@@ -1,0 +1,988 @@
+//! Consensus engine driver interface.
+//!
+//! This module provides a thin, explicit driver interface that a node can use
+//! to "run consensus". It wraps the existing HotStuff-style consensus engine
+//! in a clean interface that separates:
+//!
+//! - Engine logic: deciding what to do based on incoming events
+//! - Node logic: when to poll the network and how to apply resulting actions
+//!
+//! # Key Types
+//!
+//! - [`ConsensusEngineAction`]: Actions the engine wants the driver to perform
+//! - [`ConsensusEngineDriver`]: Trait for driving a consensus engine
+//! - [`HotStuffDriver`]: Thin wrapper around the HotStuff consensus state
+//! - [`ValidatorContext`]: Wrapper around validator set for membership and quorum checks
+
+use std::sync::Arc;
+
+use crate::hotstuff_state_engine::CommittedEntry;
+use crate::ids::ValidatorId;
+use crate::network::{ConsensusNetwork, ConsensusNetworkEvent, NetworkError};
+use crate::qc::QuorumCertificate;
+use crate::validator_set::ConsensusValidatorSet;
+use crate::verify::ConsensusVerifier;
+use cano_wire::consensus::{BlockProposal, Vote};
+
+// ============================================================================
+// ValidatorContext
+// ============================================================================
+
+/// Context for validator set membership and quorum checks.
+///
+/// This struct wraps a `ConsensusValidatorSet` and provides convenient methods
+/// for checking validator membership and quorum requirements.
+#[derive(Debug, Clone)]
+pub struct ValidatorContext {
+    /// The underlying validator set.
+    pub set: ConsensusValidatorSet,
+}
+
+impl ValidatorContext {
+    /// Create a new `ValidatorContext` with the given validator set.
+    pub fn new(set: ConsensusValidatorSet) -> Self {
+        ValidatorContext { set }
+    }
+
+    /// Checks if a validator is in the set.
+    pub fn is_member(&self, id: ValidatorId) -> bool {
+        self.set.contains(id)
+    }
+
+    /// Returns index of validator in the set, if known.
+    pub fn index_of(&self, id: ValidatorId) -> Option<usize> {
+        self.set.index_of(id)
+    }
+
+    /// Returns whether the given ids reach quorum.
+    pub fn has_quorum<I>(&self, ids: I) -> bool
+    where
+        I: IntoIterator<Item = ValidatorId>,
+    {
+        self.set.has_quorum(ids)
+    }
+}
+
+// ============================================================================
+// ConsensusEngineAction
+// ============================================================================
+
+/// Actions that the consensus engine wants the driver to perform on the network.
+///
+/// This enum represents the possible network actions that result from processing
+/// consensus events. The node is responsible for actually executing these actions
+/// on the network.
+#[derive(Debug, Clone)]
+pub enum ConsensusEngineAction<Id> {
+    /// Broadcast a new proposal to all validators.
+    BroadcastProposal(BlockProposal),
+
+    /// Broadcast a vote to all validators (or according to policy).
+    BroadcastVote(Vote),
+
+    /// Send a direct vote to a specific peer (e.g., the leader).
+    SendVoteTo {
+        /// The target peer to send the vote to.
+        to: Id,
+        /// The vote to send.
+        vote: Vote,
+    },
+
+    /// No-op / internal state update only.
+    ///
+    /// Indicates that the engine processed an event but no network action
+    /// is required.
+    Noop,
+}
+
+// ============================================================================
+// ConsensusEngineDriver trait
+// ============================================================================
+
+/// Trait for driving a consensus engine.
+///
+/// This trait defines the interface that a node uses to run a consensus engine.
+/// The engine processes incoming network events and returns a list of actions
+/// that the node should perform on the network.
+///
+/// # Usage Pattern
+///
+/// ```ignore
+/// loop {
+///     // 1. Poll the network for events
+///     let maybe_event = net.try_recv_one()?;
+///
+///     // 2. Step the consensus engine
+///     let actions = driver.step(&mut net, maybe_event)?;
+///
+///     // 3. Apply actions to the network
+///     for action in actions {
+///         match action {
+///             ConsensusEngineAction::BroadcastProposal(p) => net.broadcast_proposal(&p)?,
+///             ConsensusEngineAction::BroadcastVote(v) => net.broadcast_vote(&v)?,
+///             ConsensusEngineAction::SendVoteTo { to, vote } => net.send_vote_to(to, &vote)?,
+///             ConsensusEngineAction::Noop => {}
+///         }
+///     }
+/// }
+/// ```
+pub trait ConsensusEngineDriver<N>
+where
+    N: ConsensusNetwork,
+{
+    /// One iteration of the consensus engine driven by network + timers.
+    ///
+    /// # Arguments
+    ///
+    /// - `net`: The network implementation (e.g., `ConsensusNetAdapter<'_>` in the node)
+    /// - `maybe_event`: An optional incoming network event (if already polled)
+    ///
+    /// # Returns
+    ///
+    /// A list of actions the driver wants performed, which the caller is
+    /// responsible for applying to the network.
+    fn step(
+        &mut self,
+        net: &mut N,
+        maybe_event: Option<ConsensusNetworkEvent<N::Id>>,
+    ) -> Result<Vec<ConsensusEngineAction<N::Id>>, NetworkError>;
+}
+
+// ============================================================================
+// HotStuffDriver
+// ============================================================================
+
+/// A thin wrapper around the HotStuff consensus state that implements
+/// [`ConsensusEngineDriver`].
+///
+/// This driver processes incoming votes and proposals, updating the internal
+/// consensus state and returning appropriate actions. Currently, it focuses
+/// on correctly routing events to the underlying engine; full proposal
+/// generation and vote emission will be added in future tasks.
+///
+/// # Type Parameters
+///
+/// - `E`: The underlying consensus engine type (typically `HotStuffState` or `HotStuffStateEngine`)
+/// - `BlockIdT`: The block identifier type (typically `[u8; 32]`)
+#[derive(Debug)]
+pub struct HotStuffDriver<E, BlockIdT = [u8; 32]> {
+    /// The underlying consensus engine.
+    engine: E,
+    /// Optional validator context for membership checks.
+    validators: Option<ValidatorContext>,
+    /// Counter for received votes (for testing/debugging).
+    votes_received: u64,
+    /// Counter for received proposals (for testing/debugging).
+    proposals_received: u64,
+    /// Counter for rejected votes from non-members (for testing/debugging).
+    rejected_votes: u64,
+    /// Counter for rejected proposals from non-members (for testing/debugging).
+    rejected_proposals: u64,
+    /// Counter for QCs formed (for testing/debugging).
+    qcs_formed: u64,
+    /// Last QC formed, if any.
+    last_qc: Option<QuorumCertificate<BlockIdT>>,
+    /// Index into the engine's commit_log indicating how many entries
+    /// have already been observed/consumed by this driver.
+    last_commit_idx: usize,
+    /// Optional verifier for cryptographic signature verification.
+    verifier: Option<Arc<dyn ConsensusVerifier>>,
+    /// Counter for rejected messages due to invalid signatures.
+    rejected_invalid_signatures: u64,
+}
+
+impl<E, BlockIdT> HotStuffDriver<E, BlockIdT>
+where
+    BlockIdT: Clone,
+{
+    /// Create a new `HotStuffDriver` wrapping the given engine (permissive mode).
+    ///
+    /// **WARNING**: This constructor creates a driver WITHOUT a validator context,
+    /// which means membership checks are bypassed (permissive mode). This is
+    /// dangerous for production use.
+    ///
+    /// # Deprecation Notice
+    ///
+    /// This constructor is **deprecated** for production code. Use one of:
+    /// - [`HotStuffDriver::new_strict`] for production code (requires `ValidatorContext`)
+    /// - [`HotStuffDriver::for_tests_permissive_validators`] for test code (explicitly permissive)
+    ///
+    /// # When to use
+    ///
+    /// Only use this constructor when:
+    /// - Migrating legacy code (temporary)
+    /// - You need permissive mode and cannot use `for_tests_permissive_validators`
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use `new_strict` for production code or `for_tests_permissive_validators` for tests"
+    )]
+    pub fn new(engine: E) -> Self {
+        HotStuffDriver {
+            engine,
+            validators: None,
+            votes_received: 0,
+            proposals_received: 0,
+            rejected_votes: 0,
+            rejected_proposals: 0,
+            qcs_formed: 0,
+            last_qc: None,
+            last_commit_idx: 0,
+            verifier: None,
+            rejected_invalid_signatures: 0,
+        }
+    }
+
+    /// Create a new `HotStuffDriver` with a strict validator context (recommended for production).
+    ///
+    /// This is the **recommended constructor** for production code. The driver will
+    /// enforce membership checks for all incoming votes and proposals, rejecting
+    /// messages from validators not in the provided context.
+    ///
+    /// # Arguments
+    ///
+    /// - `engine`: The underlying consensus engine
+    /// - `validators`: The validator context containing the current epoch's validator set
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let validator_set = ConsensusValidatorSet::new(validators)?;
+    /// let ctx = ValidatorContext::new(validator_set);
+    /// let driver = HotStuffDriver::new_strict(engine, ctx);
+    /// ```
+    pub fn new_strict(engine: E, validators: ValidatorContext) -> Self {
+        HotStuffDriver {
+            engine,
+            validators: Some(validators),
+            votes_received: 0,
+            proposals_received: 0,
+            rejected_votes: 0,
+            rejected_proposals: 0,
+            qcs_formed: 0,
+            last_qc: None,
+            last_commit_idx: 0,
+            verifier: None,
+            rejected_invalid_signatures: 0,
+        }
+    }
+
+    /// Create a new `HotStuffDriver` with a validator context.
+    ///
+    /// When a validator context is provided, the driver will check that
+    /// incoming votes and proposals are from known validators in the set.
+    ///
+    /// # Note
+    ///
+    /// This is an alias for [`HotStuffDriver::new_strict`]. Prefer using
+    /// `new_strict` for clarity in production code.
+    pub fn with_validators(engine: E, validators: ValidatorContext) -> Self {
+        Self::new_strict(engine, validators)
+    }
+
+    /// Check if this driver is running in strict mode (has a validator context).
+    ///
+    /// Returns `true` if the driver has a validator context and will enforce
+    /// membership checks. Returns `false` if the driver is in permissive mode
+    /// and will accept all validators.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let driver = HotStuffDriver::new_strict(engine, ctx);
+    /// assert!(driver.is_strict_mode());
+    ///
+    /// let permissive_driver = HotStuffDriver::for_tests_permissive_validators(engine);
+    /// assert!(!permissive_driver.is_strict_mode());
+    /// ```
+    pub fn is_strict_mode(&self) -> bool {
+        self.validators.is_some()
+    }
+
+    /// Access the underlying engine.
+    pub fn engine(&self) -> &E {
+        &self.engine
+    }
+
+    /// Mutably access the underlying engine.
+    pub fn engine_mut(&mut self) -> &mut E {
+        &mut self.engine
+    }
+
+    /// Access the validator context, if any.
+    pub fn validators(&self) -> Option<&ValidatorContext> {
+        self.validators.as_ref()
+    }
+
+    /// Get the number of votes received.
+    pub fn votes_received(&self) -> u64 {
+        self.votes_received
+    }
+
+    /// Get the number of proposals received.
+    pub fn proposals_received(&self) -> u64 {
+        self.proposals_received
+    }
+
+    /// Get the number of rejected votes from non-members.
+    pub fn rejected_votes(&self) -> u64 {
+        self.rejected_votes
+    }
+
+    /// Get the number of rejected proposals from non-members.
+    pub fn rejected_proposals(&self) -> u64 {
+        self.rejected_proposals
+    }
+
+    /// Get the number of QCs formed.
+    pub fn qcs_formed(&self) -> u64 {
+        self.qcs_formed
+    }
+
+    /// Get the last QC formed, if any.
+    pub fn last_qc(&self) -> Option<&QuorumCertificate<BlockIdT>> {
+        self.last_qc.as_ref()
+    }
+
+    /// Record that a QC was formed.
+    ///
+    /// This method is called internally when a QC is formed, but can also
+    /// be called externally to record QCs formed outside the driver.
+    pub fn record_qc(&mut self, qc: QuorumCertificate<BlockIdT>) {
+        self.qcs_formed += 1;
+        self.last_qc = Some(qc);
+    }
+
+    /// Attach a verifier to this driver.
+    ///
+    /// When a verifier is attached, the driver will verify incoming votes
+    /// and proposals before processing them. If verification fails, the
+    /// message is dropped and `rejected_invalid_signatures` is incremented.
+    ///
+    /// Returns `self` for method chaining.
+    pub fn with_verifier(mut self, verifier: Arc<dyn ConsensusVerifier>) -> Self {
+        self.verifier = Some(verifier);
+        self
+    }
+
+    /// Get the number of messages rejected due to invalid signatures.
+    pub fn rejected_invalid_signatures(&self) -> u64 {
+        self.rejected_invalid_signatures
+    }
+
+    /// Check if a validator ID is a member when validator context is available.
+    /// Returns true if no validator context is set (permissive mode) or if the validator is a member.
+    fn check_membership(&self, id: ValidatorId) -> bool {
+        match &self.validators {
+            Some(ctx) => ctx.is_member(id),
+            None => true, // No validator context means permissive mode
+        }
+    }
+}
+
+// ============================================================================
+// Test-only constructors for HotStuffDriver
+// ============================================================================
+
+impl<E, BlockIdT> HotStuffDriver<E, BlockIdT>
+where
+    BlockIdT: Clone,
+{
+    /// Create a driver in permissive mode for tests.
+    ///
+    /// **⚠️ TEST-ONLY - DO NOT USE IN PRODUCTION CODE ⚠️**
+    ///
+    /// This constructor creates a driver WITHOUT a validator context, meaning
+    /// all validators are accepted regardless of membership. This is useful
+    /// for tests that focus on structural consensus behavior without needing
+    /// to set up a full validator set.
+    ///
+    /// # Safety Invariant
+    ///
+    /// This helper is intended ONLY for test code. Production code (cano-node)
+    /// should ALWAYS use [`HotStuffDriver::new_strict`] or
+    /// [`HotStuffDriver::with_validators`] to ensure proper membership checks.
+    ///
+    /// The function name is explicitly prefixed with `for_tests_` to make it
+    /// obvious when it's being misused in production code. Any occurrence of
+    /// this function in non-test code should be treated as a bug.
+    ///
+    /// # When to use
+    ///
+    /// Use this constructor when:
+    /// - Testing consensus engine logic that doesn't depend on validator membership
+    /// - Testing driver wiring without needing validator context setup
+    /// - Writing unit tests that focus on event processing, not membership
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[test]
+    /// fn test_driver_processes_vote_events() {
+    ///     let engine = HotStuffState::new_at_height(1);
+    ///     let mut driver = HotStuffDriver::for_tests_permissive_validators(engine);
+    ///     
+    ///     // This driver will accept votes from any validator
+    ///     let vote = make_dummy_vote(1, 0);
+    ///     let event = ConsensusNetworkEvent::IncomingVote { from: 999, vote };
+    ///     let actions = driver.step(&mut net, Some(event)).unwrap();
+    ///     
+    ///     assert_eq!(driver.votes_received(), 1); // Accepted!
+    /// }
+    /// ```
+    #[doc(hidden)]
+    pub fn for_tests_permissive_validators(engine: E) -> Self {
+        HotStuffDriver {
+            engine,
+            validators: None,
+            votes_received: 0,
+            proposals_received: 0,
+            rejected_votes: 0,
+            rejected_proposals: 0,
+            qcs_formed: 0,
+            last_qc: None,
+            last_commit_idx: 0,
+            verifier: None,
+            rejected_invalid_signatures: 0,
+        }
+    }
+}
+
+// ============================================================================
+// Commit notification methods for HotStuffDriver
+// ============================================================================
+
+/// Trait for engines that expose an append-only commit log.
+///
+/// This trait abstracts access to the engine's commit log, allowing
+/// `HotStuffDriver` to provide commit notification APIs without knowing
+/// the specific engine implementation.
+pub trait HasCommitLog<BlockIdT> {
+    /// Returns a slice of all committed entries.
+    fn commit_log(&self) -> &[CommittedEntry<BlockIdT>];
+}
+
+/// Trait for types that support draining new commits.
+///
+/// This trait is typically implemented by driver types that wrap an engine
+/// with `HasCommitLog` and maintain internal state to track which commits
+/// have been consumed.
+///
+/// # Design Note
+///
+/// Unlike `HasCommitLog` which provides read-only access to the commit log,
+/// this trait supports stateful "drain" semantics where each commit is
+/// returned exactly once.
+pub trait DrainableCommitLog<BlockIdT> {
+    /// Returns all new commits since the last drain and advances internal tracking.
+    ///
+    /// This method provides "handle once then forget" semantics: each commit
+    /// is returned exactly once across multiple calls to this method.
+    fn drain_new_commits(&mut self) -> Vec<CommittedEntry<BlockIdT>>;
+}
+
+impl<E, BlockIdT> HotStuffDriver<E, BlockIdT>
+where
+    BlockIdT: Clone,
+    E: HasCommitLog<BlockIdT>,
+{
+    /// Returns a slice view of all commits that have occurred since the last
+    /// time `drain_new_commits` was called.
+    ///
+    /// This method does not advance the internal index; call `drain_new_commits`
+    /// to consume the commits and advance the index.
+    pub fn new_commits(&self) -> &[CommittedEntry<BlockIdT>] {
+        let log = self.engine.commit_log();
+        // Defensive check: last_commit_idx should never exceed log.len() since
+        // the log is append-only and we only advance the index to log.len().
+        debug_assert!(
+            self.last_commit_idx <= log.len(),
+            "Commit index {} out of bounds (log len {})",
+            self.last_commit_idx,
+            log.len()
+        );
+        if self.last_commit_idx > log.len() {
+            &[]
+        } else {
+            &log[self.last_commit_idx..]
+        }
+    }
+
+    /// Returns a Vec of all new commits since the last drain and advances
+    /// the driver's internal index to the end of the commit log.
+    ///
+    /// This method provides "handle once then forget" semantics: each commit
+    /// is returned exactly once across multiple calls to this method.
+    pub fn drain_new_commits(&mut self) -> Vec<CommittedEntry<BlockIdT>> {
+        let log = self.engine.commit_log();
+        if self.last_commit_idx >= log.len() {
+            return Vec::new();
+        }
+        let slice = &log[self.last_commit_idx..];
+        let out = slice.to_vec();
+        self.last_commit_idx = log.len();
+        out
+    }
+}
+
+// Implement HasCommitLog for HotStuffDriver when its engine implements HasCommitLog.
+// This allows HotStuffDriver to be used with generic bounds requiring HasCommitLog.
+impl<E, BlockIdT> HasCommitLog<BlockIdT> for HotStuffDriver<E, BlockIdT>
+where
+    BlockIdT: Clone,
+    E: HasCommitLog<BlockIdT>,
+{
+    fn commit_log(&self) -> &[CommittedEntry<BlockIdT>] {
+        self.engine.commit_log()
+    }
+}
+
+// Implement DrainableCommitLog for HotStuffDriver when its engine implements HasCommitLog.
+// This allows HotStuffDriver to be used with generic bounds requiring DrainableCommitLog.
+impl<E, BlockIdT> DrainableCommitLog<BlockIdT> for HotStuffDriver<E, BlockIdT>
+where
+    BlockIdT: Clone,
+    E: HasCommitLog<BlockIdT>,
+{
+    fn drain_new_commits(&mut self) -> Vec<CommittedEntry<BlockIdT>> {
+        // Use explicit method call to delegate to the inherent method, not a recursive call.
+        HotStuffDriver::drain_new_commits(self)
+    }
+}
+
+// ============================================================================
+// ToValidatorId trait - for converting network IDs to ValidatorIds
+// ============================================================================
+
+/// Trait for converting network IDs to `ValidatorId` for membership checks.
+///
+/// This trait enables the driver to check validator membership regardless of
+/// the network's ID type, as long as the ID can be converted to a `ValidatorId`.
+pub trait ToValidatorId {
+    /// Convert this ID to a `ValidatorId`.
+    fn to_validator_id(&self) -> ValidatorId;
+}
+
+impl ToValidatorId for ValidatorId {
+    fn to_validator_id(&self) -> ValidatorId {
+        *self
+    }
+}
+
+impl ToValidatorId for u64 {
+    fn to_validator_id(&self) -> ValidatorId {
+        ValidatorId::new(*self)
+    }
+}
+
+// ============================================================================
+// ConsensusEngineDriver implementation for HotStuffDriver
+// ============================================================================
+
+impl<E, N, BlockIdT> ConsensusEngineDriver<N> for HotStuffDriver<E, BlockIdT>
+where
+    N: ConsensusNetwork,
+    N::Id: ToValidatorId,
+    BlockIdT: Clone,
+{
+    fn step(
+        &mut self,
+        _net: &mut N,
+        maybe_event: Option<ConsensusNetworkEvent<N::Id>>,
+    ) -> Result<Vec<ConsensusEngineAction<N::Id>>, NetworkError> {
+        let mut actions = Vec::new();
+
+        if let Some(event) = maybe_event {
+            match event {
+                ConsensusNetworkEvent::IncomingVote { from, vote } => {
+                    let validator_id = from.to_validator_id();
+
+                    // Step 1: Verify signature if verifier is attached
+                    if let Some(verifier) = &self.verifier {
+                        if verifier.verify_vote(validator_id, &vote).is_err() {
+                            self.rejected_invalid_signatures += 1;
+                            return Ok(vec![]);
+                        }
+                    }
+
+                    // Step 2: Check validator membership if validator context is set
+                    if !self.check_membership(validator_id) {
+                        // Vote from non-member: reject
+                        self.rejected_votes += 1;
+                        actions.push(ConsensusEngineAction::Noop);
+                    } else {
+                        // Track that we received a vote.
+                        // TODO: Delegate to underlying engine for actual vote processing:
+                        // - Verify vote signature (from: sender ID, vote: vote data)
+                        // - Collect votes for QC formation
+                        // - Emit actions if QC threshold is reached
+                        let _ = vote; // Silence unused warnings until TODO is implemented
+                        self.votes_received += 1;
+
+                        // For now, return Noop to indicate the event was processed
+                        // but no network action is required.
+                        actions.push(ConsensusEngineAction::Noop);
+                    }
+                }
+                ConsensusNetworkEvent::IncomingProposal { from, proposal } => {
+                    let validator_id = from.to_validator_id();
+
+                    // Step 1: Verify signature if verifier is attached
+                    if let Some(verifier) = &self.verifier {
+                        if verifier.verify_proposal(validator_id, &proposal).is_err() {
+                            self.rejected_invalid_signatures += 1;
+                            return Ok(vec![]);
+                        }
+                    }
+
+                    // Step 2: Check validator membership if validator context is set
+                    if !self.check_membership(validator_id) {
+                        // Proposal from non-member: reject
+                        self.rejected_proposals += 1;
+                        actions.push(ConsensusEngineAction::Noop);
+                    } else {
+                        // Track that we received a proposal.
+                        // TODO: Delegate to underlying engine for actual proposal processing:
+                        // - Verify proposal structure and QC (from: sender ID, proposal: block data)
+                        // - Check HotStuff locking rules
+                        // - Decide whether to vote
+                        // - Emit BroadcastVote or SendVoteTo action if voting
+                        let _ = proposal; // Silence unused warnings until TODO is implemented
+                        self.proposals_received += 1;
+
+                        // For now, return Noop to indicate the event was processed
+                        // but no network action is required.
+                        actions.push(ConsensusEngineAction::Noop);
+                    }
+                }
+            }
+        }
+
+        // TODO: Add timer-based logic for:
+        // - Proposal generation (if we are the leader)
+        // - View change / timeout handling
+
+        Ok(actions)
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::network::MockConsensusNetwork;
+    use crate::HotStuffState;
+
+    /// Create a dummy Vote for testing.
+    fn make_dummy_vote(height: u64, round: u64) -> Vote {
+        Vote {
+            version: 1,
+            chain_id: 1,
+            epoch: 0,
+            height,
+            round,
+            step: 0,
+            block_id: [0u8; 32],
+            validator_index: 0,
+            suite_id: cano_wire::DEFAULT_CONSENSUS_SUITE_ID,
+            signature: vec![],
+        }
+    }
+
+    /// Create a dummy BlockProposal for testing.
+    fn make_dummy_proposal(height: u64, round: u64) -> BlockProposal {
+        use cano_wire::consensus::BlockHeader;
+        BlockProposal {
+            header: BlockHeader {
+                version: 1,
+                chain_id: 1,
+                epoch: 0,
+                height,
+                round,
+                parent_block_id: [0u8; 32],
+                payload_hash: [0u8; 32],
+                proposer_index: 0,
+                suite_id: cano_wire::DEFAULT_CONSENSUS_SUITE_ID,
+                tx_count: 0,
+                timestamp: 0,
+                payload_kind: cano_wire::PAYLOAD_KIND_NORMAL,
+                next_epoch: 0,
+            },
+            qc: None,
+            txs: vec![],
+            signature: vec![],
+        }
+    }
+
+    #[test]
+    fn driver_new_creates_wrapper_with_zero_counters() {
+        let engine = HotStuffState::new_at_height(1);
+        let driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+
+        assert_eq!(driver.votes_received(), 0);
+        assert_eq!(driver.proposals_received(), 0);
+        assert_eq!(driver.engine().height(), 1);
+    }
+
+    #[test]
+    fn driver_step_with_no_event_returns_empty_actions() {
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+        let mut net: MockConsensusNetwork<u64> = MockConsensusNetwork::new();
+
+        let actions = driver.step(&mut net, None).unwrap();
+
+        assert!(actions.is_empty());
+        assert_eq!(driver.votes_received(), 0);
+        assert_eq!(driver.proposals_received(), 0);
+    }
+
+    #[test]
+    fn driver_receives_vote_event_increments_counter() {
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+        let mut net: MockConsensusNetwork<u64> = MockConsensusNetwork::new();
+
+        let vote = make_dummy_vote(1, 0);
+        let event = ConsensusNetworkEvent::IncomingVote { from: 42, vote };
+
+        let actions = driver.step(&mut net, Some(event)).unwrap();
+
+        assert_eq!(driver.votes_received(), 1);
+        assert_eq!(driver.proposals_received(), 0);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], ConsensusEngineAction::Noop));
+    }
+
+    #[test]
+    fn driver_receives_proposal_event_increments_counter() {
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+        let mut net: MockConsensusNetwork<u64> = MockConsensusNetwork::new();
+
+        let proposal = make_dummy_proposal(1, 0);
+        let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal };
+
+        let actions = driver.step(&mut net, Some(event)).unwrap();
+
+        assert_eq!(driver.votes_received(), 0);
+        assert_eq!(driver.proposals_received(), 1);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], ConsensusEngineAction::Noop));
+    }
+
+    #[test]
+    fn driver_handles_multiple_events_in_sequence() {
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+        let mut net: MockConsensusNetwork<u64> = MockConsensusNetwork::new();
+
+        // First event: vote
+        let vote = make_dummy_vote(1, 0);
+        let event1 = ConsensusNetworkEvent::IncomingVote {
+            from: 1,
+            vote: vote.clone(),
+        };
+        let _ = driver.step(&mut net, Some(event1)).unwrap();
+
+        // Second event: proposal
+        let proposal = make_dummy_proposal(1, 0);
+        let event2 = ConsensusNetworkEvent::IncomingProposal { from: 2, proposal };
+        let _ = driver.step(&mut net, Some(event2)).unwrap();
+
+        // Third event: another vote
+        let event3 = ConsensusNetworkEvent::IncomingVote { from: 3, vote };
+        let _ = driver.step(&mut net, Some(event3)).unwrap();
+
+        assert_eq!(driver.votes_received(), 2);
+        assert_eq!(driver.proposals_received(), 1);
+    }
+
+    #[test]
+    fn driver_engine_accessors_work() {
+        let engine = HotStuffState::new_at_height(5);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+
+        assert_eq!(driver.engine().height(), 5);
+
+        driver.engine_mut().advance_height(10).unwrap();
+        assert_eq!(driver.engine().height(), 10);
+    }
+
+    #[test]
+    fn validator_context_membership_checks() {
+        use crate::validator_set::ValidatorSetEntry;
+
+        // Create a validator set with two validators
+        let validators = vec![
+            ValidatorSetEntry {
+                id: ValidatorId::new(1),
+                voting_power: 10,
+            },
+            ValidatorSetEntry {
+                id: ValidatorId::new(2),
+                voting_power: 20,
+            },
+        ];
+        let set = crate::validator_set::ConsensusValidatorSet::new(validators).unwrap();
+        let ctx = ValidatorContext::new(set);
+
+        assert!(ctx.is_member(ValidatorId::new(1)));
+        assert!(ctx.is_member(ValidatorId::new(2)));
+        assert!(!ctx.is_member(ValidatorId::new(3)));
+        assert!(!ctx.is_member(ValidatorId::new(999)));
+
+        assert_eq!(ctx.index_of(ValidatorId::new(1)), Some(0));
+        assert_eq!(ctx.index_of(ValidatorId::new(2)), Some(1));
+        assert_eq!(ctx.index_of(ValidatorId::new(3)), None);
+    }
+
+    #[test]
+    fn driver_with_validators_rejects_vote_from_non_member() {
+        use crate::validator_set::ValidatorSetEntry;
+
+        // Create a validator set with validators 1 and 2
+        let validators = vec![
+            ValidatorSetEntry {
+                id: ValidatorId::new(1),
+                voting_power: 10,
+            },
+            ValidatorSetEntry {
+                id: ValidatorId::new(2),
+                voting_power: 20,
+            },
+        ];
+        let set = crate::validator_set::ConsensusValidatorSet::new(validators).unwrap();
+        let ctx = ValidatorContext::new(set);
+
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::with_validators(engine, ctx);
+        let mut net: MockConsensusNetwork<ValidatorId> = MockConsensusNetwork::new();
+
+        // Send a vote from a non-member (validator 999)
+        let vote = make_dummy_vote(1, 0);
+        let event = ConsensusNetworkEvent::IncomingVote {
+            from: ValidatorId::new(999),
+            vote,
+        };
+
+        let actions = driver.step(&mut net, Some(event)).unwrap();
+
+        // Vote should be rejected, not counted as received
+        assert_eq!(driver.votes_received(), 0);
+        assert_eq!(driver.rejected_votes(), 1);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], ConsensusEngineAction::Noop));
+    }
+
+    #[test]
+    fn driver_with_validators_accepts_vote_from_member() {
+        use crate::validator_set::ValidatorSetEntry;
+
+        // Create a validator set with validators 1 and 2
+        let validators = vec![
+            ValidatorSetEntry {
+                id: ValidatorId::new(1),
+                voting_power: 10,
+            },
+            ValidatorSetEntry {
+                id: ValidatorId::new(2),
+                voting_power: 20,
+            },
+        ];
+        let set = crate::validator_set::ConsensusValidatorSet::new(validators).unwrap();
+        let ctx = ValidatorContext::new(set);
+
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::with_validators(engine, ctx);
+        let mut net: MockConsensusNetwork<ValidatorId> = MockConsensusNetwork::new();
+
+        // Send a vote from a member (validator 1)
+        let vote = make_dummy_vote(1, 0);
+        let event = ConsensusNetworkEvent::IncomingVote {
+            from: ValidatorId::new(1),
+            vote,
+        };
+
+        let actions = driver.step(&mut net, Some(event)).unwrap();
+
+        // Vote should be accepted
+        assert_eq!(driver.votes_received(), 1);
+        assert_eq!(driver.rejected_votes(), 0);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], ConsensusEngineAction::Noop));
+    }
+
+    #[test]
+    fn driver_with_validators_rejects_proposal_from_non_member() {
+        use crate::validator_set::ValidatorSetEntry;
+
+        // Create a validator set with validators 1 and 2
+        let validators = vec![
+            ValidatorSetEntry {
+                id: ValidatorId::new(1),
+                voting_power: 10,
+            },
+            ValidatorSetEntry {
+                id: ValidatorId::new(2),
+                voting_power: 20,
+            },
+        ];
+        let set = crate::validator_set::ConsensusValidatorSet::new(validators).unwrap();
+        let ctx = ValidatorContext::new(set);
+
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::with_validators(engine, ctx);
+        let mut net: MockConsensusNetwork<ValidatorId> = MockConsensusNetwork::new();
+
+        // Send a proposal from a non-member (validator 999)
+        let proposal = make_dummy_proposal(1, 0);
+        let event = ConsensusNetworkEvent::IncomingProposal {
+            from: ValidatorId::new(999),
+            proposal,
+        };
+
+        let actions = driver.step(&mut net, Some(event)).unwrap();
+
+        // Proposal should be rejected, not counted as received
+        assert_eq!(driver.proposals_received(), 0);
+        assert_eq!(driver.rejected_proposals(), 1);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], ConsensusEngineAction::Noop));
+    }
+
+    #[test]
+    fn driver_without_validators_accepts_all_votes() {
+        // Driver without validator context should accept all votes (permissive mode)
+        let engine = HotStuffState::new_at_height(1);
+        let mut driver: HotStuffDriver<HotStuffState, [u8; 32]> =
+            HotStuffDriver::for_tests_permissive_validators(engine);
+        let mut net: MockConsensusNetwork<ValidatorId> = MockConsensusNetwork::new();
+
+        // Send a vote from any validator (even unknown)
+        let vote = make_dummy_vote(1, 0);
+        let event = ConsensusNetworkEvent::IncomingVote {
+            from: ValidatorId::new(999),
+            vote,
+        };
+
+        let actions = driver.step(&mut net, Some(event)).unwrap();
+
+        // Vote should be accepted (no validator context means permissive)
+        assert_eq!(driver.votes_received(), 1);
+        assert_eq!(driver.rejected_votes(), 0);
+        assert_eq!(actions.len(), 1);
+        assert!(matches!(actions[0], ConsensusEngineAction::Noop));
+    }
+}
