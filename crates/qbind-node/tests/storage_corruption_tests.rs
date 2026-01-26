@@ -472,10 +472,14 @@ fn scenario_a_missing_block_for_last_committed_in_memory() {
 
     // Create harness with this corrupted storage
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // Load persisted state should fail with a clear error
     let result = harness.load_persisted_state();
@@ -513,10 +517,14 @@ fn scenario_a_missing_block_for_last_committed_rocksdb() {
 
     // Create harness with this corrupted storage
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // Load persisted state should fail
     let result = harness.load_persisted_state();
@@ -727,11 +735,15 @@ fn scenario_c_epoch_mismatch_missing_epoch_in_provider() {
 
     // Create harness with this mismatched configuration
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage)
-            .with_epoch_state_provider(provider);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage)
+    .with_epoch_state_provider(provider);
 
     // Load persisted state should fail because epoch 5 is not in the provider
     let result = harness.load_persisted_state();
@@ -786,11 +798,15 @@ fn scenario_c_epoch_match_success() {
 
     // Create harness
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage)
-            .with_epoch_state_provider(provider);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage)
+    .with_epoch_state_provider(provider);
 
     // Load persisted state should succeed
     let result = harness.load_persisted_state();
@@ -825,10 +841,14 @@ fn scenario_c_epoch_without_provider() {
 
     // Create harness WITHOUT epoch state provider
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
     // Note: NOT calling with_epoch_state_provider()
 
     // Load persisted state should fail
@@ -867,10 +887,14 @@ fn scenario_d_incompatible_schema_version_in_memory() {
 
     // Create harness
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // Load persisted state should fail due to incompatible schema
     let result = harness.load_persisted_state();
@@ -907,10 +931,14 @@ fn scenario_d_incompatible_schema_version_rocksdb() {
 
     // Create harness
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // Load persisted state should fail
     let result = harness.load_persisted_state();

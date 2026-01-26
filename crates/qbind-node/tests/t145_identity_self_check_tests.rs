@@ -560,9 +560,13 @@ fn harness_works_with_identity_checked_config() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg, None)
-            .expect("Harness creation should succeed");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     // Run one step
     harness.step_once().expect("step_once should succeed");

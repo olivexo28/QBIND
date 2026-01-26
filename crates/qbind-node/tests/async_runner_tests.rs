@@ -376,8 +376,9 @@ async fn async_runner_max_ticks_bounded_run() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
     // Create harness
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     // Create runner with very short tick interval and bounded ticks
     let (runner, _event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(10));
@@ -399,8 +400,9 @@ async fn async_runner_max_ticks_bounded_run() {
 async fn async_runner_harness_access() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     // Initial state checks
     let initial_view = harness.current_view();
@@ -418,8 +420,9 @@ async fn async_runner_harness_access() {
 async fn async_runner_load_persisted_state_no_storage() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     let (mut runner, _event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(10));
 
@@ -436,9 +439,10 @@ async fn async_runner_load_persisted_state_empty_storage() {
 
     let storage = Arc::new(InMemoryConsensusStorage::new());
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed")
-        .with_storage(storage);
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed")
+            .with_storage(storage);
 
     let (mut runner, _event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(10));
 
@@ -453,8 +457,9 @@ async fn async_runner_load_persisted_state_empty_storage() {
 async fn async_runner_timeout_cancellation() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     // Create runner with no max_ticks (would run forever)
     let (runner, _event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(10));
@@ -471,8 +476,9 @@ async fn async_runner_timeout_cancellation() {
 async fn async_runner_multiple_step_once_calls() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     // Single node should be able to propose and commit
     let initial_view = harness.current_view();
@@ -508,8 +514,9 @@ async fn async_runner_multiple_step_once_calls() {
 fn async_runner_debug_impl() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     let (runner, _event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(100));
     let runner = runner.with_max_ticks(50);
@@ -529,8 +536,9 @@ fn async_runner_debug_impl() {
 async fn async_runner_shutdown_event_exits_cleanly() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     let (runner, event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(100));
 
@@ -562,8 +570,9 @@ async fn async_runner_shutdown_event_exits_cleanly() {
 async fn async_runner_channel_close_causes_graceful_exit() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     let (runner, event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(100));
 
@@ -592,8 +601,9 @@ async fn async_runner_channel_close_causes_graceful_exit() {
 async fn async_runner_tick_event_advances_consensus() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     // Use a very long tick interval so timer doesn't interfere
     let (runner, event_tx) = AsyncNodeRunner::new(harness, Duration::from_secs(100));
@@ -631,8 +641,9 @@ async fn async_runner_tick_event_advances_consensus() {
 async fn async_runner_multiple_senders() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     let (runner, event_tx) = AsyncNodeRunner::new(harness, Duration::from_secs(100));
 
@@ -679,8 +690,9 @@ async fn async_runner_multiple_senders() {
 async fn async_runner_custom_channel_capacity() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
-        .expect("harness creation should succeed");
+    let harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
+            .expect("harness creation should succeed");
 
     // Create with small capacity
     let (runner, event_tx) = AsyncNodeRunner::new_with_capacity(

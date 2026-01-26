@@ -361,9 +361,13 @@ fn harness_can_use_key_from_keystore() {
     };
 
     // Create harness from config
-    let harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg, None)
-            .expect("Harness creation should succeed");
+    let harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     assert_eq!(harness.validator_id, ValidatorId::new(1));
 }
@@ -408,9 +412,13 @@ fn signing_works_with_keystore_loaded_key() {
     };
 
     // Create harness from config
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg, None)
-            .expect("Harness creation should succeed");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     // Run one step - single node is leader, should propose and vote
     harness.step_once().expect("step_once should succeed");
@@ -489,9 +497,13 @@ fn suite_id_100_is_used_for_signing() {
     };
 
     // Create harness from config
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg, None)
-            .expect("Harness creation should succeed");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     // Run one step
     harness.step_once().expect("step_once should succeed");
@@ -824,9 +836,13 @@ fn make_config_from_keystore_works_with_harness() {
     };
 
     // Create harness from config
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg, None)
-            .expect("Harness creation should succeed");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     // Run one step
     harness.step_once().expect("step_once should succeed");

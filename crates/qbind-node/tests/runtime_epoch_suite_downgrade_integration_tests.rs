@@ -333,7 +333,8 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
     };
 
     // Create harness
-    let mut harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)?;
+    let mut harness =
+        NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)?;
 
     // Configure harness with epoch state provider, governance, and suite policy
     harness = harness

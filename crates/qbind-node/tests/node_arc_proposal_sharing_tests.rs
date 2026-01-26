@@ -333,9 +333,13 @@ fn committed_blocks_share_proposal_arc_between_block_store_and_ledger() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("failed to create node harness");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -383,9 +387,13 @@ fn multiple_committed_blocks_all_share_arc_with_store() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("failed to create node harness");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);

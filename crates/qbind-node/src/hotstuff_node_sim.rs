@@ -1289,42 +1289,41 @@ impl NodeHotstuffHarness {
         // 4. Build ValidatorSigner based on signer config (T148, T149).
         use crate::validator_config::EXPECTED_SUITE_ID;
         use crate::validator_signer::LocalKeySigner;
-        
+
         // Default to LocalKeystore if no config provided
         let signer_cfg = signer_cfg.unwrap_or_default();
-        
-        let signer: Arc<dyn crate::validator_signer::ValidatorSigner> = 
-            match signer_cfg.backend {
-                crate::validator_config::SignerBackend::LocalKeystore => {
-                    // Direct in-process signing with LocalKeySigner (T148)
-                    Arc::new(LocalKeySigner::new(
-                        cfg.local.validator_id,
-                        EXPECTED_SUITE_ID.as_u16(),
-                        signing_key.clone(),
-                    ))
-                }
-                crate::validator_config::SignerBackend::RemoteLoopback => {
-                    // Remote signer protocol with loopback transport (T149)
-                    use crate::remote_signer::{LoopbackSignerTransport, RemoteSignerClient};
-                    
-                    // Create LocalKeySigner for the loopback transport
-                    let local_signer = Arc::new(LocalKeySigner::new(
-                        cfg.local.validator_id,
-                        EXPECTED_SUITE_ID.as_u16(),
-                        signing_key.clone(),
-                    ));
-                    
-                    // Create loopback transport
-                    let transport = Arc::new(LoopbackSignerTransport::new(local_signer));
-                    
-                    // Create RemoteSignerClient
-                    Arc::new(RemoteSignerClient::new(
-                        cfg.local.validator_id,
-                        EXPECTED_SUITE_ID.as_u16(),
-                        transport,
-                    ))
-                }
-            };
+
+        let signer: Arc<dyn crate::validator_signer::ValidatorSigner> = match signer_cfg.backend {
+            crate::validator_config::SignerBackend::LocalKeystore => {
+                // Direct in-process signing with LocalKeySigner (T148)
+                Arc::new(LocalKeySigner::new(
+                    cfg.local.validator_id,
+                    EXPECTED_SUITE_ID.as_u16(),
+                    signing_key.clone(),
+                ))
+            }
+            crate::validator_config::SignerBackend::RemoteLoopback => {
+                // Remote signer protocol with loopback transport (T149)
+                use crate::remote_signer::{LoopbackSignerTransport, RemoteSignerClient};
+
+                // Create LocalKeySigner for the loopback transport
+                let local_signer = Arc::new(LocalKeySigner::new(
+                    cfg.local.validator_id,
+                    EXPECTED_SUITE_ID.as_u16(),
+                    signing_key.clone(),
+                ));
+
+                // Create loopback transport
+                let transport = Arc::new(LoopbackSignerTransport::new(local_signer));
+
+                // Create RemoteSignerClient
+                Arc::new(RemoteSignerClient::new(
+                    cfg.local.validator_id,
+                    EXPECTED_SUITE_ID.as_u16(),
+                    transport,
+                ))
+            }
+        };
 
         // 5. Create the harness with the built components.
         let mut harness = Self::new(

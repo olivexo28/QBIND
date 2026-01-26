@@ -336,9 +336,13 @@ fn node_hotstuff_single_node_drain_commits_yields_and_clears() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Drive the harness until at least one commit happens.
     // With a single node, we need several views to accumulate the 3-chain

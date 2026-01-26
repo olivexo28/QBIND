@@ -54,11 +54,11 @@ fn remote_signer_proposal_signature_equivalence() {
 
     // Sign a proposal preimage
     let preimage = b"test proposal preimage with domain separator";
-    
+
     let local_sig = local_signer
         .sign_proposal(preimage)
         .expect("local signing failed");
-    
+
     let remote_sig = remote_client
         .sign_proposal(preimage)
         .expect("remote signing failed");
@@ -70,11 +70,15 @@ fn remote_signer_proposal_signature_equivalence() {
     // Both should verify
     let backend = MlDsa44Backend::new();
     assert!(
-        backend.verify_proposal(1, &pk, preimage, &local_sig).is_ok(),
+        backend
+            .verify_proposal(1, &pk, preimage, &local_sig)
+            .is_ok(),
         "local signature should verify"
     );
     assert!(
-        backend.verify_proposal(1, &pk, preimage, &remote_sig).is_ok(),
+        backend
+            .verify_proposal(1, &pk, preimage, &remote_sig)
+            .is_ok(),
         "remote signature should verify"
     );
 }
@@ -88,11 +92,11 @@ fn remote_signer_vote_signature_equivalence() {
 
     // Sign a vote preimage
     let preimage = b"test vote preimage with domain separator";
-    
+
     let local_sig = local_signer
         .sign_vote(preimage)
         .expect("local signing failed");
-    
+
     let remote_sig = remote_client
         .sign_vote(preimage)
         .expect("remote signing failed");
@@ -121,11 +125,11 @@ fn remote_signer_timeout_signature_equivalence() {
     // Sign timeout without high_qc
     let view = 10u64;
     let high_qc = None;
-    
+
     let local_sig = local_signer
         .sign_timeout(view, high_qc)
         .expect("local timeout signing failed");
-    
+
     let remote_sig = remote_client
         .sign_timeout(view, high_qc)
         .expect("remote timeout signing failed");
@@ -135,7 +139,7 @@ fn remote_signer_timeout_signature_equivalence() {
     // Reconstruct preimage for verification
     use qbind_consensus::timeout::timeout_signing_bytes;
     let preimage = timeout_signing_bytes::<[u8; 32]>(view, high_qc, validator_id);
-    
+
     let backend = MlDsa44Backend::new();
     assert!(
         backend.verify_vote(3, &pk, &preimage, &local_sig).is_ok(),
@@ -157,11 +161,11 @@ fn remote_signer_timeout_with_high_qc_equivalence() {
     // Create a high_qc
     let high_qc = QuorumCertificate::new([42u8; 32], 5, vec![ValidatorId::new(1)]);
     let view = 15u64;
-    
+
     let local_sig = local_signer
         .sign_timeout(view, Some(&high_qc))
         .expect("local timeout signing with high_qc failed");
-    
+
     let remote_sig = remote_client
         .sign_timeout(view, Some(&high_qc))
         .expect("remote timeout signing with high_qc failed");
@@ -171,7 +175,7 @@ fn remote_signer_timeout_with_high_qc_equivalence() {
     // Verify both
     use qbind_consensus::timeout::timeout_signing_bytes;
     let preimage = timeout_signing_bytes(view, Some(&high_qc), validator_id);
-    
+
     let backend = MlDsa44Backend::new();
     assert!(
         backend.verify_vote(4, &pk, &preimage, &local_sig).is_ok(),
@@ -192,10 +196,10 @@ fn remote_signer_timeout_with_high_qc_equivalence() {
 fn remote_signer_suite_mismatch_returns_error() {
     let validator_id = ValidatorId::new(5);
     let (_pk, local_signer) = make_test_signer(validator_id);
-    
+
     // Create loopback transport with correct suite_id (100)
     let transport = Arc::new(LoopbackSignerTransport::new(local_signer));
-    
+
     // Create RemoteSignerClient with WRONG suite_id (200)
     let wrong_suite_client = RemoteSignerClient::new(validator_id, 200, transport);
 
@@ -207,7 +211,7 @@ fn remote_signer_suite_mismatch_returns_error() {
         result.is_err(),
         "Signing with mismatched suite_id should fail"
     );
-    
+
     match result {
         Err(SignError::InvalidKey) => {
             // Expected: Unauthorized from transport maps to InvalidKey
@@ -224,9 +228,9 @@ fn remote_signer_suite_mismatch_returns_error() {
 fn remote_signer_validator_id_mismatch_returns_error() {
     let validator_id = ValidatorId::new(6);
     let (_pk, local_signer) = make_test_signer(validator_id);
-    
+
     let transport = Arc::new(LoopbackSignerTransport::new(local_signer));
-    
+
     // Create RemoteSignerClient with WRONG validator_id
     let wrong_id_client = RemoteSignerClient::new(ValidatorId::new(999), 100, transport);
 
@@ -269,7 +273,7 @@ fn remote_signer_transport_error_handling() {
         result.is_err(),
         "Transport error should propagate as signing error"
     );
-    
+
     match result {
         Err(SignError::CryptoError) => {
             // Expected: transport errors map to CryptoError
@@ -394,7 +398,9 @@ fn remote_signer_client_as_trait_object() {
     // Verify
     let backend = MlDsa44Backend::new();
     assert!(
-        backend.verify_proposal(12, &pk, preimage, &signature).is_ok(),
+        backend
+            .verify_proposal(12, &pk, preimage, &signature)
+            .is_ok(),
         "signature from trait object should verify"
     );
 }
@@ -421,7 +427,7 @@ fn remote_sign_request_kind_variants() {
     assert_eq!(proposal, RemoteSignRequestKind::Proposal);
     assert_eq!(vote, RemoteSignRequestKind::Vote);
     assert_eq!(timeout, RemoteSignRequestKind::Timeout);
-    
+
     // Test Debug
     assert!(format!("{:?}", proposal).contains("Proposal"));
 }
@@ -440,7 +446,7 @@ fn remote_sign_error_display() {
     for error in errors {
         let display_str = format!("{}", error);
         assert!(!display_str.is_empty(), "Error should have display message");
-        
+
         // Should not contain sensitive data
         assert!(!display_str.contains("0x"));
         assert!(!display_str.contains("["));

@@ -275,9 +275,10 @@ pub struct ValidatorKeystoreConfig {
 /// - `RemoteLoopback`: Remote signer protocol with loopback transport (for testing)
 ///
 /// Future variants will include real network transports and HSM backends.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum SignerBackend {
     /// Use in-process signing with `LocalKeySigner` (default).
+    #[default]
     LocalKeystore,
     /// Use remote signer protocol with loopback transport.
     ///
@@ -289,12 +290,6 @@ pub enum SignerBackend {
     // RemoteTcp { endpoint: String },
     // RemoteGrpc { endpoint: String },
     // Hsm { config: HsmConfig },
-}
-
-impl Default for SignerBackend {
-    fn default() -> Self {
-        SignerBackend::LocalKeystore
-    }
 }
 
 /// Configuration for validator signing operations.
@@ -319,7 +314,7 @@ impl Default for SignerBackend {
 ///     remote_endpoint: None,
 /// };
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ValidatorSignerConfig {
     /// The signer backend to use.
     pub backend: SignerBackend,
@@ -329,15 +324,6 @@ pub struct ValidatorSignerConfig {
     /// Future network-based backends will use this to specify the remote signer
     /// address (e.g., "unix:///var/run/qbind-signer.sock" or "tcp://127.0.0.1:9000").
     pub remote_endpoint: Option<String>,
-}
-
-impl Default for ValidatorSignerConfig {
-    fn default() -> Self {
-        ValidatorSignerConfig {
-            backend: SignerBackend::default(),
-            remote_endpoint: None,
-        }
-    }
 }
 
 impl NodeValidatorConfig {
