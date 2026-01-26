@@ -335,7 +335,7 @@ fn remote_signer_crypto_error_propagation() {
     let result = client.sign_proposal(b"test");
 
     assert!(result.is_err(), "CryptoError should propagate");
-    matches!(result, Err(SignError::CryptoError));
+    assert!(matches!(result, Err(SignError::CryptoError)));
 }
 
 // ============================================================================
