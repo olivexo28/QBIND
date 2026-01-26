@@ -9,7 +9,7 @@ use std::fmt;
 /// 20-byte Ethereum-compatible address.
 ///
 /// Used for EVM accounts (EOAs and contracts).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, PartialOrd, Ord)]
 pub struct Address(pub [u8; 20]);
 
 impl Address {
@@ -71,7 +71,7 @@ impl From<Address> for [u8; 20] {
 /// 256-bit unsigned integer for EVM values (balances, storage, etc.).
 ///
 /// Stored as big-endian 32-byte array for consistency with EVM semantics.
-#[derive(Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Hash, PartialOrd, Ord)]
 pub struct U256(pub [u8; 32]);
 
 impl U256 {

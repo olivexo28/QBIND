@@ -15,10 +15,13 @@
 //! 2. **EVM Execution** (`RevmExecutionEngine`): Full EVM compatibility via Revm
 //!    for smart contract execution (T150+).
 //!
-//! ## EVM Module Structure (T150)
+//! ## EVM Module Structure (T150 + T151)
 //!
 //! ```text
 //! qbind-runtime/
+//! ├── block.rs            # Canonical block types (QbindBlock, QbindBlockHeader)
+//! ├── block_apply.rs      # Block application logic (apply_qbind_block)
+//! ├── evm_state.rs        # EVM ledger state (EvmLedger, LedgerStateView)
 //! ├── evm_types.rs        # Core EVM types (Address, U256, AccountState)
 //! ├── execution_engine.rs # ExecutionEngine and StateView traits
 //! ├── qbind_tx.rs         # QbindTx and QbindBlockEnv types
@@ -38,9 +41,12 @@ use qbind_types::ProgramId;
 use qbind_wire::tx::Transaction;
 
 // ============================================================================
-// EVM Execution Modules (T150)
+// EVM Execution Modules (T150 + T151)
 // ============================================================================
 
+pub mod block;
+pub mod block_apply;
+pub mod evm_state;
 pub mod evm_types;
 pub mod execution_engine;
 pub mod qbind_tx;
@@ -48,10 +54,21 @@ pub mod qbind_tx;
 #[cfg(feature = "evm")]
 pub mod revm_engine;
 
-// Re-exports for convenient access
+// Re-exports for convenient access - Core types
 pub use evm_types::{Address, EvmAccountState, LogEntry, U256};
 pub use execution_engine::{EvmExecutionError, ExecutionEngine, StateView, TxReceipt};
 pub use qbind_tx::{EvmBlockExecutionResult, QbindBlockEnv, QbindTx};
+
+// Re-exports for T151 - Block types
+pub use block::{
+    compute_receipts_root, compute_tx_root, hash_qbind_tx, hash_receipt, merkle_root,
+    BlockProposerId, QbindBlock, QbindBlockBody, QbindBlockHeader, H256, ZERO_H256,
+};
+pub use block_apply::{
+    apply_qbind_block, execute_qbind_block_for_proposal, BlockApplyError, BlockApplyResult,
+    RootMismatchKind,
+};
+pub use evm_state::{EvmLedger, EvmLedgerSnapshot, LedgerStateView};
 
 #[cfg(feature = "evm")]
 pub use revm_engine::{execute_qbind_block, RevmConfig, RevmExecutionEngine};

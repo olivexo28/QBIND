@@ -73,6 +73,7 @@ pub mod consensus_net_worker;
 pub mod consensus_network_facade;
 pub mod consensus_node;
 pub mod consensus_sim;
+pub mod evm_commit;
 pub mod hotstuff_node_sim;
 pub mod identity_map;
 pub mod keystore;
@@ -116,6 +117,12 @@ pub use consensus_sim::{NodeConsensusSim, NodeConsensusSimError};
 pub use hotstuff_node_sim::{NodeHotstuffHarness, NodeHotstuffHarnessError};
 pub use identity_map::PeerValidatorMap;
 pub use ledger_bridge::{InMemoryNodeLedgerHarness, NodeLedgerError, NodeLedgerHarness};
+
+// EVM execution bridge exports (T151)
+pub use evm_commit::{
+    init_evm_account, init_evm_contract, EvmCommitError, EvmCommitResult, EvmExecutionBridge,
+};
+
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,
     LoopbackNetService,
