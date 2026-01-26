@@ -550,6 +550,7 @@ impl ThreeNodeCluster {
                 &node_cfg,
                 kemtls_configs[i].client_cfg.clone(),
                 kemtls_configs[i].server_cfg.clone(),
+                None,
             )
             .map_err(|e| format!("Failed to create harness for node {}: {:?}", i, e))?;
 
@@ -792,6 +793,7 @@ async fn run_simplified_three_node_test(transport: ClusterTransport) -> ClusterR
             &node_cfg,
             kemtls_configs[i].client_cfg.clone(),
             kemtls_configs[i].server_cfg.clone(),
+            None,
         )
         .expect("Failed to create harness");
 
@@ -1181,6 +1183,7 @@ fn all_three_nodes_can_be_created() {
             &node_cfg,
             kemtls_cfg.client_cfg,
             kemtls_cfg.server_cfg,
+            None,
         );
 
         assert!(

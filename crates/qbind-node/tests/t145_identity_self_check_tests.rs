@@ -561,7 +561,7 @@ fn harness_works_with_identity_checked_config() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg, None)
             .expect("Harness creation should succeed");
 
     // Run one step

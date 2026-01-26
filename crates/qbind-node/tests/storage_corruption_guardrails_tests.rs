@@ -658,7 +658,7 @@ fn startup_halts_on_corrupted_last_committed() {
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to reopen RocksDB"));
     let cfg = create_single_node_config();
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("harness creation should succeed")
             .with_storage(storage);
 
@@ -718,7 +718,7 @@ fn startup_halts_on_corrupted_block() {
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to reopen RocksDB"));
     let cfg = create_single_node_config();
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("harness creation should succeed")
             .with_storage(storage);
 
@@ -778,7 +778,7 @@ fn startup_halts_on_corrupted_current_epoch() {
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to reopen RocksDB"));
     let cfg = create_single_node_config();
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("harness creation should succeed")
             .with_storage(storage)
             .with_epoch_state_provider(provider);
@@ -984,7 +984,7 @@ fn backward_compatibility_load_persisted_state_legacy_db() {
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to open RocksDB"));
     let cfg = create_single_node_config();
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("harness creation should succeed")
             .with_storage(storage);
 

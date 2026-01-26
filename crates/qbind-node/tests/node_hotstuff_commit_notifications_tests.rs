@@ -337,7 +337,7 @@ fn node_hotstuff_single_node_drain_commits_yields_and_clears() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // Drive the harness until at least one commit happens.
@@ -424,6 +424,7 @@ fn node_hotstuff_two_nodes_have_consistent_commits() {
         &cfg0,
         setup0.client_cfg.clone(),
         setup0.server_cfg.clone(),
+        None,
     )
     .expect("Failed to create harness h0");
 
@@ -431,6 +432,7 @@ fn node_hotstuff_two_nodes_have_consistent_commits() {
         &cfg1,
         setup1.client_cfg.clone(),
         setup1.server_cfg.clone(),
+        None,
     )
     .expect("Failed to create harness h1");
 

@@ -333,7 +333,7 @@ fn node_ledger_harness_applies_committed_blocks() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
@@ -373,7 +373,7 @@ fn node_ledger_harness_is_idempotent_per_step() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
@@ -413,7 +413,7 @@ fn node_ledger_harness_and_block_store_are_consistent() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 

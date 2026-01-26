@@ -337,7 +337,7 @@ fn pruning_below_height_preserves_ledger_progress() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
@@ -398,7 +398,7 @@ fn pruning_doesnt_affect_ledger_entries() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
@@ -447,7 +447,7 @@ fn pruning_multiple_times_is_safe() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
@@ -486,7 +486,7 @@ fn pruning_with_increasing_heights() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
@@ -531,7 +531,7 @@ fn pruning_at_zero_is_noop() {
     let cfg = make_single_node_config();
 
     let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 

@@ -306,7 +306,7 @@ fn block_store_starts_empty() {
     };
 
     let harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     assert!(harness.block_store().is_empty());
@@ -334,7 +334,7 @@ fn block_store_stores_proposals_on_broadcast() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // Initial state: block store is empty
@@ -367,7 +367,7 @@ fn block_store_accumulates_proposals_over_multiple_steps() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // Run several steps
@@ -399,7 +399,7 @@ fn block_store_proposals_retrievable_by_id() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // Generate proposals
@@ -434,7 +434,7 @@ fn block_store_mut_allows_clearing() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // Generate some proposals

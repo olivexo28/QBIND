@@ -814,7 +814,7 @@ fn harness_load_persisted_state_accepts_missing_schema_version() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 
@@ -848,7 +848,7 @@ fn harness_load_persisted_state_accepts_current_schema_version() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 
@@ -880,7 +880,7 @@ fn harness_load_persisted_state_rejects_future_schema_version() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 
@@ -923,7 +923,7 @@ fn harness_rocksdb_load_persisted_state_rejects_future_schema_version() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage);
 

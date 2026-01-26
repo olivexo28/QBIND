@@ -566,7 +566,7 @@ async fn worker_exits_when_channel_closed() {
 async fn worker_runner_integration_events_reach_harness() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg)
+    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
         .expect("harness creation should succeed");
 
     // Create runner with long tick interval (we'll drive it via events)
@@ -639,7 +639,7 @@ async fn multiple_workers_can_send_to_same_channel() {
 async fn worker_and_runner_run_concurrently() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg)
+    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
         .expect("harness creation should succeed");
 
     // Create runner with very long tick interval
@@ -733,7 +733,7 @@ async fn mock_sender_records_outbound_messages() {
 async fn runner_works_without_network_worker() {
     let (cfg, client_cfg, server_cfg) = make_test_config();
 
-    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg)
+    let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)
         .expect("harness creation should succeed");
 
     let (runner, event_tx) = AsyncNodeRunner::new(harness, Duration::from_millis(10));

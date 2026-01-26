@@ -321,7 +321,7 @@ fn node_hotstuff_harness_creates_from_config() {
     };
 
     let harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg);
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None);
 
     assert!(
         harness.is_ok(),
@@ -351,7 +351,7 @@ fn node_hotstuff_single_node_commits() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // The single node is always leader for view 0, should propose immediately
@@ -400,7 +400,7 @@ fn node_hotstuff_single_node_no_quorum_no_commit() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness");
 
     // Run many steps - with only 1/2 validators, we cannot form a QC (need 2/3)

@@ -332,7 +332,7 @@ fn drain_committed_blocks_is_initially_empty() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     // Call drain_committed_blocks immediately (before any steps)
@@ -357,7 +357,7 @@ fn drain_committed_blocks_returns_commits_once() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     // Step the harness until we observe a commit
@@ -405,7 +405,7 @@ fn drain_committed_blocks_yields_proposals_matching_store() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     // Step the harness until we observe a commit
@@ -445,7 +445,7 @@ fn drain_committed_blocks_returns_only_new_commits() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     // Step the harness until we observe a commit

@@ -309,7 +309,7 @@ fn harness_with_in_memory_storage_starts_successfully() {
     };
 
     let _harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 
@@ -336,7 +336,7 @@ fn harness_with_rocksdb_storage_starts_successfully() {
     };
 
     let _harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 
@@ -360,7 +360,7 @@ fn commits_are_persisted_to_storage() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 
@@ -422,6 +422,7 @@ fn load_persisted_state_works_with_data() {
             &cfg,
             setup.client_cfg.clone(),
             setup.server_cfg.clone(),
+            None,
         )
         .expect("Failed to create harness")
         .with_storage(storage.clone());
@@ -438,6 +439,7 @@ fn load_persisted_state_works_with_data() {
             &cfg,
             setup.client_cfg.clone(),
             setup.server_cfg.clone(),
+            None,
         )
         .expect("Failed to create harness")
         .with_storage(storage.clone());
@@ -475,7 +477,7 @@ fn load_persisted_state_returns_none_for_fresh_node() {
     };
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("Failed to create harness")
             .with_storage(storage.clone());
 

@@ -333,7 +333,7 @@ fn node_hotstuff_commit_index_tracks_tip() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     // Step the harness until we observe a commit
@@ -376,7 +376,7 @@ fn node_hotstuff_commit_index_monotonic_heights() {
     let cfg = make_single_node_config();
 
     let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     let mut saw_commit = false;
@@ -421,7 +421,7 @@ fn node_hotstuff_commit_index_initially_empty() {
     let cfg = make_single_node_config();
 
     let harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
+        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg, None)
             .expect("failed to create harness");
 
     // Before any steps, commit index should be empty
