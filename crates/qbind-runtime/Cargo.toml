@@ -3,6 +3,10 @@ name = "qbind-runtime"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["evm"]
+evm = ["revm"]
+
 [dependencies]
 qbind-types  = { path = "../qbind-types" }
 qbind-wire   = { path = "../qbind-wire" }
@@ -11,3 +15,6 @@ qbind-crypto = { path = "../qbind-crypto" }
 qbind-serde  = { path = "../qbind-serde" }
 qbind-ledger = { path = "../qbind-ledger" }
 qbind-system = { path = "../qbind-system" }
+
+# EVM execution via Revm
+revm = { version = "34.0.0", optional = true, default-features = false, features = ["std"] }

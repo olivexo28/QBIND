@@ -1,3 +1,30 @@
+//! QBIND Runtime - Transaction and Block Execution
+//!
+//! This crate provides the execution layer for QBIND, including:
+//!
+//! - **System Programs**: Keyset, Validator, and Governance programs.
+//! - **EVM Execution**: Revm-based EVM execution engine (T150+).
+//!
+//! ## Architecture
+//!
+//! The runtime supports two execution models:
+//!
+//! 1. **System Programs** (`TxExecutor`, `BlockExecutor`): Native QBIND programs
+//!    for consensus-critical operations (keyset management, validator registration).
+//!
+//! 2. **EVM Execution** (`RevmExecutionEngine`): Full EVM compatibility via Revm
+//!    for smart contract execution (T150+).
+//!
+//! ## EVM Module Structure (T150)
+//!
+//! ```text
+//! qbind-runtime/
+//! ├── evm_types.rs        # Core EVM types (Address, U256, AccountState)
+//! ├── execution_engine.rs # ExecutionEngine and StateView traits
+//! ├── qbind_tx.rs         # QbindTx and QbindBlockEnv types
+//! └── revm_engine.rs      # Revm integration (RevmExecutionEngine)
+//! ```
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -9,6 +36,29 @@ use qbind_system::validator_program::VALIDATOR_PROGRAM_ID;
 use qbind_system::{GovernanceProgram, KeysetProgram, ValidatorProgram};
 use qbind_types::ProgramId;
 use qbind_wire::tx::Transaction;
+
+// ============================================================================
+// EVM Execution Modules (T150)
+// ============================================================================
+
+pub mod evm_types;
+pub mod execution_engine;
+pub mod qbind_tx;
+
+#[cfg(feature = "evm")]
+pub mod revm_engine;
+
+// Re-exports for convenient access
+pub use evm_types::{Address, EvmAccountState, LogEntry, U256};
+pub use execution_engine::{EvmExecutionError, ExecutionEngine, StateView, TxReceipt};
+pub use qbind_tx::{EvmBlockExecutionResult, QbindBlockEnv, QbindTx};
+
+#[cfg(feature = "evm")]
+pub use revm_engine::{execute_qbind_block, RevmConfig, RevmExecutionEngine};
+
+// ============================================================================
+// Legacy System Program Execution
+// ============================================================================
 
 /// Result for a single transaction in a block.
 #[derive(Debug, Clone)]
