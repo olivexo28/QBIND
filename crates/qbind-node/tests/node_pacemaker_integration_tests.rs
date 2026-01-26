@@ -322,9 +322,13 @@ fn node_pacemaker_does_not_propose_twice_in_same_view() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // In a single-node setup with no remotes:
     // - The node is always leader
@@ -392,9 +396,13 @@ fn node_pacemaker_still_commits_in_single_node_setup() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Run the harness for many steps
     for _ in 0..100 {
@@ -443,9 +451,13 @@ fn node_pacemaker_allows_view_advancement() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     let initial_view = harness.current_view();
     assert_eq!(initial_view, 0, "Expected initial view to be 0");

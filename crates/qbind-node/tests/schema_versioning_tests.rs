@@ -813,10 +813,14 @@ fn harness_load_persisted_state_accepts_missing_schema_version() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // Storage has no schema version key (legacy v0)
     assert!(storage.get_schema_version().unwrap().is_none());
@@ -847,10 +851,14 @@ fn harness_load_persisted_state_accepts_current_schema_version() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // load_persisted_state should succeed
     let result = harness.load_persisted_state();
@@ -879,10 +887,14 @@ fn harness_load_persisted_state_rejects_future_schema_version() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // load_persisted_state should fail with incompatible schema error
     let result = harness.load_persisted_state();
@@ -922,10 +934,14 @@ fn harness_rocksdb_load_persisted_state_rejects_future_schema_version() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage);
 
     // load_persisted_state should fail with incompatible schema error
     let result = harness.load_persisted_state();

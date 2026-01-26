@@ -84,6 +84,7 @@ pub mod net_service;
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
+pub mod remote_signer;
 pub mod secure_channel;
 pub mod startup_validation;
 pub mod storage;
@@ -154,12 +155,18 @@ pub use validator_config::{
     make_local_validator_config_with_keystore_and_identity_check,
     verify_signing_key_matches_identity, IdentityMismatchError, KeystoreWithIdentityError,
     LocalValidatorConfig, LocalValidatorIdentity, NodeValidatorConfig, RemoteValidatorConfig,
-    ValidatorKeystoreConfig, EXPECTED_SUITE_ID,
+    SignerBackend, ValidatorKeystoreConfig, ValidatorSignerConfig, EXPECTED_SUITE_ID,
 };
 
 // Validator signer abstraction exports (T148)
 pub use validator_signer::{
     make_local_validator_signer, LocalKeySigner, SignError, ValidatorSigner,
+};
+
+// Remote signer exports (T149)
+pub use remote_signer::{
+    LoopbackSignerTransport, RemoteSignError, RemoteSignRequest, RemoteSignRequestKind,
+    RemoteSignResponse, RemoteSignerClient, RemoteSignerTransport,
 };
 
 // Verification pool exports (T147)

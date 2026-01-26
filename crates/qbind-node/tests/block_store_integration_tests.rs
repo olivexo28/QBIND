@@ -305,9 +305,13 @@ fn block_store_starts_empty() {
         remotes: vec![],
     };
 
-    let harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     assert!(harness.block_store().is_empty());
     assert_eq!(harness.block_store_count(), 0);
@@ -333,9 +337,13 @@ fn block_store_stores_proposals_on_broadcast() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Initial state: block store is empty
     assert!(harness.block_store().is_empty());
@@ -366,9 +374,13 @@ fn block_store_accumulates_proposals_over_multiple_steps() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Run several steps
     for _ in 0..10 {
@@ -398,9 +410,13 @@ fn block_store_proposals_retrievable_by_id() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Generate proposals
     for _ in 0..5 {
@@ -433,9 +449,13 @@ fn block_store_mut_allows_clearing() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Generate some proposals
     for _ in 0..3 {

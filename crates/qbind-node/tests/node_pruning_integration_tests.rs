@@ -336,9 +336,13 @@ fn pruning_below_height_preserves_ledger_progress() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -397,9 +401,13 @@ fn pruning_doesnt_affect_ledger_entries() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -446,9 +454,13 @@ fn pruning_multiple_times_is_safe() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -485,9 +497,13 @@ fn pruning_with_increasing_heights() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -530,9 +546,13 @@ fn pruning_at_zero_is_noop() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);

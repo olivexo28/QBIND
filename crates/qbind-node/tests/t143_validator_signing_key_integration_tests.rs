@@ -308,9 +308,13 @@ fn node_can_be_created_with_validator_signing_key() {
     };
 
     // Create harness from config
-    let harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg)
-            .expect("Harness creation should succeed");
+    let harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     assert_eq!(harness.validator_id, ValidatorId::new(1));
 }
@@ -340,9 +344,13 @@ fn votes_and_proposals_are_signed_on_broadcast() {
     };
 
     // Create harness from config
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&config, setup.client_cfg, setup.server_cfg)
-            .expect("Harness creation should succeed");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &config,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Harness creation should succeed");
 
     // Run one step - single node is leader, should propose and vote
     harness.step_once().expect("step_once should succeed");

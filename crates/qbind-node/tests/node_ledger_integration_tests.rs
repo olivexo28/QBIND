@@ -332,9 +332,13 @@ fn node_ledger_harness_applies_committed_blocks() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node harness");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -372,9 +376,13 @@ fn node_ledger_harness_is_idempotent_per_step() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node harness");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);
@@ -412,9 +420,13 @@ fn node_ledger_harness_and_block_store_are_consistent() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let node =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create node harness");
+    let node = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create node harness");
     let ledger = InMemoryLedger::<[u8; 32]>::new();
 
     let mut harness = InMemoryNodeLedgerHarness::new(node, ledger);

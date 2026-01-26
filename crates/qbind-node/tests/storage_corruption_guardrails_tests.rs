@@ -657,10 +657,14 @@ fn startup_halts_on_corrupted_last_committed() {
     let storage =
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to reopen RocksDB"));
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // load_persisted_state should fail
     let result = harness.load_persisted_state();
@@ -717,10 +721,14 @@ fn startup_halts_on_corrupted_block() {
     let storage =
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to reopen RocksDB"));
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // load_persisted_state should fail
     let result = harness.load_persisted_state();
@@ -777,11 +785,15 @@ fn startup_halts_on_corrupted_current_epoch() {
     let storage =
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to reopen RocksDB"));
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("harness creation should succeed")
-            .with_storage(storage)
-            .with_epoch_state_provider(provider);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage)
+    .with_epoch_state_provider(provider);
 
     // load_persisted_state should fail
     let result = harness.load_persisted_state();
@@ -983,10 +995,14 @@ fn backward_compatibility_load_persisted_state_legacy_db() {
     let storage =
         Arc::new(RocksDbConsensusStorage::open(&db_path).expect("Failed to open RocksDB"));
     let cfg = create_single_node_config();
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("harness creation should succeed")
-            .with_storage(storage);
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("harness creation should succeed")
+    .with_storage(storage);
 
     // load_persisted_state should succeed with legacy data
     let result = harness.load_persisted_state();

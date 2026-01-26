@@ -409,9 +409,13 @@ fn single_node_committed_blocks_have_proposals_in_store() {
     let setup = create_test_setup();
     let cfg = make_single_node_config();
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("failed to create harness");
 
     // Step until we see commits
     for _ in 0..MAX_STEPS_FOR_COMMIT {

@@ -308,10 +308,14 @@ fn harness_with_in_memory_storage_starts_successfully() {
         remotes: vec![],
     };
 
-    let _harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let _harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // Should start with no persisted state
     assert!(storage.get_last_committed().unwrap().is_none());
@@ -335,10 +339,14 @@ fn harness_with_rocksdb_storage_starts_successfully() {
         remotes: vec![],
     };
 
-    let _harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let _harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // Should start with no persisted state
     assert!(storage.get_last_committed().unwrap().is_none());
@@ -359,10 +367,14 @@ fn commits_are_persisted_to_storage() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // Run several steps to generate commits
     for _ in 0..20 {
@@ -422,6 +434,7 @@ fn load_persisted_state_works_with_data() {
             &cfg,
             setup.client_cfg.clone(),
             setup.server_cfg.clone(),
+            None,
         )
         .expect("Failed to create harness")
         .with_storage(storage.clone());
@@ -438,6 +451,7 @@ fn load_persisted_state_works_with_data() {
             &cfg,
             setup.client_cfg.clone(),
             setup.server_cfg.clone(),
+            None,
         )
         .expect("Failed to create harness")
         .with_storage(storage.clone());
@@ -474,10 +488,14 @@ fn load_persisted_state_returns_none_for_fresh_node() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness")
-            .with_storage(storage.clone());
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness")
+    .with_storage(storage.clone());
 
     // Load persisted state on fresh harness
     let last_committed = harness

@@ -320,8 +320,12 @@ fn node_hotstuff_harness_creates_from_config() {
         remotes: vec![],
     };
 
-    let harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg);
+    let harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    );
 
     assert!(
         harness.is_ok(),
@@ -350,9 +354,13 @@ fn node_hotstuff_single_node_commits() {
         remotes: vec![],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // The single node is always leader for view 0, should propose immediately
     // With a single validator, QC forms immediately on self-vote
@@ -399,9 +407,13 @@ fn node_hotstuff_single_node_no_quorum_no_commit() {
         }],
     };
 
-    let mut harness =
-        NodeHotstuffHarness::new_from_validator_config(&cfg, setup.client_cfg, setup.server_cfg)
-            .expect("Failed to create harness");
+    let mut harness = NodeHotstuffHarness::new_from_validator_config(
+        &cfg,
+        setup.client_cfg,
+        setup.server_cfg,
+        None,
+    )
+    .expect("Failed to create harness");
 
     // Run many steps - with only 1/2 validators, we cannot form a QC (need 2/3)
     for _ in 0..100 {

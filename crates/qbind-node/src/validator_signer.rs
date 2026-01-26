@@ -219,6 +219,31 @@ impl LocalKeySigner {
     pub fn signing_key(&self) -> &Arc<ValidatorSigningKey> {
         &self.signing_key
     }
+
+    /// Sign a preimage directly without computing additional context.
+    ///
+    /// This is an internal helper for use by the loopback remote signer transport,
+    /// which receives fully-encoded preimages (including domain separators and
+    /// all context) from the RemoteSignerClient.
+    ///
+    /// # Arguments
+    ///
+    /// * `preimage` - The complete signing preimage (with domain separator)
+    ///
+    /// # Returns
+    ///
+    /// The signature bytes on success.
+    ///
+    /// # Security Note
+    ///
+    /// This method assumes the preimage is already properly formatted with
+    /// domain separators. Use with caution. Prefer using the `ValidatorSigner`
+    /// trait methods which ensure proper preimage construction.
+    pub fn sign_preimage(&self, preimage: &[u8]) -> Result<Vec<u8>, SignError> {
+        self.signing_key
+            .sign(preimage)
+            .map_err(|_| SignError::CryptoError)
+    }
 }
 
 impl std::fmt::Debug for LocalKeySigner {

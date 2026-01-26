@@ -370,6 +370,7 @@ async fn run_pqc_three_node_test() -> PqcTestResult {
             &node_cfg,
             kemtls_configs[i].client_cfg.clone(),
             kemtls_configs[i].server_cfg.clone(),
+            None,
         )
         .expect("Failed to create harness");
 

@@ -370,6 +370,7 @@ fn two_nodes_converge_on_same_ledger_tip_height() {
         &cfg0,
         setup0.client_cfg.clone(),
         setup0.server_cfg.clone(),
+        None,
     )
     .expect("failed to create node0");
 
@@ -377,6 +378,7 @@ fn two_nodes_converge_on_same_ledger_tip_height() {
         &cfg1,
         setup1.client_cfg.clone(),
         setup1.server_cfg.clone(),
+        None,
     )
     .expect("failed to create node1");
 
@@ -573,6 +575,7 @@ fn two_nodes_ledgers_match_block_ids_by_height() {
         &cfg0,
         setup0.client_cfg.clone(),
         setup0.server_cfg.clone(),
+        None,
     )
     .expect("failed to create node0");
 
@@ -580,6 +583,7 @@ fn two_nodes_ledgers_match_block_ids_by_height() {
         &cfg1,
         setup1.client_cfg.clone(),
         setup1.server_cfg.clone(),
+        None,
     )
     .expect("failed to create node1");
 
