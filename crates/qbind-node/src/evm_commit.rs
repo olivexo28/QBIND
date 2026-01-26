@@ -118,6 +118,9 @@ pub struct EvmCommitResult {
 
     /// Computed receipts root.
     pub receipts_root: H256,
+
+    /// Total gas used by all transactions in this block (T152).
+    pub gas_used: u64,
 }
 
 /// Bridge that executes EVM transactions when blocks are committed.
@@ -248,6 +251,7 @@ impl EvmExecutionBridge {
             state_root: result.new_state_root,
             tx_root: result.tx_root,
             receipts_root: result.receipts_root,
+            gas_used: result.block_gas_used,
         };
 
         self.committed_roots.insert(height, commit_result.clone());

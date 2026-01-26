@@ -146,6 +146,10 @@ fn execute_single_tx(
     // Validate transaction basics
     validate_tx(db, tx)?;
 
+    // Compute effective gas price per EIP-1559:
+    // effective_gas_price = basefee + min(max_priority_fee, max_fee - basefee)
+    let effective_gas_price = tx.effective_gas_price(block_env.basefee);
+
     // Build Revm environment
     let revm_block_env = build_revm_block_env(block_env);
     let revm_tx_env = build_revm_tx_env(tx, block_env.chain_id);
@@ -176,7 +180,9 @@ fn execute_single_tx(
     let result = evm.transact_commit(revm_tx_env);
 
     match result {
-        Ok(exec_result) => process_execution_result(exec_result, tx, cumulative_gas_before),
+        Ok(exec_result) => {
+            process_execution_result(exec_result, tx, cumulative_gas_before, effective_gas_price)
+        }
         Err(e) => Err(EvmExecutionError::InternalError(format!(
             "Revm error: {:?}",
             e
@@ -267,6 +273,7 @@ fn process_execution_result(
     result: ExecutionResult,
     tx: &QbindTx,
     cumulative_gas_before: u64,
+    effective_gas_price: u128,
 ) -> Result<TxReceipt, EvmExecutionError> {
     match result {
         ExecutionResult::Success {
@@ -283,8 +290,13 @@ fn process_execution_result(
             let cumulative_gas_used = cumulative_gas_before.saturating_add(gas_used);
             let converted_logs: Vec<LogEntry> = logs.into_iter().map(revm_log_to_qbind).collect();
 
-            let mut receipt =
-                TxReceipt::success(gas_used, cumulative_gas_used, converted_logs, output_data);
+            let mut receipt = TxReceipt::success(
+                gas_used,
+                cumulative_gas_used,
+                effective_gas_price,
+                converted_logs,
+                output_data,
+            );
 
             // If this was a contract creation, get the contract address
             if tx.is_contract_creation() {
@@ -300,6 +312,7 @@ fn process_execution_result(
             let mut receipt = TxReceipt::failure(
                 gas_used,
                 cumulative_gas_used,
+                effective_gas_price,
                 EvmExecutionError::Revert {
                     output: output.to_vec(),
                 },
@@ -310,7 +323,12 @@ fn process_execution_result(
         ExecutionResult::Halt { gas_used, reason } => {
             let cumulative_gas_used = cumulative_gas_before.saturating_add(gas_used);
             let error = halt_reason_to_error(reason, tx.gas_limit, gas_used);
-            Ok(TxReceipt::failure(gas_used, cumulative_gas_used, error))
+            Ok(TxReceipt::failure(
+                gas_used,
+                cumulative_gas_used,
+                effective_gas_price,
+                error,
+            ))
         }
     }
 }

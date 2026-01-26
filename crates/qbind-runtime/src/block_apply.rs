@@ -41,6 +41,9 @@ pub struct BlockApplyResult {
 
     /// The computed receipts root.
     pub receipts_root: H256,
+
+    /// Total gas used by all transactions in this block (T152).
+    pub block_gas_used: u64,
 }
 
 /// Errors that can occur when applying a block.
@@ -182,6 +185,9 @@ where
         .execute_block(&block_env, &mut state_view, &block.body.transactions)
         .map_err(BlockApplyError::Execution)?;
 
+    // Compute block gas used (T152)
+    let block_gas_used = receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+
     // Compute roots
     let tx_root = compute_tx_root(&block.body);
     let receipts_root = compute_receipts_root(&receipts);
@@ -216,12 +222,22 @@ where
         });
     }
 
+    // Validate gas_used against header (if non-zero) (T152)
+    if block.header.gas_used != 0 && block.header.gas_used != block_gas_used {
+        ledger.restore(snapshot);
+        return Err(BlockApplyError::Internal(format!(
+            "gas_used mismatch: header={}, computed={}",
+            block.header.gas_used, block_gas_used
+        )));
+    }
+
     // Success - state is already committed through the state view
     Ok(BlockApplyResult {
         receipts,
         new_state_root,
         tx_root,
         receipts_root,
+        block_gas_used,
     })
 }
 
@@ -276,6 +292,9 @@ where
         .execute_block(&block_env, &mut state_view, &block.body.transactions)
         .map_err(BlockApplyError::Execution)?;
 
+    // Compute block gas used (T152)
+    let block_gas_used = receipts.last().map(|r| r.cumulative_gas_used).unwrap_or(0);
+
     // Compute roots
     let tx_root = compute_tx_root(&block.body);
     let receipts_root = compute_receipts_root(&receipts);
@@ -286,6 +305,7 @@ where
         new_state_root,
         tx_root,
         receipts_root,
+        block_gas_used,
     })
 }
 

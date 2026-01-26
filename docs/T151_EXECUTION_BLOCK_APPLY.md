@@ -19,6 +19,8 @@ pub struct QbindBlockHeader {
     pub number: u64,
     pub timestamp: u64,
     pub proposer_id: BlockProposerId,
+    pub gas_used: u64,       // sum(receipt[i].gas_used)
+    pub gas_limit: u64,      // constant 30M in v0
 }
 ```
 
@@ -29,6 +31,8 @@ pub struct QbindBlockHeader {
 - **number**: Block height in the chain
 - **timestamp**: Block timestamp from consensus (seconds since Unix epoch)
 - **proposer_id**: ID of the validator that proposed this block
+- **gas_used**: Total gas consumed by all transactions in this block
+- **gas_limit**: Maximum allowable gas for this block (default 30,000,000)
 
 ### QbindBlockBody
 
@@ -255,6 +259,40 @@ T151 builds on this by:
 - Adding `apply_qbind_block()` for end-to-end execution
 - Adding `EvmExecutionBridge` for node integration
 
+## Gas Accounting and Fee Flow (T152)
+
+T152 introduces deterministic gas accounting and a simplified fee routing model.
+
+### Gas Model (v0)
+
+The gas model is EIP-1559 compatible but simplified for the initial implementation:
+
+- **Fixed Base Fee**: Currently defaulted to `1` wei-like unit.
+- **Priority Fee**: Users can specify `max_priority_fee_per_gas` (tip) to incentivize inclusion.
+- **Effective Gas Price**: `base_fee + min(max_priority_fee, max_fee - base_fee)`
+- **Fee Distribution**: 100% of the total fee is credited to the block proposer (coinbase). Fee burning is supported by the `GasModelConfig` but disabled (0%) in the default v0 configuration.
+
+### Receipt Metadata
+
+`TxReceipt` is extended to include gas pricing information to enable deterministic Merkle root verification of fees:
+
+```rust
+pub struct TxReceipt {
+    pub success: bool,
+    pub gas_used: u64,
+    pub cumulative_gas_used: u64,
+    pub effective_gas_price: u128, // T152 addition
+    // ... logs, output, error ...
+}
+```
+
+### Verification Invariants
+
+1. **Transaction Price Verification**: Transactions are rejected if `max_fee_per_gas < base_fee_per_gas`.
+2. **Gas Limit Enforcement**: Block execution fails if `computed_gas_used > block_gas_limit`.
+3. **Receipt Consistency**: The `effective_gas_price` in each receipt must match the value computed by the execution engine and gas model.
+4. **Header Consistency**: The `gas_used` field in the block header must exactly match the sum of gas used by all transactions in the block body.
+
 ## Security Considerations
 
 1. **No consensus changes**: Execution is isolated from consensus rules
@@ -262,10 +300,12 @@ T151 builds on this by:
 3. **Snapshot rollback**: Failed validation doesn't corrupt state
 4. **Gas limits enforced**: Prevents unbounded computation
 5. **Nonce validation**: Prevents replay attacks
+6. **Price validation**: Ensures transactions pay at least the current base fee
 
 ## Future Work
 
 - **T156+**: EIP-1559 base fee updates, mempool integration
 - **State Trie**: Replace placeholder with proper Merkle Patricia Trie
 - **State Proofs**: Enable light client verification
-- **Gas Market**: Priority fee handling and transaction ordering
+- **Gas Market**: Dynamic priority fee handling and transaction ordering
+- **Fee Burning**: Enable a non-zero burn fraction in `GasModelConfig`

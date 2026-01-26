@@ -359,10 +359,17 @@ mod tests {
     #[test]
     fn test_block_execution_result() {
         let receipts = vec![
-            crate::execution_engine::TxReceipt::success(21000, 21000, vec![], vec![]),
+            crate::execution_engine::TxReceipt::success(
+                21000,
+                21000,
+                1_000_000_000,
+                vec![],
+                vec![],
+            ),
             crate::execution_engine::TxReceipt::failure(
                 21000,
                 42000,
+                1_000_000_000,
                 crate::execution_engine::EvmExecutionError::OutOfGas {
                     gas_limit: 21000,
                     gas_used: 30000,

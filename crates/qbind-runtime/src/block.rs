@@ -82,11 +82,21 @@ pub struct QbindBlockHeader {
 
     /// Validator ID of the block proposer.
     pub proposer_id: BlockProposerId,
-    // Future fields (commented for reference):
-    // pub base_fee: u128,
-    // pub prev_randao: H256,
-    // pub extra_data: Vec<u8>,
+
+    /// Total gas used by all transactions in this block (T152).
+    ///
+    /// This is computed as sum of gas_used across all receipts.
+    pub gas_used: u64,
+
+    /// Block gas limit (T152).
+    ///
+    /// Maximum gas that can be consumed by transactions in this block.
+    /// Can be a static constant or configured per chain/block.
+    pub gas_limit: u64,
 }
+
+/// Default block gas limit (30 million gas).
+pub const DEFAULT_BLOCK_GAS_LIMIT: u64 = 30_000_000;
 
 impl QbindBlockHeader {
     /// Create a new block header.
@@ -107,6 +117,34 @@ impl QbindBlockHeader {
             number,
             timestamp,
             proposer_id,
+            gas_used: 0,
+            gas_limit: DEFAULT_BLOCK_GAS_LIMIT,
+        }
+    }
+
+    /// Create a new block header with gas fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_gas(
+        parent_hash: H256,
+        state_root: H256,
+        tx_root: H256,
+        receipts_root: H256,
+        number: u64,
+        timestamp: u64,
+        proposer_id: BlockProposerId,
+        gas_used: u64,
+        gas_limit: u64,
+    ) -> Self {
+        QbindBlockHeader {
+            parent_hash,
+            state_root,
+            tx_root,
+            receipts_root,
+            number,
+            timestamp,
+            proposer_id,
+            gas_used,
+            gas_limit,
         }
     }
 
@@ -120,12 +158,21 @@ impl QbindBlockHeader {
             number: 0,
             timestamp,
             proposer_id,
+            gas_used: 0,
+            gas_limit: DEFAULT_BLOCK_GAS_LIMIT,
         }
     }
 
     /// Check if any of the roots are non-zero (need verification).
     pub fn has_roots(&self) -> bool {
         self.state_root != ZERO_H256 || self.tx_root != ZERO_H256 || self.receipts_root != ZERO_H256
+    }
+
+    /// Set gas fields (builder pattern).
+    pub fn with_gas(mut self, gas_used: u64, gas_limit: u64) -> Self {
+        self.gas_used = gas_used;
+        self.gas_limit = gas_limit;
+        self
     }
 }
 
@@ -266,6 +313,7 @@ pub fn hash_qbind_tx(tx: &QbindTx) -> H256 {
 /// - success (1 byte: 0 = false, 1 = true)
 /// - gas_used (8 bytes, big-endian)
 /// - cumulative_gas_used (8 bytes, big-endian)
+/// - effective_gas_price (16 bytes, big-endian) [T152]
 /// - logs_count (4 bytes, big-endian)
 /// - for each log:
 ///   - address (20 bytes)
@@ -290,6 +338,9 @@ pub fn hash_receipt(receipt: &TxReceipt) -> H256 {
 
     // cumulative_gas_used
     preimage.extend_from_slice(&receipt.cumulative_gas_used.to_be_bytes());
+
+    // effective_gas_price (T152)
+    preimage.extend_from_slice(&receipt.effective_gas_price.to_be_bytes());
 
     // logs
     preimage.extend_from_slice(&(receipt.logs.len() as u32).to_be_bytes());
@@ -443,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_hash_receipt_determinism() {
-        let receipt = TxReceipt::success(21000, 21000, vec![], vec![]);
+        let receipt = TxReceipt::success(21000, 21000, 1_000_000_000, vec![], vec![]);
 
         let hash1 = hash_receipt(&receipt);
         let hash2 = hash_receipt(&receipt);

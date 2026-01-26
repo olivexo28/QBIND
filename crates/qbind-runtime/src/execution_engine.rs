@@ -159,6 +159,11 @@ pub struct TxReceipt {
     /// Cumulative gas used in the block up to and including this tx.
     pub cumulative_gas_used: u64,
 
+    /// Effective gas price paid per unit of gas (T152).
+    ///
+    /// Computed as: `base_fee + min(max_priority_fee, max_fee - base_fee)`
+    pub effective_gas_price: u128,
+
     /// Logs emitted during execution.
     pub logs: Vec<crate::evm_types::LogEntry>,
 
@@ -177,6 +182,7 @@ impl TxReceipt {
     pub fn success(
         gas_used: u64,
         cumulative_gas_used: u64,
+        effective_gas_price: u128,
         logs: Vec<crate::evm_types::LogEntry>,
         output: Vec<u8>,
     ) -> Self {
@@ -184,6 +190,7 @@ impl TxReceipt {
             success: true,
             gas_used,
             cumulative_gas_used,
+            effective_gas_price,
             logs,
             contract_address: None,
             output,
@@ -192,11 +199,17 @@ impl TxReceipt {
     }
 
     /// Create a failed receipt.
-    pub fn failure(gas_used: u64, cumulative_gas_used: u64, error: EvmExecutionError) -> Self {
+    pub fn failure(
+        gas_used: u64,
+        cumulative_gas_used: u64,
+        effective_gas_price: u128,
+        error: EvmExecutionError,
+    ) -> Self {
         TxReceipt {
             success: false,
             gas_used,
             cumulative_gas_used,
+            effective_gas_price,
             logs: Vec::new(),
             contract_address: None,
             output: Vec::new(),
@@ -207,6 +220,12 @@ impl TxReceipt {
     /// Set the contract address (for contract creation txs).
     pub fn with_contract_address(mut self, addr: Address) -> Self {
         self.contract_address = Some(addr);
+        self
+    }
+
+    /// Set the effective gas price.
+    pub fn with_effective_gas_price(mut self, price: u128) -> Self {
+        self.effective_gas_price = price;
         self
     }
 }
@@ -294,14 +313,16 @@ mod tests {
 
     #[test]
     fn test_tx_receipt_creation() {
-        let receipt = TxReceipt::success(21000, 21000, vec![], vec![]);
+        let receipt = TxReceipt::success(21000, 21000, 1_000_000_000, vec![], vec![]);
         assert!(receipt.success);
         assert_eq!(receipt.gas_used, 21000);
+        assert_eq!(receipt.effective_gas_price, 1_000_000_000);
         assert!(receipt.error.is_none());
 
         let receipt = TxReceipt::failure(
             21000,
             21000,
+            1_000_000_000,
             EvmExecutionError::OutOfGas {
                 gas_limit: 21000,
                 gas_used: 30000,
