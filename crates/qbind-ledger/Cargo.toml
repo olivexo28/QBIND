@@ -1,0 +1,11 @@
+[package]
+name = "qbind-ledger"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-types = { path = "../qbind-types" }
+qbind-crypto = { path = "../qbind-crypto" }
+qbind-wire  = { path = "../qbind-wire" }
+qbind-serde = { path = "../qbind-serde" }
+qbind-hash  = { path = "../qbind-hash" }

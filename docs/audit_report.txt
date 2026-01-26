@@ -302,7 +302,7 @@ Time T0 + 3 months, block N:
 
 **Required Fixes (T82, not yet started):**
 
-1.  Ensure suite\_id is always on the wire in canonical form
+1.  Ensure suite\_id is always on the wire in qbindnical form
 
 2.  Reject unknown suite IDs explicitly (not silent fallback)
 
@@ -919,7 +919,7 @@ Failure scenario WITHOUT T82:\
 
     -   Your team: RocksDB schema design, governance persistence API
 
-    -   OpenAI: Implementation, testing, integration with cano-consensus
+    -   OpenAI: Implementation, testing, integration with qbind-consensus
 
 2.  **Phase 2 (Weeks 5--8): Observability & Load Testing**
 
@@ -1032,7 +1032,7 @@ TestNet/MainNet
 
 **References & Further Reading**
 
-**Canonical Sources (From Project Logs)**
+**Qbindnical Sources (From Project Logs)**
 
 -   T0 conversation: Full project history, task breakdowns, design
     decisions
@@ -1404,7 +1404,7 @@ Time T0 + 3 months, block N:
 
 **Required Fixes (T82, not yet started):**
 
-1.  Ensure suite\_id is always on the wire in canonical form
+1.  Ensure suite\_id is always on the wire in qbindnical form
 
 2.  Reject unknown suite IDs explicitly (not silent fallback)
 
@@ -2021,7 +2021,7 @@ Failure scenario WITHOUT T82:\
 
     -   Your team: RocksDB schema design, governance persistence API
 
-    -   OpenAI: Implementation, testing, integration with cano-consensus
+    -   OpenAI: Implementation, testing, integration with qbind-consensus
 
 2.  **Phase 2 (Weeks 5--8): Observability & Load Testing**
 
@@ -2134,7 +2134,7 @@ TestNet/MainNet
 
 **References & Further Reading**
 
-**Canonical Sources (From Project Logs)**
+**Qbindnical Sources (From Project Logs)**
 
 -   T0 conversation: Full project history, task breakdowns, design
     decisions

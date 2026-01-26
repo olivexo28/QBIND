@@ -1,0 +1,13 @@
+[package]
+name = "qbind-net"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-crypto = { path = "../qbind-crypto" }
+qbind-hash   = { path = "../qbind-hash" }
+qbind-wire   = { path = "../qbind-wire" }
+
+sha3 = "0.10"
+hmac = "0.12"
+zeroize = { version = "1", features = ["derive"] }

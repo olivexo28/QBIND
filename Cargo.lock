@@ -91,135 +91,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cano-consensus"
-version = "0.1.0"
-dependencies = [
- "cano-crypto",
- "cano-hash",
- "cano-types",
- "cano-wire",
- "rand",
- "sha3",
-]
-
-[[package]]
-name = "cano-crypto"
-version = "0.1.0"
-dependencies = [
- "cano-hash",
- "cano-types",
- "chacha20poly1305",
- "fips203",
- "fips204",
- "sha3",
- "zeroize",
-]
-
-[[package]]
-name = "cano-genesis"
-version = "0.1.0"
-dependencies = [
- "cano-ledger",
- "cano-serde",
- "cano-system",
- "cano-types",
-]
-
-[[package]]
-name = "cano-hash"
-version = "0.1.0"
-dependencies = [
- "cano-types",
- "cano-wire",
- "sha3",
-]
-
-[[package]]
-name = "cano-ledger"
-version = "0.1.0"
-dependencies = [
- "cano-crypto",
- "cano-hash",
- "cano-serde",
- "cano-types",
- "cano-wire",
-]
-
-[[package]]
-name = "cano-net"
-version = "0.1.0"
-dependencies = [
- "cano-crypto",
- "cano-hash",
- "cano-wire",
- "hmac",
- "sha3",
- "zeroize",
-]
-
-[[package]]
-name = "cano-node"
-version = "0.1.0"
-dependencies = [
- "cano-consensus",
- "cano-crypto",
- "cano-ledger",
- "cano-net",
- "cano-runtime",
- "cano-serde",
- "cano-system",
- "cano-types",
- "cano-wire",
- "crossbeam-channel",
- "num_cpus",
- "rocksdb",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "cano-runtime"
-version = "0.1.0"
-dependencies = [
- "cano-crypto",
- "cano-hash",
- "cano-ledger",
- "cano-serde",
- "cano-system",
- "cano-types",
- "cano-wire",
-]
-
-[[package]]
-name = "cano-serde"
-version = "0.1.0"
-dependencies = [
- "cano-types",
-]
-
-[[package]]
-name = "cano-system"
-version = "0.1.0"
-dependencies = [
- "cano-crypto",
- "cano-ledger",
- "cano-serde",
- "cano-types",
- "cano-wire",
-]
-
-[[package]]
-name = "cano-types"
-version = "0.1.0"
-
-[[package]]
-name = "cano-wire"
-version = "0.1.0"
-dependencies = [
- "cano-types",
-]
-
-[[package]]
 name = "cc"
 version = "1.2.51"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -655,6 +526,135 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9695f8df41bb4f3d222c95a67532365f569318332d03d5f3f67f37b20e6ebdf0"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "qbind-consensus"
+version = "0.1.0"
+dependencies = [
+ "qbind-crypto",
+ "qbind-hash",
+ "qbind-types",
+ "qbind-wire",
+ "rand",
+ "sha3",
+]
+
+[[package]]
+name = "qbind-crypto"
+version = "0.1.0"
+dependencies = [
+ "chacha20poly1305",
+ "fips203",
+ "fips204",
+ "qbind-hash",
+ "qbind-types",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
+name = "qbind-genesis"
+version = "0.1.0"
+dependencies = [
+ "qbind-ledger",
+ "qbind-serde",
+ "qbind-system",
+ "qbind-types",
+]
+
+[[package]]
+name = "qbind-hash"
+version = "0.1.0"
+dependencies = [
+ "qbind-types",
+ "qbind-wire",
+ "sha3",
+]
+
+[[package]]
+name = "qbind-ledger"
+version = "0.1.0"
+dependencies = [
+ "qbind-crypto",
+ "qbind-hash",
+ "qbind-serde",
+ "qbind-types",
+ "qbind-wire",
+]
+
+[[package]]
+name = "qbind-net"
+version = "0.1.0"
+dependencies = [
+ "hmac",
+ "qbind-crypto",
+ "qbind-hash",
+ "qbind-wire",
+ "sha3",
+ "zeroize",
+]
+
+[[package]]
+name = "qbind-node"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "num_cpus",
+ "qbind-consensus",
+ "qbind-crypto",
+ "qbind-ledger",
+ "qbind-net",
+ "qbind-runtime",
+ "qbind-serde",
+ "qbind-system",
+ "qbind-types",
+ "qbind-wire",
+ "rocksdb",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "qbind-runtime"
+version = "0.1.0"
+dependencies = [
+ "qbind-crypto",
+ "qbind-hash",
+ "qbind-ledger",
+ "qbind-serde",
+ "qbind-system",
+ "qbind-types",
+ "qbind-wire",
+]
+
+[[package]]
+name = "qbind-serde"
+version = "0.1.0"
+dependencies = [
+ "qbind-types",
+]
+
+[[package]]
+name = "qbind-system"
+version = "0.1.0"
+dependencies = [
+ "qbind-crypto",
+ "qbind-ledger",
+ "qbind-serde",
+ "qbind-types",
+ "qbind-wire",
+]
+
+[[package]]
+name = "qbind-types"
+version = "0.1.0"
+
+[[package]]
+name = "qbind-wire"
+version = "0.1.0"
+dependencies = [
+ "qbind-types",
 ]
 
 [[package]]

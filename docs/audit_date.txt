@@ -1,44 +1,44 @@
-=== REPOSITORY AUDIT FOR cano/ ===
+=== REPOSITORY AUDIT FOR qbind/ ===
 Generated on: $(date)
 
 === STRUCTURE (tree -L 3) ===
-cano/
+qbind/
 ├── Cargo.toml
 ├── Cargo.lock
 ├── README.md
 ├── docs/
 └── crates/
-    ├── cano-consensus/
-    ├── cano-crypto/
-    ├── cano-genesis/
-    ├── cano-hash/
-    ├── cano-ledger/
-    ├── cano-net/
-    ├── cano-node/
-    ├── cano-runtime/
-    ├── cano-serde/
-    ├── cano-system/
-    ├── cano-types/
-    └── cano-wire/
+    ├── qbind-consensus/
+    ├── qbind-crypto/
+    ├── qbind-genesis/
+    ├── qbind-hash/
+    ├── qbind-ledger/
+    ├── qbind-net/
+    ├── qbind-node/
+    ├── qbind-runtime/
+    ├── qbind-serde/
+    ├── qbind-system/
+    ├── qbind-types/
+    └── qbind-wire/
 
 === CRITICAL FILES (crypto-related) ===
-cano/crates/cano-crypto/src/ml_dsa44.rs
-cano/crates/cano-crypto/src/ml_kem768.rs
-cano/crates/cano-crypto/src/consensus_sig.rs
-cano/crates/cano-crypto/src/lib.rs
-cano/crates/cano-consensus/src/crypto_verifier.rs
-cano/crates/cano-consensus/src/verify.rs
+qbind/crates/qbind-crypto/src/ml_dsa44.rs
+qbind/crates/qbind-crypto/src/ml_kem768.rs
+qbind/crates/qbind-crypto/src/consensus_sig.rs
+qbind/crates/qbind-crypto/src/lib.rs
+qbind/crates/qbind-consensus/src/crypto_verifier.rs
+qbind/crates/qbind-consensus/src/verify.rs
 
 === TASK TRACKING EVIDENCE ===
-cano/crates/cano-crypto/src/ml_dsa44.rs: //! ML-DSA-44 consensus signature backend. (T142)
-cano/crates/cano-crypto/src/ml_kem768.rs: //! ML-KEM-768 Key Encapsulation Mechanism backend.
-cano/crates/cano-node/src/storage.rs: //! RocksDB-backed persistence layer for consensus/ledger state. (T104, T119)
-cano/crates/cano-node/src/async_runner.rs: //! Tokio-driven async node runner for cano post-quantum blockchain. (T85, T86)
-cano/crates/cano-node/src/consensus_net_worker.rs: //! Async consensus network worker for cano post-quantum blockchain. (T87, T88, T90.3)
-cano/crates/cano-node/src/load_harness.rs: //! Single-node load harness for testing the async consensus node (T89).
+qbind/crates/qbind-crypto/src/ml_dsa44.rs: //! ML-DSA-44 consensus signature backend. (T142)
+qbind/crates/qbind-crypto/src/ml_kem768.rs: //! ML-KEM-768 Key Encapsulation Mechanism backend.
+qbind/crates/qbind-node/src/storage.rs: //! RocksDB-backed persistence layer for consensus/ledger state. (T104, T119)
+qbind/crates/qbind-node/src/async_runner.rs: //! Tokio-driven async node runner for qbind post-quantum blockchain. (T85, T86)
+qbind/crates/qbind-node/src/consensus_net_worker.rs: //! Async consensus network worker for qbind post-quantum blockchain. (T87, T88, T90.3)
+qbind/crates/qbind-node/src/load_harness.rs: //! Single-node load harness for testing the async consensus node (T89).
 
 === SAMPLE FROM 3 RANDOM CRYPTO FILES ===
---- cano/crates/cano-crypto/src/ml_dsa44.rs (first 40 lines) ---
+--- qbind/crates/qbind-crypto/src/ml_dsa44.rs (first 40 lines) ---
 //! ML-DSA-44 consensus signature backend.
 //!
 //! This module provides a real post-quantum signature backend using ML-DSA-44
@@ -77,7 +77,7 @@ use crate::consensus_sig::{ConsensusSigError, ConsensusSigVerifier};
 /// ML-DSA-44 public key size in bytes.
 pub const ML_DSA_44_PUBLIC_KEY_SIZE: usize = 1312;
 
---- cano/crates/cano-crypto/src/ml_kem768.rs (first 40 lines) ---
+--- qbind/crates/qbind-crypto/src/ml_kem768.rs (first 40 lines) ---
 //! ML-KEM-768 Key Encapsulation Mechanism backend.
 //!
 //! This module provides a real post-quantum KEM backend using ML-KEM-768
@@ -106,14 +106,14 @@ pub const ML_DSA_44_PUBLIC_KEY_SIZE: usize = 1312;
 //!
 //! # Future Work
 //!
-//! - KEMTLS integration in cano-net
+//! - KEMTLS integration in qbind-net
 //! - Performance benchmarks and optimization
 //! - Batch encapsulation (if needed for parallel handshakes)
 
 use crate::kem::KemSuite;
 use crate::CryptoError;
 
---- cano/crates/cano-consensus/src/crypto_verifier.rs (first 40 lines) ---
+--- qbind/crates/qbind-consensus/src/crypto_verifier.rs (first 40 lines) ---
 //! Crypto-backed consensus verification.
 //!
 //! This module provides `CryptoConsensusVerifier`, a `ConsensusVerifier` implementation
@@ -160,14 +160,14 @@ use crate::CryptoError;
 //! accessed through the `metrics()` method on `CryptoConsensusVerifier`.
 
 === TEST DIRECTORY CHECK ===
-cano/crates/cano-crypto/src/ (contains test modules in each file)
-cano/crates/cano-consensus/src/ (contains test modules)
-cano/crates/cano-node/src/ (contains test modules)
+qbind/crates/qbind-crypto/src/ (contains test modules in each file)
+qbind/crates/qbind-consensus/src/ (contains test modules)
+qbind/crates/qbind-node/src/ (contains test modules)
 
 === DEPENDENCIES CHECK ===
-cano/Cargo.toml
-cano/crates/cano-crypto/Cargo.toml
-cano/crates/cano-consensus/Cargo.toml
+qbind/Cargo.toml
+qbind/crates/qbind-crypto/Cargo.toml
+qbind/crates/qbind-consensus/Cargo.toml
 
 === KEY FINDINGS FROM MANUAL AUDIT ===
 1. Uses official fips203 and fips204 crates for ML-KEM-768 and ML-DSA-44

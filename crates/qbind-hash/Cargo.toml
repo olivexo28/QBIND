@@ -1,0 +1,9 @@
+[package]
+name = "qbind-hash"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-types = { path = "../qbind-types" }
+qbind-wire  = { path = "../qbind-wire" }
+sha3       = "0.10"  # for SHA3-256

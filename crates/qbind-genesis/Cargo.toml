@@ -1,0 +1,10 @@
+[package]
+name = "qbind-genesis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-types  = { path = "../qbind-types" }
+qbind-serde  = { path = "../qbind-serde" }
+qbind-ledger = { path = "../qbind-ledger" }
+qbind-system = { path = "../qbind-system" }

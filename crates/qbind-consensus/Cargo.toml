@@ -1,0 +1,15 @@
+[package]
+name = "qbind-consensus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-types  = { path = "../qbind-types" }
+qbind-wire   = { path = "../qbind-wire" }
+qbind-hash   = { path = "../qbind-hash" }
+qbind-crypto = { path = "../qbind-crypto" }
+rand = "0.8"
+
+[dev-dependencies]
+rand = { version = "0.8", features = ["std_rng"] }
+sha3 = "0.10"

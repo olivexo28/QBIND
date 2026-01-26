@@ -1,16 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/cano-types",
-    "crates/cano-wire",
-    "crates/cano-hash",
-    "crates/cano-crypto",
-    "crates/cano-serde",
-    "crates/cano-ledger",
-    "crates/cano-system",
-    "crates/cano-runtime",
-    "crates/cano-genesis",
-    "crates/cano-consensus",
-    "crates/cano-node",
-    "crates/cano-net",
+    "crates/qbind-types",
+    "crates/qbind-wire",
+    "crates/qbind-hash",
+    "crates/qbind-crypto",
+    "crates/qbind-serde",
+    "crates/qbind-ledger",
+    "crates/qbind-system",
+    "crates/qbind-runtime",
+    "crates/qbind-genesis",
+    "crates/qbind-consensus",
+    "crates/qbind-node",
+    "crates/qbind-net",
 ]

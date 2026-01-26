@@ -1,0 +1,13 @@
+[package]
+name = "qbind-runtime"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-types  = { path = "../qbind-types" }
+qbind-wire   = { path = "../qbind-wire" }
+qbind-hash   = { path = "../qbind-hash" }
+qbind-crypto = { path = "../qbind-crypto" }
+qbind-serde  = { path = "../qbind-serde" }
+qbind-ledger = { path = "../qbind-ledger" }
+qbind-system = { path = "../qbind-system" }

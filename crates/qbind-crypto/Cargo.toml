@@ -1,0 +1,15 @@
+[package]
+name = "qbind-crypto"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+qbind-types = { path = "../qbind-types" }
+qbind-hash  = { path = "../qbind-hash" }
+fips204 = "0.4"
+fips203 = "0.4"
+chacha20poly1305 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+sha3 = "0.10"

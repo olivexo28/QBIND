@@ -1,0 +1,29 @@
+[package]
+name = "qbind-node"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+# Enable the async peer manager path (T90.1).
+# When enabled: uses AsyncPeerManagerImpl for fully async networking.
+# When disabled (legacy): uses blocking PeerManager + spawn_blocking path.
+async-peer-manager = []
+
+[dependencies]
+qbind-wire      = { path = "../qbind-wire" }
+qbind-consensus = { path = "../qbind-consensus" }
+qbind-runtime   = { path = "../qbind-runtime" }
+qbind-ledger    = { path = "../qbind-ledger" }
+qbind-crypto    = { path = "../qbind-crypto" }
+qbind-types     = { path = "../qbind-types" }
+qbind-net       = { path = "../qbind-net" }
+rocksdb        = "0.22"
+tokio          = { version = "1.44", features = ["rt-multi-thread", "time", "sync", "macros", "net", "io-util"] }
+crossbeam-channel = "0.5"
+num_cpus       = "1.16"
+
+[dev-dependencies]
+qbind-serde  = { path = "../qbind-serde" }
+qbind-system = { path = "../qbind-system" }
+tempfile    = "3.10"
