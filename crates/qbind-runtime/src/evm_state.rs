@@ -16,6 +16,7 @@
 //! - Easier testing and verification
 
 use crate::block::H256;
+use crate::evm_state_storage::{EvmStateSnapshot, SerializableAccountState};
 use crate::evm_types::{Address, EvmAccountState, U256};
 use crate::execution_engine::StateView;
 use std::collections::HashMap;
@@ -166,6 +167,55 @@ impl EvmLedger {
     /// Restore state from a snapshot.
     pub fn restore(&mut self, snapshot: EvmLedgerSnapshot) {
         self.accounts = snapshot.accounts;
+    }
+
+    /// Create a persistent state snapshot.
+    ///
+    /// This converts the ledger state to a deterministic `EvmStateSnapshot`
+    /// that can be serialized and persisted to storage.
+    ///
+    /// ## Determinism
+    ///
+    /// The snapshot is deterministic: accounts are sorted by address in
+    /// lexicographic order. This ensures that identical ledger states
+    /// produce identical snapshots.
+    ///
+    /// ## Arguments
+    ///
+    /// - `state_root`: The state root computed over this ledger state.
+    ///   This is passed in rather than recomputed to avoid duplicate work.
+    pub fn to_snapshot(&self, state_root: H256) -> EvmStateSnapshot {
+        // Collect and sort accounts by address
+        let mut sorted_accounts: Vec<_> = self.accounts.iter().collect();
+        sorted_accounts.sort_by_key(|(addr, _)| *addr);
+
+        // Convert to serializable format
+        let accounts = sorted_accounts
+            .into_iter()
+            .map(|(addr, account)| (*addr, SerializableAccountState::from_account_state(account)))
+            .collect();
+
+        EvmStateSnapshot::new(accounts, state_root)
+    }
+
+    /// Restore ledger state from a persistent snapshot.
+    ///
+    /// This creates a new `EvmLedger` and populates it with the account
+    /// states from the snapshot.
+    ///
+    /// ## Determinism
+    ///
+    /// After restoring from a snapshot, calling `compute_state_root()` on
+    /// the restored ledger should yield the same state root stored in the
+    /// snapshot (assuming the snapshot was created correctly).
+    pub fn from_snapshot(snapshot: &EvmStateSnapshot) -> Self {
+        let mut accounts = HashMap::new();
+
+        for (addr, serializable) in &snapshot.accounts {
+            accounts.insert(*addr, serializable.to_account_state());
+        }
+
+        EvmLedger { accounts }
     }
 }
 
@@ -367,5 +417,106 @@ mod tests {
             ledger.get_account(&addr).unwrap().balance.to_u64(),
             Some(1000)
         );
+    }
+
+    #[test]
+    fn test_to_snapshot_roundtrip() {
+        let mut ledger = EvmLedger::new();
+
+        let addr1 = make_test_addr(1);
+        let addr2 = make_test_addr(2);
+
+        // Create account with storage
+        let mut account1 = EvmAccountState::with_balance(U256::from_u64(1000));
+        account1.nonce = 5;
+        account1.set_storage(U256::from_u64(1), U256::from_u64(100));
+        account1.set_storage(U256::from_u64(2), U256::from_u64(200));
+
+        // Create contract account
+        let mut account2 =
+            EvmAccountState::with_code(vec![0x60, 0x80, 0x60, 0x40], U256::from_u64(500));
+        account2.set_storage(U256::from_u64(99), U256::from_u64(999));
+
+        ledger.put_account(addr1, account1);
+        ledger.put_account(addr2, account2);
+
+        // Compute state root
+        let state_root = ledger.compute_state_root();
+
+        // Create snapshot
+        let snapshot = ledger.to_snapshot(state_root);
+
+        // Restore from snapshot
+        let restored_ledger = EvmLedger::from_snapshot(&snapshot);
+
+        // Verify state root matches
+        let restored_root = restored_ledger.compute_state_root();
+        assert_eq!(state_root, restored_root);
+
+        // Verify account 1
+        let r1 = restored_ledger
+            .get_account(&addr1)
+            .expect("addr1 should exist");
+        assert_eq!(r1.balance.to_u64(), Some(1000));
+        assert_eq!(r1.nonce, 5);
+        assert_eq!(r1.get_storage(&U256::from_u64(1)).to_u64(), Some(100));
+        assert_eq!(r1.get_storage(&U256::from_u64(2)).to_u64(), Some(200));
+
+        // Verify account 2
+        let r2 = restored_ledger
+            .get_account(&addr2)
+            .expect("addr2 should exist");
+        assert_eq!(r2.balance.to_u64(), Some(500));
+        assert_eq!(r2.code, vec![0x60, 0x80, 0x60, 0x40]);
+        assert_eq!(r2.get_storage(&U256::from_u64(99)).to_u64(), Some(999));
+    }
+
+    #[test]
+    fn test_from_snapshot_empty() {
+        let empty_snapshot = crate::evm_state_storage::EvmStateSnapshot::empty();
+        let ledger = EvmLedger::from_snapshot(&empty_snapshot);
+
+        assert_eq!(ledger.account_count(), 0);
+    }
+
+    #[test]
+    fn test_snapshot_determinism() {
+        // Create two ledgers with accounts inserted in different order
+        let mut ledger1 = EvmLedger::new();
+        let mut ledger2 = EvmLedger::new();
+
+        let addr1 = make_test_addr(1);
+        let addr2 = make_test_addr(2);
+        let addr3 = make_test_addr(3);
+
+        let account1 = EvmAccountState::with_balance(U256::from_u64(100));
+        let account2 = EvmAccountState::with_balance(U256::from_u64(200));
+        let account3 = EvmAccountState::with_balance(U256::from_u64(300));
+
+        // Insert in order 1, 2, 3
+        ledger1.put_account(addr1, account1.clone());
+        ledger1.put_account(addr2, account2.clone());
+        ledger1.put_account(addr3, account3.clone());
+
+        // Insert in order 3, 1, 2
+        ledger2.put_account(addr3, account3);
+        ledger2.put_account(addr1, account1);
+        ledger2.put_account(addr2, account2);
+
+        let root1 = ledger1.compute_state_root();
+        let root2 = ledger2.compute_state_root();
+
+        // Roots must match
+        assert_eq!(root1, root2);
+
+        // Snapshots must be identical
+        let snap1 = ledger1.to_snapshot(root1);
+        let snap2 = ledger2.to_snapshot(root2);
+
+        assert_eq!(snap1.accounts.len(), snap2.accounts.len());
+        for i in 0..snap1.accounts.len() {
+            assert_eq!(snap1.accounts[i].0, snap2.accounts[i].0);
+            assert_eq!(snap1.accounts[i].1, snap2.accounts[i].1);
+        }
     }
 }

@@ -44,10 +44,12 @@
 //! - State proofs or light client support
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use qbind_runtime::{
     apply_qbind_block, Address, BlockApplyError, BlockProposerId, EvmAccountState, EvmLedger,
-    QbindBlock, QbindBlockBody, QbindBlockHeader, QbindTx, TxReceipt, H256, ZERO_H256,
+    EvmStateStorage, EvmStateStorageError, QbindBlock, QbindBlockBody, QbindBlockHeader, QbindTx,
+    TxReceipt, H256, ZERO_H256,
 };
 
 #[cfg(feature = "default")]
@@ -65,6 +67,12 @@ pub enum EvmCommitError {
     /// Block apply failed (root mismatch or execution error).
     BlockApply(BlockApplyError),
 
+    /// Storage error during snapshot persist/load.
+    Storage(EvmStateStorageError),
+
+    /// State root mismatch after loading snapshot.
+    StateRootMismatch { expected: H256, computed: H256 },
+
     /// Fatal error: committed block execution failed unexpectedly.
     /// In T151, this causes a panic. Future versions may handle this differently.
     Fatal(String),
@@ -74,6 +82,14 @@ impl std::fmt::Display for EvmCommitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EvmCommitError::BlockApply(e) => write!(f, "block apply error: {}", e),
+            EvmCommitError::Storage(e) => write!(f, "storage error: {}", e),
+            EvmCommitError::StateRootMismatch { expected, computed } => {
+                write!(
+                    f,
+                    "state root mismatch: expected {:?}, computed {:?}",
+                    expected, computed
+                )
+            }
             EvmCommitError::Fatal(msg) => write!(f, "fatal error: {}", msg),
         }
     }
@@ -83,6 +99,7 @@ impl std::error::Error for EvmCommitError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             EvmCommitError::BlockApply(e) => Some(e),
+            EvmCommitError::Storage(e) => Some(e),
             _ => None,
         }
     }
@@ -91,6 +108,12 @@ impl std::error::Error for EvmCommitError {
 impl From<BlockApplyError> for EvmCommitError {
     fn from(e: BlockApplyError) -> Self {
         EvmCommitError::BlockApply(e)
+    }
+}
+
+impl From<EvmStateStorageError> for EvmCommitError {
+    fn from(e: EvmStateStorageError) -> Self {
+        EvmCommitError::Storage(e)
     }
 }
 
@@ -130,12 +153,20 @@ pub struct EvmCommitResult {
 /// - Executing transactions via the Revm execution engine
 /// - Maintaining the EVM ledger state
 /// - Computing and storing state roots
+/// - Persisting snapshots to storage (T153)
 ///
 /// ## Thread Safety
 ///
 /// `EvmExecutionBridge` is NOT thread-safe. It should be called from
 /// a single thread that owns the ledger state. This matches the
 /// single-threaded consensus model where blocks are committed sequentially.
+///
+/// ## Persistence (T153)
+///
+/// When storage is configured:
+/// - On startup, the bridge loads the latest snapshot and validates the state root.
+/// - On each commit, a snapshot is persisted.
+/// - Old snapshots are pruned based on the retention window.
 pub struct EvmExecutionBridge {
     /// The EVM ledger containing account states.
     ledger: EvmLedger,
@@ -149,6 +180,12 @@ pub struct EvmExecutionBridge {
 
     /// History of committed block roots (for debugging/verification).
     committed_roots: HashMap<u64, EvmCommitResult>,
+
+    /// Optional persistent storage backend (T153).
+    storage: Option<Arc<dyn EvmStateStorage>>,
+
+    /// Snapshot retention window (number of blocks to keep).
+    retention: u64,
 }
 
 impl EvmExecutionBridge {
@@ -160,6 +197,8 @@ impl EvmExecutionBridge {
             engine: RevmExecutionEngine::new(RevmConfig::new(chain_id)),
             current_height: 0,
             committed_roots: HashMap::new(),
+            storage: None,
+            retention: 256, // Default retention
         }
     }
 
@@ -171,7 +210,61 @@ impl EvmExecutionBridge {
             engine: RevmExecutionEngine::new(RevmConfig::new(chain_id)),
             current_height: 0,
             committed_roots: HashMap::new(),
+            storage: None,
+            retention: 256,
         }
+    }
+
+    /// Create a new bridge with persistent storage (T153).
+    ///
+    /// This constructor:
+    /// 1. Attempts to load the latest snapshot from storage.
+    /// 2. If found, restores the ledger state and validates the state root.
+    /// 3. If not found, starts with an empty ledger.
+    ///
+    /// ## Arguments
+    ///
+    /// - `chain_id`: The chain ID for EVM execution.
+    /// - `storage`: The persistent storage backend.
+    /// - `retention`: Number of snapshots to retain.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error if:
+    /// - Storage loading fails.
+    /// - The state root computed from a restored snapshot doesn't match.
+    #[cfg(feature = "default")]
+    pub fn with_storage(
+        chain_id: u64,
+        storage: Arc<dyn EvmStateStorage>,
+        retention: u64,
+    ) -> Result<Self, EvmCommitError> {
+        let (ledger, current_height) = match storage.load_latest()? {
+            Some((height, snapshot)) => {
+                let ledger = EvmLedger::from_snapshot(&snapshot);
+
+                // Validate state root
+                let computed_root = ledger.compute_state_root();
+                if computed_root != snapshot.state_root {
+                    return Err(EvmCommitError::StateRootMismatch {
+                        expected: snapshot.state_root,
+                        computed: computed_root,
+                    });
+                }
+
+                (ledger, height)
+            }
+            None => (EvmLedger::new(), 0),
+        };
+
+        Ok(EvmExecutionBridge {
+            ledger,
+            engine: RevmExecutionEngine::new(RevmConfig::new(chain_id)),
+            current_height,
+            committed_roots: HashMap::new(),
+            storage: Some(storage),
+            retention,
+        })
     }
 
     /// Get a reference to the EVM ledger.
@@ -192,6 +285,16 @@ impl EvmExecutionBridge {
     /// Get the result of a committed block by height.
     pub fn get_commit_result(&self, height: u64) -> Option<&EvmCommitResult> {
         self.committed_roots.get(&height)
+    }
+
+    /// Check if this bridge has persistent storage configured.
+    pub fn has_storage(&self) -> bool {
+        self.storage.is_some()
+    }
+
+    /// Get the retention window size.
+    pub fn retention(&self) -> u64 {
+        self.retention
     }
 
     /// Apply a committed block from consensus to the EVM ledger.
@@ -256,6 +359,20 @@ impl EvmExecutionBridge {
 
         self.committed_roots.insert(height, commit_result.clone());
 
+        // Persist snapshot to storage (T153)
+        if let Some(ref storage) = self.storage {
+            let snapshot = self.ledger.to_snapshot(result.new_state_root);
+            storage.store_snapshot(height, &snapshot)?;
+
+            // Prune old snapshots
+            // With retention=3 and height=4: prune heights < 4-3=1, so nothing is pruned
+            // With retention=3 and height=5: prune heights < 5-3=2, so height 1 is pruned
+            if height >= self.retention {
+                let prune_below = height.saturating_sub(self.retention) + 1;
+                storage.prune_below(prune_below)?;
+            }
+        }
+
         Ok(commit_result)
     }
 
@@ -282,6 +399,8 @@ impl std::fmt::Debug for EvmExecutionBridge {
             .field("current_height", &self.current_height)
             .field("account_count", &self.ledger.account_count())
             .field("committed_blocks", &self.committed_roots.len())
+            .field("has_storage", &self.storage.is_some())
+            .field("retention", &self.retention)
             .finish()
     }
 }

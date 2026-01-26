@@ -47,6 +47,7 @@ use qbind_wire::tx::Transaction;
 pub mod block;
 pub mod block_apply;
 pub mod evm_state;
+pub mod evm_state_storage;
 pub mod evm_types;
 pub mod execution_engine;
 pub mod gas_model;
@@ -75,6 +76,12 @@ pub use block_apply::{
     RootMismatchKind,
 };
 pub use evm_state::{EvmLedger, EvmLedgerSnapshot, LedgerStateView};
+
+// Re-exports for T153 - EVM state persistence
+pub use evm_state_storage::{
+    EvmStateSnapshot, EvmStateStorage, EvmStateStorageConfig, EvmStateStorageError,
+    SerializableAccountState,
+};
 
 #[cfg(feature = "evm")]
 pub use revm_engine::{execute_qbind_block, RevmConfig, RevmExecutionEngine};

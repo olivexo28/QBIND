@@ -74,6 +74,7 @@ pub mod consensus_network_facade;
 pub mod consensus_node;
 pub mod consensus_sim;
 pub mod evm_commit;
+pub mod evm_state_store;
 pub mod hotstuff_node_sim;
 pub mod identity_map;
 pub mod keystore;
@@ -122,6 +123,9 @@ pub use ledger_bridge::{InMemoryNodeLedgerHarness, NodeLedgerError, NodeLedgerHa
 pub use evm_commit::{
     init_evm_account, init_evm_contract, EvmCommitError, EvmCommitResult, EvmExecutionBridge,
 };
+
+// EVM state storage exports (T153)
+pub use evm_state_store::FileEvmStateStorage;
 
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,
