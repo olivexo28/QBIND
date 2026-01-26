@@ -264,6 +264,82 @@ pub struct ValidatorKeystoreConfig {
     pub keystore_entry: String,
 }
 
+// ============================================================================
+// T149: Signer Backend Configuration
+// ============================================================================
+
+/// Signer backend selection for validator signing operations.
+///
+/// This enum allows configuring which signing backend to use:
+/// - `LocalKeystore`: Direct in-process signing with `LocalKeySigner`
+/// - `RemoteLoopback`: Remote signer protocol with loopback transport (for testing)
+///
+/// Future variants will include real network transports and HSM backends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SignerBackend {
+    /// Use in-process signing with `LocalKeySigner` (default).
+    LocalKeystore,
+    /// Use remote signer protocol with loopback transport.
+    ///
+    /// This exercises the remote signer plumbing using `LocalKeySigner` under
+    /// the hood, useful for testing and development.
+    RemoteLoopback,
+    // Future variants:
+    // RemoteUnixSocket { path: PathBuf },
+    // RemoteTcp { endpoint: String },
+    // RemoteGrpc { endpoint: String },
+    // Hsm { config: HsmConfig },
+}
+
+impl Default for SignerBackend {
+    fn default() -> Self {
+        SignerBackend::LocalKeystore
+    }
+}
+
+/// Configuration for validator signing operations.
+///
+/// This struct controls how the validator signs consensus messages (proposals,
+/// votes, timeout messages).
+///
+/// # Usage
+///
+/// ```ignore
+/// use qbind_node::validator_config::{ValidatorSignerConfig, SignerBackend};
+///
+/// // Local signing (default)
+/// let cfg = ValidatorSignerConfig {
+///     backend: SignerBackend::LocalKeystore,
+///     remote_endpoint: None,
+/// };
+///
+/// // Remote loopback (for testing)
+/// let cfg = ValidatorSignerConfig {
+///     backend: SignerBackend::RemoteLoopback,
+///     remote_endpoint: None,
+/// };
+/// ```
+#[derive(Debug, Clone)]
+pub struct ValidatorSignerConfig {
+    /// The signer backend to use.
+    pub backend: SignerBackend,
+    /// Optional remote endpoint (reserved for future use).
+    ///
+    /// This field is not used by `LocalKeystore` or `RemoteLoopback` backends.
+    /// Future network-based backends will use this to specify the remote signer
+    /// address (e.g., "unix:///var/run/qbind-signer.sock" or "tcp://127.0.0.1:9000").
+    pub remote_endpoint: Option<String>,
+}
+
+impl Default for ValidatorSignerConfig {
+    fn default() -> Self {
+        ValidatorSignerConfig {
+            backend: SignerBackend::default(),
+            remote_endpoint: None,
+        }
+    }
+}
+
 impl NodeValidatorConfig {
     /// Builds a `ConsensusValidatorSet` suitable for use with `BasicHotStuffEngine`.
     ///
