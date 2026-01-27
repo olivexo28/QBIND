@@ -75,6 +75,7 @@ pub mod consensus_node;
 pub mod consensus_sim;
 pub mod evm_commit;
 pub mod evm_state_store;
+pub mod execution_adapter;
 pub mod hotstuff_node_sim;
 pub mod identity_map;
 pub mod keystore;
@@ -126,6 +127,11 @@ pub use evm_commit::{
 
 // EVM state storage exports (T153)
 pub use evm_state_store::FileEvmStateStorage;
+
+// T150 Execution Adapter exports
+pub use execution_adapter::{
+    ExecutionAdapter, ExecutionAdapterError, InMemoryExecutionAdapter, QbindBlock,
+};
 
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,

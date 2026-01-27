@@ -3,6 +3,7 @@ pub mod apply;
 pub mod auth;
 pub mod context;
 pub mod error;
+pub mod execution;
 pub mod program;
 pub mod store;
 
@@ -14,3 +15,11 @@ pub use program::Program;
 pub use store::{AccountStore, InMemoryAccountStore};
 
 pub use apply::{InMemoryLedger, LedgerApply, LedgerBlockInfo, LedgerError};
+
+// T150: Execution layer exports
+pub use execution::{
+    get_account_nonce, set_account_nonce, ExecutionEngine, ExecutionEngineError, ExecutionEvent,
+    ExecutionOutcome, InMemoryState, NonceExecutionEngine, QbindTransaction, StateUpdater,
+    StateView, TxVerifyError, UserPublicKey, UserSignature, NONCE_KEY_PREFIX, TX_DOMAIN_TAG,
+    USER_ML_DSA_44_SUITE_ID,
+};

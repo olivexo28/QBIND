@@ -298,6 +298,9 @@ impl MlDsa44Backend {
 
     /// Verify a signature using an ML-DSA-44 public key.
     ///
+    /// This is a public static method for direct signature verification.
+    /// Use this for user transaction signature verification.
+    ///
     /// # Arguments
     ///
     /// * `pk` - The public key bytes (must be `ML_DSA_44_PUBLIC_KEY_SIZE` bytes)
@@ -307,6 +310,11 @@ impl MlDsa44Backend {
     /// # Returns
     ///
     /// `Ok(())` if the signature is valid, `Err` otherwise.
+    pub fn verify(pk: &[u8], message: &[u8], signature: &[u8]) -> Result<(), ConsensusSigError> {
+        Self::verify_internal(pk, message, signature)
+    }
+
+    /// Internal verify implementation.
     fn verify_internal(
         pk: &[u8],
         message: &[u8],
