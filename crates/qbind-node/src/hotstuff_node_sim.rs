@@ -401,6 +401,16 @@ pub struct NodeHotstuffHarness {
     execution_adapter:
         Option<Arc<parking_lot::Mutex<dyn crate::execution_adapter::ExecutionAdapter>>>,
 
+    /// Optional async execution service for non-blocking block execution (T155).
+    ///
+    /// When set, the harness submits committed blocks to this service instead of
+    /// applying them synchronously via `execution_adapter`. This decouples
+    /// consensus liveness from execution latency.
+    ///
+    /// If both `async_execution` and `execution_adapter` are set, `async_execution`
+    /// takes precedence.
+    async_execution: Option<Arc<dyn crate::execution_adapter::AsyncExecutionService>>,
+
     /// Maximum number of transactions per block (T151).
     ///
     /// Controls how many transactions are pulled from the mempool for proposals.
@@ -436,6 +446,7 @@ impl std::fmt::Debug for NodeHotstuffHarness {
             .field("pending_votes", &self.pending_votes.len())
             .field("mempool", &self.mempool.is_some())
             .field("execution_adapter", &self.execution_adapter.is_some())
+            .field("async_execution", &self.async_execution.is_some())
             .field("max_txs_per_block", &self.max_txs_per_block)
             .finish()
     }
@@ -524,6 +535,7 @@ impl NodeHotstuffHarness {
             pending_votes: std::collections::HashMap::new(),
             mempool: None,
             execution_adapter: None,
+            async_execution: None, // T155: Async execution disabled by default
             max_txs_per_block: 1000, // Default max txs per block
         })
     }
@@ -930,6 +942,42 @@ impl NodeHotstuffHarness {
         adapter: Arc<parking_lot::Mutex<dyn crate::execution_adapter::ExecutionAdapter>>,
     ) -> Self {
         self.execution_adapter = Some(adapter);
+        self
+    }
+
+    /// Attach an async execution service for non-blocking block execution (T155).
+    ///
+    /// When an async execution service is attached, committed blocks are submitted
+    /// to the service instead of being applied synchronously. This decouples
+    /// consensus liveness from execution latency.
+    ///
+    /// If both `async_execution` and `execution_adapter` are set, `async_execution`
+    /// takes precedence.
+    ///
+    /// # Arguments
+    ///
+    /// * `service` - The async execution service to use
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_node::execution_adapter::{SingleThreadExecutionService, SingleThreadExecutionServiceConfig};
+    /// use qbind_ledger::NonceExecutionEngine;
+    /// use std::sync::Arc;
+    ///
+    /// let engine = NonceExecutionEngine::new();
+    /// let service = Arc::new(SingleThreadExecutionService::new(engine));
+    /// let harness = harness.with_async_execution(service);
+    /// ```
+    pub fn with_async_execution(
+        mut self,
+        service: Arc<dyn crate::execution_adapter::AsyncExecutionService>,
+    ) -> Self {
+        self.async_execution = Some(service);
         self
     }
 
@@ -1999,99 +2047,131 @@ impl NodeHotstuffHarness {
             // Apply to in-memory commit index first
             self.commit_index.apply_commits(new_commits.clone())?;
 
-            // T151: Apply committed blocks to execution adapter (if attached)
-            // We need to decode transactions and create QbindBlocks for the adapter
-            if let Some(ref execution_adapter) = self.execution_adapter {
-                for commit_info in &new_commits {
-                    // Get the block proposal from store
-                    if let Some(stored_block) = self.block_store.get(&commit_info.block_id) {
-                        // Decode transactions from proposal.txs
-                        let mut decoded_txs = Vec::new();
-                        for tx_bytes in &stored_block.proposal.txs {
-                            // Decode QbindTransaction from bytes
-                            // Format: sender(TX_SENDER_SIZE) + nonce(TX_NONCE_SIZE) + payload_len(TX_PAYLOAD_LEN_SIZE) + payload + sig_len(TX_SIG_LEN_SIZE) + sig + suite_id(TX_SUITE_ID_SIZE)
-                            if tx_bytes.len() < TX_SENDER_SIZE + TX_NONCE_SIZE + TX_PAYLOAD_LEN_SIZE
-                            {
-                                eprintln!("[T151] WARNING: Invalid transaction encoding, skipping");
-                                continue;
-                            }
+            // T155: Apply committed blocks - prefer async execution if configured
+            // This decouples consensus liveness from execution latency
+            let use_async = self.async_execution.is_some();
 
-                            let mut offset = 0;
-
-                            // sender (TX_SENDER_SIZE bytes)
-                            let mut sender = [0u8; TX_SENDER_SIZE];
-                            sender.copy_from_slice(&tx_bytes[offset..offset + TX_SENDER_SIZE]);
-                            offset += TX_SENDER_SIZE;
-
-                            // nonce (TX_NONCE_SIZE bytes, LE)
-                            let nonce = u64::from_le_bytes(
-                                tx_bytes[offset..offset + TX_NONCE_SIZE]
-                                    .try_into()
-                                    .expect("slice with incorrect length"),
-                            );
-                            offset += TX_NONCE_SIZE;
-
-                            // payload_len (TX_PAYLOAD_LEN_SIZE bytes, LE)
-                            let payload_len = u32::from_le_bytes(
-                                tx_bytes[offset..offset + TX_PAYLOAD_LEN_SIZE]
-                                    .try_into()
-                                    .expect("slice with incorrect length"),
-                            ) as usize;
-                            offset += TX_PAYLOAD_LEN_SIZE;
-
-                            if tx_bytes.len() < offset + payload_len + TX_SIG_LEN_SIZE {
-                                eprintln!("[T151] WARNING: Invalid transaction encoding (payload), skipping");
-                                continue;
-                            }
-
-                            // payload
-                            let payload = tx_bytes[offset..offset + payload_len].to_vec();
-                            offset += payload_len;
-
-                            // signature_len (TX_SIG_LEN_SIZE bytes, LE)
-                            let sig_len = u32::from_le_bytes(
-                                tx_bytes[offset..offset + TX_SIG_LEN_SIZE]
-                                    .try_into()
-                                    .expect("slice with incorrect length"),
-                            ) as usize;
-                            offset += TX_SIG_LEN_SIZE;
-
-                            if tx_bytes.len() < offset + sig_len + TX_SUITE_ID_SIZE {
-                                eprintln!("[T151] WARNING: Invalid transaction encoding (signature), skipping");
-                                continue;
-                            }
-
-                            // signature
-                            let signature = qbind_ledger::UserSignature::new(
-                                tx_bytes[offset..offset + sig_len].to_vec(),
-                            );
-                            offset += sig_len;
-
-                            // suite_id (TX_SUITE_ID_SIZE bytes, LE)
-                            let suite_id = u16::from_le_bytes(
-                                tx_bytes[offset..offset + TX_SUITE_ID_SIZE]
-                                    .try_into()
-                                    .expect("slice with incorrect length"),
-                            );
-
-                            let tx = qbind_ledger::QbindTransaction {
-                                sender,
-                                nonce,
-                                payload,
-                                signature,
-                                suite_id,
-                            };
-
-                            decoded_txs.push(tx);
+            for commit_info in &new_commits {
+                // Get the block proposal from store
+                if let Some(stored_block) = self.block_store.get(&commit_info.block_id) {
+                    // Decode transactions from proposal.txs
+                    let mut decoded_txs = Vec::new();
+                    for tx_bytes in &stored_block.proposal.txs {
+                        // Decode QbindTransaction from bytes
+                        // Format: sender(TX_SENDER_SIZE) + nonce(TX_NONCE_SIZE) + payload_len(TX_PAYLOAD_LEN_SIZE) + payload + sig_len(TX_SIG_LEN_SIZE) + sig + suite_id(TX_SUITE_ID_SIZE)
+                        if tx_bytes.len() < TX_SENDER_SIZE + TX_NONCE_SIZE + TX_PAYLOAD_LEN_SIZE {
+                            eprintln!("[T151] WARNING: Invalid transaction encoding, skipping");
+                            continue;
                         }
 
-                        // Create QbindBlock
-                        let qbind_block = crate::execution_adapter::QbindBlock::new(
-                            stored_block.proposal.clone(),
-                            decoded_txs.clone(),
+                        let mut offset = 0;
+
+                        // sender (TX_SENDER_SIZE bytes)
+                        let mut sender = [0u8; TX_SENDER_SIZE];
+                        sender.copy_from_slice(&tx_bytes[offset..offset + TX_SENDER_SIZE]);
+                        offset += TX_SENDER_SIZE;
+
+                        // nonce (TX_NONCE_SIZE bytes, LE)
+                        let nonce = u64::from_le_bytes(
+                            tx_bytes[offset..offset + TX_NONCE_SIZE]
+                                .try_into()
+                                .expect("slice with incorrect length"),
+                        );
+                        offset += TX_NONCE_SIZE;
+
+                        // payload_len (TX_PAYLOAD_LEN_SIZE bytes, LE)
+                        let payload_len = u32::from_le_bytes(
+                            tx_bytes[offset..offset + TX_PAYLOAD_LEN_SIZE]
+                                .try_into()
+                                .expect("slice with incorrect length"),
+                        ) as usize;
+                        offset += TX_PAYLOAD_LEN_SIZE;
+
+                        if tx_bytes.len() < offset + payload_len + TX_SIG_LEN_SIZE {
+                            eprintln!(
+                                "[T151] WARNING: Invalid transaction encoding (payload), skipping"
+                            );
+                            continue;
+                        }
+
+                        // payload
+                        let payload = tx_bytes[offset..offset + payload_len].to_vec();
+                        offset += payload_len;
+
+                        // signature_len (TX_SIG_LEN_SIZE bytes, LE)
+                        let sig_len = u32::from_le_bytes(
+                            tx_bytes[offset..offset + TX_SIG_LEN_SIZE]
+                                .try_into()
+                                .expect("slice with incorrect length"),
+                        ) as usize;
+                        offset += TX_SIG_LEN_SIZE;
+
+                        if tx_bytes.len() < offset + sig_len + TX_SUITE_ID_SIZE {
+                            eprintln!("[T151] WARNING: Invalid transaction encoding (signature), skipping");
+                            continue;
+                        }
+
+                        // signature
+                        let signature = qbind_ledger::UserSignature::new(
+                            tx_bytes[offset..offset + sig_len].to_vec(),
+                        );
+                        offset += sig_len;
+
+                        // suite_id (TX_SUITE_ID_SIZE bytes, LE)
+                        let suite_id = u16::from_le_bytes(
+                            tx_bytes[offset..offset + TX_SUITE_ID_SIZE]
+                                .try_into()
+                                .expect("slice with incorrect length"),
                         );
 
-                        // Apply block to execution adapter
+                        let tx = qbind_ledger::QbindTransaction {
+                            sender,
+                            nonce,
+                            payload,
+                            signature,
+                            suite_id,
+                        };
+
+                        decoded_txs.push(tx);
+                    }
+
+                    // Create QbindBlock
+                    let qbind_block = crate::execution_adapter::QbindBlock::new(
+                        stored_block.proposal.clone(),
+                        decoded_txs.clone(),
+                    );
+
+                    // T155: Use async execution if configured, otherwise fall back to sync
+                    if use_async {
+                        if let Some(ref async_exec) = self.async_execution {
+                            match async_exec.submit_block(qbind_block) {
+                                Ok(()) => {
+                                    // Block successfully enqueued for async execution
+                                }
+                                Err(crate::execution_adapter::AsyncExecError::QueueFull) => {
+                                    // Queue full - for DevNet, this is a hard error
+                                    eprintln!(
+                                        "[T155] CRITICAL: Async execution queue full for block at height {}",
+                                        commit_info.height
+                                    );
+                                    // For DevNet fail-stop behavior, we panic here
+                                    // Production may have different error policies
+                                    panic!(
+                                        "T155: Async execution queue full at height {}",
+                                        commit_info.height
+                                    );
+                                }
+                                Err(crate::execution_adapter::AsyncExecError::ShuttingDown) => {
+                                    eprintln!(
+                                        "[T155] WARNING: Async execution service shutting down for block at height {}",
+                                        commit_info.height
+                                    );
+                                    // Continue without execution - service is shutting down
+                                }
+                            }
+                        }
+                    } else if let Some(ref execution_adapter) = self.execution_adapter {
+                        // T151: Fall back to synchronous execution
                         let mut adapter = execution_adapter.lock();
                         if let Err(e) = adapter.apply_block(&qbind_block) {
                             eprintln!(
@@ -2101,11 +2181,11 @@ impl NodeHotstuffHarness {
                             // For T151, we log the error but don't fail the commit
                             // Future versions may have different error policies
                         }
+                    }
 
-                        // T151: Remove committed transactions from mempool
-                        if let Some(ref mempool) = self.mempool {
-                            mempool.remove_committed(&decoded_txs);
-                        }
+                    // T151: Remove committed transactions from mempool
+                    if let Some(ref mempool) = self.mempool {
+                        mempool.remove_committed(&decoded_txs);
                     }
                 }
             }

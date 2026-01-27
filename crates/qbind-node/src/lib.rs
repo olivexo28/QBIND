@@ -134,6 +134,12 @@ pub use execution_adapter::{
     ExecutionAdapter, ExecutionAdapterError, InMemoryExecutionAdapter, QbindBlock,
 };
 
+// T155 Async Execution Service exports
+pub use execution_adapter::{
+    AsyncExecError, AsyncExecutionService, SingleThreadExecutionService,
+    SingleThreadExecutionServiceConfig,
+};
+
 // T151 Mempool exports
 pub use mempool::{
     InMemoryKeyProvider, InMemoryMempool, KeyProvider, KeyProviderError, Mempool, MempoolConfig,

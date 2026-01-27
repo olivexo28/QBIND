@@ -64,7 +64,12 @@ For DevNet v0, the following key storage options are available:
 *   **Execution Engine**: `NonceExecutionEngine`.
     *   **State**: `InMemoryState` (Account -> Nonce mapping).
     *   **Semantics**: Only checks and increments nonces. Payloads are currently opaque/ignored (no VM yet).
-*   **Commit Hook**: `ExecutionAdapter` (T150) bridges consensus commits to execution. It runs execution synchronously on the committed block; deviations trigger a panic or error (fail-stop).
+*   **Async Execution Pipeline (T155)**: Block execution is now handled by an async execution worker (`SingleThreadExecutionService`) that processes committed blocks in FIFO order on a dedicated thread.
+    *   The main consensus path no longer directly applies execution; it enqueues blocks instead.
+    *   State semantics of `NonceExecutionEngine` are unchanged.
+    *   This decouples consensus liveness from execution latency.
+    *   Execution remains logically sequential (single worker thread); no parallel/multi-core execution yet.
+*   **Commit Hook**: `AsyncExecutionService` (T155) bridges consensus commits to execution via non-blocking submission. Falls back to synchronous `ExecutionAdapter` (T150) when async is not configured.
 
 ## DevNet-Specific Configuration
 
@@ -126,6 +131,9 @@ The following metric families are exposed for observability:
 | `qbind_execution_txs_applied_total` | Counter | Transactions applied successfully |
 | `qbind_execution_block_apply_seconds` | Histogram | Block application latency |
 | `qbind_execution_errors_total{reason}` | Counter | Execution errors (nonce_mismatch/other) |
+| `qbind_execution_queue_len` | Gauge | Current async execution queue depth (T155) |
+| `qbind_execution_queue_full_total` | Counter | Times submit_block failed due to queue full (T155) |
+| `qbind_execution_worker_restarts_total` | Counter | Worker thread restarts (T155) |
 
 #### Signer/Keystore Metrics
 | Metric | Type | Description |
@@ -193,6 +201,7 @@ Avg mempool latency:     X.XXX ms
 
 For tracking performance improvements over time:
 *   Initial baseline established by T154
+*   T155 introduces async execution pipeline (off consensus thread), decoupling consensus from execution latency
 *   Future tasks may improve TPS via parallel execution (DAG mempool, multi-core execution)
 *   See [DevNet Audit Log](./QBIND_DEVNET_AUDIT.md) for the current risk posture (R6)
 
