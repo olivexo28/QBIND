@@ -8,11 +8,33 @@ This document describes the architecture of **QBIND DevNet v0**, the initial dev
 ## System Architecture (DevNet v0)
 
 ### 1. Validator Keys & Signing
-*   **Keystore**: Validators use `FsValidatorKeystore` (T144) to load keys from local disk. Keys are stored as JSON files containing the secret key and suite ID (ML-DSA-44).
-*   **Identity**: Nodes verify their identity at startup using `LocalValidatorIdentity`, ensuring the loaded key matches the configured validator ID.
+*   **Keystore (T144/T153)**: Validators load keys from local disk using one of two backends:
+    *   **PlainFs (T144)**: Plaintext JSON files (`.json`) containing secret key and suite ID (ML-DSA-44). **Recommended for testing/development only.**
+    *   **EncryptedFsV1 (T153)**: Encrypted files (`.enc`) using ChaCha20-Poly1305 AEAD with PBKDF2-derived keys. **Recommended for DevNet and beyond.**
+*   **Identity**: Nodes verify their identity at startup using `LocalValidatorIdentity`, ensuring the loaded key matches the configured validator ID. This self-check works identically for both keystore backends.
 *   **Signer Abstraction**: The `ValidatorSigner` trait (T148) abstracts all consensus signing operations.
     *   **Current Implementation**: `LocalKeySigner` (in-memory signing).
     *   **Remote Signing**: Supported via `RemoteSignerClient` and `LoopbackSignerTransport` (T149) for testing remote signing flows without actual remote hardware.
+
+#### DevNet Key Storage Policy v1 (T153)
+
+For DevNet v0, the following key storage options are available:
+
+| Backend | File Format | Encryption | DevNet Status | TestNet/MainNet |
+| :--- | :--- | :--- | :--- | :--- |
+| **PlainFs** | JSON (`.json`) | None (OS-level only) | Acceptable for local testing | **Not Acceptable** |
+| **EncryptedFsV1** | JSON (`.enc`) | ChaCha20-Poly1305 + PBKDF2 | **Recommended** | Acceptable (with stronger passphrase mgmt) |
+| **Remote Signer** | N/A | Handled externally | Available (loopback for testing) | **Required** (with HSM) |
+
+**DevNet Recommendations:**
+*   Use `EncryptedFsV1` for any non-ephemeral DevNet deployment.
+*   Passphrase should be stored in a secure environment variable (e.g., `QBIND_VALIDATOR_KEY_PASSPHRASE`).
+*   Encrypted files may be committed to version control (salt/nonce are public), but passphrases must never be committed.
+
+**TestNet/MainNet Requirements (Future):**
+*   Encrypted keystore with strong passphrase management (e.g., secrets manager, vault).
+*   Remote signer with HSM support for production validator keys.
+*   Threshold signatures for high-value validators.
 
 ### 2. Consensus Layer
 *   **Protocol**: **HotStuff BFT** (3-chain commit rule).

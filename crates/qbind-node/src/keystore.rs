@@ -41,7 +41,6 @@
 //! # Future Work
 //!
 //! - Key generation, rotation, and write operations
-//! - Encrypted keystore format
 //! - Remote/HSM keystore backends
 
 use std::fs;
@@ -60,6 +59,26 @@ const EXPECTED_SUITE_ID: u8 = 100;
 // Types
 // ============================================================================
 
+/// Keystore backend type selection (T153).
+///
+/// This enum allows selection between different keystore implementations:
+/// - `PlainFs`: Plaintext JSON files (legacy/testing)
+/// - `EncryptedFsV1`: Encrypted files with passphrase-based KDF
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum KeystoreBackend {
+    /// Plaintext JSON keystore (default for DevNet, testing only).
+    ///
+    /// Files are stored at `{root}/{entry_id}.json` with plaintext key material.
+    #[default]
+    PlainFs,
+
+    /// Encrypted keystore v1 with AEAD and KDF (T153).
+    ///
+    /// Files are stored at `{root}/{entry_id}.enc` with encrypted key material.
+    /// Encryption key is derived from a passphrase via PBKDF2.
+    EncryptedFsV1,
+}
+
 /// Identifier for a local keystore entry.
 ///
 /// This is an opaque string identifier that maps to a file on disk
@@ -77,6 +96,28 @@ pub struct KeystoreConfig {
     ///
     /// For `FsValidatorKeystore`, keys are stored at `{root}/{entry_id}.json`.
     pub root: PathBuf,
+}
+
+/// Configuration for encrypted keystore v1 (T153).
+///
+/// This struct holds the parameters needed to decrypt keys from an
+/// encrypted keystore. The encryption key is derived from a passphrase
+/// using PBKDF2.
+#[derive(Debug, Clone)]
+pub struct EncryptedKeystoreConfig {
+    /// Name of the environment variable containing the passphrase.
+    ///
+    /// Example: `"QBIND_VALIDATOR_KEY_PASSPHRASE"`
+    ///
+    /// The passphrase is read from this environment variable at startup
+    /// and used to derive the encryption key via PBKDF2.
+    pub passphrase_env_var: String,
+
+    /// Number of PBKDF2 iterations.
+    ///
+    /// Higher values provide more security but slower key derivation.
+    /// DevNet default: 100,000 iterations (~100ms on modern hardware).
+    pub kdf_iterations: u32,
 }
 
 // ============================================================================
@@ -107,6 +148,12 @@ pub enum KeystoreError {
     /// suite_id, or fails cryptographic validation).
     InvalidKey,
 
+    /// Configuration error (T153).
+    ///
+    /// This indicates a problem with the keystore configuration, such as
+    /// a missing environment variable or invalid parameters.
+    Config(String),
+
     /// I/O error reading the keystore entry.
     Io(io::Error),
 }
@@ -117,6 +164,7 @@ impl std::fmt::Display for KeystoreError {
             KeystoreError::NotFound(entry) => write!(f, "keystore entry not found: {}", entry),
             KeystoreError::Parse(msg) => write!(f, "failed to parse keystore entry: {}", msg),
             KeystoreError::InvalidKey => write!(f, "invalid key material"),
+            KeystoreError::Config(msg) => write!(f, "keystore configuration error: {}", msg),
             KeystoreError::Io(e) => write!(f, "io error: {}", e),
         }
     }
@@ -175,12 +223,12 @@ pub trait ValidatorKeystore: Send + Sync {
 }
 
 // ============================================================================
-// Filesystem implementation
+// Plaintext Filesystem implementation (T144)
 // ============================================================================
 
-/// Filesystem-backed validator keystore.
+/// Plaintext filesystem-backed validator keystore (T144).
 ///
-/// This implementation reads validator signing keys from JSON files on disk.
+/// This implementation reads validator signing keys from plaintext JSON files on disk.
 /// Each entry is stored at `{config.root}/{entry_id}.json`.
 ///
 /// # File Format
@@ -196,7 +244,7 @@ pub trait ValidatorKeystore: Send + Sync {
 ///
 /// - This implementation assumes OS-level disk protections.
 /// - Key files should have restricted permissions (e.g., 0600).
-/// - Future versions will support encrypted key files.
+/// - For encrypted keys, use `EncryptedFsValidatorKeystore` (T153).
 pub struct FsValidatorKeystore {
     config: KeystoreConfig,
 }
@@ -243,6 +291,151 @@ impl ValidatorKeystore for FsValidatorKeystore {
             .map_err(|e| KeystoreError::Parse(format!("invalid hex: {}", e)))?;
 
         // Construct ValidatorSigningKey - this takes ownership of the bytes
+        Ok(ValidatorSigningKey::new(key_bytes))
+    }
+}
+
+// ============================================================================
+// Encrypted Filesystem implementation (T153)
+// ============================================================================
+
+/// Encrypted filesystem-backed validator keystore (T153).
+///
+/// This implementation reads validator signing keys from encrypted files on disk.
+/// Each entry is stored at `{root}/{entry_id}.enc` with AEAD-encrypted content.
+///
+/// # File Format
+///
+/// ```json
+/// {
+///   "version": 1,
+///   "suite_id": 100,
+///   "aead": "ChaCha20-Poly1305",
+///   "kdf": "PBKDF2-HMAC-SHA256",
+///   "kdf_iterations": 100000,
+///   "salt_hex": "...",
+///   "nonce_hex": "...",
+///   "ciphertext_hex": "..."
+/// }
+/// ```
+///
+/// The plaintext (before encryption) is a JSON object:
+/// ```json
+/// {
+///   "private_key_hex": "..."
+/// }
+/// ```
+///
+/// # Security
+///
+/// - Encryption uses ChaCha20-Poly1305 AEAD
+/// - Encryption key is derived from passphrase using PBKDF2-HMAC-SHA256
+/// - Passphrase is read from environment variable (not stored on disk)
+/// - Salt and nonce are stored in the encrypted file (safe to be public)
+/// - Key derivation intentionally slow (~100ms) to resist brute-force
+pub struct EncryptedFsValidatorKeystore {
+    root: PathBuf,
+    enc_config: EncryptedKeystoreConfig,
+}
+
+impl EncryptedFsValidatorKeystore {
+    /// Create a new encrypted filesystem keystore.
+    pub fn new(root: PathBuf, enc_config: EncryptedKeystoreConfig) -> Self {
+        Self { root, enc_config }
+    }
+
+    /// Get the file path for a given entry ID.
+    fn entry_path(&self, entry: &LocalKeystoreEntryId) -> PathBuf {
+        self.root.join(format!("{}.enc", entry.0))
+    }
+}
+
+impl ValidatorKeystore for EncryptedFsValidatorKeystore {
+    fn load_signing_key(
+        &self,
+        entry: &LocalKeystoreEntryId,
+    ) -> Result<ValidatorSigningKey, KeystoreError> {
+        use qbind_crypto::{
+            derive_key_pbkdf2, AeadSuite, ChaCha20Poly1305Backend, CHACHA20_POLY1305_NONCE_SIZE,
+        };
+
+        let path = self.entry_path(entry);
+
+        // Read encrypted file contents
+        let contents = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(KeystoreError::NotFound(entry.0.clone()));
+            }
+            Err(e) => return Err(KeystoreError::Io(e)),
+        };
+
+        // Parse encrypted file JSON
+        let encrypted = parse_encrypted_keystore_json(&contents)?;
+
+        // Validate version
+        if encrypted.version != 1 {
+            return Err(KeystoreError::Parse(format!(
+                "unsupported encrypted keystore version: {}",
+                encrypted.version
+            )));
+        }
+
+        // Validate suite_id
+        if encrypted.suite_id != EXPECTED_SUITE_ID {
+            return Err(KeystoreError::InvalidKey);
+        }
+
+        // Get passphrase from environment variable
+        let passphrase = std::env::var(&self.enc_config.passphrase_env_var).map_err(|_| {
+            KeystoreError::Config(format!(
+                "passphrase environment variable '{}' not set",
+                self.enc_config.passphrase_env_var
+            ))
+        })?;
+
+        // Decode salt and nonce from hex
+        let salt = decode_hex(&encrypted.salt_hex)
+            .map_err(|e| KeystoreError::Parse(format!("invalid salt hex: {}", e)))?;
+        let nonce = decode_hex(&encrypted.nonce_hex)
+            .map_err(|e| KeystoreError::Parse(format!("invalid nonce hex: {}", e)))?;
+        let ciphertext = decode_hex(&encrypted.ciphertext_hex)
+            .map_err(|e| KeystoreError::Parse(format!("invalid ciphertext hex: {}", e)))?;
+
+        // Validate nonce size
+        if nonce.len() != CHACHA20_POLY1305_NONCE_SIZE {
+            return Err(KeystoreError::Parse(format!(
+                "invalid nonce size: expected {}, got {}",
+                CHACHA20_POLY1305_NONCE_SIZE,
+                nonce.len()
+            )));
+        }
+
+        // Derive encryption key from passphrase using PBKDF2
+        let encryption_key =
+            derive_key_pbkdf2(passphrase.as_bytes(), &salt, encrypted.kdf_iterations);
+
+        // Decrypt using ChaCha20-Poly1305
+        let aead = ChaCha20Poly1305Backend::new();
+        let plaintext_json = aead
+            .open(&encryption_key, &nonce, b"", &ciphertext)
+            .map_err(|_| {
+                // Decryption failure likely means wrong passphrase or corrupted file
+                KeystoreError::InvalidKey
+            })?;
+
+        // Parse plaintext JSON to extract private_key_hex
+        let plaintext_str = String::from_utf8(plaintext_json).map_err(|_| {
+            KeystoreError::Parse("decrypted plaintext is not valid UTF-8".to_string())
+        })?;
+
+        let plaintext_parsed = parse_plaintext_json(&plaintext_str)?;
+
+        // Decode hex key bytes
+        let key_bytes = decode_hex(&plaintext_parsed.private_key_hex)
+            .map_err(|e| KeystoreError::Parse(format!("invalid private key hex: {}", e)))?;
+
+        // Construct ValidatorSigningKey
         Ok(ValidatorSigningKey::new(key_bytes))
     }
 }
@@ -408,6 +601,338 @@ fn parse_keystore_json(json: &str) -> Result<ParsedKeystoreEntry, KeystoreError>
     })
 }
 
+/// Parsed encrypted keystore entry (T153).
+struct ParsedEncryptedKeystoreEntry {
+    version: u32,
+    suite_id: u8,
+    kdf_iterations: u32,
+    salt_hex: String,
+    nonce_hex: String,
+    ciphertext_hex: String,
+}
+
+/// Parse an encrypted keystore JSON string (T153).
+///
+/// Expected format:
+/// ```json
+/// {
+///   "version": 1,
+///   "suite_id": 100,
+///   "aead": "ChaCha20-Poly1305",
+///   "kdf": "PBKDF2-HMAC-SHA256",
+///   "kdf_iterations": 100000,
+///   "salt_hex": "...",
+///   "nonce_hex": "...",
+///   "ciphertext_hex": "..."
+/// }
+/// ```
+fn parse_encrypted_keystore_json(
+    json: &str,
+) -> Result<ParsedEncryptedKeystoreEntry, KeystoreError> {
+    let json = json.trim();
+
+    if !json.starts_with('{') || !json.ends_with('}') {
+        return Err(KeystoreError::Parse("expected JSON object".to_string()));
+    }
+
+    let inner = &json[1..json.len() - 1];
+
+    let mut version: Option<u32> = None;
+    let mut suite_id: Option<u8> = None;
+    let mut kdf_iterations: Option<u32> = None;
+    let mut salt_hex: Option<String> = None;
+    let mut nonce_hex: Option<String> = None;
+    let mut ciphertext_hex: Option<String> = None;
+
+    let mut chars = inner.chars().peekable();
+
+    loop {
+        // Skip whitespace and commas
+        while chars.peek().is_some_and(|c| c.is_whitespace() || *c == ',') {
+            chars.next();
+        }
+
+        if chars.peek().is_none() {
+            break;
+        }
+
+        // Parse key
+        if chars.next() != Some('"') {
+            return Err(KeystoreError::Parse("expected quoted key".to_string()));
+        }
+
+        let mut key = String::new();
+        loop {
+            match chars.next() {
+                Some('"') => break,
+                Some(c) => key.push(c),
+                None => return Err(KeystoreError::Parse("unterminated key string".to_string())),
+            }
+        }
+
+        // Skip whitespace and colon
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        if chars.next() != Some(':') {
+            return Err(KeystoreError::Parse("expected colon after key".to_string()));
+        }
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+
+        // Parse value based on key
+        match key.as_str() {
+            "version" | "suite_id" | "kdf_iterations" => {
+                // Parse number
+                let mut num_str = String::new();
+                while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                    num_str.push(chars.next().unwrap());
+                }
+
+                match key.as_str() {
+                    "version" => {
+                        version =
+                            Some(num_str.parse().map_err(|_| {
+                                KeystoreError::Parse("invalid version".to_string())
+                            })?);
+                    }
+                    "suite_id" => {
+                        suite_id =
+                            Some(num_str.parse().map_err(|_| {
+                                KeystoreError::Parse("invalid suite_id".to_string())
+                            })?);
+                    }
+                    "kdf_iterations" => {
+                        kdf_iterations = Some(num_str.parse().map_err(|_| {
+                            KeystoreError::Parse("invalid kdf_iterations".to_string())
+                        })?);
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            "salt_hex" | "nonce_hex" | "ciphertext_hex" | "aead" | "kdf" => {
+                // Parse string
+                if chars.next() != Some('"') {
+                    return Err(KeystoreError::Parse(format!(
+                        "expected quoted string for {}",
+                        key
+                    )));
+                }
+
+                let mut value = String::new();
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => match chars.next() {
+                            Some('n') => value.push('\n'),
+                            Some('r') => value.push('\r'),
+                            Some('t') => value.push('\t'),
+                            Some('\\') => value.push('\\'),
+                            Some('"') => value.push('"'),
+                            Some(c) => {
+                                value.push('\\');
+                                value.push(c);
+                            }
+                            None => {
+                                return Err(KeystoreError::Parse(
+                                    "unterminated escape sequence".to_string(),
+                                ))
+                            }
+                        },
+                        Some(c) => value.push(c),
+                        None => {
+                            return Err(KeystoreError::Parse(
+                                "unterminated value string".to_string(),
+                            ))
+                        }
+                    }
+                }
+
+                match key.as_str() {
+                    "salt_hex" => salt_hex = Some(value),
+                    "nonce_hex" => nonce_hex = Some(value),
+                    "ciphertext_hex" => ciphertext_hex = Some(value),
+                    "aead" | "kdf" => {} // Informational fields, ignored
+                    _ => unreachable!(),
+                }
+            }
+            _ => {
+                // Skip unknown field
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    loop {
+                        match chars.next() {
+                            Some('"') => break,
+                            Some('\\') => {
+                                chars.next();
+                            }
+                            Some(_) => {}
+                            None => {
+                                return Err(KeystoreError::Parse("unterminated string".to_string()))
+                            }
+                        }
+                    }
+                } else {
+                    while chars.peek().is_some_and(|c| *c != ',' && *c != '}') {
+                        chars.next();
+                    }
+                }
+            }
+        }
+    }
+
+    // Validate required fields
+    let version =
+        version.ok_or_else(|| KeystoreError::Parse("missing version field".to_string()))?;
+    let suite_id =
+        suite_id.ok_or_else(|| KeystoreError::Parse("missing suite_id field".to_string()))?;
+    let kdf_iterations = kdf_iterations
+        .ok_or_else(|| KeystoreError::Parse("missing kdf_iterations field".to_string()))?;
+    let salt_hex =
+        salt_hex.ok_or_else(|| KeystoreError::Parse("missing salt_hex field".to_string()))?;
+    let nonce_hex =
+        nonce_hex.ok_or_else(|| KeystoreError::Parse("missing nonce_hex field".to_string()))?;
+    let ciphertext_hex = ciphertext_hex
+        .ok_or_else(|| KeystoreError::Parse("missing ciphertext_hex field".to_string()))?;
+
+    Ok(ParsedEncryptedKeystoreEntry {
+        version,
+        suite_id,
+        kdf_iterations,
+        salt_hex,
+        nonce_hex,
+        ciphertext_hex,
+    })
+}
+
+/// Parsed plaintext entry (inside encrypted envelope).
+struct ParsedPlaintextEntry {
+    private_key_hex: String,
+}
+
+/// Parse plaintext JSON (decrypted content from encrypted keystore).
+///
+/// Expected format:
+/// ```json
+/// {
+///   "private_key_hex": "..."
+/// }
+/// ```
+fn parse_plaintext_json(json: &str) -> Result<ParsedPlaintextEntry, KeystoreError> {
+    let json = json.trim();
+
+    if !json.starts_with('{') || !json.ends_with('}') {
+        return Err(KeystoreError::Parse("expected JSON object".to_string()));
+    }
+
+    let inner = &json[1..json.len() - 1];
+    let mut private_key_hex: Option<String> = None;
+    let mut chars = inner.chars().peekable();
+
+    loop {
+        // Skip whitespace and commas
+        while chars.peek().is_some_and(|c| c.is_whitespace() || *c == ',') {
+            chars.next();
+        }
+
+        if chars.peek().is_none() {
+            break;
+        }
+
+        // Parse key
+        if chars.next() != Some('"') {
+            return Err(KeystoreError::Parse("expected quoted key".to_string()));
+        }
+
+        let mut key = String::new();
+        loop {
+            match chars.next() {
+                Some('"') => break,
+                Some(c) => key.push(c),
+                None => return Err(KeystoreError::Parse("unterminated key string".to_string())),
+            }
+        }
+
+        // Skip whitespace and colon
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+        if chars.next() != Some(':') {
+            return Err(KeystoreError::Parse("expected colon after key".to_string()));
+        }
+        while chars.peek().is_some_and(|c| c.is_whitespace()) {
+            chars.next();
+        }
+
+        // Parse value
+        if key == "private_key_hex" {
+            // Parse string
+            if chars.next() != Some('"') {
+                return Err(KeystoreError::Parse(
+                    "expected quoted string for private_key_hex".to_string(),
+                ));
+            }
+
+            let mut value = String::new();
+            loop {
+                match chars.next() {
+                    Some('"') => break,
+                    Some('\\') => match chars.next() {
+                        Some('n') => value.push('\n'),
+                        Some('r') => value.push('\r'),
+                        Some('t') => value.push('\t'),
+                        Some('\\') => value.push('\\'),
+                        Some('"') => value.push('"'),
+                        Some(c) => {
+                            value.push('\\');
+                            value.push(c);
+                        }
+                        None => {
+                            return Err(KeystoreError::Parse(
+                                "unterminated escape sequence".to_string(),
+                            ))
+                        }
+                    },
+                    Some(c) => value.push(c),
+                    None => {
+                        return Err(KeystoreError::Parse(
+                            "unterminated value string".to_string(),
+                        ))
+                    }
+                }
+            }
+            private_key_hex = Some(value);
+        } else {
+            // Skip unknown field
+            if chars.peek() == Some(&'"') {
+                chars.next();
+                loop {
+                    match chars.next() {
+                        Some('"') => break,
+                        Some('\\') => {
+                            chars.next();
+                        }
+                        Some(_) => {}
+                        None => {
+                            return Err(KeystoreError::Parse("unterminated string".to_string()))
+                        }
+                    }
+                }
+            } else {
+                while chars.peek().is_some_and(|c| *c != ',' && *c != '}') {
+                    chars.next();
+                }
+            }
+        }
+    }
+
+    let private_key_hex = private_key_hex
+        .ok_or_else(|| KeystoreError::Parse("missing private_key_hex field".to_string()))?;
+
+    Ok(ParsedPlaintextEntry { private_key_hex })
+}
+
 // ============================================================================
 // Hex encoding/decoding (minimal, no external deps)
 // ============================================================================
@@ -473,6 +998,79 @@ mod tests {
             file,
             r#"{{"suite_id": {}, "private_key_hex": "{}"}}"#,
             suite_id, key_hex
+        )
+        .expect("write file");
+    }
+
+    /// Helper to create an encrypted keystore file (T153).
+    fn write_encrypted_keystore_file(
+        dir: &TempDir,
+        entry_id: &str,
+        suite_id: u8,
+        key_hex: &str,
+        passphrase: &str,
+        kdf_iterations: u32,
+    ) {
+        use qbind_crypto::{
+            derive_key_pbkdf2, AeadSuite, ChaCha20Poly1305Backend, CHACHA20_POLY1305_NONCE_SIZE,
+            PBKDF2_SALT_SIZE,
+        };
+
+        // Generate random salt and nonce
+        let salt = {
+            let mut s = [0u8; PBKDF2_SALT_SIZE];
+            // For tests, use a deterministic "random" salt based on entry_id
+            for (i, byte) in entry_id.as_bytes().iter().enumerate() {
+                if i < PBKDF2_SALT_SIZE {
+                    s[i] = *byte;
+                }
+            }
+            s
+        };
+
+        let nonce = {
+            let mut n = [0u8; CHACHA20_POLY1305_NONCE_SIZE];
+            // For tests, use a deterministic "random" nonce
+            for (i, byte) in entry_id.as_bytes().iter().rev().enumerate() {
+                if i < CHACHA20_POLY1305_NONCE_SIZE {
+                    n[i] = byte.wrapping_add(1);
+                }
+            }
+            n
+        };
+
+        // Derive encryption key from passphrase
+        let encryption_key = derive_key_pbkdf2(passphrase.as_bytes(), &salt, kdf_iterations);
+
+        // Create plaintext JSON
+        let plaintext_json = format!(r#"{{"private_key_hex": "{}"}}"#, key_hex);
+
+        // Encrypt with ChaCha20-Poly1305
+        let aead = ChaCha20Poly1305Backend::new();
+        let ciphertext = aead
+            .seal(&encryption_key, &nonce, b"", plaintext_json.as_bytes())
+            .expect("encryption should succeed");
+
+        // Write encrypted file
+        let path = dir.path().join(format!("{}.enc", entry_id));
+        let mut file = File::create(path).expect("create file");
+        writeln!(
+            file,
+            r#"{{
+  "version": 1,
+  "suite_id": {},
+  "aead": "ChaCha20-Poly1305",
+  "kdf": "PBKDF2-HMAC-SHA256",
+  "kdf_iterations": {},
+  "salt_hex": "{}",
+  "nonce_hex": "{}",
+  "ciphertext_hex": "{}"
+}}"#,
+            suite_id,
+            kdf_iterations,
+            encode_hex(&salt),
+            encode_hex(&nonce),
+            encode_hex(&ciphertext)
         )
         .expect("write file");
     }
@@ -760,5 +1358,210 @@ mod tests {
         let parsed = parse_keystore_json(json).expect("parse should succeed");
         assert_eq!(parsed.suite_id, 100);
         assert_eq!(parsed.private_key_hex, "00ff");
+    }
+
+    // ------------------------------------------------------------------------
+    // Encrypted keystore tests (T153)
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn encrypted_keystore_happy_path() {
+        use qbind_crypto::DEFAULT_PBKDF2_ITERATIONS;
+
+        // Generate a real ML-DSA-44 keypair
+        let (pk, sk) = MlDsa44Backend::generate_keypair()
+            .expect("ML-DSA-44 keypair generation should succeed");
+
+        // Create temp directory and write encrypted keystore file
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let key_hex = encode_hex(&sk);
+        let passphrase = "test-passphrase-12345";
+
+        // Set passphrase in environment
+        std::env::set_var("QBIND_TEST_PASSPHRASE", passphrase);
+
+        write_encrypted_keystore_file(
+            &temp_dir,
+            "validator1",
+            EXPECTED_SUITE_ID,
+            &key_hex,
+            passphrase,
+            DEFAULT_PBKDF2_ITERATIONS,
+        );
+
+        // Load key from encrypted keystore
+        let enc_config = EncryptedKeystoreConfig {
+            passphrase_env_var: "QBIND_TEST_PASSPHRASE".to_string(),
+            kdf_iterations: DEFAULT_PBKDF2_ITERATIONS,
+        };
+        let keystore = EncryptedFsValidatorKeystore::new(temp_dir.path().to_path_buf(), enc_config);
+        let loaded_key = keystore
+            .load_signing_key(&LocalKeystoreEntryId("validator1".to_string()))
+            .expect("load_signing_key should succeed");
+
+        // Verify key works for signing
+        let message = b"test message for encrypted keystore";
+        let signature = loaded_key.sign(message).expect("signing should succeed");
+
+        // Verify signature
+        let backend = MlDsa44Backend::new();
+        let result = backend.verify_vote(1, &pk, message, &signature);
+        assert!(result.is_ok(), "signature should verify, got: {:?}", result);
+
+        // Clean up
+        std::env::remove_var("QBIND_TEST_PASSPHRASE");
+    }
+
+    #[test]
+    fn encrypted_keystore_wrong_passphrase() {
+        use qbind_crypto::DEFAULT_PBKDF2_ITERATIONS;
+
+        let (_, sk) = MlDsa44Backend::generate_keypair()
+            .expect("ML-DSA-44 keypair generation should succeed");
+
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let key_hex = encode_hex(&sk);
+        let correct_passphrase = "correct-passphrase";
+        let wrong_passphrase = "wrong-passphrase";
+
+        // Create file with correct passphrase
+        write_encrypted_keystore_file(
+            &temp_dir,
+            "validator1",
+            EXPECTED_SUITE_ID,
+            &key_hex,
+            correct_passphrase,
+            DEFAULT_PBKDF2_ITERATIONS,
+        );
+
+        // Try to load with wrong passphrase
+        std::env::set_var("QBIND_TEST_PASSPHRASE_WRONG", wrong_passphrase);
+
+        let enc_config = EncryptedKeystoreConfig {
+            passphrase_env_var: "QBIND_TEST_PASSPHRASE_WRONG".to_string(),
+            kdf_iterations: DEFAULT_PBKDF2_ITERATIONS,
+        };
+        let keystore = EncryptedFsValidatorKeystore::new(temp_dir.path().to_path_buf(), enc_config);
+        let result = keystore.load_signing_key(&LocalKeystoreEntryId("validator1".to_string()));
+
+        // Should fail with InvalidKey (decryption failure)
+        match result {
+            Err(KeystoreError::InvalidKey) => {}
+            other => panic!(
+                "expected InvalidKey error for wrong passphrase, got: {:?}",
+                other
+            ),
+        }
+
+        std::env::remove_var("QBIND_TEST_PASSPHRASE_WRONG");
+    }
+
+    #[test]
+    fn encrypted_keystore_missing_env_var() {
+        use qbind_crypto::DEFAULT_PBKDF2_ITERATIONS;
+
+        let (_, sk) = MlDsa44Backend::generate_keypair()
+            .expect("ML-DSA-44 keypair generation should succeed");
+
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let key_hex = encode_hex(&sk);
+
+        write_encrypted_keystore_file(
+            &temp_dir,
+            "validator1",
+            EXPECTED_SUITE_ID,
+            &key_hex,
+            "some-passphrase",
+            DEFAULT_PBKDF2_ITERATIONS,
+        );
+
+        // Ensure env var is not set
+        std::env::remove_var("QBIND_TEST_MISSING");
+
+        let enc_config = EncryptedKeystoreConfig {
+            passphrase_env_var: "QBIND_TEST_MISSING".to_string(),
+            kdf_iterations: DEFAULT_PBKDF2_ITERATIONS,
+        };
+        let keystore = EncryptedFsValidatorKeystore::new(temp_dir.path().to_path_buf(), enc_config);
+        let result = keystore.load_signing_key(&LocalKeystoreEntryId("validator1".to_string()));
+
+        // Should fail with Config error
+        match result {
+            Err(KeystoreError::Config(msg)) => {
+                assert!(
+                    msg.contains("QBIND_TEST_MISSING"),
+                    "error should mention the env var name"
+                );
+            }
+            other => panic!(
+                "expected Config error for missing env var, got: {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn encrypted_keystore_wrong_suite_id() {
+        use qbind_crypto::DEFAULT_PBKDF2_ITERATIONS;
+
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let key_hex = encode_hex(&vec![0u8; ML_DSA_44_SECRET_KEY_SIZE]);
+        let passphrase = "test-passphrase";
+
+        // Write encrypted file with wrong suite_id
+        write_encrypted_keystore_file(
+            &temp_dir,
+            "validator1",
+            99, // Wrong suite_id
+            &key_hex,
+            passphrase,
+            DEFAULT_PBKDF2_ITERATIONS,
+        );
+
+        std::env::set_var("QBIND_TEST_PASSPHRASE_SUITE", passphrase);
+
+        let enc_config = EncryptedKeystoreConfig {
+            passphrase_env_var: "QBIND_TEST_PASSPHRASE_SUITE".to_string(),
+            kdf_iterations: DEFAULT_PBKDF2_ITERATIONS,
+        };
+        let keystore = EncryptedFsValidatorKeystore::new(temp_dir.path().to_path_buf(), enc_config);
+        let result = keystore.load_signing_key(&LocalKeystoreEntryId("validator1".to_string()));
+
+        // Should fail with InvalidKey
+        match result {
+            Err(KeystoreError::InvalidKey) => {}
+            other => panic!(
+                "expected InvalidKey error for wrong suite_id, got: {:?}",
+                other
+            ),
+        }
+
+        std::env::remove_var("QBIND_TEST_PASSPHRASE_SUITE");
+    }
+
+    #[test]
+    fn encrypted_keystore_missing_file() {
+        use qbind_crypto::DEFAULT_PBKDF2_ITERATIONS;
+
+        let temp_dir = TempDir::new().expect("create temp dir");
+
+        std::env::set_var("QBIND_TEST_PASSPHRASE_MISSING", "passphrase");
+
+        let enc_config = EncryptedKeystoreConfig {
+            passphrase_env_var: "QBIND_TEST_PASSPHRASE_MISSING".to_string(),
+            kdf_iterations: DEFAULT_PBKDF2_ITERATIONS,
+        };
+        let keystore = EncryptedFsValidatorKeystore::new(temp_dir.path().to_path_buf(), enc_config);
+        let result = keystore.load_signing_key(&LocalKeystoreEntryId("nonexistent".to_string()));
+
+        // Should fail with NotFound
+        match result {
+            Err(KeystoreError::NotFound(entry)) => {
+                assert_eq!(entry, "nonexistent");
+            }
+            other => panic!("expected NotFound error, got: {:?}", other),
+        }
+
+        std::env::remove_var("QBIND_TEST_PASSPHRASE_MISSING");
     }
 }

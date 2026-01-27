@@ -227,7 +227,7 @@ pub struct NodeValidatorConfig {
 // Keystore Configuration (T144)
 // ============================================================================
 
-/// Configuration for loading validator keys from a keystore (T144).
+/// Configuration for loading validator keys from a keystore (T144/T153).
 ///
 /// This struct holds the parameters needed to locate and load a validator's
 /// signing key from a keystore. It can be populated from:
@@ -235,15 +235,24 @@ pub struct NodeValidatorConfig {
 /// - Configuration files (TOML/JSON)
 /// - Environment variables
 ///
+/// # T153: Encrypted Keystore
+///
+/// The `backend` field selects which keystore implementation to use:
+/// - `KeystoreBackend::PlainFs`: Plaintext JSON files (default, testing only)
+/// - `KeystoreBackend::EncryptedFsV1`: Encrypted files with passphrase-based KDF
+///
 /// # Example
 ///
 /// ```ignore
 /// use qbind_node::validator_config::ValidatorKeystoreConfig;
+/// use qbind_node::keystore::KeystoreBackend;
 /// use std::path::PathBuf;
 ///
 /// let keystore_cfg = ValidatorKeystoreConfig {
 ///     keystore_root: PathBuf::from("/etc/qbind/keystore"),
 ///     keystore_entry: "validator-1".to_string(),
+///     backend: KeystoreBackend::PlainFs,
+///     encryption_config: None,
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -251,17 +260,30 @@ pub struct ValidatorKeystoreConfig {
     /// The root directory where keystore entries are stored.
     ///
     /// For `FsValidatorKeystore`, keys are stored at `{keystore_root}/{keystore_entry}.json`.
+    /// For `EncryptedFsValidatorKeystore`, keys are stored at `{keystore_root}/{keystore_entry}.enc`.
     ///
     /// Can be set via CLI: `--validator-keystore-root <PATH>`
     pub keystore_root: PathBuf,
 
     /// The identifier for the keystore entry to load.
     ///
-    /// This maps to a file `{keystore_root}/{keystore_entry}.json` for the
-    /// filesystem keystore.
+    /// This maps to a file:
+    /// - `{keystore_root}/{keystore_entry}.json` for plaintext keystore
+    /// - `{keystore_root}/{keystore_entry}.enc` for encrypted keystore
     ///
     /// Can be set via CLI: `--validator-keystore-entry <ID>`
     pub keystore_entry: String,
+
+    /// Keystore backend selection (T153).
+    ///
+    /// Defaults to `KeystoreBackend::PlainFs` for backward compatibility.
+    pub backend: crate::keystore::KeystoreBackend,
+
+    /// Encryption configuration for encrypted keystore (T153).
+    ///
+    /// Required when `backend == KeystoreBackend::EncryptedFsV1`.
+    /// Ignored for other backends.
+    pub encryption_config: Option<crate::keystore::EncryptedKeystoreConfig>,
 }
 
 // ============================================================================
@@ -683,6 +705,8 @@ pub fn derive_validator_public_key(
 /// let keystore_cfg = ValidatorKeystoreConfig {
 ///     keystore_root: PathBuf::from("/etc/qbind/keystore"),
 ///     keystore_entry: "validator-1".to_string(),
+///     backend: KeystoreBackend::PlainFs,
+///     encryption_config: None,
 /// };
 ///
 /// let config = make_local_validator_config_from_keystore(
@@ -705,19 +729,35 @@ pub fn make_local_validator_config_from_keystore(
     consensus_pk: Vec<u8>,
     keystore_cfg: &ValidatorKeystoreConfig,
 ) -> Result<LocalValidatorConfig, KeystoreError> {
-    // 1. Construct KeystoreConfig from ValidatorKeystoreConfig
-    let ks_config = KeystoreConfig {
-        root: keystore_cfg.keystore_root.clone(),
+    use crate::keystore::{EncryptedFsValidatorKeystore, KeystoreBackend};
+
+    // Load signing key based on backend selection
+    let entry_id = LocalKeystoreEntryId(keystore_cfg.keystore_entry.clone());
+    let signing_key = match &keystore_cfg.backend {
+        KeystoreBackend::PlainFs => {
+            // Use plaintext filesystem keystore
+            let ks_config = KeystoreConfig {
+                root: keystore_cfg.keystore_root.clone(),
+            };
+            let keystore = FsValidatorKeystore::new(ks_config);
+            keystore.load_signing_key(&entry_id)?
+        }
+        KeystoreBackend::EncryptedFsV1 => {
+            // Use encrypted filesystem keystore
+            let enc_config = keystore_cfg.encryption_config.as_ref().ok_or_else(|| {
+                KeystoreError::Config(
+                    "EncryptedFsV1 backend requires encryption_config to be set".to_string(),
+                )
+            })?;
+            let keystore = EncryptedFsValidatorKeystore::new(
+                keystore_cfg.keystore_root.clone(),
+                enc_config.clone(),
+            );
+            keystore.load_signing_key(&entry_id)?
+        }
     };
 
-    // 2. Construct FsValidatorKeystore
-    let keystore = FsValidatorKeystore::new(ks_config);
-
-    // 3. Load the signing key using the entry ID
-    let entry_id = LocalKeystoreEntryId(keystore_cfg.keystore_entry.clone());
-    let signing_key = keystore.load_signing_key(&entry_id)?;
-
-    // 4. Wrap in Arc and build LocalValidatorConfig
+    // Wrap in Arc and build LocalValidatorConfig
     Ok(LocalValidatorConfig {
         validator_id,
         listen_addr,
@@ -852,6 +892,8 @@ impl From<IdentityMismatchError> for KeystoreWithIdentityError {
 /// let keystore_cfg = ValidatorKeystoreConfig {
 ///     keystore_root: PathBuf::from("/etc/qbind/keystore"),
 ///     keystore_entry: "validator-1".to_string(),
+///     backend: KeystoreBackend::PlainFs,
+///     encryption_config: None,
 /// };
 ///
 /// // This will fail at startup if the keystore key doesn't match the public key
@@ -1063,6 +1105,8 @@ mod tests {
         let config = ValidatorKeystoreConfig {
             keystore_root: PathBuf::from("/etc/qbind/keystore"),
             keystore_entry: "validator-1".to_string(),
+            backend: crate::keystore::KeystoreBackend::PlainFs,
+            encryption_config: None,
         };
 
         assert_eq!(config.keystore_root, PathBuf::from("/etc/qbind/keystore"));
@@ -1074,6 +1118,8 @@ mod tests {
         let config = ValidatorKeystoreConfig {
             keystore_root: PathBuf::from("/etc/qbind/keystore"),
             keystore_entry: "validator-1".to_string(),
+            backend: crate::keystore::KeystoreBackend::PlainFs,
+            encryption_config: None,
         };
 
         let cloned = config.clone();

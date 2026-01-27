@@ -23,7 +23,7 @@ use qbind_net::{
     ServerHandshakeConfig,
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
-use qbind_node::keystore::{FsValidatorKeystore, KeystoreConfig};
+use qbind_node::keystore::{FsValidatorKeystore, KeystoreBackend, KeystoreConfig};
 use qbind_node::validator_config::{
     derive_validator_public_key, make_local_validator_config_with_identity_check,
     make_local_validator_config_with_keystore_and_identity_check,
@@ -474,6 +474,8 @@ fn make_config_with_identity_check_happy_path() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     // Use the identity-checked function
@@ -506,6 +508,8 @@ fn signing_works_after_identity_check() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let config = make_local_validator_config_with_identity_check(
@@ -545,6 +549,8 @@ fn harness_works_with_identity_checked_config() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let local_config = make_local_validator_config_with_identity_check(
@@ -612,6 +618,8 @@ fn make_config_with_identity_check_fails_for_wrong_public_key() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     // Try to create config with pk2 (doesn't match sk1)
@@ -688,6 +696,8 @@ fn startup_fails_fast_for_public_key_mismatch() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let result = make_local_validator_config_with_identity_check(
@@ -722,6 +732,8 @@ fn keystore_not_found_error_propagates() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "nonexistent".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let result = make_local_validator_config_with_identity_check(
@@ -753,6 +765,8 @@ fn identity_checked_config_preserves_all_fields() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let config = make_local_validator_config_with_identity_check(

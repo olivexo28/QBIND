@@ -2,6 +2,7 @@ pub mod aead;
 pub mod chacha20poly1305;
 pub mod consensus_sig;
 pub mod error;
+pub mod kdf;
 pub mod kem;
 pub mod ml_dsa44;
 pub mod ml_kem768;
@@ -18,6 +19,7 @@ pub use consensus_sig::{
     ConsensusSigError, ConsensusSigSuiteId, ConsensusSigVerifier, SUITE_TOY_SHA3,
 };
 pub use error::CryptoError;
+pub use kdf::{derive_key_pbkdf2, DEFAULT_PBKDF2_ITERATIONS, PBKDF2_OUTPUT_SIZE, PBKDF2_SALT_SIZE};
 pub use kem::KemSuite;
 pub use ml_dsa44::{
     MlDsa44Backend, ValidatorSigningKey, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SECRET_KEY_SIZE,

@@ -27,7 +27,7 @@ use qbind_net::{
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
 use qbind_node::keystore::{
-    FsValidatorKeystore, KeystoreConfig, LocalKeystoreEntryId, ValidatorKeystore,
+    FsValidatorKeystore, KeystoreBackend, KeystoreConfig, LocalKeystoreEntryId, ValidatorKeystore,
 };
 use qbind_node::validator_config::{
     make_local_validator_config_from_keystore, make_local_validator_config_with_keystore,
@@ -768,6 +768,8 @@ fn make_config_from_keystore_works() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     // Use the helper function to create LocalValidatorConfig
@@ -818,6 +820,8 @@ fn make_config_from_keystore_works_with_harness() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "validator1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     // Use the helper function to create LocalValidatorConfig
@@ -876,6 +880,8 @@ fn make_config_from_keystore_fails_for_missing_key() {
     let keystore_cfg = ValidatorKeystoreConfig {
         keystore_root: temp_dir.path().to_path_buf(),
         keystore_entry: "nonexistent".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let result = make_local_validator_config_from_keystore(
@@ -944,6 +950,8 @@ fn validator_keystore_config_is_clone() {
     let config = ValidatorKeystoreConfig {
         keystore_root: std::path::PathBuf::from("/etc/qbind/keystore"),
         keystore_entry: "validator-1".to_string(),
+        backend: KeystoreBackend::PlainFs,
+        encryption_config: None,
     };
 
     let cloned = config.clone();

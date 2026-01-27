@@ -21,12 +21,13 @@ This document tracks the audit status, completed tasks, and identified risks for
 | T149 | Keys/Signer | RemoteSignerClient + Loopback | DevNet-ready | Loopback transport for testing remote signer flows. |
 | T150 | Execution | Transaction Execution Adapter | DevNet-ready | Wiring consensus commits to execution engine. |
 | T151 | Mempool | Mempool & Proposer Pipeline | DevNet-ready | InMemoryMempool, signature checks, nonce tracking. |
+| T153 | Keys/Keystore | Encrypted validator keystore v1 + backend selection | DevNet-ready | AEAD-encrypted keystores, PBKDF2 KDF, backend abstraction. |
 
 ## Risk & Mitigation Table
 
 | ID | Category | Description | Severity | Mitigation / Plan | Status |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| R1 | Key Management | Keys stored as plain JSON on disk (mock HSM) | High | Implement encrypted keystore or true HSM support (MainNet req). | Open |
+| R1 | Key Management | Keys stored as plain JSON on disk (when using PlainFs backend) | High | Use EncryptedFsV1 backend (T153) for DevNet; require encrypted keystore + HSM for MainNet. | Mitigated (T153) |
 | R2 | Liveness | Single-leader HotStuff (rotate-on-view) | Medium | Robustness improvements, potential DAG-based mempool. | Open |
 | R3 | Execution | Serial execution on main thread | Low | Move execution to async task or separate thread pool if blocking increases. | Open |
 | R4 | Networking | Loopback/Local TCP only tested extensively | Medium | Scale up to real distributed cluster testing (TestNet phase). | Open |
