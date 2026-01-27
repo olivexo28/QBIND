@@ -2926,6 +2926,708 @@ impl ViewLagMetrics {
 }
 
 // ============================================================================
+// T154 Metrics - DevNet Performance & Observability Baseline
+// ============================================================================
+
+// ============================================================================
+// ConsensusT154Metrics - Consensus-level metrics for T154
+// ============================================================================
+
+/// Metrics for consensus-level observability (T154).
+///
+/// Tracks:
+/// - Proposals total (accepted/rejected)
+/// - Votes total (accepted/invalid)
+/// - Timeouts total
+/// - Current view number (gauge)
+///
+/// # Thread Safety
+///
+/// All counters use `AtomicU64` with relaxed ordering for performance.
+#[derive(Debug, Default)]
+pub struct ConsensusT154Metrics {
+    /// Total proposals received that were accepted.
+    proposals_accepted: AtomicU64,
+    /// Total proposals received that were rejected.
+    proposals_rejected: AtomicU64,
+    /// Total votes received that were accepted.
+    votes_accepted: AtomicU64,
+    /// Total votes received that were invalid.
+    votes_invalid: AtomicU64,
+    /// Total timeout messages processed.
+    timeouts_total: AtomicU64,
+    /// Current view number (gauge).
+    view_number: AtomicU64,
+}
+
+impl ConsensusT154Metrics {
+    /// Create a new metrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Increment accepted proposals counter.
+    pub fn inc_proposal_accepted(&self) {
+        self.proposals_accepted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment rejected proposals counter.
+    pub fn inc_proposal_rejected(&self) {
+        self.proposals_rejected.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total accepted proposals.
+    pub fn proposals_accepted(&self) -> u64 {
+        self.proposals_accepted.load(Ordering::Relaxed)
+    }
+
+    /// Get total rejected proposals.
+    pub fn proposals_rejected(&self) -> u64 {
+        self.proposals_rejected.load(Ordering::Relaxed)
+    }
+
+    /// Increment accepted votes counter.
+    pub fn inc_vote_accepted(&self) {
+        self.votes_accepted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment invalid votes counter.
+    pub fn inc_vote_invalid(&self) {
+        self.votes_invalid.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total accepted votes.
+    pub fn votes_accepted(&self) -> u64 {
+        self.votes_accepted.load(Ordering::Relaxed)
+    }
+
+    /// Get total invalid votes.
+    pub fn votes_invalid(&self) -> u64 {
+        self.votes_invalid.load(Ordering::Relaxed)
+    }
+
+    /// Increment timeouts counter.
+    pub fn inc_timeout(&self) {
+        self.timeouts_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total timeouts.
+    pub fn timeouts_total(&self) -> u64 {
+        self.timeouts_total.load(Ordering::Relaxed)
+    }
+
+    /// Set current view number.
+    pub fn set_view_number(&self, view: u64) {
+        self.view_number.store(view, Ordering::Relaxed);
+    }
+
+    /// Get current view number.
+    pub fn view_number(&self) -> u64 {
+        self.view_number.load(Ordering::Relaxed)
+    }
+
+    /// Format consensus T154 metrics as Prometheus-style output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Consensus metrics (T154)\n");
+        output.push_str(&format!(
+            "qbind_consensus_proposals_total{{result=\"accepted\"}} {}\n",
+            self.proposals_accepted()
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_proposals_total{{result=\"rejected\"}} {}\n",
+            self.proposals_rejected()
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_votes_total{{result=\"accepted\"}} {}\n",
+            self.votes_accepted()
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_votes_total{{result=\"invalid\"}} {}\n",
+            self.votes_invalid()
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_timeouts_total {}\n",
+            self.timeouts_total()
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_number {}\n",
+            self.view_number()
+        ));
+        output
+    }
+}
+
+// ============================================================================
+// MempoolMetrics - Mempool metrics for T154
+// ============================================================================
+
+/// Metrics for mempool observability (T154).
+///
+/// Tracks:
+/// - Current mempool size (gauge)
+/// - Total transactions inserted
+/// - Total transactions rejected (by reason)
+/// - Total transactions committed (removed on commit)
+///
+/// # Security Note
+///
+/// No transaction contents, sender addresses, or nonces are exposed
+/// in these metrics. Only aggregate counts are tracked.
+///
+/// # Thread Safety
+///
+/// All counters use `AtomicU64` with relaxed ordering for performance.
+#[derive(Debug, Default)]
+pub struct MempoolMetrics {
+    /// Current number of transactions in the mempool (gauge).
+    size: AtomicU64,
+    /// Total transactions inserted successfully.
+    inserted_total: AtomicU64,
+    /// Total transactions rejected due to mempool full.
+    rejected_full: AtomicU64,
+    /// Total transactions rejected due to invalid signature.
+    rejected_invalid_sig: AtomicU64,
+    /// Total transactions rejected due to invalid nonce.
+    rejected_invalid_nonce: AtomicU64,
+    /// Total transactions rejected for other reasons.
+    rejected_other: AtomicU64,
+    /// Total transactions committed (removed from mempool).
+    committed_total: AtomicU64,
+}
+
+impl MempoolMetrics {
+    /// Create a new metrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the current mempool size.
+    pub fn set_size(&self, size: u64) {
+        self.size.store(size, Ordering::Relaxed);
+    }
+
+    /// Get the current mempool size.
+    pub fn size(&self) -> u64 {
+        self.size.load(Ordering::Relaxed)
+    }
+
+    /// Increment inserted counter.
+    pub fn inc_inserted(&self) {
+        self.inserted_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total inserted transactions.
+    pub fn inserted_total(&self) -> u64 {
+        self.inserted_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment rejected counter by reason.
+    pub fn inc_rejected(&self, reason: MempoolRejectReason) {
+        match reason {
+            MempoolRejectReason::Full => {
+                self.rejected_full.fetch_add(1, Ordering::Relaxed);
+            }
+            MempoolRejectReason::InvalidSignature => {
+                self.rejected_invalid_sig.fetch_add(1, Ordering::Relaxed);
+            }
+            MempoolRejectReason::InvalidNonce => {
+                self.rejected_invalid_nonce.fetch_add(1, Ordering::Relaxed);
+            }
+            MempoolRejectReason::Other => {
+                self.rejected_other.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Get rejected count by reason.
+    pub fn rejected_by_reason(&self, reason: MempoolRejectReason) -> u64 {
+        match reason {
+            MempoolRejectReason::Full => self.rejected_full.load(Ordering::Relaxed),
+            MempoolRejectReason::InvalidSignature => {
+                self.rejected_invalid_sig.load(Ordering::Relaxed)
+            }
+            MempoolRejectReason::InvalidNonce => {
+                self.rejected_invalid_nonce.load(Ordering::Relaxed)
+            }
+            MempoolRejectReason::Other => self.rejected_other.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Get total rejected transactions.
+    pub fn rejected_total(&self) -> u64 {
+        self.rejected_full.load(Ordering::Relaxed)
+            + self.rejected_invalid_sig.load(Ordering::Relaxed)
+            + self.rejected_invalid_nonce.load(Ordering::Relaxed)
+            + self.rejected_other.load(Ordering::Relaxed)
+    }
+
+    /// Increment committed counter.
+    pub fn inc_committed(&self) {
+        self.committed_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment committed counter by amount.
+    pub fn add_committed(&self, count: u64) {
+        self.committed_total.fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Get total committed transactions.
+    pub fn committed_total(&self) -> u64 {
+        self.committed_total.load(Ordering::Relaxed)
+    }
+
+    /// Format mempool metrics as Prometheus-style output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Mempool metrics (T154)\n");
+        output.push_str(&format!("qbind_mempool_txs_total {}\n", self.size()));
+        output.push_str(&format!(
+            "qbind_mempool_inserted_total {}\n",
+            self.inserted_total()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_rejected_total{{reason=\"full\"}} {}\n",
+            self.rejected_by_reason(MempoolRejectReason::Full)
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_rejected_total{{reason=\"invalid_signature\"}} {}\n",
+            self.rejected_by_reason(MempoolRejectReason::InvalidSignature)
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_rejected_total{{reason=\"invalid_nonce\"}} {}\n",
+            self.rejected_by_reason(MempoolRejectReason::InvalidNonce)
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_rejected_total{{reason=\"other\"}} {}\n",
+            self.rejected_by_reason(MempoolRejectReason::Other)
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_committed_total {}\n",
+            self.committed_total()
+        ));
+        output
+    }
+}
+
+/// Reason for mempool rejection (T154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MempoolRejectReason {
+    /// Mempool is at capacity.
+    Full,
+    /// Transaction signature is invalid.
+    InvalidSignature,
+    /// Transaction nonce is invalid.
+    InvalidNonce,
+    /// Other rejection reason.
+    Other,
+}
+
+// ============================================================================
+// ExecutionMetrics - Execution metrics for T154
+// ============================================================================
+
+/// Metrics for execution layer observability (T154).
+///
+/// Tracks:
+/// - Total transactions applied
+/// - Block apply latency histogram
+/// - Execution errors by reason
+///
+/// # Security Note
+///
+/// No transaction contents, state data, or specific error details
+/// are exposed in these metrics. Only aggregate counts are tracked.
+///
+/// # Thread Safety
+///
+/// All counters use `AtomicU64` with relaxed ordering for performance.
+#[derive(Debug, Default)]
+pub struct ExecutionMetrics {
+    /// Total transactions applied successfully.
+    txs_applied_total: AtomicU64,
+    /// Total blocks applied.
+    blocks_applied_total: AtomicU64,
+    /// Sum of block apply times in milliseconds.
+    block_apply_time_ms_sum: AtomicU64,
+    /// Block apply time bucket: < 1ms.
+    block_apply_bucket_1ms: AtomicU64,
+    /// Block apply time bucket: < 10ms.
+    block_apply_bucket_10ms: AtomicU64,
+    /// Block apply time bucket: < 100ms.
+    block_apply_bucket_100ms: AtomicU64,
+    /// Block apply time bucket: >= 100ms.
+    block_apply_bucket_over_100ms: AtomicU64,
+    /// Total execution errors: nonce mismatch.
+    errors_nonce_mismatch: AtomicU64,
+    /// Total execution errors: other.
+    errors_other: AtomicU64,
+}
+
+impl ExecutionMetrics {
+    /// Create a new metrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Increment applied transactions counter.
+    pub fn add_txs_applied(&self, count: u64) {
+        self.txs_applied_total.fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Get total applied transactions.
+    pub fn txs_applied_total(&self) -> u64 {
+        self.txs_applied_total.load(Ordering::Relaxed)
+    }
+
+    /// Record a block application with its duration.
+    pub fn record_block_apply(&self, duration: std::time::Duration) {
+        self.blocks_applied_total.fetch_add(1, Ordering::Relaxed);
+        let millis = duration.as_millis() as u64;
+        self.block_apply_time_ms_sum
+            .fetch_add(millis, Ordering::Relaxed);
+
+        if millis < 1 {
+            self.block_apply_bucket_1ms.fetch_add(1, Ordering::Relaxed);
+        } else if millis < 10 {
+            self.block_apply_bucket_10ms.fetch_add(1, Ordering::Relaxed);
+        } else if millis < 100 {
+            self.block_apply_bucket_100ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.block_apply_bucket_over_100ms
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get total blocks applied.
+    pub fn blocks_applied_total(&self) -> u64 {
+        self.blocks_applied_total.load(Ordering::Relaxed)
+    }
+
+    /// Get block apply time sum in milliseconds.
+    pub fn block_apply_time_ms_sum(&self) -> u64 {
+        self.block_apply_time_ms_sum.load(Ordering::Relaxed)
+    }
+
+    /// Get block apply latency buckets.
+    pub fn block_apply_buckets(&self) -> (u64, u64, u64, u64) {
+        (
+            self.block_apply_bucket_1ms.load(Ordering::Relaxed),
+            self.block_apply_bucket_10ms.load(Ordering::Relaxed),
+            self.block_apply_bucket_100ms.load(Ordering::Relaxed),
+            self.block_apply_bucket_over_100ms.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Increment error counter by reason.
+    pub fn inc_error(&self, reason: ExecutionErrorReason) {
+        match reason {
+            ExecutionErrorReason::NonceMismatch => {
+                self.errors_nonce_mismatch.fetch_add(1, Ordering::Relaxed);
+            }
+            ExecutionErrorReason::Other => {
+                self.errors_other.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Get error count by reason.
+    pub fn errors_by_reason(&self, reason: ExecutionErrorReason) -> u64 {
+        match reason {
+            ExecutionErrorReason::NonceMismatch => {
+                self.errors_nonce_mismatch.load(Ordering::Relaxed)
+            }
+            ExecutionErrorReason::Other => self.errors_other.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Get total errors.
+    pub fn errors_total(&self) -> u64 {
+        self.errors_nonce_mismatch.load(Ordering::Relaxed)
+            + self.errors_other.load(Ordering::Relaxed)
+    }
+
+    /// Format execution metrics as Prometheus-style output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Execution metrics (T154)\n");
+        output.push_str(&format!(
+            "qbind_execution_txs_applied_total {}\n",
+            self.txs_applied_total()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_apply_seconds_count {}\n",
+            self.blocks_applied_total()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_apply_seconds_sum {}\n",
+            self.block_apply_time_ms_sum() as f64 / 1000.0
+        ));
+
+        let (b1, b10, b100, over) = self.block_apply_buckets();
+        // Cumulative histogram buckets
+        output.push_str(&format!(
+            "qbind_execution_block_apply_seconds_bucket{{le=\"0.001\"}} {}\n",
+            b1
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_apply_seconds_bucket{{le=\"0.01\"}} {}\n",
+            b1 + b10
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_apply_seconds_bucket{{le=\"0.1\"}} {}\n",
+            b1 + b10 + b100
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_apply_seconds_bucket{{le=\"+Inf\"}} {}\n",
+            b1 + b10 + b100 + over
+        ));
+
+        output.push_str(&format!(
+            "qbind_execution_errors_total{{reason=\"nonce_mismatch\"}} {}\n",
+            self.errors_by_reason(ExecutionErrorReason::NonceMismatch)
+        ));
+        output.push_str(&format!(
+            "qbind_execution_errors_total{{reason=\"other\"}} {}\n",
+            self.errors_by_reason(ExecutionErrorReason::Other)
+        ));
+        output
+    }
+}
+
+/// Reason for execution error (T154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExecutionErrorReason {
+    /// Nonce mismatch error.
+    NonceMismatch,
+    /// Other execution error.
+    Other,
+}
+
+// ============================================================================
+// SignerKeystoreMetrics - Signer and keystore metrics for T154
+// ============================================================================
+
+/// Metrics for signer and keystore observability (T154).
+///
+/// Tracks:
+/// - Sign requests by kind (proposal/vote/timeout)
+/// - Sign failures
+/// - Keystore load success/failure by backend
+///
+/// # Security Note
+///
+/// No secrets, key IDs, passphrases, or key material are exposed
+/// in these metrics. Only aggregate counts are tracked.
+///
+/// # Thread Safety
+///
+/// All counters use `AtomicU64` with relaxed ordering for performance.
+#[derive(Debug, Default)]
+pub struct SignerKeystoreMetrics {
+    /// Sign requests for proposals.
+    sign_requests_proposal: AtomicU64,
+    /// Sign requests for votes.
+    sign_requests_vote: AtomicU64,
+    /// Sign requests for timeouts.
+    sign_requests_timeout: AtomicU64,
+    /// Total sign failures.
+    sign_failures_total: AtomicU64,
+    /// Keystore load success: PlainFs backend.
+    keystore_load_success_plainfs: AtomicU64,
+    /// Keystore load success: EncryptedFsV1 backend.
+    keystore_load_success_encrypted: AtomicU64,
+    /// Keystore load failure: PlainFs backend.
+    keystore_load_failure_plainfs: AtomicU64,
+    /// Keystore load failure: EncryptedFsV1 backend.
+    keystore_load_failure_encrypted: AtomicU64,
+}
+
+impl SignerKeystoreMetrics {
+    /// Create a new metrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Increment sign request counter by kind.
+    pub fn inc_sign_request(&self, kind: SignRequestKind) {
+        match kind {
+            SignRequestKind::Proposal => {
+                self.sign_requests_proposal.fetch_add(1, Ordering::Relaxed);
+            }
+            SignRequestKind::Vote => {
+                self.sign_requests_vote.fetch_add(1, Ordering::Relaxed);
+            }
+            SignRequestKind::Timeout => {
+                self.sign_requests_timeout.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Get sign request count by kind.
+    pub fn sign_requests_by_kind(&self, kind: SignRequestKind) -> u64 {
+        match kind {
+            SignRequestKind::Proposal => self.sign_requests_proposal.load(Ordering::Relaxed),
+            SignRequestKind::Vote => self.sign_requests_vote.load(Ordering::Relaxed),
+            SignRequestKind::Timeout => self.sign_requests_timeout.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Get total sign requests.
+    pub fn sign_requests_total(&self) -> u64 {
+        self.sign_requests_proposal.load(Ordering::Relaxed)
+            + self.sign_requests_vote.load(Ordering::Relaxed)
+            + self.sign_requests_timeout.load(Ordering::Relaxed)
+    }
+
+    /// Increment sign failure counter.
+    pub fn inc_sign_failure(&self) {
+        self.sign_failures_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total sign failures.
+    pub fn sign_failures_total(&self) -> u64 {
+        self.sign_failures_total.load(Ordering::Relaxed)
+    }
+
+    /// Record a keystore load success.
+    pub fn inc_keystore_load_success(&self, backend: KeystoreBackendKind) {
+        match backend {
+            KeystoreBackendKind::PlainFs => {
+                self.keystore_load_success_plainfs
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            KeystoreBackendKind::EncryptedFsV1 => {
+                self.keystore_load_success_encrypted
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Record a keystore load failure.
+    pub fn inc_keystore_load_failure(&self, backend: KeystoreBackendKind) {
+        match backend {
+            KeystoreBackendKind::PlainFs => {
+                self.keystore_load_failure_plainfs
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            KeystoreBackendKind::EncryptedFsV1 => {
+                self.keystore_load_failure_encrypted
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Get keystore load success count by backend.
+    pub fn keystore_load_success_by_backend(&self, backend: KeystoreBackendKind) -> u64 {
+        match backend {
+            KeystoreBackendKind::PlainFs => {
+                self.keystore_load_success_plainfs.load(Ordering::Relaxed)
+            }
+            KeystoreBackendKind::EncryptedFsV1 => {
+                self.keystore_load_success_encrypted.load(Ordering::Relaxed)
+            }
+        }
+    }
+
+    /// Get keystore load failure count by backend.
+    pub fn keystore_load_failure_by_backend(&self, backend: KeystoreBackendKind) -> u64 {
+        match backend {
+            KeystoreBackendKind::PlainFs => {
+                self.keystore_load_failure_plainfs.load(Ordering::Relaxed)
+            }
+            KeystoreBackendKind::EncryptedFsV1 => {
+                self.keystore_load_failure_encrypted.load(Ordering::Relaxed)
+            }
+        }
+    }
+
+    /// Get total keystore load successes.
+    pub fn keystore_load_success_total(&self) -> u64 {
+        self.keystore_load_success_plainfs.load(Ordering::Relaxed)
+            + self.keystore_load_success_encrypted.load(Ordering::Relaxed)
+    }
+
+    /// Get total keystore load failures.
+    pub fn keystore_load_failure_total(&self) -> u64 {
+        self.keystore_load_failure_plainfs.load(Ordering::Relaxed)
+            + self.keystore_load_failure_encrypted.load(Ordering::Relaxed)
+    }
+
+    /// Format signer/keystore metrics as Prometheus-style output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Signer/Keystore metrics (T154)\n");
+        output.push_str(&format!(
+            "qbind_signer_sign_requests_total{{kind=\"proposal\"}} {}\n",
+            self.sign_requests_by_kind(SignRequestKind::Proposal)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_sign_requests_total{{kind=\"vote\"}} {}\n",
+            self.sign_requests_by_kind(SignRequestKind::Vote)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_sign_requests_total{{kind=\"timeout\"}} {}\n",
+            self.sign_requests_by_kind(SignRequestKind::Timeout)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_sign_failures_total {}\n",
+            self.sign_failures_total()
+        ));
+        output.push_str(&format!(
+            "qbind_keystore_load_success_total{{backend=\"PlainFs\"}} {}\n",
+            self.keystore_load_success_by_backend(KeystoreBackendKind::PlainFs)
+        ));
+        output.push_str(&format!(
+            "qbind_keystore_load_success_total{{backend=\"EncryptedFsV1\"}} {}\n",
+            self.keystore_load_success_by_backend(KeystoreBackendKind::EncryptedFsV1)
+        ));
+        output.push_str(&format!(
+            "qbind_keystore_load_failure_total{{backend=\"PlainFs\"}} {}\n",
+            self.keystore_load_failure_by_backend(KeystoreBackendKind::PlainFs)
+        ));
+        output.push_str(&format!(
+            "qbind_keystore_load_failure_total{{backend=\"EncryptedFsV1\"}} {}\n",
+            self.keystore_load_failure_by_backend(KeystoreBackendKind::EncryptedFsV1)
+        ));
+        output
+    }
+}
+
+/// Kind of sign request (T154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignRequestKind {
+    /// Proposal signing.
+    Proposal,
+    /// Vote signing.
+    Vote,
+    /// Timeout signing.
+    Timeout,
+}
+
+/// Keystore backend kind (T154).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeystoreBackendKind {
+    /// PlainFs backend (unencrypted JSON).
+    PlainFs,
+    /// EncryptedFsV1 backend (AEAD encrypted).
+    EncryptedFsV1,
+}
+
+// ============================================================================
+// VerifyPoolMetrics (T154) - Already exists in verify_pool.rs, but we add
+// additional centralized access via NodeMetrics
+// ============================================================================
+
+// Note: VerifyPoolMetrics is already defined in verify_pool.rs and tracks:
+// - qbind_verify_jobs_submitted_total
+// - qbind_verify_jobs_dropped_total
+// - qbind_verify_jobs_ok_total
+// - qbind_verify_jobs_failed_total
+// We'll integrate these into the NodeMetrics format_metrics output.
+
+// ============================================================================
 // NodeMetrics - Combined metrics container
 // ============================================================================
 
@@ -3006,6 +3708,14 @@ pub struct NodeMetrics {
     kem_metrics: Arc<KemOpMetrics>,
     /// Configured channel capacities (for metrics export).
     channel_config: std::sync::RwLock<Option<ChannelCapacityConfig>>,
+    /// Consensus T154 metrics (proposals, votes, timeouts, view).
+    consensus_t154: ConsensusT154Metrics,
+    /// Mempool metrics (T154).
+    mempool: MempoolMetrics,
+    /// Execution metrics (T154).
+    execution: ExecutionMetrics,
+    /// Signer/Keystore metrics (T154).
+    signer_keystore: SignerKeystoreMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -3033,6 +3743,10 @@ impl NodeMetrics {
             validator_equivocations: ValidatorEquivocationMetrics::new(),
             kem_metrics: Arc::new(KemOpMetrics::new()),
             channel_config: std::sync::RwLock::new(None),
+            consensus_t154: ConsensusT154Metrics::new(),
+            mempool: MempoolMetrics::new(),
+            execution: ExecutionMetrics::new(),
+            signer_keystore: SignerKeystoreMetrics::new(),
         }
     }
 
@@ -3104,6 +3818,26 @@ impl NodeMetrics {
     /// Get KEM operation metrics (T137).
     pub fn kem_metrics(&self) -> Arc<KemOpMetrics> {
         Arc::clone(&self.kem_metrics)
+    }
+
+    /// Get consensus T154 metrics (proposals, votes, timeouts, view).
+    pub fn consensus_t154(&self) -> &ConsensusT154Metrics {
+        &self.consensus_t154
+    }
+
+    /// Get mempool metrics (T154).
+    pub fn mempool(&self) -> &MempoolMetrics {
+        &self.mempool
+    }
+
+    /// Get execution metrics (T154).
+    pub fn execution(&self) -> &ExecutionMetrics {
+        &self.execution
+    }
+
+    /// Get signer/keystore metrics (T154).
+    pub fn signer_keystore(&self) -> &SignerKeystoreMetrics {
+        &self.signer_keystore
     }
 
     /// Set the channel capacity configuration for metrics export.
@@ -3383,6 +4117,12 @@ impl NodeMetrics {
 
         // KEM operation metrics (T137)
         output.push_str(&self.format_kem_metrics());
+
+        // T154 Metrics - DevNet Performance & Observability
+        output.push_str(&self.consensus_t154.format_metrics());
+        output.push_str(&self.mempool.format_metrics());
+        output.push_str(&self.execution.format_metrics());
+        output.push_str(&self.signer_keystore.format_metrics());
 
         output
     }

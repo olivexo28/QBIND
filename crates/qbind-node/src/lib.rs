@@ -145,8 +145,10 @@ pub use load_harness::{
     LoopbackNetService,
 };
 pub use metrics::{
-    CommitMetrics, ConsensusProgressMetrics, DisconnectReason, InboundMsgKind, NetworkMetrics,
-    NodeMetrics, OutboundMsgKind, PeerCounters, PeerNetworkMetrics, RuntimeMetrics,
+    CommitMetrics, ConsensusProgressMetrics, ConsensusT154Metrics, DisconnectReason,
+    ExecutionErrorReason, ExecutionMetrics, InboundMsgKind, KeystoreBackendKind, MempoolMetrics,
+    MempoolRejectReason, NetworkMetrics, NodeMetrics, OutboundMsgKind, PeerCounters,
+    PeerNetworkMetrics, RuntimeMetrics, SignRequestKind, SignerKeystoreMetrics,
     SpawnBlockingMetrics, StorageMetrics, StorageOp, ValidatorEquivocationMetrics,
     ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics, MAX_TRACKED_PEERS,
     MAX_TRACKED_VALIDATORS,
