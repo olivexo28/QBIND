@@ -23,6 +23,7 @@ This document tracks the audit status, completed tasks, and identified risks for
 | T151 | Mempool | Mempool & Proposer Pipeline | DevNet-ready | InMemoryMempool, signature checks, nonce tracking. |
 | T153 | Keys/Keystore | Encrypted validator keystore v1 + backend selection | DevNet-ready | AEAD-encrypted keystores, PBKDF2 KDF, backend abstraction. |
 | T154 | Performance / Observability | DevNet metrics + TPS harness | DevNet-ready | Metrics for consensus, mempool, execution, signer/keystore; TPS benchmark harness. |
+| T155 | Execution | Async execution pipeline (off consensus thread) | DevNet-ready | Dedicated execution worker thread, non-blocking commit hook, queue metrics. |
 
 ## Risk & Mitigation Table
 
@@ -30,10 +31,10 @@ This document tracks the audit status, completed tasks, and identified risks for
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | R1 | Key Management | Keys stored as plain JSON on disk (when using PlainFs backend) | High | Use EncryptedFsV1 backend (T153) for DevNet; require encrypted keystore + HSM for MainNet. | Mitigated (T153) |
 | R2 | Liveness | Single-leader HotStuff (rotate-on-view) | Medium | Robustness improvements, potential DAG-based mempool. | Open |
-| R3 | Execution | Serial execution on main thread | Low | Move execution to async task or separate thread pool if blocking increases. | Open |
+| R3 | Execution | Execution coupled to consensus thread | Low | Execution moved to async worker thread (T155); still single-threaded but decoupled from consensus. | Mitigated (T155) |
 | R4 | Networking | Loopback/Local TCP only tested extensively | Medium | Scale up to real distributed cluster testing (TestNet phase). | Open |
 | R5 | Mempool | Basic FIFO without priority/fees | Low | Implement fee market and priority ordering for TestNet. | Open |
-| R6 | Performance | No DAG/multi-core execution yet; TPS limited by single-threaded execution | Medium | Parallel execution + DAG mempool in future tasks. Initial baseline established by T154. | Open |
+| R6 | Performance | No DAG/multi-core execution yet; TPS limited by single-threaded execution | Medium | Parallel execution + DAG mempool in future tasks. Initial baseline established by T154. T155 lays foundation for parallel execution. | Open |
 
 ## DevNet vs TestNet/MainNet Readiness
 
@@ -41,10 +42,10 @@ This document tracks the audit status, completed tasks, and identified risks for
 | :--- | :--- | :--- | :--- |
 | **Consensus Core** | Ready (HotStuff) | Planned | Planned |
 | **Mempool** | Ready (FIFO) | Planned | Planned |
-| **Execution** | Ready (Nonce) | Planned | Planned |
+| **Execution** | Ready (Nonce + Async Pipeline) | Planned | Planned |
 | **Keys/Signer** | Ready (Local/Loopback) | Planned (HSM Basic) | Planned (HSM Full) |
 | **Networking** | Ready (Static Mesh) | Planned (Dynamic) | Planned (Public P2P) |
-| **Monitoring** | Ready (T154 Metrics) | Planned | Planned |
+| **Monitoring** | Ready (T154/T155 Metrics) | Planned | Planned |
 
 ## Future Work
 For tracking future network phases, see:

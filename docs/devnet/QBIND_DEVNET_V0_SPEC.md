@@ -64,7 +64,13 @@ For DevNet v0, the following key storage options are available:
 *   **Execution Engine**: `NonceExecutionEngine`.
     *   **State**: `InMemoryState` (Account -> Nonce mapping).
     *   **Semantics**: Only checks and increments nonces. Payloads are currently opaque/ignored (no VM yet).
-*   **Commit Hook**: `ExecutionAdapter` (T150) bridges consensus commits to execution. It runs execution synchronously on the committed block; deviations trigger a panic or error (fail-stop).
+*   **Async Execution Pipeline (T155)**: Block execution is now handled by an asynchronous worker thread.
+    *   **`SingleThreadExecutionService`**: A dedicated worker thread that processes committed blocks in FIFO order.
+    *   **Non-blocking Commit**: The consensus thread enqueues blocks via `submit_block()` instead of blocking on execution.
+    *   **Bounded Queue**: Backpressure is applied via a bounded channel; `QueueFull` errors trigger fail-stop in DevNet.
+    *   **Deterministic Order**: Blocks are executed in commit order across all validators.
+    *   **Note**: Execution is still logically sequential (single worker thread). Parallel/DAG execution is a future enhancement.
+*   **Commit Hook**: The harness uses `AsyncExecutionService` (T155) when configured, falling back to synchronous `ExecutionAdapter` (T150) for backward compatibility.
 
 ## DevNet-Specific Configuration
 
@@ -126,6 +132,9 @@ The following metric families are exposed for observability:
 | `qbind_execution_txs_applied_total` | Counter | Transactions applied successfully |
 | `qbind_execution_block_apply_seconds` | Histogram | Block application latency |
 | `qbind_execution_errors_total{reason}` | Counter | Execution errors (nonce_mismatch/other) |
+| `qbind_execution_queue_len` | Gauge | Current async execution queue length (T155) |
+| `qbind_execution_queue_full_total` | Counter | Times submit_block failed due to full queue (T155) |
+| `qbind_execution_worker_restarts_total` | Counter | Execution worker restarts (T155) |
 
 #### Signer/Keystore Metrics
 | Metric | Type | Description |
@@ -193,8 +202,9 @@ Avg mempool latency:     X.XXX ms
 
 For tracking performance improvements over time:
 *   Initial baseline established by T154
+*   T155 introduced async execution pipeline (execution off consensus thread), a prerequisite for parallel execution
 *   Future tasks may improve TPS via parallel execution (DAG mempool, multi-core execution)
-*   See [DevNet Audit Log](./QBIND_DEVNET_AUDIT.md) for the current risk posture (R6)
+*   See [DevNet Audit Log](./QBIND_DEVNET_AUDIT.md) for the current risk posture (R3, R6)
 
 ## Path to TestNet & MainNet
 

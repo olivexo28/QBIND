@@ -3262,6 +3262,16 @@ pub struct ExecutionMetrics {
     errors_nonce_mismatch: AtomicU64,
     /// Total execution errors: other.
     errors_other: AtomicU64,
+
+    // ========================================================================
+    // T155: Async execution pipeline metrics
+    // ========================================================================
+    /// Current execution queue length (gauge) - T155.
+    queue_len: AtomicU64,
+    /// Number of times submit_block failed due to queue full - T155.
+    queue_full_total: AtomicU64,
+    /// Number of worker restarts (if worker panics/fails) - T155.
+    worker_restarts_total: AtomicU64,
 }
 
 impl ExecutionMetrics {
@@ -3348,10 +3358,48 @@ impl ExecutionMetrics {
             + self.errors_other.load(Ordering::Relaxed)
     }
 
+    // ========================================================================
+    // T155: Async execution pipeline metrics
+    // ========================================================================
+
+    /// Set the current execution queue length (T155).
+    pub fn set_queue_len(&self, len: u64) {
+        self.queue_len.store(len, Ordering::Relaxed);
+    }
+
+    /// Get the current execution queue length (T155).
+    pub fn queue_len(&self) -> u64 {
+        self.queue_len.load(Ordering::Relaxed)
+    }
+
+    /// Increment queue full counter (T155).
+    ///
+    /// Call this when submit_block fails due to queue being full.
+    pub fn inc_queue_full(&self) {
+        self.queue_full_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total queue full count (T155).
+    pub fn queue_full_total(&self) -> u64 {
+        self.queue_full_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment worker restart counter (T155).
+    ///
+    /// Call this if the execution worker is restarted due to panic or failure.
+    pub fn inc_worker_restart(&self) {
+        self.worker_restarts_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total worker restart count (T155).
+    pub fn worker_restarts_total(&self) -> u64 {
+        self.worker_restarts_total.load(Ordering::Relaxed)
+    }
+
     /// Format execution metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
-        output.push_str("\n# Execution metrics (T154)\n");
+        output.push_str("\n# Execution metrics (T154/T155)\n");
         output.push_str(&format!(
             "qbind_execution_txs_applied_total {}\n",
             self.txs_applied_total()
@@ -3391,6 +3439,17 @@ impl ExecutionMetrics {
         output.push_str(&format!(
             "qbind_execution_errors_total{{reason=\"other\"}} {}\n",
             self.errors_by_reason(ExecutionErrorReason::Other)
+        ));
+
+        // T155: Async execution pipeline metrics
+        output.push_str(&format!("qbind_execution_queue_len {}\n", self.queue_len()));
+        output.push_str(&format!(
+            "qbind_execution_queue_full_total {}\n",
+            self.queue_full_total()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_worker_restarts_total {}\n",
+            self.worker_restarts_total()
         ));
         output
     }
