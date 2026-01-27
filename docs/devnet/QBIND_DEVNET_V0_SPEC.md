@@ -218,6 +218,33 @@ This section outlines how DevNet components evolve.
 | **Storage** | Ephemeral / Basic RocksDB | Full State Persistence | Pruned/Archival Modes |
 | **Networking** | Static Mesh | Dynamic P2P / Gossip | Public P2P + DDoS Protection |
 
+### Parallel Execution & DAG Mempool Roadmap (T156)
+
+As part of the DevNet → TestNet → MainNet progression, two key architectural enhancements are planned:
+
+**Stage A – Parallel Execution (DevNet v1 / TestNet)**:
+*   Introduce sender-partitioned parallel execution within blocks.
+*   For the current nonce-only engine, transactions from different senders are independent and can execute concurrently.
+*   Preserves determinism while achieving multi-core speedup.
+*   See: [Parallel Execution Design Spec](./QBIND_PARALLEL_EXECUTION_DESIGN.md)
+
+**DAG-Based Mempool (TestNet / MainNet)**:
+*   Replace FIFO mempool with a Narwhal-style DAG mempool.
+*   Validators create signed batches that form a DAG via parent references.
+*   Availability certificates (2f+1 acknowledgments) guarantee data availability before consensus ordering.
+*   HotStuff leaders propose DAG frontiers rather than raw transaction lists.
+*   See: [DAG Mempool Design Spec](./QBIND_DAG_MEMPOOL_DESIGN.md)
+
+**Rollout Summary**:
+
+| Phase | Network | Mempool | Execution |
+| :--- | :--- | :--- | :--- |
+| Current | DevNet v0 | FIFO | Async Sequential (T155) |
+| Phase 1 | DevNet v1 | FIFO | Parallel Stage A |
+| Phase 2 | TestNet Alpha | DAG (prototype) | Parallel Stage A |
+| Phase 3 | TestNet Beta | DAG (default) | Parallel Stage A |
+| Phase 4 | MainNet | DAG + DoS Protection | Parallel Stage A + B |
+
 ### Future Work (Audit)
 For tracking the evolution and readiness of these future networks, see:
 *   [DevNet Audit Log](./QBIND_DEVNET_AUDIT.md)
