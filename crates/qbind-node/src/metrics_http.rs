@@ -180,6 +180,8 @@ pub struct CryptoMetricsRefs {
     pub consensus_sig_metrics: Option<Arc<ConsensusSigMetrics>>,
     /// KEMTLS handshake metrics.
     pub kemtls_metrics: Option<Arc<KemtlsMetrics>>,
+    /// DAG mempool metrics (T158).
+    pub dag_mempool_metrics: Option<Arc<crate::dag_mempool::DagMempoolMetrics>>,
 }
 
 impl CryptoMetricsRefs {
@@ -197,6 +199,12 @@ impl CryptoMetricsRefs {
     /// Set KEMTLS metrics.
     pub fn with_kemtls(mut self, metrics: Arc<KemtlsMetrics>) -> Self {
         self.kemtls_metrics = Some(metrics);
+        self
+    }
+
+    /// Set DAG mempool metrics (T158).
+    pub fn with_dag_mempool(mut self, metrics: Arc<crate::dag_mempool::DagMempoolMetrics>) -> Self {
+        self.dag_mempool_metrics = Some(metrics);
         self
     }
 }
@@ -465,11 +473,18 @@ fn format_metrics_output(metrics: &NodeMetrics, crypto_refs: &CryptoMetricsRefs)
         .map(|a| a.as_ref());
     let kemtls = crypto_refs.kemtls_metrics.as_ref().map(|a| a.as_ref());
 
-    if sig_metrics.is_some() || kemtls.is_some() {
+    let mut output = if sig_metrics.is_some() || kemtls.is_some() {
         metrics.format_metrics_with_crypto(sig_metrics, kemtls)
     } else {
         metrics.format_metrics()
+    };
+
+    // T158: Append DAG mempool metrics if available
+    if let Some(ref dag_metrics) = crypto_refs.dag_mempool_metrics {
+        output.push_str(&dag_metrics.format_metrics());
     }
+
+    output
 }
 
 /// Send an HTTP response.

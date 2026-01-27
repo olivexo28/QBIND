@@ -62,6 +62,16 @@
 //! - `QBIND_ASYNC_PEER_OUTBOUND_CAPACITY`: AsyncPeerManager per-peer outbound
 //!
 //! No networking, no DAG, no signing or IO.
+//!
+//! # DAG Mempool (T158)
+//!
+//! The `dag_mempool` module provides the core data structures and implementation
+//! for a DAG-based mempool. This is an alternative to the FIFO mempool that:
+//! - Organizes transactions into signed batches
+//! - Forms a DAG structure via parent references
+//! - Provides deterministic frontier selection for proposals
+//!
+//! See `dag_mempool` module documentation for details.
 
 pub mod async_peer_manager;
 pub mod async_runner;
@@ -73,6 +83,7 @@ pub mod consensus_net_worker;
 pub mod consensus_network_facade;
 pub mod consensus_node;
 pub mod consensus_sim;
+pub mod dag_mempool;
 pub mod evm_commit;
 pub mod evm_state_store;
 pub mod execution_adapter;
@@ -117,7 +128,7 @@ pub use consensus_node::{
     ConsensusNode, ConsensusNodeError as NetConsensusNodeError, NodeCommitInfo, NodeCommittedBlock,
 };
 pub use consensus_sim::{NodeConsensusSim, NodeConsensusSimError};
-pub use hotstuff_node_sim::{NodeHotstuffHarness, NodeHotstuffHarnessError};
+pub use hotstuff_node_sim::{NodeHotstuffHarness, NodeHotstuffHarnessError, ProposerSource};
 pub use identity_map::PeerValidatorMap;
 pub use ledger_bridge::{InMemoryNodeLedgerHarness, NodeLedgerError, NodeLedgerHarness};
 
@@ -144,6 +155,13 @@ pub use execution_adapter::{
 pub use mempool::{
     InMemoryKeyProvider, InMemoryMempool, KeyProvider, KeyProviderError, Mempool, MempoolConfig,
     MempoolError,
+};
+
+// T158 DAG Mempool exports
+pub use dag_mempool::{
+    batch_signing_preimage, compute_batch_id, compute_tx_id, BatchError, BatchId, BatchRef,
+    BatchSignature, DagMempool, DagMempoolConfig, DagMempoolError, DagMempoolMetrics,
+    DagMempoolStats, InMemoryDagMempool, QbindBatch, TxId, BATCH_DOMAIN_TAG,
 };
 
 pub use load_harness::{

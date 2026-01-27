@@ -18,6 +18,7 @@ qbind-ledger    = { path = "../qbind-ledger" }
 qbind-crypto    = { path = "../qbind-crypto" }
 qbind-types     = { path = "../qbind-types" }
 qbind-net       = { path = "../qbind-net" }
+qbind-hash      = { path = "../qbind-hash" }
 rocksdb        = "0.22"
 tokio          = { version = "1.44", features = ["rt-multi-thread", "time", "sync", "macros", "net", "io-util"] }
 crossbeam-channel = "0.5"

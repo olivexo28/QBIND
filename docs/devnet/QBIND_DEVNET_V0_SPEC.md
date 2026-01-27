@@ -227,7 +227,7 @@ This section outlines how DevNet components evolve.
 | **Storage** | Ephemeral / Basic RocksDB | Full State Persistence | Pruned/Archival Modes |
 | **Networking** | Static Mesh | Dynamic P2P / Gossip | Public P2P + DDoS Protection |
 
-### Parallel Execution & DAG Mempool Roadmap (T156/T157)
+### Parallel Execution & DAG Mempool Roadmap (T156/T157/T158)
 
 As part of the DevNet → TestNet → MainNet progression, two key architectural enhancements are planned:
 
@@ -239,7 +239,20 @@ As part of the DevNet → TestNet → MainNet progression, two key architectural
 *   New metrics track parallelism: `qbind_execution_parallel_workers_active`, `qbind_execution_parallel_sender_partitions`, `qbind_execution_block_parallel_seconds`, `qbind_execution_parallel_fallback_total`.
 *   See: [Parallel Execution Design Spec](./QBIND_PARALLEL_EXECUTION_DESIGN.md)
 
-**DAG-Based Mempool (TestNet / MainNet)**:
+**DAG Mempool v0 (Implemented in T158 for DevNet – Experimental)**:
+*   Core DAG data structures are now available: `QbindBatch`, `BatchId`, `BatchRef`, `BatchSignature`.
+*   In-memory DAG mempool implementation (`InMemoryDagMempool`) with:
+    *   Local transaction batching into signed batches.
+    *   DAG structure via parent references.
+    *   Deterministic frontier selection for proposals.
+    *   Commit cleanup to track committed transactions.
+*   Feature-flagged proposer integration (`ProposerSource::DagMempool`) allows leaders to optionally source block transactions from the DAG instead of FIFO mempool.
+*   New metrics: `qbind_dag_batches_total`, `qbind_dag_edges_total`, `qbind_dag_txs_total`, `qbind_dag_frontier_select_total`, `qbind_dag_frontier_txs_selected_total`.
+*   **Note**: This is a data-plane feature only; consensus semantics remain unchanged (HotStuff 3-chain).
+*   **Not yet implemented**: Availability certificates, cross-node certificate protocol (planned for future tasks).
+*   See: [DAG Mempool Design Spec](./QBIND_DAG_MEMPOOL_DESIGN.md)
+
+**DAG-Based Mempool (Full – TestNet / MainNet)**:
 *   Replace FIFO mempool with a Narwhal-style DAG mempool.
 *   Validators create signed batches that form a DAG via parent references.
 *   Availability certificates (2f+1 acknowledgments) guarantee data availability before consensus ordering.
@@ -250,8 +263,8 @@ As part of the DevNet → TestNet → MainNet progression, two key architectural
 
 | Phase | Network | Mempool | Execution |
 | :--- | :--- | :--- | :--- |
-| Current | DevNet v0 | FIFO | Parallel Stage A (T157) |
-| Phase 1 | TestNet Alpha | DAG (prototype) | Parallel Stage A |
+| Current | DevNet v0 | FIFO (default) + DAG v0 (opt-in, T158) | Parallel Stage A (T157) |
+| Phase 1 | TestNet Alpha | DAG (prototype with certs) | Parallel Stage A |
 | Phase 2 | TestNet Beta | DAG (default) | Parallel Stage A |
 | Phase 3 | MainNet | DAG + DoS Protection | Parallel Stage A + B |
 

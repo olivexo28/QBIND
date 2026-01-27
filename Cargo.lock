@@ -2109,6 +2109,7 @@ dependencies = [
  "parking_lot",
  "qbind-consensus",
  "qbind-crypto",
+ "qbind-hash",
  "qbind-ledger",
  "qbind-net",
  "qbind-runtime",
