@@ -78,6 +78,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 // ============================================================================
+// QbindTransaction Wire Encoding Constants (T151)
+// ============================================================================
+// These constants define the wire format for QbindTransactions in block proposals.
+// Format: sender(32) + nonce(8) + payload_len(4) + payload + sig_len(4) + sig + suite_id(2)
+
+const TX_SENDER_SIZE: usize = 32;
+const TX_NONCE_SIZE: usize = 8;
+const TX_PAYLOAD_LEN_SIZE: usize = 4;
+const TX_SIG_LEN_SIZE: usize = 4;
+const TX_SUITE_ID_SIZE: usize = 2;
+
+// ============================================================================
 // Error types
 // ============================================================================
 
@@ -375,6 +387,24 @@ pub struct NodeHotstuffHarness {
 
     /// Pending votes waiting for verification (T147).
     pending_votes: std::collections::HashMap<(u64, u64), Vote>,
+
+    /// Optional mempool for transaction admission and block building (T151).
+    ///
+    /// When set, the harness pulls transactions from the mempool when building
+    /// proposals and removes committed transactions on block commits.
+    mempool: Option<Arc<dyn crate::mempool::Mempool>>,
+
+    /// Optional execution adapter for applying committed blocks (T150/T151).
+    ///
+    /// When set, the harness calls the adapter's `apply_block()` on each commit
+    /// to update execution state.
+    execution_adapter:
+        Option<Arc<parking_lot::Mutex<dyn crate::execution_adapter::ExecutionAdapter>>>,
+
+    /// Maximum number of transactions per block (T151).
+    ///
+    /// Controls how many transactions are pulled from the mempool for proposals.
+    max_txs_per_block: usize,
 }
 
 // Manual Debug implementation because Arc<dyn ConsensusStorage> doesn't implement Debug
@@ -404,6 +434,9 @@ impl std::fmt::Debug for NodeHotstuffHarness {
             .field("verify_pool", &self.verify_pool.is_some())
             .field("pending_proposals", &self.pending_proposals.len())
             .field("pending_votes", &self.pending_votes.len())
+            .field("mempool", &self.mempool.is_some())
+            .field("execution_adapter", &self.execution_adapter.is_some())
+            .field("max_txs_per_block", &self.max_txs_per_block)
             .finish()
     }
 }
@@ -489,6 +522,9 @@ impl NodeHotstuffHarness {
             verify_pool: None,
             pending_proposals: std::collections::HashMap::new(),
             pending_votes: std::collections::HashMap::new(),
+            mempool: None,
+            execution_adapter: None,
+            max_txs_per_block: 1000, // Default max txs per block
         })
     }
 
@@ -857,6 +893,60 @@ impl NodeHotstuffHarness {
     /// Get verification pool metrics, if pool is attached.
     pub fn verify_pool_metrics(&self) -> Option<&crate::verify_pool::VerifyPoolMetrics> {
         self.verify_pool.as_ref().map(|p| p.metrics())
+    }
+
+    /// Attach a mempool for transaction admission and block building (T151).
+    ///
+    /// When a mempool is attached, the harness will:
+    /// - Pull transactions from the mempool when building proposals
+    /// - Remove committed transactions on block commits
+    ///
+    /// # Arguments
+    ///
+    /// * `mempool` - The mempool implementation to use
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    pub fn with_mempool(mut self, mempool: Arc<dyn crate::mempool::Mempool>) -> Self {
+        self.mempool = Some(mempool);
+        self
+    }
+
+    /// Attach an execution adapter for applying committed blocks (T151).
+    ///
+    /// When an execution adapter is attached, the harness calls its `apply_block()`
+    /// method on each commit to update execution state.
+    ///
+    /// # Arguments
+    ///
+    /// * `adapter` - The execution adapter to use
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    pub fn with_execution_adapter(
+        mut self,
+        adapter: Arc<parking_lot::Mutex<dyn crate::execution_adapter::ExecutionAdapter>>,
+    ) -> Self {
+        self.execution_adapter = Some(adapter);
+        self
+    }
+
+    /// Set the maximum number of transactions per block (T151).
+    ///
+    /// Controls how many transactions are pulled from the mempool for proposals.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_txs` - The maximum number of transactions per block
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    pub fn with_max_txs_per_block(mut self, max_txs: usize) -> Self {
+        self.max_txs_per_block = max_txs;
+        self
     }
 
     /// Get the epoch state provider, if attached.
@@ -1909,6 +1999,117 @@ impl NodeHotstuffHarness {
             // Apply to in-memory commit index first
             self.commit_index.apply_commits(new_commits.clone())?;
 
+            // T151: Apply committed blocks to execution adapter (if attached)
+            // We need to decode transactions and create QbindBlocks for the adapter
+            if let Some(ref execution_adapter) = self.execution_adapter {
+                for commit_info in &new_commits {
+                    // Get the block proposal from store
+                    if let Some(stored_block) = self.block_store.get(&commit_info.block_id) {
+                        // Decode transactions from proposal.txs
+                        let mut decoded_txs = Vec::new();
+                        for tx_bytes in &stored_block.proposal.txs {
+                            // Decode QbindTransaction from bytes
+                            // Format: sender(TX_SENDER_SIZE) + nonce(TX_NONCE_SIZE) + payload_len(TX_PAYLOAD_LEN_SIZE) + payload + sig_len(TX_SIG_LEN_SIZE) + sig + suite_id(TX_SUITE_ID_SIZE)
+                            if tx_bytes.len() < TX_SENDER_SIZE + TX_NONCE_SIZE + TX_PAYLOAD_LEN_SIZE
+                            {
+                                eprintln!("[T151] WARNING: Invalid transaction encoding, skipping");
+                                continue;
+                            }
+
+                            let mut offset = 0;
+
+                            // sender (TX_SENDER_SIZE bytes)
+                            let mut sender = [0u8; TX_SENDER_SIZE];
+                            sender.copy_from_slice(&tx_bytes[offset..offset + TX_SENDER_SIZE]);
+                            offset += TX_SENDER_SIZE;
+
+                            // nonce (TX_NONCE_SIZE bytes, LE)
+                            let nonce = u64::from_le_bytes(
+                                tx_bytes[offset..offset + TX_NONCE_SIZE]
+                                    .try_into()
+                                    .expect("slice with incorrect length"),
+                            );
+                            offset += TX_NONCE_SIZE;
+
+                            // payload_len (TX_PAYLOAD_LEN_SIZE bytes, LE)
+                            let payload_len = u32::from_le_bytes(
+                                tx_bytes[offset..offset + TX_PAYLOAD_LEN_SIZE]
+                                    .try_into()
+                                    .expect("slice with incorrect length"),
+                            ) as usize;
+                            offset += TX_PAYLOAD_LEN_SIZE;
+
+                            if tx_bytes.len() < offset + payload_len + TX_SIG_LEN_SIZE {
+                                eprintln!("[T151] WARNING: Invalid transaction encoding (payload), skipping");
+                                continue;
+                            }
+
+                            // payload
+                            let payload = tx_bytes[offset..offset + payload_len].to_vec();
+                            offset += payload_len;
+
+                            // signature_len (TX_SIG_LEN_SIZE bytes, LE)
+                            let sig_len = u32::from_le_bytes(
+                                tx_bytes[offset..offset + TX_SIG_LEN_SIZE]
+                                    .try_into()
+                                    .expect("slice with incorrect length"),
+                            ) as usize;
+                            offset += TX_SIG_LEN_SIZE;
+
+                            if tx_bytes.len() < offset + sig_len + TX_SUITE_ID_SIZE {
+                                eprintln!("[T151] WARNING: Invalid transaction encoding (signature), skipping");
+                                continue;
+                            }
+
+                            // signature
+                            let signature = qbind_ledger::UserSignature::new(
+                                tx_bytes[offset..offset + sig_len].to_vec(),
+                            );
+                            offset += sig_len;
+
+                            // suite_id (TX_SUITE_ID_SIZE bytes, LE)
+                            let suite_id = u16::from_le_bytes(
+                                tx_bytes[offset..offset + TX_SUITE_ID_SIZE]
+                                    .try_into()
+                                    .expect("slice with incorrect length"),
+                            );
+
+                            let tx = qbind_ledger::QbindTransaction {
+                                sender,
+                                nonce,
+                                payload,
+                                signature,
+                                suite_id,
+                            };
+
+                            decoded_txs.push(tx);
+                        }
+
+                        // Create QbindBlock
+                        let qbind_block = crate::execution_adapter::QbindBlock::new(
+                            stored_block.proposal.clone(),
+                            decoded_txs.clone(),
+                        );
+
+                        // Apply block to execution adapter
+                        let mut adapter = execution_adapter.lock();
+                        if let Err(e) = adapter.apply_block(&qbind_block) {
+                            eprintln!(
+                                "[T151] WARNING: Execution adapter failed for block at height {}: {}",
+                                commit_info.height, e
+                            );
+                            // For T151, we log the error but don't fail the commit
+                            // Future versions may have different error policies
+                        }
+
+                        // T151: Remove committed transactions from mempool
+                        if let Some(ref mempool) = self.mempool {
+                            mempool.remove_committed(&decoded_txs);
+                        }
+                    }
+                }
+            }
+
             // If storage is attached, persist the commits (T82)
             if let Some(storage) = &self.storage {
                 for commit_info in &new_commits {
@@ -2126,6 +2327,42 @@ impl NodeHotstuffHarness {
         &mut self,
         mut action: ConsensusEngineAction<ValidatorId>,
     ) -> Result<(), NodeHotstuffHarnessError> {
+        // T151: Populate proposal with transactions from mempool BEFORE signing
+        if let ConsensusEngineAction::BroadcastProposal(ref mut proposal) = action {
+            if let Some(ref mempool) = self.mempool {
+                let txs = mempool.get_block_candidates(self.max_txs_per_block);
+
+                // Serialize transactions to Vec<Vec<u8>>
+                // For now, use simple serialization: for QbindTransaction, we need to encode it
+                // We'll use a simple format since QbindTransaction doesn't have WireEncode yet
+                proposal.txs = txs
+                    .iter()
+                    .map(|tx| {
+                        // Simple serialization: we'll encode as a bincode-style format
+                        // For T151, we'll use a minimal encoding
+                        let mut bytes = Vec::new();
+                        // sender (TX_SENDER_SIZE bytes)
+                        bytes.extend_from_slice(&tx.sender);
+                        // nonce (TX_NONCE_SIZE bytes, LE)
+                        bytes.extend_from_slice(&tx.nonce.to_le_bytes());
+                        // payload length (TX_PAYLOAD_LEN_SIZE bytes, LE)
+                        bytes.extend_from_slice(&(tx.payload.len() as u32).to_le_bytes());
+                        // payload
+                        bytes.extend_from_slice(&tx.payload);
+                        // signature length (TX_SIG_LEN_SIZE bytes, LE)
+                        bytes.extend_from_slice(&(tx.signature.bytes.len() as u32).to_le_bytes());
+                        // signature
+                        bytes.extend_from_slice(&tx.signature.bytes);
+                        // suite_id (TX_SUITE_ID_SIZE bytes, LE)
+                        bytes.extend_from_slice(&tx.suite_id.to_le_bytes());
+                        bytes
+                    })
+                    .collect();
+
+                proposal.header.tx_count = proposal.txs.len() as u32;
+            }
+        }
+
         // T148: Sign via signer abstraction (takes precedence over signing_key)
         // T143: Fallback to direct signing_key for backwards compatibility
         if let Some(ref signer) = self.signer {
@@ -2705,6 +2942,36 @@ impl NodeHotstuffHarness {
                     to_suite,
                 })
             }
+        }
+    }
+
+    /// Submit a transaction to the mempool (T151).
+    ///
+    /// This method provides a simple API for injecting user transactions into the node.
+    /// The transaction is verified and admitted according to mempool policy.
+    ///
+    /// # Arguments
+    ///
+    /// * `tx` - The transaction to submit
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the transaction was admitted to the mempool
+    /// * `Err(MempoolError)` if the transaction was rejected
+    ///
+    /// # Errors
+    ///
+    /// Returns `MempoolError::Invalid` if no mempool is configured.
+    pub fn submit_transaction(
+        &self,
+        tx: qbind_ledger::QbindTransaction,
+    ) -> Result<(), crate::mempool::MempoolError> {
+        if let Some(ref mempool) = self.mempool {
+            mempool.insert(tx)
+        } else {
+            Err(crate::mempool::MempoolError::Invalid(
+                "no mempool configured".to_string(),
+            ))
         }
     }
 }

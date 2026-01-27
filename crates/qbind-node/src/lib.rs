@@ -81,6 +81,7 @@ pub mod identity_map;
 pub mod keystore;
 pub mod ledger_bridge;
 pub mod load_harness;
+pub mod mempool;
 pub mod metrics;
 pub mod metrics_http;
 pub mod net_service;
@@ -131,6 +132,12 @@ pub use evm_state_store::FileEvmStateStorage;
 // T150 Execution Adapter exports
 pub use execution_adapter::{
     ExecutionAdapter, ExecutionAdapterError, InMemoryExecutionAdapter, QbindBlock,
+};
+
+// T151 Mempool exports
+pub use mempool::{
+    InMemoryKeyProvider, InMemoryMempool, KeyProvider, KeyProviderError, Mempool, MempoolConfig,
+    MempoolError,
 };
 
 pub use load_harness::{
