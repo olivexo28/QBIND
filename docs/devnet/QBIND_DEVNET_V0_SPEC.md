@@ -88,6 +88,114 @@ These are the default parameters for DevNet v0:
 *   **Safety**: Guaranteed by HotStuff 3-chain rule + ML-DSA-44 signatures.
 *   **Hardware**: Intended for standard cloud VMs or local consumer hardware.
 
+## Performance & Metrics (DevNet v0)
+
+This section documents the observability infrastructure and performance measurement capabilities for DevNet v0 (T154).
+
+### 1. Metrics Categories
+
+The following metric families are exposed for observability:
+
+#### Consensus Metrics
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_consensus_proposals_total{result}` | Counter | Proposals received (accepted/rejected) |
+| `qbind_consensus_votes_total{result}` | Counter | Votes received (accepted/invalid) |
+| `qbind_consensus_timeouts_total` | Counter | Timeout messages processed |
+| `qbind_consensus_view_number` | Gauge | Current consensus view number |
+
+#### Verification Pool Metrics (T147)
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_verify_jobs_submitted_total` | Counter | Jobs submitted to verification pool |
+| `qbind_verify_jobs_dropped_total` | Counter | Jobs dropped due to queue overflow |
+| `qbind_verify_jobs_ok_total` | Counter | Jobs verified successfully |
+| `qbind_verify_jobs_failed_total` | Counter | Jobs that failed verification |
+
+#### Mempool Metrics
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_mempool_txs_total` | Gauge | Current number of transactions in mempool |
+| `qbind_mempool_inserted_total` | Counter | Transactions successfully inserted |
+| `qbind_mempool_rejected_total{reason}` | Counter | Transactions rejected (full/invalid_signature/invalid_nonce/other) |
+| `qbind_mempool_committed_total` | Counter | Transactions committed (removed from mempool) |
+
+#### Execution Metrics
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_execution_txs_applied_total` | Counter | Transactions applied successfully |
+| `qbind_execution_block_apply_seconds` | Histogram | Block application latency |
+| `qbind_execution_errors_total{reason}` | Counter | Execution errors (nonce_mismatch/other) |
+
+#### Signer/Keystore Metrics
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_signer_sign_requests_total{kind}` | Counter | Signing requests (proposal/vote/timeout) |
+| `qbind_signer_sign_failures_total` | Counter | Signing failures |
+| `qbind_keystore_load_success_total{backend}` | Counter | Keystore loads (PlainFs/EncryptedFsV1) |
+| `qbind_keystore_load_failure_total{backend}` | Counter | Keystore load failures |
+
+**Security Note**: No secrets, key IDs, preimages, passphrases, or transaction contents are exposed in metrics. Only aggregate counts are tracked.
+
+### 2. Metrics Export
+
+Metrics are exposed via HTTP in Prometheus text format:
+
+**Configuration**:
+```bash
+# Set environment variable to enable HTTP metrics endpoint
+export QBIND_METRICS_HTTP_ADDR=127.0.0.1:9100
+```
+
+**Endpoints**:
+*   `GET /metrics` - Returns all metrics in Prometheus text format
+
+**Example**:
+```bash
+curl http://127.0.0.1:9100/metrics
+```
+
+### 3. DevNet TPS Harness
+
+A performance benchmark harness is available for measuring DevNet throughput.
+
+**Running the TPS Harness**:
+```bash
+# Run the canonical DevNet v0 benchmark scenario
+cargo test -p qbind-node --test t154_devnet_tps_harness tps_benchmark_canonical -- --ignored --nocapture
+```
+
+**Canonical Benchmark Scenario (DevNet v0)**:
+
+| Parameter | Value |
+| :--- | :--- |
+| Validators | 4 |
+| Transactions | 10,000 |
+| Payload Size | 128 bytes |
+| Max Txs/Block | 1000 |
+| Mempool Size | 10,000 |
+
+**Benchmark Output**:
+```
+========== DevNet TPS Benchmark Results (T154) ==========
+Total transactions:      10000
+Committed transactions:  10000
+Rejected transactions:   0
+Duration:                X.XXX seconds
+Throughput (TPS):        XXXX.XX
+Avg mempool latency:     X.XXX ms
+=========================================================
+```
+
+**Note**: Actual TPS figures depend on hardware. Operators should run the harness on their target hardware to obtain baseline measurements.
+
+### 4. Performance Tracking
+
+For tracking performance improvements over time:
+*   Initial baseline established by T154
+*   Future tasks may improve TPS via parallel execution (DAG mempool, multi-core execution)
+*   See [DevNet Audit Log](./QBIND_DEVNET_AUDIT.md) for the current risk posture (R6)
+
 ## Path to TestNet & MainNet
 
 This section outlines how DevNet components evolve.
