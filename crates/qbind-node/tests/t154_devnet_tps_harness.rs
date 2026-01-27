@@ -43,9 +43,10 @@ pub struct BenchResult {
     pub duration_secs: f64,
     /// Throughput: committed transactions per second.
     pub tps: f64,
-    /// Average latency from submission to commit in milliseconds.
+    /// Average mempool insertion latency in milliseconds.
+    /// Note: This measures the time to insert into mempool, not end-to-end commit latency.
     pub avg_latency_ms: f64,
-    /// 95th percentile latency in milliseconds (if available).
+    /// 95th percentile mempool insertion latency in milliseconds (if available).
     pub p95_latency_ms: Option<f64>,
     /// Number of transactions successfully committed.
     pub committed_txs: usize,
@@ -62,9 +63,9 @@ impl BenchResult {
         eprintln!("Rejected transactions:   {}", self.rejected_txs);
         eprintln!("Duration:                {:.3} seconds", self.duration_secs);
         eprintln!("Throughput (TPS):        {:.2}", self.tps);
-        eprintln!("Average latency:         {:.3} ms", self.avg_latency_ms);
+        eprintln!("Avg mempool latency:     {:.3} ms", self.avg_latency_ms);
         if let Some(p95) = self.p95_latency_ms {
-            eprintln!("P95 latency:             {:.3} ms", p95);
+            eprintln!("P95 mempool latency:     {:.3} ms", p95);
         }
         eprintln!("=========================================================\n");
     }
@@ -146,10 +147,18 @@ impl TestAccount {
         let (pk_bytes, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
         let public_key = UserPublicKey::ml_dsa_44(pk_bytes);
 
-        // Derive account ID from public key (using first 32 bytes)
-        let mut account_id = [0u8; 32];
+        // Derive account ID from public key using a simple hash-like transformation.
+        // For ML-DSA-44, the public key is 2420 bytes, so we combine multiple
+        // sections of the key to derive a unique 32-byte account ID.
         let pk_slice = public_key.as_bytes();
-        account_id.copy_from_slice(&pk_slice[..32.min(pk_slice.len())]);
+        let mut account_id = [0u8; 32];
+        for (i, chunk) in pk_slice.chunks(32).enumerate() {
+            for (j, &byte) in chunk.iter().enumerate() {
+                if j < 32 {
+                    account_id[j] ^= byte.wrapping_add(i as u8);
+                }
+            }
+        }
 
         Self {
             account_id,
@@ -329,12 +338,16 @@ pub fn run_simple_tps_bench(config: BenchConfig) -> BenchResult {
         0.0
     };
 
-    // Calculate p95 latency
+    // Calculate p95 latency using in-place partial sort (more efficient than full clone+sort)
+    // For large datasets, we only need to find the 95th percentile element.
     let p95_latency_ms = if latencies_ms.len() >= 20 {
-        let mut sorted = latencies_ms.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let p95_idx = (sorted.len() as f64 * 0.95) as usize;
-        Some(sorted[p95_idx.min(sorted.len() - 1)])
+        let p95_idx = (latencies_ms.len() as f64 * 0.95) as usize;
+        // Use select_nth_unstable for O(n) average performance vs O(n log n) for full sort
+        let mut latencies_for_p95 = latencies_ms;
+        latencies_for_p95.select_nth_unstable_by(p95_idx, |a, b| {
+            a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        Some(latencies_for_p95[p95_idx])
     } else {
         None
     };
