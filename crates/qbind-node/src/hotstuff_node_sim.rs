@@ -137,6 +137,44 @@ pub enum NodeHotstuffHarnessError {
     },
 }
 
+// ============================================================================
+// Proposer Source (T158)
+// ============================================================================
+
+/// Controls the source of transactions for block proposals (T158).
+///
+/// This enum allows the harness to be configured to use either the traditional
+/// FIFO mempool or the new DAG-based mempool for transaction selection.
+///
+/// # Usage
+///
+/// ```ignore
+/// use qbind_node::hotstuff_node_sim::ProposerSource;
+///
+/// // Use FIFO mempool (default)
+/// let harness = harness.with_proposer_source(ProposerSource::FifoMempool);
+///
+/// // Use DAG mempool
+/// let harness = harness
+///     .with_dag_mempool(dag_mempool)
+///     .with_proposer_source(ProposerSource::DagMempool);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProposerSource {
+    /// Use the traditional FIFO mempool (`Mempool` trait).
+    ///
+    /// Transactions are selected via `mempool.get_block_candidates()`.
+    /// This is the current default behavior for DevNet v0.
+    #[default]
+    FifoMempool,
+
+    /// Use the DAG-based mempool (`DagMempool` trait).
+    ///
+    /// Transactions are selected via `dag_mempool.select_frontier_txs()`.
+    /// This is an experimental feature for T158 DAG mempool v0.
+    DagMempool,
+}
+
 impl From<NodeConsensusSimError> for NodeHotstuffHarnessError {
     fn from(e: NodeConsensusSimError) -> Self {
         NodeHotstuffHarnessError::Sim(e)
@@ -394,6 +432,18 @@ pub struct NodeHotstuffHarness {
     /// proposals and removes committed transactions on block commits.
     mempool: Option<Arc<dyn crate::mempool::Mempool>>,
 
+    /// Optional DAG mempool for batch-based transaction handling (T158).
+    ///
+    /// When set and `proposer_source` is `DagMempool`, the harness pulls
+    /// transactions from the DAG mempool instead of the FIFO mempool.
+    dag_mempool: Option<Arc<dyn crate::dag_mempool::DagMempool>>,
+
+    /// Controls the source of transactions for block proposals (T158).
+    ///
+    /// When `FifoMempool` (default), uses the standard `mempool` field.
+    /// When `DagMempool`, uses the `dag_mempool` field.
+    proposer_source: ProposerSource,
+
     /// Optional execution adapter for applying committed blocks (T150/T151).
     ///
     /// When set, the harness calls the adapter's `apply_block()` on each commit
@@ -445,6 +495,8 @@ impl std::fmt::Debug for NodeHotstuffHarness {
             .field("pending_proposals", &self.pending_proposals.len())
             .field("pending_votes", &self.pending_votes.len())
             .field("mempool", &self.mempool.is_some())
+            .field("dag_mempool", &self.dag_mempool.is_some())
+            .field("proposer_source", &self.proposer_source)
             .field("execution_adapter", &self.execution_adapter.is_some())
             .field("async_execution", &self.async_execution.is_some())
             .field("max_txs_per_block", &self.max_txs_per_block)
@@ -534,6 +586,8 @@ impl NodeHotstuffHarness {
             pending_proposals: std::collections::HashMap::new(),
             pending_votes: std::collections::HashMap::new(),
             mempool: None,
+            dag_mempool: None, // T158: DAG mempool disabled by default
+            proposer_source: ProposerSource::FifoMempool, // T158: Default to FIFO
             execution_adapter: None,
             async_execution: None, // T155: Async execution disabled by default
             max_txs_per_block: 1000, // Default max txs per block
@@ -923,6 +977,83 @@ impl NodeHotstuffHarness {
     pub fn with_mempool(mut self, mempool: Arc<dyn crate::mempool::Mempool>) -> Self {
         self.mempool = Some(mempool);
         self
+    }
+
+    /// Attach a DAG mempool for batch-based transaction handling (T158).
+    ///
+    /// When a DAG mempool is attached and `proposer_source` is set to
+    /// `ProposerSource::DagMempool`, the harness will:
+    /// - Pull transactions from the DAG mempool's frontier when building proposals
+    /// - Mark committed transactions in the DAG mempool on block commits
+    ///
+    /// The DAG mempool provides an alternative to the FIFO mempool that:
+    /// - Organizes transactions into signed batches
+    /// - Forms a DAG structure via parent references
+    /// - Provides deterministic frontier selection for proposals
+    ///
+    /// # Arguments
+    ///
+    /// * `dag_mempool` - The DAG mempool implementation to use
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_node::{InMemoryDagMempool, ProposerSource};
+    /// use qbind_consensus::ids::ValidatorId;
+    /// use std::sync::Arc;
+    ///
+    /// let dag = Arc::new(InMemoryDagMempool::new(ValidatorId::new(1)));
+    /// let harness = harness
+    ///     .with_dag_mempool(dag)
+    ///     .with_proposer_source(ProposerSource::DagMempool);
+    /// ```
+    pub fn with_dag_mempool(
+        mut self,
+        dag_mempool: Arc<dyn crate::dag_mempool::DagMempool>,
+    ) -> Self {
+        self.dag_mempool = Some(dag_mempool);
+        self
+    }
+
+    /// Set the proposer source for transaction selection (T158).
+    ///
+    /// Controls whether the harness pulls transactions from:
+    /// - `FifoMempool` (default): The traditional FIFO mempool
+    /// - `DagMempool`: The DAG-based mempool
+    ///
+    /// When using `DagMempool`, you must also attach a DAG mempool via
+    /// `with_dag_mempool()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The proposer source to use
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_node::hotstuff_node_sim::ProposerSource;
+    ///
+    /// // Use DAG mempool for proposals
+    /// let harness = harness
+    ///     .with_dag_mempool(dag)
+    ///     .with_proposer_source(ProposerSource::DagMempool);
+    /// ```
+    pub fn with_proposer_source(mut self, source: ProposerSource) -> Self {
+        self.proposer_source = source;
+        self
+    }
+
+    /// Get the current proposer source (T158).
+    pub fn proposer_source(&self) -> ProposerSource {
+        self.proposer_source
     }
 
     /// Attach an execution adapter for applying committed blocks (T151).
@@ -2183,9 +2314,25 @@ impl NodeHotstuffHarness {
                         }
                     }
 
-                    // T151: Remove committed transactions from mempool
-                    if let Some(ref mempool) = self.mempool {
-                        mempool.remove_committed(&decoded_txs);
+                    // T151/T158: Remove committed transactions from mempool
+                    // When using DAG mempool, also mark transactions as committed there
+                    match self.proposer_source {
+                        ProposerSource::DagMempool => {
+                            // T158: Mark committed in DAG mempool
+                            if let Some(ref dag_mempool) = self.dag_mempool {
+                                dag_mempool.mark_committed(&decoded_txs);
+                            }
+                            // Also update FIFO mempool if attached (for compatibility)
+                            if let Some(ref mempool) = self.mempool {
+                                mempool.remove_committed(&decoded_txs);
+                            }
+                        }
+                        ProposerSource::FifoMempool => {
+                            // T151: Remove from FIFO mempool
+                            if let Some(ref mempool) = self.mempool {
+                                mempool.remove_committed(&decoded_txs);
+                            }
+                        }
                     }
                 }
             }
@@ -2407,40 +2554,61 @@ impl NodeHotstuffHarness {
         &mut self,
         mut action: ConsensusEngineAction<ValidatorId>,
     ) -> Result<(), NodeHotstuffHarnessError> {
-        // T151: Populate proposal with transactions from mempool BEFORE signing
+        // T151/T158: Populate proposal with transactions from mempool BEFORE signing
         if let ConsensusEngineAction::BroadcastProposal(ref mut proposal) = action {
-            if let Some(ref mempool) = self.mempool {
-                let txs = mempool.get_block_candidates(self.max_txs_per_block);
+            // T158: Select transactions based on proposer_source
+            let txs: Vec<qbind_ledger::QbindTransaction> = match self.proposer_source {
+                ProposerSource::DagMempool => {
+                    // T158: Use DAG mempool for transaction selection
+                    if let Some(ref dag_mempool) = self.dag_mempool {
+                        dag_mempool.select_frontier_txs(self.max_txs_per_block)
+                    } else {
+                        // Fallback to FIFO if DAG mempool not configured
+                        if let Some(ref mempool) = self.mempool {
+                            mempool.get_block_candidates(self.max_txs_per_block)
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                }
+                ProposerSource::FifoMempool => {
+                    // T151: Use traditional FIFO mempool
+                    if let Some(ref mempool) = self.mempool {
+                        mempool.get_block_candidates(self.max_txs_per_block)
+                    } else {
+                        Vec::new()
+                    }
+                }
+            };
 
-                // Serialize transactions to Vec<Vec<u8>>
-                // For now, use simple serialization: for QbindTransaction, we need to encode it
-                // We'll use a simple format since QbindTransaction doesn't have WireEncode yet
-                proposal.txs = txs
-                    .iter()
-                    .map(|tx| {
-                        // Simple serialization: we'll encode as a bincode-style format
-                        // For T151, we'll use a minimal encoding
-                        let mut bytes = Vec::new();
-                        // sender (TX_SENDER_SIZE bytes)
-                        bytes.extend_from_slice(&tx.sender);
-                        // nonce (TX_NONCE_SIZE bytes, LE)
-                        bytes.extend_from_slice(&tx.nonce.to_le_bytes());
-                        // payload length (TX_PAYLOAD_LEN_SIZE bytes, LE)
-                        bytes.extend_from_slice(&(tx.payload.len() as u32).to_le_bytes());
-                        // payload
-                        bytes.extend_from_slice(&tx.payload);
-                        // signature length (TX_SIG_LEN_SIZE bytes, LE)
-                        bytes.extend_from_slice(&(tx.signature.bytes.len() as u32).to_le_bytes());
-                        // signature
-                        bytes.extend_from_slice(&tx.signature.bytes);
-                        // suite_id (TX_SUITE_ID_SIZE bytes, LE)
-                        bytes.extend_from_slice(&tx.suite_id.to_le_bytes());
-                        bytes
-                    })
-                    .collect();
+            // Serialize transactions to Vec<Vec<u8>>
+            // For now, use simple serialization: for QbindTransaction, we need to encode it
+            // We'll use a simple format since QbindTransaction doesn't have WireEncode yet
+            proposal.txs = txs
+                .iter()
+                .map(|tx| {
+                    // Simple serialization: we'll encode as a bincode-style format
+                    // For T151, we'll use a minimal encoding
+                    let mut bytes = Vec::new();
+                    // sender (TX_SENDER_SIZE bytes)
+                    bytes.extend_from_slice(&tx.sender);
+                    // nonce (TX_NONCE_SIZE bytes, LE)
+                    bytes.extend_from_slice(&tx.nonce.to_le_bytes());
+                    // payload length (TX_PAYLOAD_LEN_SIZE bytes, LE)
+                    bytes.extend_from_slice(&(tx.payload.len() as u32).to_le_bytes());
+                    // payload
+                    bytes.extend_from_slice(&tx.payload);
+                    // signature length (TX_SIG_LEN_SIZE bytes, LE)
+                    bytes.extend_from_slice(&(tx.signature.bytes.len() as u32).to_le_bytes());
+                    // signature
+                    bytes.extend_from_slice(&tx.signature.bytes);
+                    // suite_id (TX_SUITE_ID_SIZE bytes, LE)
+                    bytes.extend_from_slice(&tx.suite_id.to_le_bytes());
+                    bytes
+                })
+                .collect();
 
-                proposal.header.tx_count = proposal.txs.len() as u32;
-            }
+            proposal.header.tx_count = proposal.txs.len() as u32;
         }
 
         // T148: Sign via signer abstraction (takes precedence over signing_key)
