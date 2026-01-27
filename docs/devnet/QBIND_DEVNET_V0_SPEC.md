@@ -183,7 +183,7 @@ Committed transactions:  10000
 Rejected transactions:   0
 Duration:                X.XXX seconds
 Throughput (TPS):        XXXX.XX
-Average latency:         X.XXX ms
+Avg mempool latency:     X.XXX ms
 =========================================================
 ```
 
