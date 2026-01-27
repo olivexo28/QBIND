@@ -830,16 +830,20 @@ impl DagMempool for InMemoryDagMempool {
         // For T158, we accept remote batches without full verification
         // (no availability certificates yet). Basic validation only.
 
-        let mut inner = self.inner.write();
+        let batch_parents_len = batch.parents.len() as u64;
+        let batch_txs_len = batch.txs.len() as u64;
 
-        // Update metrics
+        let mut inner = self.inner.write();
+        Self::insert_batch_inner(&mut inner, batch)?;
+
+        // Update metrics only after successful insertion
         if let Some(ref m) = self.metrics {
             m.inc_batches_total();
-            m.inc_edges_total(batch.parents.len() as u64);
-            m.inc_txs_total(batch.txs.len() as u64);
+            m.inc_edges_total(batch_parents_len);
+            m.inc_txs_total(batch_txs_len);
         }
 
-        Self::insert_batch_inner(&mut inner, batch)
+        Ok(())
     }
 
     fn select_frontier_txs(&self, max_txs: usize) -> Vec<QbindTransaction> {
