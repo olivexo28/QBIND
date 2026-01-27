@@ -68,8 +68,8 @@ use std::time::Instant;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use qbind_ledger::{
-    ExecutionEngine, ExecutionEngineError, InMemoryState, ParallelExecConfig,
-    QbindTransaction, SenderPartitionedNonceExecutor, StateUpdater,
+    ExecutionEngine, ExecutionEngineError, InMemoryState, ParallelExecConfig, QbindTransaction,
+    SenderPartitionedNonceExecutor, StateUpdater,
 };
 use qbind_types::Hash32;
 use qbind_wire::consensus::BlockProposal;
@@ -514,7 +514,7 @@ impl SingleThreadExecutionService {
 
     /// Worker thread main loop (T157: Updated to use parallel executor).
     fn worker_loop<E: ExecutionEngine>(
-        _engine: E,  // Kept for backward compatibility but unused in T157
+        _engine: E, // Kept for backward compatibility but unused in T157
         receiver: Receiver<ExecTask>,
         shutdown: Arc<AtomicBool>,
         queue_len: Arc<AtomicU64>,
@@ -555,8 +555,7 @@ impl SingleThreadExecutionService {
                             // Count successful transactions
                             let success_count =
                                 receipts.iter().filter(|r| r.success).count() as u64;
-                            let error_count =
-                                receipts.iter().filter(|r| !r.success).count() as u64;
+                            let error_count = receipts.iter().filter(|r| !r.success).count() as u64;
 
                             // Update metrics
                             if let Some(ref m) = metrics {

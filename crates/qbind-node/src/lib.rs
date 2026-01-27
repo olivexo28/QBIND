@@ -128,7 +128,7 @@ pub use consensus_node::{
     ConsensusNode, ConsensusNodeError as NetConsensusNodeError, NodeCommitInfo, NodeCommittedBlock,
 };
 pub use consensus_sim::{NodeConsensusSim, NodeConsensusSimError};
-pub use hotstuff_node_sim::{NodeHotstuffHarness, NodeHotstuffHarnessError};
+pub use hotstuff_node_sim::{NodeHotstuffHarness, NodeHotstuffHarnessError, ProposerSource};
 pub use identity_map::PeerValidatorMap;
 pub use ledger_bridge::{InMemoryNodeLedgerHarness, NodeLedgerError, NodeLedgerHarness};
 

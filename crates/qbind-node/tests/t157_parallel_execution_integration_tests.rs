@@ -283,11 +283,7 @@ fn test_tps_harness_compatibility_parallel() {
     for sender_idx in 0..num_senders {
         for nonce in 0..txs_per_sender {
             let sender = test_account_id(sender_idx as u8);
-            all_txs.push(QbindTransaction::new(
-                sender,
-                nonce as u64,
-                vec![0xAB; 64],
-            ));
+            all_txs.push(QbindTransaction::new(sender, nonce as u64, vec![0xAB; 64]));
         }
     }
 
@@ -418,10 +414,7 @@ fn test_nonce_errors_recorded_parallel() {
     let applied = metrics.txs_applied_total();
     let errors = metrics.errors_total();
 
-    eprintln!(
-        "[T157] Applied: {}, Errors: {}",
-        applied, errors
-    );
+    eprintln!("[T157] Applied: {}, Errors: {}", applied, errors);
 
     // 3 should succeed (a0, b0, b1), 1 should fail (a5_wrong)
     assert_eq!(applied, 3, "should have applied 3 txs");

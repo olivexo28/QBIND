@@ -266,7 +266,9 @@ impl QbindBatch {
     ///
     /// `Ok(())` if the signature is valid, `Err` otherwise.
     pub fn verify_signature(&self, pk: &[u8]) -> Result<(), BatchError> {
-        use qbind_crypto::ml_dsa44::{MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE};
+        use qbind_crypto::ml_dsa44::{
+            MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
+        };
 
         if pk.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
             return Err(BatchError::InvalidPublicKey);
@@ -607,7 +609,8 @@ impl Default for DagMempoolConfig {
 
 /// Internal state for the DAG mempool.
 struct DagInner {
-    /// Next sequence number for local batches.
+    /// Next sequence number for local batches (reserved for future use).
+    #[allow(dead_code)]
     next_local_batch_seq: u64,
     /// Batches indexed by batch ID.
     batches_by_id: HashMap<BatchId, StoredBatch>,
@@ -632,7 +635,8 @@ struct DagInner {
 struct StoredBatch {
     /// The batch itself.
     batch: QbindBatch,
-    /// Whether this batch is fully acknowledged (for future use).
+    /// Whether this batch is fully acknowledged (reserved for future availability certs).
+    #[allow(dead_code)]
     acknowledged: bool,
     /// Whether all txs in this batch are committed.
     fully_committed: bool,
@@ -774,7 +778,9 @@ impl InMemoryDagMempool {
         inner.latest_batch_per_validator.insert(creator, batch_id);
 
         // Store the batch
-        inner.batches_by_id.insert(batch_id, StoredBatch::new(batch));
+        inner
+            .batches_by_id
+            .insert(batch_id, StoredBatch::new(batch));
 
         Ok(())
     }
@@ -922,7 +928,7 @@ impl DagMempool for InMemoryDagMempool {
         // First, collect tx_committed reference to avoid borrow issues
         let committed_set = &inner.tx_committed;
         let batch_ids: Vec<BatchId> = inner.batches_by_id.keys().cloned().collect();
-        
+
         // Collect batch IDs that need to be marked as fully committed
         let mut batches_to_mark: Vec<BatchId> = Vec::new();
         for batch_id in &batch_ids {
@@ -939,7 +945,7 @@ impl DagMempool for InMemoryDagMempool {
                 }
             }
         }
-        
+
         // Now mark them
         for batch_id in batches_to_mark {
             if let Some(stored) = inner.batches_by_id.get_mut(&batch_id) {
@@ -961,7 +967,11 @@ impl DagMempool for InMemoryDagMempool {
 
         let num_batches = inner.batches_by_id.len();
         let num_edges: usize = inner.children.values().map(|c| c.len()).sum();
-        let num_txs: usize = inner.batches_by_id.values().map(|b| b.batch.txs.len()).sum();
+        let num_txs: usize = inner
+            .batches_by_id
+            .values()
+            .map(|b| b.batch.txs.len())
+            .sum();
         let pending_txs = inner.pending_txs.len();
         let committed_txs = inner.tx_committed.len();
 
@@ -1163,10 +1173,7 @@ mod tests {
         let preimage1 = batch_signing_preimage(creator, view_hint, &parents, &txs);
         let preimage2 = batch_signing_preimage(creator, view_hint, &parents, &txs);
 
-        assert_eq!(
-            preimage1, preimage2,
-            "signing preimage should be stable"
-        );
+        assert_eq!(preimage1, preimage2, "signing preimage should be stable");
     }
 
     #[test]
@@ -1225,10 +1232,7 @@ mod tests {
 
         // Verify with wrong public key (pk2)
         let result = batch.verify_signature(&pk2_bytes);
-        assert!(
-            result.is_err(),
-            "verification should fail with wrong key"
-        );
+        assert!(result.is_err(), "verification should fail with wrong key");
 
         // Verify with correct public key
         batch
@@ -1294,10 +1298,15 @@ mod tests {
 
         // Insert some transactions
         let txs = vec![make_test_tx(0xDD, 0), make_test_tx(0xDD, 1)];
-        mempool.insert_local_txs(txs).expect("insert should succeed");
+        mempool
+            .insert_local_txs(txs)
+            .expect("insert should succeed");
 
         let stats = mempool.stats();
-        assert!(stats.pending_txs > 0 || stats.num_txs > 0, "should have txs");
+        assert!(
+            stats.pending_txs > 0 || stats.num_txs > 0,
+            "should have txs"
+        );
     }
 
     #[test]
@@ -1315,7 +1324,9 @@ mod tests {
             make_test_tx(0xEE, 1),
             make_test_tx(0xEE, 2),
         ];
-        mempool.insert_local_txs(txs).expect("insert should succeed");
+        mempool
+            .insert_local_txs(txs)
+            .expect("insert should succeed");
 
         let stats = mempool.stats();
         // Should have created 1 batch (2 txs) with 1 pending
@@ -1333,10 +1344,10 @@ mod tests {
         let mempool = InMemoryDagMempool::with_config(config);
 
         // Insert 5 transactions
-        let txs = (0..5)
-            .map(|i| make_test_tx(0xFF, i as u64))
-            .collect();
-        mempool.insert_local_txs(txs).expect("insert should succeed");
+        let txs = (0..5).map(|i| make_test_tx(0xFF, i as u64)).collect();
+        mempool
+            .insert_local_txs(txs)
+            .expect("insert should succeed");
 
         // Select 3 transactions
         let selected = mempool.select_frontier_txs(3);
@@ -1395,10 +1406,7 @@ mod tests {
 
         let stats = mempool.stats();
         // Should only have 1 transaction
-        assert_eq!(
-            stats.pending_txs, 1,
-            "duplicate should be filtered"
-        );
+        assert_eq!(stats.pending_txs, 1, "duplicate should be filtered");
     }
 
     #[test]
