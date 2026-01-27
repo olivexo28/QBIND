@@ -8,7 +8,8 @@
 
 use std::fs::File;
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::consensus_sig::ConsensusSigVerifier;
@@ -18,7 +19,11 @@ use qbind_crypto::DEFAULT_PBKDF2_ITERATIONS;
 /// Expected suite_id for ML-DSA-44 keys.
 const EXPECTED_SUITE_ID: u8 = 100;
 
-use qbind_net::{ClientConnectionConfig, ServerConnectionConfig};
+use qbind_net::{
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, ServerConnectionConfig,
+    ServerHandshakeConfig,
+};
+use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
 use qbind_node::keystore::{
     EncryptedFsValidatorKeystore, EncryptedKeystoreConfig, KeystoreBackend, LocalKeystoreEntryId,
     ValidatorKeystore,
@@ -33,21 +38,20 @@ use tempfile::TempDir;
 // Test Setup Helpers
 // ============================================================================
 
-use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite};
+use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
+use qbind_wire::io::WireEncode;
+use qbind_wire::net::NetworkDelegationCert;
 
-#[allow(dead_code)]
 struct TestSetup {
     _client_cfg: ClientConnectionConfig,
     _server_cfg: ServerConnectionConfig,
 }
 
 // Dummy implementations for testing
-#[allow(dead_code)]
 struct DummyKem {
     suite_id: u8,
 }
 
-#[allow(dead_code)]
 impl DummyKem {
     fn new(suite_id: u8) -> Self {
         DummyKem { suite_id }
@@ -88,12 +92,10 @@ impl KemSuite for DummyKem {
     }
 }
 
-#[allow(dead_code)]
 struct DummyAead {
     suite_id: u8,
 }
 
-#[allow(dead_code)]
 impl DummyAead {
     fn new(suite_id: u8) -> Self {
         DummyAead { suite_id }
@@ -147,12 +149,10 @@ impl AeadSuite for DummyAead {
     }
 }
 
-#[allow(dead_code)]
 struct DummySignature {
     suite_id: u8,
 }
 
-#[allow(dead_code)]
 impl DummySignature {
     fn new(suite_id: u8) -> Self {
         DummySignature { suite_id }
