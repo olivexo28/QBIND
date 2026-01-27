@@ -23,3 +23,8 @@ pub use execution::{
     StateView, TxVerifyError, UserPublicKey, UserSignature, NONCE_KEY_PREFIX, TX_DOMAIN_TAG,
     USER_ML_DSA_44_SUITE_ID,
 };
+
+// T157: Stage A parallel execution exports
+pub use execution::{
+    ParallelExecConfig, ParallelExecStats, SenderPartitionedNonceExecutor, TxReceipt,
+};

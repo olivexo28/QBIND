@@ -69,7 +69,12 @@ For DevNet v0, the following key storage options are available:
     *   **Non-blocking Commit**: The consensus thread enqueues blocks via `submit_block()` instead of blocking on execution.
     *   **Bounded Queue**: Backpressure is applied via a bounded channel; `QueueFull` errors trigger fail-stop in DevNet.
     *   **Deterministic Order**: Blocks are executed in commit order across all validators.
-    *   **Note**: Execution is still logically sequential (single worker thread). Parallel/DAG execution is a future enhancement.
+*   **Stage A Parallel Execution (T157)**: Within-block parallel execution for the nonce-only engine.
+    *   **Sender-Partitioned Parallelism**: Transactions are partitioned by sender; each sender's transactions execute sequentially while different senders execute in parallel.
+    *   **`SenderPartitionedNonceExecutor`**: Uses rayon thread pool for work-stealing parallel execution.
+    *   **Determinism Guarantee**: Per-sender nonce ordering is preserved; final state is identical to sequential execution.
+    *   **Automatic Fallback**: Falls back to sequential execution when fewer than 2 distinct senders (configurable via `min_senders_for_parallel`).
+    *   **Configuration**: `ParallelExecConfig` allows tuning `max_workers` and `min_senders_for_parallel`.
 *   **Commit Hook**: The harness uses `AsyncExecutionService` (T155) when configured, falling back to synchronous `ExecutionAdapter` (T150) for backward compatibility.
 
 ## DevNet-Specific Configuration
@@ -135,6 +140,10 @@ The following metric families are exposed for observability:
 | `qbind_execution_queue_len` | Gauge | Current async execution queue length (T155) |
 | `qbind_execution_queue_full_total` | Counter | Times submit_block failed due to full queue (T155) |
 | `qbind_execution_worker_restarts_total` | Counter | Execution worker restarts (T155) |
+| `qbind_execution_parallel_workers_active` | Gauge | Number of parallel workers used for last block (T157) |
+| `qbind_execution_parallel_sender_partitions` | Histogram | Number of distinct senders per block (T157) |
+| `qbind_execution_block_parallel_seconds` | Histogram | Wall-clock parallel execution time per block (T157) |
+| `qbind_execution_parallel_fallback_total` | Counter | Times execution fell back to sequential (T157) |
 
 #### Signer/Keystore Metrics
 | Metric | Type | Description |
@@ -217,6 +226,34 @@ This section outlines how DevNet components evolve.
 | **Mempool** | FIFO / In-Memory | Priority / QoS | DAG-based Mempool (Narwhal/Bullshark style) |
 | **Storage** | Ephemeral / Basic RocksDB | Full State Persistence | Pruned/Archival Modes |
 | **Networking** | Static Mesh | Dynamic P2P / Gossip | Public P2P + DDoS Protection |
+
+### Parallel Execution & DAG Mempool Roadmap (T156/T157)
+
+As part of the DevNet → TestNet → MainNet progression, two key architectural enhancements are planned:
+
+**Stage A – Parallel Execution (Implemented in T157 for DevNet)**:
+*   Sender-partitioned parallel execution is now implemented for the nonce-only engine.
+*   Transactions from different senders execute concurrently using rayon's work-stealing thread pool.
+*   Per-sender transaction order is strictly preserved; determinism is guaranteed.
+*   Automatic fallback to sequential execution for blocks with few distinct senders.
+*   New metrics track parallelism: `qbind_execution_parallel_workers_active`, `qbind_execution_parallel_sender_partitions`, `qbind_execution_block_parallel_seconds`, `qbind_execution_parallel_fallback_total`.
+*   See: [Parallel Execution Design Spec](./QBIND_PARALLEL_EXECUTION_DESIGN.md)
+
+**DAG-Based Mempool (TestNet / MainNet)**:
+*   Replace FIFO mempool with a Narwhal-style DAG mempool.
+*   Validators create signed batches that form a DAG via parent references.
+*   Availability certificates (2f+1 acknowledgments) guarantee data availability before consensus ordering.
+*   HotStuff leaders propose DAG frontiers rather than raw transaction lists.
+*   See: [DAG Mempool Design Spec](./QBIND_DAG_MEMPOOL_DESIGN.md)
+
+**Rollout Summary**:
+
+| Phase | Network | Mempool | Execution |
+| :--- | :--- | :--- | :--- |
+| Current | DevNet v0 | FIFO | Parallel Stage A (T157) |
+| Phase 1 | TestNet Alpha | DAG (prototype) | Parallel Stage A |
+| Phase 2 | TestNet Beta | DAG (default) | Parallel Stage A |
+| Phase 3 | MainNet | DAG + DoS Protection | Parallel Stage A + B |
 
 ### Future Work (Audit)
 For tracking the evolution and readiness of these future networks, see:

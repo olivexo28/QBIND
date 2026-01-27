@@ -68,7 +68,8 @@ use std::time::Instant;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use qbind_ledger::{
-    ExecutionEngine, ExecutionEngineError, InMemoryState, QbindTransaction, StateUpdater,
+    ExecutionEngine, ExecutionEngineError, InMemoryState, ParallelExecConfig,
+    QbindTransaction, SenderPartitionedNonceExecutor, StateUpdater,
 };
 use qbind_types::Hash32;
 use qbind_wire::consensus::BlockProposal;
@@ -373,12 +374,15 @@ struct ExecTask {
 pub struct SingleThreadExecutionServiceConfig {
     /// Maximum queue capacity (bounded channel size).
     pub queue_capacity: usize,
+    /// Configuration for Stage A parallel execution (T157).
+    pub parallel_config: ParallelExecConfig,
 }
 
 impl Default for SingleThreadExecutionServiceConfig {
     fn default() -> Self {
         Self {
             queue_capacity: 1024,
+            parallel_config: ParallelExecConfig::default(),
         }
     }
 }
@@ -387,6 +391,18 @@ impl SingleThreadExecutionServiceConfig {
     /// Create a new config with the specified queue capacity.
     pub fn with_queue_capacity(mut self, capacity: usize) -> Self {
         self.queue_capacity = capacity;
+        self
+    }
+
+    /// Set the parallel execution configuration (T157).
+    pub fn with_parallel_config(mut self, config: ParallelExecConfig) -> Self {
+        self.parallel_config = config;
+        self
+    }
+
+    /// Disable parallel execution (force sequential) (T157).
+    pub fn sequential_only(mut self) -> Self {
+        self.parallel_config = ParallelExecConfig::sequential();
         self
     }
 }
@@ -472,6 +488,7 @@ impl SingleThreadExecutionService {
         let worker_shutdown = Arc::clone(&shutdown);
         let worker_queue_len = Arc::clone(&queue_len);
         let worker_metrics = metrics.clone();
+        let parallel_config = config.parallel_config.clone();
 
         // Spawn the dedicated worker thread
         thread::spawn(move || {
@@ -481,6 +498,7 @@ impl SingleThreadExecutionService {
                 worker_shutdown,
                 worker_queue_len,
                 worker_metrics,
+                parallel_config,
             );
         });
 
@@ -494,17 +512,20 @@ impl SingleThreadExecutionService {
         }
     }
 
-    /// Worker thread main loop.
+    /// Worker thread main loop (T157: Updated to use parallel executor).
     fn worker_loop<E: ExecutionEngine>(
-        engine: E,
+        _engine: E,  // Kept for backward compatibility but unused in T157
         receiver: Receiver<ExecTask>,
         shutdown: Arc<AtomicBool>,
         queue_len: Arc<AtomicU64>,
         metrics: Option<Arc<ExecutionMetrics>>,
+        parallel_config: ParallelExecConfig,
     ) {
-        let engine = Arc::new(engine);
         let mut state = InMemoryState::new();
         let mut current_height: u64 = 0;
+
+        // T157: Create the sender-partitioned parallel executor
+        let parallel_executor = SenderPartitionedNonceExecutor::new(parallel_config);
 
         loop {
             // Check for shutdown
@@ -519,59 +540,80 @@ impl SingleThreadExecutionService {
                     let len = receiver.len();
                     queue_len.store(len as u64, Ordering::Relaxed);
 
-                    // Apply the block
+                    // Apply the block using T157 parallel executor
                     let block_start = Instant::now();
                     let tx_count = task.block.tx_count();
 
-                    let mut success = true;
-                    for (idx, tx) in task.block.txs.iter().enumerate() {
-                        if let Err(e) = engine.execute_tx(&mut state as &mut dyn StateUpdater, tx) {
-                            // Log error but continue processing
-                            eprintln!(
-                                "[T155] Execution error at height {} tx {}: {:?}",
-                                task.block.height(),
-                                idx,
-                                e
-                            );
-                            success = false;
+                    // T157: Use sender-partitioned parallel execution
+                    match parallel_executor
+                        .execute_block_sender_partitioned(&task.block.txs, &mut state)
+                    {
+                        Ok((receipts, stats)) => {
+                            let block_duration = block_start.elapsed();
+                            current_height = task.block.height();
 
-                            // Record error metric
+                            // Count successful transactions
+                            let success_count =
+                                receipts.iter().filter(|r| r.success).count() as u64;
+                            let error_count =
+                                receipts.iter().filter(|r| !r.success).count() as u64;
+
+                            // Update metrics
                             if let Some(ref m) = metrics {
-                                use crate::metrics::ExecutionErrorReason;
-                                let reason = match &e {
-                                    ExecutionEngineError::NonceMismatch { .. } => {
-                                        ExecutionErrorReason::NonceMismatch
+                                m.add_txs_applied(success_count);
+                                m.record_block_apply(block_duration);
+
+                                // T157: Parallel execution metrics
+                                m.set_parallel_workers_active(stats.workers_used);
+                                m.record_sender_partitions(stats.num_senders);
+                                m.record_parallel_block_time(block_duration);
+
+                                if !stats.used_parallel {
+                                    m.inc_parallel_fallback();
+                                }
+
+                                // Record errors (count nonce mismatches from receipts)
+                                for receipt in &receipts {
+                                    if !receipt.success {
+                                        use crate::metrics::ExecutionErrorReason;
+                                        m.inc_error(ExecutionErrorReason::NonceMismatch);
                                     }
-                                    _ => ExecutionErrorReason::Other,
-                                };
-                                m.inc_error(reason);
+                                }
                             }
 
-                            // Stop processing this block on first error (fail-stop behavior)
-                            break;
+                            // Brief log (no sensitive content)
+                            if tx_count > 0 {
+                                eprintln!(
+                                    "[T157] Applied block {} ({} txs, {} senders, parallel={}) in {:?}",
+                                    task.block.height(),
+                                    tx_count,
+                                    stats.num_senders,
+                                    stats.used_parallel,
+                                    block_duration
+                                );
+                            }
+
+                            if error_count > 0 {
+                                eprintln!(
+                                    "[T157] Block {} had {} tx errors",
+                                    task.block.height(),
+                                    error_count
+                                );
+                            }
                         }
-                    }
+                        Err(e) => {
+                            // Internal execution error (should be rare)
+                            eprintln!(
+                                "[T157] Execution error at height {}: {:?}",
+                                task.block.height(),
+                                e
+                            );
 
-                    let block_duration = block_start.elapsed();
-
-                    // Update metrics on success
-                    if success {
-                        current_height = task.block.height();
-
-                        if let Some(ref m) = metrics {
-                            m.add_txs_applied(tx_count as u64);
-                            m.record_block_apply(block_duration);
+                            if let Some(ref m) = metrics {
+                                use crate::metrics::ExecutionErrorReason;
+                                m.inc_error(ExecutionErrorReason::Other);
+                            }
                         }
-                    }
-
-                    // Brief log (no sensitive content)
-                    if tx_count > 0 {
-                        eprintln!(
-                            "[T155] Applied block {} ({} txs) in {:?}",
-                            task.block.height(),
-                            tx_count,
-                            block_duration
-                        );
                     }
                 }
                 Err(_) => {
@@ -582,7 +624,7 @@ impl SingleThreadExecutionService {
         }
 
         eprintln!(
-            "[T155] Execution worker shutting down at height {}",
+            "[T157] Execution worker shutting down at height {}",
             current_height
         );
     }

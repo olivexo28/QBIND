@@ -3272,6 +3272,34 @@ pub struct ExecutionMetrics {
     queue_full_total: AtomicU64,
     /// Number of worker restarts (if worker panics/fails) - T155.
     worker_restarts_total: AtomicU64,
+
+    // ========================================================================
+    // T157: Stage A parallel execution metrics
+    // ========================================================================
+    /// Number of workers active for the last block (gauge) - T157.
+    parallel_workers_active: AtomicU64,
+    /// Total sender partitions observed (sum for histogram) - T157.
+    parallel_sender_partitions_sum: AtomicU64,
+    /// Sender partitions bucket: < 4 senders.
+    parallel_sender_partitions_bucket_4: AtomicU64,
+    /// Sender partitions bucket: < 16 senders.
+    parallel_sender_partitions_bucket_16: AtomicU64,
+    /// Sender partitions bucket: < 64 senders.
+    parallel_sender_partitions_bucket_64: AtomicU64,
+    /// Sender partitions bucket: >= 64 senders.
+    parallel_sender_partitions_bucket_over_64: AtomicU64,
+    /// Parallel block execution time sum in milliseconds - T157.
+    parallel_block_time_ms_sum: AtomicU64,
+    /// Parallel execution time bucket: < 1ms.
+    parallel_block_bucket_1ms: AtomicU64,
+    /// Parallel execution time bucket: < 10ms.
+    parallel_block_bucket_10ms: AtomicU64,
+    /// Parallel execution time bucket: < 100ms.
+    parallel_block_bucket_100ms: AtomicU64,
+    /// Parallel execution time bucket: >= 100ms.
+    parallel_block_bucket_over_100ms: AtomicU64,
+    /// Times we intentionally fell back to sequential - T157.
+    parallel_fallback_total: AtomicU64,
 }
 
 impl ExecutionMetrics {
@@ -3396,6 +3424,112 @@ impl ExecutionMetrics {
         self.worker_restarts_total.load(Ordering::Relaxed)
     }
 
+    // ========================================================================
+    // T157: Stage A parallel execution metrics
+    // ========================================================================
+
+    /// Set the number of parallel workers active for the current block (T157).
+    pub fn set_parallel_workers_active(&self, workers: usize) {
+        self.parallel_workers_active
+            .store(workers as u64, Ordering::Relaxed);
+    }
+
+    /// Get the number of parallel workers active (T157).
+    pub fn parallel_workers_active(&self) -> u64 {
+        self.parallel_workers_active.load(Ordering::Relaxed)
+    }
+
+    /// Record sender partition count for a block (T157).
+    ///
+    /// This records the number of distinct senders in a block for histogram tracking.
+    pub fn record_sender_partitions(&self, num_senders: usize) {
+        let count = num_senders as u64;
+        self.parallel_sender_partitions_sum
+            .fetch_add(count, Ordering::Relaxed);
+
+        if num_senders < 4 {
+            self.parallel_sender_partitions_bucket_4
+                .fetch_add(1, Ordering::Relaxed);
+        } else if num_senders < 16 {
+            self.parallel_sender_partitions_bucket_16
+                .fetch_add(1, Ordering::Relaxed);
+        } else if num_senders < 64 {
+            self.parallel_sender_partitions_bucket_64
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.parallel_sender_partitions_bucket_over_64
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get sender partition histogram buckets (T157).
+    pub fn sender_partitions_buckets(&self) -> (u64, u64, u64, u64) {
+        (
+            self.parallel_sender_partitions_bucket_4
+                .load(Ordering::Relaxed),
+            self.parallel_sender_partitions_bucket_16
+                .load(Ordering::Relaxed),
+            self.parallel_sender_partitions_bucket_64
+                .load(Ordering::Relaxed),
+            self.parallel_sender_partitions_bucket_over_64
+                .load(Ordering::Relaxed),
+        )
+    }
+
+    /// Get sender partition sum (T157).
+    pub fn sender_partitions_sum(&self) -> u64 {
+        self.parallel_sender_partitions_sum.load(Ordering::Relaxed)
+    }
+
+    /// Record parallel block execution time (T157).
+    pub fn record_parallel_block_time(&self, duration: std::time::Duration) {
+        let millis = duration.as_millis() as u64;
+        self.parallel_block_time_ms_sum
+            .fetch_add(millis, Ordering::Relaxed);
+
+        if millis < 1 {
+            self.parallel_block_bucket_1ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else if millis < 10 {
+            self.parallel_block_bucket_10ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else if millis < 100 {
+            self.parallel_block_bucket_100ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.parallel_block_bucket_over_100ms
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get parallel block time sum in milliseconds (T157).
+    pub fn parallel_block_time_ms_sum(&self) -> u64 {
+        self.parallel_block_time_ms_sum.load(Ordering::Relaxed)
+    }
+
+    /// Get parallel block time histogram buckets (T157).
+    pub fn parallel_block_buckets(&self) -> (u64, u64, u64, u64) {
+        (
+            self.parallel_block_bucket_1ms.load(Ordering::Relaxed),
+            self.parallel_block_bucket_10ms.load(Ordering::Relaxed),
+            self.parallel_block_bucket_100ms.load(Ordering::Relaxed),
+            self.parallel_block_bucket_over_100ms
+                .load(Ordering::Relaxed),
+        )
+    }
+
+    /// Increment parallel fallback counter (T157).
+    ///
+    /// Call this when execution falls back to sequential due to low sender count.
+    pub fn inc_parallel_fallback(&self) {
+        self.parallel_fallback_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total parallel fallbacks (T157).
+    pub fn parallel_fallback_total(&self) -> u64 {
+        self.parallel_fallback_total.load(Ordering::Relaxed)
+    }
+
     /// Format execution metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -3451,6 +3585,75 @@ impl ExecutionMetrics {
             "qbind_execution_worker_restarts_total {}\n",
             self.worker_restarts_total()
         ));
+
+        // T157: Parallel execution metrics
+        output.push_str("\n# T157: Stage A parallel execution metrics\n");
+        output.push_str(&format!(
+            "qbind_execution_parallel_workers_active {}\n",
+            self.parallel_workers_active()
+        ));
+
+        // Sender partitions histogram
+        let (sp4, sp16, sp64, sp_over) = self.sender_partitions_buckets();
+        let sp_total = sp4 + sp16 + sp64 + sp_over;
+        output.push_str(&format!(
+            "qbind_execution_parallel_sender_partitions_bucket{{le=\"4\"}} {}\n",
+            sp4
+        ));
+        output.push_str(&format!(
+            "qbind_execution_parallel_sender_partitions_bucket{{le=\"16\"}} {}\n",
+            sp4 + sp16
+        ));
+        output.push_str(&format!(
+            "qbind_execution_parallel_sender_partitions_bucket{{le=\"64\"}} {}\n",
+            sp4 + sp16 + sp64
+        ));
+        output.push_str(&format!(
+            "qbind_execution_parallel_sender_partitions_bucket{{le=\"+Inf\"}} {}\n",
+            sp_total
+        ));
+        output.push_str(&format!(
+            "qbind_execution_parallel_sender_partitions_sum {}\n",
+            self.sender_partitions_sum()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_parallel_sender_partitions_count {}\n",
+            sp_total
+        ));
+
+        // Parallel block time histogram
+        let (pb1, pb10, pb100, pb_over) = self.parallel_block_buckets();
+        let pb_total = pb1 + pb10 + pb100 + pb_over;
+        output.push_str(&format!(
+            "qbind_execution_block_parallel_seconds_bucket{{le=\"0.001\"}} {}\n",
+            pb1
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_parallel_seconds_bucket{{le=\"0.01\"}} {}\n",
+            pb1 + pb10
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_parallel_seconds_bucket{{le=\"0.1\"}} {}\n",
+            pb1 + pb10 + pb100
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_parallel_seconds_bucket{{le=\"+Inf\"}} {}\n",
+            pb_total
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_parallel_seconds_sum {}\n",
+            self.parallel_block_time_ms_sum() as f64 / 1000.0
+        ));
+        output.push_str(&format!(
+            "qbind_execution_block_parallel_seconds_count {}\n",
+            pb_total
+        ));
+
+        output.push_str(&format!(
+            "qbind_execution_parallel_fallback_total {}\n",
+            self.parallel_fallback_total()
+        ));
+
         output
     }
 }

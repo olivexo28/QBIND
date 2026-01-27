@@ -632,6 +632,372 @@ impl ExecutionEngine for NonceExecutionEngine {
 }
 
 // ============================================================================
+// T157: Stage A Parallel Execution (Sender-Partitioned)
+// ============================================================================
+
+use rayon::prelude::*;
+
+/// Transaction receipt for execution result tracking.
+///
+/// This mirrors `ExecutionOutcome` but is designed for lightweight result
+/// aggregation in parallel execution scenarios.
+#[derive(Debug, Clone)]
+pub struct TxReceipt {
+    /// Whether the transaction succeeded.
+    pub success: bool,
+    /// Events emitted during execution.
+    pub events: Vec<ExecutionEvent>,
+    /// Gas used (placeholder).
+    pub gas_used: u64,
+}
+
+impl TxReceipt {
+    /// Create a success receipt.
+    pub fn success(events: Vec<ExecutionEvent>, gas_used: u64) -> Self {
+        Self {
+            success: true,
+            events,
+            gas_used,
+        }
+    }
+
+    /// Create a failure receipt.
+    pub fn failure(events: Vec<ExecutionEvent>, gas_used: u64) -> Self {
+        Self {
+            success: false,
+            events,
+            gas_used,
+        }
+    }
+
+    /// Convert from ExecutionOutcome.
+    pub fn from_outcome(outcome: ExecutionOutcome) -> Self {
+        Self {
+            success: outcome.success,
+            events: outcome.events,
+            gas_used: outcome.gas_used,
+        }
+    }
+}
+
+/// Configuration for Stage A parallel execution.
+///
+/// # Parameters
+///
+/// * `max_workers` - Maximum worker threads. 0 means auto-detect (rayon default).
+/// * `min_senders_for_parallel` - Minimum distinct senders required to use parallel
+///   execution. Below this threshold, falls back to sequential for lower overhead.
+#[derive(Debug, Clone)]
+pub struct ParallelExecConfig {
+    /// Maximum worker threads (0 = auto-detect from available cores).
+    pub max_workers: usize,
+    /// Minimum number of distinct senders to enable parallel execution.
+    /// Below this threshold, fall back to sequential for lower overhead.
+    pub min_senders_for_parallel: usize,
+}
+
+impl Default for ParallelExecConfig {
+    fn default() -> Self {
+        Self {
+            max_workers: 0, // Auto-detect
+            min_senders_for_parallel: 2,
+        }
+    }
+}
+
+impl ParallelExecConfig {
+    /// Create a new config with default settings.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set maximum worker threads.
+    pub fn with_max_workers(mut self, workers: usize) -> Self {
+        self.max_workers = workers;
+        self
+    }
+
+    /// Set minimum senders threshold for parallel execution.
+    pub fn with_min_senders(mut self, min_senders: usize) -> Self {
+        self.min_senders_for_parallel = min_senders;
+        self
+    }
+
+    /// Create a config that forces sequential execution.
+    pub fn sequential() -> Self {
+        Self {
+            max_workers: 1,
+            min_senders_for_parallel: usize::MAX,
+        }
+    }
+}
+
+/// Execution statistics from parallel block execution.
+///
+/// These stats are used for metrics and observability.
+#[derive(Debug, Clone, Default)]
+pub struct ParallelExecStats {
+    /// Number of distinct senders (partitions) in the block.
+    pub num_senders: usize,
+    /// Number of workers actually used (may be less than num_senders).
+    pub workers_used: usize,
+    /// Whether parallel execution was used (vs sequential fallback).
+    pub used_parallel: bool,
+}
+
+/// Stage A sender-partitioned parallel executor for the nonce-only engine.
+///
+/// This executor implements Stage A of the QBIND parallel execution design:
+/// - Partition transactions by sender
+/// - Execute per-sender chains in parallel
+/// - Merge nonce updates back into state (commutative for nonce-only)
+/// - Reassemble receipts in original block order
+///
+/// # Determinism Guarantee
+///
+/// For the nonce-only engine, any schedule that:
+/// - Preserves per-sender order, and
+/// - Applies all transactions in the block
+///
+/// yields the same final state and the same set of receipts.
+///
+/// # Thread Safety
+///
+/// This executor is `Send + Sync` and can be shared across threads.
+/// It uses rayon for work-stealing parallel execution.
+pub struct SenderPartitionedNonceExecutor {
+    /// Configuration for parallel execution.
+    config: ParallelExecConfig,
+}
+
+impl std::fmt::Debug for SenderPartitionedNonceExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SenderPartitionedNonceExecutor")
+            .field("config", &self.config)
+            .finish()
+    }
+}
+
+/// Internal structure for tracking indexed transactions.
+struct IndexedTx {
+    /// Original index in the block's transaction list.
+    index: usize,
+    /// The transaction.
+    tx: QbindTransaction,
+}
+
+/// Per-sender execution result.
+struct SenderResult {
+    /// The sender's account ID.
+    sender: AccountId,
+    /// Final nonce after executing all transactions.
+    final_nonce: u64,
+    /// Receipts with their original indices.
+    receipts: Vec<(usize, TxReceipt)>,
+}
+
+impl SenderPartitionedNonceExecutor {
+    /// Create a new parallel executor with the given configuration.
+    pub fn new(config: ParallelExecConfig) -> Self {
+        Self { config }
+    }
+
+    /// Create a new parallel executor with default configuration.
+    pub fn default_config() -> Self {
+        Self::new(ParallelExecConfig::default())
+    }
+
+    /// Get the executor configuration.
+    pub fn config(&self) -> &ParallelExecConfig {
+        &self.config
+    }
+
+    /// Execute a block using sender-partitioned parallel execution.
+    ///
+    /// This is the main entry point for Stage A parallel execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `transactions` - The transactions to execute in block order
+    /// * `state` - The mutable state to execute against
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (receipts, stats) where receipts are in the same order as
+    /// the input transactions.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only for internal failures (e.g., thread panic).
+    /// Individual transaction failures are recorded in receipts.
+    pub fn execute_block_sender_partitioned(
+        &self,
+        transactions: &[QbindTransaction],
+        state: &mut InMemoryState,
+    ) -> Result<(Vec<TxReceipt>, ParallelExecStats), ExecutionEngineError> {
+        if transactions.is_empty() {
+            return Ok((
+                Vec::new(),
+                ParallelExecStats {
+                    num_senders: 0,
+                    workers_used: 0,
+                    used_parallel: false,
+                },
+            ));
+        }
+
+        // Step 1: Partition by sender while preserving original indices
+        let mut per_sender: HashMap<AccountId, Vec<IndexedTx>> = HashMap::new();
+        for (index, tx) in transactions.iter().enumerate() {
+            per_sender
+                .entry(tx.sender)
+                .or_default()
+                .push(IndexedTx {
+                    index,
+                    tx: tx.clone(),
+                });
+        }
+
+        let num_senders = per_sender.len();
+
+        // Step 2: Decide whether to parallelize
+        let use_parallel = num_senders >= self.config.min_senders_for_parallel
+            && self.config.max_workers != 1;
+
+        // Step 3: Fetch initial nonces for each sender
+        let sender_initial_nonces: HashMap<AccountId, u64> = per_sender
+            .keys()
+            .map(|sender| (*sender, get_account_nonce(state, sender)))
+            .collect();
+
+        // Step 4: Execute (parallel or sequential)
+        let sender_results: Vec<SenderResult> = if use_parallel {
+            self.execute_parallel(&per_sender, &sender_initial_nonces)
+        } else {
+            self.execute_sequential(&per_sender, &sender_initial_nonces)
+        };
+
+        let workers_used = if use_parallel {
+            num_senders.min(rayon::current_num_threads())
+        } else {
+            1
+        };
+
+        // Step 5: Merge per-sender nonce updates into state
+        for result in &sender_results {
+            set_account_nonce(state, &result.sender, result.final_nonce);
+        }
+
+        // Step 6: Reassemble receipts in original block order
+        let mut receipts: Vec<Option<TxReceipt>> = vec![None; transactions.len()];
+        for result in sender_results {
+            for (index, receipt) in result.receipts {
+                receipts[index] = Some(receipt);
+            }
+        }
+
+        // Verify no gaps (should never happen if algorithm is correct)
+        let receipts: Vec<TxReceipt> = receipts
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.ok_or_else(|| {
+                    ExecutionEngineError::InternalError(format!("missing receipt for tx {}", i))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let stats = ParallelExecStats {
+            num_senders,
+            workers_used,
+            used_parallel: use_parallel,
+        };
+
+        Ok((receipts, stats))
+    }
+
+    /// Execute transactions sequentially (fallback path).
+    fn execute_sequential(
+        &self,
+        per_sender: &HashMap<AccountId, Vec<IndexedTx>>,
+        initial_nonces: &HashMap<AccountId, u64>,
+    ) -> Vec<SenderResult> {
+        per_sender
+            .iter()
+            .map(|(sender, indexed_txs)| {
+                let initial_nonce = *initial_nonces.get(sender).unwrap_or(&0);
+                self.execute_sender_chain(*sender, indexed_txs, initial_nonce)
+            })
+            .collect()
+    }
+
+    /// Execute transactions in parallel using rayon.
+    fn execute_parallel(
+        &self,
+        per_sender: &HashMap<AccountId, Vec<IndexedTx>>,
+        initial_nonces: &HashMap<AccountId, u64>,
+    ) -> Vec<SenderResult> {
+        // Collect into Vec for parallel iteration (HashMap doesn't implement IntoParallelIterator)
+        let sender_chains: Vec<_> = per_sender.iter().collect();
+
+        sender_chains
+            .par_iter()
+            .map(|(sender, indexed_txs)| {
+                let initial_nonce = *initial_nonces.get(*sender).unwrap_or(&0);
+                self.execute_sender_chain(**sender, indexed_txs, initial_nonce)
+            })
+            .collect()
+    }
+
+    /// Execute a single sender's transaction chain.
+    ///
+    /// This is the core execution logic for one sender. Transactions are
+    /// executed in order, checking nonces and incrementing on success.
+    fn execute_sender_chain(
+        &self,
+        sender: AccountId,
+        indexed_txs: &[IndexedTx],
+        initial_nonce: u64,
+    ) -> SenderResult {
+        let mut local_nonce = initial_nonce;
+        let mut receipts = Vec::with_capacity(indexed_txs.len());
+
+        for itx in indexed_txs {
+            let receipt = if itx.tx.nonce == local_nonce {
+                // Success: increment nonce
+                local_nonce += 1;
+                TxReceipt::success(
+                    vec![ExecutionEvent::TxAccepted {
+                        sender,
+                        nonce: itx.tx.nonce,
+                    }],
+                    0,
+                )
+            } else {
+                // Nonce mismatch: record failure but continue processing
+                TxReceipt::failure(
+                    vec![ExecutionEvent::TxRejected {
+                        sender,
+                        reason: format!(
+                            "nonce mismatch: expected {}, got {}",
+                            local_nonce, itx.tx.nonce
+                        ),
+                    }],
+                    0,
+                )
+            };
+            receipts.push((itx.index, receipt));
+        }
+
+        SenderResult {
+            sender,
+            final_nonce: local_nonce,
+            receipts,
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
