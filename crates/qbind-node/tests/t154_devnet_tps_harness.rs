@@ -554,16 +554,20 @@ fn test_t154_metrics_smoke() {
         1
     );
 
-    // Verify format_metrics doesn't panic and includes T154 sections
+    // Verify format_metrics doesn't panic and includes T154/T155 sections
     let output = metrics.format_metrics();
     assert!(output.contains("Consensus metrics (T154)"));
     assert!(output.contains("Mempool metrics (T154)"));
-    assert!(output.contains("Execution metrics (T154)"));
+    assert!(output.contains("Execution metrics (T154/T155)"));
     assert!(output.contains("Signer/Keystore metrics (T154)"));
     assert!(output.contains("qbind_consensus_proposals_total"));
     assert!(output.contains("qbind_mempool_txs_total"));
     assert!(output.contains("qbind_execution_txs_applied_total"));
     assert!(output.contains("qbind_signer_sign_requests_total"));
+    // T155: Verify async execution metrics are included
+    assert!(output.contains("qbind_execution_queue_len"));
+    assert!(output.contains("qbind_execution_queue_full_total"));
+    assert!(output.contains("qbind_execution_worker_restarts_total"));
 }
 
 #[test]
