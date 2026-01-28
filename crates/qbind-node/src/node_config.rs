@@ -38,6 +38,61 @@
 use qbind_types::{ChainId, NetworkEnvironment};
 
 // ============================================================================
+// ExecutionProfile (T163)
+// ============================================================================
+
+/// Execution profile for selecting the transaction execution mode.
+///
+/// # T163: VM v0 Introduction
+///
+/// This enum allows the node to choose between different execution modes:
+/// - `NonceOnly`: DevNet default, uses Stage A sender-partitioned parallel execution
+/// - `VmV0`: TestNet Alpha, uses sequential VM v0 execution with account balances
+///
+/// DevNet v0 behavior is preserved by defaulting to `NonceOnly`.
+/// TestNet Alpha will use `VmV0` for the new VM-based execution.
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::{ExecutionProfile, parse_execution_profile};
+///
+/// // Parse from CLI argument
+/// let profile = parse_execution_profile("vm-v0");
+/// assert_eq!(profile, ExecutionProfile::VmV0);
+///
+/// // Default is NonceOnly
+/// let default_profile = parse_execution_profile("unknown");
+/// assert_eq!(default_profile, ExecutionProfile::NonceOnly);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ExecutionProfile {
+    /// Nonce-only execution (DevNet default).
+    ///
+    /// Uses Stage A sender-partitioned parallel execution.
+    /// Transactions only validate and increment nonces.
+    #[default]
+    NonceOnly,
+
+    /// VM v0 execution (TestNet Alpha).
+    ///
+    /// Uses sequential execution with account state:
+    /// - AccountState { nonce, balance }
+    /// - Transfer transaction semantics
+    /// - Deterministic state transitions
+    VmV0,
+}
+
+impl std::fmt::Display for ExecutionProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionProfile::NonceOnly => write!(f, "nonce-only"),
+            ExecutionProfile::VmV0 => write!(f, "vm-v0"),
+        }
+    }
+}
+
+// ============================================================================
 // NodeConfig
 // ============================================================================
 
@@ -54,15 +109,28 @@ use qbind_types::{ChainId, NetworkEnvironment};
 /// - **Domain Scope**: DEV, TST, or MAIN for domain-separated signatures
 /// - **Logging**: Environment is included in startup logs and metrics
 ///
+/// # Execution Profile (T163)
+///
+/// The `execution_profile` field determines:
+/// - **NonceOnly**: DevNet default, Stage A parallel nonce execution
+/// - **VmV0**: TestNet Alpha, sequential VM v0 with account balances
+///
 /// # Example
 ///
 /// ```rust,ignore
-/// use qbind_node::node_config::NodeConfig;
+/// use qbind_node::node_config::{NodeConfig, ExecutionProfile};
 /// use qbind_types::NetworkEnvironment;
 ///
 /// let config = NodeConfig::new(NetworkEnvironment::Testnet);
 /// assert_eq!(config.environment, NetworkEnvironment::Testnet);
 /// assert_eq!(config.chain_id().as_u64(), 0x51424E44_54535400);
+///
+/// // Create config with VM v0 profile for TestNet
+/// let vm_config = NodeConfig::with_profile(
+///     NetworkEnvironment::Testnet,
+///     ExecutionProfile::VmV0
+/// );
+/// assert_eq!(vm_config.execution_profile, ExecutionProfile::VmV0);
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeConfig {
@@ -71,36 +139,70 @@ pub struct NodeConfig {
     /// Determines the chain ID and domain scope used for all
     /// signing and verification operations.
     pub environment: NetworkEnvironment,
+
+    /// The execution profile for this node (T163).
+    ///
+    /// Determines the transaction execution mode:
+    /// - NonceOnly: Stage A parallel nonce execution (DevNet default)
+    /// - VmV0: Sequential VM v0 with account balances (TestNet Alpha)
+    pub execution_profile: ExecutionProfile,
 }
 
 impl Default for NodeConfig {
-    /// Default configuration uses DevNet environment.
+    /// Default configuration uses DevNet environment and NonceOnly profile.
     ///
     /// This ensures backward compatibility with existing code and scripts
-    /// that don't explicitly specify an environment.
+    /// that don't explicitly specify an environment or profile.
     fn default() -> Self {
         Self {
             environment: NetworkEnvironment::Devnet,
+            execution_profile: ExecutionProfile::NonceOnly,
         }
     }
 }
 
 impl NodeConfig {
     /// Create a new node configuration with the specified environment.
+    ///
+    /// Uses the default execution profile (NonceOnly) for backward compatibility.
     pub fn new(environment: NetworkEnvironment) -> Self {
-        Self { environment }
+        Self {
+            environment,
+            execution_profile: ExecutionProfile::NonceOnly,
+        }
+    }
+
+    /// Create a new node configuration with environment and execution profile.
+    pub fn with_profile(
+        environment: NetworkEnvironment,
+        execution_profile: ExecutionProfile,
+    ) -> Self {
+        Self {
+            environment,
+            execution_profile,
+        }
     }
 
     /// Create a DevNet configuration.
     ///
     /// Convenience method for the most common test/dev case.
+    /// Uses NonceOnly profile (DevNet default).
     pub fn devnet() -> Self {
         Self::new(NetworkEnvironment::Devnet)
     }
 
     /// Create a TestNet configuration.
+    ///
+    /// Uses NonceOnly profile by default. For VM v0, use `testnet_vm_v0()`.
     pub fn testnet() -> Self {
         Self::new(NetworkEnvironment::Testnet)
+    }
+
+    /// Create a TestNet configuration with VM v0 profile (T163).
+    ///
+    /// This is the recommended configuration for TestNet Alpha.
+    pub fn testnet_vm_v0() -> Self {
+        Self::with_profile(NetworkEnvironment::Testnet, ExecutionProfile::VmV0)
     }
 
     /// Create a MainNet configuration.
@@ -143,18 +245,19 @@ impl NodeConfig {
     ///
     /// Prints to stdout:
     /// ```text
-    /// qbind-node[validator=V1]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV
+    /// qbind-node[validator=V1]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV profile=nonce-only
     /// ```
     pub fn log_startup_info(&self, validator_id: Option<&str>) {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
 
         println!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={}",
             validator_str,
             self.environment,
             chain_id_hex,
-            self.scope()
+            self.scope(),
+            self.execution_profile
         );
     }
 
@@ -172,11 +275,12 @@ impl NodeConfig {
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
 
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={}",
             validator_str,
             self.environment,
             chain_id_hex,
-            self.scope()
+            self.scope(),
+            self.execution_profile
         )
     }
 }
@@ -248,6 +352,51 @@ pub const DEFAULT_ENVIRONMENT: &str = "devnet";
 pub const VALID_ENVIRONMENTS: &[&str] = &["devnet", "testnet", "mainnet"];
 
 // ============================================================================
+// Execution Profile CLI Parsing (T163)
+// ============================================================================
+
+/// Parse an execution profile from a CLI argument string.
+///
+/// Accepts case-insensitive values:
+/// - "nonce-only" → `ExecutionProfile::NonceOnly` (default)
+/// - "vm-v0" → `ExecutionProfile::VmV0`
+///
+/// Unknown values default to `NonceOnly` for backward compatibility.
+///
+/// # Arguments
+///
+/// * `s` - The execution profile string from CLI
+///
+/// # Returns
+///
+/// The parsed `ExecutionProfile`. Unknown values return `NonceOnly`.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_execution_profile;
+/// use qbind_node::node_config::ExecutionProfile;
+///
+/// assert_eq!(parse_execution_profile("nonce-only"), ExecutionProfile::NonceOnly);
+/// assert_eq!(parse_execution_profile("vm-v0"), ExecutionProfile::VmV0);
+/// assert_eq!(parse_execution_profile("VM-V0"), ExecutionProfile::VmV0);
+/// assert_eq!(parse_execution_profile("unknown"), ExecutionProfile::NonceOnly); // fallback
+/// ```
+pub fn parse_execution_profile(s: &str) -> ExecutionProfile {
+    match s.to_ascii_lowercase().as_str() {
+        "nonce-only" => ExecutionProfile::NonceOnly,
+        "vm-v0" => ExecutionProfile::VmV0,
+        _ => ExecutionProfile::NonceOnly,
+    }
+}
+
+/// Default execution profile string for CLI parsing.
+pub const DEFAULT_EXECUTION_PROFILE: &str = "nonce-only";
+
+/// Valid execution profile values for CLI help text.
+pub const VALID_EXECUTION_PROFILES: &[&str] = &["nonce-only", "vm-v0"];
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -262,6 +411,7 @@ mod tests {
         assert_eq!(config.environment, NetworkEnvironment::Devnet);
         assert_eq!(config.chain_id(), QBIND_DEVNET_CHAIN_ID);
         assert_eq!(config.scope(), "DEV");
+        assert_eq!(config.execution_profile, ExecutionProfile::NonceOnly);
     }
 
     #[test]
@@ -270,6 +420,7 @@ mod tests {
         assert_eq!(config.environment, NetworkEnvironment::Devnet);
         assert_eq!(config.chain_id(), QBIND_DEVNET_CHAIN_ID);
         assert_eq!(config.scope(), "DEV");
+        assert_eq!(config.execution_profile, ExecutionProfile::NonceOnly);
     }
 
     #[test]
@@ -278,6 +429,7 @@ mod tests {
         assert_eq!(config.environment, NetworkEnvironment::Testnet);
         assert_eq!(config.chain_id(), QBIND_TESTNET_CHAIN_ID);
         assert_eq!(config.scope(), "TST");
+        assert_eq!(config.execution_profile, ExecutionProfile::NonceOnly);
     }
 
     #[test]
@@ -286,6 +438,7 @@ mod tests {
         assert_eq!(config.environment, NetworkEnvironment::Mainnet);
         assert_eq!(config.chain_id(), QBIND_MAINNET_CHAIN_ID);
         assert_eq!(config.scope(), "MAIN");
+        assert_eq!(config.execution_profile, ExecutionProfile::NonceOnly);
     }
 
     #[test]
@@ -368,5 +521,81 @@ mod tests {
         assert_ne!(devnet, testnet);
         assert_ne!(devnet, mainnet);
         assert_ne!(testnet, mainnet);
+    }
+
+    // ========================================================================
+    // T163: ExecutionProfile Tests
+    // ========================================================================
+
+    #[test]
+    fn test_execution_profile_default() {
+        let profile = ExecutionProfile::default();
+        assert_eq!(profile, ExecutionProfile::NonceOnly);
+    }
+
+    #[test]
+    fn test_execution_profile_display() {
+        assert_eq!(format!("{}", ExecutionProfile::NonceOnly), "nonce-only");
+        assert_eq!(format!("{}", ExecutionProfile::VmV0), "vm-v0");
+    }
+
+    #[test]
+    fn test_node_config_with_profile() {
+        let config = NodeConfig::with_profile(NetworkEnvironment::Testnet, ExecutionProfile::VmV0);
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert_eq!(config.execution_profile, ExecutionProfile::VmV0);
+    }
+
+    #[test]
+    fn test_node_config_testnet_vm_v0() {
+        let config = NodeConfig::testnet_vm_v0();
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert_eq!(config.execution_profile, ExecutionProfile::VmV0);
+    }
+
+    #[test]
+    fn test_parse_execution_profile_valid() {
+        // Case-insensitive matching
+        assert_eq!(
+            parse_execution_profile("nonce-only"),
+            ExecutionProfile::NonceOnly
+        );
+        assert_eq!(
+            parse_execution_profile("NONCE-ONLY"),
+            ExecutionProfile::NonceOnly
+        );
+        assert_eq!(
+            parse_execution_profile("Nonce-Only"),
+            ExecutionProfile::NonceOnly
+        );
+        assert_eq!(parse_execution_profile("vm-v0"), ExecutionProfile::VmV0);
+        assert_eq!(parse_execution_profile("VM-V0"), ExecutionProfile::VmV0);
+    }
+
+    #[test]
+    fn test_parse_execution_profile_fallback() {
+        // Unknown values should fallback to NonceOnly
+        assert_eq!(
+            parse_execution_profile("invalid"),
+            ExecutionProfile::NonceOnly
+        );
+        assert_eq!(parse_execution_profile(""), ExecutionProfile::NonceOnly);
+        assert_eq!(
+            parse_execution_profile("vm-v1"),
+            ExecutionProfile::NonceOnly
+        );
+    }
+
+    #[test]
+    fn test_execution_profile_constants() {
+        assert_eq!(DEFAULT_EXECUTION_PROFILE, "nonce-only");
+        assert_eq!(VALID_EXECUTION_PROFILES, &["nonce-only", "vm-v0"]);
+    }
+
+    #[test]
+    fn test_startup_info_includes_profile() {
+        let config = NodeConfig::testnet_vm_v0();
+        let info = config.startup_info_string(Some("V1"));
+        assert!(info.contains("profile=vm-v0"));
     }
 }

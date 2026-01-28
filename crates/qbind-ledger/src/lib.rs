@@ -28,3 +28,9 @@ pub use execution::{
 pub use execution::{
     ParallelExecConfig, ParallelExecStats, SenderPartitionedNonceExecutor, TxReceipt,
 };
+
+// T163: VM v0 state model and execution engine exports
+pub use execution::{
+    AccountState, AccountStateUpdater, AccountStateView, InMemoryAccountState, TransferPayload,
+    VmV0Error, VmV0ExecutionEngine, VmV0TxResult, TRANSFER_PAYLOAD_SIZE,
+};
