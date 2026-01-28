@@ -68,13 +68,14 @@ use std::time::Instant;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use qbind_ledger::{
-    ExecutionEngine, ExecutionEngineError, InMemoryState, ParallelExecConfig, QbindTransaction,
-    SenderPartitionedNonceExecutor, StateUpdater,
+    ExecutionEngine, ExecutionEngineError, InMemoryAccountState, InMemoryState, ParallelExecConfig,
+    QbindTransaction, SenderPartitionedNonceExecutor, StateUpdater, VmV0ExecutionEngine,
 };
 use qbind_types::Hash32;
 use qbind_wire::consensus::BlockProposal;
 
 use crate::metrics::ExecutionMetrics;
+use crate::node_config::ExecutionProfile;
 
 // ============================================================================
 // QbindBlock - Block wrapper with decoded transactions
@@ -376,6 +377,11 @@ pub struct SingleThreadExecutionServiceConfig {
     pub queue_capacity: usize,
     /// Configuration for Stage A parallel execution (T157).
     pub parallel_config: ParallelExecConfig,
+    /// Execution profile selection (T163).
+    ///
+    /// - `NonceOnly`: Uses Stage A parallel nonce execution (DevNet default)
+    /// - `VmV0`: Uses sequential VM v0 execution with account balances (TestNet Alpha)
+    pub execution_profile: ExecutionProfile,
 }
 
 impl Default for SingleThreadExecutionServiceConfig {
@@ -383,6 +389,7 @@ impl Default for SingleThreadExecutionServiceConfig {
         Self {
             queue_capacity: 1024,
             parallel_config: ParallelExecConfig::default(),
+            execution_profile: ExecutionProfile::NonceOnly,
         }
     }
 }
@@ -404,6 +411,21 @@ impl SingleThreadExecutionServiceConfig {
     pub fn sequential_only(mut self) -> Self {
         self.parallel_config = ParallelExecConfig::sequential();
         self
+    }
+
+    /// Set the execution profile (T163).
+    pub fn with_execution_profile(mut self, profile: ExecutionProfile) -> Self {
+        self.execution_profile = profile;
+        self
+    }
+
+    /// Create a config for VM v0 execution (TestNet Alpha) (T163).
+    pub fn vm_v0() -> Self {
+        Self {
+            queue_capacity: 1024,
+            parallel_config: ParallelExecConfig::default(),
+            execution_profile: ExecutionProfile::VmV0,
+        }
     }
 }
 
@@ -489,6 +511,7 @@ impl SingleThreadExecutionService {
         let worker_queue_len = Arc::clone(&queue_len);
         let worker_metrics = metrics.clone();
         let parallel_config = config.parallel_config.clone();
+        let execution_profile = config.execution_profile;
 
         // Spawn the dedicated worker thread
         thread::spawn(move || {
@@ -499,6 +522,7 @@ impl SingleThreadExecutionService {
                 worker_queue_len,
                 worker_metrics,
                 parallel_config,
+                execution_profile,
             );
         });
 
@@ -511,18 +535,56 @@ impl SingleThreadExecutionService {
             worker_restarts,
         }
     }
-
-    /// Worker thread main loop (T157: Updated to use parallel executor).
+    /// - `VmV0`: Uses sequential VM v0 execution with account balances (T163)
     fn worker_loop<E: ExecutionEngine>(
-        _engine: E, // Kept for backward compatibility but unused in T157
+        _engine: E, // Kept for backward compatibility but unused in T157+
         receiver: Receiver<ExecTask>,
         shutdown: Arc<AtomicBool>,
         queue_len: Arc<AtomicU64>,
         metrics: Option<Arc<ExecutionMetrics>>,
         parallel_config: ParallelExecConfig,
+        execution_profile: ExecutionProfile,
+    ) {
+        let mut current_height: u64 = 0;
+
+        match execution_profile {
+            ExecutionProfile::NonceOnly => {
+                Self::worker_loop_nonce_only(
+                    receiver,
+                    shutdown,
+                    queue_len,
+                    metrics,
+                    parallel_config,
+                    &mut current_height,
+                );
+            }
+            ExecutionProfile::VmV0 => {
+                Self::worker_loop_vm_v0(
+                    receiver,
+                    shutdown,
+                    queue_len,
+                    metrics,
+                    &mut current_height,
+                );
+            }
+        }
+
+        eprintln!(
+            "[T163] Execution worker shutting down at height {} (profile={:?})",
+            current_height, execution_profile
+        );
+    }
+
+    /// Worker loop for NonceOnly profile (T157 Stage A parallelism).
+    fn worker_loop_nonce_only(
+        receiver: Receiver<ExecTask>,
+        shutdown: Arc<AtomicBool>,
+        queue_len: Arc<AtomicU64>,
+        metrics: Option<Arc<ExecutionMetrics>>,
+        parallel_config: ParallelExecConfig,
+        current_height: &mut u64,
     ) {
         let mut state = InMemoryState::new();
-        let mut current_height: u64 = 0;
 
         // T157: Create the sender-partitioned parallel executor
         let parallel_executor = SenderPartitionedNonceExecutor::new(parallel_config);
@@ -550,7 +612,7 @@ impl SingleThreadExecutionService {
                     {
                         Ok((receipts, stats)) => {
                             let block_duration = block_start.elapsed();
-                            current_height = task.block.height();
+                            *current_height = task.block.height();
 
                             // Count successful transactions
                             let success_count =
@@ -621,11 +683,100 @@ impl SingleThreadExecutionService {
                 }
             }
         }
+    }
 
-        eprintln!(
-            "[T157] Execution worker shutting down at height {}",
-            current_height
-        );
+    /// Worker loop for VmV0 profile (T163 sequential VM execution).
+    fn worker_loop_vm_v0(
+        receiver: Receiver<ExecTask>,
+        shutdown: Arc<AtomicBool>,
+        queue_len: Arc<AtomicU64>,
+        metrics: Option<Arc<ExecutionMetrics>>,
+        current_height: &mut u64,
+    ) {
+        // T163: Use InMemoryAccountState for VM v0
+        let mut state = InMemoryAccountState::new();
+        let engine = VmV0ExecutionEngine::new();
+
+        loop {
+            // Check for shutdown
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+
+            // Receive next task (blocking)
+            match receiver.recv() {
+                Ok(task) => {
+                    // Update queue length
+                    let len = receiver.len();
+                    queue_len.store(len as u64, Ordering::Relaxed);
+
+                    // Apply the block using sequential VM v0 execution
+                    let block_start = Instant::now();
+                    let tx_count = task.block.tx_count();
+
+                    // T163: Execute transactions sequentially
+                    let results = engine.execute_block(&mut state, &task.block.txs);
+                    let block_duration = block_start.elapsed();
+                    *current_height = task.block.height();
+
+                    // Count successful transactions
+                    let success_count = results.iter().filter(|r| r.success).count() as u64;
+                    let error_count = results.iter().filter(|r| !r.success).count() as u64;
+
+                    // Update metrics
+                    if let Some(ref m) = metrics {
+                        m.add_txs_applied(success_count);
+                        m.record_block_apply(block_duration);
+
+                        // VM v0 is sequential, set parallel workers to 1
+                        m.set_parallel_workers_active(1);
+                        m.record_parallel_block_time(block_duration);
+
+                        // Record errors by type
+                        for result in &results {
+                            if !result.success {
+                                use crate::metrics::ExecutionErrorReason;
+                                if let Some(ref err) = result.error {
+                                    match err {
+                                        qbind_ledger::VmV0Error::NonceMismatch { .. } => {
+                                            m.inc_error(ExecutionErrorReason::NonceMismatch);
+                                        }
+                                        qbind_ledger::VmV0Error::InsufficientBalance { .. } => {
+                                            m.inc_error(ExecutionErrorReason::Other);
+                                        }
+                                        qbind_ledger::VmV0Error::MalformedPayload => {
+                                            m.inc_error(ExecutionErrorReason::Other);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Brief log (no sensitive content)
+                    if tx_count > 0 {
+                        eprintln!(
+                            "[T163] Applied block {} ({} txs, VM v0 sequential) in {:?}",
+                            task.block.height(),
+                            tx_count,
+                            block_duration
+                        );
+                    }
+
+                    if error_count > 0 {
+                        eprintln!(
+                            "[T163] Block {} had {} tx errors",
+                            task.block.height(),
+                            error_count
+                        );
+                    }
+                }
+                Err(_) => {
+                    // Channel closed, exit
+                    break;
+                }
+            }
+        }
     }
 
     /// Get the queue full counter value.

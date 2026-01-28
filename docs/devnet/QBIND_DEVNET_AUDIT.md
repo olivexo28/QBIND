@@ -30,6 +30,7 @@ This document tracks the audit status, completed tasks, and identified risks for
 | T159 | Crypto / Domain Separation | ChainId + domain-separation unification | DevNet-ready | All signed objects now include chain-aware domain prefixes (QBIND:DEV:*:v1). Prevents cross-chain replay attacks. |
 | T160 | Networking / Integration | DevNet v0 multi-node cluster harness + soak test | DevNet-ready | 4-node cluster harness with real KEMTLS networking, soak/TPS test, DevNet stack integration. Local single-machine only. |
 | T161 | Architecture / Planning | DevNet v0 freeze capsule + TestNet Alpha roadmap | DevNet-ready | Declares DevNet v0 frozen; provides structured TestNet Alpha roadmap. See [QBIND_DEVNET_V0_FREEZE.md](./QBIND_DEVNET_V0_FREEZE.md). |
+| T163 | Execution / VM | Minimal VM v0 (account + balance) with execution profiles | TestNet-alpha | VM v0 with account state (nonce + balance), transfer semantics, sequential execution. See [TestNet Alpha Spec](../testnet/QBIND_TESTNET_ALPHA_SPEC.md). |
 
 ## Risk & Mitigation Table
 
@@ -58,6 +59,10 @@ This document tracks the audit status, completed tasks, and identified risks for
 
 DevNet v0 is now frozen. For the TestNet Alpha roadmap and work buckets, see:
 *   [QBIND DevNet v0 Freeze Capsule](./QBIND_DEVNET_V0_FREEZE.md) — DevNet v0 summary and TestNet Alpha roadmap
+
+### Cross-References
+
+*   **T163 (VM v0)** — Minimal VM with account/balance support. See [TestNet Alpha Spec](../testnet/QBIND_TESTNET_ALPHA_SPEC.md).
 
 For tracking future network phases, see:
 *   [TestNet Audit Skeleton](../testnet/QBIND_TESTNET_AUDIT_SKELETON.md)

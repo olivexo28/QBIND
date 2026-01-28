@@ -1078,6 +1078,380 @@ impl SenderPartitionedNonceExecutor {
 }
 
 // ============================================================================
+// T163: VM v0 State Model (Account with Nonce + Balance)
+// ============================================================================
+
+/// Account state for VM v0 (T163).
+///
+/// This represents the minimal account state needed for a VM with balance transfers:
+/// - `nonce`: Transaction replay protection (must match tx.nonce)
+/// - `balance`: Account balance for transfers
+///
+/// # Default Value
+///
+/// New accounts have `nonce = 0` and `balance = 0`.
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use qbind_ledger::execution::AccountState;
+///
+/// let mut state = AccountState::default();
+/// assert_eq!(state.nonce, 0);
+/// assert_eq!(state.balance, 0);
+///
+/// // After transfer of 100 units
+/// state.balance = 100;
+/// state.nonce = 1;
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AccountState {
+    /// Transaction nonce (replay protection).
+    pub nonce: u64,
+    /// Account balance.
+    pub balance: u128,
+}
+
+impl AccountState {
+    /// Create a new account state with the given nonce and balance.
+    pub fn new(nonce: u64, balance: u128) -> Self {
+        Self { nonce, balance }
+    }
+
+    /// Create an account state with zero nonce and the given balance.
+    ///
+    /// Useful for initializing accounts with a balance.
+    pub fn with_balance(balance: u128) -> Self {
+        Self { nonce: 0, balance }
+    }
+}
+
+/// Read-only view of account state (T163).
+pub trait AccountStateView {
+    /// Get the account state for an account ID.
+    ///
+    /// Returns the default `AccountState` (nonce=0, balance=0) for absent accounts.
+    fn get_account_state(&self, account: &AccountId) -> AccountState;
+}
+
+/// Mutable updater for account state (T163).
+pub trait AccountStateUpdater: AccountStateView {
+    /// Set the account state for an account ID.
+    fn set_account_state(&mut self, account: &AccountId, state: AccountState);
+}
+
+/// In-memory account state backend for VM v0 (T163).
+///
+/// This is a simple HashMap-based implementation suitable for testing
+/// and in-memory execution. Production deployments should use a
+/// persistent backend (e.g., RocksDB).
+///
+/// # Default Values
+///
+/// Accounts not in the map are treated as having the default `AccountState`
+/// (nonce = 0, balance = 0).
+#[derive(Clone, Debug, Default)]
+pub struct InMemoryAccountState {
+    inner: HashMap<AccountId, AccountState>,
+}
+
+impl InMemoryAccountState {
+    /// Create a new empty in-memory account state.
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
+    /// Get the number of accounts in the state.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Check if the state is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Iterate over all account states.
+    pub fn iter(&self) -> impl Iterator<Item = (&AccountId, &AccountState)> {
+        self.inner.iter()
+    }
+
+    /// Initialize an account with the given balance (for testing/genesis).
+    pub fn init_account(&mut self, account: &AccountId, balance: u128) {
+        self.inner
+            .insert(*account, AccountState::with_balance(balance));
+    }
+}
+
+impl AccountStateView for InMemoryAccountState {
+    fn get_account_state(&self, account: &AccountId) -> AccountState {
+        self.inner.get(account).cloned().unwrap_or_default()
+    }
+}
+
+impl AccountStateUpdater for InMemoryAccountState {
+    fn set_account_state(&mut self, account: &AccountId, state: AccountState) {
+        self.inner.insert(*account, state);
+    }
+}
+
+// ============================================================================
+// T163: VM v0 Execution Engine
+// ============================================================================
+
+/// Error type for VM v0 transaction execution (T163).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VmV0Error {
+    /// Transaction nonce doesn't match the expected value.
+    NonceMismatch {
+        /// The expected nonce (from state).
+        expected: u64,
+        /// The actual nonce (in transaction).
+        got: u64,
+    },
+    /// Sender doesn't have enough balance for the transfer.
+    InsufficientBalance {
+        /// The sender's current balance.
+        balance: u128,
+        /// The amount needed (transfer amount).
+        needed: u128,
+    },
+    /// Transaction payload is malformed and cannot be decoded.
+    MalformedPayload,
+}
+
+impl std::fmt::Display for VmV0Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VmV0Error::NonceMismatch { expected, got } => {
+                write!(f, "nonce mismatch: expected {}, got {}", expected, got)
+            }
+            VmV0Error::InsufficientBalance { balance, needed } => {
+                write!(f, "insufficient balance: have {}, need {}", balance, needed)
+            }
+            VmV0Error::MalformedPayload => write!(f, "malformed payload"),
+        }
+    }
+}
+
+impl std::error::Error for VmV0Error {}
+
+/// Result of executing a VM v0 transaction (T163).
+#[derive(Debug, Clone)]
+pub struct VmV0TxResult {
+    /// Whether the transaction was successful.
+    pub success: bool,
+    /// Error details if the transaction failed.
+    pub error: Option<VmV0Error>,
+}
+
+impl VmV0TxResult {
+    /// Create a success result.
+    pub fn success() -> Self {
+        Self {
+            success: true,
+            error: None,
+        }
+    }
+
+    /// Create a failure result with the given error.
+    pub fn failure(error: VmV0Error) -> Self {
+        Self {
+            success: false,
+            error: Some(error),
+        }
+    }
+}
+
+/// VM v0 transfer payload structure (T163).
+///
+/// This is the canonical format for transfer transactions in VM v0:
+/// - `recipient`: 32-byte account ID of the transfer recipient
+/// - `amount`: u128 amount in big-endian format (16 bytes)
+///
+/// Total payload size: 48 bytes.
+///
+/// # Wire Format
+///
+/// ```text
+/// recipient: [u8; 32]  (bytes 0..32)
+/// amount:    u128 BE   (bytes 32..48)
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferPayload {
+    /// The recipient account ID.
+    pub recipient: AccountId,
+    /// The amount to transfer.
+    pub amount: u128,
+}
+
+/// Size of a valid transfer payload in bytes.
+pub const TRANSFER_PAYLOAD_SIZE: usize = 32 + 16; // recipient (32) + amount (16)
+
+impl TransferPayload {
+    /// Create a new transfer payload.
+    pub fn new(recipient: AccountId, amount: u128) -> Self {
+        Self { recipient, amount }
+    }
+
+    /// Encode the transfer payload to bytes.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(TRANSFER_PAYLOAD_SIZE);
+        out.extend_from_slice(&self.recipient);
+        out.extend_from_slice(&self.amount.to_be_bytes());
+        out
+    }
+
+    /// Decode a transfer payload from bytes.
+    ///
+    /// Returns `None` if the payload is malformed.
+    pub fn decode(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != TRANSFER_PAYLOAD_SIZE {
+            return None;
+        }
+
+        let recipient: AccountId = bytes[0..32].try_into().ok()?;
+        let amount = u128::from_be_bytes(bytes[32..48].try_into().ok()?);
+
+        Some(Self { recipient, amount })
+    }
+}
+
+/// VM v0 execution engine (T163).
+///
+/// This engine implements the VM v0 execution semantics:
+/// - Decode payload as a transfer (recipient, amount)
+/// - Check nonce matches sender's stored nonce
+/// - Check sender has sufficient balance
+/// - Update sender: decrement balance, increment nonce
+/// - Update recipient: increment balance (create account if absent)
+///
+/// # Determinism
+///
+/// Transactions are executed sequentially in block order.
+/// All state transitions are deterministic.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_ledger::{VmV0ExecutionEngine, InMemoryAccountState, QbindTransaction, TransferPayload};
+///
+/// let mut state = InMemoryAccountState::new();
+/// state.init_account(&sender, 100);
+///
+/// let engine = VmV0ExecutionEngine::new();
+/// let payload = TransferPayload::new(recipient, 50).encode();
+/// let tx = QbindTransaction::new(sender, 0, payload);
+///
+/// let result = engine.execute_tx(&mut state, &tx);
+/// assert!(result.success);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct VmV0ExecutionEngine {
+    /// Placeholder for future configuration.
+    _private: (),
+}
+
+impl VmV0ExecutionEngine {
+    /// Create a new VM v0 execution engine.
+    pub fn new() -> Self {
+        Self { _private: () }
+    }
+
+    /// Execute a transaction against the given account state.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The mutable account state
+    /// * `tx` - The transaction to execute
+    ///
+    /// # Returns
+    ///
+    /// A `VmV0TxResult` indicating success or failure.
+    ///
+    /// # State Mutations
+    ///
+    /// On success:
+    /// - Sender's balance is decremented by the transfer amount
+    /// - Sender's nonce is incremented by 1
+    /// - Recipient's balance is incremented by the transfer amount
+    /// - Recipient account is created if it doesn't exist
+    ///
+    /// On failure:
+    /// - No state changes are made
+    pub fn execute_tx<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        tx: &QbindTransaction,
+    ) -> VmV0TxResult {
+        // Step 1: Decode payload as transfer
+        let transfer = match TransferPayload::decode(&tx.payload) {
+            Some(t) => t,
+            None => return VmV0TxResult::failure(VmV0Error::MalformedPayload),
+        };
+
+        // Step 2: Fetch sender's current state
+        let sender_state = state.get_account_state(&tx.sender);
+
+        // Step 3: Check nonce
+        if tx.nonce != sender_state.nonce {
+            return VmV0TxResult::failure(VmV0Error::NonceMismatch {
+                expected: sender_state.nonce,
+                got: tx.nonce,
+            });
+        }
+
+        // Step 4: Check balance
+        if sender_state.balance < transfer.amount {
+            return VmV0TxResult::failure(VmV0Error::InsufficientBalance {
+                balance: sender_state.balance,
+                needed: transfer.amount,
+            });
+        }
+
+        // Step 5: Update sender (decrement balance, increment nonce)
+        let new_sender_state = AccountState {
+            nonce: sender_state.nonce + 1,
+            balance: sender_state.balance - transfer.amount,
+        };
+        state.set_account_state(&tx.sender, new_sender_state);
+
+        // Step 6: Update recipient (increment balance, create if absent)
+        let recipient_state = state.get_account_state(&transfer.recipient);
+        let new_recipient_state = AccountState {
+            nonce: recipient_state.nonce,
+            balance: recipient_state.balance + transfer.amount,
+        };
+        state.set_account_state(&transfer.recipient, new_recipient_state);
+
+        VmV0TxResult::success()
+    }
+
+    /// Execute a block of transactions sequentially.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The mutable account state
+    /// * `transactions` - The transactions to execute in order
+    ///
+    /// # Returns
+    ///
+    /// A vector of `VmV0TxResult` in the same order as the input transactions.
+    pub fn execute_block<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        transactions: &[QbindTransaction],
+    ) -> Vec<VmV0TxResult> {
+        transactions
+            .iter()
+            .map(|tx| self.execute_tx(state, tx))
+            .collect()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

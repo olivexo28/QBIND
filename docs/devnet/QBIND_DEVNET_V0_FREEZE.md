@@ -85,9 +85,11 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 
 | Work Item | Description | Risks Addressed |
 | :--- | :--- | :--- |
-| **Minimal VM** | Implement balance transfers, simple scripts, or basic EVM subset | New capability |
+| **Minimal VM (T163)** | VM v0 with account balances and transfer semantics | New capability |
 | **State Persistence** | Persist execution state to disk (RocksDB or similar) | New capability |
 | **Stage B Parallelism** | Conflict-graph-based parallel execution when VM is in place | R6 |
+
+**T163 Status**: ✅ Implemented — See [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) for VM v0 semantics.
 
 **References**: [QBIND_PARALLEL_EXECUTION_DESIGN.md](./QBIND_PARALLEL_EXECUTION_DESIGN.md) §4.2
 
