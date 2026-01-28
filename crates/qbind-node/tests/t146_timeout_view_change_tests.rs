@@ -343,13 +343,17 @@ fn safety_timeout_signing_bytes_uniqueness() {
 #[test]
 fn safety_timeout_domain_separator() {
     use qbind_consensus::timeout::timeout_signing_bytes;
+    use qbind_types::domain::{domain_prefix, DomainKind};
+    use qbind_types::QBIND_DEVNET_CHAIN_ID;
 
     let bytes = timeout_signing_bytes::<[u8; 32]>(5, None, ValidatorId::new(1));
 
-    // Should start with domain separator
+    // timeout_signing_bytes uses QBIND_DEVNET_CHAIN_ID by default,
+    // so it should start with the chain-aware domain tag.
+    let expected_prefix = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Timeout);
     assert!(
-        bytes.starts_with(b"QBIND_TIMEOUT_V1"),
-        "Timeout signing bytes should include domain separator"
+        bytes.starts_with(&expected_prefix),
+        "Timeout signing bytes should start with chain-aware domain tag (QBIND:DEV:TIMEOUT:v1)"
     );
 }
 

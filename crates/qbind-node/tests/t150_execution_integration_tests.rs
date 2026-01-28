@@ -61,6 +61,9 @@ fn make_test_proposal(height: u64) -> Arc<BlockProposal> {
 
 #[test]
 fn test_transaction_signing_preimage_stability() {
+    use qbind_types::domain::{domain_prefix, DomainKind};
+    use qbind_types::QBIND_DEVNET_CHAIN_ID;
+
     // Verify that signing_preimage() produces deterministic output
     let sender = test_account_id(0xAA);
     let tx = QbindTransaction::new(sender, 42, b"payload data".to_vec());
@@ -70,12 +73,15 @@ fn test_transaction_signing_preimage_stability() {
 
     assert_eq!(preimage1, preimage2, "preimage should be deterministic");
 
-    // Verify preimage contains expected components
+    // signing_preimage() uses QBIND_DEVNET_CHAIN_ID by default,
+    // so it should start with the chain-aware domain tag.
+    let expected_prefix = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::UserTx);
     assert!(
-        preimage1.starts_with(b"QBIND:TX:v1"),
-        "should contain domain tag"
+        preimage1.starts_with(&expected_prefix),
+        "should contain chain-aware domain tag (QBIND:DEV:TX:v1)"
     );
-    assert!(preimage1.len() > 11 + 32 + 8, "should have minimum length");
+    // Expected prefix is 15 bytes for DevNet: "QBIND:DEV:TX:v1"
+    assert!(preimage1.len() > expected_prefix.len() + 32 + 8, "should have minimum length");
 }
 
 #[test]

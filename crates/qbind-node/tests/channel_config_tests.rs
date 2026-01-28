@@ -6,20 +6,21 @@
 //! - Integration with `AsyncNodeRunner`, `AsyncConsensusNetAdapter`, `AsyncNetSender`
 //! - Metrics output includes configured capacities
 //!
-//! # Running Tests
+//! # Note on Environment Variable Tests
 //!
-//! ```bash
-//! cargo test --package qbind-node --test channel_config_tests -- --test-threads=1
-//! ```
-//!
-//! Note: Tests that modify environment variables should run sequentially.
+//! Tests that modify environment variables use a global mutex (`ENV_TEST_MUTEX`)
+//! to prevent race conditions when tests run in parallel.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use qbind_node::async_peer_manager::AsyncPeerManagerConfig;
 use qbind_node::channel_config::ChannelCapacityConfig;
 use qbind_node::consensus_net_worker::{AsyncConsensusNetAdapter, AsyncNetSender};
 use qbind_node::metrics::NodeMetrics;
+
+/// Global mutex to serialize tests that modify environment variables.
+/// This prevents race conditions when tests run in parallel.
+static ENV_TEST_MUTEX: Mutex<()> = Mutex::new(());
 
 // ============================================================================
 // Part A: ChannelCapacityConfig construction tests
@@ -64,16 +65,22 @@ fn config_is_clone_send_sync() {
 // Part B: Environment variable parsing tests
 // ============================================================================
 
-// Note: These tests modify environment variables and should run sequentially.
-// The test runner should use --test-threads=1.
+// These tests use ENV_TEST_MUTEX to prevent race conditions.
 
-#[test]
-fn from_env_uses_defaults_when_vars_unset() {
-    // Clear any existing vars
+/// Helper to clear all channel config environment variables.
+fn clear_channel_env_vars() {
     std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
     std::env::remove_var("QBIND_OUTBOUND_COMMAND_CHANNEL_CAPACITY");
     std::env::remove_var("QBIND_ASYNC_PEER_INBOUND_CAPACITY");
     std::env::remove_var("QBIND_ASYNC_PEER_OUTBOUND_CAPACITY");
+}
+
+#[test]
+fn from_env_uses_defaults_when_vars_unset() {
+    let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
+    // Clear any existing vars
+    clear_channel_env_vars();
 
     let config = ChannelCapacityConfig::from_env();
 
@@ -86,11 +93,10 @@ fn from_env_uses_defaults_when_vars_unset() {
 
 #[test]
 fn from_env_parses_valid_values() {
+    let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
     // Clear any existing vars first to ensure clean state
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_OUTBOUND_COMMAND_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_INBOUND_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_OUTBOUND_CAPACITY");
+    clear_channel_env_vars();
 
     // Set environment variables
     std::env::set_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY", "2048");
@@ -106,14 +112,16 @@ fn from_env_parses_valid_values() {
     assert_eq!(config.async_peer_outbound_capacity, 128);
 
     // Clean up
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_OUTBOUND_COMMAND_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_INBOUND_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_OUTBOUND_CAPACITY");
+    clear_channel_env_vars();
 }
 
 #[test]
 fn from_env_rejects_zero_value() {
+    let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
+    // Clear first
+    clear_channel_env_vars();
+
     // Set an invalid value
     std::env::set_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY", "0");
 
@@ -123,11 +131,16 @@ fn from_env_rejects_zero_value() {
     assert_eq!(config.consensus_event_capacity, 1024);
 
     // Clean up
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
+    clear_channel_env_vars();
 }
 
 #[test]
 fn from_env_rejects_non_numeric_value() {
+    let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
+    // Clear first
+    clear_channel_env_vars();
+
     // Set an invalid value
     std::env::set_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY", "not_a_number");
 
@@ -137,16 +150,15 @@ fn from_env_rejects_non_numeric_value() {
     assert_eq!(config.consensus_event_capacity, 1024);
 
     // Clean up
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
+    clear_channel_env_vars();
 }
 
 #[test]
 fn from_env_partial_override() {
+    let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
     // Clear all environment variables first to ensure clean state
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_OUTBOUND_COMMAND_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_INBOUND_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_OUTBOUND_CAPACITY");
+    clear_channel_env_vars();
 
     // Only override one value
     std::env::set_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY", "2048");
@@ -160,19 +172,15 @@ fn from_env_partial_override() {
     assert_eq!(config.async_peer_outbound_capacity, 256); // default
 
     // Clean up
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_OUTBOUND_COMMAND_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_INBOUND_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_OUTBOUND_CAPACITY");
+    clear_channel_env_vars();
 }
 
 #[test]
 fn has_env_overrides_detects_set_vars() {
+    let _guard = ENV_TEST_MUTEX.lock().unwrap();
+
     // Clear all
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_OUTBOUND_COMMAND_CHANNEL_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_INBOUND_CAPACITY");
-    std::env::remove_var("QBIND_ASYNC_PEER_OUTBOUND_CAPACITY");
+    clear_channel_env_vars();
 
     assert!(!ChannelCapacityConfig::has_env_overrides());
 
@@ -181,7 +189,7 @@ fn has_env_overrides_detects_set_vars() {
     assert!(ChannelCapacityConfig::has_env_overrides());
 
     // Clean up
-    std::env::remove_var("QBIND_CONSENSUS_EVENT_CHANNEL_CAPACITY");
+    clear_channel_env_vars();
 }
 
 // ============================================================================

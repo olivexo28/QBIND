@@ -4,10 +4,16 @@
 //! - signing_preimage() excludes the signature field
 //! - signing_preimage() produces stable output for fixed inputs
 //! - Changing signature does not change the preimage
+//!
+//! ## T159: Chain-Aware Domain Separation
+//!
+//! These tests verify the default DevNet chain-aware domain tags.
+//! The `signing_preimage()` method now defaults to `QBIND_DEVNET_CHAIN_ID`,
+//! producing domain tags like "QBIND:DEV:VOTE:v1" instead of "QBIND:VOTE:v1".
 
-use qbind_wire::consensus::{
-    BlockHeader, BlockProposal, QuorumCertificate, Vote, PROPOSAL_DOMAIN_TAG, VOTE_DOMAIN_TAG,
-};
+use qbind_types::domain::{domain_prefix, DomainKind};
+use qbind_types::{QBIND_DEVNET_CHAIN_ID, QBIND_TESTNET_CHAIN_ID};
+use qbind_wire::consensus::{BlockHeader, BlockProposal, QuorumCertificate, Vote};
 
 // ============================================================================
 // Vote signing preimage tests
@@ -94,8 +100,9 @@ fn vote_signing_preimage_stable_for_fields() {
     // Call signing_preimage() and compare to expected
     let preimage = vote.signing_preimage();
 
-    // Build expected preimage manually (with epoch field - T101):
-    // domain_tag: "QBIND:VOTE:v1" (13 bytes)
+    // T159: Domain tag is now chain-aware
+    // Build expected preimage manually (with epoch field - T101, chain-aware - T159):
+    // domain_tag: "QBIND:DEV:VOTE:v1" (17 bytes for DevNet)
     // version: u8 (1)
     // chain_id: u32 LE (42)
     // epoch: u64 LE (0)
@@ -105,8 +112,9 @@ fn vote_signing_preimage_stable_for_fields() {
     // block_id: [0xAB; 32]
     // validator_index: u16 LE (7)
     // suite_id: u16 LE (0)
+    let devnet_vote_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Vote);
     let mut expected = Vec::new();
-    expected.extend_from_slice(VOTE_DOMAIN_TAG); // 13 bytes: "QBIND:VOTE:v1"
+    expected.extend_from_slice(&devnet_vote_tag); // "QBIND:DEV:VOTE:v1"
     expected.push(1u8); // version
     expected.extend_from_slice(&42u32.to_le_bytes()); // chain_id
     expected.extend_from_slice(&0u64.to_le_bytes()); // epoch (T101)
@@ -122,13 +130,12 @@ fn vote_signing_preimage_stable_for_fields() {
         "Vote signing preimage does not match expected layout"
     );
 
-    // Hard-coded expected bytes for stability test (captured from a known-good implementation)
-    // This ensures the preimage structure doesn't accidentally change
-    // Updated for T101 to include epoch field, updated to QBIND domain tag (T143)
+    // T159: Hard-coded expected bytes updated for chain-aware domain tag
+    // "QBIND:DEV:VOTE:v1" = [0x51, 0x42, 0x49, 0x4e, 0x44, 0x3a, 0x44, 0x45, 0x56, 0x3a, 0x56, 0x4f, 0x54, 0x45, 0x3a, 0x76, 0x31] (17 bytes)
     let expected_bytes: Vec<u8> = vec![
-        // "QBIND:VOTE:v1" (13 bytes)
-        0x51, 0x42, 0x49, 0x4e, 0x44, 0x3a, 0x56, 0x4f, 0x54, 0x45, 0x3a, 0x76, 0x31,
-        // version: 1
+        // "QBIND:DEV:VOTE:v1" (17 bytes)
+        0x51, 0x42, 0x49, 0x4e, 0x44, 0x3a, 0x44, 0x45, 0x56, 0x3a, 0x56, 0x4f, 0x54, 0x45, 0x3a,
+        0x76, 0x31, // version: 1
         0x01, // chain_id: 42 (LE)
         0x2a, 0x00, 0x00, 0x00, // epoch: 0 (LE) - T101
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // height: 100 (LE)
@@ -152,9 +159,11 @@ fn vote_signing_preimage_starts_with_domain_tag() {
     let vote = make_dummy_vote();
     let preimage = vote.signing_preimage();
 
+    // T159: Domain tag is now chain-aware (DevNet by default)
+    let devnet_vote_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Vote);
     assert!(
-        preimage.starts_with(VOTE_DOMAIN_TAG),
-        "Vote signing preimage must start with domain tag"
+        preimage.starts_with(&devnet_vote_tag),
+        "Vote signing preimage must start with DevNet domain tag"
     );
 }
 
@@ -163,8 +172,8 @@ fn vote_signing_preimage_length_is_correct() {
     let vote = make_dummy_vote();
     let preimage = vote.signing_preimage();
 
-    // Expected length (with epoch field - T101):
-    // domain_tag: 13 bytes ("QBIND:VOTE:v1")
+    // T159: Expected length with chain-aware domain tag
+    // domain_tag: 17 bytes ("QBIND:DEV:VOTE:v1")
     // version: 1
     // chain_id: 4
     // epoch: 8
@@ -174,8 +183,8 @@ fn vote_signing_preimage_length_is_correct() {
     // block_id: 32
     // validator_index: 2
     // suite_id: 2
-    // Total: 13 + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2 = 79
-    let expected_len = 13 + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2;
+    // Total: 17 + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2 = 83
+    let expected_len = 17 + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2;
     assert_eq!(preimage.len(), expected_len);
 }
 
@@ -307,8 +316,8 @@ fn proposal_signing_preimage_stable_for_fields() {
     // Call signing_preimage()
     let preimage = proposal.signing_preimage();
 
-    // Build expected preimage manually (with epoch - T101):
-    // domain_tag: "QBIND:PROPOSAL:v1" (17 bytes)
+    // T159: Build expected preimage manually with chain-aware domain tag
+    // domain_tag: "QBIND:DEV:PROPOSAL:v1" (21 bytes for DevNet)
     // version: u8 (1)
     // chain_id: u32 LE (42)
     // epoch: u64 LE (0)
@@ -325,8 +334,9 @@ fn proposal_signing_preimage_stable_for_fields() {
     // qc_len: u32 LE (0)
     // (no qc_bytes)
     // (no txs)
+    let devnet_proposal_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Proposal);
     let mut expected = Vec::new();
-    expected.extend_from_slice(PROPOSAL_DOMAIN_TAG); // 17 bytes
+    expected.extend_from_slice(&devnet_proposal_tag); // "QBIND:DEV:PROPOSAL:v1"
     expected.push(1u8); // version
     expected.extend_from_slice(&42u32.to_le_bytes()); // chain_id
     expected.extend_from_slice(&0u64.to_le_bytes()); // epoch (T101)
@@ -347,13 +357,12 @@ fn proposal_signing_preimage_stable_for_fields() {
         "BlockProposal signing preimage does not match expected layout"
     );
 
-    // Hard-coded expected bytes for stability test (captured from a known-good implementation)
-    // This ensures the preimage structure doesn't accidentally change
-    // Updated for T101 to include epoch field, updated to QBIND domain tag (T143)
+    // T159: Hard-coded expected bytes updated for chain-aware domain tag
+    // "QBIND:DEV:PROPOSAL:v1" (21 bytes)
     let expected_bytes: Vec<u8> = vec![
-        // "QBIND:PROPOSAL:v1" (17 bytes)
-        0x51, 0x42, 0x49, 0x4e, 0x44, 0x3a, 0x50, 0x52, 0x4f, 0x50, 0x4f, 0x53, 0x41, 0x4c, 0x3a,
-        0x76, 0x31, // version: 1
+        // "QBIND:DEV:PROPOSAL:v1" (21 bytes)
+        0x51, 0x42, 0x49, 0x4e, 0x44, 0x3a, 0x44, 0x45, 0x56, 0x3a, 0x50, 0x52, 0x4f, 0x50, 0x4f,
+        0x53, 0x41, 0x4c, 0x3a, 0x76, 0x31, // version: 1
         0x01, // chain_id: 42 (LE)
         0x2a, 0x00, 0x00, 0x00, // epoch: 0 (LE) - T101
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // height: 100 (LE)
@@ -384,9 +393,11 @@ fn proposal_signing_preimage_starts_with_domain_tag() {
     let proposal = make_dummy_block_proposal();
     let preimage = proposal.signing_preimage();
 
+    // T159: Domain tag is now chain-aware (DevNet by default)
+    let devnet_proposal_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Proposal);
     assert!(
-        preimage.starts_with(PROPOSAL_DOMAIN_TAG),
-        "BlockProposal signing preimage must start with domain tag"
+        preimage.starts_with(&devnet_proposal_tag),
+        "BlockProposal signing preimage must start with DevNet domain tag"
     );
 }
 
@@ -406,8 +417,9 @@ fn proposal_signing_preimage_includes_qc_and_txs() {
         "Proposal with QC and txs should have larger preimage"
     );
 
-    // Verify the preimage still starts with domain tag
-    assert!(preimage.starts_with(PROPOSAL_DOMAIN_TAG));
+    // T159: Verify the preimage still starts with DevNet domain tag
+    let devnet_proposal_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Proposal);
+    assert!(preimage.starts_with(&devnet_proposal_tag));
 }
 
 #[test]
@@ -415,8 +427,8 @@ fn proposal_signing_preimage_length_no_qc_no_txs() {
     let proposal = make_dummy_block_proposal();
     let preimage = proposal.signing_preimage();
 
-    // Expected length (no QC, no txs) - with epoch field (T101) and payload_kind/next_epoch (T102.1):
-    // domain_tag: 17 bytes ("QBIND:PROPOSAL:v1")
+    // T159: Expected length with chain-aware domain tag (no QC, no txs)
+    // domain_tag: 21 bytes ("QBIND:DEV:PROPOSAL:v1")
     // version: 1
     // chain_id: 4
     // epoch: 8
@@ -431,8 +443,8 @@ fn proposal_signing_preimage_length_no_qc_no_txs() {
     // payload_kind: 1 (T102.1)
     // next_epoch: 8 (T102.1)
     // qc_len: 4
-    // Total: 17 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 4 = 139
-    let expected_len = 17 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 4;
+    // Total: 21 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 4 = 143
+    let expected_len = 21 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 4;
     assert_eq!(preimage.len(), expected_len);
 }
 
@@ -496,4 +508,50 @@ fn proposal_signing_preimage_different_qcs_produce_different_preimages() {
         preimage1, preimage2,
         "Different QCs should produce different preimages"
     );
+}
+
+// ============================================================================
+// T159: Cross-chain separation tests
+// ============================================================================
+
+#[test]
+fn vote_different_chains_produce_different_preimages() {
+    // Critical security test: Same vote data with different chain IDs must produce different preimages
+    let vote = make_dummy_vote();
+
+    let devnet_preimage = vote.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+    let testnet_preimage = vote.signing_preimage_with_chain_id(QBIND_TESTNET_CHAIN_ID);
+
+    assert_ne!(
+        devnet_preimage, testnet_preimage,
+        "DevNet and TestNet vote preimages must differ"
+    );
+
+    // Verify both start with correct chain-specific tags
+    let devnet_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Vote);
+    let testnet_tag = domain_prefix(QBIND_TESTNET_CHAIN_ID, DomainKind::Vote);
+
+    assert!(devnet_preimage.starts_with(&devnet_tag));
+    assert!(testnet_preimage.starts_with(&testnet_tag));
+}
+
+#[test]
+fn proposal_different_chains_produce_different_preimages() {
+    // Critical security test: Same proposal data with different chain IDs must produce different preimages
+    let proposal = make_dummy_block_proposal();
+
+    let devnet_preimage = proposal.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID);
+    let testnet_preimage = proposal.signing_preimage_with_chain_id(QBIND_TESTNET_CHAIN_ID);
+
+    assert_ne!(
+        devnet_preimage, testnet_preimage,
+        "DevNet and TestNet proposal preimages must differ"
+    );
+
+    // Verify both start with correct chain-specific tags
+    let devnet_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Proposal);
+    let testnet_tag = domain_prefix(QBIND_TESTNET_CHAIN_ID, DomainKind::Proposal);
+
+    assert!(devnet_preimage.starts_with(&devnet_tag));
+    assert!(testnet_preimage.starts_with(&testnet_tag));
 }

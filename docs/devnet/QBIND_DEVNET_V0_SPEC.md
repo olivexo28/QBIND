@@ -99,6 +99,22 @@ These are the default parameters for DevNet v0:
 *   **Safety**: Guaranteed by HotStuff 3-chain rule + ML-DSA-44 signatures.
 *   **Hardware**: Intended for standard cloud VMs or local consumer hardware.
 
+### Chain ID & Domain Separation (T159)
+
+All signed objects in QBIND include a chain-aware domain tag to prevent cross-chain replay attacks:
+
+*   **DevNet Chain ID**: `0x51424E44_44455600` (constant `QBIND_DEVNET_CHAIN_ID`)
+*   **Domain Tags**: All signing preimages use chain-aware domain tags like:
+    *   `QBIND:DEV:TX:v1` for user transactions
+    *   `QBIND:DEV:VOTE:v1` for consensus votes
+    *   `QBIND:DEV:PROPOSAL:v1` for block proposals
+    *   `QBIND:DEV:TIMEOUT:v1` for timeout messages
+    *   `QBIND:DEV:BATCH:v1` for DAG batches
+
+This ensures that signatures created on DevNet cannot be replayed on TestNet or MainNet.
+
+See [QBIND_CHAIN_ID_AND_DOMAINS.md](./QBIND_CHAIN_ID_AND_DOMAINS.md) for the complete domain-separation scheme.
+
 ## Performance & Metrics (DevNet v0)
 
 This section documents the observability infrastructure and performance measurement capabilities for DevNet v0 (T154).

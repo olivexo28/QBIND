@@ -27,6 +27,7 @@ This document tracks the audit status, completed tasks, and identified risks for
 | T156 | Execution / Mempool | Parallel execution & DAG mempool design spec | DevNet-ready (design) | Design docs for Stage A/B parallel execution and DAG mempool; implementation in T157+. |
 | T157 | Execution | Stage A parallel execution (sender-partitioned nonce engine) | DevNet-ready | Sender-partitioned parallelism for nonce-only engine; rayon thread pool; deterministic; metrics. |
 | T158 | Mempool | DAG mempool v0 (local batches + DAG structure) | DevNet-ready (experimental) | QbindBatch, InMemoryDagMempool, frontier selection, feature-flagged proposer integration. No availability certs yet. |
+| T159 | Crypto / Domain Separation | ChainId + domain-separation unification | DevNet-ready | All signed objects now include chain-aware domain prefixes (QBIND:DEV:*:v1). Prevents cross-chain replay attacks. |
 
 ## Risk & Mitigation Table
 
@@ -38,6 +39,7 @@ This document tracks the audit status, completed tasks, and identified risks for
 | R4 | Networking | Loopback/Local TCP only tested extensively | Medium | Scale up to real distributed cluster testing (TestNet phase). | Open |
 | R5 | Mempool | Basic FIFO without priority/fees | Low | Implement fee market and priority ordering for TestNet. DAG mempool v0 (T158) available as opt-in alternative. | Partially Mitigated (T158) |
 | R6 | Performance | No DAG/full VM parallelism yet; TPS improved by Stage A parallel execution | Medium | Stage A sender-partitioned parallel execution implemented in T157 for DevNet. Multi-core speedup for workloads with many distinct senders. **T158** adds DAG mempool v0 data structures (batches, frontier selection) at the data plane level. DAG + VM parallelism (Stage B) planned for future. Initial baseline established by T154. T155 lays foundation with async execution. **T156** design spec documents staged approach; **T157** implements Stage A for nonce engine; **T158** implements DAG data structures. See [QBIND_PARALLEL_EXECUTION_DESIGN.md](./QBIND_PARALLEL_EXECUTION_DESIGN.md) and [QBIND_DAG_MEMPOOL_DESIGN.md](./QBIND_DAG_MEMPOOL_DESIGN.md). | Partially Mitigated (T157/T158) |
+| R7 | Crypto | No chain ID / weak domain separation | High | **T159** introduces ChainId type and chain-aware domain tags for all signing preimages. All signed objects now include environment-specific domain prefixes, preventing cross-chain replay. | Mitigated (T159) |
 
 ## DevNet vs TestNet/MainNet Readiness
 

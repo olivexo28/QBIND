@@ -9,11 +9,19 @@
 //! The tests ensure that timeout messages use the correct ML-DSA-44
 //! suite (suite_id = 100) and maintain consistency with the existing
 //! vote/QC signing mechanisms.
+//!
+//! ## T159: Chain-Aware Domain Separation
+//!
+//! As of T159, timeout signing bytes include the chain ID in the domain tag.
+//! The `timeout_signing_bytes()` function now defaults to DevNet chain ID,
+//! producing domain tags like "QBIND:DEV:TIMEOUT:v1".
 
 use qbind_consensus::{
     timeout::{timeout_signing_bytes, TimeoutCertificate, TimeoutMsg, TIMEOUT_SUITE_ID},
     PacemakerEvent, QuorumCertificate, TimeoutPacemaker, TimeoutPacemakerConfig, ValidatorId,
 };
+use qbind_types::domain::{domain_prefix, DomainKind};
+use qbind_types::QBIND_DEVNET_CHAIN_ID;
 use std::time::{Duration, Instant};
 
 // ============================================================================
@@ -69,8 +77,12 @@ fn timeout_signing_bytes_includes_domain_separator() {
 
     let bytes = timeout_signing_bytes(view, Some(&high_qc), validator_id);
 
-    // Should start with domain separator "QBIND_TIMEOUT_V1"
-    assert!(bytes.starts_with(b"QBIND_TIMEOUT_V1"));
+    // T159: Should start with DevNet chain-aware domain separator "QBIND:DEV:TIMEOUT:v1"
+    let expected_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Timeout);
+    assert!(
+        bytes.starts_with(&expected_tag),
+        "timeout signing bytes must start with DevNet domain tag"
+    );
 }
 
 #[test]

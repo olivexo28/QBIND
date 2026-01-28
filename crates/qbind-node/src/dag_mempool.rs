@@ -32,6 +32,12 @@
 //! - Arrays: length-prefixed with elements concatenated
 //!
 //! This ensures `batch_id` is identical on all nodes for the same input.
+//!
+//! ## T159: Chain-Aware Domain Separation
+//!
+//! As of T159, all signing preimages include the chain ID to prevent cross-chain
+//! replay attacks. Use `signing_preimage_with_chain_id()` with the appropriate
+//! `ChainId` for the network environment (DevNet, TestNet, MainNet).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -41,12 +47,16 @@ use parking_lot::RwLock;
 use qbind_consensus::ids::ValidatorId;
 use qbind_hash::sha3_256;
 use qbind_ledger::QbindTransaction;
+use qbind_types::domain::{domain_prefix, DomainKind};
+use qbind_types::{ChainId, QBIND_DEVNET_CHAIN_ID};
 
 // ============================================================================
 // Domain Tags
 // ============================================================================
 
-/// Domain separator for batch signing preimages.
+/// Legacy domain separator for batch signing preimages.
+///
+/// **DEPRECATED (T159)**: Use `domain_prefix(chain_id, DomainKind::Batch)` instead.
 ///
 /// Format: `QBIND:BATCH:v1` || creator || view_hint || parents || tx_root
 ///
@@ -228,16 +238,59 @@ impl QbindBatch {
         }
     }
 
-    /// Compute the signing preimage for this batch.
+    /// Compute the signing preimage for this batch with chain ID (T159).
     ///
-    /// Format: `QBIND:BATCH:v1 || creator || view_hint || parents_root || tx_root`
+    /// Format: `QBIND:<SCOPE>:BATCH:v1 || creator || view_hint || parents_root || tx_root`
+    ///
+    /// Where `<SCOPE>` is "DEV", "TST", "MAIN", or "UNK" based on the chain ID.
+    ///
+    /// This is what gets signed by the creator's ML-DSA-44 key.
+    pub fn signing_preimage_with_chain_id(&self, chain_id: ChainId) -> Vec<u8> {
+        batch_signing_preimage_with_chain_id(
+            chain_id,
+            self.creator,
+            self.view_hint,
+            &self.parents,
+            &self.txs,
+        )
+    }
+
+    /// Compute the signing preimage using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `signing_preimage_with_chain_id()` instead.
+    ///
+    /// Format: `QBIND:DEV:BATCH:v1 || creator || view_hint || parents_root || tx_root`
     ///
     /// This is what gets signed by the creator's ML-DSA-44 key.
     pub fn signing_preimage(&self) -> Vec<u8> {
-        batch_signing_preimage(self.creator, self.view_hint, &self.parents, &self.txs)
+        self.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID)
     }
 
-    /// Sign this batch with the given secret key (ML-DSA-44).
+    /// Sign this batch with the given secret key and chain ID (T159).
+    ///
+    /// # Arguments
+    ///
+    /// * `sk` - The secret key bytes (must be ML_DSA_44_SECRET_KEY_SIZE bytes)
+    /// * `chain_id` - The chain ID for domain separation
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if signing succeeded, `Err` otherwise.
+    pub fn sign_with_chain_id(&mut self, sk: &[u8], chain_id: ChainId) -> Result<(), BatchError> {
+        use qbind_crypto::ml_dsa44::MlDsa44Backend;
+
+        let preimage = self.signing_preimage_with_chain_id(chain_id);
+        let sig_bytes =
+            MlDsa44Backend::sign(sk, &preimage).map_err(|_| BatchError::SigningFailed)?;
+        self.signature = BatchSignature::new(sig_bytes);
+        Ok(())
+    }
+
+    /// Sign this batch using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `sign_with_chain_id()` instead.
     ///
     /// # Arguments
     ///
@@ -247,25 +300,24 @@ impl QbindBatch {
     ///
     /// `Ok(())` if signing succeeded, `Err` otherwise.
     pub fn sign(&mut self, sk: &[u8]) -> Result<(), BatchError> {
-        use qbind_crypto::ml_dsa44::MlDsa44Backend;
-
-        let preimage = self.signing_preimage();
-        let sig_bytes =
-            MlDsa44Backend::sign(sk, &preimage).map_err(|_| BatchError::SigningFailed)?;
-        self.signature = BatchSignature::new(sig_bytes);
-        Ok(())
+        self.sign_with_chain_id(sk, QBIND_DEVNET_CHAIN_ID)
     }
 
-    /// Verify the batch signature against the given public key.
+    /// Verify the batch signature against the given public key with chain ID (T159).
     ///
     /// # Arguments
     ///
     /// * `pk` - The creator's public key bytes (ML-DSA-44)
+    /// * `chain_id` - The chain ID for domain separation
     ///
     /// # Returns
     ///
     /// `Ok(())` if the signature is valid, `Err` otherwise.
-    pub fn verify_signature(&self, pk: &[u8]) -> Result<(), BatchError> {
+    pub fn verify_signature_with_chain_id(
+        &self,
+        pk: &[u8],
+        chain_id: ChainId,
+    ) -> Result<(), BatchError> {
         use qbind_crypto::ml_dsa44::{
             MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
         };
@@ -278,9 +330,25 @@ impl QbindBatch {
             return Err(BatchError::InvalidSignature);
         }
 
-        let preimage = self.signing_preimage();
+        let preimage = self.signing_preimage_with_chain_id(chain_id);
         MlDsa44Backend::verify(pk, &preimage, &self.signature.bytes)
             .map_err(|_| BatchError::SignatureVerificationFailed)
+    }
+
+    /// Verify the batch signature using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `verify_signature_with_chain_id()` instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `pk` - The creator's public key bytes (ML-DSA-44)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the signature is valid, `Err` otherwise.
+    pub fn verify_signature(&self, pk: &[u8]) -> Result<(), BatchError> {
+        self.verify_signature_with_chain_id(pk, QBIND_DEVNET_CHAIN_ID)
     }
 
     /// Get the number of transactions in this batch.
@@ -398,29 +466,33 @@ pub fn compute_batch_id(
     sha3_256(&encoding)
 }
 
-/// Compute the signing preimage for a batch.
+/// Compute the signing preimage for a batch with chain ID (T159).
 ///
 /// ## Format
 ///
 /// ```text
-/// QBIND:BATCH:v1   (14 bytes)
-/// creator          (8 bytes, little-endian)
-/// view_hint        (8 bytes, little-endian)
-/// parents_root     (32 bytes, SHA3-256 of parents encoding)
-/// tx_root          (32 bytes, SHA3-256 of txs encoding)
+/// QBIND:<SCOPE>:BATCH:v1  (variable length based on scope)
+/// creator                  (8 bytes, little-endian)
+/// view_hint                (8 bytes, little-endian)
+/// parents_root             (32 bytes, SHA3-256 of parents encoding)
+/// tx_root                  (32 bytes, SHA3-256 of txs encoding)
 /// ```
 ///
+/// Where `<SCOPE>` is "DEV", "TST", "MAIN", or "UNK" based on the chain ID.
+///
 /// Using roots instead of full data keeps the preimage compact for signing.
-pub fn batch_signing_preimage(
+pub fn batch_signing_preimage_with_chain_id(
+    chain_id: ChainId,
     creator: ValidatorId,
     view_hint: u64,
     parents: &[BatchRef],
     txs: &[QbindTransaction],
 ) -> Vec<u8> {
-    let mut out = Vec::with_capacity(BATCH_DOMAIN_TAG.len() + 8 + 8 + 32 + 32);
+    let domain_tag = domain_prefix(chain_id, DomainKind::Batch);
+    let mut out = Vec::with_capacity(domain_tag.len() + 8 + 8 + 32 + 32);
 
-    // Domain tag
-    out.extend_from_slice(BATCH_DOMAIN_TAG);
+    // Domain tag (chain-aware)
+    out.extend_from_slice(&domain_tag);
 
     // Creator (8 bytes, LE)
     out.extend_from_slice(&creator.as_u64().to_le_bytes());
@@ -438,12 +510,12 @@ pub fn batch_signing_preimage(
     let parents_root = sha3_256(&parents_bytes);
     out.extend_from_slice(&parents_root);
 
-    // Tx root (SHA3-256 of txs encoding)
+    // Tx root (SHA3-256 of txs encoding) - use chain-aware tx preimage
     let mut txs_bytes = Vec::new();
     let num_txs = txs.len() as u32;
     txs_bytes.extend_from_slice(&num_txs.to_le_bytes());
     for tx in txs {
-        let tx_preimage = tx.signing_preimage();
+        let tx_preimage = tx.signing_preimage_with_chain_id(chain_id);
         let tx_len = tx_preimage.len() as u32;
         txs_bytes.extend_from_slice(&tx_len.to_le_bytes());
         txs_bytes.extend_from_slice(&tx_preimage);
@@ -452,6 +524,31 @@ pub fn batch_signing_preimage(
     out.extend_from_slice(&tx_root);
 
     out
+}
+
+/// Compute the signing preimage for a batch using DevNet chain ID.
+///
+/// **Note (T159)**: This function defaults to `QBIND_DEVNET_CHAIN_ID`. For
+/// explicit chain control, use `batch_signing_preimage_with_chain_id()` instead.
+///
+/// ## Format
+///
+/// ```text
+/// QBIND:DEV:BATCH:v1  (18 bytes for DevNet)
+/// creator              (8 bytes, little-endian)
+/// view_hint            (8 bytes, little-endian)
+/// parents_root         (32 bytes, SHA3-256 of parents encoding)
+/// tx_root              (32 bytes, SHA3-256 of txs encoding)
+/// ```
+///
+/// Using roots instead of full data keeps the preimage compact for signing.
+pub fn batch_signing_preimage(
+    creator: ValidatorId,
+    view_hint: u64,
+    parents: &[BatchRef],
+    txs: &[QbindTransaction],
+) -> Vec<u8> {
+    batch_signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID, creator, view_hint, parents, txs)
 }
 
 // ============================================================================
@@ -1182,6 +1279,9 @@ mod tests {
 
     #[test]
     fn test_signing_preimage_starts_with_domain_tag() {
+        use qbind_types::domain::{domain_prefix, DomainKind};
+        use qbind_types::QBIND_DEVNET_CHAIN_ID;
+
         let creator = ValidatorId::new(1);
         let view_hint = 10;
         let parents = vec![];
@@ -1189,9 +1289,12 @@ mod tests {
 
         let preimage = batch_signing_preimage(creator, view_hint, &parents, &txs);
 
+        // batch_signing_preimage uses QBIND_DEVNET_CHAIN_ID by default,
+        // so the preimage should start with the chain-aware domain tag.
+        let expected_prefix = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Batch);
         assert!(
-            preimage.starts_with(BATCH_DOMAIN_TAG),
-            "signing preimage should start with domain tag"
+            preimage.starts_with(&expected_prefix),
+            "signing preimage should start with chain-aware domain tag (QBIND:DEV:BATCH:v1)"
         );
     }
 

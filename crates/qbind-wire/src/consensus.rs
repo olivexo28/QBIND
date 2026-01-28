@@ -3,7 +3,8 @@ use crate::io::{
     get_bytes, get_u16, get_u32, get_u64, get_u8, len_to_u16, len_to_u32, put_bytes, put_u16,
     put_u32, put_u64, put_u8, WireDecode, WireEncode,
 };
-use qbind_types::Hash32;
+use qbind_types::domain::{domain_prefix, DomainKind};
+use qbind_types::{ChainId, Hash32, QBIND_DEVNET_CHAIN_ID};
 
 pub const MSG_TYPE_VOTE: u8 = 0x01;
 pub const MSG_TYPE_QC: u8 = 0x02;
@@ -116,20 +117,85 @@ impl WireDecode for Vote {
     }
 }
 
-/// Domain separator for Vote signing preimages.
+/// Legacy domain separator for Vote signing preimages.
+///
+/// **DEPRECATED (T159)**: Use `domain_prefix(chain_id, DomainKind::Vote)` instead.
+///
+/// This constant is provided for backward compatibility and documentation.
 /// Changing this is a consensus-breaking change.
 pub const VOTE_DOMAIN_TAG: &[u8] = b"QBIND:VOTE:v1";
 
 impl Vote {
-    /// Return the canonical preimage bytes to be signed for this vote
+    /// Return the canonical preimage bytes to be signed for this vote with chain ID (T159).
     /// (excluding the signature field itself).
+    ///
+    /// # Preimage Layout (v1 with T159 chain-aware domain)
+    ///
+    /// The preimage is constructed as follows (all integers are little-endian):
+    ///
+    /// ```text
+    /// domain_tag:      "QBIND:<SCOPE>:VOTE:v1" (variable length based on scope)
+    /// version:         u8
+    /// chain_id:        u32
+    /// epoch:           u64
+    /// height:          u64
+    /// round:           u64
+    /// step:            u8
+    /// block_id:        [u8; 32]
+    /// validator_index: u16
+    /// suite_id:        u16
+    /// ```
+    ///
+    /// Where `<SCOPE>` is "DEV", "TST", "MAIN", or "UNK" based on the chain ID.
+    ///
+    /// Note: The signature field is NOT included in the preimage.
+    ///
+    /// # Wire Format Change (T101)
+    ///
+    /// Added `epoch` to the preimage. This ensures that votes from different
+    /// epochs cannot be replayed, as the epoch is part of what's signed.
+    ///
+    /// # Wire Format Change (T159)
+    ///
+    /// Domain tag is now chain-aware. Use `signing_preimage_with_chain_id()`
+    /// with the appropriate `ChainId` for cross-chain isolation.
+    ///
+    /// # Stability
+    ///
+    /// Changing this layout is a consensus-breaking change and must be versioned
+    /// (hence "v1" in the domain tag). Any future layout changes should use a
+    /// new domain tag (e.g., "QBIND:VOTE:v2").
+    pub fn signing_preimage_with_chain_id(&self, qbind_chain_id: ChainId) -> Vec<u8> {
+        let domain_tag = domain_prefix(qbind_chain_id, DomainKind::Vote);
+        // Capacity hint: domain_tag + version(1) + chain_id(4) + epoch(8) + height(8) + round(8) +
+        //               step(1) + block_id(32) + validator_index(2) + suite_id(2)
+        let mut out = Vec::with_capacity(domain_tag.len() + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2);
+        // Domain separator (chain-aware)
+        put_bytes(&mut out, &domain_tag);
+        // Vote fields (excluding signature)
+        put_u8(&mut out, self.version);
+        put_u32(&mut out, self.chain_id);
+        put_u64(&mut out, self.epoch);
+        put_u64(&mut out, self.height);
+        put_u64(&mut out, self.round);
+        put_u8(&mut out, self.step);
+        put_bytes(&mut out, &self.block_id);
+        put_u16(&mut out, self.validator_index);
+        put_u16(&mut out, self.suite_id);
+        out
+    }
+
+    /// Return the canonical preimage bytes using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `signing_preimage_with_chain_id()` instead.
     ///
     /// # Preimage Layout (v1)
     ///
     /// The preimage is constructed as follows (all integers are little-endian):
     ///
     /// ```text
-    /// domain_tag:      "QBIND:VOTE:v1" (12 bytes)
+    /// domain_tag:      "QBIND:DEV:VOTE:v1" (17 bytes for DevNet)
     /// version:         u8
     /// chain_id:        u32
     /// epoch:           u64
@@ -142,35 +208,8 @@ impl Vote {
     /// ```
     ///
     /// Note: The signature field is NOT included in the preimage.
-    ///
-    /// # Wire Format Change (T101)
-    ///
-    /// Added `epoch` to the preimage. This ensures that votes from different
-    /// epochs cannot be replayed, as the epoch is part of what's signed.
-    ///
-    /// # Stability
-    ///
-    /// Changing this layout is a consensus-breaking change and must be versioned
-    /// (hence "v1" in the domain tag). Any future layout changes should use a
-    /// new domain tag (e.g., "QBIND:VOTE:v2").
     pub fn signing_preimage(&self) -> Vec<u8> {
-        // Capacity hint: domain_tag(12) + version(1) + chain_id(4) + epoch(8) + height(8) + round(8) +
-        //               step(1) + block_id(32) + validator_index(2) + suite_id(2) = 78 bytes
-        let mut out =
-            Vec::with_capacity(VOTE_DOMAIN_TAG.len() + 1 + 4 + 8 + 8 + 8 + 1 + 32 + 2 + 2);
-        // Domain separator
-        put_bytes(&mut out, VOTE_DOMAIN_TAG);
-        // Vote fields (excluding signature)
-        put_u8(&mut out, self.version);
-        put_u32(&mut out, self.chain_id);
-        put_u64(&mut out, self.epoch);
-        put_u64(&mut out, self.height);
-        put_u64(&mut out, self.round);
-        put_u8(&mut out, self.step);
-        put_bytes(&mut out, &self.block_id);
-        put_u16(&mut out, self.validator_index);
-        put_u16(&mut out, self.suite_id);
-        out
+        self.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID)
     }
 }
 
@@ -523,20 +562,24 @@ impl WireDecode for BlockProposal {
     }
 }
 
-/// Domain separator for BlockProposal signing preimages.
+/// Legacy domain separator for BlockProposal signing preimages.
+///
+/// **DEPRECATED (T159)**: Use `domain_prefix(chain_id, DomainKind::Proposal)` instead.
+///
+/// This constant is provided for backward compatibility and documentation.
 /// Changing this is a consensus-breaking change.
 pub const PROPOSAL_DOMAIN_TAG: &[u8] = b"QBIND:PROPOSAL:v1";
 
 impl BlockProposal {
-    /// Return the canonical preimage bytes to be signed for this proposal
+    /// Return the canonical preimage bytes to be signed for this proposal with chain ID (T159).
     /// (excluding the signature field itself).
     ///
-    /// # Preimage Layout (v1)
+    /// # Preimage Layout (v1 with T159 chain-aware domain)
     ///
     /// The preimage is constructed as follows (all integers are little-endian):
     ///
     /// ```text
-    /// domain_tag:       "QBIND:PROPOSAL:v1" (16 bytes)
+    /// domain_tag:       "QBIND:<SCOPE>:PROPOSAL:v1" (variable length based on scope)
     /// version:          u8
     /// chain_id:         u32
     /// epoch:            u64
@@ -555,6 +598,8 @@ impl BlockProposal {
     /// txs:              sequence of (u32 len, bytes[len])
     /// ```
     ///
+    /// Where `<SCOPE>` is "DEV", "TST", "MAIN", or "UNK" based on the chain ID.
+    ///
     /// Note: The signature field is NOT included in the preimage.
     ///
     /// # Wire Format Change (T101)
@@ -567,12 +612,17 @@ impl BlockProposal {
     /// Added `payload_kind` and `next_epoch` to the preimage. This ensures that
     /// the reconfig payload is signed and cannot be altered after proposal.
     ///
+    /// # Wire Format Change (T159)
+    ///
+    /// Domain tag is now chain-aware. Use `signing_preimage_with_chain_id()`
+    /// with the appropriate `ChainId` for cross-chain isolation.
+    ///
     /// # Stability
     ///
     /// Changing this layout is a consensus-breaking change and must be versioned
     /// (hence "v1" in the domain tag). Any future layout changes should use a
     /// new domain tag (e.g., "QBIND:PROPOSAL:v2").
-    pub fn signing_preimage(&self) -> Vec<u8> {
+    pub fn signing_preimage_with_chain_id(&self, qbind_chain_id: ChainId) -> Vec<u8> {
         // Encode QC into a temp buffer to get its length
         let qc_bytes = if let Some(ref qc) = self.qc {
             let mut qc_buf = Vec::new();
@@ -583,10 +633,11 @@ impl BlockProposal {
         };
         let qc_len = len_to_u32(qc_bytes.len());
 
+        let domain_tag = domain_prefix(qbind_chain_id, DomainKind::Proposal);
         let mut out = Vec::new();
 
-        // Domain separator
-        put_bytes(&mut out, PROPOSAL_DOMAIN_TAG);
+        // Domain separator (chain-aware)
+        put_bytes(&mut out, &domain_tag);
 
         // Header fields
         put_u8(&mut out, self.header.version);
@@ -617,5 +668,39 @@ impl BlockProposal {
 
         // NOTE: signature is NOT included
         out
+    }
+
+    /// Return the canonical preimage bytes using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `signing_preimage_with_chain_id()` instead.
+    ///
+    /// # Preimage Layout (v1)
+    ///
+    /// The preimage is constructed as follows (all integers are little-endian):
+    ///
+    /// ```text
+    /// domain_tag:       "QBIND:DEV:PROPOSAL:v1" (21 bytes for DevNet)
+    /// version:          u8
+    /// chain_id:         u32
+    /// epoch:            u64
+    /// height:           u64
+    /// round:            u64
+    /// parent_block_id:  [u8; 32]
+    /// payload_hash:     [u8; 32]
+    /// proposer_index:   u16
+    /// suite_id:         u16
+    /// tx_count:         u32
+    /// timestamp:        u64
+    /// payload_kind:     u8           (T102.1)
+    /// next_epoch:       u64          (T102.1)
+    /// qc_len:           u32
+    /// qc_bytes:         [u8; qc_len]  (full WireEncode of QC if present)
+    /// txs:              sequence of (u32 len, bytes[len])
+    /// ```
+    ///
+    /// Note: The signature field is NOT included in the preimage.
+    pub fn signing_preimage(&self) -> Vec<u8> {
+        self.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID)
     }
 }

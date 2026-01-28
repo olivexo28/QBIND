@@ -36,3 +36,6 @@ pub use suite_catalog::{
     validate_suite_catalog, ConsensusSigSuiteInfo, KNOWN_CONSENSUS_SIG_SUITES, SUITE_PQ_RESERVED_1,
     SUITE_PQ_RESERVED_2, SUITE_PQ_RESERVED_3,
 };
+
+// Re-export domain separation helpers from qbind-types
+pub use qbind_types::domain::{chain_scope, domain_prefix, DomainKind};
