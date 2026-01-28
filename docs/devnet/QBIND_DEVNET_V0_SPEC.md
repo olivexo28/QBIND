@@ -284,6 +284,81 @@ As part of the DevNet → TestNet → MainNet progression, two key architectural
 | Phase 2 | TestNet Beta | DAG (default) | Parallel Stage A |
 | Phase 3 | MainNet | DAG + DoS Protection | Parallel Stage A + B |
 
+## DevNet v0 Cluster Harness & Soak Testing (T160)
+
+This section describes the multi-node DevNet cluster harness for testing consensus, networking, and execution under load.
+
+### 1. Cluster Harness Overview
+
+The T160 DevNet cluster harness provides a 4-node (or N-node) DevNet cluster that exercises:
+*   **Real KEMTLS Networking**: Each node uses the KEMTLS stack for quantum-resistant authenticated channels.
+*   **Full DevNet Stack**: Mempool (FIFO or DAG), async execution pipeline (T155), and Stage A parallel execution (T157).
+*   **Static Mesh Topology**: Validators are configured with static peer addresses (localhost).
+*   **Unique Keystores**: Each validator has its own identity and signing keys.
+
+**Configuration Options** (`DevnetClusterConfig`):
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `num_validators` | 4 | Number of validators in the cluster (≥1) |
+| `chain_id` | `QBIND_DEVNET_CHAIN_ID` | Chain ID for domain separation |
+| `use_dag_mempool` | false | Use DAG mempool instead of FIFO |
+| `max_txs_per_block` | 1000 | Maximum transactions per block |
+| `mempool_size` | 10,000 | Maximum mempool capacity |
+| `execution_parallel_workers` | `num_cpus` | Parallel execution worker threads |
+
+### 2. Soak/TPS Test
+
+The soak test submits thousands of transactions and measures throughput and consistency.
+
+**Soak Configuration** (`SoakConfig`):
+
+| Parameter | Default | Description |
+| :--- | :--- | :--- |
+| `num_txs` | 5,000 | Total transactions to submit |
+| `tx_payload_size` | 64 bytes | Payload size per transaction |
+| `send_concurrency` | 8 | Concurrent sender threads |
+| `max_duration_secs` | 60 | Maximum test duration |
+| `num_senders` | 100 | Number of distinct sender accounts |
+
+**Running the Soak Test**:
+
+```bash
+# Run the FIFO mempool soak test
+cargo test -p qbind-node --test t160_devnet_cluster_harness devnet_cluster_soak_fifo_mempool -- --ignored --nocapture
+
+# Run the DAG mempool smoke test
+cargo test -p qbind-node --test t160_devnet_cluster_harness devnet_cluster_smoke_dag_mempool -- --ignored --nocapture
+
+# Run quick smoke tests (CI-friendly)
+cargo test -p qbind-node --test t160_devnet_cluster_harness -- --nocapture
+```
+
+**Soak Test Metrics**:
+
+The soak test reports:
+*   `tps_observed`: Observed transactions per second
+*   `total_txs_committed`: Total transactions committed across all nodes
+*   `duration_secs`: Total test duration
+*   `final_view`: Highest consensus view reached
+*   `state_consistent`: Whether all nodes converged to the same state
+
+**Observable Metrics During Soak**:
+*   Consensus: `qbind_consensus_proposals_total`, `qbind_consensus_votes_total`
+*   Execution: `qbind_execution_txs_applied_total`, `qbind_execution_parallel_workers_active`
+*   Mempool: `qbind_mempool_inserted_total`, `qbind_mempool_committed_total`
+*   DAG (if enabled): `qbind_dag_batches_total`, `qbind_dag_txs_total`
+
+### 3. Limitations
+
+The T160 harness is a **local, single-machine** cluster for development and testing:
+*   No distributed deployment across multiple machines
+*   No dynamic peer discovery (static mesh)
+*   Simplified single-validator-per-node quorum (100%) for test simplicity
+*   Not representative of TestNet/MainNet latencies
+
+For distributed multi-machine testing, see the planned TestNet infrastructure.
+
 ### Future Work (Audit)
 For tracking the evolution and readiness of these future networks, see:
 *   [DevNet Audit Log](./QBIND_DEVNET_AUDIT.md)
