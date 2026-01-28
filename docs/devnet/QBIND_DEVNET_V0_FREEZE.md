@@ -56,6 +56,7 @@ The following table summarizes each major axis of DevNet v0, linking to the unde
 - [QBIND Parallel Execution Design](./QBIND_PARALLEL_EXECUTION_DESIGN.md) — Stage A/B parallel execution design
 - [QBIND DAG Mempool Design](./QBIND_DAG_MEMPOOL_DESIGN.md) — DAG mempool architecture
 - [QBIND Chain ID and Domains](./QBIND_CHAIN_ID_AND_DOMAINS.md) — Domain separation scheme
+- [QBIND Gas and Fee Model Design](../testnet/QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167)
 
 ---
 
@@ -66,7 +67,7 @@ The following limitations are **accepted** for DevNet v0 and will be addressed i
 | Limitation | Description | Target Phase |
 | :--- | :--- | :--- |
 | **Nonce-only execution** | No user-visible VM; payloads are ignored | TestNet Alpha |
-| **No fee market / priority mempool** | FIFO ordering only (R5) | TestNet Alpha |
+| **No fee market / priority mempool** | FIFO ordering only (R5); gas model designed in T167 | TestNet Beta |
 | **DAG v0 only** | No availability certificates; no leaderless data plane | TestNet Alpha |
 | **Static mesh networking** | No dynamic peer discovery, NAT traversal, or gossip | TestNet Alpha |
 | **Single-machine cluster harness** | T160 harness is local only; not a distributed staging environment | TestNet Alpha |

@@ -381,6 +381,19 @@ During the transition period:
 2. **Fallback**: If DAG mode fails, fall back to FIFO mode.
 3. **Interop**: DAG nodes must be able to participate in a mixed network (graceful degradation).
 
+### 5.5 Gas Model Integration (T167)
+
+The T167 gas and fee model will affect DAG mempool behavior in future phases:
+
+| Component | Gas Integration Impact |
+| :--- | :--- |
+| **Batch Construction** | Batch creators may preferentially include higher-fee transactions for economic incentive. |
+| **Block Construction** | When building blocks from DAG frontier, gas-invalid transactions are skipped and per-block gas limit is enforced. |
+| **Admission Policy** | Transactions must satisfy gas legality (`gas(tx) <= gas_limit`) and balance requirements before entering any mempool. |
+| **Eviction Policy** | Low-fee transactions may be evicted when mempool is full; fee priority determines eviction order. |
+
+**Note**: Gas enforcement is not implemented in TestNet Alpha. See [QBIND Gas and Fee Model Design](../testnet/QBIND_GAS_AND_FEES_DESIGN.md) for the complete specification and migration timeline.
+
 ---
 
 ## 6. Rollout Plan (DevNet → TestNet → MainNet)
@@ -492,6 +505,7 @@ Each phase includes a rollback plan:
 - [QBIND DevNet v0 Spec](./QBIND_DEVNET_V0_SPEC.md) — Current architecture.
 - [QBIND Parallel Execution Design](./QBIND_PARALLEL_EXECUTION_DESIGN.md) — Companion parallel execution spec.
 - [QBIND DevNet Audit Log](./QBIND_DEVNET_AUDIT.md) — Risk tracking (R2, R5, R6).
+- [QBIND Gas and Fee Model Design](../testnet/QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167).
 - **Narwhal and Tusk** (Danezis et al., 2022) — DAG-based mempool and consensus.
 - **Bullshark** (Spiegelman et al., 2022) — DAG-based BFT with improved latency.
 - **PBFT** (Castro & Liskov, 1999) — Classical BFT consensus.

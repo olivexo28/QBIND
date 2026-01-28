@@ -368,8 +368,9 @@ TestNet Beta / MainNet may add:
 | **State Persistence** | Disk-backed account state (RocksDB) | TestNet Alpha | ✅ Done (T164) |
 | **DAG Availability Certs** | BatchAck + BatchCertificate v1 | TestNet Alpha | ✅ Done (T165) |
 | **Cluster Harness** | Multi-node TestNet Alpha harness | TestNet Alpha | ✅ Done (T166) |
+| **Gas & Fee Model Design** | Resource accounting and fee specification | TestNet Alpha | ✅ Done (T167 – Design) |
 | **Stage B Parallelism** | Conflict-graph-based VM parallelism | TestNet Beta | Planned |
-| **Gas Accounting** | Transaction fees and gas limits | TestNet Beta | Planned |
+| **Gas Accounting** | Transaction fees and gas limits (implementation) | TestNet Beta | Planned |
 | **Smart Contracts** | Full EVM or custom VM support | MainNet | Planned |
 
 ---
@@ -455,8 +456,43 @@ This harness is the **canonical entry point** to validate the full TestNet Alpha
 
 ---
 
+## 7. Execution Economics & Gas (T167 – Design)
+
+TestNet Alpha currently operates **without enforced gas or fee accounting**. All transfer transactions are processed without cost, and there is no resource metering.
+
+### 7.1 Current State
+
+| Aspect | TestNet Alpha Status |
+| :--- | :--- |
+| **Gas Metering** | Not enforced |
+| **Transaction Fees** | None (all transfers are free) |
+| **Block Gas Limit** | Not enforced |
+| **Fee-Based Priority** | Not implemented (FIFO ordering) |
+
+### 7.2 T167 Gas & Fee Model Design
+
+Task T167 defines the gas and fee model for future implementation in TestNet Beta and MainNet:
+
+- **Gas Cost Model**: Abstract gas units for measuring resource consumption (signature verification, state access, payload size).
+- **VM v1 Transaction Format**: `TransferPayloadV1` with explicit `gas_limit` and `max_fee_per_gas` fields.
+- **Per-Transaction and Per-Block Limits**: Gas limits to cap resource usage and prevent DoS.
+- **Mempool Integration**: Admission policies based on gas validity and fee priority.
+- **Fee Distribution**: Burn policy for TestNet, hybrid (burn + proposer reward) for MainNet.
+- **DAG Integration**: Gas constraints enforced at block construction from DAG batches.
+
+### 7.3 Migration Path
+
+1. **TestNet Alpha**: No gas enforcement; `TransferPayload` (v0) format.
+2. **TestNet Beta**: Gas enforcement enabled; both v0 and v1 payloads accepted with deprecation timeline.
+3. **MainNet**: Full gas and fee enforcement; v1 format required.
+
+**Reference**: [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) for complete specification.
+
+---
+
 ## Appendix A: Related Documents
 
+- [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167)
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet v0 specification and freeze
 - [QBIND Parallel Execution Design](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) — Stage A/B parallelism
 - [QBIND Chain ID and Domains](../devnet/QBIND_CHAIN_ID_AND_DOMAINS.md) — Domain separation
