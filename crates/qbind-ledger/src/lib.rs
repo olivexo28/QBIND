@@ -34,3 +34,8 @@ pub use execution::{
     AccountState, AccountStateUpdater, AccountStateView, InMemoryAccountState, TransferPayload,
     VmV0Error, VmV0ExecutionEngine, VmV0TxResult, TRANSFER_PAYLOAD_SIZE,
 };
+
+// T164: Persistent account state exports
+pub use execution::{
+    CachedPersistentAccountState, PersistentAccountState, RocksDbAccountState, StorageError,
+};

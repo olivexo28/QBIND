@@ -83,13 +83,15 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 
 **Goal**: Evolve from nonce-only engine to a minimal deterministic VM.
 
-| Work Item | Description | Risks Addressed |
-| :--- | :--- | :--- |
-| **Minimal VM (T163)** | VM v0 with account balances and transfer semantics | New capability |
-| **State Persistence** | Persist execution state to disk (RocksDB or similar) | New capability |
-| **Stage B Parallelism** | Conflict-graph-based parallel execution when VM is in place | R6 |
+| Work Item | Description | Risks Addressed | Status |
+| :--- | :--- | :--- | :--- |
+| **Minimal VM (T163)** | VM v0 with account balances and transfer semantics | New capability | ✅ Done |
+| **State Persistence (T164)** | Persist execution state to disk (RocksDB) | New capability | ✅ Done |
+| **Stage B Parallelism** | Conflict-graph-based parallel execution when VM is in place | R6 | Planned |
 
 **T163 Status**: ✅ Implemented — See [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) for VM v0 semantics.
+
+**T164 Status**: ✅ Implemented — See [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) §4.4 for persistence details.
 
 **References**: [QBIND_PARALLEL_EXECUTION_DESIGN.md](./QBIND_PARALLEL_EXECUTION_DESIGN.md) §4.2
 

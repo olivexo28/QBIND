@@ -61,6 +61,7 @@
 //! - On first execution error, the adapter returns the error immediately
 //! - Future versions may support different error policies (continue, revert, etc.)
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -68,14 +69,44 @@ use std::time::Instant;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use qbind_ledger::{
-    ExecutionEngine, ExecutionEngineError, InMemoryAccountState, InMemoryState, ParallelExecConfig,
-    QbindTransaction, SenderPartitionedNonceExecutor, StateUpdater, VmV0ExecutionEngine,
+    CachedPersistentAccountState, ExecutionEngine, ExecutionEngineError, InMemoryAccountState,
+    InMemoryState, ParallelExecConfig, PersistentAccountState, QbindTransaction,
+    RocksDbAccountState, SenderPartitionedNonceExecutor, StateUpdater, VmV0ExecutionEngine,
 };
 use qbind_types::Hash32;
 use qbind_wire::consensus::BlockProposal;
 
 use crate::metrics::ExecutionMetrics;
 use crate::node_config::ExecutionProfile;
+
+// ============================================================================
+// T164: FlushableState Trait
+// ============================================================================
+
+/// Trait for state backends that support flushing to durable storage (T164).
+///
+/// This trait allows the VM v0 execution loop to work with both in-memory
+/// and persistent state backends through a common interface.
+trait FlushableState {
+    /// Flush any pending state changes to durable storage.
+    ///
+    /// For in-memory backends, this is a no-op.
+    /// For persistent backends, this ensures data is written to disk.
+    fn flush_state(&self) -> Result<(), qbind_ledger::StorageError>;
+}
+
+impl FlushableState for InMemoryAccountState {
+    fn flush_state(&self) -> Result<(), qbind_ledger::StorageError> {
+        // In-memory state doesn't need flushing
+        Ok(())
+    }
+}
+
+impl<P: PersistentAccountState> FlushableState for CachedPersistentAccountState<P> {
+    fn flush_state(&self) -> Result<(), qbind_ledger::StorageError> {
+        self.flush()
+    }
+}
 
 // ============================================================================
 // QbindBlock - Block wrapper with decoded transactions
@@ -382,6 +413,11 @@ pub struct SingleThreadExecutionServiceConfig {
     /// - `NonceOnly`: Uses Stage A parallel nonce execution (DevNet default)
     /// - `VmV0`: Uses sequential VM v0 execution with account balances (TestNet Alpha)
     pub execution_profile: ExecutionProfile,
+    /// State directory for VM v0 persistence (T164).
+    ///
+    /// When set and `execution_profile` is `VmV0`, the service uses RocksDB-backed
+    /// persistent storage at this path. When `None`, uses in-memory state only.
+    pub state_dir: Option<PathBuf>,
 }
 
 impl Default for SingleThreadExecutionServiceConfig {
@@ -390,6 +426,7 @@ impl Default for SingleThreadExecutionServiceConfig {
             queue_capacity: 1024,
             parallel_config: ParallelExecConfig::default(),
             execution_profile: ExecutionProfile::NonceOnly,
+            state_dir: None,
         }
     }
 }
@@ -419,12 +456,45 @@ impl SingleThreadExecutionServiceConfig {
         self
     }
 
+    /// Set the state directory for VM v0 persistence (T164).
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the state directory. The directory will be created if
+    ///   it doesn't exist.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = SingleThreadExecutionServiceConfig::vm_v0()
+    ///     .with_state_dir("/data/vm_v0_state");
+    /// ```
+    pub fn with_state_dir<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.state_dir = Some(path.into());
+        self
+    }
+
     /// Create a config for VM v0 execution (TestNet Alpha) (T163).
     pub fn vm_v0() -> Self {
         Self {
             queue_capacity: 1024,
             parallel_config: ParallelExecConfig::default(),
             execution_profile: ExecutionProfile::VmV0,
+            state_dir: None,
+        }
+    }
+
+    /// Create a config for VM v0 execution with persistent state (T164).
+    ///
+    /// # Arguments
+    ///
+    /// * `state_dir` - Path to the state directory.
+    pub fn vm_v0_persistent<P: Into<PathBuf>>(state_dir: P) -> Self {
+        Self {
+            queue_capacity: 1024,
+            parallel_config: ParallelExecConfig::default(),
+            execution_profile: ExecutionProfile::VmV0,
+            state_dir: Some(state_dir.into()),
         }
     }
 }
@@ -512,6 +582,7 @@ impl SingleThreadExecutionService {
         let worker_metrics = metrics.clone();
         let parallel_config = config.parallel_config.clone();
         let execution_profile = config.execution_profile;
+        let state_dir = config.state_dir.clone();
 
         // Spawn the dedicated worker thread
         thread::spawn(move || {
@@ -523,6 +594,7 @@ impl SingleThreadExecutionService {
                 worker_metrics,
                 parallel_config,
                 execution_profile,
+                state_dir,
             );
         });
 
@@ -536,6 +608,7 @@ impl SingleThreadExecutionService {
         }
     }
     /// - `VmV0`: Uses sequential VM v0 execution with account balances (T163)
+    #[allow(clippy::too_many_arguments)]
     fn worker_loop<E: ExecutionEngine>(
         _engine: E, // Kept for backward compatibility but unused in T157+
         receiver: Receiver<ExecTask>,
@@ -544,6 +617,7 @@ impl SingleThreadExecutionService {
         metrics: Option<Arc<ExecutionMetrics>>,
         parallel_config: ParallelExecConfig,
         execution_profile: ExecutionProfile,
+        state_dir: Option<PathBuf>,
     ) {
         let mut current_height: u64 = 0;
 
@@ -564,6 +638,7 @@ impl SingleThreadExecutionService {
                     shutdown,
                     queue_len,
                     metrics,
+                    state_dir,
                     &mut current_height,
                 );
             }
@@ -686,17 +761,91 @@ impl SingleThreadExecutionService {
     }
 
     /// Worker loop for VmV0 profile (T163 sequential VM execution).
+    ///
+    /// # T164: Persistent State
+    ///
+    /// When `state_dir` is provided, uses RocksDB-backed persistent storage.
+    /// State is flushed after each committed block to ensure durability.
     fn worker_loop_vm_v0(
         receiver: Receiver<ExecTask>,
         shutdown: Arc<AtomicBool>,
         queue_len: Arc<AtomicU64>,
         metrics: Option<Arc<ExecutionMetrics>>,
+        state_dir: Option<PathBuf>,
         current_height: &mut u64,
     ) {
-        // T163: Use InMemoryAccountState for VM v0
-        let mut state = InMemoryAccountState::new();
         let engine = VmV0ExecutionEngine::new();
 
+        // T164: Initialize state backend based on configuration
+        match state_dir {
+            Some(ref path) => {
+                // Use persistent state
+                match RocksDbAccountState::open(path) {
+                    Ok(persistent) => {
+                        eprintln!("[T164] VM v0 using persistent state at {:?}", path);
+                        let mut state = CachedPersistentAccountState::new(persistent);
+                        Self::run_vm_v0_loop(
+                            &engine,
+                            &mut state,
+                            receiver,
+                            shutdown,
+                            queue_len,
+                            metrics,
+                            current_height,
+                            true, // persistent
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[T164] Failed to open persistent state at {:?}: {:?}, falling back to in-memory",
+                            path, e
+                        );
+                        let mut state = InMemoryAccountState::new();
+                        Self::run_vm_v0_loop(
+                            &engine,
+                            &mut state,
+                            receiver,
+                            shutdown,
+                            queue_len,
+                            metrics,
+                            current_height,
+                            false, // not persistent
+                        );
+                    }
+                }
+            }
+            None => {
+                // Use in-memory state (T163 behavior)
+                eprintln!("[T164] VM v0 using in-memory state (no persistence)");
+                let mut state = InMemoryAccountState::new();
+                Self::run_vm_v0_loop(
+                    &engine,
+                    &mut state,
+                    receiver,
+                    shutdown,
+                    queue_len,
+                    metrics,
+                    current_height,
+                    false, // not persistent
+                );
+            }
+        }
+    }
+
+    /// Inner loop for VM v0 execution.
+    ///
+    /// Generic over the state backend to support both in-memory and persistent state.
+    #[allow(clippy::too_many_arguments)]
+    fn run_vm_v0_loop<S: qbind_ledger::AccountStateUpdater + FlushableState>(
+        engine: &VmV0ExecutionEngine,
+        state: &mut S,
+        receiver: Receiver<ExecTask>,
+        shutdown: Arc<AtomicBool>,
+        queue_len: Arc<AtomicU64>,
+        metrics: Option<Arc<ExecutionMetrics>>,
+        current_height: &mut u64,
+        is_persistent: bool,
+    ) {
         loop {
             // Check for shutdown
             if shutdown.load(Ordering::SeqCst) {
@@ -715,7 +864,19 @@ impl SingleThreadExecutionService {
                     let tx_count = task.block.tx_count();
 
                     // T163: Execute transactions sequentially
-                    let results = engine.execute_block(&mut state, &task.block.txs);
+                    let results = engine.execute_block(state, &task.block.txs);
+
+                    // T164: Flush state after block execution if using persistent backend
+                    if is_persistent {
+                        if let Err(e) = state.flush_state() {
+                            eprintln!(
+                                "[T164] Failed to flush state at height {}: {:?}",
+                                task.block.height(),
+                                e
+                            );
+                        }
+                    }
+
                     let block_duration = block_start.elapsed();
                     *current_height = task.block.height();
 
@@ -755,17 +916,23 @@ impl SingleThreadExecutionService {
 
                     // Brief log (no sensitive content)
                     if tx_count > 0 {
+                        let persistence_info = if is_persistent {
+                            "persistent"
+                        } else {
+                            "in-memory"
+                        };
                         eprintln!(
-                            "[T163] Applied block {} ({} txs, VM v0 sequential) in {:?}",
+                            "[T164] Applied block {} ({} txs, VM v0 sequential, {}) in {:?}",
                             task.block.height(),
                             tx_count,
+                            persistence_info,
                             block_duration
                         );
                     }
 
                     if error_count > 0 {
                         eprintln!(
-                            "[T163] Block {} had {} tx errors",
+                            "[T164] Block {} had {} tx errors",
                             task.block.height(),
                             error_count
                         );

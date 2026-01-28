@@ -2086,6 +2086,8 @@ dependencies = [
  "qbind-types",
  "qbind-wire",
  "rayon",
+ "rocksdb",
+ "tempfile",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 # QBIND TestNet Alpha Specification
 
-**Task**: T163 (Minimal VM v0)  
-**Status**: In Progress  
+**Task**: T163 (Minimal VM v0), T164 (State Persistence)  
+**Status**: Ready  
 **Date**: 2026-01-28
 
 ---
@@ -12,6 +12,7 @@ TestNet Alpha is the first public test network for QBIND. It extends the DevNet 
 
 - **Network Environment**: `NetworkEnvironment::Testnet` (`QBIND_TESTNET_CHAIN_ID`)
 - **Execution Profile**: `ExecutionProfile::VmV0` (sequential VM execution with account balances)
+- **State Persistence**: RocksDB-backed persistent account state (T164)
 - **Consensus**: Same as DevNet (HotStuff BFT, 3-chain commit rule)
 - **Networking**: Same as DevNet (static KEMTLS mesh)
 - **Mempool**: Same as DevNet (FIFO mempool, DAG v0 opt-in)
@@ -24,6 +25,7 @@ TestNet Alpha is the first public test network for QBIND. It extends the DevNet 
 | **Account State** | Nonce only | Nonce + Balance |
 | **Transaction Semantics** | Nonce validation only | Balance transfers |
 | **Parallelism** | Stage A (sender-partitioned) | Sequential (for now) |
+| **State Persistence** | In-memory only | RocksDB-backed disk persistence |
 
 ### What Remains the Same
 
@@ -49,7 +51,7 @@ pub struct AccountState {
 ```
 
 - **Default**: Absent accounts have `nonce = 0`, `balance = 0`.
-- **Persistence**: In-memory for now; disk persistence is future work.
+- **Persistence**: RocksDB-backed disk storage (T164). See §4.4 for details.
 
 ### 2.2 Transfer Transaction Format
 
@@ -156,12 +158,16 @@ The `SingleThreadExecutionService` selects behavior based on `ExecutionProfile`:
 
 ### 4.2 State Backends
 
-Current implementation uses in-memory state:
+VM v0 state can use either backend:
 
-- `InMemoryState` for `NonceOnly` profile
-- `InMemoryAccountState` for `VmV0` profile
+- `InMemoryAccountState`: In-memory only (for testing or when no `data_dir` is configured)
+- `RocksDbAccountState`: Persistent disk storage (T164)
 
-Disk-backed persistence is planned for future tasks.
+Production nodes should use persistent storage via the `CachedPersistentAccountState` wrapper, which provides:
+
+- In-memory caching for fast reads during execution
+- Write-through to RocksDB for durability
+- Flush-at-block-boundary for crash safety
 
 ### 4.3 Parallelism
 
@@ -171,6 +177,61 @@ Stage B parallelism (conflict-graph-based) is future work, requiring:
 - Read/write set tracking per transaction
 - Conflict detection and scheduling
 - Deterministic parallel execution
+
+### 4.4 State Persistence (T164)
+
+TestNet Alpha uses RocksDB-backed persistent storage for VM v0 state.
+
+#### Storage Layout
+
+```
+<data_dir>/
+└── state_vm_v0/        # RocksDB database directory
+    ├── 000001.sst     # SST files
+    ├── CURRENT
+    ├── MANIFEST-*
+    └── ...
+```
+
+#### Key Format
+
+Account states are stored with keys of the form:
+
+```
+"acct:" || account_id (32 bytes)
+```
+
+#### Value Format
+
+Account states use a fixed 24-byte binary encoding:
+
+```
+nonce:   u64  (8 bytes, big-endian)
+balance: u128 (16 bytes, big-endian)
+```
+
+#### Durability Guarantees
+
+- State is flushed to disk after each committed block
+- Node restart loads persisted state automatically
+- All validators converge to the same state after replaying committed blocks
+
+#### Configuration
+
+```rust
+// Configure persistent storage via NodeConfig
+let config = NodeConfig::testnet_vm_v0()
+    .with_data_dir("/data/qbind");
+
+// The VM v0 state directory is: /data/qbind/state_vm_v0
+let state_dir = config.vm_v0_state_dir();
+```
+
+#### Limitations
+
+- No pruning or compaction yet (state grows monotonically)
+- No snapshotting or checkpointing
+- Single-node restart only; no cross-node state sync in this version
 
 ---
 
@@ -195,16 +256,34 @@ Located in `qbind-node/tests/t163_vm_v0_integration_tests.rs`:
 - `test_service_vm_v0_multiple_blocks`
 - `test_service_nonce_only_profile` (DevNet regression)
 
+### 5.3 Persistence Tests (T164)
+
+Located in `qbind-ledger/tests/t164_vm_persistence_tests.rs`:
+
+- `basic_put_get_roundtrip`
+- `default_state_for_missing_account`
+- `persist_across_reopen`
+- `account_state_serialization_roundtrip`
+- `cached_state_basic`
+- `cached_state_write_through`
+
+Located in `qbind-node/tests/t164_vm_v0_persistence_integration_tests.rs`:
+
+- `test_vm_v0_engine_with_persistent_state`
+- `test_vm_v0_state_survives_restart`
+- `test_vm_v0_execute_block_persistent`
+- `test_vm_v0_multiple_blocks_persistent`
+
 ---
 
 ## 6. Future Work
 
-| Work Item | Description | Target |
-| :--- | :--- | :--- |
-| **State Persistence** | Disk-backed account state (RocksDB) | TestNet Alpha |
-| **Stage B Parallelism** | Conflict-graph-based VM parallelism | TestNet Beta |
-| **Gas Accounting** | Transaction fees and gas limits | TestNet Beta |
-| **Smart Contracts** | Full EVM or custom VM support | MainNet |
+| Work Item | Description | Target | Status |
+| :--- | :--- | :--- | :--- |
+| **State Persistence** | Disk-backed account state (RocksDB) | TestNet Alpha | ✅ Done (T164) |
+| **Stage B Parallelism** | Conflict-graph-based VM parallelism | TestNet Beta | Planned |
+| **Gas Accounting** | Transaction fees and gas limits | TestNet Beta | Planned |
+| **Smart Contracts** | Full EVM or custom VM support | MainNet | Planned |
 
 ---
 

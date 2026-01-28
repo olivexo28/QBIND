@@ -36,6 +36,7 @@
 //! ```
 
 use qbind_types::{ChainId, NetworkEnvironment};
+use std::path::PathBuf;
 
 // ============================================================================
 // ExecutionProfile (T163)
@@ -146,6 +147,14 @@ pub struct NodeConfig {
     /// - NonceOnly: Stage A parallel nonce execution (DevNet default)
     /// - VmV0: Sequential VM v0 with account balances (TestNet Alpha)
     pub execution_profile: ExecutionProfile,
+
+    /// The data directory for persistent state (T164).
+    ///
+    /// When set and `execution_profile` is `VmV0`, the VM v0 state will be
+    /// persisted to disk at `<data_dir>/state_vm_v0`.
+    ///
+    /// When `None`, VM v0 uses in-memory state only (not persistent).
+    pub data_dir: Option<PathBuf>,
 }
 
 impl Default for NodeConfig {
@@ -157,6 +166,7 @@ impl Default for NodeConfig {
         Self {
             environment: NetworkEnvironment::Devnet,
             execution_profile: ExecutionProfile::NonceOnly,
+            data_dir: None,
         }
     }
 }
@@ -169,6 +179,7 @@ impl NodeConfig {
         Self {
             environment,
             execution_profile: ExecutionProfile::NonceOnly,
+            data_dir: None,
         }
     }
 
@@ -180,6 +191,7 @@ impl NodeConfig {
         Self {
             environment,
             execution_profile,
+            data_dir: None,
         }
     }
 
@@ -208,6 +220,31 @@ impl NodeConfig {
     /// Create a MainNet configuration.
     pub fn mainnet() -> Self {
         Self::new(NetworkEnvironment::Mainnet)
+    }
+
+    /// Set the data directory for persistent state (T164).
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the data directory.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::testnet_vm_v0()
+    ///     .with_data_dir("/data/qbind");
+    /// ```
+    pub fn with_data_dir<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.data_dir = Some(path.into());
+        self
+    }
+
+    /// Get the path to the VM v0 state directory (T164).
+    ///
+    /// Returns `Some(<data_dir>/state_vm_v0)` if `data_dir` is set,
+    /// otherwise returns `None`.
+    pub fn vm_v0_state_dir(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().map(|d| d.join("state_vm_v0"))
     }
 
     /// Get the chain ID for this node's environment.

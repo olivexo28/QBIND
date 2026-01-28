@@ -31,6 +31,7 @@ This document tracks the audit status, completed tasks, and identified risks for
 | T160 | Networking / Integration | DevNet v0 multi-node cluster harness + soak test | DevNet-ready | 4-node cluster harness with real KEMTLS networking, soak/TPS test, DevNet stack integration. Local single-machine only. |
 | T161 | Architecture / Planning | DevNet v0 freeze capsule + TestNet Alpha roadmap | DevNet-ready | Declares DevNet v0 frozen; provides structured TestNet Alpha roadmap. See [QBIND_DEVNET_V0_FREEZE.md](./QBIND_DEVNET_V0_FREEZE.md). |
 | T163 | Execution / VM | Minimal VM v0 (account + balance) with execution profiles | TestNet-alpha | VM v0 with account state (nonce + balance), transfer semantics, sequential execution. See [TestNet Alpha Spec](../testnet/QBIND_TESTNET_ALPHA_SPEC.md). |
+| T164 | Execution / VM | VM v0 disk-backed state persistence | TestNet-alpha | RocksDB-backed persistent account state for VM v0. Nodes can restart and resume from last committed state. See [TestNet Alpha Spec](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) §4.4. |
 
 ## Risk & Mitigation Table
 

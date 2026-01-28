@@ -10,3 +10,7 @@ qbind-wire  = { path = "../qbind-wire" }
 qbind-serde = { path = "../qbind-serde" }
 qbind-hash  = { path = "../qbind-hash" }
 rayon = "1.10"
+rocksdb = "0.22"
+
+[dev-dependencies]
+tempfile = "3.10"
