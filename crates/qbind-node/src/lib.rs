@@ -154,8 +154,8 @@ pub use execution_adapter::{
 
 // T151 Mempool exports
 pub use mempool::{
-    InMemoryKeyProvider, InMemoryMempool, KeyProvider, KeyProviderError, Mempool, MempoolConfig,
-    MempoolError,
+    BalanceProvider, InMemoryBalanceProvider, InMemoryKeyProvider, InMemoryMempool, KeyProvider,
+    KeyProviderError, Mempool, MempoolConfig, MempoolError,
 };
 
 // T158 DAG Mempool exports
