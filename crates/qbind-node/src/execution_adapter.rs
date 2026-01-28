@@ -908,6 +908,15 @@ impl SingleThreadExecutionService {
                                         qbind_ledger::VmV0Error::MalformedPayload => {
                                             m.inc_error(ExecutionErrorReason::Other);
                                         }
+                                        // T168: Gas-related errors
+                                        qbind_ledger::VmV0Error::GasLimitExceeded { .. } => {
+                                            m.inc_error(ExecutionErrorReason::Other);
+                                        }
+                                        qbind_ledger::VmV0Error::InsufficientBalanceForFee {
+                                            ..
+                                        } => {
+                                            m.inc_error(ExecutionErrorReason::Other);
+                                        }
                                     }
                                 }
                             }

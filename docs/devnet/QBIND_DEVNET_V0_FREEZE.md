@@ -67,7 +67,7 @@ The following limitations are **accepted** for DevNet v0 and will be addressed i
 | Limitation | Description | Target Phase |
 | :--- | :--- | :--- |
 | **Nonce-only execution** | No user-visible VM; payloads are ignored | TestNet Alpha |
-| **No fee market / priority mempool** | FIFO ordering only (R5); gas model designed in T167 | TestNet Beta |
+| **No fee market / priority mempool** | FIFO ordering only (R5); gas model designed in T167; T168 implements initial VM v0 gas enforcement for TestNet only; **DevNet remains unchanged** | TestNet Beta |
 | **DAG v0 only** | No availability certificates; no leaderless data plane | TestNet Alpha |
 | **Static mesh networking** | No dynamic peer discovery, NAT traversal, or gossip | TestNet Alpha |
 | **Single-machine cluster harness** | T160 harness is local only; not a distributed staging environment | TestNet Alpha |

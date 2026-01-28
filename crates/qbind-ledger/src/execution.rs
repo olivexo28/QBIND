@@ -1562,7 +1562,7 @@ impl<P: PersistentAccountState> std::fmt::Debug for CachedPersistentAccountState
 // T163: VM v0 Execution Engine
 // ============================================================================
 
-/// Error type for VM v0 transaction execution (T163).
+/// Error type for VM v0 transaction execution (T163, T168).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VmV0Error {
     /// Transaction nonce doesn't match the expected value.
@@ -1581,6 +1581,23 @@ pub enum VmV0Error {
     },
     /// Transaction payload is malformed and cannot be decoded.
     MalformedPayload,
+
+    // T168: Gas-related error variants
+    /// Transaction's gas cost exceeds its gas limit (T168).
+    GasLimitExceeded {
+        /// The required gas for this transaction.
+        required: u64,
+        /// The gas limit specified in the transaction.
+        limit: u64,
+    },
+
+    /// Sender doesn't have enough balance to cover the fee (T168).
+    InsufficientBalanceForFee {
+        /// The sender's current balance.
+        balance: u128,
+        /// The total amount needed (transfer amount + fee).
+        needed: u128,
+    },
 }
 
 impl std::fmt::Display for VmV0Error {
@@ -1593,19 +1610,39 @@ impl std::fmt::Display for VmV0Error {
                 write!(f, "insufficient balance: have {}, need {}", balance, needed)
             }
             VmV0Error::MalformedPayload => write!(f, "malformed payload"),
+            VmV0Error::GasLimitExceeded { required, limit } => {
+                write!(
+                    f,
+                    "gas limit exceeded: required {}, limit {}",
+                    required, limit
+                )
+            }
+            VmV0Error::InsufficientBalanceForFee { balance, needed } => {
+                write!(
+                    f,
+                    "insufficient balance for fee: have {}, need {}",
+                    balance, needed
+                )
+            }
         }
     }
 }
 
 impl std::error::Error for VmV0Error {}
 
-/// Result of executing a VM v0 transaction (T163).
+/// Result of executing a VM v0 transaction (T163, T168).
 #[derive(Debug, Clone)]
 pub struct VmV0TxResult {
     /// Whether the transaction was successful.
     pub success: bool,
     /// Error details if the transaction failed.
     pub error: Option<VmV0Error>,
+    /// Gas used by this transaction (T168).
+    /// Only meaningful when gas enforcement is enabled.
+    pub gas_used: u64,
+    /// Fee paid (burned) by this transaction (T168).
+    /// Only meaningful when gas enforcement is enabled.
+    pub fee_paid: u128,
 }
 
 impl VmV0TxResult {
@@ -1614,6 +1651,18 @@ impl VmV0TxResult {
         Self {
             success: true,
             error: None,
+            gas_used: 0,
+            fee_paid: 0,
+        }
+    }
+
+    /// Create a success result with gas information (T168).
+    pub fn success_with_gas(gas_used: u64, fee_paid: u128) -> Self {
+        Self {
+            success: true,
+            error: None,
+            gas_used,
+            fee_paid,
         }
     }
 
@@ -1622,6 +1671,18 @@ impl VmV0TxResult {
         Self {
             success: false,
             error: Some(error),
+            gas_used: 0,
+            fee_paid: 0,
+        }
+    }
+
+    /// Create a failure result with gas information (T168).
+    pub fn failure_with_gas(error: VmV0Error, gas_used: u64) -> Self {
+        Self {
+            success: false,
+            error: Some(error),
+            gas_used,
+            fee_paid: 0,
         }
     }
 }
@@ -1680,7 +1741,7 @@ impl TransferPayload {
     }
 }
 
-/// VM v0 execution engine (T163).
+/// VM v0 execution engine (T163, T168).
 ///
 /// This engine implements the VM v0 execution semantics:
 /// - Decode payload as a transfer (recipient, amount)
@@ -1688,6 +1749,14 @@ impl TransferPayload {
 /// - Check sender has sufficient balance
 /// - Update sender: decrement balance, increment nonce
 /// - Update recipient: increment balance (create account if absent)
+///
+/// # Gas Enforcement (T168)
+///
+/// When gas enforcement is enabled via `ExecutionGasConfig`:
+/// - Compute gas cost from payload and account access patterns
+/// - Enforce gas_limit: reject if gas_cost > gas_limit
+/// - Compute and deduct fee: sender.balance -= amount + (gas_cost * max_fee_per_gas)
+/// - Fees are burned (not credited anywhere) in TestNet
 ///
 /// # Determinism
 ///
@@ -1711,14 +1780,31 @@ impl TransferPayload {
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct VmV0ExecutionEngine {
-    /// Placeholder for future configuration.
-    _private: (),
+    /// Gas configuration (T168).
+    gas_config: crate::execution_gas::ExecutionGasConfig,
 }
 
 impl VmV0ExecutionEngine {
-    /// Create a new VM v0 execution engine.
+    /// Create a new VM v0 execution engine with gas disabled (default).
     pub fn new() -> Self {
-        Self { _private: () }
+        Self {
+            gas_config: crate::execution_gas::ExecutionGasConfig::disabled(),
+        }
+    }
+
+    /// Create a new VM v0 execution engine with the specified gas configuration.
+    pub fn with_gas_config(gas_config: crate::execution_gas::ExecutionGasConfig) -> Self {
+        Self { gas_config }
+    }
+
+    /// Check if gas enforcement is enabled.
+    pub fn is_gas_enabled(&self) -> bool {
+        self.gas_config.enabled
+    }
+
+    /// Get the gas configuration.
+    pub fn gas_config(&self) -> &crate::execution_gas::ExecutionGasConfig {
+        &self.gas_config
     }
 
     /// Execute a transaction against the given account state.
@@ -1735,7 +1821,7 @@ impl VmV0ExecutionEngine {
     /// # State Mutations
     ///
     /// On success:
-    /// - Sender's balance is decremented by the transfer amount
+    /// - Sender's balance is decremented by the transfer amount (+ fee if gas enabled)
     /// - Sender's nonce is incremented by 1
     /// - Recipient's balance is incremented by the transfer amount
     /// - Recipient account is created if it doesn't exist
@@ -1747,6 +1833,12 @@ impl VmV0ExecutionEngine {
         state: &mut S,
         tx: &QbindTransaction,
     ) -> VmV0TxResult {
+        // Use the gas-aware path when gas is enabled
+        if self.gas_config.enabled {
+            return self.execute_tx_with_gas(state, tx);
+        }
+
+        // Original path when gas is disabled (backward compatible)
         // Step 1: Decode payload as transfer
         let transfer = match TransferPayload::decode(&tx.payload) {
             Some(t) => t,
@@ -1790,6 +1882,92 @@ impl VmV0ExecutionEngine {
         VmV0TxResult::success()
     }
 
+    /// Execute a transaction with gas enforcement (T168).
+    ///
+    /// This is the gas-aware execution path used when `gas_config.enabled = true`.
+    fn execute_tx_with_gas<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        tx: &QbindTransaction,
+    ) -> VmV0TxResult {
+        use crate::execution_gas::{
+            compute_gas_for_vm_v0_tx, decode_transfer_payload, TransferPayloadDecoded,
+        };
+
+        // Step 1: Compute gas and decode payload
+        let gas_result = match compute_gas_for_vm_v0_tx(tx) {
+            Ok(r) => r,
+            Err(_) => return VmV0TxResult::failure(VmV0Error::MalformedPayload),
+        };
+
+        let gas_cost = gas_result.gas_cost;
+        let gas_limit = gas_result.gas_limit;
+        let max_fee_per_gas = gas_result.max_fee_per_gas;
+
+        // Step 2: Enforce gas limit
+        if gas_cost > gas_limit {
+            return VmV0TxResult::failure(VmV0Error::GasLimitExceeded {
+                required: gas_cost,
+                limit: gas_limit,
+            });
+        }
+
+        // Step 3: Extract transfer details from decoded payload
+        let (recipient, amount) = match decode_transfer_payload(&tx.payload) {
+            Ok(TransferPayloadDecoded::V0(p)) => (p.recipient, p.amount),
+            Ok(TransferPayloadDecoded::V1(p)) => (p.recipient, p.amount),
+            Err(_) => return VmV0TxResult::failure(VmV0Error::MalformedPayload),
+        };
+
+        // Step 4: Compute fee (fee = gas_cost * max_fee_per_gas)
+        let fee = (gas_cost as u128) * max_fee_per_gas;
+        let total_debit = amount.saturating_add(fee);
+
+        // Step 5: Fetch sender's current state
+        let sender_state = state.get_account_state(&tx.sender);
+
+        // Step 6: Check nonce
+        if tx.nonce != sender_state.nonce {
+            return VmV0TxResult::failure_with_gas(
+                VmV0Error::NonceMismatch {
+                    expected: sender_state.nonce,
+                    got: tx.nonce,
+                },
+                gas_cost,
+            );
+        }
+
+        // Step 7: Check balance covers amount + fee
+        if sender_state.balance < total_debit {
+            return VmV0TxResult::failure_with_gas(
+                VmV0Error::InsufficientBalanceForFee {
+                    balance: sender_state.balance,
+                    needed: total_debit,
+                },
+                gas_cost,
+            );
+        }
+
+        // Step 8: Update sender (decrement balance by amount + fee, increment nonce)
+        let new_sender_state = AccountState {
+            nonce: sender_state.nonce + 1,
+            balance: sender_state.balance - total_debit,
+        };
+        state.set_account_state(&tx.sender, new_sender_state);
+
+        // Step 9: Update recipient (increment balance, create if absent)
+        let recipient_state = state.get_account_state(&recipient);
+        let new_recipient_state = AccountState {
+            nonce: recipient_state.nonce,
+            balance: recipient_state.balance + amount,
+        };
+        state.set_account_state(&recipient, new_recipient_state);
+
+        // Success with gas information
+        // Note: Fee is burned (not credited to anyone) per TestNet policy
+        VmV0TxResult::success_with_gas(gas_cost, fee)
+    }
+
     /// Execute a block of transactions sequentially.
     ///
     /// # Arguments
@@ -1805,11 +1983,114 @@ impl VmV0ExecutionEngine {
         state: &mut S,
         transactions: &[QbindTransaction],
     ) -> Vec<VmV0TxResult> {
+        // Use gas-aware block execution when gas is enabled
+        if self.gas_config.enabled {
+            return self.execute_block_with_gas(state, transactions);
+        }
+
+        // Original path when gas is disabled
         transactions
             .iter()
             .map(|tx| self.execute_tx(state, tx))
             .collect()
     }
+
+    /// Execute a block with gas enforcement and per-block gas limit (T168).
+    ///
+    /// # Gas Accounting Policy
+    ///
+    /// - Malformed transactions are treated as having `MINIMUM_GAS_LIMIT` gas to prevent DoS
+    /// - Failed transactions (nonce mismatch, insufficient balance) do NOT consume gas
+    ///   (they are rejected before any state changes, similar to pre-flight validation)
+    /// - Only successful transactions consume gas from the block limit
+    fn execute_block_with_gas<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        transactions: &[QbindTransaction],
+    ) -> Vec<VmV0TxResult> {
+        use crate::execution_gas::{compute_gas_for_vm_v0_tx, MINIMUM_GAS_LIMIT};
+
+        let block_gas_limit = self.gas_config.block_gas_limit;
+        let mut block_gas_used: u64 = 0;
+        let mut results = Vec::with_capacity(transactions.len());
+
+        for tx in transactions {
+            // Pre-compute gas cost to check block limit
+            // Malformed transactions get MINIMUM_GAS_LIMIT to prevent DoS via many small malformed txs
+            let gas_cost = compute_gas_for_vm_v0_tx(tx)
+                .map(|r| r.gas_cost)
+                .unwrap_or(MINIMUM_GAS_LIMIT);
+
+            // Check if adding this tx would exceed block gas limit
+            if block_gas_used.saturating_add(gas_cost) > block_gas_limit {
+                // Block is full; stop processing further transactions
+                // Remaining transactions are not executed in this block
+                break;
+            }
+
+            // Execute the transaction
+            let result = self.execute_tx_with_gas(state, tx);
+
+            // Update block gas used
+            // Policy: Only count gas for successful transactions
+            // Failed transactions are rejected before state changes (like pre-flight validation)
+            if result.success {
+                block_gas_used = block_gas_used.saturating_add(result.gas_used);
+            }
+
+            results.push(result);
+        }
+
+        results
+    }
+
+    /// Execute a block with gas enforcement and return block statistics (T168).
+    ///
+    /// This variant returns both the transaction results and block-level statistics.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The mutable account state
+    /// * `transactions` - The transactions to execute in order
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (results, stats) where:
+    /// - results: Vector of `VmV0TxResult` for each transaction (may be shorter than input if block limit reached)
+    /// - stats: `VmV0BlockStats` with block-level gas information
+    pub fn execute_block_with_stats<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        transactions: &[QbindTransaction],
+    ) -> (Vec<VmV0TxResult>, VmV0BlockStats) {
+        let results = if self.gas_config.enabled {
+            self.execute_block_with_gas(state, transactions)
+        } else {
+            self.execute_block(state, transactions)
+        };
+
+        let stats = VmV0BlockStats {
+            total_gas_used: results.iter().map(|r| r.gas_used).sum(),
+            total_fees_burned: results.iter().map(|r| r.fee_paid).sum(),
+            txs_executed: results.len(),
+            txs_succeeded: results.iter().filter(|r| r.success).count(),
+        };
+
+        (results, stats)
+    }
+}
+
+/// Block-level execution statistics (T168).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct VmV0BlockStats {
+    /// Total gas used by all executed transactions.
+    pub total_gas_used: u64,
+    /// Total fees burned (removed from supply) by all transactions.
+    pub total_fees_burned: u128,
+    /// Number of transactions executed (may be less than submitted if block limit reached).
+    pub txs_executed: usize,
+    /// Number of transactions that succeeded.
+    pub txs_succeeded: usize,
 }
 
 // ============================================================================
