@@ -3878,6 +3878,97 @@ pub enum KeystoreBackendKind {
 }
 
 // ============================================================================
+// EnvironmentMetrics (T162) - Network environment info metric
+// ============================================================================
+
+/// Static metric indicating the network environment.
+///
+/// This metric exposes the selected network environment (DevNet/TestNet/MainNet)
+/// as a gauge with a label, allowing operators to identify which network a node
+/// is running on.
+///
+/// # Prometheus Format
+///
+/// ```text
+/// qbind_build_env{network="devnet"} 1
+/// ```
+///
+/// # Usage (T162)
+///
+/// ```ignore
+/// use qbind_node::metrics::EnvironmentMetrics;
+/// use qbind_types::NetworkEnvironment;
+///
+/// let metrics = EnvironmentMetrics::new(NetworkEnvironment::Testnet);
+/// assert_eq!(metrics.network(), "testnet");
+/// assert_eq!(metrics.chain_id_hex(), "0x51424e4454535400");
+/// ```
+#[derive(Debug, Clone)]
+pub struct EnvironmentMetrics {
+    /// The network environment string (lowercase).
+    network: &'static str,
+    /// The chain ID as a hex string (for logging/metrics).
+    chain_id_hex: String,
+    /// The domain scope (DEV/TST/MAIN).
+    scope: &'static str,
+}
+
+impl EnvironmentMetrics {
+    /// Create new environment metrics from a NetworkEnvironment.
+    pub fn new(env: qbind_types::NetworkEnvironment) -> Self {
+        let network = match env {
+            qbind_types::NetworkEnvironment::Devnet => "devnet",
+            qbind_types::NetworkEnvironment::Testnet => "testnet",
+            qbind_types::NetworkEnvironment::Mainnet => "mainnet",
+        };
+        let chain_id_hex = format!("0x{:016x}", env.chain_id().as_u64());
+        let scope = env.scope();
+        Self {
+            network,
+            chain_id_hex,
+            scope,
+        }
+    }
+
+    /// Create default environment metrics (DevNet).
+    pub fn default_devnet() -> Self {
+        Self::new(qbind_types::NetworkEnvironment::Devnet)
+    }
+
+    /// Get the network string (lowercase).
+    pub fn network(&self) -> &'static str {
+        self.network
+    }
+
+    /// Get the chain ID as a hex string.
+    pub fn chain_id_hex(&self) -> &str {
+        &self.chain_id_hex
+    }
+
+    /// Get the domain scope (DEV/TST/MAIN).
+    pub fn scope(&self) -> &'static str {
+        self.scope
+    }
+
+    /// Format environment metrics as Prometheus-style output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Environment metrics (T162)\n");
+        // Static gauge indicating the environment
+        output.push_str(&format!(
+            "qbind_build_env{{network=\"{}\"}} 1\n",
+            self.network
+        ));
+        // Chain ID as info metric
+        output.push_str(&format!(
+            "qbind_chain_id{{network=\"{}\",chain_id=\"{}\",scope=\"{}\"}} 1\n",
+            self.network, self.chain_id_hex, self.scope
+        ));
+        output
+    }
+}
+
+// ============================================================================
 // VerifyPoolMetrics (T154) - Already exists in verify_pool.rs, but we add
 // additional centralized access via NodeMetrics
 // ============================================================================
@@ -3940,6 +4031,9 @@ use crate::channel_config::ChannelCapacityConfig;
 ///
 /// // Set channel capacity config for metrics export
 /// metrics.set_channel_config(ChannelCapacityConfig::default());
+///
+/// // Environment metrics (T162)
+/// metrics.set_environment(qbind_types::NetworkEnvironment::Testnet);
 /// ```
 #[derive(Debug)]
 pub struct NodeMetrics {
@@ -3978,6 +4072,8 @@ pub struct NodeMetrics {
     execution: ExecutionMetrics,
     /// Signer/Keystore metrics (T154).
     signer_keystore: SignerKeystoreMetrics,
+    /// Environment metrics (T162).
+    environment: std::sync::RwLock<Option<EnvironmentMetrics>>,
 }
 
 impl Default for NodeMetrics {
@@ -4009,6 +4105,7 @@ impl NodeMetrics {
             mempool: MempoolMetrics::new(),
             execution: ExecutionMetrics::new(),
             signer_keystore: SignerKeystoreMetrics::new(),
+            environment: std::sync::RwLock::new(None),
         }
     }
 
@@ -4100,6 +4197,21 @@ impl NodeMetrics {
     /// Get signer/keystore metrics (T154).
     pub fn signer_keystore(&self) -> &SignerKeystoreMetrics {
         &self.signer_keystore
+    }
+
+    /// Set the network environment for metrics export (T162).
+    ///
+    /// Call this during node initialization to record the selected
+    /// environment in the metrics output.
+    pub fn set_environment(&self, env: qbind_types::NetworkEnvironment) {
+        if let Ok(mut guard) = self.environment.write() {
+            *guard = Some(EnvironmentMetrics::new(env));
+        }
+    }
+
+    /// Get the environment metrics (if set).
+    pub fn environment(&self) -> Option<EnvironmentMetrics> {
+        self.environment.read().ok().and_then(|g| g.clone())
     }
 
     /// Set the channel capacity configuration for metrics export.
@@ -4453,6 +4565,11 @@ impl NodeMetrics {
             "qbind_net_kem_decaps_latency_ms_count {}\n",
             decaps_inf
         ));
+
+        // Environment metrics (T162)
+        if let Some(env_metrics) = self.environment() {
+            output.push_str(&env_metrics.format_metrics());
+        }
 
         output
     }

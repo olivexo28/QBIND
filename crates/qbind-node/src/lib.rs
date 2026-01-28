@@ -96,6 +96,7 @@ pub mod mempool;
 pub mod metrics;
 pub mod metrics_http;
 pub mod net_service;
+pub mod node_config;
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -164,18 +165,23 @@ pub use dag_mempool::{
     DagMempoolStats, InMemoryDagMempool, QbindBatch, TxId, BATCH_DOMAIN_TAG,
 };
 
+// T162 Node Config exports
+pub use node_config::{
+    parse_environment, NodeConfig, ParseEnvironmentError, DEFAULT_ENVIRONMENT, VALID_ENVIRONMENTS,
+};
+
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,
     LoopbackNetService,
 };
 pub use metrics::{
     CommitMetrics, ConsensusProgressMetrics, ConsensusT154Metrics, DisconnectReason,
-    ExecutionErrorReason, ExecutionMetrics, InboundMsgKind, KeystoreBackendKind, MempoolMetrics,
-    MempoolRejectReason, NetworkMetrics, NodeMetrics, OutboundMsgKind, PeerCounters,
-    PeerNetworkMetrics, RuntimeMetrics, SignRequestKind, SignerKeystoreMetrics,
-    SpawnBlockingMetrics, StorageMetrics, StorageOp, ValidatorEquivocationMetrics,
-    ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics, MAX_TRACKED_PEERS,
-    MAX_TRACKED_VALIDATORS,
+    EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
+    KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, NetworkMetrics, NodeMetrics,
+    OutboundMsgKind, PeerCounters, PeerNetworkMetrics, RuntimeMetrics, SignRequestKind,
+    SignerKeystoreMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp,
+    ValidatorEquivocationMetrics, ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics,
+    MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
 };
 
 // Metrics HTTP server exports (T126)

@@ -115,6 +115,29 @@ This ensures that signatures created on DevNet cannot be replayed on TestNet or 
 
 See [QBIND_CHAIN_ID_AND_DOMAINS.md](./QBIND_CHAIN_ID_AND_DOMAINS.md) for the complete domain-separation scheme.
 
+### Network Environment Selection (T162)
+
+The node binary supports selecting the network environment at startup via CLI arguments:
+
+*   **CLI Flag**: `--env devnet|testnet|mainnet` (default: `devnet`)
+*   **Environment Behavior**:
+    *   Sets the `ChainId` used for all signing/verification operations
+    *   Sets the domain scope (DEV/TST/MAIN) for domain-separated signatures
+    *   Logs and exposes the environment in metrics
+
+**Startup Logging**: When a node starts, it logs its environment configuration:
+```
+qbind-node[validator=V1]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV
+```
+
+**Metrics**: The environment is exposed via Prometheus-style metrics:
+```
+qbind_build_env{network="devnet"} 1
+qbind_chain_id{network="devnet",chain_id="0x51424e4444455600",scope="DEV"} 1
+```
+
+**For DevNet v0 runs**: Explicitly use `--env devnet` (or rely on the default) to ensure DevNet chain ID and domain scope.
+
 ## Performance & Metrics (DevNet v0)
 
 This section documents the observability infrastructure and performance measurement capabilities for DevNet v0 (T154).
