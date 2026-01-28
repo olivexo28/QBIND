@@ -170,6 +170,11 @@ pub use node_config::{
     parse_environment, NodeConfig, ParseEnvironmentError, DEFAULT_ENVIRONMENT, VALID_ENVIRONMENTS,
 };
 
+// T163 Execution Profile exports
+pub use node_config::{
+    parse_execution_profile, ExecutionProfile, DEFAULT_EXECUTION_PROFILE, VALID_EXECUTION_PROFILES,
+};
+
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,
     LoopbackNetService,
