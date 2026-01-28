@@ -165,6 +165,11 @@ pub use dag_mempool::{
     DagMempoolStats, InMemoryDagMempool, QbindBatch, TxId, BATCH_DOMAIN_TAG,
 };
 
+// T165 DAG Availability exports
+pub use dag_mempool::{
+    BatchAck, BatchAckResult, BatchAckTracker, BatchCertificate, SignatureBytes,
+};
+
 // T162 Node Config exports
 pub use node_config::{
     parse_environment, NodeConfig, ParseEnvironmentError, DEFAULT_ENVIRONMENT, VALID_ENVIRONMENTS,
@@ -174,6 +179,9 @@ pub use node_config::{
 pub use node_config::{
     parse_execution_profile, ExecutionProfile, DEFAULT_EXECUTION_PROFILE, VALID_EXECUTION_PROFILES,
 };
+
+// T165 DAG Availability Config exports
+pub use node_config::DagAvailabilityConfig;
 
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,

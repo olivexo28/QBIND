@@ -158,18 +158,50 @@ QbindBatch {
 
 Before a batch is considered "available," it must be acknowledged by a quorum:
 
-```
-BatchCertificate {
-    batch_digest: BatchDigest,
-    round: u64,
-    author: ValidatorId,
-    signatures: Vec<(ValidatorId, ValidatorSignature)>, // 2f+1 signatures
+**T165 Implementation (v1)**:
+
+```rust
+/// A batch acknowledgment from a validator.
+pub struct BatchAck {
+    pub batch_ref: BatchRef,      // (creator, batch_id)
+    pub validator_id: ValidatorId,
+    pub view_hint: u64,
+    pub suite_id: u16,            // 100 for ML-DSA-44
+    pub signature: Vec<u8>,       // ML-DSA-44 signature
+}
+
+/// A batch availability certificate.
+pub struct BatchCertificate {
+    pub batch_ref: BatchRef,      // Reference to the certified batch
+    pub view: u64,                // View at which cert was formed
+    pub signers: Vec<ValidatorId>,// 2f+1 or more validators
+    pub aggregated: Option<Vec<u8>>, // Placeholder for future aggregation (None in v1)
 }
 ```
 
+**BatchAck Signing Preimage** (T165 v1):
+```
+QBIND:<SCOPE>:BATCH_ACK:v1  (domain tag with chain scope)
+batch_ref.creator            (8 bytes, little-endian)
+batch_ref.batch_id           (32 bytes)
+validator_id                 (8 bytes, little-endian)
+view_hint                    (8 bytes, little-endian)
+```
+
 **Properties**:
-- A certificate proves that 2f+1 validators have received and stored the batch.
+- A certificate proves that ≥2f+1 validators have received and stored the batch.
 - Certificates ensure data availability: even if the author crashes, the batch can be reconstructed.
+- Domain separation prevents cross-chain ack replay (e.g., DevNet acks invalid on TestNet).
+
+**V1 Limitations**:
+- No batch fetch-on-miss: if a batch is unknown, the ack is ignored (with metrics).
+- No signature aggregation: certificates store list of signers, not aggregated signature.
+- Certificates are data-plane artifacts; consensus rules unchanged.
+
+**Future v2 Enhancements** (planned):
+- PQ-safe aggregate signatures (when standards mature)
+- Batch fetch protocol for missing batches
+- Consensus integration (require certs before commit)
 
 #### 3.2.3 DAG Structure
 
@@ -331,6 +363,15 @@ New metrics for DAG mempool:
 | `qbind_dag_cert_latency_seconds` | Histogram | Time from batch creation to certification. |
 | `qbind_dag_batches_pending` | Gauge | Batches awaiting certification. |
 | `qbind_dag_bandwidth_bytes` | Counter | Network bytes for DAG dissemination. |
+
+**T165 Availability Metrics** (new):
+
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_dag_batch_acks_total{result}` | Counter | Batch acks processed (accepted/rejected). |
+| `qbind_dag_batch_certs_total` | Counter | Batch certificates formed. |
+| `qbind_dag_batch_certs_pending` | Gauge | Batches with some acks but no cert yet. |
+| `qbind_dag_batch_acks_invalid_total{reason}` | Counter | Invalid acks (bad_sig/duplicate/unknown_batch). |
 
 ### 5.4 Coexistence with FIFO Mempool
 

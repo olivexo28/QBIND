@@ -276,7 +276,92 @@ Located in `qbind-node/tests/t164_vm_v0_persistence_integration_tests.rs`:
 
 ---
 
-## 6. Future Work
+## 5.5 DAG Availability Tests (T165)
+
+Located in `qbind-node/tests/t165_dag_availability_tests.rs`:
+
+- `test_batch_ack_signing_preimage_starts_with_domain_tag`
+- `test_batch_ack_cross_chain_preimages_differ`
+- `test_acks_accumulate_to_quorum_form_cert`
+- `test_duplicate_acks_ignored`
+- `test_cross_chain_ack_preimage_rejection`
+- `test_dag_mempool_metrics_ack_tracking`
+
+Located in `qbind-node/tests/t165_dag_availability_integration_tests.rs`:
+
+- `test_single_node_local_acks_cert`
+- `test_multi_node_partial_ack_delivery`
+- `test_dag_availability_config_integration`
+- `test_t165_metrics_integration`
+
+---
+
+## 5.6 DAG Availability (T165)
+
+TestNet Alpha introduces DAG availability certificates as an opt-in feature:
+
+### Overview
+
+When DAG mempool is enabled with availability certificates:
+
+1. **Validators issue BatchAcks**: When a validator stores a batch (local or remote), it creates and broadcasts a `BatchAck` message signed with ML-DSA-44.
+
+2. **Batches form certificates**: When a batch receives acknowledgments from ≥2f+1 validators, a `BatchCertificate` is formed, proving data availability.
+
+3. **Certificates are data-plane artifacts**: In T165 v1, certificates do not change HotStuff consensus rules. They provide observability and prepare for future consensus integration.
+
+### Configuration
+
+```rust
+// Enable DAG availability for TestNet Alpha
+let dag_config = DagAvailabilityConfig::enabled();
+let quorum_size = dag_config.compute_quorum_size(num_validators);
+let mempool = InMemoryDagMempool::with_availability(config, quorum_size);
+```
+
+### Message Format
+
+**BatchAck**:
+```rust
+pub struct BatchAck {
+    pub batch_ref: BatchRef,      // (creator, batch_id)
+    pub validator_id: ValidatorId,
+    pub view_hint: u64,
+    pub suite_id: u16,            // 100 for ML-DSA-44
+    pub signature: Vec<u8>,
+}
+```
+
+**Signing Preimage**:
+```
+QBIND:TST:BATCH_ACK:v1  (for TestNet Alpha)
+<batch_ref.creator>     (8 bytes LE)
+<batch_ref.batch_id>    (32 bytes)
+<validator_id>          (8 bytes LE)
+<view_hint>             (8 bytes LE)
+```
+
+### Metrics
+
+| Metric | Description |
+| :--- | :--- |
+| `qbind_dag_batch_acks_total{result="accepted"}` | Accepted batch acks |
+| `qbind_dag_batch_acks_total{result="rejected"}` | Rejected batch acks |
+| `qbind_dag_batch_certs_total` | Certificates formed |
+| `qbind_dag_batch_acks_invalid_total{reason}` | Invalid acks by reason |
+
+### Limitations (v1)
+
+- **No fetch-on-miss**: Acks for unknown batches are ignored (metrics tracked).
+- **No signature aggregation**: Certificates store signer list, not aggregated signatures.
+- **Data-plane only**: HotStuff consensus rules unchanged.
+
+### Future Enhancements
+
+TestNet Beta / MainNet may add:
+- Batch fetch protocol for missing batches
+- Consensus rule: require cert before commit
+- PQ-safe aggregate signatures
 
 | Work Item | Description | Target | Status |
 | :--- | :--- | :--- | :--- |

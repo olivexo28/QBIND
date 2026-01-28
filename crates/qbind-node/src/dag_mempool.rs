@@ -144,6 +144,415 @@ impl BatchSignature {
 }
 
 // ============================================================================
+// T165: Batch Acknowledgment & Availability Certificate Types
+// ============================================================================
+
+/// A batch acknowledgment from a validator (T165).
+///
+/// A `BatchAck` represents a validator's attestation that they have stored
+/// a specific batch. When ≥2f+1 validators acknowledge a batch, the batch
+/// can form a `BatchCertificate` proving data availability.
+///
+/// ## Signing Preimage
+///
+/// ```text
+/// QBIND:<SCOPE>:BATCH_ACK:v1  (variable length based on scope)
+/// batch_ref.creator           (8 bytes, little-endian)
+/// batch_ref.batch_id          (32 bytes)
+/// validator_id                (8 bytes, little-endian)
+/// view_hint                   (8 bytes, little-endian)
+/// ```
+///
+/// ## Security Properties
+///
+/// - Chain-aware domain separation prevents cross-chain ack replay
+/// - Each validator can only submit one ack per batch
+/// - Signature covers batch_ref to prevent ack reuse across batches
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchAck {
+    /// Reference to the acknowledged batch (creator + batch_id).
+    pub batch_ref: BatchRef,
+    /// The validator who is acknowledging the batch.
+    pub validator_id: ValidatorId,
+    /// View hint at the time of acknowledgment (for ordering/debugging).
+    pub view_hint: u64,
+    /// Signature suite ID (100 for ML-DSA-44).
+    pub suite_id: u16,
+    /// ML-DSA-44 signature over the acknowledgment preimage.
+    pub signature: Vec<u8>,
+}
+
+/// Type alias for signature bytes used in BatchAck.
+pub type SignatureBytes = Vec<u8>;
+
+impl BatchAck {
+    /// Compute the signing preimage for a batch acknowledgment with chain ID.
+    ///
+    /// ## Format
+    ///
+    /// ```text
+    /// QBIND:<SCOPE>:BATCH_ACK:v1  (variable length based on scope)
+    /// batch_ref.creator           (8 bytes, little-endian)
+    /// batch_ref.batch_id          (32 bytes)
+    /// validator_id                (8 bytes, little-endian)
+    /// view_hint                   (8 bytes, little-endian)
+    /// ```
+    pub fn signing_preimage_with_chain_id(
+        chain_id: ChainId,
+        batch_ref: &BatchRef,
+        validator_id: ValidatorId,
+        view_hint: u64,
+    ) -> Vec<u8> {
+        let domain_tag = domain_prefix(chain_id, DomainKind::BatchAck);
+        let mut out = Vec::with_capacity(domain_tag.len() + 8 + 32 + 8 + 8);
+
+        // Domain tag (chain-aware)
+        out.extend_from_slice(&domain_tag);
+
+        // Batch reference (creator + batch_id)
+        out.extend_from_slice(&batch_ref.creator.as_u64().to_le_bytes());
+        out.extend_from_slice(&batch_ref.batch_id);
+
+        // Validator ID (8 bytes, LE)
+        out.extend_from_slice(&validator_id.as_u64().to_le_bytes());
+
+        // View hint (8 bytes, LE)
+        out.extend_from_slice(&view_hint.to_le_bytes());
+
+        out
+    }
+
+    /// Create a new signed batch acknowledgment.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_ref` - Reference to the batch being acknowledged
+    /// * `validator_id` - The validator creating this ack
+    /// * `view_hint` - Current view hint for ordering
+    /// * `chain_id` - Chain ID for domain separation
+    /// * `suite_id` - Signature suite ID (100 for ML-DSA-44)
+    /// * `sign_fn` - Signing function that takes preimage and returns signature
+    ///
+    /// # Returns
+    ///
+    /// A signed `BatchAck` if signing succeeds.
+    pub fn new_signed<F, E>(
+        batch_ref: BatchRef,
+        validator_id: ValidatorId,
+        view_hint: u64,
+        chain_id: ChainId,
+        suite_id: u16,
+        sign_fn: F,
+    ) -> Result<Self, E>
+    where
+        F: FnOnce(&[u8]) -> Result<Vec<u8>, E>,
+    {
+        let preimage = Self::signing_preimage_with_chain_id(
+            chain_id,
+            &batch_ref,
+            validator_id,
+            view_hint,
+        );
+        let signature = sign_fn(&preimage)?;
+
+        Ok(Self {
+            batch_ref,
+            validator_id,
+            view_hint,
+            suite_id,
+            signature,
+        })
+    }
+
+    /// Create an unsigned batch acknowledgment (for testing).
+    pub fn new_unsigned(
+        batch_ref: BatchRef,
+        validator_id: ValidatorId,
+        view_hint: u64,
+        suite_id: u16,
+    ) -> Self {
+        Self {
+            batch_ref,
+            validator_id,
+            view_hint,
+            suite_id,
+            signature: Vec::new(),
+        }
+    }
+
+    /// Check if this ack is unsigned (empty signature).
+    pub fn is_unsigned(&self) -> bool {
+        self.signature.is_empty()
+    }
+
+    /// Get the batch ID being acknowledged.
+    pub fn batch_id(&self) -> &BatchId {
+        &self.batch_ref.batch_id
+    }
+}
+
+/// A batch availability certificate (T165 v1).
+///
+/// A `BatchCertificate` proves that a batch has been stored by ≥2f+1 validators,
+/// guaranteeing data availability. This is the v1 implementation that stores
+/// the list of acknowledging validators without signature aggregation.
+///
+/// ## Invariants
+///
+/// - `signers.len() >= quorum_size` (typically 2f+1)
+/// - All signers must have provided valid acks for the same `batch_ref`
+/// - The certificate is immutable once formed
+///
+/// ## Future Versions
+///
+/// V2 may include:
+/// - Aggregated signatures (when PQ aggregate schemes mature)
+/// - More compact signer representation (bitfields)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchCertificate {
+    /// Reference to the certified batch.
+    pub batch_ref: BatchRef,
+    /// Canonical view at which this certificate was formed.
+    pub view: u64,
+    /// Validators who acknowledged this batch (2f+1 or more).
+    pub signers: Vec<ValidatorId>,
+    /// Placeholder for future aggregated signature.
+    /// In v1, this is always `None`.
+    pub aggregated: Option<SignatureBytes>,
+}
+
+impl BatchCertificate {
+    /// Create a new batch certificate from acknowledged signers.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_ref` - Reference to the certified batch
+    /// * `view` - View at which the certificate was formed
+    /// * `signers` - Validators who acknowledged the batch
+    ///
+    /// # Panics (debug)
+    ///
+    /// Debug builds will assert that signers is not empty.
+    pub fn new(batch_ref: BatchRef, view: u64, signers: Vec<ValidatorId>) -> Self {
+        debug_assert!(!signers.is_empty(), "certificate must have at least one signer");
+        Self {
+            batch_ref,
+            view,
+            signers,
+            aggregated: None,
+        }
+    }
+
+    /// Get the batch ID for this certificate.
+    pub fn batch_id(&self) -> &BatchId {
+        &self.batch_ref.batch_id
+    }
+
+    /// Get the number of signers in this certificate.
+    pub fn num_signers(&self) -> usize {
+        self.signers.len()
+    }
+
+    /// Check if this certificate has enough signers for the given quorum.
+    pub fn has_quorum(&self, quorum_size: usize) -> bool {
+        self.signers.len() >= quorum_size
+    }
+
+    /// Check if a validator is a signer of this certificate.
+    pub fn has_signer(&self, validator_id: ValidatorId) -> bool {
+        self.signers.contains(&validator_id)
+    }
+}
+
+// ============================================================================
+// T165: Batch Ack Tracker
+// ============================================================================
+
+/// Result of inserting a batch acknowledgment into the tracker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BatchAckResult {
+    /// Ack was accepted and stored.
+    Accepted,
+    /// Ack was accepted and a certificate was formed (quorum reached).
+    CertificateFormed(BatchCertificate),
+    /// Ack was rejected because the validator already acked this batch.
+    DuplicateAck,
+    /// Ack was rejected because the batch is unknown.
+    UnknownBatch,
+    /// Ack was rejected due to invalid signature.
+    InvalidSignature,
+    /// Ack was rejected for another reason.
+    Rejected(String),
+}
+
+/// Tracker for batch acknowledgments and certificate formation (T165).
+///
+/// The `BatchAckTracker` accumulates acknowledgments for batches and
+/// automatically forms `BatchCertificate`s when quorum is reached.
+///
+/// ## Design
+///
+/// - Each batch can accumulate acks from multiple validators
+/// - When ack count reaches `quorum_size`, a certificate is formed
+/// - Duplicate acks from the same validator are rejected
+/// - Once a certificate is formed, additional acks are still tracked
+///   but do not affect the certificate
+///
+/// ## Thread Safety
+///
+/// This struct is NOT thread-safe. It should be protected by the
+/// parent `InMemoryDagMempool`'s lock.
+#[derive(Debug)]
+pub struct BatchAckTracker {
+    /// Acks indexed by batch ID.
+    acks: HashMap<BatchId, Vec<BatchAck>>,
+    /// Certificates formed for batches.
+    certs: HashMap<BatchId, BatchCertificate>,
+    /// Quorum size required for certificate formation.
+    quorum_size: usize,
+    /// View at which tracker was last updated (for cert view assignment).
+    current_view: u64,
+}
+
+impl BatchAckTracker {
+    /// Create a new batch ack tracker with the given quorum size.
+    ///
+    /// # Arguments
+    ///
+    /// * `quorum_size` - Number of acks required to form a certificate (typically 2f+1)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // For 4 validators (f=1, n=3f+1=4), quorum = 2f+1 = 3
+    /// let tracker = BatchAckTracker::new(3);
+    /// ```
+    pub fn new(quorum_size: usize) -> Self {
+        Self {
+            acks: HashMap::new(),
+            certs: HashMap::new(),
+            quorum_size,
+            current_view: 0,
+        }
+    }
+
+    /// Set the current view for certificate formation.
+    pub fn set_current_view(&mut self, view: u64) {
+        self.current_view = view;
+    }
+
+    /// Get the quorum size.
+    pub fn quorum_size(&self) -> usize {
+        self.quorum_size
+    }
+
+    /// Insert a batch acknowledgment.
+    ///
+    /// This method assumes the ack's signature has already been verified.
+    /// Use the result to determine metrics updates.
+    ///
+    /// # Arguments
+    ///
+    /// * `ack` - The batch acknowledgment to insert
+    /// * `batch_exists` - Whether the batch exists in the mempool
+    ///
+    /// # Returns
+    ///
+    /// The result of the insertion:
+    /// - `Accepted`: Ack stored, no certificate formed yet
+    /// - `CertificateFormed`: Ack stored and certificate formed (quorum reached)
+    /// - `DuplicateAck`: Same validator already acked this batch
+    /// - `UnknownBatch`: Batch not found in mempool
+    pub fn insert_ack(&mut self, ack: BatchAck, batch_exists: bool) -> BatchAckResult {
+        let batch_id = *ack.batch_id();
+
+        // Check if batch exists (if required)
+        if !batch_exists {
+            return BatchAckResult::UnknownBatch;
+        }
+
+        // Check for duplicate ack from the same validator
+        if let Some(existing_acks) = self.acks.get(&batch_id) {
+            if existing_acks
+                .iter()
+                .any(|a| a.validator_id == ack.validator_id)
+            {
+                return BatchAckResult::DuplicateAck;
+            }
+        }
+
+        // Insert the ack
+        let acks = self.acks.entry(batch_id).or_insert_with(Vec::new);
+        let batch_ref = ack.batch_ref.clone();
+        acks.push(ack);
+
+        // Check if we've reached quorum and don't already have a cert
+        if acks.len() >= self.quorum_size && !self.certs.contains_key(&batch_id) {
+            // Form a certificate
+            let signers: Vec<ValidatorId> = acks.iter().map(|a| a.validator_id).collect();
+            let cert = BatchCertificate::new(batch_ref, self.current_view, signers);
+            let cert_clone = cert.clone();
+            self.certs.insert(batch_id, cert);
+            return BatchAckResult::CertificateFormed(cert_clone);
+        }
+
+        BatchAckResult::Accepted
+    }
+
+    /// Check if a batch has a certificate.
+    pub fn has_certificate(&self, batch_id: &BatchId) -> bool {
+        self.certs.contains_key(batch_id)
+    }
+
+    /// Get the certificate for a batch, if it exists.
+    pub fn certificate(&self, batch_id: &BatchId) -> Option<&BatchCertificate> {
+        self.certs.get(batch_id)
+    }
+
+    /// Get the number of acks for a batch.
+    pub fn ack_count(&self, batch_id: &BatchId) -> usize {
+        self.acks.get(batch_id).map(|a| a.len()).unwrap_or(0)
+    }
+
+    /// Get all batch IDs that have pending acks but no certificate.
+    pub fn pending_batch_ids(&self) -> Vec<BatchId> {
+        self.acks
+            .keys()
+            .filter(|id| !self.certs.contains_key(*id))
+            .cloned()
+            .collect()
+    }
+
+    /// Get the number of batches with certificates.
+    pub fn cert_count(&self) -> usize {
+        self.certs.len()
+    }
+
+    /// Get the number of batches with pending acks (no cert yet).
+    pub fn pending_count(&self) -> usize {
+        self.acks
+            .keys()
+            .filter(|id| !self.certs.contains_key(*id))
+            .count()
+    }
+
+    /// Mark a batch as known (creates empty ack entry if not present).
+    ///
+    /// This is useful when a batch is inserted and we want to track
+    /// that it exists even before any acks arrive.
+    pub fn mark_batch_known(&mut self, batch_id: BatchId) {
+        self.acks.entry(batch_id).or_insert_with(Vec::new);
+    }
+
+    /// Clear all acks and certificates (for testing/reset).
+    #[cfg(test)]
+    pub fn clear(&mut self) {
+        self.acks.clear();
+        self.certs.clear();
+    }
+}
+
+// ============================================================================
 // QbindBatch
 // ============================================================================
 
@@ -757,6 +1166,13 @@ impl StoredBatch {
 /// - Provides deterministic frontier selection via topological ordering
 /// - Tracks committed transactions for deduplication
 ///
+/// ## T165: Availability Certificates
+///
+/// When `availability_enabled` is true, the mempool also:
+/// - Tracks batch acknowledgments from validators
+/// - Forms `BatchCertificate`s when quorum is reached
+/// - Exposes certificate status via `batch_certificate()` and `has_certificate()`
+///
 /// ## Thread Safety
 ///
 /// Uses `parking_lot::RwLock` for interior mutability.
@@ -764,6 +1180,10 @@ pub struct InMemoryDagMempool {
     inner: RwLock<DagInner>,
     /// Optional metrics for observability.
     metrics: Option<Arc<DagMempoolMetrics>>,
+    /// Batch ack tracker for availability certificates (T165).
+    ack_tracker: RwLock<BatchAckTracker>,
+    /// Whether availability certificates are enabled.
+    availability_enabled: bool,
 }
 
 impl InMemoryDagMempool {
@@ -778,6 +1198,7 @@ impl InMemoryDagMempool {
 
     /// Create a new in-memory DAG mempool with custom configuration.
     pub fn with_config(config: DagMempoolConfig) -> Self {
+        // Default quorum_size = 1 (single node test), will be updated via enable_availability
         Self {
             inner: RwLock::new(DagInner {
                 next_local_batch_seq: 0,
@@ -791,7 +1212,47 @@ impl InMemoryDagMempool {
                 current_view_hint: 0,
             }),
             metrics: None,
+            ack_tracker: RwLock::new(BatchAckTracker::new(1)),
+            availability_enabled: false,
         }
+    }
+
+    /// Create a new in-memory DAG mempool with availability certificates enabled (T165).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - DAG mempool configuration
+    /// * `quorum_size` - Number of acks required for certificate formation
+    pub fn with_availability(config: DagMempoolConfig, quorum_size: usize) -> Self {
+        Self {
+            inner: RwLock::new(DagInner {
+                next_local_batch_seq: 0,
+                batches_by_id: HashMap::new(),
+                children: HashMap::new(),
+                pending_txs: Vec::new(),
+                tx_seen: HashSet::new(),
+                tx_committed: HashSet::new(),
+                config,
+                latest_batch_per_validator: HashMap::new(),
+                current_view_hint: 0,
+            }),
+            metrics: None,
+            ack_tracker: RwLock::new(BatchAckTracker::new(quorum_size)),
+            availability_enabled: true,
+        }
+    }
+
+    /// Enable availability certificates with the given quorum size (T165).
+    ///
+    /// This can be called after construction to enable availability tracking.
+    pub fn enable_availability(&mut self, quorum_size: usize) {
+        self.availability_enabled = true;
+        *self.ack_tracker.write() = BatchAckTracker::new(quorum_size);
+    }
+
+    /// Check if availability certificates are enabled.
+    pub fn is_availability_enabled(&self) -> bool {
+        self.availability_enabled
     }
 
     /// Attach metrics for observability.
@@ -803,6 +1264,129 @@ impl InMemoryDagMempool {
     /// Get the metrics instance, if attached.
     pub fn metrics(&self) -> Option<&Arc<DagMempoolMetrics>> {
         self.metrics.as_ref()
+    }
+
+    // ========================================================================
+    // T165: Batch Ack & Certificate Methods
+    // ========================================================================
+
+    /// Handle a batch acknowledgment (T165).
+    ///
+    /// This method processes a BatchAck and updates the ack tracker.
+    /// If quorum is reached, a certificate is formed.
+    ///
+    /// # Arguments
+    ///
+    /// * `ack` - The batch acknowledgment to process
+    ///
+    /// # Returns
+    ///
+    /// The result of processing the ack:
+    /// - `Accepted`: Ack stored, no certificate formed yet
+    /// - `CertificateFormed`: Quorum reached, certificate created
+    /// - `DuplicateAck`: This validator already acked this batch
+    /// - `UnknownBatch`: The batch doesn't exist in the mempool
+    ///
+    /// # Note
+    ///
+    /// This method assumes the ack's signature has been verified by the caller.
+    /// If availability is disabled, returns `Rejected`.
+    pub fn handle_batch_ack(&self, ack: BatchAck) -> BatchAckResult {
+        if !self.availability_enabled {
+            return BatchAckResult::Rejected("availability not enabled".to_string());
+        }
+
+        let batch_id = *ack.batch_id();
+
+        // Check if batch exists
+        let batch_exists = {
+            let inner = self.inner.read();
+            inner.batches_by_id.contains_key(&batch_id)
+        };
+
+        // Process the ack
+        let result = {
+            let mut tracker = self.ack_tracker.write();
+            tracker.insert_ack(ack, batch_exists)
+        };
+
+        // Update metrics
+        if let Some(ref m) = self.metrics {
+            match &result {
+                BatchAckResult::Accepted => m.inc_batch_acks_accepted(),
+                BatchAckResult::CertificateFormed(_) => {
+                    m.inc_batch_acks_accepted();
+                    m.inc_batch_certs_total();
+                }
+                BatchAckResult::DuplicateAck => m.inc_batch_acks_rejected_duplicate(),
+                BatchAckResult::UnknownBatch => m.inc_batch_acks_rejected_unknown(),
+                BatchAckResult::InvalidSignature => m.inc_batch_acks_rejected_bad_sig(),
+                BatchAckResult::Rejected(_) => m.inc_batch_acks_rejected_other(),
+            }
+        }
+
+        result
+    }
+
+    /// Check if a batch has a certificate (T165).
+    ///
+    /// Returns `true` if the batch has received >=quorum_size acks and
+    /// a certificate has been formed.
+    pub fn has_certificate(&self, batch_id: &BatchId) -> bool {
+        if !self.availability_enabled {
+            return false;
+        }
+        self.ack_tracker.read().has_certificate(batch_id)
+    }
+
+    /// Get the certificate for a batch, if it exists (T165).
+    ///
+    /// Returns `None` if:
+    /// - Availability is disabled
+    /// - The batch doesn't have a certificate yet
+    pub fn batch_certificate(&self, batch_id: &BatchId) -> Option<BatchCertificate> {
+        if !self.availability_enabled {
+            return None;
+        }
+        self.ack_tracker.read().certificate(batch_id).cloned()
+    }
+
+    /// Get the number of acks for a batch (T165).
+    ///
+    /// Returns 0 if availability is disabled or batch has no acks.
+    pub fn ack_count(&self, batch_id: &BatchId) -> usize {
+        if !self.availability_enabled {
+            return 0;
+        }
+        self.ack_tracker.read().ack_count(batch_id)
+    }
+
+    /// Get the number of batches with certificates (T165).
+    pub fn cert_count(&self) -> usize {
+        if !self.availability_enabled {
+            return 0;
+        }
+        self.ack_tracker.read().cert_count()
+    }
+
+    /// Get the number of batches with pending acks but no certificate (T165).
+    pub fn pending_cert_count(&self) -> usize {
+        if !self.availability_enabled {
+            return 0;
+        }
+        self.ack_tracker.read().pending_count()
+    }
+
+    /// Set the current view for certificate formation (T165).
+    pub fn set_current_view(&self, view: u64) {
+        if self.availability_enabled {
+            self.ack_tracker.write().set_current_view(view);
+        }
+    }
+
+    /// Check if a batch exists in the mempool.
+    pub fn has_batch(&self, batch_id: &BatchId) -> bool {
+        self.inner.read().batches_by_id.contains_key(batch_id)
     }
 
     /// Create a batch from pending transactions (internal helper).
@@ -1097,6 +1681,7 @@ impl DagMempool for InMemoryDagMempool {
 /// - Edges in the DAG
 /// - Transactions processed
 /// - Frontier selection operations
+/// - T165: Batch acks and certificates
 ///
 /// # Thread Safety
 ///
@@ -1113,6 +1698,20 @@ pub struct DagMempoolMetrics {
     frontier_select_total: AtomicU64,
     /// Total number of transactions selected for proposals.
     frontier_txs_selected_total: AtomicU64,
+
+    // T165: Batch ack and certificate metrics
+    /// Total number of accepted batch acks.
+    batch_acks_accepted: AtomicU64,
+    /// Total number of batch acks rejected due to duplicate.
+    batch_acks_rejected_duplicate: AtomicU64,
+    /// Total number of batch acks rejected due to unknown batch.
+    batch_acks_rejected_unknown: AtomicU64,
+    /// Total number of batch acks rejected due to bad signature.
+    batch_acks_rejected_bad_sig: AtomicU64,
+    /// Total number of batch acks rejected for other reasons.
+    batch_acks_rejected_other: AtomicU64,
+    /// Total number of batch certificates formed.
+    batch_certs_total: AtomicU64,
 }
 
 impl DagMempoolMetrics {
@@ -1172,6 +1771,82 @@ impl DagMempoolMetrics {
             .fetch_add(count, Ordering::Relaxed);
     }
 
+    // ========================================================================
+    // T165: Batch Ack & Certificate Metrics
+    // ========================================================================
+
+    /// Get the total accepted batch acks.
+    pub fn batch_acks_accepted(&self) -> u64 {
+        self.batch_acks_accepted.load(Ordering::Relaxed)
+    }
+
+    /// Increment the accepted batch acks counter.
+    pub fn inc_batch_acks_accepted(&self) {
+        self.batch_acks_accepted.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total rejected batch acks (duplicate).
+    pub fn batch_acks_rejected_duplicate(&self) -> u64 {
+        self.batch_acks_rejected_duplicate.load(Ordering::Relaxed)
+    }
+
+    /// Increment the rejected duplicate batch acks counter.
+    pub fn inc_batch_acks_rejected_duplicate(&self) {
+        self.batch_acks_rejected_duplicate
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total rejected batch acks (unknown batch).
+    pub fn batch_acks_rejected_unknown(&self) -> u64 {
+        self.batch_acks_rejected_unknown.load(Ordering::Relaxed)
+    }
+
+    /// Increment the rejected unknown batch acks counter.
+    pub fn inc_batch_acks_rejected_unknown(&self) {
+        self.batch_acks_rejected_unknown
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total rejected batch acks (bad signature).
+    pub fn batch_acks_rejected_bad_sig(&self) -> u64 {
+        self.batch_acks_rejected_bad_sig.load(Ordering::Relaxed)
+    }
+
+    /// Increment the rejected bad signature batch acks counter.
+    pub fn inc_batch_acks_rejected_bad_sig(&self) {
+        self.batch_acks_rejected_bad_sig
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total rejected batch acks (other reasons).
+    pub fn batch_acks_rejected_other(&self) -> u64 {
+        self.batch_acks_rejected_other.load(Ordering::Relaxed)
+    }
+
+    /// Increment the rejected other batch acks counter.
+    pub fn inc_batch_acks_rejected_other(&self) {
+        self.batch_acks_rejected_other
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total batch certificates formed.
+    pub fn batch_certs_total(&self) -> u64 {
+        self.batch_certs_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the batch certificates counter.
+    pub fn inc_batch_certs_total(&self) {
+        self.batch_certs_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total rejected batch acks (all reasons).
+    pub fn batch_acks_rejected_total(&self) -> u64 {
+        self.batch_acks_rejected_duplicate()
+            + self.batch_acks_rejected_unknown()
+            + self.batch_acks_rejected_bad_sig()
+            + self.batch_acks_rejected_other()
+    }
+
     /// Format metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -1189,6 +1864,33 @@ impl DagMempoolMetrics {
         output.push_str(&format!(
             "qbind_dag_frontier_txs_selected_total {}\n",
             self.frontier_txs_selected_total()
+        ));
+
+        // T165: Batch ack and certificate metrics
+        output.push_str("\n# DAG Availability Metrics (T165)\n");
+        output.push_str(&format!(
+            "qbind_dag_batch_acks_total{{result=\"accepted\"}} {}\n",
+            self.batch_acks_accepted()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_batch_acks_total{{result=\"rejected\"}} {}\n",
+            self.batch_acks_rejected_total()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_batch_acks_invalid_total{{reason=\"duplicate\"}} {}\n",
+            self.batch_acks_rejected_duplicate()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_batch_acks_invalid_total{{reason=\"unknown_batch\"}} {}\n",
+            self.batch_acks_rejected_unknown()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_batch_acks_invalid_total{{reason=\"bad_sig\"}} {}\n",
+            self.batch_acks_rejected_bad_sig()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_batch_certs_total {}\n",
+            self.batch_certs_total()
         ));
         output
     }

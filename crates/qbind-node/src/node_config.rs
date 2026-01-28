@@ -39,6 +39,98 @@ use qbind_types::{ChainId, NetworkEnvironment};
 use std::path::PathBuf;
 
 // ============================================================================
+// T165: DAG Availability Configuration
+// ============================================================================
+
+/// Configuration for DAG availability certificates (T165).
+///
+/// This struct controls the behavior of the DAG availability protocol,
+/// including whether it's enabled and the quorum threshold for certificates.
+///
+/// # Environments
+///
+/// - **DevNet**: Disabled by default (DevNet is frozen at DAG v0)
+/// - **TestNet Alpha**: Enabled when running with DAG mempool
+/// - **MainNet**: Enabled by default (future)
+///
+/// # Quorum Calculation
+///
+/// For BFT consensus with `n = 3f + 1` validators, the quorum is `2f + 1`.
+/// For example:
+/// - 4 validators (f=1): quorum = 3
+/// - 7 validators (f=2): quorum = 5
+/// - 10 validators (f=3): quorum = 7
+#[derive(Clone, Debug, PartialEq)]
+pub struct DagAvailabilityConfig {
+    /// Whether DAG availability certificates are enabled.
+    ///
+    /// When `false`, the DAG mempool operates in v0 mode (no acks/certs).
+    /// When `true`, validators issue BatchAcks and form BatchCertificates.
+    pub enabled: bool,
+
+    /// Quorum fraction for certificate formation.
+    ///
+    /// Default: `2.0 / 3.0` (i.e., 2f+1 for n=3f+1)
+    ///
+    /// The actual quorum size is computed as:
+    /// `quorum_size = ceil(quorum_fraction * num_validators)`
+    pub quorum_fraction: f32,
+}
+
+impl Default for DagAvailabilityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Disabled by default (DevNet compatibility)
+            quorum_fraction: 2.0 / 3.0,
+        }
+    }
+}
+
+impl DagAvailabilityConfig {
+    /// Create a disabled configuration (DevNet default).
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Create an enabled configuration for TestNet/MainNet.
+    pub fn enabled() -> Self {
+        Self {
+            enabled: true,
+            quorum_fraction: 2.0 / 3.0,
+        }
+    }
+
+    /// Compute the quorum size for a given number of validators.
+    ///
+    /// # Arguments
+    ///
+    /// * `num_validators` - Total number of validators in the network
+    ///
+    /// # Returns
+    ///
+    /// The quorum size (number of acks required for a certificate).
+    /// Returns 1 if `num_validators` is 0 (edge case for single-node testing).
+    pub fn compute_quorum_size(&self, num_validators: usize) -> usize {
+        if num_validators == 0 {
+            return 1;
+        }
+        let quorum = (self.quorum_fraction * num_validators as f32).ceil() as usize;
+        quorum.max(1) // At least 1 ack required
+    }
+
+    /// Create a configuration with a specific quorum size (for testing).
+    pub fn with_fixed_quorum(quorum_size: usize) -> Self {
+        // We don't store a fixed quorum, but this helps with testing
+        // where we want a specific quorum regardless of validator count
+        Self {
+            enabled: true,
+            // Use a fraction that will give the desired quorum for typical validator counts
+            quorum_fraction: quorum_size as f32 / 4.0, // Assumes ~4 validators in tests
+        }
+    }
+}
+
+// ============================================================================
 // ExecutionProfile (T163)
 // ============================================================================
 
@@ -634,5 +726,59 @@ mod tests {
         let config = NodeConfig::testnet_vm_v0();
         let info = config.startup_info_string(Some("V1"));
         assert!(info.contains("profile=vm-v0"));
+    }
+
+    // ========================================================================
+    // T165: DagAvailabilityConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dag_availability_config_default() {
+        let config = DagAvailabilityConfig::default();
+        assert!(!config.enabled, "should be disabled by default");
+        assert!((config.quorum_fraction - 2.0 / 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_dag_availability_config_disabled() {
+        let config = DagAvailabilityConfig::disabled();
+        assert!(!config.enabled);
+    }
+
+    #[test]
+    fn test_dag_availability_config_enabled() {
+        let config = DagAvailabilityConfig::enabled();
+        assert!(config.enabled);
+        assert!((config.quorum_fraction - 2.0 / 3.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_dag_availability_quorum_computation() {
+        let config = DagAvailabilityConfig::enabled();
+
+        // n=4 (f=1): quorum = ceil(4 * 2/3) = ceil(2.67) = 3
+        assert_eq!(config.compute_quorum_size(4), 3);
+
+        // n=7 (f=2): quorum = ceil(7 * 2/3) = ceil(4.67) = 5
+        assert_eq!(config.compute_quorum_size(7), 5);
+
+        // n=10 (f=3): quorum = ceil(10 * 2/3) = ceil(6.67) = 7
+        assert_eq!(config.compute_quorum_size(10), 7);
+
+        // n=1: quorum = ceil(1 * 2/3) = ceil(0.67) = 1
+        assert_eq!(config.compute_quorum_size(1), 1);
+
+        // n=0: edge case, returns 1
+        assert_eq!(config.compute_quorum_size(0), 1);
+    }
+
+    #[test]
+    fn test_dag_availability_with_fixed_quorum() {
+        let config = DagAvailabilityConfig::with_fixed_quorum(3);
+        assert!(config.enabled);
+        // For 4 validators, should give quorum ~= 3
+        // quorum_fraction = 3/4 = 0.75
+        // ceil(4 * 0.75) = 3
+        assert_eq!(config.compute_quorum_size(4), 3);
     }
 }

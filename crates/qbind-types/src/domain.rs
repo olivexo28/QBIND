@@ -90,6 +90,11 @@ pub enum DomainKind {
     ///
     /// Domain tag: `QBIND:<SCOPE>:NEWVIEW:v1`
     NewView,
+
+    /// Batch acknowledgment signing preimage (T165).
+    ///
+    /// Domain tag: `QBIND:<SCOPE>:BATCH_ACK:v1`
+    BatchAck,
 }
 
 impl DomainKind {
@@ -104,6 +109,7 @@ impl DomainKind {
             DomainKind::Proposal => "PROPOSAL",
             DomainKind::Timeout => "TIMEOUT",
             DomainKind::NewView => "NEWVIEW",
+            DomainKind::BatchAck => "BATCH_ACK",
         }
     }
 }
@@ -247,6 +253,10 @@ mod tests {
             domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::NewView),
             b"QBIND:DEV:NEWVIEW:v1"
         );
+        assert_eq!(
+            domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::BatchAck),
+            b"QBIND:DEV:BATCH_ACK:v1"
+        );
     }
 
     #[test]
@@ -262,6 +272,10 @@ mod tests {
         assert_eq!(
             domain_prefix(QBIND_TESTNET_CHAIN_ID, DomainKind::Vote),
             b"QBIND:TST:VOTE:v1"
+        );
+        assert_eq!(
+            domain_prefix(QBIND_TESTNET_CHAIN_ID, DomainKind::BatchAck),
+            b"QBIND:TST:BATCH_ACK:v1"
         );
     }
 
@@ -320,9 +334,10 @@ mod tests {
         let proposal = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Proposal);
         let timeout = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::Timeout);
         let newview = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::NewView);
+        let batch_ack = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::BatchAck);
 
         // All must be unique
-        let prefixes = vec![tx, batch, vote, proposal, timeout, newview];
+        let prefixes = vec![tx, batch, vote, proposal, timeout, newview, batch_ack];
         for i in 0..prefixes.len() {
             for j in (i + 1)..prefixes.len() {
                 assert_ne!(
