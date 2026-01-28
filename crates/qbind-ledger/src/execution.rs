@@ -1996,12 +1996,19 @@ impl VmV0ExecutionEngine {
     }
 
     /// Execute a block with gas enforcement and per-block gas limit (T168).
+    ///
+    /// # Gas Accounting Policy
+    ///
+    /// - Malformed transactions are treated as having `MINIMUM_GAS_LIMIT` gas to prevent DoS
+    /// - Failed transactions (nonce mismatch, insufficient balance) do NOT consume gas
+    ///   (they are rejected before any state changes, similar to pre-flight validation)
+    /// - Only successful transactions consume gas from the block limit
     fn execute_block_with_gas<S: AccountStateUpdater>(
         &self,
         state: &mut S,
         transactions: &[QbindTransaction],
     ) -> Vec<VmV0TxResult> {
-        use crate::execution_gas::compute_gas_for_vm_v0_tx;
+        use crate::execution_gas::{compute_gas_for_vm_v0_tx, MINIMUM_GAS_LIMIT};
 
         let block_gas_limit = self.gas_config.block_gas_limit;
         let mut block_gas_used: u64 = 0;
@@ -2009,9 +2016,10 @@ impl VmV0ExecutionEngine {
 
         for tx in transactions {
             // Pre-compute gas cost to check block limit
+            // Malformed transactions get MINIMUM_GAS_LIMIT to prevent DoS via many small malformed txs
             let gas_cost = compute_gas_for_vm_v0_tx(tx)
                 .map(|r| r.gas_cost)
-                .unwrap_or(0);
+                .unwrap_or(MINIMUM_GAS_LIMIT);
 
             // Check if adding this tx would exceed block gas limit
             if block_gas_used.saturating_add(gas_cost) > block_gas_limit {
@@ -2023,12 +2031,11 @@ impl VmV0ExecutionEngine {
             // Execute the transaction
             let result = self.execute_tx_with_gas(state, tx);
 
-            // Update block gas used (only count gas for executed txs)
+            // Update block gas used
+            // Policy: Only count gas for successful transactions
+            // Failed transactions are rejected before state changes (like pre-flight validation)
             if result.success {
                 block_gas_used = block_gas_used.saturating_add(result.gas_used);
-            } else {
-                // Even failed txs might count toward gas (depending on policy)
-                // For now, only count successful tx gas
             }
 
             results.push(result);

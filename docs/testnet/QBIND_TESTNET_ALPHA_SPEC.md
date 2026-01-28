@@ -482,7 +482,7 @@ Task T167 defines the gas and fee model for future implementation in TestNet Bet
 
 ### 7.3 T168 Implementation Status
 
-> **T168 adds experimental, config-gated gas enforcement for VM v0:**
+> **T168 adds config-gated gas enforcement for VM v0:**
 >
 > - When `ExecutionGasConfig.enabled = true`:
 >   - Per-transaction gas limits are enforced (`GasLimitExceeded` error if exceeded)
@@ -501,7 +501,7 @@ Task T167 defines the gas and fee model for future implementation in TestNet Bet
 >
 > **Configuration Example**:
 > ```rust
-> // Enable gas enforcement for testing
+> // Enable gas enforcement (for TestNet Beta / MainNet)
 > let gas_config = ExecutionGasConfig::enabled();
 > let engine = VmV0ExecutionEngine::with_gas_config(gas_config);
 > 

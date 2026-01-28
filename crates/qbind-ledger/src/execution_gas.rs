@@ -84,6 +84,8 @@ pub const DEFAULT_V0_GAS_LIMIT: u64 = 50_000;
 
 /// Compute the gas cost for a VM v0 transfer transaction.
 ///
+/// Uses saturating arithmetic to prevent overflow.
+///
 /// # Arguments
 ///
 /// * `payload_len` - Length of the transaction payload in bytes
@@ -108,10 +110,11 @@ pub const DEFAULT_V0_GAS_LIMIT: u64 = 50_000;
 /// assert_eq!(gas_self, 29_368);
 /// ```
 pub fn gas_for_transfer_v0(payload_len: usize, num_reads: u32, num_writes: u32) -> u64 {
+    // Use saturating arithmetic to prevent overflow
     GAS_BASE_TX
-        + GAS_PER_ACCOUNT_READ * (num_reads as u64)
-        + GAS_PER_ACCOUNT_WRITE * (num_writes as u64)
-        + GAS_PER_BYTE_PAYLOAD * (payload_len as u64)
+        .saturating_add(GAS_PER_ACCOUNT_READ.saturating_mul(num_reads as u64))
+        .saturating_add(GAS_PER_ACCOUNT_WRITE.saturating_mul(num_writes as u64))
+        .saturating_add(GAS_PER_BYTE_PAYLOAD.saturating_mul(payload_len as u64))
 }
 
 /// Compute the gas cost for a standard VM v0 transfer.
