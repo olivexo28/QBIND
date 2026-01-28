@@ -81,7 +81,10 @@ fn test_transaction_signing_preimage_stability() {
         "should contain chain-aware domain tag (QBIND:DEV:TX:v1)"
     );
     // Expected prefix is 15 bytes for DevNet: "QBIND:DEV:TX:v1"
-    assert!(preimage1.len() > expected_prefix.len() + 32 + 8, "should have minimum length");
+    assert!(
+        preimage1.len() > expected_prefix.len() + 32 + 8,
+        "should have minimum length"
+    );
 }
 
 #[test]
