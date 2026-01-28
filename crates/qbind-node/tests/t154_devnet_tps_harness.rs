@@ -211,6 +211,7 @@ pub fn run_simple_tps_bench(config: BenchConfig) -> BenchResult {
     let mempool_config = MempoolConfig {
         max_txs: config.mempool_size,
         max_nonce_gap: config.num_txs as u64 + 1000,
+        gas_config: None, // Disabled for TPS benchmark
     };
     let mempool = InMemoryMempool::with_key_provider(mempool_config, Arc::new(key_provider));
 

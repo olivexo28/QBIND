@@ -480,7 +480,40 @@ Task T167 defines the gas and fee model for future implementation in TestNet Bet
 - **Fee Distribution**: Burn policy for TestNet, hybrid (burn + proposer reward) for MainNet.
 - **DAG Integration**: Gas constraints enforced at block construction from DAG batches.
 
-### 7.3 Migration Path
+### 7.3 T168 Implementation Status
+
+> **T168 adds config-gated gas enforcement for VM v0:**
+>
+> - When `ExecutionGasConfig.enabled = true`:
+>   - Per-transaction gas limits are enforced (`GasLimitExceeded` error if exceeded)
+>   - Per-block gas limit is enforced (`BLOCK_GAS_LIMIT_DEFAULT = 30,000,000`)
+>   - Fees are computed as `gas_cost * max_fee_per_gas` and deducted from sender
+>   - Fees are **burned** in TestNet (not credited to proposer)
+>   - Mempool admission checks gas legality and balance sufficiency
+>
+> - When `ExecutionGasConfig.enabled = false` (default):
+>   - Behavior is exactly as before T168 (no gas, no fees)
+>   - This is the default for public TestNet Alpha
+>
+> **Transaction Payload Formats**:
+> - `TransferPayload` (v0, 48 bytes): recipient + amount only; derives `gas_limit` = 50k, `max_fee_per_gas` = 0
+> - `TransferPayloadV1` (v1, 72 bytes): recipient + amount + gas_limit + max_fee_per_gas
+>
+> **Configuration Example**:
+> ```rust
+> // Enable gas enforcement (for TestNet Beta / MainNet)
+> let gas_config = ExecutionGasConfig::enabled();
+> let engine = VmV0ExecutionEngine::with_gas_config(gas_config);
+> 
+> // Mempool with gas admission checks
+> let mut mempool_config = MempoolConfig::default();
+> mempool_config.gas_config = Some(ExecutionGasConfig::enabled());
+> let mempool = InMemoryMempool::with_config(mempool_config);
+> ```
+>
+> **Note**: Default public TestNet Alpha remains gas-disabled until TestNet Beta.
+
+### 7.4 Migration Path
 
 1. **TestNet Alpha**: No gas enforcement; `TransferPayload` (v0) format.
 2. **TestNet Beta**: Gas enforcement enabled; both v0 and v1 payloads accepted with deprecation timeline.

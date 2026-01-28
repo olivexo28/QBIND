@@ -88,6 +88,25 @@ pub enum MempoolError {
     /// The transaction is invalid.
     #[error("invalid transaction: {0}")]
     Invalid(String),
+
+    // T168: Gas-related admission errors
+    /// Transaction's gas cost exceeds its gas limit (T168).
+    #[error("insufficient gas limit: required {required}, limit {limit}")]
+    InsufficientGasLimit {
+        /// The required gas for this transaction.
+        required: u64,
+        /// The gas limit specified in the transaction.
+        limit: u64,
+    },
+
+    /// Sender doesn't have enough balance to cover amount + fee (T168).
+    #[error("insufficient balance for fee: balance {balance}, needed {needed}")]
+    InsufficientBalanceForFee {
+        /// The sender's current balance.
+        balance: u128,
+        /// The total amount needed (transfer amount + max fee).
+        needed: u128,
+    },
 }
 
 // ============================================================================
@@ -102,6 +121,9 @@ pub struct MempoolConfig {
     /// Maximum nonce gap to allow per sender (0 = no gap check).
     /// If > 0, reject txs with nonce > max_seen_nonce + max_nonce_gap.
     pub max_nonce_gap: u64,
+    /// Gas enforcement configuration (T168).
+    /// When enabled, mempool performs gas legality and balance checks.
+    pub gas_config: Option<qbind_ledger::ExecutionGasConfig>,
 }
 
 impl Default for MempoolConfig {
@@ -109,17 +131,19 @@ impl Default for MempoolConfig {
         Self {
             max_txs: 10000,
             max_nonce_gap: 1000,
+            gas_config: None, // Disabled by default for backward compatibility
         }
     }
 }
 
 /// In-memory mempool implementation for QbindTransactions.
 ///
-/// This is the reference implementation for T151:
+/// This is the reference implementation for T151 with T168 gas support:
 /// - FIFO ordering (insertion order)
 /// - Signature verification on admission
 /// - Basic per-sender nonce tracking to prevent spam
 /// - Capacity limits
+/// - Gas legality and balance checks when enabled (T168)
 ///
 /// ## Thread Safety
 ///
@@ -131,6 +155,9 @@ pub struct InMemoryMempool {
     /// Optional key provider for signature verification.
     /// If None, signature verification is skipped (test-only mode).
     key_provider: Option<Arc<dyn KeyProvider>>,
+    /// Optional balance provider for gas-aware admission (T168).
+    /// Required when gas_config is enabled.
+    balance_provider: Option<Arc<dyn BalanceProvider>>,
 }
 
 /// Internal mempool state (protected by RwLock).
@@ -157,6 +184,7 @@ impl InMemoryMempool {
             }),
             config,
             key_provider: None,
+            balance_provider: None,
         }
     }
 
@@ -169,7 +197,36 @@ impl InMemoryMempool {
             }),
             config,
             key_provider: Some(key_provider),
+            balance_provider: None,
         }
+    }
+
+    /// Create a mempool with key and balance providers (T168).
+    ///
+    /// This constructor enables both signature verification and gas-aware admission.
+    pub fn with_providers(
+        config: MempoolConfig,
+        key_provider: Arc<dyn KeyProvider>,
+        balance_provider: Arc<dyn BalanceProvider>,
+    ) -> Self {
+        Self {
+            inner: RwLock::new(MempoolInner {
+                txs: Vec::new(),
+                nonce_tracker: HashMap::new(),
+            }),
+            config,
+            key_provider: Some(key_provider),
+            balance_provider: Some(balance_provider),
+        }
+    }
+
+    /// Check if gas enforcement is enabled.
+    pub fn is_gas_enabled(&self) -> bool {
+        self.config
+            .gas_config
+            .as_ref()
+            .map(|c| c.enabled)
+            .unwrap_or(false)
     }
 }
 
@@ -199,7 +256,12 @@ impl Mempool for InMemoryMempool {
             })?;
         }
 
-        // 3. Basic nonce sanity check (if max_nonce_gap > 0)
+        // 3. Gas legality and balance checks (T168) - only when gas is enabled
+        if self.is_gas_enabled() {
+            self.check_gas_admission(&tx)?;
+        }
+
+        // 4. Basic nonce sanity check (if max_nonce_gap > 0)
         if self.config.max_nonce_gap > 0 {
             const MAX_NONCE_GAP_BEHIND: u64 = 10; // How far behind max_nonce we allow
 
@@ -232,7 +294,7 @@ impl Mempool for InMemoryMempool {
                 .or_insert(tx.nonce);
         }
 
-        // 4. Insert the transaction
+        // 5. Insert the transaction
         inner.txs.push(tx);
 
         Ok(())
@@ -259,6 +321,115 @@ impl Mempool for InMemoryMempool {
     fn size(&self) -> usize {
         let inner = self.inner.read();
         inner.txs.len()
+    }
+}
+
+impl InMemoryMempool {
+    /// Check gas legality and balance for a transaction (T168).
+    ///
+    /// This is called during admission when gas enforcement is enabled.
+    fn check_gas_admission(&self, tx: &QbindTransaction) -> Result<(), MempoolError> {
+        use qbind_ledger::compute_gas_for_vm_v0_tx;
+
+        // Compute gas cost and parameters
+        let gas_result = compute_gas_for_vm_v0_tx(tx).map_err(|_| {
+            MempoolError::Invalid("failed to compute gas: malformed payload".to_string())
+        })?;
+
+        let gas_cost = gas_result.gas_cost;
+        let gas_limit = gas_result.gas_limit;
+        let max_fee_per_gas = gas_result.max_fee_per_gas;
+
+        // Check gas limit is sufficient
+        if gas_cost > gas_limit {
+            return Err(MempoolError::InsufficientGasLimit {
+                required: gas_cost,
+                limit: gas_limit,
+            });
+        }
+
+        // Check balance is sufficient for amount + max_fee (if balance provider is available)
+        if let Some(ref balance_provider) = self.balance_provider {
+            // Decode payload to get amount
+            let amount = match qbind_ledger::decode_transfer_payload(&tx.payload) {
+                Ok(qbind_ledger::TransferPayloadDecoded::V0(p)) => p.amount,
+                Ok(qbind_ledger::TransferPayloadDecoded::V1(p)) => p.amount,
+                Err(_) => {
+                    return Err(MempoolError::Invalid(
+                        "malformed payload for balance check".to_string(),
+                    ))
+                }
+            };
+
+            // Compute max fee (worst case: all gas used)
+            let max_fee = (gas_limit as u128) * max_fee_per_gas;
+            let total_needed = amount.saturating_add(max_fee);
+
+            // Get sender's balance
+            let sender_balance = balance_provider.get_balance(&tx.sender);
+
+            if sender_balance < total_needed {
+                return Err(MempoolError::InsufficientBalanceForFee {
+                    balance: sender_balance,
+                    needed: total_needed,
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Balance Provider Trait (T168)
+// ============================================================================
+
+/// Trait for querying account balances for gas-aware mempool admission (T168).
+///
+/// This abstraction allows different implementations:
+/// - Test mode: in-memory map of account -> balance
+/// - Production: query current execution state
+pub trait BalanceProvider: Send + Sync {
+    /// Get the current balance for an account.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The account ID
+    ///
+    /// # Returns
+    ///
+    /// The account balance, or 0 if the account doesn't exist.
+    fn get_balance(&self, account: &AccountId) -> u128;
+}
+
+/// Simple in-memory balance provider for testing (T168).
+pub struct InMemoryBalanceProvider {
+    balances: parking_lot::RwLock<HashMap<AccountId, u128>>,
+}
+
+impl InMemoryBalanceProvider {
+    /// Create an empty balance provider.
+    pub fn new() -> Self {
+        Self {
+            balances: parking_lot::RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Set the balance for an account.
+    pub fn set_balance(&self, account: AccountId, balance: u128) {
+        self.balances.write().insert(account, balance);
+    }
+}
+
+impl Default for InMemoryBalanceProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BalanceProvider for InMemoryBalanceProvider {
+    fn get_balance(&self, account: &AccountId) -> u128 {
+        self.balances.read().get(account).copied().unwrap_or(0)
     }
 }
 
@@ -355,6 +526,7 @@ mod tests {
         let config = MempoolConfig {
             max_txs: 2,
             max_nonce_gap: 0, // Disable nonce checks for this test
+            gas_config: None,
         };
         let mempool = InMemoryMempool::with_config(config);
 
@@ -390,6 +562,7 @@ mod tests {
         let config = MempoolConfig {
             max_txs: 10,
             max_nonce_gap: 0,
+            gas_config: None,
         };
         let mempool = InMemoryMempool::with_key_provider(config, Arc::new(key_provider));
 
@@ -412,6 +585,7 @@ mod tests {
         let config = MempoolConfig {
             max_txs: 100,
             max_nonce_gap: 5, // Allow gap of 5
+            gas_config: None,
         };
         let mempool = InMemoryMempool::with_config(config);
 
@@ -492,6 +666,7 @@ mod tests {
         let config = MempoolConfig {
             max_txs: 100,
             max_nonce_gap: 0,
+            gas_config: None,
         };
         let mempool1 = InMemoryMempool::with_config(config.clone());
         let mempool2 = InMemoryMempool::with_config(config);

@@ -394,6 +394,8 @@ The T167 gas and fee model will affect DAG mempool behavior in future phases:
 
 **Note**: Gas enforcement is not implemented in TestNet Alpha. See [QBIND Gas and Fee Model Design](../testnet/QBIND_GAS_AND_FEES_DESIGN.md) for the complete specification and migration timeline.
 
+> **T168 Implementation Note**: Task T168 implements initial VM v0 gas enforcement (config-gated) and mempool admission checks. Gas limits, fee deduction, and balance verification are available in both FIFO and DAG mempools when `ExecutionGasConfig.enabled = true`. However, DAG-specific fee prioritization and eviction remain future work.
+
 ---
 
 ## 6. Rollout Plan (DevNet → TestNet → MainNet)

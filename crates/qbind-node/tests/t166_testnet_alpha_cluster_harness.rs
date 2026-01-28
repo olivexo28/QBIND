@@ -785,6 +785,7 @@ impl TestnetAlphaClusterHandle {
             let mempool_config = MempoolConfig {
                 max_txs: config.mempool_size,
                 max_nonce_gap: config.mempool_size as u64 + 1000,
+                gas_config: None,
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
@@ -944,6 +945,7 @@ impl TestnetAlphaClusterHandle {
             let mempool_config = MempoolConfig {
                 max_txs: config.mempool_size,
                 max_nonce_gap: config.mempool_size as u64 + 1000,
+                gas_config: None,
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 

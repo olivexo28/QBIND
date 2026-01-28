@@ -4,6 +4,7 @@ pub mod auth;
 pub mod context;
 pub mod error;
 pub mod execution;
+pub mod execution_gas;
 pub mod program;
 pub mod store;
 
@@ -32,10 +33,19 @@ pub use execution::{
 // T163: VM v0 state model and execution engine exports
 pub use execution::{
     AccountState, AccountStateUpdater, AccountStateView, InMemoryAccountState, TransferPayload,
-    VmV0Error, VmV0ExecutionEngine, VmV0TxResult, TRANSFER_PAYLOAD_SIZE,
+    VmV0BlockStats, VmV0Error, VmV0ExecutionEngine, VmV0TxResult, TRANSFER_PAYLOAD_SIZE,
 };
 
 // T164: Persistent account state exports
 pub use execution::{
     CachedPersistentAccountState, PersistentAccountState, RocksDbAccountState, StorageError,
+};
+
+// T168: Gas accounting and fee model exports
+pub use execution_gas::{
+    compute_gas_for_vm_v0_tx, decode_transfer_payload, gas_for_standard_transfer,
+    gas_for_transfer_v0, ExecutionGasConfig, GasComputeResult, TransferPayloadDecoded,
+    TransferPayloadV1, VmGasError, BLOCK_GAS_LIMIT_DEFAULT, DEFAULT_V0_GAS_LIMIT, GAS_BASE_TX,
+    GAS_PER_ACCOUNT_READ, GAS_PER_ACCOUNT_WRITE, GAS_PER_BYTE_PAYLOAD, MINIMUM_GAS_LIMIT,
+    TRANSFER_PAYLOAD_V1_SIZE,
 };

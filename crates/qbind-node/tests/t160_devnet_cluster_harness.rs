@@ -487,6 +487,7 @@ impl DevnetClusterHandle {
             let mempool_config = MempoolConfig {
                 max_txs: cfg.mempool_size,
                 max_nonce_gap: cfg.mempool_size as u64 + 1000,
+                gas_config: None, // Disabled for cluster harness
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
