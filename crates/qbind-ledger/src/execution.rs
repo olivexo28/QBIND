@@ -21,9 +21,16 @@
 //! - Full VM implementation
 //! - Gas accounting beyond placeholders
 //! - Balance transfers or token logic
+//!
+//! ## T159: Chain-Aware Domain Separation
+//!
+//! As of T159, all signing preimages include the chain ID to prevent cross-chain
+//! replay attacks. Use `signing_preimage_with_chain_id()` with the appropriate
+//! `ChainId` for the network environment (DevNet, TestNet, MainNet).
 
 use qbind_crypto::ml_dsa44::{MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE};
-use qbind_types::AccountId;
+use qbind_types::domain::{domain_prefix, DomainKind};
+use qbind_types::{AccountId, ChainId, QBIND_DEVNET_CHAIN_ID};
 use std::collections::HashMap;
 
 // ============================================================================
@@ -89,7 +96,12 @@ impl UserSignature {
 // Transaction Model
 // ============================================================================
 
-/// Domain separator for QbindTransaction signing preimages.
+/// Legacy domain separator for QbindTransaction signing preimages.
+///
+/// **DEPRECATED (T159)**: Use `domain_prefix(chain_id, DomainKind::UserTx)` instead.
+///
+/// This constant is provided for backward compatibility. New code should use
+/// `signing_preimage_with_chain_id()` with the appropriate `ChainId`.
 ///
 /// Changing this is a consensus-breaking change.
 pub const TX_DOMAIN_TAG: &[u8] = b"QBIND:TX:v1";
@@ -103,10 +115,10 @@ pub const TX_DOMAIN_TAG: &[u8] = b"QBIND:TX:v1";
 /// - `signature`: ML-DSA-44 signature over the signing preimage
 /// - `suite_id`: Signature suite identifier (100 = ML-DSA-44)
 ///
-/// ## Signing
+/// ## Signing (T159: Chain-Aware)
 ///
-/// The signature covers `signing_preimage()`, which includes:
-/// - Domain tag ("QBIND:TX:v1")
+/// The signature covers `signing_preimage_with_chain_id(chain_id)`, which includes:
+/// - Domain tag (e.g., "QBIND:DEV:TX:v1" for DevNet)
 /// - sender (32 bytes)
 /// - nonce (8 bytes, little-endian)
 /// - payload length (4 bytes, little-endian)
@@ -115,7 +127,8 @@ pub const TX_DOMAIN_TAG: &[u8] = b"QBIND:TX:v1";
 ///
 /// ## Verification
 ///
-/// Use `verify_signature()` with the sender's `UserPublicKey`.
+/// Use `verify_signature_with_chain_id()` with the sender's `UserPublicKey` and the
+/// chain ID for the network environment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QbindTransaction {
     /// The account ID of the sender.
@@ -133,7 +146,7 @@ pub struct QbindTransaction {
 impl QbindTransaction {
     /// Create a new unsigned transaction.
     ///
-    /// Use `sign()` or set `signature` manually after calling this.
+    /// Use `sign_with_chain_id()` or set `signature` manually after calling this.
     pub fn new(sender: AccountId, nonce: u64, payload: Vec<u8>) -> Self {
         Self {
             sender,
@@ -144,11 +157,11 @@ impl QbindTransaction {
         }
     }
 
-    /// Compute the canonical signing preimage for this transaction.
+    /// Compute the canonical signing preimage for this transaction with chain ID (T159).
     ///
     /// The preimage layout is:
     /// ```text
-    /// domain_tag:   "QBIND:TX:v1" (11 bytes)
+    /// domain_tag:   "QBIND:<SCOPE>:TX:v1" (variable length based on scope)
     /// sender:       [u8; 32]
     /// nonce:        u64 (little-endian)
     /// payload_len:  u32 (little-endian)
@@ -156,12 +169,18 @@ impl QbindTransaction {
     /// suite_id:     u16 (little-endian)
     /// ```
     ///
+    /// Where `<SCOPE>` is:
+    /// - "DEV" for DevNet (`QBIND_DEVNET_CHAIN_ID`)
+    /// - "TST" for TestNet (`QBIND_TESTNET_CHAIN_ID`)
+    /// - "MAIN" for MainNet (`QBIND_MAINNET_CHAIN_ID`)
+    ///
     /// Note: The signature field is NOT included in the preimage.
-    pub fn signing_preimage(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(TX_DOMAIN_TAG.len() + 32 + 8 + 4 + self.payload.len() + 2);
+    pub fn signing_preimage_with_chain_id(&self, chain_id: ChainId) -> Vec<u8> {
+        let domain_tag = domain_prefix(chain_id, DomainKind::UserTx);
+        let mut out = Vec::with_capacity(domain_tag.len() + 32 + 8 + 4 + self.payload.len() + 2);
 
-        // Domain separator
-        out.extend_from_slice(TX_DOMAIN_TAG);
+        // Domain separator (chain-aware)
+        out.extend_from_slice(&domain_tag);
 
         // sender (32 bytes)
         out.extend_from_slice(&self.sender);
@@ -180,16 +199,41 @@ impl QbindTransaction {
         out
     }
 
-    /// Verify the transaction signature against the given public key.
+    /// Compute the signing preimage using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `signing_preimage_with_chain_id()` instead.
+    ///
+    /// The preimage layout is:
+    /// ```text
+    /// domain_tag:   "QBIND:DEV:TX:v1" (15 bytes for DevNet)
+    /// sender:       [u8; 32]
+    /// nonce:        u64 (little-endian)
+    /// payload_len:  u32 (little-endian)
+    /// payload:      [u8; payload_len]
+    /// suite_id:     u16 (little-endian)
+    /// ```
+    ///
+    /// Note: The signature field is NOT included in the preimage.
+    pub fn signing_preimage(&self) -> Vec<u8> {
+        self.signing_preimage_with_chain_id(QBIND_DEVNET_CHAIN_ID)
+    }
+
+    /// Verify the transaction signature against the given public key with chain ID (T159).
     ///
     /// # Arguments
     ///
     /// * `pk` - The sender's public key (must be ML-DSA-44 for suite_id = 100)
+    /// * `chain_id` - The chain ID for domain separation
     ///
     /// # Returns
     ///
     /// `Ok(())` if the signature is valid, `Err(TxVerifyError)` otherwise.
-    pub fn verify_signature(&self, pk: &UserPublicKey) -> Result<(), TxVerifyError> {
+    pub fn verify_signature_with_chain_id(
+        &self,
+        pk: &UserPublicKey,
+        chain_id: ChainId,
+    ) -> Result<(), TxVerifyError> {
         // Check suite_id compatibility
         if self.suite_id != pk.suite_id {
             return Err(TxVerifyError::SuiteMismatch {
@@ -213,14 +257,57 @@ impl QbindTransaction {
             return Err(TxVerifyError::InvalidSignature);
         }
 
-        // Compute preimage and verify
-        let preimage = self.signing_preimage();
+        // Compute preimage and verify with chain ID
+        let preimage = self.signing_preimage_with_chain_id(chain_id);
 
         MlDsa44Backend::verify(&pk.bytes, &preimage, &self.signature.bytes)
             .map_err(|_| TxVerifyError::SignatureVerificationFailed)
     }
 
-    /// Sign this transaction with the given secret key.
+    /// Verify the transaction signature using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `verify_signature_with_chain_id()` instead.
+    ///
+    /// # Arguments
+    ///
+    /// * `pk` - The sender's public key (must be ML-DSA-44 for suite_id = 100)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the signature is valid, `Err(TxVerifyError)` otherwise.
+    pub fn verify_signature(&self, pk: &UserPublicKey) -> Result<(), TxVerifyError> {
+        self.verify_signature_with_chain_id(pk, QBIND_DEVNET_CHAIN_ID)
+    }
+
+    /// Sign this transaction with the given secret key and chain ID (T159).
+    ///
+    /// This sets the `signature` field using ML-DSA-44.
+    ///
+    /// # Arguments
+    ///
+    /// * `sk` - The secret key bytes (must be ML_DSA_44_SECRET_KEY_SIZE bytes)
+    /// * `chain_id` - The chain ID for domain separation
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if signing succeeded, `Err` otherwise.
+    pub fn sign_with_chain_id(
+        &mut self,
+        sk: &[u8],
+        chain_id: ChainId,
+    ) -> Result<(), TxVerifyError> {
+        let preimage = self.signing_preimage_with_chain_id(chain_id);
+        let sig_bytes =
+            MlDsa44Backend::sign(sk, &preimage).map_err(|_| TxVerifyError::SigningFailed)?;
+        self.signature = UserSignature::new(sig_bytes);
+        Ok(())
+    }
+
+    /// Sign this transaction using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `sign_with_chain_id()` instead.
     ///
     /// This sets the `signature` field using ML-DSA-44.
     ///
@@ -232,11 +319,7 @@ impl QbindTransaction {
     ///
     /// `Ok(())` if signing succeeded, `Err` otherwise.
     pub fn sign(&mut self, sk: &[u8]) -> Result<(), TxVerifyError> {
-        let preimage = self.signing_preimage();
-        let sig_bytes =
-            MlDsa44Backend::sign(sk, &preimage).map_err(|_| TxVerifyError::SigningFailed)?;
-        self.signature = UserSignature::new(sig_bytes);
-        Ok(())
+        self.sign_with_chain_id(sk, QBIND_DEVNET_CHAIN_ID)
     }
 }
 
@@ -849,20 +932,17 @@ impl SenderPartitionedNonceExecutor {
         // Step 1: Partition by sender while preserving original indices
         let mut per_sender: HashMap<AccountId, Vec<IndexedTx>> = HashMap::new();
         for (index, tx) in transactions.iter().enumerate() {
-            per_sender
-                .entry(tx.sender)
-                .or_default()
-                .push(IndexedTx {
-                    index,
-                    tx: tx.clone(),
-                });
+            per_sender.entry(tx.sender).or_default().push(IndexedTx {
+                index,
+                tx: tx.clone(),
+            });
         }
 
         let num_senders = per_sender.len();
 
         // Step 2: Decide whether to parallelize
-        let use_parallel = num_senders >= self.config.min_senders_for_parallel
-            && self.config.max_workers != 1;
+        let use_parallel =
+            num_senders >= self.config.min_senders_for_parallel && self.config.max_workers != 1;
 
         // Step 3: Fetch initial nonces for each sender
         let sender_initial_nonces: HashMap<AccountId, u64> = per_sender
@@ -1021,9 +1101,12 @@ mod tests {
         let preimage2 = tx.signing_preimage();
 
         assert_eq!(preimage1, preimage2, "preimage should be deterministic");
+
+        // T159: Default signing_preimage() uses DevNet chain ID
+        let devnet_tx_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::UserTx);
         assert!(
-            preimage1.starts_with(TX_DOMAIN_TAG),
-            "should start with domain tag"
+            preimage1.starts_with(&devnet_tx_tag),
+            "should start with DevNet domain tag"
         );
     }
 
