@@ -247,12 +247,8 @@ impl BatchAck {
     where
         F: FnOnce(&[u8]) -> Result<Vec<u8>, E>,
     {
-        let preimage = Self::signing_preimage_with_chain_id(
-            chain_id,
-            &batch_ref,
-            validator_id,
-            view_hint,
-        );
+        let preimage =
+            Self::signing_preimage_with_chain_id(chain_id, &batch_ref, validator_id, view_hint);
         let signature = sign_fn(&preimage)?;
 
         Ok(Self {
@@ -334,7 +330,10 @@ impl BatchCertificate {
     ///
     /// Debug builds will assert that signers is not empty.
     pub fn new(batch_ref: BatchRef, view: u64, signers: Vec<ValidatorId>) -> Self {
-        debug_assert!(!signers.is_empty(), "certificate must have at least one signer");
+        debug_assert!(
+            !signers.is_empty(),
+            "certificate must have at least one signer"
+        );
         Self {
             batch_ref,
             view,
@@ -482,7 +481,7 @@ impl BatchAckTracker {
         }
 
         // Insert the ack
-        let acks = self.acks.entry(batch_id).or_insert_with(Vec::new);
+        let acks = self.acks.entry(batch_id).or_default();
         let batch_ref = ack.batch_ref.clone();
         acks.push(ack);
 
@@ -541,7 +540,7 @@ impl BatchAckTracker {
     /// This is useful when a batch is inserted and we want to track
     /// that it exists even before any acks arrive.
     pub fn mark_batch_known(&mut self, batch_id: BatchId) {
-        self.acks.entry(batch_id).or_insert_with(Vec::new);
+        self.acks.entry(batch_id).or_default();
     }
 
     /// Clear all acks and certificates (for testing/reset).

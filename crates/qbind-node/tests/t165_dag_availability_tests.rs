@@ -233,7 +233,9 @@ fn test_acks_accumulate_to_quorum_form_cert() {
     assert_eq!(tracker.cert_count(), 1);
 
     // Verify certificate is retrievable
-    let cert = tracker.certificate(&batch_id).expect("certificate should exist");
+    let cert = tracker
+        .certificate(&batch_id)
+        .expect("certificate should exist");
     assert_eq!(*cert.batch_id(), batch_id);
 }
 
@@ -297,13 +299,28 @@ fn test_pending_batch_count() {
     let batch2_ref = BatchRef::new(ValidatorId::new(2), batch2_id);
 
     // Batch 1: 2 acks (not enough for cert)
-    tracker.insert_ack(make_test_ack(batch1_ref.clone(), ValidatorId::new(1), 0), true);
-    tracker.insert_ack(make_test_ack(batch1_ref.clone(), ValidatorId::new(2), 0), true);
+    tracker.insert_ack(
+        make_test_ack(batch1_ref.clone(), ValidatorId::new(1), 0),
+        true,
+    );
+    tracker.insert_ack(
+        make_test_ack(batch1_ref.clone(), ValidatorId::new(2), 0),
+        true,
+    );
 
     // Batch 2: 3 acks (forms cert)
-    tracker.insert_ack(make_test_ack(batch2_ref.clone(), ValidatorId::new(1), 0), true);
-    tracker.insert_ack(make_test_ack(batch2_ref.clone(), ValidatorId::new(2), 0), true);
-    tracker.insert_ack(make_test_ack(batch2_ref.clone(), ValidatorId::new(3), 0), true);
+    tracker.insert_ack(
+        make_test_ack(batch2_ref.clone(), ValidatorId::new(1), 0),
+        true,
+    );
+    tracker.insert_ack(
+        make_test_ack(batch2_ref.clone(), ValidatorId::new(2), 0),
+        true,
+    );
+    tracker.insert_ack(
+        make_test_ack(batch2_ref.clone(), ValidatorId::new(3), 0),
+        true,
+    );
 
     // Check counts
     assert_eq!(tracker.cert_count(), 1, "should have 1 cert");
@@ -356,7 +373,9 @@ fn test_dag_mempool_handle_batch_ack() {
     let batch_id = batch.batch_id;
     let batch_ref = BatchRef::new(ValidatorId::new(1), batch_id);
 
-    mempool.insert_remote_batch(batch).expect("insert should succeed");
+    mempool
+        .insert_remote_batch(batch)
+        .expect("insert should succeed");
 
     // Insert acks
     let ack1 = make_test_ack(batch_ref.clone(), ValidatorId::new(1), 10);
@@ -380,7 +399,9 @@ fn test_dag_mempool_handle_batch_ack() {
     }
 
     assert!(mempool.has_certificate(&batch_id));
-    let cert = mempool.batch_certificate(&batch_id).expect("cert should exist");
+    let cert = mempool
+        .batch_certificate(&batch_id)
+        .expect("cert should exist");
     assert_eq!(cert.num_signers(), 3);
 }
 
@@ -415,7 +436,9 @@ fn test_dag_mempool_duplicate_ack_rejected() {
     // Create and insert a batch
     let batch = make_test_batch(ValidatorId::new(1), 5);
     let batch_ref = BatchRef::new(ValidatorId::new(1), batch.batch_id);
-    mempool.insert_remote_batch(batch).expect("insert should succeed");
+    mempool
+        .insert_remote_batch(batch)
+        .expect("insert should succeed");
 
     // Insert first ack
     let ack1 = make_test_ack(batch_ref.clone(), ValidatorId::new(2), 10);
@@ -456,11 +479,11 @@ fn test_dag_availability_config_quorum_size() {
     let config = DagAvailabilityConfig::enabled();
 
     // Standard BFT quorum: ceil(n * 2/3)
-    assert_eq!(config.compute_quorum_size(4), 3);   // f=1
-    assert_eq!(config.compute_quorum_size(7), 5);   // f=2
-    assert_eq!(config.compute_quorum_size(10), 7);  // f=3
-    assert_eq!(config.compute_quorum_size(1), 1);   // edge case
-    assert_eq!(config.compute_quorum_size(0), 1);   // edge case
+    assert_eq!(config.compute_quorum_size(4), 3); // f=1
+    assert_eq!(config.compute_quorum_size(7), 5); // f=2
+    assert_eq!(config.compute_quorum_size(10), 7); // f=3
+    assert_eq!(config.compute_quorum_size(1), 1); // edge case
+    assert_eq!(config.compute_quorum_size(0), 1); // edge case
 }
 
 // ============================================================================
@@ -519,14 +542,15 @@ fn test_dag_mempool_metrics_ack_tracking() {
         max_batches: 100,
         max_pending_txs: 1000,
     };
-    let mempool = InMemoryDagMempool::with_availability(config, 2)
-        .with_metrics(metrics.clone());
+    let mempool = InMemoryDagMempool::with_availability(config, 2).with_metrics(metrics.clone());
 
     // Create and insert a batch
     let batch = make_test_batch(ValidatorId::new(1), 5);
     let batch_id = batch.batch_id;
     let batch_ref = BatchRef::new(ValidatorId::new(1), batch_id);
-    mempool.insert_remote_batch(batch).expect("insert should succeed");
+    mempool
+        .insert_remote_batch(batch)
+        .expect("insert should succeed");
 
     // Process acks
     let ack1 = make_test_ack(batch_ref.clone(), ValidatorId::new(1), 10);

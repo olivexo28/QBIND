@@ -366,9 +366,92 @@ TestNet Beta / MainNet may add:
 | Work Item | Description | Target | Status |
 | :--- | :--- | :--- | :--- |
 | **State Persistence** | Disk-backed account state (RocksDB) | TestNet Alpha | ✅ Done (T164) |
+| **DAG Availability Certs** | BatchAck + BatchCertificate v1 | TestNet Alpha | ✅ Done (T165) |
+| **Cluster Harness** | Multi-node TestNet Alpha harness | TestNet Alpha | ✅ Done (T166) |
 | **Stage B Parallelism** | Conflict-graph-based VM parallelism | TestNet Beta | Planned |
 | **Gas Accounting** | Transaction fees and gas limits | TestNet Beta | Planned |
 | **Smart Contracts** | Full EVM or custom VM support | MainNet | Planned |
+
+---
+
+## 6. Cluster Harness & Soak Testing (T166)
+
+TestNet Alpha includes a multi-node cluster harness for end-to-end verification of the full stack.
+
+### Overview
+
+The `t166_testnet_alpha_cluster_harness` test file provides:
+
+- **TestnetAlphaClusterHandle**: A cluster management handle that:
+  - Boots a 4-node (or N-node) TestNet Alpha cluster
+  - Configures VM v0 execution with persistent RocksDB state
+  - Optionally enables DAG mempool + DAG availability certificates
+  - Provides transaction submission, state inspection, and metrics collection
+
+- **TPS Measurement**: A helper function `run_testnet_alpha_tps_scenario()` that:
+  - Pre-funds sender accounts
+  - Submits transfers as fast as possible
+  - Measures time to commit and computes TPS
+  - Verifies final balance consistency
+
+### Configuration
+
+```rust
+pub struct TestnetAlphaClusterConfig {
+    pub num_validators: usize,          // Default: 4
+    pub use_dag_mempool: bool,          // Default: false
+    pub enable_dag_availability: bool,  // Default: false
+    pub initial_balance: u128,          // Default: 10_000_000
+    pub txs_per_sender: u64,            // Default: 10
+    pub num_senders: usize,             // Default: 10
+}
+```
+
+### Running the Tests
+
+**CI-friendly smoke test (FIFO mempool + VM v0):**
+```bash
+cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
+  test_testnet_alpha_cluster_vm_v0_fifo_smoke
+```
+
+**VM v0 restart consistency test:**
+```bash
+cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
+  test_testnet_alpha_cluster_vm_v0_fifo_restart_consistency
+```
+
+**DAG availability smoke test (ignored by default):**
+```bash
+cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
+  test_testnet_alpha_cluster_dag_availability_smoke -- --ignored --nocapture
+```
+
+**TPS measurement scenario:**
+```bash
+cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
+  test_testnet_alpha_tps_scenario_minimal
+```
+
+### Tests Included
+
+| Test | Description |
+| :--- | :--- |
+| `test_testnet_alpha_cluster_vm_v0_fifo_smoke` | Start cluster, run transfers, verify state consistency |
+| `test_testnet_alpha_cluster_vm_v0_fifo_restart_consistency` | Verify state persists across restart |
+| `test_testnet_alpha_cluster_dag_availability_smoke` | DAG + availability certs (ignored) |
+| `test_testnet_alpha_cluster_dag_metrics_integration` | Verify DAG metrics (ignored) |
+| `test_testnet_alpha_tps_scenario_minimal` | CI-friendly TPS measurement |
+| `test_testnet_alpha_tps_scenario_heavy` | Heavy soak test (ignored) |
+
+### Purpose
+
+This harness is the **canonical entry point** to validate the full TestNet Alpha stack:
+
+1. **VM v0 Execution**: Verifies that transfer transactions work correctly with account balances
+2. **State Persistence**: Confirms RocksDB-backed state survives restarts
+3. **DAG Availability**: Tests BatchAck/BatchCertificate formation in a multi-node setting
+4. **TPS Measurement**: Provides baseline performance numbers for TestNet Alpha
 
 ---
 

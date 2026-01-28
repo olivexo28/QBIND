@@ -427,6 +427,10 @@ During the transition period:
 - HotStuff integration: proposals reference batch digests.
 - Feature flag for enabling/disabling DAG mode.
 
+**Implementation Status**:
+- **T165** implements availability certificates v1 (BatchAck, BatchCertificate, quorum accumulation).
+- **T166** provides the first multi-node TestNet Alpha harness that exercises DAG availability in practice.
+
 **Success Criteria**:
 - 4-validator TestNet runs with DAG mempool.
 - TPS comparable to or better than FIFO baseline.

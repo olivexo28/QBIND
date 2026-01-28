@@ -39,11 +39,7 @@ fn make_test_batch(creator: ValidatorId, view_hint: u64, tx_count: usize) -> Qbi
     QbindBatch::new(creator, view_hint, vec![], txs)
 }
 
-fn make_signed_ack(
-    batch_ref: BatchRef,
-    validator_id: ValidatorId,
-    view_hint: u64,
-) -> BatchAck {
+fn make_signed_ack(batch_ref: BatchRef, validator_id: ValidatorId, view_hint: u64) -> BatchAck {
     // Create a signed ack using a simple signing function
     BatchAck::new_signed(
         batch_ref,
@@ -97,7 +93,9 @@ fn test_single_node_local_acks_cert() {
     let batch_ref = BatchRef::new(node_id, batch_id);
 
     // Insert the batch into the mempool
-    mempool.insert_remote_batch(batch).expect("insert should succeed");
+    mempool
+        .insert_remote_batch(batch)
+        .expect("insert should succeed");
     assert!(mempool.has_batch(&batch_id), "batch should exist");
 
     // Simulate receiving acks from 3 validators (including self)
@@ -128,7 +126,9 @@ fn test_single_node_local_acks_cert() {
 
     // Verify certificate is accessible
     assert!(mempool.has_certificate(&batch_id));
-    let cert = mempool.batch_certificate(&batch_id).expect("cert should exist");
+    let cert = mempool
+        .batch_certificate(&batch_id)
+        .expect("cert should exist");
     assert_eq!(cert.num_signers(), 3);
 
     // Verify metrics
@@ -225,7 +225,10 @@ fn test_multi_node_cluster_smoke() {
         );
     }
 
-    println!("Multi-node cluster smoke test passed: all {} validators have certificate", NUM_VALIDATORS);
+    println!(
+        "Multi-node cluster smoke test passed: all {} validators have certificate",
+        NUM_VALIDATORS
+    );
 }
 
 /// Multi-node test with partial ack delivery (some acks lost).
@@ -250,7 +253,9 @@ fn test_multi_node_partial_ack_delivery() {
 
     // All validators receive the batch
     for validator in &validators {
-        validator.insert_batch(batch.clone()).expect("should succeed");
+        validator
+            .insert_batch(batch.clone())
+            .expect("should succeed");
     }
 
     // Create acks from only 3 validators (enough for quorum)
@@ -299,8 +304,8 @@ fn test_dag_availability_config_integration() {
     assert!(enabled_config.enabled);
 
     // Test quorum computation for different validator counts
-    assert_eq!(enabled_config.compute_quorum_size(4), 3);  // f=1, 2f+1=3
-    assert_eq!(enabled_config.compute_quorum_size(7), 5);  // f=2, 2f+1=5
+    assert_eq!(enabled_config.compute_quorum_size(4), 3); // f=1, 2f+1=3
+    assert_eq!(enabled_config.compute_quorum_size(7), 5); // f=2, 2f+1=5
     assert_eq!(enabled_config.compute_quorum_size(10), 7); // f=3, 2f+1=7
 
     // Create mempool with computed quorum
@@ -327,11 +332,17 @@ fn test_dag_availability_config_integration() {
     // 2 acks -> no cert
     mempool.handle_batch_ack(make_signed_ack(batch_ref.clone(), ValidatorId::new(1), 1));
     mempool.handle_batch_ack(make_signed_ack(batch_ref.clone(), ValidatorId::new(2), 1));
-    assert!(!mempool.has_certificate(&batch_id), "2 acks should not form cert");
+    assert!(
+        !mempool.has_certificate(&batch_id),
+        "2 acks should not form cert"
+    );
 
     // 3rd ack -> cert
     mempool.handle_batch_ack(make_signed_ack(batch_ref.clone(), ValidatorId::new(3), 1));
-    assert!(mempool.has_certificate(&batch_id), "3 acks should form cert");
+    assert!(
+        mempool.has_certificate(&batch_id),
+        "3 acks should form cert"
+    );
 }
 
 // ============================================================================
@@ -393,8 +404,7 @@ fn test_enable_availability_after_construction() {
 #[test]
 fn test_t165_metrics_integration() {
     let metrics = Arc::new(DagMempoolMetrics::new());
-    let mempool = create_testnet_dag_mempool(ValidatorId::new(1), 4)
-        .with_metrics(metrics.clone());
+    let mempool = create_testnet_dag_mempool(ValidatorId::new(1), 4).with_metrics(metrics.clone());
     mempool.set_current_view(1);
 
     // Create and insert batch
@@ -417,9 +427,21 @@ fn test_t165_metrics_integration() {
     mempool.handle_batch_ack(make_signed_ack(unknown_ref, ValidatorId::new(4), 1));
 
     // Verify metrics
-    assert_eq!(metrics.batch_acks_accepted(), 3, "should have 3 accepted acks");
-    assert_eq!(metrics.batch_acks_rejected_duplicate(), 1, "should have 1 duplicate rejection");
-    assert_eq!(metrics.batch_acks_rejected_unknown(), 1, "should have 1 unknown rejection");
+    assert_eq!(
+        metrics.batch_acks_accepted(),
+        3,
+        "should have 3 accepted acks"
+    );
+    assert_eq!(
+        metrics.batch_acks_rejected_duplicate(),
+        1,
+        "should have 1 duplicate rejection"
+    );
+    assert_eq!(
+        metrics.batch_acks_rejected_unknown(),
+        1,
+        "should have 1 unknown rejection"
+    );
     assert_eq!(metrics.batch_certs_total(), 1, "should have 1 certificate");
 
     // Verify format includes T165 metrics
