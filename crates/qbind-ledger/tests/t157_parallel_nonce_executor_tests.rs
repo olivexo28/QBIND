@@ -8,8 +8,8 @@
 //! 5. Empty block handling
 
 use qbind_ledger::{
-    get_account_nonce, InMemoryState, ParallelExecConfig,
-    QbindTransaction, SenderPartitionedNonceExecutor,
+    get_account_nonce, InMemoryState, ParallelExecConfig, QbindTransaction,
+    SenderPartitionedNonceExecutor,
 };
 
 // ============================================================================
@@ -101,7 +101,10 @@ fn test_parallel_vs_sequential_equivalence() {
     }
 
     // Verify stats
-    assert!(!seq_stats.used_parallel, "sequential should not use parallel");
+    assert!(
+        !seq_stats.used_parallel,
+        "sequential should not use parallel"
+    );
     // Parallel may or may not be used depending on threshold
     eprintln!(
         "[T157] Sequential: {} senders, {} workers, parallel={}",
@@ -221,7 +224,10 @@ fn test_sequential_config_forces_sequential() {
         .execute_block_sender_partitioned(&transactions, &mut state)
         .expect("execution should succeed");
 
-    assert!(!stats.used_parallel, "sequential config should force sequential");
+    assert!(
+        !stats.used_parallel,
+        "sequential config should force sequential"
+    );
 }
 
 // ============================================================================
@@ -385,6 +391,9 @@ fn test_parallel_threshold_respected() {
         .execute_block_sender_partitioned(&transactions, &mut state)
         .expect("execution should succeed");
 
-    assert!(!stats.used_parallel, "should fallback with 3 senders < 5 threshold");
+    assert!(
+        !stats.used_parallel,
+        "should fallback with 3 senders < 5 threshold"
+    );
     assert_eq!(stats.num_senders, 3);
 }

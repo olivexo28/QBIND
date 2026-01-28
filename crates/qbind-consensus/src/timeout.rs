@@ -24,16 +24,29 @@
 //! - The TC carries the maximum high_qc from all included timeout messages
 //! - New proposals in the next view must be justified by this high_qc
 //! - The locked QC semantics remain intact
+//!
+//! # T159: Chain-Aware Domain Separation
+//!
+//! As of T159, all signing preimages include the chain ID to prevent cross-chain
+//! replay attacks. Use `signing_bytes_with_chain_id()` with the appropriate
+//! `ChainId` for the network environment (DevNet, TestNet, MainNet).
 
 use crate::ids::ValidatorId;
 use crate::qc::QuorumCertificate;
 use crate::validator_set::ConsensusValidatorSet;
+use qbind_types::domain::{domain_prefix, DomainKind};
+use qbind_types::{ChainId, QBIND_DEVNET_CHAIN_ID};
 
 /// Suite ID for timeout message signatures (ML-DSA-44, same as votes/proposals).
 pub const TIMEOUT_SUITE_ID: u8 = 100;
 
-/// Domain separator for timeout message signing.
-/// This ensures timeout signatures cannot be confused with vote or proposal signatures.
+/// Legacy domain separator for timeout message signing.
+///
+/// **DEPRECATED (T159)**: Use `domain_prefix(chain_id, DomainKind::Timeout)` instead.
+///
+/// This constant is provided for documentation purposes. New code should use
+/// `timeout_signing_bytes_with_chain_id()` with the appropriate chain ID.
+#[allow(dead_code)]
 const TIMEOUT_DOMAIN_SEPARATOR: &[u8] = b"QBIND_TIMEOUT_V1";
 
 /// A timeout message sent by a validator when they detect lack of progress.
@@ -49,10 +62,10 @@ const TIMEOUT_DOMAIN_SEPARATOR: &[u8] = b"QBIND_TIMEOUT_V1";
 /// - `validator_id`: The validator sending this timeout message
 /// - `signature`: ML-DSA-44 signature over the timeout signing bytes
 ///
-/// # Signing
+/// # Signing (T159: Chain-Aware)
 ///
 /// The signature covers:
-/// - Domain separator
+/// - Domain separator (e.g., "QBIND:DEV:TIMEOUT:v1" for DevNet)
 /// - View number
 /// - High QC's block_id and view
 /// - Validator ID
@@ -94,25 +107,46 @@ impl<BlockIdT: Clone + AsRef<[u8]>> TimeoutMsg<BlockIdT> {
         self.signature = signature;
     }
 
-    /// Compute the signing bytes for this timeout message.
+    /// Compute the signing bytes for this timeout message with chain ID (T159).
     ///
     /// The signing bytes include:
-    /// - Domain separator (QBIND_TIMEOUT_V1)
+    /// - Domain separator (e.g., "QBIND:DEV:TIMEOUT:v1" for DevNet)
+    /// - View number (8 bytes, little-endian)
+    /// - High QC block_id (32 bytes) or zeros if None
+    /// - High QC view (8 bytes, little-endian) or zeros if None
+    /// - Validator ID (8 bytes, little-endian)
+    pub fn signing_bytes_with_chain_id(&self, chain_id: ChainId) -> Vec<u8> {
+        timeout_signing_bytes_with_chain_id(
+            chain_id,
+            self.view,
+            self.high_qc.as_ref(),
+            self.validator_id,
+        )
+    }
+
+    /// Compute the signing bytes using the default DevNet chain ID.
+    ///
+    /// **Note (T159)**: This method defaults to `QBIND_DEVNET_CHAIN_ID`. For
+    /// explicit chain control, use `signing_bytes_with_chain_id()` instead.
+    ///
+    /// The signing bytes include:
+    /// - Domain separator ("QBIND:DEV:TIMEOUT:v1" for DevNet)
     /// - View number (8 bytes, little-endian)
     /// - High QC block_id (32 bytes) or zeros if None
     /// - High QC view (8 bytes, little-endian) or zeros if None
     /// - Validator ID (8 bytes, little-endian)
     pub fn signing_bytes(&self) -> Vec<u8> {
-        timeout_signing_bytes(self.view, self.high_qc.as_ref(), self.validator_id)
+        self.signing_bytes_with_chain_id(QBIND_DEVNET_CHAIN_ID)
     }
 }
 
-/// Compute the signing bytes for a timeout message.
+/// Compute the signing bytes for a timeout message with chain ID (T159).
 ///
 /// This function is public to allow verification of timeout signatures.
 ///
 /// # Arguments
 ///
+/// - `chain_id`: The chain ID for domain separation
 /// - `view`: The view being timed out
 /// - `high_qc`: The highest QC known to the signer (optional)
 /// - `validator_id`: The validator ID
@@ -120,15 +154,17 @@ impl<BlockIdT: Clone + AsRef<[u8]>> TimeoutMsg<BlockIdT> {
 /// # Returns
 ///
 /// A byte vector suitable for signing with ML-DSA-44.
-pub fn timeout_signing_bytes<BlockIdT: Clone + AsRef<[u8]>>(
+pub fn timeout_signing_bytes_with_chain_id<BlockIdT: Clone + AsRef<[u8]>>(
+    chain_id: ChainId,
     view: u64,
     high_qc: Option<&QuorumCertificate<BlockIdT>>,
     validator_id: ValidatorId,
 ) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(64);
+    let domain_tag = domain_prefix(chain_id, DomainKind::Timeout);
+    let mut bytes = Vec::with_capacity(domain_tag.len() + 8 + 32 + 8 + 8);
 
-    // Domain separator
-    bytes.extend_from_slice(TIMEOUT_DOMAIN_SEPARATOR);
+    // Domain separator (chain-aware)
+    bytes.extend_from_slice(&domain_tag);
 
     // View number (8 bytes, little-endian)
     bytes.extend_from_slice(&view.to_le_bytes());
@@ -149,6 +185,30 @@ pub fn timeout_signing_bytes<BlockIdT: Clone + AsRef<[u8]>>(
     bytes.extend_from_slice(&validator_id.0.to_le_bytes());
 
     bytes
+}
+
+/// Compute the signing bytes for a timeout message using DevNet chain ID.
+///
+/// **Note (T159)**: This function defaults to `QBIND_DEVNET_CHAIN_ID`. For
+/// explicit chain control, use `timeout_signing_bytes_with_chain_id()` instead.
+///
+/// This function is public to allow verification of timeout signatures.
+///
+/// # Arguments
+///
+/// - `view`: The view being timed out
+/// - `high_qc`: The highest QC known to the signer (optional)
+/// - `validator_id`: The validator ID
+///
+/// # Returns
+///
+/// A byte vector suitable for signing with ML-DSA-44.
+pub fn timeout_signing_bytes<BlockIdT: Clone + AsRef<[u8]>>(
+    view: u64,
+    high_qc: Option<&QuorumCertificate<BlockIdT>>,
+    validator_id: ValidatorId,
+) -> Vec<u8> {
+    timeout_signing_bytes_with_chain_id(QBIND_DEVNET_CHAIN_ID, view, high_qc, validator_id)
 }
 
 /// A Timeout Certificate (TC) formed from 2f+1 timeout messages.
