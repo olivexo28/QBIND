@@ -1101,9 +1101,12 @@ mod tests {
         let preimage2 = tx.signing_preimage();
 
         assert_eq!(preimage1, preimage2, "preimage should be deterministic");
+
+        // T159: Default signing_preimage() uses DevNet chain ID
+        let devnet_tx_tag = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::UserTx);
         assert!(
-            preimage1.starts_with(TX_DOMAIN_TAG),
-            "should start with domain tag"
+            preimage1.starts_with(&devnet_tx_tag),
+            "should start with DevNet domain tag"
         );
     }
 
