@@ -90,7 +90,6 @@ pub enum MempoolError {
     Invalid(String),
 
     // T168: Gas-related admission errors
-
     /// Transaction's gas cost exceeds its gas limit (T168).
     #[error("insufficient gas limit: required {required}, limit {limit}")]
     InsufficientGasLimit {

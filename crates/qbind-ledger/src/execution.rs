@@ -1583,7 +1583,6 @@ pub enum VmV0Error {
     MalformedPayload,
 
     // T168: Gas-related error variants
-
     /// Transaction's gas cost exceeds its gas limit (T168).
     GasLimitExceeded {
         /// The required gas for this transaction.

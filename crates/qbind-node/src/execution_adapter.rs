@@ -912,7 +912,9 @@ impl SingleThreadExecutionService {
                                         qbind_ledger::VmV0Error::GasLimitExceeded { .. } => {
                                             m.inc_error(ExecutionErrorReason::Other);
                                         }
-                                        qbind_ledger::VmV0Error::InsufficientBalanceForFee { .. } => {
+                                        qbind_ledger::VmV0Error::InsufficientBalanceForFee {
+                                            ..
+                                        } => {
                                             m.inc_error(ExecutionErrorReason::Other);
                                         }
                                     }

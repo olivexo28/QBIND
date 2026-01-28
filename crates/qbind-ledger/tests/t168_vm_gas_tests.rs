@@ -174,7 +174,10 @@ fn vm_v0_rejects_when_balance_insufficient_for_fee() {
     // Should fail with InsufficientBalanceForFee
     assert!(!result.success);
     assert!(
-        matches!(result.error, Some(VmV0Error::InsufficientBalanceForFee { .. })),
+        matches!(
+            result.error,
+            Some(VmV0Error::InsufficientBalanceForFee { .. })
+        ),
         "expected InsufficientBalanceForFee, got {:?}",
         result.error
     );
@@ -247,7 +250,10 @@ fn vm_v0_fee_free_with_zero_max_fee_per_gas() {
     // Should succeed
     assert!(result.success);
     assert!(result.gas_used > 0, "gas should still be tracked");
-    assert_eq!(result.fee_paid, 0, "no fee should be paid when max_fee_per_gas = 0");
+    assert_eq!(
+        result.fee_paid, 0,
+        "no fee should be paid when max_fee_per_gas = 0"
+    );
 
     // Verify only amount was deducted
     let sender_state = state.get_account_state(&sender);
@@ -319,7 +325,10 @@ fn block_respects_block_gas_limit() {
 
     // Should execute only the transactions that fit within gas limit
     // Each v0 transfer costs ~37k gas, so 2 txs fit in 100k limit
-    assert!(results.len() <= 3, "should stop before exceeding block gas limit");
+    assert!(
+        results.len() <= 3,
+        "should stop before exceeding block gas limit"
+    );
 
     // All executed transactions should succeed
     for result in &results {
