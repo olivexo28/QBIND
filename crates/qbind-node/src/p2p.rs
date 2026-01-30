@@ -170,6 +170,12 @@ pub enum ConsensusNetMsg {
 
     /// A new-view message for view synchronization.
     /// Contains the serialized new-view message bytes.
+    ///
+    /// **Note (T173)**: This variant is reserved for future HotStuff view-change
+    /// protocol extensions. The current consensus implementation uses direct
+    /// timeout broadcast for view synchronization. When full new-view message
+    /// support is added to `ConsensusNetworkFacade`, this variant will carry
+    /// those messages.
     NewView(Vec<u8>),
 }
 

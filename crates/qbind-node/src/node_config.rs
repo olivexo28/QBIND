@@ -325,12 +325,34 @@ impl std::fmt::Display for NetworkMode {
 ///
 /// Valid values: "local-mesh" | "localmesh" | "mesh" | "p2p"
 ///
-/// Returns `NetworkMode::LocalMesh` for unrecognized values.
+/// # Fallback Behavior
+///
+/// Returns `NetworkMode::LocalMesh` for unrecognized values. This is intentional
+/// to preserve backward compatibility - new config values default to the safe
+/// existing behavior. Users should verify their configuration takes effect by
+/// checking `NodeConfig::network_mode` after parsing.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_network_mode;
+///
+/// assert_eq!(parse_network_mode("p2p"), NetworkMode::P2p);
+/// assert_eq!(parse_network_mode("local-mesh"), NetworkMode::LocalMesh);
+/// assert_eq!(parse_network_mode("unknown"), NetworkMode::LocalMesh); // Fallback
+/// ```
 pub fn parse_network_mode(s: &str) -> NetworkMode {
     match s.to_lowercase().as_str() {
         "p2p" => NetworkMode::P2p,
         "local-mesh" | "localmesh" | "mesh" => NetworkMode::LocalMesh,
-        _ => NetworkMode::LocalMesh,
+        _ => {
+            // Log the fallback for debugging purposes
+            eprintln!(
+                "[T173] Warning: Unrecognized network mode '{}', defaulting to LocalMesh",
+                s
+            );
+            NetworkMode::LocalMesh
+        }
     }
 }
 

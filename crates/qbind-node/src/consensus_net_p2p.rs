@@ -29,7 +29,8 @@
 //! use qbind_node::p2p::P2pService;
 //!
 //! let p2p_service: Arc<dyn P2pService> = /* ... */;
-//! let network = P2pConsensusNetwork::new(p2p_service);
+//! let num_validators = 4;
+//! let network = P2pConsensusNetwork::new(p2p_service, num_validators);
 //!
 //! // Use with NodeHotstuffHarness
 //! let harness = NodeHotstuffHarness::new(/* ... */)
