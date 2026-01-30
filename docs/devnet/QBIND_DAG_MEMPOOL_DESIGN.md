@@ -467,6 +467,18 @@ The T167 gas and fee model will affect DAG mempool behavior in future phases:
 - Integration with TPS harness.
 - Documentation for operators.
 
+**P2P Integration**:
+
+In TestNet Beta and MainNet, DAG batch dissemination will run atop the P2P overlay defined in [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md) (T170). Key integration points:
+
+| Component | P2P Overlay Usage |
+| :--- | :--- |
+| **Batch Dissemination** | Gossip protocol on DAG/mempool overlay (stream `0x0002`) |
+| **Availability Acks** | Direct send to batch author on DAG availability overlay (stream `0x0003`) |
+| **Certificate Broadcast** | Gossip on DAG/mempool overlay |
+
+This replaces the current static mesh broadcast with efficient gossip-based propagation.
+
 **Success Criteria**:
 - Stable operation over weeks of TestNet.
 - Clear TPS improvement over FIFO.
@@ -510,6 +522,7 @@ Each phase includes a rollback plan:
 - [QBIND Parallel Execution Design](./QBIND_PARALLEL_EXECUTION_DESIGN.md) — Companion parallel execution spec.
 - [QBIND DevNet Audit Log](./QBIND_DEVNET_AUDIT.md) — Risk tracking (R2, R5, R6).
 - [QBIND Gas and Fee Model Design](../testnet/QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167).
+- [QBIND P2P Network Design](../network/QBIND_P2P_NETWORK_DESIGN.md) — P2P networking architecture (T170).
 - **Narwhal and Tusk** (Danezis et al., 2022) — DAG-based mempool and consensus.
 - **Bullshark** (Spiegelman et al., 2022) — DAG-based BFT with improved latency.
 - **PBFT** (Castro & Liskov, 1999) — Classical BFT consensus.
