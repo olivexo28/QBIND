@@ -5,6 +5,7 @@ pub mod context;
 pub mod error;
 pub mod execution;
 pub mod execution_gas;
+pub mod parallel_exec;
 pub mod program;
 pub mod store;
 
@@ -48,4 +49,10 @@ pub use execution_gas::{
     TransferPayloadV1, VmGasError, BLOCK_GAS_LIMIT_DEFAULT, DEFAULT_V0_GAS_LIMIT, GAS_BASE_TX,
     GAS_PER_ACCOUNT_READ, GAS_PER_ACCOUNT_WRITE, GAS_PER_BYTE_PAYLOAD, MINIMUM_GAS_LIMIT,
     TRANSFER_PAYLOAD_V1_SIZE,
+};
+
+// T171: Stage B parallel execution skeleton exports
+pub use parallel_exec::{
+    build_conflict_graph, build_parallel_schedule, extract_all_read_write_sets,
+    extract_read_write_set, ConflictGraph, ParallelSchedule, TxIndex, TxReadWriteSet,
 };
