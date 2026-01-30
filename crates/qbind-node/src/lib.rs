@@ -79,6 +79,7 @@ pub mod block_store;
 pub mod channel_config;
 pub mod commit_index;
 pub mod consensus_net;
+pub mod consensus_net_p2p;
 pub mod consensus_net_worker;
 pub mod consensus_network_facade;
 pub mod consensus_node;
@@ -188,6 +189,9 @@ pub use node_config::DagAvailabilityConfig;
 // T170 Network Transport Config exports
 pub use node_config::NetworkTransportConfig;
 
+// T173 Network Mode exports
+pub use node_config::{parse_network_mode, NetworkMode};
+
 // T170 P2P Service exports
 pub use p2p::{
     ConsensusNetMsg, ControlMsg, DagNetMsg, NodeId, NullP2pService, P2pMessage, P2pService,
@@ -276,6 +280,11 @@ pub use secure_channel::{
 pub use consensus_network_facade::{
     AsyncNetworkFacade, BlockingNetworkFacade, ConsensusNetworkFacade, DirectAsyncNetworkFacade,
     IdentityValidatorPeerMapping, NullNetworkFacade, ValidatorPeerMapping,
+};
+
+// T173: P2P consensus network exports
+pub use consensus_net_p2p::{
+    P2pConsensusNetwork, SimpleValidatorNodeMapping, ValidatorNodeMapping,
 };
 
 use std::sync::Arc;

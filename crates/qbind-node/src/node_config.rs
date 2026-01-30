@@ -260,6 +260,103 @@ impl NetworkTransportConfig {
 }
 
 // ============================================================================
+// T173: NetworkMode – Consensus/DAG networking mode selection
+// ============================================================================
+
+/// Network mode for consensus and DAG message transport (T173).
+///
+/// This enum determines how consensus and DAG messages are transported
+/// between validators:
+///
+/// - **LocalMesh**: Uses existing local/loopback networking (default for DevNet/TestNet Alpha)
+/// - **P2p**: Uses `TcpKemTlsP2pService` for P2P transport (opt-in for TestNet Alpha)
+///
+/// # Phased Rollout
+///
+/// - **DevNet v0**: `LocalMesh` default; P2P disabled
+/// - **TestNet Alpha**: `LocalMesh` default; `P2p` opt-in for testing
+/// - **TestNet Beta**: `P2p` default for dynamic peer discovery
+/// - **MainNet**: `P2p` required with full DoS protection
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::{NetworkMode, NodeConfig};
+///
+/// // Default uses LocalMesh (DevNet compatibility)
+/// let config = NodeConfig::default();
+/// assert_eq!(config.network_mode, NetworkMode::LocalMesh);
+///
+/// // Opt-in to P2P mode for TestNet testing
+/// let p2p_config = config.with_network_mode(NetworkMode::P2p);
+/// assert_eq!(p2p_config.network_mode, NetworkMode::P2p);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NetworkMode {
+    /// Local mesh networking (existing behavior).
+    ///
+    /// Uses the existing `PeerManager` / `AsyncPeerManager` based networking
+    /// with direct KEMTLS connections. This is the default for DevNet and
+    /// TestNet Alpha for backward compatibility.
+    #[default]
+    LocalMesh,
+
+    /// P2P networking via `TcpKemTlsP2pService` (T172/T173).
+    ///
+    /// Uses the new P2P transport layer with:
+    /// - `P2pMessage` framing for consensus/DAG messages
+    /// - Static peer connections via `NetworkTransportConfig.static_peers`
+    /// - Broadcast and direct messaging via `P2pService` trait
+    ///
+    /// Requires `enable_p2p = true` in `NetworkTransportConfig`.
+    P2p,
+}
+
+impl std::fmt::Display for NetworkMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetworkMode::LocalMesh => write!(f, "local-mesh"),
+            NetworkMode::P2p => write!(f, "p2p"),
+        }
+    }
+}
+
+/// Parse a network mode from a string.
+///
+/// Valid values: "local-mesh" | "localmesh" | "mesh" | "p2p"
+///
+/// # Fallback Behavior
+///
+/// Returns `NetworkMode::LocalMesh` for unrecognized values. This is intentional
+/// to preserve backward compatibility - new config values default to the safe
+/// existing behavior. Users should verify their configuration takes effect by
+/// checking `NodeConfig::network_mode` after parsing.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_network_mode;
+///
+/// assert_eq!(parse_network_mode("p2p"), NetworkMode::P2p);
+/// assert_eq!(parse_network_mode("local-mesh"), NetworkMode::LocalMesh);
+/// assert_eq!(parse_network_mode("unknown"), NetworkMode::LocalMesh); // Fallback
+/// ```
+pub fn parse_network_mode(s: &str) -> NetworkMode {
+    match s.to_lowercase().as_str() {
+        "p2p" => NetworkMode::P2p,
+        "local-mesh" | "localmesh" | "mesh" => NetworkMode::LocalMesh,
+        _ => {
+            // Log the fallback for debugging purposes
+            eprintln!(
+                "[T173] Warning: Unrecognized network mode '{}', defaulting to LocalMesh",
+                s
+            );
+            NetworkMode::LocalMesh
+        }
+    }
+}
+
+// ============================================================================
 // ExecutionProfile (T163)
 // ============================================================================
 
@@ -379,6 +476,13 @@ pub struct NodeConfig {
 
     /// P2P network transport configuration (T170/T172).
     pub network: NetworkTransportConfig,
+
+    /// Network mode for consensus/DAG message transport (T173).
+    ///
+    /// Determines whether consensus and DAG messages use:
+    /// - `LocalMesh`: Existing local/loopback networking (default)
+    /// - `P2p`: New P2P transport via `TcpKemTlsP2pService`
+    pub network_mode: NetworkMode,
 }
 
 impl Default for NodeConfig {
@@ -392,6 +496,7 @@ impl Default for NodeConfig {
             execution_profile: ExecutionProfile::NonceOnly,
             data_dir: None,
             network: NetworkTransportConfig::default(),
+            network_mode: NetworkMode::LocalMesh,
         }
     }
 }
@@ -406,6 +511,7 @@ impl NodeConfig {
             execution_profile: ExecutionProfile::NonceOnly,
             data_dir: None,
             network: NetworkTransportConfig::default(),
+            network_mode: NetworkMode::LocalMesh,
         }
     }
 
@@ -419,6 +525,7 @@ impl NodeConfig {
             execution_profile,
             data_dir: None,
             network: NetworkTransportConfig::default(),
+            network_mode: NetworkMode::LocalMesh,
         }
     }
 
@@ -447,6 +554,23 @@ impl NodeConfig {
     /// Create a MainNet configuration.
     pub fn mainnet() -> Self {
         Self::new(NetworkEnvironment::Mainnet)
+    }
+
+    /// Set the network mode for consensus/DAG transport (T173).
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The network mode to use (LocalMesh or P2p)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::testnet_vm_v0()
+    ///     .with_network_mode(NetworkMode::P2p);
+    /// ```
+    pub fn with_network_mode(mut self, mode: NetworkMode) -> Self {
+        self.network_mode = mode;
+        self
     }
 
     /// Set the data directory for persistent state (T164).
