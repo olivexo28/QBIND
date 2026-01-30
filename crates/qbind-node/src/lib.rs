@@ -98,6 +98,7 @@ pub mod metrics_http;
 pub mod net_service;
 pub mod node_config;
 pub mod p2p;
+pub mod p2p_tcp;
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -201,7 +202,7 @@ pub use metrics::{
     CommitMetrics, ConsensusProgressMetrics, ConsensusT154Metrics, DisconnectReason,
     EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
     KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, NetworkMetrics, NodeMetrics,
-    OutboundMsgKind, PeerCounters, PeerNetworkMetrics, RuntimeMetrics, SignRequestKind,
+    OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics, SignRequestKind,
     SignerKeystoreMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp,
     ValidatorEquivocationMetrics, ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics,
     MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,

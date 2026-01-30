@@ -71,7 +71,7 @@
 /// // Access the underlying bytes
 /// assert_eq!(node_id.as_bytes(), &bytes);
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub struct NodeId([u8; 32]);
 
 impl NodeId {
@@ -150,7 +150,7 @@ impl AsRef<[u8]> for NodeId {
 /// - `Vote(Vote)`
 /// - `Timeout(TimeoutMessage)`
 /// - `NewView(NewViewMessage)`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ConsensusNetMsg {
     /// Placeholder variant for future implementation.
     ///
@@ -169,7 +169,7 @@ pub enum ConsensusNetMsg {
 /// - `Batch(QbindBatch)`
 /// - `BatchAck(BatchAck)`
 /// - `BatchCertificate(BatchCertificate)`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum DagNetMsg {
     /// Placeholder variant for future implementation.
     ///
@@ -181,7 +181,7 @@ pub enum DagNetMsg {
 ///
 /// Control messages handle network-level operations like heartbeats,
 /// peer discovery, and health checks.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ControlMsg {
     /// Heartbeat message to maintain connection liveness.
     Heartbeat {
@@ -209,7 +209,7 @@ pub enum ControlMsg {
 /// Information about a peer for discovery (T170).
 ///
 /// This struct contains the minimum information needed to connect to a peer.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PeerInfo {
     /// The peer's NodeId.
     pub node_id: NodeId,
@@ -232,7 +232,7 @@ pub struct PeerInfo {
 /// | `Consensus` | `0x0001` | HotStuff consensus messages |
 /// | `Dag` | `0x0002` / `0x0003` | DAG batches and availability |
 /// | `Control` | `0x0004` | Heartbeats, peer discovery |
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum P2pMessage {
     /// Consensus messages (proposals, votes, timeouts).
     Consensus(ConsensusNetMsg),

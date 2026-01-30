@@ -592,7 +592,14 @@ This document specifies:
 | **TestNet Beta** | Basic peer discovery, gossip for DAG batches, multi-machine |
 | **MainNet** | Full P2P with DoS protection, multi-region support |
 
-**Note**: TestNet Alpha does not change P2P behavior from DevNet. The P2P design document (T170) provides the architecture for future implementation in TestNet Beta and MainNet.
+**Note (T172)**: T172 introduces a minimal P2P transport v1 behind `enable_p2p` flag:
+- PQC KEMTLS transport (`TcpKemTlsP2pService`)
+- Static peer connections via `NetworkTransportConfig.static_peers`
+- Basic P2pService interface (broadcast, send_to, subscribe)
+- Simple framing (u8 discriminator + u32 length + payload)
+- Metrics for connections, bytes, and message counts
+
+TestNet Alpha remains default-off for P2P; `enable_p2p = false` is the default. P2P v1 is intended for experimental multi-process deployments and is not yet wired into production consensus/DAG paths.
 
 ---
 

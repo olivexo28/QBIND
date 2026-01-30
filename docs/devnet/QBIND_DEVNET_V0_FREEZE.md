@@ -116,10 +116,13 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 | Work Item | Description | Risks Addressed |
 | :--- | :--- | :--- |
 | **P2P Network Design (T170)** | Canonical networking design spec for TestNet+ evolution | R4 |
+| **P2P Transport v1 (T172)** | Minimal PQC KEMTLS transport with static peers, config-gated | R4 |
 | **Dynamic Peer Discovery** | Basic P2P overlay with peer exchange | R4 |
 | **Gossip for DAG Batches** | Efficient batch/certificate dissemination | R4, R6 |
 | **Multi-Machine Deployments** | Distributed test deployments beyond T160 single-machine harness | R4 |
 | **NAT Traversal (Optional)** | Enable connectivity through NAT when needed | R4 |
+
+**T172 Implementation Note**: T172 implements P2P v1 transport, but DevNet stays on static harness with `enable_p2p = false`. The transport is available for testing but does not change DevNet's frozen behavior.
 
 **References**: [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md) (T170), [QBIND_DEVNET_V0_SPEC.md](./QBIND_DEVNET_V0_SPEC.md) §3
 

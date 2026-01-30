@@ -4072,6 +4072,116 @@ use crate::channel_config::ChannelCapacityConfig;
 /// // Environment metrics (T162)
 /// metrics.set_environment(qbind_types::NetworkEnvironment::Testnet);
 /// ```
+// ============================================================================
+// P2pMetrics - P2P transport metrics (T172)
+// ============================================================================
+/// Metrics for P2P transport layer (T172).
+///
+/// Tracks connection counts, bytes sent/received, and message flow for the
+/// P2P transport service.
+///
+/// # Prometheus-style naming
+///
+/// - `qbind_p2p_connections_current` → `connections_current()`
+/// - `qbind_p2p_bytes_sent_total` → `bytes_sent_total()`
+/// - `qbind_p2p_bytes_received_total` → `bytes_received_total()`
+/// - `qbind_p2p_messages_sent_total{kind="..."}` → `messages_sent_total(kind)`
+/// - `qbind_p2p_messages_received_total{kind="..."}` → `messages_received_total(kind)`
+#[derive(Debug, Default)]
+pub struct P2pMetrics {
+    connections_current: AtomicU64,
+    bytes_sent_total: AtomicU64,
+    bytes_received_total: AtomicU64,
+    messages_sent_consensus: AtomicU64,
+    messages_sent_dag: AtomicU64,
+    messages_sent_control: AtomicU64,
+    messages_received_consensus: AtomicU64,
+    messages_received_dag: AtomicU64,
+    messages_received_control: AtomicU64,
+}
+
+impl P2pMetrics {
+    /// Create a new P2pMetrics instance.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get current number of P2P connections.
+    pub fn connections_current(&self) -> u64 {
+        self.connections_current.load(Ordering::Relaxed)
+    }
+
+    /// Set current number of P2P connections.
+    pub fn set_connections_current(&self, count: u64) {
+        self.connections_current.store(count, Ordering::Relaxed);
+    }
+
+    /// Get total bytes sent over P2P.
+    pub fn bytes_sent_total(&self) -> u64 {
+        self.bytes_sent_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment total bytes sent.
+    pub fn add_bytes_sent(&self, bytes: u64) {
+        self.bytes_sent_total.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Get total bytes received over P2P.
+    pub fn bytes_received_total(&self) -> u64 {
+        self.bytes_received_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment total bytes received.
+    pub fn add_bytes_received(&self, bytes: u64) {
+        self.bytes_received_total
+            .fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Increment sent message counter for a specific message kind.
+    pub fn inc_message_sent(&self, kind: &str) {
+        match kind {
+            "consensus" => self.messages_sent_consensus.fetch_add(1, Ordering::Relaxed),
+            "dag" => self.messages_sent_dag.fetch_add(1, Ordering::Relaxed),
+            "control" => self.messages_sent_control.fetch_add(1, Ordering::Relaxed),
+            _ => 0,
+        };
+    }
+
+    /// Get sent message count for a specific kind.
+    pub fn messages_sent_total(&self, kind: &str) -> u64 {
+        match kind {
+            "consensus" => self.messages_sent_consensus.load(Ordering::Relaxed),
+            "dag" => self.messages_sent_dag.load(Ordering::Relaxed),
+            "control" => self.messages_sent_control.load(Ordering::Relaxed),
+            _ => 0,
+        }
+    }
+
+    /// Increment received message counter for a specific message kind.
+    pub fn inc_message_received(&self, kind: &str) {
+        match kind {
+            "consensus" => self
+                .messages_received_consensus
+                .fetch_add(1, Ordering::Relaxed),
+            "dag" => self.messages_received_dag.fetch_add(1, Ordering::Relaxed),
+            "control" => self
+                .messages_received_control
+                .fetch_add(1, Ordering::Relaxed),
+            _ => 0,
+        };
+    }
+
+    /// Get received message count for a specific kind.
+    pub fn messages_received_total(&self, kind: &str) -> u64 {
+        match kind {
+            "consensus" => self.messages_received_consensus.load(Ordering::Relaxed),
+            "dag" => self.messages_received_dag.load(Ordering::Relaxed),
+            "control" => self.messages_received_control.load(Ordering::Relaxed),
+            _ => 0,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct NodeMetrics {
     network: NetworkMetrics,
@@ -4111,6 +4221,8 @@ pub struct NodeMetrics {
     signer_keystore: SignerKeystoreMetrics,
     /// Environment metrics (T162).
     environment: std::sync::RwLock<Option<EnvironmentMetrics>>,
+    /// P2P transport metrics (T172).
+    p2p: P2pMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -4143,6 +4255,7 @@ impl NodeMetrics {
             execution: ExecutionMetrics::new(),
             signer_keystore: SignerKeystoreMetrics::new(),
             environment: std::sync::RwLock::new(None),
+            p2p: P2pMetrics::new(),
         }
     }
 
@@ -4234,6 +4347,11 @@ impl NodeMetrics {
     /// Get signer/keystore metrics (T154).
     pub fn signer_keystore(&self) -> &SignerKeystoreMetrics {
         &self.signer_keystore
+    }
+
+    /// Get P2P transport metrics (T172).
+    pub fn p2p(&self) -> &P2pMetrics {
+        &self.p2p
     }
 
     /// Set the network environment for metrics export (T162).

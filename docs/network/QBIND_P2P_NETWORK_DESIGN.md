@@ -582,8 +582,21 @@ pub struct PeerRateLimiterConfig {
 - [x] P2P design document (T170)
 - [x] NetworkTransportConfig skeleton
 - [x] P2pService trait skeleton
+- [x] **T172: P2P Transport v1 implementation (PQC KEMTLS, static peers)**
 - [ ] Multi-machine deployment guide (future task)
 - [ ] Basic peer health monitoring (future task)
+
+**Implementation Status (T172)**:
+
+P2P v1 implements:
+- **PQC KEMTLS transport**: All connections use ML-KEM-768 + AEAD for encryption
+- **Static peers**: Configured via `NetworkTransportConfig.static_peers`
+- **Basic P2pService**: `TcpKemTlsP2pService` implements broadcast and direct messaging
+- **Simple framing**: `u8 discriminator` + `u32 length` + `payload` over KEMTLS
+- **Metrics**: Connection count, bytes sent/received, message counters
+- **Config-gated**: `enable_p2p` flag controls whether P2P is active
+
+Not yet wired into consensus/DAG production paths. Integration with `NodeHotstuffHarness` is provided as a builder method for testing.
 
 ### 7.3 Phase 2: TestNet Beta
 

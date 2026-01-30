@@ -166,7 +166,7 @@ impl DagAvailabilityConfig {
 /// let testnet_beta = NetworkTransportConfig::testnet_beta();
 /// assert!(testnet_beta.enable_p2p);
 /// ```
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkTransportConfig {
     /// Whether the P2P overlay is enabled.
     ///
@@ -188,6 +188,17 @@ pub struct NetworkTransportConfig {
     ///
     /// Default: 6. Number of peers to forward gossip messages to.
     pub gossip_fanout: usize,
+
+    /// Local address to listen on for P2P connections (T172).
+    /// e.g. "0.0.0.0:9000"
+    pub listen_addr: Option<String>,
+
+    /// Public address to advertise to peers (T172).
+    pub advertised_addr: Option<String>,
+
+    /// List of static peers to dial at startup (T172).
+    /// Format: "host:port"
+    pub static_peers: Vec<String>,
 }
 
 impl Default for NetworkTransportConfig {
@@ -197,6 +208,9 @@ impl Default for NetworkTransportConfig {
             max_outbound: 16,  // Suggested default for validators
             max_inbound: 64,   // Allow more inbound for full nodes
             gossip_fanout: 6,  // Standard gossip fanout
+            listen_addr: None,
+            advertised_addr: None,
+            static_peers: Vec::new(),
         }
     }
 }
@@ -218,6 +232,9 @@ impl NetworkTransportConfig {
             max_outbound: 16,
             max_inbound: 64,
             gossip_fanout: 6,
+            listen_addr: Some("0.0.0.0:9000".to_string()),
+            advertised_addr: None,
+            static_peers: Vec::new(),
         }
     }
 
@@ -230,6 +247,9 @@ impl NetworkTransportConfig {
             max_outbound: 16,
             max_inbound: 64,
             gossip_fanout: 8,
+            listen_addr: Some("0.0.0.0:9000".to_string()),
+            advertised_addr: None,
+            static_peers: Vec::new(),
         }
     }
 
@@ -356,6 +376,9 @@ pub struct NodeConfig {
     ///
     /// When `None`, VM v0 uses in-memory state only (not persistent).
     pub data_dir: Option<PathBuf>,
+
+    /// P2P network transport configuration (T170/T172).
+    pub network: NetworkTransportConfig,
 }
 
 impl Default for NodeConfig {
@@ -368,6 +391,7 @@ impl Default for NodeConfig {
             environment: NetworkEnvironment::Devnet,
             execution_profile: ExecutionProfile::NonceOnly,
             data_dir: None,
+            network: NetworkTransportConfig::default(),
         }
     }
 }
@@ -381,6 +405,7 @@ impl NodeConfig {
             environment,
             execution_profile: ExecutionProfile::NonceOnly,
             data_dir: None,
+            network: NetworkTransportConfig::default(),
         }
     }
 
@@ -393,6 +418,7 @@ impl NodeConfig {
             environment,
             execution_profile,
             data_dir: None,
+            network: NetworkTransportConfig::default(),
         }
     }
 
