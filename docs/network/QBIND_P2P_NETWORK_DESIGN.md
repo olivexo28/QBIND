@@ -287,8 +287,8 @@ This ensures consensus keys are not reused for network authentication while main
 
 | Parameter | DevNet | TestNet Alpha | TestNet Beta | MainNet |
 | :--- | :--- | :--- | :--- | :--- |
-| `max_outbound` | N-1 (full mesh) | 8 | 16 | 16 |
-| `max_inbound` | N-1 (full mesh) | 16 | 64 | 64 |
+| `max_outbound` | N-1 (full mesh) | 8 | 16 | 16 (Placeholder; see §4.5) |
+| `max_inbound` | N-1 (full mesh) | 16 | 64 | 64+ |
 | `gossip_fanout` | N/A | N/A | 6 | 8 |
 
 ### 4.4 Peer Lifecycle
@@ -324,6 +324,55 @@ pub struct PeerScore {
 ```
 
 The scoring system shape is defined here; actual logic is future work.
+
+### 4.5 Connection Limit Scaling Policy
+
+As the network scales from DevNet/Alpha ($n \lesssim 50$) to a 1000+ validator MainNet, connection limits must evolve to maintain BFT liveness and gossip efficiency.
+
+#### 4.5.1 BFT Quorum vs Overlay Degree
+
+For HotStuff-style BFT:
+- **Safety** is guaranteed by 2f+1 quorums, independent of overlay degree.
+- **Liveness** requires the leader to reach 2f+1 validators within a bounded time.
+
+For $n \approx 100$, an outbound degree of 16 provides an expected diameter of 2–3 hops, which is sufficient for rapid quorum formation.
+
+#### 4.5.2 Scaling Rule for Validator Sets
+
+QBIND treats "16 outbound" as a conservative placeholder for early phases. Long-term, the degree should scale with $n$ to preserve network diameter and eclipse resistance:
+
+- **Scaling Law**: `degree_outbound ≈ c · log n`, with $c \in [2, 4]$.
+- **Example Values (Target $c=3$ for MainNet)**:
+
+| Validator Set Size (n) | $\log_2(n)$ | Recommended Outbound ($c \approx 3$) | Current Default | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| 50 | 5.6 | 17 | 16 | ✅ Adequate |
+| 100 | 6.6 | 20 | 16 | ~ Borderline |
+| 500 | 9.0 | 27 | 16 | ⚠️ Under-connected |
+| 1,000 | 10.0 | 30 | 16 | ❌ Insufficient |
+
+- **Connectivity Thresholds**:
+  - **n = 100**: Direct connectivity $\approx 16\%$. `max_outbound = 16` is adequate.
+  - **n = 1000**: Direct connectivity drops to $\approx 1.6\%$. A fixed degree of 16 becomes sensitive to adversarial edge placement.
+
+#### 4.5.3 Gossip Reach and Robustness
+
+Gossip propagation time follows $O(\log n / \log \text{fanout})$. While `fanout = 6` provides high coverage in 3–4 hops for $n=1000$, the robustness of the overlay to adversarial partitioning decreases if the degree remains constant.
+
+#### 4.5.4 Implementation Strategy
+
+1. **Short Term (DevNet / TestNet Alpha)**: Maintain fixed `max_outbound = 16`.
+2. **Medium Term (TestNet Beta)**: Validate propagation via simulation for $n \approx 100-200$ and make degree configurable.
+3. **Long Term (MainNet)**: Transition to an $n$-aware degree scaling rule or introduce hierarchical overlays (e.g., validator-only committees) for very large $n$.
+
+#### 4.5.5 Simulation Requirements (Before MainNet)
+
+Before locking in MainNet parameters, the P2P stack must be validated against the following metrics under various network sizes ($n=100$ to $n=1000$):
+
+- **Gossip Reach**: Percentage of the network that receives a message within $k$ hops (Target: >99% for $k=4$ at $n=1000$).
+- **Eclipse Probability**: Likelihood of an honest node being isolated given $f$ Byzantine validators actively attempting to bias peer selection.
+- **Propagation Latency**: 95th percentile time for a block/batch to reach a supermajority (2f+1) of validators.
+- **Churn Resilience**: Stability of message propagation during rapid validator join/leave events or mass network partitions.
 
 ---
 

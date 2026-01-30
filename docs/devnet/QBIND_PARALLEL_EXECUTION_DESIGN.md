@@ -488,4 +488,49 @@ parallel_min_senders = 2
 
 ---
 
+## Appendix C: T171 Stage B Implementation Notes
+
+**Task**: T171  
+**Status**: Test-only skeleton (NOT wired into production)  
+**Date**: 2026-01-30
+
+### Overview
+
+T171 provides the initial Stage B parallel execution skeleton with:
+
+1. **New types** in `qbind-ledger/src/parallel_exec.rs`:
+   - `TxIndex`: Transaction identifier within a block
+   - `TxReadWriteSet`: Read/write set for conflict analysis
+   - `ConflictGraph`: Dependency graph over transactions
+   - `ParallelSchedule`: Deterministic schedule (levels) for parallel execution
+
+2. **Core algorithms**:
+   - `extract_read_write_set()`: Extract accounts touched by a VM v0 transfer
+   - `build_conflict_graph()`: O(n²) conflict detection based on account overlap
+   - `build_parallel_schedule()`: Topological layering for deterministic scheduling
+
+3. **Test harness** (`#[cfg(test)]` only):
+   - Parallel executor using Rayon for within-level parallelism
+   - Comparison with sequential execution for correctness validation
+
+### Critical Invariants
+
+- **No randomness**: All conflict detection and scheduling are purely deterministic
+- **Single-block scope**: Scheduler reasons within one block only
+- **VM semantics preserved**: Stage B produces identical results to sequential execution
+
+### What T171 Does NOT Do
+
+- No changes to `SingleThreadExecutionService` behavior
+- No CLI flags or node config changes
+- No parallelism for DevNet `NonceOnly` profile (Stage A remains as-is)
+- No speculative execution or rollback
+
+### Future Work
+
+Stage B wiring into the production pipeline will be addressed in future tasks (T172+)
+after the conflict-graph core has been validated through testing and benchmarking.
+
+---
+
 *End of Document*
