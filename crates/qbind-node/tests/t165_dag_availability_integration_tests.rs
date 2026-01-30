@@ -62,6 +62,7 @@ fn create_testnet_dag_mempool(
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
 
     let dag_config = DagAvailabilityConfig::enabled();
@@ -318,6 +319,7 @@ fn test_dag_availability_config_integration() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
 
     let mempool = InMemoryDagMempool::with_availability(config, quorum);
@@ -376,6 +378,7 @@ fn test_enable_availability_after_construction() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
 
     // Start with availability disabled

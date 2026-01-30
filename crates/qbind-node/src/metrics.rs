@@ -3094,6 +3094,10 @@ pub struct MempoolMetrics {
     rejected_other: AtomicU64,
     /// Total transactions committed (removed from mempool).
     committed_total: AtomicU64,
+    /// Total transactions evicted due to low priority (T169).
+    evicted_low_priority_total: AtomicU64,
+    /// Whether fee-based priority is enabled (gauge: 0/1) (T169).
+    priority_enabled: AtomicU64,
 }
 
 impl MempoolMetrics {
@@ -3134,6 +3138,14 @@ impl MempoolMetrics {
             MempoolRejectReason::InvalidNonce => {
                 self.rejected_invalid_nonce.fetch_add(1, Ordering::Relaxed);
             }
+            MempoolRejectReason::LowPriority => {
+                // We use inc_evicted_low_priority for evictions, but for rejection
+                // of new tx due to low priority, we can either use rejected_other
+                // or add a new counter if needed.
+                // T169 suggests qbind_mempool_evicted_low_priority_total for evictions.
+                // For "reject new tx because it's lower than existing", we use this.
+                self.rejected_other.fetch_add(1, Ordering::Relaxed);
+            }
             MempoolRejectReason::Other => {
                 self.rejected_other.fetch_add(1, Ordering::Relaxed);
             }
@@ -3150,6 +3162,7 @@ impl MempoolMetrics {
             MempoolRejectReason::InvalidNonce => {
                 self.rejected_invalid_nonce.load(Ordering::Relaxed)
             }
+            MempoolRejectReason::LowPriority => self.rejected_other.load(Ordering::Relaxed),
             MempoolRejectReason::Other => self.rejected_other.load(Ordering::Relaxed),
         }
     }
@@ -3165,6 +3178,28 @@ impl MempoolMetrics {
     /// Increment committed counter.
     pub fn inc_committed(&self) {
         self.committed_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment evicted_low_priority_total counter (T169).
+    pub fn inc_evicted_low_priority(&self) {
+        self.evicted_low_priority_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Set whether fee-priority is enabled (T169).
+    pub fn set_priority_enabled(&self, enabled: bool) {
+        self.priority_enabled
+            .store(if enabled { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
+    /// Get total evicted due to low priority (T169).
+    pub fn evicted_low_priority_total(&self) -> u64 {
+        self.evicted_low_priority_total.load(Ordering::Relaxed)
+    }
+
+    /// Get priority enabled status (T169).
+    pub fn priority_enabled(&self) -> bool {
+        self.priority_enabled.load(Ordering::Relaxed) == 1
     }
 
     /// Increment committed counter by amount.
@@ -3219,6 +3254,8 @@ pub enum MempoolRejectReason {
     InvalidSignature,
     /// Transaction nonce is invalid.
     InvalidNonce,
+    /// Transaction priority too low (T169).
+    LowPriority,
     /// Other rejection reason.
     Other,
 }

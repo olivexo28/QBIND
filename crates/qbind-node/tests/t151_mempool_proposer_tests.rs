@@ -225,6 +225,7 @@ fn test_end_to_end_tx_inclusion() {
         max_txs: 100,
         max_nonce_gap: 1000,
         gas_config: None,
+        enable_fee_priority: false,
     };
     let mempool = Arc::new(InMemoryMempool::with_key_provider(
         mempool_config,
@@ -324,6 +325,7 @@ fn test_mempool_capacity_enforcement() {
         max_txs: 2,
         max_nonce_gap: 0, // Disable nonce checking for this test
         gas_config: None,
+        enable_fee_priority: false,
     };
     let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
@@ -379,6 +381,7 @@ fn test_invalid_tx_rejection() {
         max_txs: 100,
         max_nonce_gap: 1000,
         gas_config: None,
+        enable_fee_priority: false,
     };
     let mempool = Arc::new(InMemoryMempool::with_key_provider(
         mempool_config,
@@ -430,6 +433,7 @@ fn test_deterministic_tx_order() {
         max_txs: 100,
         max_nonce_gap: 0,
         gas_config: None,
+        enable_fee_priority: false,
     };
     let mempool1 = InMemoryMempool::with_config(config.clone());
     let mempool2 = InMemoryMempool::with_config(config);
@@ -466,6 +470,7 @@ fn test_max_txs_per_block_limit() {
         max_txs: 1000,
         max_nonce_gap: 0,
         gas_config: None,
+        enable_fee_priority: false,
     };
     let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 

@@ -513,7 +513,40 @@ Task T167 defines the gas and fee model for future implementation in TestNet Bet
 >
 > **Note**: Default public TestNet Alpha remains gas-disabled until TestNet Beta.
 
-### 7.4 Migration Path
+### 7.4 T169 Fee-aware Mempool Priority & Eviction
+
+> **T169 adds optional fee-based priority and eviction to mempools:**
+>
+> - When `enable_fee_priority = true` (config-gated):
+>   - FIFO mempool becomes a priority queue ordered by (`fee_per_gas`, `effective_fee`, `arrival_id`)
+>   - When mempool is full, lowest-priority transactions are evicted to make room for higher-fee txs
+>   - DAG mempool batch construction and frontier selection prioritize high-fee transactions
+>   - Block proposals preferentially include transactions with higher fees
+>
+> - When `enable_fee_priority = false` (default):
+>   - Existing FIFO (or DAG insertion-order) behavior is preserved
+>
+> **Configuration Coupling**:
+> - Fee priority requires gas enforcement (`ExecutionGasConfig.enabled = true`)
+> - If gas is disabled, `enable_fee_priority` is automatically forced to `false`
+> - Default public TestNet Alpha remains FIFO-only; fee-priority is for TestNet Beta experimentation
+>
+> **Example**:
+> ```rust
+> // Enable fee-based priority (requires gas enabled)
+> let mut mempool_config = MempoolConfig::default();
+> mempool_config.gas_config = Some(ExecutionGasConfig::enabled());
+> mempool_config.enable_fee_priority = true;
+> let mempool = InMemoryMempool::with_config(mempool_config.enforce_constraints());
+> ```
+>
+> **Metrics**:
+> - `qbind_mempool_evicted_low_priority_total`: Count of evicted low-priority txs
+> - `qbind_mempool_priority_enabled`: Gauge (0/1) indicating if priority is enabled
+>
+> **Note**: T169 implements the minimal fee market infrastructure; sophisticated MEV strategies are not in scope.
+
+### 7.5 Migration Path
 
 1. **TestNet Alpha**: No gas enforcement; `TransferPayload` (v0) format.
 2. **TestNet Beta**: Gas enforcement enabled; both v0 and v1 payloads accepted with deprecation timeline.

@@ -42,6 +42,7 @@ fn test_batch_creation_with_unique_ids() {
         batch_size: 2, // Small batch size for testing
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -88,6 +89,7 @@ fn test_batch_parent_references() {
         batch_size: 2,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -238,6 +240,7 @@ fn test_frontier_selection_deterministic() {
         batch_size: 100, // Large batch size to keep txs pending
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -267,6 +270,7 @@ fn test_frontier_excludes_committed_txs() {
         batch_size: 100,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -299,6 +303,7 @@ fn test_frontier_respects_max_txs() {
         batch_size: 100,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -332,6 +337,7 @@ fn test_mark_committed_updates_state() {
         batch_size: 2,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -362,6 +368,7 @@ fn test_commit_cleans_pending_txs() {
         batch_size: 100, // Large batch size to keep txs pending
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -396,6 +403,7 @@ fn test_dag_mempool_metrics_tracking() {
         batch_size: 2,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
 
@@ -419,6 +427,7 @@ fn test_frontier_selection_metrics() {
         batch_size: 100,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
 
@@ -538,6 +547,7 @@ fn test_transaction_deduplication() {
         batch_size: 100,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -578,6 +588,7 @@ fn test_mempool_capacity_limit() {
         batch_size: 100, // Large batch size so txs stay pending
         max_batches: 100,
         max_pending_txs: 5, // Very small limit
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 

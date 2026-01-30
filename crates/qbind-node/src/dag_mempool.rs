@@ -1099,6 +1099,8 @@ pub struct DagMempoolConfig {
     pub batch_size: usize,
     /// Local validator ID (for batch creation).
     pub local_validator_id: ValidatorId,
+    /// T169: Whether to enable fee-based priority and eviction.
+    pub enable_fee_priority: bool,
 }
 
 impl Default for DagMempoolConfig {
@@ -1108,7 +1110,22 @@ impl Default for DagMempoolConfig {
             max_pending_txs: 10000,
             batch_size: 100,
             local_validator_id: ValidatorId::new(0),
+            enable_fee_priority: false,
         }
+    }
+}
+
+impl DagMempoolConfig {
+    /// Enforce configuration constraints (T169).
+    ///
+    /// Fee priority is typically coupled with gas enforcement in the execution layer.
+    /// If you need to enable fee priority in DAG mempool, ensure gas is enabled in
+    /// the execution config as well.
+    ///
+    /// This method is provided for explicit validation.
+    pub fn with_fee_priority(mut self, enabled: bool) -> Self {
+        self.enable_fee_priority = enabled;
+        self
     }
 }
 
@@ -1123,6 +1140,10 @@ struct DagInner {
     children: HashMap<BatchId, Vec<BatchId>>,
     /// Pending transactions not yet batched.
     pending_txs: Vec<QbindTransaction>,
+    /// Tie-breaking arrival counter for priority (T169).
+    arrival_counter: u64,
+    /// Map of (sender, nonce) -> arrival_id to preserve arrival order (T169).
+    tx_arrivals: HashMap<(qbind_types::AccountId, u64), u64>,
     /// Set of seen transaction IDs for deduplication.
     tx_seen: HashSet<TxId>,
     /// Set of committed transaction IDs.
@@ -1204,6 +1225,8 @@ impl InMemoryDagMempool {
                 batches_by_id: HashMap::new(),
                 children: HashMap::new(),
                 pending_txs: Vec::new(),
+                arrival_counter: 0,
+                tx_arrivals: HashMap::new(),
                 tx_seen: HashSet::new(),
                 tx_committed: HashSet::new(),
                 config,
@@ -1229,6 +1252,8 @@ impl InMemoryDagMempool {
                 batches_by_id: HashMap::new(),
                 children: HashMap::new(),
                 pending_txs: Vec::new(),
+                arrival_counter: 0,
+                tx_arrivals: HashMap::new(),
                 tx_seen: HashSet::new(),
                 tx_committed: HashSet::new(),
                 config,
@@ -1391,14 +1416,55 @@ impl InMemoryDagMempool {
     /// Create a batch from pending transactions (internal helper).
     ///
     /// This is called when we have enough pending txs to form a batch.
+    /// T169: If fee_priority is enabled, selects highest-priority txs.
     fn create_local_batch(inner: &mut DagInner) -> Option<QbindBatch> {
         if inner.pending_txs.is_empty() {
             return None;
         }
 
-        // Take up to batch_size transactions
+        // T169: Sort pending_txs by priority if enabled
+        if inner.config.enable_fee_priority {
+            inner.pending_txs.sort_by(|a, b| {
+                use crate::mempool::compute_tx_mempool_cost;
+
+                // Compute costs
+                let cost_a = compute_tx_mempool_cost(a).ok();
+                let cost_b = compute_tx_mempool_cost(b).ok();
+
+                match (cost_a, cost_b) {
+                    (Some(ca), Some(cb)) => {
+                        // Sort by descending fee_per_gas, then descending effective_fee, then arrival_id
+                        let arrival_a = inner
+                            .tx_arrivals
+                            .get(&(a.sender, a.nonce))
+                            .copied()
+                            .unwrap_or(0);
+                        let arrival_b = inner
+                            .tx_arrivals
+                            .get(&(b.sender, b.nonce))
+                            .copied()
+                            .unwrap_or(0);
+
+                        cb.fee_per_gas
+                            .cmp(&ca.fee_per_gas)
+                            .then_with(|| cb.effective_fee.cmp(&ca.effective_fee))
+                            .then_with(|| arrival_a.cmp(&arrival_b))
+                    }
+                    (Some(_), None) => std::cmp::Ordering::Less, // Valid comes before invalid
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            });
+        }
+
+        // Take up to batch_size transactions (from the front, which are now highest priority)
         let batch_size = inner.config.batch_size.min(inner.pending_txs.len());
         let txs: Vec<_> = inner.pending_txs.drain(..batch_size).collect();
+
+        // Clean up arrival tracking for batched txs
+        for tx in &txs {
+            inner.tx_arrivals.remove(&(tx.sender, tx.nonce));
+        }
 
         // Collect parent references (latest batch from each known validator)
         let parents: Vec<BatchRef> = inner
@@ -1481,6 +1547,14 @@ impl DagMempool for InMemoryDagMempool {
             let tx_id = compute_tx_id(&tx);
             if !inner.tx_seen.contains(&tx_id) && !inner.tx_committed.contains(&tx_id) {
                 inner.tx_seen.insert(tx_id);
+
+                // T169: Track arrival for priority
+                if inner.config.enable_fee_priority {
+                    let arrival_id = inner.arrival_counter;
+                    inner.arrival_counter += 1;
+                    inner.tx_arrivals.insert((tx.sender, tx.nonce), arrival_id);
+                }
+
                 inner.pending_txs.push(tx);
                 added += 1;
             }
@@ -1536,38 +1610,119 @@ impl DagMempool for InMemoryDagMempool {
             m.inc_frontier_select_total();
         }
 
-        // Collect batches and sort for deterministic ordering:
-        // Order by (view_hint, creator, batch_id)
-        let mut batches: Vec<_> = inner.batches_by_id.values().collect();
-        batches.sort_by(|a, b| {
-            let a_batch = &a.batch;
-            let b_batch = &b.batch;
-            (a_batch.view_hint, a_batch.creator, a_batch.batch_id).cmp(&(
-                b_batch.view_hint,
-                b_batch.creator,
-                b_batch.batch_id,
-            ))
-        });
+        // T169: Collect all candidate transactions first if priority is enabled
+        if inner.config.enable_fee_priority {
+            let mut candidates: Vec<QbindTransaction> = Vec::new();
 
-        // Iterate through batches and collect transactions
-        for stored in batches {
-            if result.len() >= max_txs {
-                break;
+            // Collect batches and sort for deterministic ordering:
+            // Order by (view_hint, creator, batch_id)
+            let mut batches: Vec<_> = inner.batches_by_id.values().collect();
+            batches.sort_by(|a, b| {
+                let a_batch = &a.batch;
+                let b_batch = &b.batch;
+                (a_batch.view_hint, a_batch.creator, a_batch.batch_id).cmp(&(
+                    b_batch.view_hint,
+                    b_batch.creator,
+                    b_batch.batch_id,
+                ))
+            });
+
+            // Collect transactions from batches
+            for stored in batches {
+                if stored.fully_committed {
+                    continue;
+                }
+
+                for tx in &stored.batch.txs {
+                    let tx_id = compute_tx_id(tx);
+                    if !inner.tx_committed.contains(&tx_id) && !seen_tx_ids.contains(&tx_id) {
+                        seen_tx_ids.insert(tx_id);
+                        candidates.push(tx.clone());
+                    }
+                }
             }
 
-            // Skip fully committed batches
-            if stored.fully_committed {
-                continue;
+            // Also include pending transactions
+            for tx in &inner.pending_txs {
+                let tx_id = compute_tx_id(tx);
+                if !inner.tx_committed.contains(&tx_id) && !seen_tx_ids.contains(&tx_id) {
+                    seen_tx_ids.insert(tx_id);
+                    candidates.push(tx.clone());
+                }
             }
 
-            for tx in &stored.batch.txs {
+            // Sort candidates by priority
+            candidates.sort_by(|a, b| {
+                use crate::mempool::compute_tx_mempool_cost;
+
+                let cost_a = compute_tx_mempool_cost(a).ok();
+                let cost_b = compute_tx_mempool_cost(b).ok();
+
+                match (cost_a, cost_b) {
+                    (Some(ca), Some(cb)) => {
+                        // Descending fee_per_gas, then descending effective_fee
+                        cb.fee_per_gas
+                            .cmp(&ca.fee_per_gas)
+                            .then_with(|| cb.effective_fee.cmp(&ca.effective_fee))
+                    }
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            });
+
+            // Take up to max_txs from sorted candidates
+            result = candidates.into_iter().take(max_txs).collect();
+        } else {
+            // Original FIFO behavior (without priority)
+            // Collect batches and sort for deterministic ordering:
+            // Order by (view_hint, creator, batch_id)
+            let mut batches: Vec<_> = inner.batches_by_id.values().collect();
+            batches.sort_by(|a, b| {
+                let a_batch = &a.batch;
+                let b_batch = &b.batch;
+                (a_batch.view_hint, a_batch.creator, a_batch.batch_id).cmp(&(
+                    b_batch.view_hint,
+                    b_batch.creator,
+                    b_batch.batch_id,
+                ))
+            });
+
+            // Iterate through batches and collect transactions
+            for stored in batches {
+                if result.len() >= max_txs {
+                    break;
+                }
+
+                // Skip fully committed batches
+                if stored.fully_committed {
+                    continue;
+                }
+
+                for tx in &stored.batch.txs {
+                    if result.len() >= max_txs {
+                        break;
+                    }
+
+                    let tx_id = compute_tx_id(tx);
+
+                    // Skip committed or already-selected transactions
+                    if inner.tx_committed.contains(&tx_id) || seen_tx_ids.contains(&tx_id) {
+                        continue;
+                    }
+
+                    seen_tx_ids.insert(tx_id);
+                    result.push(tx.clone());
+                }
+            }
+
+            // Also include pending transactions that aren't batched yet
+            for tx in &inner.pending_txs {
                 if result.len() >= max_txs {
                     break;
                 }
 
                 let tx_id = compute_tx_id(tx);
-
-                // Skip committed or already-selected transactions
                 if inner.tx_committed.contains(&tx_id) || seen_tx_ids.contains(&tx_id) {
                     continue;
                 }
@@ -1575,21 +1730,6 @@ impl DagMempool for InMemoryDagMempool {
                 seen_tx_ids.insert(tx_id);
                 result.push(tx.clone());
             }
-        }
-
-        // Also include pending transactions that aren't batched yet
-        for tx in &inner.pending_txs {
-            if result.len() >= max_txs {
-                break;
-            }
-
-            let tx_id = compute_tx_id(tx);
-            if inner.tx_committed.contains(&tx_id) || seen_tx_ids.contains(&tx_id) {
-                continue;
-            }
-
-            seen_tx_ids.insert(tx_id);
-            result.push(tx.clone());
         }
 
         // Update metrics

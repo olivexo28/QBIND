@@ -350,6 +350,7 @@ fn test_dag_mempool_with_availability() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -364,6 +365,7 @@ fn test_dag_mempool_handle_batch_ack() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
     mempool.set_current_view(10);
@@ -430,6 +432,7 @@ fn test_dag_mempool_duplicate_ack_rejected() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -459,6 +462,7 @@ fn test_dag_mempool_unknown_batch_ack_rejected() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -541,6 +545,7 @@ fn test_dag_mempool_metrics_ack_tracking() {
         batch_size: 10,
         max_batches: 100,
         max_pending_txs: 1000,
+        enable_fee_priority: false,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 2).with_metrics(metrics.clone());
 

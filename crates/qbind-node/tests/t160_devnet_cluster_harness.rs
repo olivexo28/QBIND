@@ -488,6 +488,7 @@ impl DevnetClusterHandle {
                 max_txs: cfg.mempool_size,
                 max_nonce_gap: cfg.mempool_size as u64 + 1000,
                 gas_config: None, // Disabled for cluster harness
+                enable_fee_priority: false,
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
@@ -533,6 +534,7 @@ impl DevnetClusterHandle {
                     batch_size: 100,
                     max_batches: 1000,
                     max_pending_txs: cfg.mempool_size,
+                    enable_fee_priority: false,
                 };
                 let dag_mempool = Arc::new(InMemoryDagMempool::with_config(dag_config));
                 harness

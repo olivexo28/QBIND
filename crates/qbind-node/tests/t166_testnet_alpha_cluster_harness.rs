@@ -786,6 +786,7 @@ impl TestnetAlphaClusterHandle {
                 max_txs: config.mempool_size,
                 max_nonce_gap: config.mempool_size as u64 + 1000,
                 gas_config: None,
+                enable_fee_priority: false,
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 
@@ -826,6 +827,7 @@ impl TestnetAlphaClusterHandle {
                     batch_size: 50,
                     max_batches: 500,
                     max_pending_txs: config.mempool_size,
+                    enable_fee_priority: false,
                 };
 
                 let dag_mempool = if config.enable_dag_availability {
@@ -946,6 +948,7 @@ impl TestnetAlphaClusterHandle {
                 max_txs: config.mempool_size,
                 max_nonce_gap: config.mempool_size as u64 + 1000,
                 gas_config: None,
+                enable_fee_priority: false,
             };
             let mempool = Arc::new(InMemoryMempool::with_config(mempool_config));
 

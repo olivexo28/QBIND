@@ -12,12 +12,14 @@
 //! and executed. It enforces basic validity checks and provides a pool of
 //! ready-to-execute transactions for block proposers.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use qbind_ledger::{QbindTransaction, UserPublicKey};
 use qbind_types::AccountId;
+
+use crate::metrics::{MempoolMetrics, MempoolRejectReason};
 
 // ============================================================================
 // Mempool Trait
@@ -107,6 +109,81 @@ pub enum MempoolError {
         /// The total amount needed (transfer amount + max fee).
         needed: u128,
     },
+
+    /// T169: Transaction dropped because its priority is lower than everything in the mempool.
+    #[error("transaction priority too low for admission")]
+    LowPriorityDropped,
+}
+
+// ============================================================================
+// T169: Fee-aware Priority & Scoring
+// ============================================================================
+
+/// Cost parameters for a transaction in the mempool (T169).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TxMempoolCost {
+    /// Estimated gas cost for execution.
+    pub gas_cost: u64,
+    /// Maximum gas limit specified in the transaction.
+    pub gas_limit: u64,
+    /// Maximum fee the sender is willing to pay per unit of gas.
+    pub max_fee_per_gas: u128,
+    /// Total fee if all gas is consumed (gas_limit * max_fee_per_gas).
+    pub effective_fee: u128,
+    /// The actual fee density (max_fee_per_gas).
+    pub fee_per_gas: u128,
+}
+
+/// Priority score for ranking transactions in the mempool (T169).
+///
+/// Transactions are ordered by:
+/// 1. `fee_per_gas` (higher is better)
+/// 2. `effective_fee` (higher is better)
+/// 3. `arrival_id` (lower is better/older)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TxPriorityScore {
+    /// Fee per gas (primary key).
+    pub fee_per_gas: u128,
+    /// Total effective fee (secondary key).
+    pub effective_fee: u128,
+    /// Monotonic arrival counter (tertiary key).
+    pub arrival_id: u64,
+}
+
+impl Ord for TxPriorityScore {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.fee_per_gas
+            .cmp(&other.fee_per_gas)
+            .then_with(|| self.effective_fee.cmp(&other.effective_fee))
+            // Lower arrival_id means higher priority (comes first in FIFO)
+            // So we want smaller arrival_id to be "Greater" in priority
+            .then_with(|| other.arrival_id.cmp(&self.arrival_id))
+    }
+}
+
+impl PartialOrd for TxPriorityScore {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Helper to compute mempool cost parameters for a transaction (T169).
+pub fn compute_tx_mempool_cost(tx: &QbindTransaction) -> Result<TxMempoolCost, MempoolError> {
+    use qbind_ledger::compute_gas_for_vm_v0_tx;
+
+    let gas_result = compute_gas_for_vm_v0_tx(tx).map_err(|_| {
+        MempoolError::Invalid("failed to compute gas: malformed payload".to_string())
+    })?;
+
+    let effective_fee = (gas_result.gas_limit as u128) * gas_result.max_fee_per_gas;
+
+    Ok(TxMempoolCost {
+        gas_cost: gas_result.gas_cost,
+        gas_limit: gas_result.gas_limit,
+        max_fee_per_gas: gas_result.max_fee_per_gas,
+        effective_fee,
+        fee_per_gas: gas_result.max_fee_per_gas,
+    })
 }
 
 // ============================================================================
@@ -124,6 +201,27 @@ pub struct MempoolConfig {
     /// Gas enforcement configuration (T168).
     /// When enabled, mempool performs gas legality and balance checks.
     pub gas_config: Option<qbind_ledger::ExecutionGasConfig>,
+    /// T169: Whether to enable fee-based priority and eviction.
+    /// When true, transactions are ranked by fee_per_gas and effective_fee.
+    pub enable_fee_priority: bool,
+}
+
+impl MempoolConfig {
+    /// Enforce configuration constraints (T169).
+    ///
+    /// This method ensures that:
+    /// - If gas is disabled, fee priority is also disabled
+    ///
+    /// Returns a sanitized config.
+    pub fn enforce_constraints(mut self) -> Self {
+        if (self.gas_config.is_none() || !self.gas_config.as_ref().unwrap().enabled)
+            && self.enable_fee_priority
+        {
+            // Fee priority requires gas enforcement; silently disable
+            self.enable_fee_priority = false;
+        }
+        self
+    }
 }
 
 impl Default for MempoolConfig {
@@ -132,6 +230,7 @@ impl Default for MempoolConfig {
             max_txs: 10000,
             max_nonce_gap: 1000,
             gas_config: None, // Disabled by default for backward compatibility
+            enable_fee_priority: false,
         }
     }
 }
@@ -158,15 +257,30 @@ pub struct InMemoryMempool {
     /// Optional balance provider for gas-aware admission (T168).
     /// Required when gas_config is enabled.
     balance_provider: Option<Arc<dyn BalanceProvider>>,
+    /// Optional metrics for observability (T169).
+    metrics: Option<Arc<MempoolMetrics>>,
 }
 
 /// Internal mempool state (protected by RwLock).
 struct MempoolInner {
-    /// Transactions in insertion order.
+    /// Transactions in insertion order (FIFO mode).
     txs: Vec<QbindTransaction>,
+    /// Priority-ordered transactions (Priority mode).
+    priority_index: BTreeMap<TxPriorityScore, QbindTransaction>,
+    /// Map of (sender, nonce) -> priority score for removal.
+    tx_scores: HashMap<(AccountId, u64), TxPriorityScore>,
+    /// Monotonic arrival counter for tie-breaking.
+    arrival_counter: u64,
     /// Per-sender nonce tracking: sender -> max nonce seen.
     /// Used to reject txs with nonces far in the future (spam prevention).
     nonce_tracker: HashMap<AccountId, u64>,
+}
+
+impl MempoolInner {
+    /// Get the total number of transactions in the mempool.
+    fn tx_count(&self) -> usize {
+        self.txs.len() + self.priority_index.len()
+    }
 }
 
 impl InMemoryMempool {
@@ -180,12 +294,23 @@ impl InMemoryMempool {
         Self {
             inner: RwLock::new(MempoolInner {
                 txs: Vec::new(),
+                priority_index: BTreeMap::new(),
+                tx_scores: HashMap::new(),
+                arrival_counter: 0,
                 nonce_tracker: HashMap::new(),
             }),
             config,
             key_provider: None,
             balance_provider: None,
+            metrics: None,
         }
+    }
+
+    /// Set metrics for the mempool (T169).
+    pub fn with_metrics(mut self, metrics: Arc<MempoolMetrics>) -> Self {
+        metrics.set_priority_enabled(self.config.enable_fee_priority);
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Create a mempool with a key provider for signature verification.
@@ -193,11 +318,15 @@ impl InMemoryMempool {
         Self {
             inner: RwLock::new(MempoolInner {
                 txs: Vec::new(),
+                priority_index: BTreeMap::new(),
+                tx_scores: HashMap::new(),
+                arrival_counter: 0,
                 nonce_tracker: HashMap::new(),
             }),
             config,
             key_provider: Some(key_provider),
             balance_provider: None,
+            metrics: None,
         }
     }
 
@@ -212,11 +341,15 @@ impl InMemoryMempool {
         Self {
             inner: RwLock::new(MempoolInner {
                 txs: Vec::new(),
+                priority_index: BTreeMap::new(),
+                tx_scores: HashMap::new(),
+                arrival_counter: 0,
                 nonce_tracker: HashMap::new(),
             }),
             config,
             key_provider: Some(key_provider),
             balance_provider: Some(balance_provider),
+            metrics: None,
         }
     }
 
@@ -240,25 +373,75 @@ impl Mempool for InMemoryMempool {
     fn insert(&self, tx: QbindTransaction) -> Result<(), MempoolError> {
         let mut inner = self.inner.write();
 
-        // 1. Capacity check
-        if inner.txs.len() >= self.config.max_txs {
-            return Err(MempoolError::Full);
+        // 1. Capacity check & optional priority eviction (T169)
+        if inner.tx_count() >= self.config.max_txs {
+            if self.config.enable_fee_priority {
+                let cost = compute_tx_mempool_cost(&tx)?;
+                let score = TxPriorityScore {
+                    fee_per_gas: cost.fee_per_gas,
+                    effective_fee: cost.effective_fee,
+                    arrival_id: inner.arrival_counter,
+                };
+
+                // Find the lowest priority entry
+                if let Some((&lowest_score, _)) = inner.priority_index.iter().next() {
+                    if score > lowest_score {
+                        // Evict lowest
+                        if let Some((_evicted_score, evicted_tx)) = inner.priority_index.pop_first()
+                        {
+                            inner
+                                .tx_scores
+                                .remove(&(evicted_tx.sender, evicted_tx.nonce));
+
+                            if let Some(ref m) = self.metrics {
+                                m.inc_evicted_low_priority();
+                            }
+                        }
+                    } else {
+                        if let Some(ref m) = self.metrics {
+                            m.inc_rejected(MempoolRejectReason::LowPriority);
+                        }
+                        return Err(MempoolError::LowPriorityDropped);
+                    }
+                } else {
+                    if let Some(ref m) = self.metrics {
+                        m.inc_rejected(MempoolRejectReason::Full);
+                    }
+                    return Err(MempoolError::Full);
+                }
+            } else {
+                if let Some(ref m) = self.metrics {
+                    m.inc_rejected(MempoolRejectReason::Full);
+                }
+                return Err(MempoolError::Full);
+            }
         }
 
         // 2. Signature verification (if key provider is set)
         if let Some(ref provider) = self.key_provider {
-            let pk = provider
-                .get_public_key(&tx.sender)
-                .map_err(|e| MempoolError::Invalid(format!("key lookup failed: {}", e)))?;
+            let pk = provider.get_public_key(&tx.sender).map_err(|e| {
+                if let Some(ref m) = self.metrics {
+                    m.inc_rejected(MempoolRejectReason::Other);
+                }
+                MempoolError::Invalid(format!("key lookup failed: {}", e))
+            })?;
 
             tx.verify_signature(&pk).map_err(|e| {
+                if let Some(ref m) = self.metrics {
+                    m.inc_rejected(MempoolRejectReason::InvalidSignature);
+                }
                 MempoolError::Invalid(format!("signature verification failed: {}", e))
             })?;
         }
 
         // 3. Gas legality and balance checks (T168) - only when gas is enabled
         if self.is_gas_enabled() {
-            self.check_gas_admission(&tx)?;
+            if let Err(e) = self.check_gas_admission(&tx) {
+                if let Some(ref m) = self.metrics {
+                    m.inc_rejected(MempoolRejectReason::Other);
+                }
+                return Err(e);
+            }
         }
 
         // 4. Basic nonce sanity check (if max_nonce_gap > 0)
@@ -268,6 +451,9 @@ impl Mempool for InMemoryMempool {
             if let Some(&max_nonce) = inner.nonce_tracker.get(&tx.sender) {
                 // Reject if nonce is too far in the future
                 if tx.nonce > max_nonce + self.config.max_nonce_gap {
+                    if let Some(ref m) = self.metrics {
+                        m.inc_rejected(MempoolRejectReason::InvalidNonce);
+                    }
                     return Err(MempoolError::Invalid(format!(
                         "nonce {} too far ahead of max seen {} (gap limit {})",
                         tx.nonce, max_nonce, self.config.max_nonce_gap
@@ -275,6 +461,9 @@ impl Mempool for InMemoryMempool {
                 }
                 // Also reject if nonce is too far in the past (already executed)
                 if tx.nonce < max_nonce.saturating_sub(MAX_NONCE_GAP_BEHIND) {
+                    if let Some(ref m) = self.metrics {
+                        m.inc_rejected(MempoolRejectReason::InvalidNonce);
+                    }
                     return Err(MempoolError::Invalid(format!(
                         "nonce {} too far behind max seen {}",
                         tx.nonce, max_nonce
@@ -295,7 +484,25 @@ impl Mempool for InMemoryMempool {
         }
 
         // 5. Insert the transaction
-        inner.txs.push(tx);
+        if self.config.enable_fee_priority {
+            let cost = compute_tx_mempool_cost(&tx)?;
+            let score = TxPriorityScore {
+                fee_per_gas: cost.fee_per_gas,
+                effective_fee: cost.effective_fee,
+                arrival_id: inner.arrival_counter,
+            };
+            inner.arrival_counter += 1;
+            inner.tx_scores.insert((tx.sender, tx.nonce), score);
+            inner.priority_index.insert(score, tx);
+        } else {
+            inner.txs.push(tx);
+        }
+
+        // Update metrics
+        if let Some(ref m) = self.metrics {
+            m.inc_inserted();
+            m.set_size(inner.tx_count() as u64);
+        }
 
         Ok(())
     }
@@ -303,24 +510,62 @@ impl Mempool for InMemoryMempool {
     fn get_block_candidates(&self, max_txs: usize) -> Vec<QbindTransaction> {
         let inner = self.inner.read();
 
-        // Simple FIFO: take up to max_txs from the front
-        inner.txs.iter().take(max_txs).cloned().collect()
+        if self.config.enable_fee_priority {
+            // Priority mode: take up to max_txs from the back (highest priority)
+            inner
+                .priority_index
+                .values()
+                .rev()
+                .take(max_txs)
+                .cloned()
+                .collect()
+        } else {
+            // Simple FIFO: take up to max_txs from the front
+            inner.txs.iter().take(max_txs).cloned().collect()
+        }
     }
 
     fn remove_committed(&self, committed: &[QbindTransaction]) {
         let mut inner = self.inner.write();
 
-        // For each committed tx, remove matching (sender, nonce) from mempool
-        for committed_tx in committed {
-            inner
-                .txs
-                .retain(|tx| tx.sender != committed_tx.sender || tx.nonce != committed_tx.nonce);
+        if self.config.enable_fee_priority {
+            // Priority mode: remove by score
+            for committed_tx in committed {
+                if let Some(score) = inner
+                    .tx_scores
+                    .remove(&(committed_tx.sender, committed_tx.nonce))
+                {
+                    inner.priority_index.remove(&score);
+                    if let Some(ref m) = self.metrics {
+                        m.inc_committed();
+                    }
+                }
+            }
+        } else {
+            // FIFO mode: remove matching (sender, nonce) from mempool
+            for committed_tx in committed {
+                let old_len = inner.txs.len();
+                inner.txs.retain(|tx| {
+                    tx.sender != committed_tx.sender || tx.nonce != committed_tx.nonce
+                });
+
+                if let Some(ref m) = self.metrics {
+                    if inner.txs.len() < old_len {
+                        m.inc_committed();
+                    }
+                }
+            }
+        }
+
+        // Update size metric
+        if let Some(ref m) = self.metrics {
+            m.set_size(inner.tx_count() as u64);
         }
     }
 
     fn size(&self) -> usize {
         let inner = self.inner.read();
-        inner.txs.len()
+        inner.tx_count()
     }
 }
 
@@ -527,6 +772,7 @@ mod tests {
             max_txs: 2,
             max_nonce_gap: 0, // Disable nonce checks for this test
             gas_config: None,
+            enable_fee_priority: false,
         };
         let mempool = InMemoryMempool::with_config(config);
 
@@ -563,6 +809,7 @@ mod tests {
             max_txs: 10,
             max_nonce_gap: 0,
             gas_config: None,
+            enable_fee_priority: false,
         };
         let mempool = InMemoryMempool::with_key_provider(config, Arc::new(key_provider));
 
@@ -586,6 +833,7 @@ mod tests {
             max_txs: 100,
             max_nonce_gap: 5, // Allow gap of 5
             gas_config: None,
+            enable_fee_priority: false,
         };
         let mempool = InMemoryMempool::with_config(config);
 
@@ -667,6 +915,7 @@ mod tests {
             max_txs: 100,
             max_nonce_gap: 0,
             gas_config: None,
+            enable_fee_priority: false,
         };
         let mempool1 = InMemoryMempool::with_config(config.clone());
         let mempool2 = InMemoryMempool::with_config(config);
