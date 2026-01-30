@@ -204,10 +204,7 @@ impl P2pConsensusNetwork {
     ///
     /// * `p2p` - The P2P service for message transport
     /// * `mapping` - Custom validator-to-node mapping
-    pub fn with_mapping(
-        p2p: Arc<dyn P2pService>,
-        mapping: Box<dyn ValidatorNodeMapping>,
-    ) -> Self {
+    pub fn with_mapping(p2p: Arc<dyn P2pService>, mapping: Box<dyn ValidatorNodeMapping>) -> Self {
         Self {
             p2p,
             mapping: Arc::new(RwLock::new(mapping)),
@@ -285,11 +282,7 @@ impl ConsensusNetworkFacade for P2pConsensusNetwork {
         Ok(())
     }
 
-    fn send_timeout_msg(
-        &self,
-        _target: PeerId,
-        msg_bytes: Vec<u8>,
-    ) -> Result<(), NetworkError> {
+    fn send_timeout_msg(&self, _target: PeerId, msg_bytes: Vec<u8>) -> Result<(), NetworkError> {
         // For T173, broadcast timeout messages to all peers.
         // Future versions may add directed timeout sends.
         let msg = P2pMessage::Consensus(ConsensusNetMsg::Timeout(msg_bytes));
@@ -348,8 +341,7 @@ mod tests {
     #[test]
     fn test_p2p_consensus_network_with_local_validator() {
         let p2p = Arc::new(NullP2pService::zero());
-        let network = P2pConsensusNetwork::new(p2p, 4)
-            .with_local_validator(ValidatorId::new(0));
+        let network = P2pConsensusNetwork::new(p2p, 4).with_local_validator(ValidatorId::new(0));
 
         assert_eq!(network.local_validator_id, Some(ValidatorId::new(0)));
     }

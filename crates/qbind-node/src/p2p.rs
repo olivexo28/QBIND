@@ -456,7 +456,9 @@ mod tests {
     #[test]
     fn test_p2p_message_variants() {
         let _consensus = P2pMessage::Consensus(ConsensusNetMsg::Vote(vec![1, 2, 3]));
-        let _dag = P2pMessage::Dag(DagNetMsg::Batch { data: vec![4, 5, 6] });
+        let _dag = P2pMessage::Dag(DagNetMsg::Batch {
+            data: vec![4, 5, 6],
+        });
         let _control = P2pMessage::Control(ControlMsg::Heartbeat {
             view: 1,
             timestamp_ms: 1234567890,
@@ -495,7 +497,10 @@ mod tests {
 
         // Should not panic
         service.broadcast(P2pMessage::Dag(DagNetMsg::Batch { data: vec![] }));
-        service.send_to(NodeId::zero(), P2pMessage::Dag(DagNetMsg::BatchAck { data: vec![] }));
+        service.send_to(
+            NodeId::zero(),
+            P2pMessage::Dag(DagNetMsg::BatchAck { data: vec![] }),
+        );
 
         // Should return zero NodeId
         assert_eq!(service.local_node_id(), NodeId::zero());

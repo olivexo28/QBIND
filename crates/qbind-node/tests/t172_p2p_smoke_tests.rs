@@ -3,16 +3,14 @@
 //! This module contains smoke tests for the minimal P2P transport implementation.
 //! These tests verify basic functionality without requiring a full network setup.
 
-use qbind_node::p2p::{
-    ControlMsg, NodeId, P2pMessage, P2pService,
-};
-use qbind_node::p2p_tcp::TcpKemTlsP2pService;
-use qbind_node::node_config::NetworkTransportConfig;
-use qbind_node::metrics::P2pMetrics;
 use qbind_crypto::{CryptoProvider, StaticCryptoProvider};
 use qbind_net::connection::{ClientConnectionConfig, ServerConnectionConfig};
 use qbind_net::handshake::{ClientHandshakeConfig, ServerHandshakeConfig};
 use qbind_net::keys::KemPrivateKey;
+use qbind_node::metrics::P2pMetrics;
+use qbind_node::node_config::NetworkTransportConfig;
+use qbind_node::p2p::{ControlMsg, NodeId, P2pMessage, P2pService};
+use qbind_node::p2p_tcp::TcpKemTlsP2pService;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,10 +20,12 @@ fn create_test_crypto() -> Arc<dyn CryptoProvider> {
 }
 
 /// Helper function to create test connection configs.
-fn create_test_connection_configs(crypto: Arc<dyn CryptoProvider>) -> (ServerConnectionConfig, ClientConnectionConfig) {
+fn create_test_connection_configs(
+    crypto: Arc<dyn CryptoProvider>,
+) -> (ServerConnectionConfig, ClientConnectionConfig) {
     let server_kem_sk = vec![0u8; 32];
     let server_kem_pk = vec![0u8; 32];
-    
+
     let server_cfg = ServerConnectionConfig {
         handshake_config: ServerHandshakeConfig {
             kem_suite_id: 1,
@@ -38,7 +38,7 @@ fn create_test_connection_configs(crypto: Arc<dyn CryptoProvider>) -> (ServerCon
         },
         server_random: [0u8; 32],
     };
-    
+
     let client_cfg = ClientConnectionConfig {
         handshake_config: ClientHandshakeConfig {
             kem_suite_id: 1,
@@ -51,7 +51,7 @@ fn create_test_connection_configs(crypto: Arc<dyn CryptoProvider>) -> (ServerCon
         validator_id: [0u8; 32],
         peer_kem_pk: server_kem_pk,
     };
-    
+
     (server_cfg, client_cfg)
 }
 
