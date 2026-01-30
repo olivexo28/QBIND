@@ -556,12 +556,53 @@ Task T167 defines the gas and fee model for future implementation in TestNet Bet
 
 ---
 
+## 8. Networking / P2P (T170)
+
+TestNet Alpha continues to use the **static KEMTLS mesh** networking model from DevNet v0.
+
+### 8.1 Current State
+
+| Aspect | TestNet Alpha Status |
+| :--- | :--- |
+| **Topology** | Static mesh (fully-connected validators) |
+| **Transport** | KEMTLS (ML-KEM-768 + AEAD) |
+| **Peer Discovery** | None (config-driven static peers) |
+| **Gossip** | None (direct broadcast) |
+| **Multi-Region** | Not supported |
+
+### 8.2 P2P Design Reference
+
+The comprehensive P2P networking design for QBIND is documented in:
+
+- **[QBIND P2P Network Design](../network/QBIND_P2P_NETWORK_DESIGN.md)** (T170)
+
+This document specifies:
+
+- Node roles and identities (`NodeId`, key separation)
+- Overlay topology evolution (DevNet → TestNet → MainNet)
+- Protocol layering (transport, multiplexing, application frames)
+- Threat model and mitigations (Sybil, eclipse, DoS)
+- Phased rollout plan
+
+### 8.3 Evolution Path
+
+| Phase | P2P Capabilities |
+| :--- | :--- |
+| **TestNet Alpha** | Static mesh, config-driven peers, local harness |
+| **TestNet Beta** | Basic peer discovery, gossip for DAG batches, multi-machine |
+| **MainNet** | Full P2P with DoS protection, multi-region support |
+
+**Note**: TestNet Alpha does not change P2P behavior from DevNet. The P2P design document (T170) provides the architecture for future implementation in TestNet Beta and MainNet.
+
+---
+
 ## Appendix A: Related Documents
 
 - [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167)
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet v0 specification and freeze
 - [QBIND Parallel Execution Design](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) — Stage A/B parallelism
 - [QBIND Chain ID and Domains](../devnet/QBIND_CHAIN_ID_AND_DOMAINS.md) — Domain separation
+- [QBIND P2P Network Design](../network/QBIND_P2P_NETWORK_DESIGN.md) — P2P networking architecture (T170)
 
 ---
 
