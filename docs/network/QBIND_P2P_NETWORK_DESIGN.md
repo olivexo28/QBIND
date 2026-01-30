@@ -583,6 +583,7 @@ pub struct PeerRateLimiterConfig {
 - [x] NetworkTransportConfig skeleton
 - [x] P2pService trait skeleton
 - [x] **T172: P2P Transport v1 implementation (PQC KEMTLS, static peers)**
+- [x] **T173: Consensus & DAG networking over P2P (opt-in integration)**
 - [ ] Multi-machine deployment guide (future task)
 - [ ] Basic peer health monitoring (future task)
 
@@ -596,7 +597,16 @@ P2P v1 implements:
 - **Metrics**: Connection count, bytes sent/received, message counters
 - **Config-gated**: `enable_p2p` flag controls whether P2P is active
 
-Not yet wired into consensus/DAG production paths. Integration with `NodeHotstuffHarness` is provided as a builder method for testing.
+**Implementation Status (T173)**:
+
+T173 wires consensus and DAG messages through the P2P transport:
+
+- **Consensus → P2P send path**: `P2pConsensusNetwork` implements `ConsensusNetworkFacade` and wraps consensus messages (proposals, votes, timeouts) in `P2pMessage::Consensus` for P2P transport.
+- **DAG → P2P send path**: DAG mempool messages (batches, acks, certificates) can be sent as `P2pMessage::Dag` via the P2P service.
+- **P2P message types**: `ConsensusNetMsg` enum now has `Proposal`, `Vote`, `Timeout`, `NewView` variants; `DagNetMsg` enum has `Batch`, `BatchAck`, `BatchCertificate` variants.
+- **Network mode selection**: `NetworkMode` enum (`LocalMesh` / `P2p`) added to `NodeConfig` for selecting networking mode.
+- **Validator-to-NodeId mapping**: `ValidatorNodeMapping` trait and `SimpleValidatorNodeMapping` implementation bridge consensus `ValidatorId` to P2P `NodeId`.
+- **Default behavior preserved**: DevNet and TestNet Alpha default to `LocalMesh` mode; P2P is opt-in via `network_mode = P2p` configuration.
 
 ### 7.3 Phase 2: TestNet Beta
 

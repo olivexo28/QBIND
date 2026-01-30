@@ -138,43 +138,83 @@ impl AsRef<[u8]> for NodeId {
 // P2P Message Types
 // ============================================================================
 
-/// Placeholder for consensus network messages (T170).
+/// Consensus network messages for P2P transport (T170, T173).
 ///
-/// This enum will wrap the existing consensus message types for P2P transport.
-/// In the current implementation, consensus messages are handled directly by
-/// `ConsensusNetworkFacade`. This type provides a future abstraction layer.
+/// This enum wraps the existing consensus message types for P2P transport.
+/// Messages are serialized using bincode for wire encoding.
 ///
-/// # Future Variants
+/// # Message Types
 ///
-/// - `Proposal(BlockProposal)`
-/// - `Vote(Vote)`
-/// - `Timeout(TimeoutMessage)`
-/// - `NewView(NewViewMessage)`
+/// - `Proposal`: Block proposals from leaders
+/// - `Vote`: Votes for block proposals
+/// - `Timeout`: Timeout messages for view-change
+/// - `NewView`: New-view messages for view synchronization
+///
+/// # Wire Format
+///
+/// Each variant wraps the serialized form of the original wire message
+/// to allow efficient encoding/decoding over the P2P layer.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum ConsensusNetMsg {
-    /// Placeholder variant for future implementation.
+    /// A block proposal from a leader.
+    /// Contains the serialized `BlockProposal` from `qbind-wire`.
+    Proposal(Vec<u8>),
+
+    /// A vote for a block proposal.
+    /// Contains the serialized `Vote` from `qbind-wire`.
+    Vote(Vec<u8>),
+
+    /// A timeout message for view-change.
+    /// Contains the serialized timeout message bytes.
+    Timeout(Vec<u8>),
+
+    /// A new-view message for view synchronization.
+    /// Contains the serialized new-view message bytes.
     ///
-    /// Will be replaced with actual consensus message types.
-    _Placeholder,
+    /// **Note (T173)**: This variant is reserved for future HotStuff view-change
+    /// protocol extensions. The current consensus implementation uses direct
+    /// timeout broadcast for view synchronization. When full new-view message
+    /// support is added to `ConsensusNetworkFacade`, this variant will carry
+    /// those messages.
+    NewView(Vec<u8>),
 }
 
-/// Placeholder for DAG mempool network messages (T170).
+/// DAG mempool network messages for P2P transport (T170, T173).
 ///
-/// This enum will wrap the existing DAG mempool message types for P2P transport.
-/// In the current implementation, DAG messages are handled directly by the
-/// mempool layer. This type provides a future abstraction layer.
+/// This enum wraps the existing DAG mempool message types for P2P transport.
+/// Messages are serialized using bincode for wire encoding.
 ///
-/// # Future Variants
+/// # Message Types
 ///
-/// - `Batch(QbindBatch)`
-/// - `BatchAck(BatchAck)`
-/// - `BatchCertificate(BatchCertificate)`
+/// - `Batch`: A batch of transactions created by a validator
+/// - `BatchAck`: Acknowledgment of a stored batch
+/// - `BatchCertificate`: Availability certificate proving 2f+1 acks
+///
+/// # Wire Format
+///
+/// Each variant contains serialized data to allow efficient encoding/decoding.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum DagNetMsg {
-    /// Placeholder variant for future implementation.
-    ///
-    /// Will be replaced with actual DAG message types.
-    _Placeholder,
+    /// A batch of transactions from a validator.
+    /// Contains the serialized `QbindBatch` data.
+    Batch {
+        /// Serialized batch data.
+        data: Vec<u8>,
+    },
+
+    /// Acknowledgment that a batch has been stored.
+    /// Contains the serialized `BatchAck` data.
+    BatchAck {
+        /// Serialized batch ack data.
+        data: Vec<u8>,
+    },
+
+    /// Availability certificate proving quorum acknowledgment.
+    /// Contains the serialized `BatchCertificate` data.
+    BatchCertificate {
+        /// Serialized certificate data.
+        data: Vec<u8>,
+    },
 }
 
 /// Control messages for P2P protocol (T170).
@@ -421,8 +461,10 @@ mod tests {
 
     #[test]
     fn test_p2p_message_variants() {
-        let _consensus = P2pMessage::Consensus(ConsensusNetMsg::_Placeholder);
-        let _dag = P2pMessage::Dag(DagNetMsg::_Placeholder);
+        let _consensus = P2pMessage::Consensus(ConsensusNetMsg::Vote(vec![1, 2, 3]));
+        let _dag = P2pMessage::Dag(DagNetMsg::Batch {
+            data: vec![4, 5, 6],
+        });
         let _control = P2pMessage::Control(ControlMsg::Heartbeat {
             view: 1,
             timestamp_ms: 1234567890,
@@ -460,8 +502,11 @@ mod tests {
         let service = NullP2pService::zero();
 
         // Should not panic
-        service.broadcast(P2pMessage::Dag(DagNetMsg::_Placeholder));
-        service.send_to(NodeId::zero(), P2pMessage::Dag(DagNetMsg::_Placeholder));
+        service.broadcast(P2pMessage::Dag(DagNetMsg::Batch { data: vec![] }));
+        service.send_to(
+            NodeId::zero(),
+            P2pMessage::Dag(DagNetMsg::BatchAck { data: vec![] }),
+        );
 
         // Should return zero NodeId
         assert_eq!(service.local_node_id(), NodeId::zero());
