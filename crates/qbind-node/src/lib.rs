@@ -97,6 +97,7 @@ pub mod metrics;
 pub mod metrics_http;
 pub mod net_service;
 pub mod node_config;
+pub mod p2p;
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -182,6 +183,15 @@ pub use node_config::{
 
 // T165 DAG Availability Config exports
 pub use node_config::DagAvailabilityConfig;
+
+// T170 Network Transport Config exports
+pub use node_config::NetworkTransportConfig;
+
+// T170 P2P Service exports
+pub use p2p::{
+    ConsensusNetMsg, ControlMsg, DagNetMsg, NodeId, NullP2pService, P2pMessage, P2pService,
+    PeerInfo,
+};
 
 pub use load_harness::{
     run_load_harness, LoadGenerator, LoadHarnessConfig, LoadHarnessError, LoadHarnessResult,

@@ -131,6 +131,115 @@ impl DagAvailabilityConfig {
 }
 
 // ============================================================================
+// T170: NetworkTransportConfig
+// ============================================================================
+
+/// Configuration for the P2P network transport layer (T170).
+///
+/// This struct controls the behavior of the P2P networking stack.
+/// For DevNet and TestNet Alpha, P2P is disabled by default (static mesh).
+/// For TestNet Beta and MainNet, P2P will be enabled.
+///
+/// # Phased Rollout
+///
+/// - **DevNet v0**: `enable_p2p = false` — Uses static KEMTLS mesh
+/// - **TestNet Alpha**: `enable_p2p = false` — Config-driven static mesh
+/// - **TestNet Beta**: `enable_p2p = true` — Basic peer discovery + gossip
+/// - **MainNet**: `enable_p2p = true` — Full P2P with DoS protection
+///
+/// # Connection Limits
+///
+/// - `max_outbound`: Maximum outbound connections (default: 16)
+/// - `max_inbound`: Maximum inbound connections (default: 64)
+/// - `gossip_fanout`: Number of peers to forward gossip messages (default: 6)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::NetworkTransportConfig;
+///
+/// // Default config (P2P disabled, static mesh)
+/// let config = NetworkTransportConfig::default();
+/// assert!(!config.enable_p2p);
+///
+/// // Enable P2P for TestNet Beta
+/// let testnet_beta = NetworkTransportConfig::testnet_beta();
+/// assert!(testnet_beta.enable_p2p);
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub struct NetworkTransportConfig {
+    /// Whether the P2P overlay is enabled.
+    ///
+    /// - `false` (default): Uses static mesh (DevNet, TestNet Alpha)
+    /// - `true`: Uses dynamic P2P overlay (TestNet Beta, MainNet)
+    pub enable_p2p: bool,
+
+    /// Maximum number of outbound connections.
+    ///
+    /// Default: 16. For validators, this should be at least 2f+1 for liveness.
+    pub max_outbound: usize,
+
+    /// Maximum number of inbound connections.
+    ///
+    /// Default: 64. Higher than outbound to allow full nodes to connect.
+    pub max_inbound: usize,
+
+    /// Gossip fanout for DAG/mempool overlay.
+    ///
+    /// Default: 6. Number of peers to forward gossip messages to.
+    pub gossip_fanout: usize,
+}
+
+impl Default for NetworkTransportConfig {
+    fn default() -> Self {
+        Self {
+            enable_p2p: false, // Static mesh by default (DevNet/TestNet Alpha)
+            max_outbound: 16,  // Suggested default for validators
+            max_inbound: 64,   // Allow more inbound for full nodes
+            gossip_fanout: 6,  // Standard gossip fanout
+        }
+    }
+}
+
+impl NetworkTransportConfig {
+    /// Create a disabled configuration (DevNet/TestNet Alpha default).
+    ///
+    /// Uses static mesh networking without dynamic P2P.
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Create an enabled configuration for TestNet Beta.
+    ///
+    /// Enables basic P2P with peer discovery and gossip.
+    pub fn testnet_beta() -> Self {
+        Self {
+            enable_p2p: true,
+            max_outbound: 16,
+            max_inbound: 64,
+            gossip_fanout: 6,
+        }
+    }
+
+    /// Create a configuration for MainNet with production values.
+    ///
+    /// Enables full P2P with DoS protection settings.
+    pub fn mainnet() -> Self {
+        Self {
+            enable_p2p: true,
+            max_outbound: 16,
+            max_inbound: 64,
+            gossip_fanout: 8,
+        }
+    }
+
+    /// Check if the P2P overlay is enabled.
+    pub fn is_p2p_enabled(&self) -> bool {
+        self.enable_p2p
+    }
+}
+
+// ============================================================================
 // ExecutionProfile (T163)
 // ============================================================================
 
@@ -780,5 +889,54 @@ mod tests {
         // quorum_fraction = 3/4 = 0.75
         // ceil(4 * 0.75) = 3
         assert_eq!(config.compute_quorum_size(4), 3);
+    }
+
+    // ========================================================================
+    // T170: NetworkTransportConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_network_transport_config_default() {
+        let config = NetworkTransportConfig::default();
+        assert!(!config.enable_p2p, "P2P should be disabled by default");
+        assert_eq!(config.max_outbound, 16);
+        assert_eq!(config.max_inbound, 64);
+        assert_eq!(config.gossip_fanout, 6);
+    }
+
+    #[test]
+    fn test_network_transport_config_disabled() {
+        let config = NetworkTransportConfig::disabled();
+        assert!(!config.enable_p2p);
+        assert!(!config.is_p2p_enabled());
+    }
+
+    #[test]
+    fn test_network_transport_config_testnet_beta() {
+        let config = NetworkTransportConfig::testnet_beta();
+        assert!(config.enable_p2p);
+        assert!(config.is_p2p_enabled());
+        assert_eq!(config.max_outbound, 16);
+        assert_eq!(config.max_inbound, 64);
+        assert_eq!(config.gossip_fanout, 6);
+    }
+
+    #[test]
+    fn test_network_transport_config_mainnet() {
+        let config = NetworkTransportConfig::mainnet();
+        assert!(config.enable_p2p);
+        assert!(config.is_p2p_enabled());
+        assert_eq!(config.max_outbound, 16);
+        assert_eq!(config.max_inbound, 64);
+        assert_eq!(config.gossip_fanout, 8); // Higher fanout for MainNet
+    }
+
+    #[test]
+    fn test_network_transport_config_is_p2p_enabled() {
+        let disabled = NetworkTransportConfig::disabled();
+        assert!(!disabled.is_p2p_enabled());
+
+        let enabled = NetworkTransportConfig::testnet_beta();
+        assert!(enabled.is_p2p_enabled());
     }
 }

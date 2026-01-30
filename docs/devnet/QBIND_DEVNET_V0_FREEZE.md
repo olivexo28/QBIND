@@ -69,7 +69,7 @@ The following limitations are **accepted** for DevNet v0 and will be addressed i
 | **Nonce-only execution** | No user-visible VM; payloads are ignored | TestNet Alpha |
 | **No fee market / priority mempool** | FIFO ordering only (R5); gas model designed in T167; T168 implements initial VM v0 gas enforcement for TestNet only; T169 adds a config-gated fee-priority mempool for TestNet, DevNet remains FIFO-only | TestNet Beta |
 | **DAG v0 only** | No availability certificates; no leaderless data plane | TestNet Alpha |
-| **Static mesh networking** | No dynamic peer discovery, NAT traversal, or gossip | TestNet Alpha |
+| **Static mesh networking** | No dynamic P2P layer. Future P2P design in [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md) (T170); implementation will be staged across TestNet Alpha/Beta. | TestNet Beta |
 | **Single-machine cluster harness** | T160 harness is local only; not a distributed staging environment | TestNet Alpha |
 | **Loopback remote signer only** | No real networked remote signer or HSM integration | TestNet Beta |
 | **No Stage B parallelism** | Conflict-graph-based VM parallelism deferred until VM is available | MainNet |
@@ -115,12 +115,13 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 
 | Work Item | Description | Risks Addressed |
 | :--- | :--- | :--- |
+| **P2P Network Design (T170)** | Canonical networking design spec for TestNet+ evolution | R4 |
 | **Dynamic Peer Discovery** | Basic P2P overlay with peer exchange | R4 |
 | **Gossip for DAG Batches** | Efficient batch/certificate dissemination | R4, R6 |
 | **Multi-Machine Deployments** | Distributed test deployments beyond T160 single-machine harness | R4 |
 | **NAT Traversal (Optional)** | Enable connectivity through NAT when needed | R4 |
 
-**References**: [QBIND_DEVNET_V0_SPEC.md](./QBIND_DEVNET_V0_SPEC.md) §3
+**References**: [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md) (T170), [QBIND_DEVNET_V0_SPEC.md](./QBIND_DEVNET_V0_SPEC.md) §3
 
 ### 4.4 Keys & Remote Signer
 
