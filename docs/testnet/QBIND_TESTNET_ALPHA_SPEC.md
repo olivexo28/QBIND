@@ -599,7 +599,15 @@ This document specifies:
 - Simple framing (u8 discriminator + u32 length + payload)
 - Metrics for connections, bytes, and message counts
 
-TestNet Alpha remains default-off for P2P; `enable_p2p = false` is the default. P2P v1 is intended for experimental multi-process deployments and is not yet wired into production consensus/DAG paths.
+**Note (T173)**: T173 enables consensus and DAG messages to be transported over P2P v1 when enabled:
+- `P2pConsensusNetwork` implements `ConsensusNetworkFacade` backed by `P2pService`
+- `ConsensusNetMsg` enum carries proposals, votes, timeouts, new-views over P2P
+- `DagNetMsg` enum carries batches, acks, certificates over P2P
+- `NetworkMode` enum (`LocalMesh` / `P2p`) added to `NodeConfig` for mode selection
+- Default remains `LocalMesh` (existing behavior); `P2p` mode is opt-in
+- TestNet Alpha clusters can opt-in to P2P mode via `network_mode = P2p` and `enable_p2p = true`
+
+TestNet Alpha remains default-off for P2P; `enable_p2p = false` and `network_mode = LocalMesh` are the defaults. P2P transport is intended for experimental multi-process deployments in TestNet Alpha / Beta clusters.
 
 ---
 
