@@ -584,6 +584,7 @@ pub struct PeerRateLimiterConfig {
 - [x] P2pService trait skeleton
 - [x] **T172: P2P Transport v1 implementation (PQC KEMTLS, static peers)**
 - [x] **T173: Consensus & DAG networking over P2P (opt-in integration)**
+- [x] **T174: P2P receive path + cluster harness P2P mode**
 - [ ] Multi-machine deployment guide (future task)
 - [ ] Basic peer health monitoring (future task)
 
@@ -607,6 +608,17 @@ T173 wires consensus and DAG messages through the P2P transport:
 - **Network mode selection**: `NetworkMode` enum (`LocalMesh` / `P2p`) added to `NodeConfig` for selecting networking mode.
 - **Validator-to-NodeId mapping**: `ValidatorNodeMapping` trait and `SimpleValidatorNodeMapping` implementation bridge consensus `ValidatorId` to P2P `NodeId`.
 - **Default behavior preserved**: DevNet and TestNet Alpha default to `LocalMesh` mode; P2P is opt-in via `network_mode = P2p` configuration.
+
+**Implementation Status (T174)**:
+
+T174 completes the P2P receive path and adds cluster harness P2P mode:
+
+- **P2P inbound demuxer**: `P2pInboundDemuxer` component receives `P2pMessage` instances from `TcpKemTlsP2pService` and routes them to consensus and DAG handlers via `ConsensusInboundHandler` and `DagInboundHandler` traits.
+- **Handler traits**: `ConsensusInboundHandler`, `DagInboundHandler`, and `ControlInboundHandler` define clean interfaces for message routing. Channel-based implementations (`ChannelConsensusHandler`, `ChannelDagHandler`) integrate with existing async processing.
+- **Cluster harness P2P mode**: `ClusterNetworkMode` enum (`LocalMesh` / `P2p`) added to `TestnetAlphaClusterConfig` for running multi-node test clusters with P2P transport enabled.
+- **P2P smoke tests**: New tests verify P2P mode configuration and basic cluster operation with P2P networking.
+- **Metrics integration**: P2P inbound demuxer increments `messages_received_total` metrics for each message type (consensus/dag/control).
+- **Default behavior preserved**: DevNet and TestNet Alpha cluster harness default to `LocalMesh`; P2P mode is opt-in via `network_mode = ClusterNetworkMode::P2p`.
 
 ### 7.3 Phase 2: TestNet Beta
 
