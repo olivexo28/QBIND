@@ -165,6 +165,10 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 
 ## 5. Roadmap Summary
 
+> **Note (T178)**: For detailed TestNet specifications, see:
+> - **TestNet Alpha**: [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) + [QBIND_TESTNET_ALPHA_AUDIT.md](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md)
+> - **TestNet Beta** (next step): [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) + [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md)
+
 | Phase | Network | Key Changes from DevNet v0 |
 | :--- | :--- | :--- |
 | **TestNet Alpha** | TestNet | Minimal VM, DAG with availability certs (opt-in), basic P2P, networked remote signer |

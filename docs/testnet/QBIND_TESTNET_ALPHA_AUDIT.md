@@ -322,6 +322,10 @@ The following items are explicitly **NOT** required for TestNet Alpha readiness:
 
 This section summarizes what remains out-of-scope for Alpha and the explicit goals for future phases.
 
+> **Note (T178)**: The **TestNet Beta specification** is now the source of truth for Beta requirements. See [QBIND_TESTNET_BETA_SPEC.md](./QBIND_TESTNET_BETA_SPEC.md) for the complete Beta architecture.
+>
+> The **Beta audit skeleton** is the forward-looking risk tracker for Beta. See [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) for Beta-specific risks (TB-R1 through TB-R6).
+
 ### 6.1 TestNet Beta Goals
 
 | Work Item | Description | Reference |
@@ -403,6 +407,8 @@ This table maps TestNet Alpha tasks to their areas and documentation coverage.
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](./QBIND_TESTNET_ALPHA_SPEC.md) | Full TestNet Alpha architecture |
+| TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](./QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture (T178) |
+| TestNet Beta Audit Skeleton | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker (T178) |
 | Gas and Fees Design | [QBIND_GAS_AND_FEES_DESIGN.md](./QBIND_GAS_AND_FEES_DESIGN.md) | Gas and fee model (T167) |
 | DevNet v0 Freeze | [QBIND_DEVNET_V0_FREEZE.md](../devnet/QBIND_DEVNET_V0_FREEZE.md) | DevNet v0 baseline |
 | DevNet Audit Log | [QBIND_DEVNET_AUDIT.md](../devnet/QBIND_DEVNET_AUDIT.md) | DevNet task tracking |
