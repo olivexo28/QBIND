@@ -46,9 +46,9 @@ However, Beta introduces **new attack surfaces**:
 
 | ID | Category | Severity | Status | Spec Section |
 | :--- | :--- | :--- | :--- | :--- |
-| **TB-R1** | Execution & VM | Medium | Planned | [§2](./QBIND_TESTNET_BETA_SPEC.md#2-execution--state) |
+| **TB-R1** | Execution & VM | Medium | Partially Mitigated (T179) | [§2](./QBIND_TESTNET_BETA_SPEC.md#2-execution--state) |
 | **TB-R2** | State Persistence & Growth | Medium | Planned | [§2.2](./QBIND_TESTNET_BETA_SPEC.md#22-state-persistence) |
-| **TB-R3** | Gas / Fees & Fee Market | High | Planned | [§3](./QBIND_TESTNET_BETA_SPEC.md#3-gas--fees-beta-defaults) |
+| **TB-R3** | Gas / Fees & Fee Market | High | Partially Mitigated (T179) | [§3](./QBIND_TESTNET_BETA_SPEC.md#3-gas--fees-beta-defaults) |
 | **TB-R4** | DAG as Default | Medium | Planned | [§4](./QBIND_TESTNET_BETA_SPEC.md#4-mempool--dag) |
 | **TB-R5** | P2P & Topology | Medium | Planned | [§5](./QBIND_TESTNET_BETA_SPEC.md#5-networking--p2p) |
 | **TB-R6** | Ops & Observability | Low | Planned | [§7](./QBIND_TESTNET_BETA_SPEC.md#7-operational-profiles--cli-defaults) |
@@ -63,17 +63,24 @@ However, Beta introduces **new attack surfaces**:
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Gas-on execution bugs** | New failure modes (out-of-gas, fee deduction) may introduce bugs not covered by existing tests | Medium | Planned |
-| **Non-determinism under load** | Higher transaction volume with gas enforcement may expose latent non-determinism | Medium | Planned |
-| **State corruption** | Fee deduction logic errors could corrupt account balances | Medium | Planned |
+| **Gas-on execution bugs** | New failure modes (out-of-gas, fee deduction) may introduce bugs not covered by existing tests | Medium | Partially Mitigated |
+| **Non-determinism under load** | Higher transaction volume with gas enforcement may expose latent non-determinism | Medium | Partially Mitigated |
+| **State corruption** | Fee deduction logic errors could corrupt account balances | Medium | Partially Mitigated |
 
 **Current Mitigations**:
 - ✅ T177 property-based tests validate core VM v0 invariants (Alpha)
 - ✅ Sequential execution prevents race conditions
-- ⏳ Gas-specific property tests planned
+- ✅ **T179**: Gas-enabled property tests now cover gas/fee accounting:
+  - `t179_vm_v0_gas_proptests.rs`: Ledger-level gas property tests verifying:
+    - G1: No overflow/underflow under gas-on execution
+    - G2: Balance + burned fees conservation
+    - G3: Nonce monotonicity with gas-on
+    - G4: Failed transactions don't consume fees
+    - G5: Block gas limit is respected
+  - `t179_gas_pipeline_proptests.rs`: Node-level gas pipeline tests
 
 **Planned Mitigations**:
-- [ ] Extend T177 property tests to cover gas-enabled scenarios
+- [x] Extend T177 property tests to cover gas-enabled scenarios (T179)
 - [ ] Fuzzing with gas-limit edge cases
 - [ ] Stress testing under high TPS with gas enforcement
 
@@ -111,19 +118,22 @@ However, Beta introduces **new attack surfaces**:
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Fee market gaming** | Simple priority ordering may be gameable; front-running possible | High | Planned |
-| **Gas limit manipulation** | Attackers may craft transactions to maximize gas usage | Medium | Planned |
-| **Eviction attacks** | Attackers may flood mempool to evict legitimate low-fee txs | Medium | Planned |
-| **Balance draining** | Bugs in fee deduction could drain accounts unexpectedly | Medium | Planned |
+| **Fee market gaming** | Simple priority ordering may be gameable; front-running possible | High | Open |
+| **Gas limit manipulation** | Attackers may craft transactions to maximize gas usage | Medium | Partially Mitigated |
+| **Eviction attacks** | Attackers may flood mempool to evict legitimate low-fee txs | Medium | Open |
+| **Balance draining** | Bugs in fee deduction could drain accounts unexpectedly | Medium | Partially Mitigated |
 
 **Current Mitigations**:
 - ✅ Gas model fully designed (T167)
 - ✅ Gas enforcement implemented and config-gated (T168)
 - ✅ Fee-priority mempool implemented and config-gated (T169)
 - ✅ Mempool admission checks balance sufficiency
+- ✅ **T179**: Property tests for fee deduction correctness:
+  - `t179_vm_v0_gas_proptests.rs`: Validates balance + fee conservation, no fee charge for failed txs
+  - `t179_gas_pipeline_proptests.rs`: Validates mempool gas checks and block gas limit enforcement
 
 **Planned Mitigations**:
-- [ ] Property tests for fee deduction correctness
+- [x] Property tests for fee deduction correctness (T179)
 - [ ] Mempool eviction rate limiting
 - [ ] Fee market analysis and tuning
 - [ ] EIP-1559-style base fee (MainNet consideration)

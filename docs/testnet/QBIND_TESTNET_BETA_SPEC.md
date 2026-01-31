@@ -154,6 +154,19 @@ TestNet Beta accepts **both** v0 and v1 payload formats:
 
 **Reference**: [QBIND_GAS_AND_FEES_DESIGN.md](./QBIND_GAS_AND_FEES_DESIGN.md) for complete gas/fee specification.
 
+### 3.5 Property-Based Test Coverage (T179)
+
+Gas-enabled VM v0 execution has dedicated property-based test coverage validating:
+
+- **Balance + Fee Conservation**: `sum(initial_balances) == sum(final_balances) + total_burned_fees`
+- **Nonce Monotonicity with Gas**: Final nonce == initial nonce + count of successful txs
+- **Failed Transaction Safety**: Failed transactions don't consume gas or modify state
+- **Block Gas Limit Enforcement**: Total gas of included txs never exceeds configured limit
+
+Test files:
+- `qbind-ledger/tests/t179_vm_v0_gas_proptests.rs`: Ledger-level gas invariants (G1–G5)
+- `qbind-node/tests/t179_gas_pipeline_proptests.rs`: Node-level pipeline tests (P1–P3)
+
 ---
 
 ## 4. Mempool & DAG
@@ -272,10 +285,11 @@ This section provides a Beta-specific view of key security areas. For the comple
 | :--- | :--- | :--- |
 | VM v0 semantics | Same as Alpha | Low |
 | Property-based tests (T177) | Active | Mitigated |
+| Gas-enabled property tests (T179) | Active | Partially Mitigated |
 | Stage B parallelism | Off | N/A (not enabled) |
 | Gas-on behavior | New for Beta | Medium (new surface) |
 
-**Key Risk**: Gas-on execution introduces new failure modes (out-of-gas, fee deduction). Existing T177 property tests do not cover gas semantics.
+**Key Risk**: Gas-on execution introduces new failure modes (out-of-gas, fee deduction). T179 gas-enabled property tests now cover balance + fee conservation, nonce monotonicity with gas, and block gas limit invariants.
 
 ### 6.2 Gas / Fees
 
@@ -283,9 +297,10 @@ This section provides a Beta-specific view of key security areas. For the comple
 | :--- | :--- | :--- |
 | Gas enforcement | Enabled by default | Medium |
 | Fee market | Simple priority ordering | Medium |
+| Fee accounting tests (T179) | Active | Partially Mitigated |
 | DoS resistance | Substantially improved | Improved vs Alpha |
 
-**Key Risk**: Fee market is simple (no EIP-1559-style base fee); gaming and manipulation may be possible.
+**Key Risk**: Fee market is simple (no EIP-1559-style base fee); gaming and manipulation may be possible. T179 property tests validate fee deduction correctness and balance conservation.
 
 ### 6.3 DAG Availability
 
@@ -408,12 +423,12 @@ Beta nodes may interoperate with Alpha-style nodes **if configuration is aligned
 | DAG mempool + availability certs | ✅ Ready | T158, T165 |
 | P2P transport v1 | ✅ Ready | T172, T173, T174, T175 |
 | Property-based tests (T177) | ✅ Ready | T177 |
+| Gas-aware property tests (T179) | ✅ Ready | T179 |
 
 ### 9.2 Pending for Beta
 
 | Item | Status | Target Task |
 | :--- | :--- | :--- |
-| Gas-aware property tests | ⏳ Planned | T179+ |
 | DAG fetch-on-miss protocol | ⏳ Planned | Future |
 | DAG consensus coupling | ⏳ Planned | Future |
 | Dynamic P2P discovery | ⏳ Planned | Future |
