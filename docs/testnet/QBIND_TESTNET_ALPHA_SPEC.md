@@ -405,6 +405,14 @@ pub struct TestnetAlphaClusterConfig {
     pub initial_balance: u128,          // Default: 10_000_000
     pub txs_per_sender: u64,            // Default: 10
     pub num_senders: usize,             // Default: 10
+    pub network_mode: ClusterNetworkMode, // Default: LocalMesh (T174)
+    pub p2p_base_port: u16,             // Default: 19000 (T174)
+}
+
+/// Network mode for cluster testing (T174)
+pub enum ClusterNetworkMode {
+    LocalMesh,  // Existing behavior (default)
+    P2p,        // P2P transport via TcpKemTlsP2pService
 }
 ```
 
@@ -434,6 +442,12 @@ cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
   test_testnet_alpha_tps_scenario_minimal
 ```
 
+**P2P mode smoke test (T174):**
+```bash
+cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
+  test_testnet_alpha_cluster_p2p_vm_v0_fifo_smoke
+```
+
 ### Tests Included
 
 | Test | Description |
@@ -444,6 +458,9 @@ cargo test -p qbind-node --test t166_testnet_alpha_cluster_harness \
 | `test_testnet_alpha_cluster_dag_metrics_integration` | Verify DAG metrics (ignored) |
 | `test_testnet_alpha_tps_scenario_minimal` | CI-friendly TPS measurement |
 | `test_testnet_alpha_tps_scenario_heavy` | Heavy soak test (ignored) |
+| `test_testnet_alpha_cluster_p2p_config` | Verify P2P mode configuration (T174) |
+| `test_testnet_alpha_cluster_p2p_smoke` | Basic P2P mode cluster startup (T174) |
+| `test_testnet_alpha_cluster_p2p_vm_v0_fifo_smoke` | P2P mode with VM v0 and FIFO mempool (T174) |
 
 ### Purpose
 
@@ -606,6 +623,14 @@ This document specifies:
 - `NetworkMode` enum (`LocalMesh` / `P2p`) added to `NodeConfig` for mode selection
 - Default remains `LocalMesh` (existing behavior); `P2p` mode is opt-in
 - TestNet Alpha clusters can opt-in to P2P mode via `network_mode = P2p` and `enable_p2p = true`
+
+**Note (T174)**: T174 completes the P2P receive path and adds cluster harness P2P mode:
+- `P2pInboundDemuxer` component routes inbound `P2pMessage` instances to consensus and DAG handlers
+- `ConsensusInboundHandler`, `DagInboundHandler`, `ControlInboundHandler` traits define clean handler interfaces
+- `ChannelConsensusHandler` and `ChannelDagHandler` integrate with existing async processing
+- `ClusterNetworkMode` enum (`LocalMesh` / `P2p`) added to `TestnetAlphaClusterConfig`
+- New P2P smoke tests: `test_testnet_alpha_cluster_p2p_vm_v0_fifo_smoke` and related tests
+- Metrics integration: `messages_received_total` incremented for each P2P message type
 
 TestNet Alpha remains default-off for P2P; `enable_p2p = false` and `network_mode = LocalMesh` are the defaults. P2P transport is intended for experimental multi-process deployments in TestNet Alpha / Beta clusters.
 
