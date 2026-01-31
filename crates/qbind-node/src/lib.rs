@@ -99,6 +99,7 @@ pub mod metrics_http;
 pub mod net_service;
 pub mod node_config;
 pub mod p2p;
+pub mod p2p_inbound;
 pub mod p2p_tcp;
 pub mod peer;
 pub mod peer_manager;
@@ -196,6 +197,12 @@ pub use node_config::{parse_network_mode, NetworkMode};
 pub use p2p::{
     ConsensusNetMsg, ControlMsg, DagNetMsg, NodeId, NullP2pService, P2pMessage, P2pService,
     PeerInfo,
+};
+
+// T174 P2P Inbound exports
+pub use p2p_inbound::{
+    ChannelConsensusHandler, ChannelDagHandler, ConsensusInboundHandler, ControlInboundHandler,
+    DagInboundHandler, NullConsensusHandler, NullControlHandler, NullDagHandler, P2pInboundDemuxer,
 };
 
 pub use load_harness::{
