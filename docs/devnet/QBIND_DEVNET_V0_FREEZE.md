@@ -78,6 +78,8 @@ The following limitations are **accepted** for DevNet v0 and will be addressed i
 
 ## 4. TestNet Alpha Roadmap (Task Buckets)
 
+> **For up-to-date TestNet Alpha risk status and readiness, see [QBIND_TESTNET_ALPHA_AUDIT.md](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md).**
+
 This section defines the work buckets required to evolve DevNet v0 into TestNet Alpha. Each bucket will correspond to one or more future implementation tasks.
 
 ### 4.1 Execution / VM

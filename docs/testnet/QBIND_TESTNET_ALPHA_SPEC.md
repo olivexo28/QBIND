@@ -8,6 +8,8 @@
 
 ## 1. Scope
 
+> **For a risk-oriented view and readiness checklist of TestNet Alpha, see [QBIND_TESTNET_ALPHA_AUDIT.md](./QBIND_TESTNET_ALPHA_AUDIT.md).**
+
 TestNet Alpha is the first public test network for QBIND. It extends the DevNet v0 architecture with:
 
 - **Network Environment**: `NetworkEnvironment::Testnet` (`QBIND_TESTNET_CHAIN_ID`)
@@ -112,6 +114,8 @@ pub enum VmV0Error {
 - Transactions are executed **sequentially** in block order.
 - All state transitions are deterministic.
 - All validators executing the same block produce the same final state.
+
+> **Risk Note**: For VM/execution-related risks (TA-R1), see [QBIND_TESTNET_ALPHA_AUDIT.md §4.2](./QBIND_TESTNET_ALPHA_AUDIT.md).
 
 ---
 
@@ -363,6 +367,8 @@ TestNet Beta / MainNet may add:
 - Consensus rule: require cert before commit
 - PQ-safe aggregate signatures
 
+> **Risk Note**: For DAG availability risks (TA-R4), see [QBIND_TESTNET_ALPHA_AUDIT.md §4.2](./QBIND_TESTNET_ALPHA_AUDIT.md).
+
 | Work Item | Description | Target | Status |
 | :--- | :--- | :--- | :--- |
 | **State Persistence** | Disk-backed account state (RocksDB) | TestNet Alpha | ✅ Done (T164) |
@@ -571,6 +577,8 @@ Task T167 defines the gas and fee model for future implementation in TestNet Bet
 
 **Reference**: [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) for complete specification.
 
+> **Risk Note**: For gas/fee risks (TA-R3), see [QBIND_TESTNET_ALPHA_AUDIT.md §4.2](./QBIND_TESTNET_ALPHA_AUDIT.md).
+
 ---
 
 ## 8. Networking / P2P (T170)
@@ -641,10 +649,13 @@ TestNet Alpha remains default-off for P2P; `enable_p2p = false` and `network_mod
 - **Multi-process runbook**: [QBIND_P2P_TESTNET_ALPHA_GUIDE.md](../network/QBIND_P2P_TESTNET_ALPHA_GUIDE.md) provides step-by-step instructions for running a 4-validator P2P cluster across separate processes
 - DevNet v0 freeze is preserved: defaults remain `LocalMesh` with `enable_p2p = false`
 
+> **Risk Note**: For P2P networking risks (TA-R5), see [QBIND_TESTNET_ALPHA_AUDIT.md §4.2](./QBIND_TESTNET_ALPHA_AUDIT.md).
+
 ---
 
 ## Appendix A: Related Documents
 
+- [QBIND TestNet Alpha Audit & Readiness](./QBIND_TESTNET_ALPHA_AUDIT.md) — Risk and readiness checklist (T176)
 - [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167)
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet v0 specification and freeze
 - [QBIND Parallel Execution Design](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) — Stage A/B parallelism
