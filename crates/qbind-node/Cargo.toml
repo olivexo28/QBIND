@@ -10,6 +10,10 @@ default = []
 # When disabled (legacy): uses blocking PeerManager + spawn_blocking path.
 async-peer-manager = []
 
+[[bin]]
+name = "qbind-node"
+path = "src/main.rs"
+
 [dependencies]
 qbind-wire      = { path = "../qbind-wire" }
 qbind-consensus = { path = "../qbind-consensus" }
@@ -20,13 +24,14 @@ qbind-types     = { path = "../qbind-types" }
 qbind-net       = { path = "../qbind-net" }
 qbind-hash      = { path = "../qbind-hash" }
 rocksdb        = "0.22"
-tokio          = { version = "1.44", features = ["rt-multi-thread", "time", "sync", "macros", "net", "io-util"] }
+tokio          = { version = "1.44", features = ["rt-multi-thread", "time", "sync", "macros", "net", "io-util", "signal"] }
 crossbeam-channel = "0.5"
 num_cpus       = "1.16"
 parking_lot    = "0.12"
 thiserror      = "1.0"
 serde          = { version = "1.0", features = ["derive"] }
 bincode        = "1.3"
+clap           = { version = "4.5", features = ["derive"] }
 
 [dev-dependencies]
 qbind-serde  = { path = "../qbind-serde" }

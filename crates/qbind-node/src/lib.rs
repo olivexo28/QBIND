@@ -77,6 +77,7 @@ pub mod async_peer_manager;
 pub mod async_runner;
 pub mod block_store;
 pub mod channel_config;
+pub mod cli;
 pub mod commit_index;
 pub mod consensus_net;
 pub mod consensus_net_p2p;
@@ -100,6 +101,7 @@ pub mod net_service;
 pub mod node_config;
 pub mod p2p;
 pub mod p2p_inbound;
+pub mod p2p_node_builder;
 pub mod p2p_tcp;
 pub mod peer;
 pub mod peer_manager;
@@ -203,6 +205,18 @@ pub use p2p::{
 pub use p2p_inbound::{
     ChannelConsensusHandler, ChannelDagHandler, ConsensusInboundHandler, ControlInboundHandler,
     DagInboundHandler, NullConsensusHandler, NullControlHandler, NullDagHandler, P2pInboundDemuxer,
+};
+
+// T175 CLI exports
+pub use cli::{CliArgs, CliError};
+
+// T175 P2P Node Builder exports
+pub use p2p_node_builder::{P2pNodeBuilder, P2pNodeContext, P2pNodeError};
+
+// T175 Address parsing exports
+pub use node_config::{
+    parse_socket_addr, ParseAddrError, DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR,
+    VALID_NETWORK_MODES,
 };
 
 pub use load_harness::{

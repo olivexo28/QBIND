@@ -130,6 +130,8 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 
 **T174 Implementation Note**: T174 completes the P2P receive path with `P2pInboundDemuxer` for message routing and adds P2P mode to the TestNet Alpha cluster harness via `ClusterNetworkMode::P2p`. DevNet v0 remains unchanged with static mesh as the default. P2P cluster testing is available for TestNet Alpha experimentation.
 
+**T175 Implementation Note**: T175 wires P2P transport into the real `qbind-node` binary with CLI flags (`--network-mode`, `--enable-p2p`, `--p2p-listen-addr`, `--p2p-peer`) and provides a multi-process TestNet Alpha runbook. DevNet v0 remains unchanged: defaults are `LocalMesh` + `enable_p2p = false`. See [QBIND_P2P_TESTNET_ALPHA_GUIDE.md](../network/QBIND_P2P_TESTNET_ALPHA_GUIDE.md) for the runbook.
+
 **References**: [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md) (T170), [QBIND_DEVNET_V0_SPEC.md](./QBIND_DEVNET_V0_SPEC.md) §3
 
 ### 4.4 Keys & Remote Signer

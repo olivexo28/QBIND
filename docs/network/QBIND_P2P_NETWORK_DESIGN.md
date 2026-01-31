@@ -585,7 +585,7 @@ pub struct PeerRateLimiterConfig {
 - [x] **T172: P2P Transport v1 implementation (PQC KEMTLS, static peers)**
 - [x] **T173: Consensus & DAG networking over P2P (opt-in integration)**
 - [x] **T174: P2P receive path + cluster harness P2P mode**
-- [ ] Multi-machine deployment guide (future task)
+- [x] **T175: Node P2P wiring + multi-process runbook** (see [QBIND_P2P_TESTNET_ALPHA_GUIDE.md](./QBIND_P2P_TESTNET_ALPHA_GUIDE.md))
 - [ ] Basic peer health monitoring (future task)
 
 **Implementation Status (T172)**:

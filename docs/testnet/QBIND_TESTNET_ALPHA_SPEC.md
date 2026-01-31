@@ -634,6 +634,13 @@ This document specifies:
 
 TestNet Alpha remains default-off for P2P; `enable_p2p = false` and `network_mode = LocalMesh` are the defaults. P2P transport is intended for experimental multi-process deployments in TestNet Alpha / Beta clusters.
 
+**Note (T175)**: T175 provides full qbind-node binary wiring for P2P mode and a step-by-step multi-process runbook:
+- **CLI flags**: `--network-mode p2p`, `--enable-p2p`, `--p2p-listen-addr`, `--p2p-peer`, etc.
+- **Binary entry point**: `qbind-node` binary parses CLI args and starts the appropriate network mode
+- **P2P node builder**: `P2pNodeBuilder` wires `TcpKemTlsP2pService`, `P2pInboundDemuxer`, and `P2pConsensusNetwork`
+- **Multi-process runbook**: [QBIND_P2P_TESTNET_ALPHA_GUIDE.md](../network/QBIND_P2P_TESTNET_ALPHA_GUIDE.md) provides step-by-step instructions for running a 4-validator P2P cluster across separate processes
+- DevNet v0 freeze is preserved: defaults remain `LocalMesh` with `enable_p2p = false`
+
 ---
 
 ## Appendix A: Related Documents

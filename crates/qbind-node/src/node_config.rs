@@ -633,20 +633,10 @@ impl NodeConfig {
     ///
     /// Prints to stdout:
     /// ```text
-    /// qbind-node[validator=V1]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV profile=nonce-only
+    /// qbind-node[validator=V1]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV profile=nonce-only network=local-mesh p2p=disabled
     /// ```
     pub fn log_startup_info(&self, validator_id: Option<&str>) {
-        let validator_str = validator_id.unwrap_or("none");
-        let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
-
-        println!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={}",
-            validator_str,
-            self.environment,
-            chain_id_hex,
-            self.scope(),
-            self.execution_profile
-        );
+        println!("{}", self.startup_info_string(validator_id));
     }
 
     /// Format startup information as a string (for use in custom logging).
@@ -657,19 +647,122 @@ impl NodeConfig {
     ///
     /// # Returns
     ///
-    /// A formatted string with environment information.
+    /// A formatted string with environment and P2P information.
+    ///
+    /// # T175 Additions
+    ///
+    /// The startup info string now includes:
+    /// - Network mode (local-mesh / p2p)
+    /// - P2P state (enabled/disabled)
+    /// - Listen address (when P2P enabled)
+    /// - Number of static peers
     pub fn startup_info_string(&self, validator_id: Option<&str>) -> String {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
 
+        // Build P2P info string (T175)
+        let p2p_info = if self.network_mode == NetworkMode::P2p && self.network.enable_p2p {
+            let listen_str = self
+                .network
+                .listen_addr
+                .as_ref()
+                .map(|a| a.as_str())
+                .unwrap_or("default");
+            let peer_count = self.network.static_peers.len();
+            format!("p2p=enabled listen={} peers={}", listen_str, peer_count)
+        } else {
+            "p2p=disabled".to_string()
+        };
+
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {}",
             validator_str,
             self.environment,
             chain_id_hex,
             self.scope(),
-            self.execution_profile
+            self.execution_profile,
+            self.network_mode,
+            p2p_info
         )
+    }
+
+    /// Validate and normalize P2P configuration (T175).
+    ///
+    /// This method checks the P2P configuration and logs warnings for
+    /// common misconfigurations. It should be called after building
+    /// the NodeConfig from CLI arguments.
+    ///
+    /// # Behavior
+    ///
+    /// - If `network_mode == LocalMesh` or `enable_p2p == false`:
+    ///   P2P flags are ignored with a warning log.
+    /// - If `network_mode == P2p && enable_p2p == true`:
+    ///   - If `listen_addr` is missing, uses default (127.0.0.1:0)
+    ///   - If zero peers, logs a warning about single-node operation
+    /// - DevNet with P2P enabled logs a warning about violating freeze
+    ///
+    /// # Returns
+    ///
+    /// `true` if P2P should be enabled, `false` otherwise.
+    pub fn validate_p2p_config(&mut self) -> bool {
+        // Case 1: LocalMesh mode - P2P is disabled regardless of enable_p2p
+        if self.network_mode == NetworkMode::LocalMesh {
+            if self.network.enable_p2p {
+                eprintln!(
+                    "[T175] Warning: enable_p2p=true ignored because network_mode=local-mesh"
+                );
+            }
+            return false;
+        }
+
+        // Case 2: P2p mode but enable_p2p is false - warn and use LocalMesh
+        if self.network_mode == NetworkMode::P2p && !self.network.enable_p2p {
+            eprintln!(
+                "[T175] Warning: network_mode=p2p but enable_p2p=false; \
+                 P2P will not be started. Set --enable-p2p to enable P2P transport."
+            );
+            return false;
+        }
+
+        // Case 3: P2p mode and enable_p2p - validate and proceed
+        if self.network_mode == NetworkMode::P2p && self.network.enable_p2p {
+            // Warn if DevNet with P2P (violates freeze)
+            if self.environment == NetworkEnvironment::Devnet {
+                eprintln!(
+                    "[T175] Warning: P2P enabled in DevNet environment. \
+                     DevNet v0 freeze recommends LocalMesh. \
+                     Use --env testnet for P2P experimentation."
+                );
+            }
+
+            // Ensure listen_addr has a default
+            if self.network.listen_addr.is_none() {
+                eprintln!(
+                    "[T175] Warning: P2P enabled but no listen address specified. \
+                     Using default: 127.0.0.1:0 (OS-assigned port)"
+                );
+                self.network.listen_addr = Some("127.0.0.1:0".to_string());
+            }
+
+            // Warn if no peers
+            if self.network.static_peers.is_empty() {
+                eprintln!(
+                    "[T175] Warning: P2P enabled with zero static peers. \
+                     Node will operate in single-node loopback mode."
+                );
+            }
+
+            return true;
+        }
+
+        false
+    }
+
+    /// Check if P2P mode is effectively enabled.
+    ///
+    /// Returns `true` if both `network_mode == P2p` and `enable_p2p == true`.
+    pub fn is_p2p_mode(&self) -> bool {
+        self.network_mode == NetworkMode::P2p && self.network.enable_p2p
     }
 }
 
@@ -783,6 +876,72 @@ pub const DEFAULT_EXECUTION_PROFILE: &str = "nonce-only";
 
 /// Valid execution profile values for CLI help text.
 pub const VALID_EXECUTION_PROFILES: &[&str] = &["nonce-only", "vm-v0"];
+
+// ============================================================================
+// T175: Address Parsing Helpers
+// ============================================================================
+
+use std::net::SocketAddr;
+
+/// Error returned when parsing an invalid socket address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseAddrError {
+    /// The invalid address string that was provided.
+    pub invalid_value: String,
+    /// The reason for the parse failure.
+    pub reason: String,
+}
+
+impl std::fmt::Display for ParseAddrError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "invalid address '{}': {}",
+            self.invalid_value, self.reason
+        )
+    }
+}
+
+impl std::error::Error for ParseAddrError {}
+
+/// Parse a socket address from a CLI argument string (T175).
+///
+/// Accepts `host:port` format, e.g., "127.0.0.1:19000" or "0.0.0.0:9000".
+///
+/// # Arguments
+///
+/// * `s` - The address string from CLI
+///
+/// # Returns
+///
+/// `Ok(SocketAddr)` if valid, `Err(ParseAddrError)` otherwise.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_socket_addr;
+///
+/// let addr = parse_socket_addr("127.0.0.1:19000").unwrap();
+/// assert_eq!(addr.port(), 19000);
+///
+/// let result = parse_socket_addr("invalid:addr");
+/// assert!(result.is_err());
+/// ```
+pub fn parse_socket_addr(s: &str) -> Result<SocketAddr, ParseAddrError> {
+    s.parse().map_err(|e| ParseAddrError {
+        invalid_value: s.to_string(),
+        reason: format!("{}", e),
+    })
+}
+
+/// Default P2P listen address for CLI parsing.
+pub const DEFAULT_P2P_LISTEN_ADDR: &str = "127.0.0.1:0";
+
+/// Default network mode for CLI parsing.
+pub const DEFAULT_NETWORK_MODE: &str = "local-mesh";
+
+/// Valid network mode values for CLI help text.
+pub const VALID_NETWORK_MODES: &[&str] = &["local-mesh", "p2p"];
 
 // ============================================================================
 // Tests
