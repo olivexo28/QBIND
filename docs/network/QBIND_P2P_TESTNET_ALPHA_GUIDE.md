@@ -293,6 +293,7 @@ Expected output:
 
 - [QBIND P2P Network Design](./QBIND_P2P_NETWORK_DESIGN.md) - Full P2P architecture
 - [QBIND TestNet Alpha Spec](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) - TestNet Alpha features
+- [QBIND TestNet Alpha Audit](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md) - P2P-related risks and roadmap (TA-R5)
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) - DevNet freeze status
 
 ---
