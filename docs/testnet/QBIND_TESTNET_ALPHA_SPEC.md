@@ -308,6 +308,30 @@ T177 introduced a property-based test suite for VM v0 execution, exercising rand
 
 > **Risk Note**: T177 partially mitigates TA-R1 ("Execution / VM" risks). See [QBIND_TESTNET_ALPHA_AUDIT.md §4.2](./QBIND_TESTNET_ALPHA_AUDIT.md).
 
+### 5.4.1 Gas-Enabled Property Tests (T179)
+
+T179 extends the T177 property test suite to cover **gas-enabled VM v0 execution** with fee accounting invariants. These tests validate the gas enforcement and fee deduction logic introduced in T168.
+
+**Ledger-level gas proptests** in `qbind-ledger/tests/t179_vm_v0_gas_proptests.rs`:
+
+| Property | Description |
+| :--- | :--- |
+| **G1: No overflow with gas** | All account balances remain valid under gas/fee deduction |
+| **G2: Balance + fees conservation** | `sum(initial_balances) == sum(final_balances) + total_burned_fees` |
+| **G3: Nonce monotonicity with gas** | Final nonce == initial nonce + count of successful txs |
+| **G4: Failed txs no fee charge** | Failed transactions don't consume gas or fees |
+| **G5: Block gas limit respected** | Total gas of executed txs ≤ configured block gas limit |
+
+**Node-level gas pipeline proptests** in `qbind-node/tests/t179_gas_pipeline_proptests.rs`:
+
+| Property | Description |
+| :--- | :--- |
+| **P1: Mempool gas rejection** | Mempool rejects transactions with impossible gas |
+| **P2: Block gas limit end-to-end** | Block construction respects gas limit |
+| **P3: Pipeline vs engine consistency** | Pipeline and direct engine produce identical results |
+
+> **Risk Note**: T179 further mitigates TA-R1 ("Execution / VM" risks) and partially mitigates TB-R1 and TB-R3 (gas/fee risks for TestNet Beta). See [QBIND_TESTNET_BETA_AUDIT_SKELETON.md §2.2](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md).
+
 ---
 
 ## 5.5 DAG Availability Tests (T165)
