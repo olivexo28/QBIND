@@ -683,9 +683,24 @@ TestNet Alpha remains default-off for P2P; `enable_p2p = false` and `network_mod
 
 ---
 
+## 9. Path to TestNet Beta
+
+For the next phase of the TestNet roadmap (TestNet Beta), see [QBIND_TESTNET_BETA_SPEC.md](./QBIND_TESTNET_BETA_SPEC.md).
+
+TestNet Beta extends Alpha with:
+
+- **Gas enforcement enabled by default** — All transactions incur gas costs
+- **Fee-priority mempool** — Transactions ordered by fee, not just arrival time
+- **DAG mempool as default** — FIFO mempool becomes fallback only
+- **P2P networking as default** — LocalMesh becomes dev/harness only
+
+---
+
 ## Appendix A: Related Documents
 
 - [QBIND TestNet Alpha Audit & Readiness](./QBIND_TESTNET_ALPHA_AUDIT.md) — Risk and readiness checklist (T176)
+- [QBIND TestNet Beta Specification](./QBIND_TESTNET_BETA_SPEC.md) — TestNet Beta architecture (T178)
+- [QBIND TestNet Beta Audit Skeleton](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) — Beta risk tracker (T178)
 - [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167)
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet v0 specification and freeze
 - [QBIND Parallel Execution Design](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) — Stage A/B parallelism
