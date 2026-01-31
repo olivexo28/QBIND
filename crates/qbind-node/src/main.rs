@@ -63,7 +63,9 @@ async fn main() {
                 run_p2p_node(&config, &args).await;
             } else {
                 // P2P mode requested but not enabled - fall back to LocalMesh stub
-                eprintln!("[T175] P2P mode requested but not fully enabled. Running in LocalMesh mode.");
+                eprintln!(
+                    "[T175] P2P mode requested but not fully enabled. Running in LocalMesh mode."
+                );
                 run_local_mesh_node(&config, &args).await;
             }
         }
@@ -75,10 +77,7 @@ async fn main() {
 /// This is a stub for T175. Full LocalMesh node operation will be
 /// implemented in future tasks. For now, this prints a message and
 /// waits for shutdown signal.
-async fn run_local_mesh_node(
-    config: &qbind_node::node_config::NodeConfig,
-    _args: &CliArgs,
-) {
+async fn run_local_mesh_node(config: &qbind_node::node_config::NodeConfig, _args: &CliArgs) {
     println!(
         "[T175] LocalMesh mode: Node would start with environment={} profile={}",
         config.environment, config.execution_profile
@@ -97,10 +96,7 @@ async fn run_local_mesh_node(
 ///
 /// This creates the P2P transport service, wires up the inbound demuxer,
 /// and starts the consensus engine with P2P networking.
-async fn run_p2p_node(
-    config: &qbind_node::node_config::NodeConfig,
-    args: &CliArgs,
-) {
+async fn run_p2p_node(config: &qbind_node::node_config::NodeConfig, args: &CliArgs) {
     println!(
         "[T175] P2P mode: Node starting with environment={} profile={}",
         config.environment, config.execution_profile
@@ -111,7 +107,7 @@ async fn run_p2p_node(
 
     // Build the P2P node
     let builder = P2pNodeBuilder::new();
-    
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {
@@ -134,7 +130,7 @@ async fn run_p2p_node(
         .expect("Failed to listen for ctrl-c");
 
     println!("[T175] Shutting down P2P node...");
-    
+
     // Shutdown the P2P node
     if let Err(e) = P2pNodeBuilder::shutdown(node_context).await {
         eprintln!("[T175] Error during shutdown: {:?}", e);

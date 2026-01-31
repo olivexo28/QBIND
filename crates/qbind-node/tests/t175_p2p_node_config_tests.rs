@@ -75,7 +75,10 @@ fn test_p2p_config_local_mesh_disabled() {
     };
 
     let p2p_enabled = config.validate_p2p_config();
-    assert!(!p2p_enabled, "LocalMesh + enable_p2p=false should disable P2P");
+    assert!(
+        !p2p_enabled,
+        "LocalMesh + enable_p2p=false should disable P2P"
+    );
     assert!(!config.is_p2p_mode());
 }
 
@@ -298,10 +301,7 @@ fn test_startup_info_p2p_enabled() {
             gossip_fanout: 6,
             listen_addr: Some("0.0.0.0:19000".to_string()),
             advertised_addr: None,
-            static_peers: vec![
-                "127.0.0.1:19001".to_string(),
-                "127.0.0.1:19002".to_string(),
-            ],
+            static_peers: vec!["127.0.0.1:19001".to_string(), "127.0.0.1:19002".to_string()],
         },
         network_mode: NetworkMode::P2p,
     };

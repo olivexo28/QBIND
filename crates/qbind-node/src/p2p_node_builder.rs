@@ -62,8 +62,8 @@ use crate::metrics::P2pMetrics;
 use crate::node_config::NodeConfig;
 use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::p2p_inbound::{
-    ConsensusInboundHandler, ControlInboundHandler, DagInboundHandler,
-    NullConsensusHandler, NullControlHandler, NullDagHandler, P2pInboundDemuxer,
+    ConsensusInboundHandler, ControlInboundHandler, DagInboundHandler, NullConsensusHandler,
+    NullControlHandler, NullDagHandler, P2pInboundDemuxer,
 };
 use crate::p2p_tcp::{P2pTransportError, TcpKemTlsP2pService};
 
@@ -401,7 +401,8 @@ impl P2pNodeBuilder {
         let validator_id = ValidatorId::new(validator_id);
 
         // Create NodeId from validator ID
-        let node_id = SimpleValidatorNodeMapping::node_id_from_index(validator_id.as_u64() as usize);
+        let node_id =
+            SimpleValidatorNodeMapping::node_id_from_index(validator_id.as_u64() as usize);
 
         // Create crypto provider (using test crypto for T175)
         let kem_suite_id: u8 = 1;
@@ -410,8 +411,13 @@ impl P2pNodeBuilder {
         let crypto = make_test_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id);
 
         // Create connection configs
-        let (server_cfg, client_cfg) =
-            self.create_connection_configs(validator_id, crypto.clone(), kem_suite_id, aead_suite_id, sig_suite_id);
+        let (server_cfg, client_cfg) = self.create_connection_configs(
+            validator_id,
+            crypto.clone(),
+            kem_suite_id,
+            aead_suite_id,
+            sig_suite_id,
+        );
 
         // Create P2P service
         let mut p2p_service = TcpKemTlsP2pService::new(
@@ -598,17 +604,17 @@ impl P2pNodeBuilder {
     ///
     /// * `context` - The P2P node context to shutdown
     pub async fn shutdown(context: P2pNodeContext) -> Result<(), P2pNodeError> {
-        println!("[T175] Shutting down P2P node for validator {:?}", context.validator_id);
+        println!(
+            "[T175] Shutting down P2P node for validator {:?}",
+            context.validator_id
+        );
 
         // Abort the demuxer task
         context.demuxer_handle.abort();
-        
+
         // Wait for demuxer to finish (with timeout)
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            context.demuxer_handle,
-        )
-        .await;
+        let _ =
+            tokio::time::timeout(std::time::Duration::from_secs(5), context.demuxer_handle).await;
 
         // Note: TcpKemTlsP2pService shutdown is handled via its internal
         // shutdown channel when it's dropped
@@ -676,7 +682,7 @@ mod tests {
     fn test_simple_validator_node_mapping_node_id() {
         let node_id_0 = SimpleValidatorNodeMapping::node_id_from_index(0);
         let node_id_1 = SimpleValidatorNodeMapping::node_id_from_index(1);
-        
+
         assert_ne!(node_id_0, node_id_1);
     }
 
@@ -686,7 +692,11 @@ mod tests {
         let builder = P2pNodeBuilder::new().with_num_validators(4);
 
         let result = builder.build(&config, 0).await;
-        assert!(result.is_ok(), "Should build P2P node context: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Should build P2P node context: {:?}",
+            result.err()
+        );
 
         let context = result.unwrap();
         assert_eq!(context.validator_id.as_u64(), 0);

@@ -36,8 +36,8 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use crate::node_config::{
-    parse_environment, parse_execution_profile, parse_network_mode,
-    NetworkMode, NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
+    parse_environment, parse_execution_profile, parse_network_mode, NetworkMode,
+    NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
 };
 
 // ============================================================================
@@ -148,7 +148,11 @@ pub enum CliError {
     /// Invalid environment string.
     InvalidEnvironment(ParseEnvironmentError),
     /// Invalid socket address.
-    InvalidAddress { field: String, value: String, reason: String },
+    InvalidAddress {
+        field: String,
+        value: String,
+        reason: String,
+    },
     /// Configuration validation error.
     ConfigValidation(String),
 }
@@ -157,7 +161,11 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CliError::InvalidEnvironment(e) => write!(f, "invalid environment: {}", e),
-            CliError::InvalidAddress { field, value, reason } => {
+            CliError::InvalidAddress {
+                field,
+                value,
+                reason,
+            } => {
                 write!(f, "invalid {} '{}': {}", field, value, reason)
             }
             CliError::ConfigValidation(msg) => write!(f, "config validation error: {}", msg),
@@ -285,15 +293,23 @@ mod tests {
     fn test_cli_args_testnet_p2p() {
         let args = CliArgs::try_parse_from([
             "qbind-node",
-            "--env", "testnet",
-            "--execution-profile", "vm-v0",
-            "--network-mode", "p2p",
+            "--env",
+            "testnet",
+            "--execution-profile",
+            "vm-v0",
+            "--network-mode",
+            "p2p",
             "--enable-p2p",
-            "--p2p-listen-addr", "0.0.0.0:19000",
-            "--p2p-advertised-addr", "203.0.113.10:19000",
-            "--p2p-peer", "127.0.0.1:19001",
-            "--p2p-peer", "127.0.0.1:19002",
-            "--validator-id", "0",
+            "--p2p-listen-addr",
+            "0.0.0.0:19000",
+            "--p2p-advertised-addr",
+            "203.0.113.10:19000",
+            "--p2p-peer",
+            "127.0.0.1:19001",
+            "--p2p-peer",
+            "127.0.0.1:19002",
+            "--validator-id",
+            "0",
         ])
         .unwrap();
 
@@ -302,7 +318,10 @@ mod tests {
         assert_eq!(args.network_mode, "p2p");
         assert!(args.enable_p2p);
         assert_eq!(args.p2p_listen_addr, "0.0.0.0:19000");
-        assert_eq!(args.p2p_advertised_addr, Some("203.0.113.10:19000".to_string()));
+        assert_eq!(
+            args.p2p_advertised_addr,
+            Some("203.0.113.10:19000".to_string())
+        );
         assert_eq!(args.p2p_peers, vec!["127.0.0.1:19001", "127.0.0.1:19002"]);
         assert_eq!(args.validator_id, Some(0));
     }
@@ -311,11 +330,15 @@ mod tests {
     fn test_cli_args_to_node_config() {
         let args = CliArgs::try_parse_from([
             "qbind-node",
-            "--env", "testnet",
-            "--network-mode", "p2p",
+            "--env",
+            "testnet",
+            "--network-mode",
+            "p2p",
             "--enable-p2p",
-            "--p2p-listen-addr", "127.0.0.1:19000",
-            "--p2p-peer", "127.0.0.1:19001",
+            "--p2p-listen-addr",
+            "127.0.0.1:19000",
+            "--p2p-peer",
+            "127.0.0.1:19001",
         ])
         .unwrap();
 
@@ -324,7 +347,10 @@ mod tests {
         assert_eq!(config.environment, NetworkEnvironment::Testnet);
         assert_eq!(config.network_mode, NetworkMode::P2p);
         assert!(config.network.enable_p2p);
-        assert_eq!(config.network.listen_addr, Some("127.0.0.1:19000".to_string()));
+        assert_eq!(
+            config.network.listen_addr,
+            Some("127.0.0.1:19000".to_string())
+        );
         assert_eq!(config.network.static_peers, vec!["127.0.0.1:19001"]);
     }
 

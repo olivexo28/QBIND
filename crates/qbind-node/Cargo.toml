@@ -37,3 +37,4 @@ clap           = { version = "4.5", features = ["derive"] }
 qbind-serde  = { path = "../qbind-serde" }
 qbind-system = { path = "../qbind-system" }
 tempfile    = "3.10"
+proptest    = "1"

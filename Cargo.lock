@@ -2203,6 +2203,7 @@ dependencies = [
 name = "qbind-ledger"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "qbind-crypto",
  "qbind-hash",
  "qbind-serde",
@@ -2234,6 +2235,7 @@ dependencies = [
  "crossbeam-channel",
  "num_cpus",
  "parking_lot",
+ "proptest",
  "qbind-consensus",
  "qbind-crypto",
  "qbind-hash",

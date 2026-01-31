@@ -278,6 +278,36 @@ Located in `qbind-node/tests/t164_vm_v0_persistence_integration_tests.rs`:
 - `test_vm_v0_execute_block_persistent`
 - `test_vm_v0_multiple_blocks_persistent`
 
+### 5.4 Property-Based Tests (T177)
+
+T177 introduced a property-based test suite for VM v0 execution, exercising randomized transfer sequences and checking key invariants to strengthen the TestNet Alpha execution layer.
+
+**Ledger-level proptests** in `qbind-ledger/tests/t177_vm_v0_proptests.rs`:
+
+| Property | Description |
+| :--- | :--- |
+| **P1: No overflow** | All account balances remain valid (no underflow/overflow) |
+| **P2: Balance conservation** | Sum of all balances before == after (no mint/burn in Alpha) |
+| **P3: Nonce monotonicity** | Each account's final nonce == count of successful txs from that sender |
+| **P4: Determinism** | Same inputs produce identical outputs across multiple runs |
+| **P5: Fail-safe** | Failing txs (nonce mismatch, insufficient balance) do not mutate state |
+
+**Edge case scenarios**:
+- Self-transfers (sender == recipient)
+- Hot account distributing to many recipients
+- Many tiny dust transfers
+- Large balances near u128 boundaries
+- Nonce mismatch and insufficient balance rejection
+
+**Node-level pipeline proptests** in `qbind-node/tests/t177_vm_v0_pipeline_proptests.rs`:
+
+- `prop_direct_engine_determinism`: Baseline determinism for direct engine execution
+- `prop_pipeline_runs_without_panic`: Service handles randomized sequences without panic
+- `prop_pipeline_multiple_blocks`: Multiple blocks processed correctly
+- Restart-like scenarios: Two independent runs produce consistent behavior
+
+> **Risk Note**: T177 partially mitigates TA-R1 ("Execution / VM" risks). See [QBIND_TESTNET_ALPHA_AUDIT.md §4.2](./QBIND_TESTNET_ALPHA_AUDIT.md).
+
 ---
 
 ## 5.5 DAG Availability Tests (T165)

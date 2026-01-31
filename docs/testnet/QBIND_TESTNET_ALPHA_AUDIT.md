@@ -142,7 +142,7 @@ This section updates the DevNet v0 risk categories for TestNet Alpha's expanded 
 
 | ID | Category | Severity | Status | Mitigation Target |
 | :--- | :--- | :--- | :--- | :--- |
-| TA-R1 | Execution / VM | Medium | Open | TestNet Beta |
+| TA-R1 | Execution / VM | Medium | Partially Mitigated | TestNet Beta |
 | TA-R2 | State Persistence | Medium | Partially Mitigated | TestNet Beta |
 | TA-R3 | Gas / Fees | High | Open | TestNet Beta |
 | TA-R4 | DAG Availability | Medium | Partially Mitigated | TestNet Beta |
@@ -155,15 +155,26 @@ This section updates the DevNet v0 risk categories for TestNet Alpha's expanded 
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Non-determinism** | VM v0 execution may have subtle non-determinism bugs | Medium | Open |
-| **State corruption** | Bugs in balance arithmetic could corrupt account state | Medium | Open |
+| **Non-determinism** | VM v0 execution may have subtle non-determinism bugs | Medium | Partially Mitigated |
+| **State corruption** | Bugs in balance arithmetic could corrupt account state | Medium | Partially Mitigated |
 | **Parallelism staging** | Sequential execution limits throughput; Stage B deferred | Low | Open |
 
 **Mitigation Status**:
 - ✅ VM v0 execution is single-threaded (sequential) to avoid race conditions
 - ✅ All balance arithmetic uses safe integer operations (checked/saturating)
 - ✅ Extensive unit tests for edge cases (t163_vm_v0_tests.rs)
-- ⏳ Fuzzing and property-based testing planned for TestNet Beta
+- ✅ **T177**: Property-based testing for VM v0 invariants and determinism:
+  - `t177_vm_v0_proptests.rs`: Ledger-level property tests verifying:
+    - P1: No negative balances / no overflow
+    - P2: Total balance conservation (no mint/burn)
+    - P3: Nonce monotonicity per sender
+    - P4: Deterministic execution (same inputs → same outputs)
+    - P5: Failing transactions do not mutate state
+  - `t177_vm_v0_pipeline_proptests.rs`: Node-level integration tests verifying:
+    - Pipeline determinism matches direct engine execution
+    - Service handles randomized transaction sequences
+    - Restart-like scenarios produce consistent results
+- ⏳ Additional fuzzing coverage planned for TestNet Beta
 
 **Target Phase**: TestNet Beta (additional testing), MainNet (Stage B parallelism)
 
@@ -363,7 +374,7 @@ This section summarizes what remains out-of-scope for Alpha and the explicit goa
 
 ---
 
-## 7. Appendix: Task Index (T163–T175)
+## 7. Appendix: Task Index (T163–T177)
 
 This table maps TestNet Alpha tasks to their areas and documentation coverage.
 
@@ -383,6 +394,7 @@ This table maps TestNet Alpha tasks to their areas and documentation coverage.
 | **T174** | Networking | P2P receive path + cluster harness P2P mode | §2, §3.5, §5.2 |
 | **T175** | Networking | qbind-node P2P wiring + multi-process runbook | §2, §3.5, §5.4 |
 | **T176** | Documentation | This audit & readiness capsule | This document |
+| **T177** | Testing | VM v0 property-based invariant & determinism tests | §4.2 (TA-R1) |
 
 ---
 

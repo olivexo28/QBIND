@@ -206,8 +206,7 @@ impl P2pInboundDemuxer {
             receiver,
             consensus_handler,
             dag_handler,
-            control_handler: control_handler
-                .unwrap_or_else(|| Arc::new(NullControlHandler)),
+            control_handler: control_handler.unwrap_or_else(|| Arc::new(NullControlHandler)),
             metrics: None,
         }
     }
