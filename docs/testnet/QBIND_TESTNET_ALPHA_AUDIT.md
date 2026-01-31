@@ -155,8 +155,8 @@ This section updates the DevNet v0 risk categories for TestNet Alpha's expanded 
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Non-determinism** | VM v0 execution may have subtle non-determinism bugs | Medium | Partially Mitigated |
-| **State corruption** | Bugs in balance arithmetic could corrupt account state | Medium | Partially Mitigated |
+| **Non-determinism** | VM v0 execution may have subtle non-determinism bugs | Medium | Further Mitigated |
+| **State corruption** | Bugs in balance arithmetic could corrupt account state | Medium | Further Mitigated |
 | **Parallelism staging** | Sequential execution limits throughput; Stage B deferred | Low | Open |
 
 **Mitigation Status**:
@@ -174,6 +174,17 @@ This section updates the DevNet v0 risk categories for TestNet Alpha's expanded 
     - Pipeline determinism matches direct engine execution
     - Service handles randomized transaction sequences
     - Restart-like scenarios produce consistent results
+- ✅ **T179**: Gas-enabled property-based testing for fee accounting invariants:
+  - `t179_vm_v0_gas_proptests.rs`: Ledger-level gas property tests verifying:
+    - G1: No overflow/underflow under gas-on execution
+    - G2: Balance + burned fees conservation
+    - G3: Nonce monotonicity with gas-on
+    - G4: Failed transactions don't consume fees
+    - G5: Block gas limit is respected
+  - `t179_gas_pipeline_proptests.rs`: Node-level gas pipeline tests verifying:
+    - P1: Mempool gas validation
+    - P2: Block gas limit enforcement end-to-end
+    - P3: Pipeline vs direct engine consistency with gas
 - ⏳ Additional fuzzing coverage planned for TestNet Beta
 
 **Target Phase**: TestNet Beta (additional testing), MainNet (Stage B parallelism)
