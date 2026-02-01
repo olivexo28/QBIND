@@ -309,6 +309,8 @@ fn dag_msg_type(msg: &DagNetMsg) -> &'static str {
         DagNetMsg::Batch { .. } => "Batch",
         DagNetMsg::BatchAck { .. } => "BatchAck",
         DagNetMsg::BatchCertificate { .. } => "BatchCertificate",
+        DagNetMsg::BatchRequest { .. } => "BatchRequest",
+        DagNetMsg::BatchResponse { .. } => "BatchResponse",
     }
 }
 

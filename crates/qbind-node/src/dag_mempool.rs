@@ -552,6 +552,61 @@ impl BatchAckTracker {
 }
 
 // ============================================================================
+// T182: Missing Batch Tracking
+// ============================================================================
+
+/// Information about a batch that is missing from the local mempool (T182).
+///
+/// When a node receives a `BatchAck` for a batch it doesn't have, it records
+/// the batch as missing. This information is used to drive fetch-on-miss requests.
+///
+/// ## Lifecycle
+///
+/// 1. Node receives `BatchAck` for batch B from validator V
+/// 2. Node checks: do we have batch B? No.
+/// 3. Node calls `record_missing_batch(batch_ref, first_seen_from_validator)`
+/// 4. Later, node can call `get_missing_batches()` to get a list of missing batches
+/// 5. Node sends `BatchRequest` to peers
+/// 6. On receiving `BatchResponse`, node calls `insert_remote_batch()` and removes from missing
+#[derive(Clone, Debug)]
+pub struct MissingBatchInfo {
+    /// Reference to the missing batch.
+    pub batch_ref: BatchRef,
+    /// The first validator we saw acknowledge this batch.
+    pub first_ack_from: ValidatorId,
+    /// Unix timestamp (milliseconds) when we first learned about this batch.
+    pub first_seen_ms: u64,
+    /// Number of fetch attempts made so far.
+    pub fetch_attempts: u32,
+    /// Unix timestamp of last fetch attempt (0 if never attempted).
+    pub last_fetch_ms: u64,
+}
+
+impl MissingBatchInfo {
+    /// Create a new missing batch info record.
+    pub fn new(batch_ref: BatchRef, first_ack_from: ValidatorId, first_seen_ms: u64) -> Self {
+        Self {
+            batch_ref,
+            first_ack_from,
+            first_seen_ms,
+            fetch_attempts: 0,
+            last_fetch_ms: 0,
+        }
+    }
+
+    /// Record a fetch attempt.
+    pub fn record_fetch_attempt(&mut self, timestamp_ms: u64) {
+        self.fetch_attempts += 1;
+        self.last_fetch_ms = timestamp_ms;
+    }
+
+    /// Get the batch ID.
+    pub fn batch_id(&self) -> &BatchId {
+        &self.batch_ref.batch_id
+    }
+}
+
+// ============================================================================
 // QbindBatch
 // ============================================================================
 
@@ -1193,6 +1248,11 @@ impl StoredBatch {
 /// - Forms `BatchCertificate`s when quorum is reached
 /// - Exposes certificate status via `batch_certificate()` and `has_certificate()`
 ///
+/// ## T182: Missing Batch Tracking
+///
+/// When a node receives a `BatchAck` for a batch it doesn't have, it tracks
+/// the batch as "missing" and can request it from peers via the fetch API.
+///
 /// ## Thread Safety
 ///
 /// Uses `parking_lot::RwLock` for interior mutability.
@@ -1204,6 +1264,8 @@ pub struct InMemoryDagMempool {
     ack_tracker: RwLock<BatchAckTracker>,
     /// Whether availability certificates are enabled.
     availability_enabled: bool,
+    /// Missing batches that we've seen acks for but don't have (T182).
+    missing_batches: RwLock<HashMap<BatchId, MissingBatchInfo>>,
 }
 
 impl InMemoryDagMempool {
@@ -1236,6 +1298,7 @@ impl InMemoryDagMempool {
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(1)),
             availability_enabled: false,
+            missing_batches: RwLock::new(HashMap::new()),
         }
     }
 
@@ -1263,6 +1326,7 @@ impl InMemoryDagMempool {
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(quorum_size)),
             availability_enabled: true,
+            missing_batches: RwLock::new(HashMap::new()),
         }
     }
 
@@ -1411,6 +1475,156 @@ impl InMemoryDagMempool {
     /// Check if a batch exists in the mempool.
     pub fn has_batch(&self, batch_id: &BatchId) -> bool {
         self.inner.read().batches_by_id.contains_key(batch_id)
+    }
+
+    // ========================================================================
+    // T182: Missing Batch Tracking & Fetch API
+    // ========================================================================
+
+    /// Record a missing batch (T182).
+    ///
+    /// This method is called when we receive a `BatchAck` for a batch we don't have.
+    /// The batch is added to the missing batches tracking map so it can be fetched.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_ref` - Reference to the missing batch
+    /// * `first_ack_from` - The validator that sent the ack that revealed the missing batch
+    /// * `timestamp_ms` - Current Unix timestamp in milliseconds
+    ///
+    /// # Returns
+    ///
+    /// `true` if this is a newly recorded missing batch, `false` if already tracked.
+    pub fn record_missing_batch(
+        &self,
+        batch_ref: BatchRef,
+        first_ack_from: ValidatorId,
+        timestamp_ms: u64,
+    ) -> bool {
+        let batch_id = batch_ref.batch_id;
+
+        // Don't track if we already have the batch
+        if self.has_batch(&batch_id) {
+            return false;
+        }
+
+        let mut missing = self.missing_batches.write();
+        if missing.contains_key(&batch_id) {
+            return false;
+        }
+
+        let info = MissingBatchInfo::new(batch_ref, first_ack_from, timestamp_ms);
+        missing.insert(batch_id, info);
+
+        // Update metrics
+        if let Some(ref m) = self.metrics {
+            m.inc_missing_batches_recorded();
+        }
+
+        true
+    }
+
+    /// Check if a batch is tracked as missing (T182).
+    pub fn is_batch_missing(&self, batch_id: &BatchId) -> bool {
+        self.missing_batches.read().contains_key(batch_id)
+    }
+
+    /// Get the number of missing batches being tracked (T182).
+    pub fn missing_batch_count(&self) -> usize {
+        self.missing_batches.read().len()
+    }
+
+    /// Get a list of missing batches for fetch requests (T182).
+    ///
+    /// Returns a list of `MissingBatchInfo` for batches that should be fetched.
+    /// The caller can use this to issue `BatchRequest` messages to peers.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_count` - Maximum number of missing batches to return
+    ///
+    /// # Returns
+    ///
+    /// A vector of `MissingBatchInfo` for batches that need to be fetched.
+    pub fn get_missing_batches(&self, max_count: usize) -> Vec<MissingBatchInfo> {
+        self.missing_batches
+            .read()
+            .values()
+            .take(max_count)
+            .cloned()
+            .collect()
+    }
+
+    /// Record a fetch attempt for a missing batch (T182).
+    ///
+    /// # Arguments
+    ///
+    /// * `batch_id` - The batch ID being fetched
+    /// * `timestamp_ms` - Current Unix timestamp in milliseconds
+    ///
+    /// # Returns
+    ///
+    /// `true` if the batch was tracked and updated, `false` if not tracked.
+    pub fn record_fetch_attempt(&self, batch_id: &BatchId, timestamp_ms: u64) -> bool {
+        let mut missing = self.missing_batches.write();
+        if let Some(info) = missing.get_mut(batch_id) {
+            info.record_fetch_attempt(timestamp_ms);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Handle a batch response (T182).
+    ///
+    /// This method is called when we receive a `BatchResponse` from a peer.
+    /// If the batch is valid and we were tracking it as missing, we insert it
+    /// and remove it from the missing batches map.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` - The batch received from the peer
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the batch was inserted (was missing and is now present).
+    /// `Ok(false)` if the batch was already present (not missing).
+    /// `Err` if the batch is invalid.
+    pub fn handle_batch_response(&self, batch: QbindBatch) -> Result<bool, DagMempoolError> {
+        let batch_id = batch.batch_id;
+
+        // First, check and remove from missing_batches while holding the lock
+        // This reduces lock contention by doing the check and remove atomically
+        let was_tracked_as_missing = self.missing_batches.write().remove(&batch_id).is_some();
+
+        // Check if we already have this batch (separate lock from missing_batches)
+        if self.has_batch(&batch_id) {
+            // Already present, nothing to do
+            return Ok(false);
+        }
+
+        // Insert the batch
+        self.insert_remote_batch(batch)?;
+
+        // Update metrics only if it was tracked as missing
+        if was_tracked_as_missing {
+            if let Some(ref m) = self.metrics {
+                m.inc_missing_batches_fetched();
+            }
+        }
+
+        Ok(was_tracked_as_missing)
+    }
+
+    /// Get a batch by ID (T182).
+    ///
+    /// Returns a clone of the batch if it exists in the mempool.
+    pub fn get_batch(&self, batch_id: &BatchId) -> Option<QbindBatch> {
+        self.inner
+            .read()
+            .batches_by_id
+            .get(batch_id)
+            .map(|stored| stored.batch.clone())
     }
 
     /// Create a batch from pending transactions (internal helper).
@@ -1851,6 +2065,12 @@ pub struct DagMempoolMetrics {
     batch_acks_rejected_other: AtomicU64,
     /// Total number of batch certificates formed.
     batch_certs_total: AtomicU64,
+
+    // T182: Missing batch tracking metrics
+    /// Total number of missing batches recorded.
+    missing_batches_recorded: AtomicU64,
+    /// Total number of missing batches successfully fetched.
+    missing_batches_fetched: AtomicU64,
 }
 
 impl DagMempoolMetrics {
@@ -1986,6 +2206,30 @@ impl DagMempoolMetrics {
             + self.batch_acks_rejected_other()
     }
 
+    // ========================================================================
+    // T182: Missing Batch Metrics
+    // ========================================================================
+
+    /// Get the total missing batches recorded.
+    pub fn missing_batches_recorded(&self) -> u64 {
+        self.missing_batches_recorded.load(Ordering::Relaxed)
+    }
+
+    /// Increment the missing batches recorded counter.
+    pub fn inc_missing_batches_recorded(&self) {
+        self.missing_batches_recorded.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total missing batches fetched.
+    pub fn missing_batches_fetched(&self) -> u64 {
+        self.missing_batches_fetched.load(Ordering::Relaxed)
+    }
+
+    /// Increment the missing batches fetched counter.
+    pub fn inc_missing_batches_fetched(&self) {
+        self.missing_batches_fetched.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Format metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -2030,6 +2274,17 @@ impl DagMempoolMetrics {
         output.push_str(&format!(
             "qbind_dag_batch_certs_total {}\n",
             self.batch_certs_total()
+        ));
+
+        // T182: Missing batch metrics
+        output.push_str("\n# DAG Fetch-on-Miss Metrics (T182)\n");
+        output.push_str(&format!(
+            "qbind_dag_missing_batches_recorded {}\n",
+            self.missing_batches_recorded()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_missing_batches_fetched {}\n",
+            self.missing_batches_fetched()
         ));
         output
     }
@@ -2453,5 +2708,285 @@ mod tests {
         let output = metrics.format_metrics();
         assert!(output.contains("qbind_dag_batches_total 1"));
         assert!(output.contains("qbind_dag_txs_total 5"));
+    }
+
+    // ========================================================================
+    // T182: Missing Batch Tracking Tests
+    // ========================================================================
+
+    #[test]
+    fn test_missing_batch_info_creation() {
+        let batch_ref = BatchRef::new(ValidatorId::new(1), [0xAA; 32]);
+        let info = MissingBatchInfo::new(batch_ref.clone(), ValidatorId::new(2), 12345);
+
+        assert_eq!(*info.batch_id(), [0xAA; 32]);
+        assert_eq!(info.batch_ref, batch_ref);
+        assert_eq!(info.first_ack_from, ValidatorId::new(2));
+        assert_eq!(info.first_seen_ms, 12345);
+        assert_eq!(info.fetch_attempts, 0);
+        assert_eq!(info.last_fetch_ms, 0);
+    }
+
+    #[test]
+    fn test_missing_batch_info_record_fetch_attempt() {
+        let batch_ref = BatchRef::new(ValidatorId::new(1), [0xBB; 32]);
+        let mut info = MissingBatchInfo::new(batch_ref, ValidatorId::new(2), 10000);
+
+        info.record_fetch_attempt(20000);
+        assert_eq!(info.fetch_attempts, 1);
+        assert_eq!(info.last_fetch_ms, 20000);
+
+        info.record_fetch_attempt(30000);
+        assert_eq!(info.fetch_attempts, 2);
+        assert_eq!(info.last_fetch_ms, 30000);
+    }
+
+    #[test]
+    fn test_dag_mempool_record_missing_batch() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        let batch_ref = BatchRef::new(ValidatorId::new(99), [0xCC; 32]);
+
+        // Record the missing batch
+        let recorded = mempool.record_missing_batch(batch_ref.clone(), ValidatorId::new(2), 5000);
+        assert!(recorded, "should record new missing batch");
+
+        // Check it's tracked
+        assert!(mempool.is_batch_missing(&batch_ref.batch_id));
+        assert_eq!(mempool.missing_batch_count(), 1);
+
+        // Recording again should return false
+        let recorded2 = mempool.record_missing_batch(batch_ref.clone(), ValidatorId::new(3), 6000);
+        assert!(!recorded2, "should not re-record same batch");
+        assert_eq!(mempool.missing_batch_count(), 1);
+    }
+
+    #[test]
+    fn test_dag_mempool_record_missing_batch_not_if_exists() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        // Create and insert a batch
+        let batch = QbindBatch::new(
+            ValidatorId::new(5),
+            0,
+            vec![],
+            vec![make_test_tx(0xDD, 0)],
+        );
+        let batch_id = batch.batch_id;
+        let batch_ref = BatchRef::new(ValidatorId::new(5), batch_id);
+
+        mempool
+            .insert_remote_batch(batch)
+            .expect("insert should succeed");
+
+        // Try to record it as missing - should fail since we have it
+        let recorded = mempool.record_missing_batch(batch_ref, ValidatorId::new(2), 5000);
+        assert!(!recorded, "should not record existing batch as missing");
+        assert_eq!(mempool.missing_batch_count(), 0);
+    }
+
+    #[test]
+    fn test_dag_mempool_get_missing_batches() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        // Record multiple missing batches
+        for i in 0..5 {
+            let mut batch_id = [0u8; 32];
+            batch_id[0] = i;
+            let batch_ref = BatchRef::new(ValidatorId::new(i as u64), batch_id);
+            mempool.record_missing_batch(batch_ref, ValidatorId::new(1), i as u64 * 1000);
+        }
+
+        assert_eq!(mempool.missing_batch_count(), 5);
+
+        // Get 3 missing batches
+        let missing = mempool.get_missing_batches(3);
+        assert_eq!(missing.len(), 3);
+
+        // Get all missing batches
+        let all_missing = mempool.get_missing_batches(100);
+        assert_eq!(all_missing.len(), 5);
+    }
+
+    #[test]
+    fn test_dag_mempool_record_fetch_attempt() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        let batch_id: BatchId = [0xEE; 32];
+        let batch_ref = BatchRef::new(ValidatorId::new(1), batch_id);
+
+        // Record missing batch
+        mempool.record_missing_batch(batch_ref, ValidatorId::new(2), 1000);
+
+        // Record fetch attempt
+        let updated = mempool.record_fetch_attempt(&batch_id, 2000);
+        assert!(updated);
+
+        // Verify attempt recorded
+        let missing = mempool.get_missing_batches(10);
+        let info = missing.iter().find(|m| *m.batch_id() == batch_id).unwrap();
+        assert_eq!(info.fetch_attempts, 1);
+        assert_eq!(info.last_fetch_ms, 2000);
+
+        // Non-existent batch should return false
+        let not_updated = mempool.record_fetch_attempt(&[0xFF; 32], 3000);
+        assert!(!not_updated);
+    }
+
+    #[test]
+    fn test_dag_mempool_handle_batch_response() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        // Create a batch
+        let batch = QbindBatch::new(
+            ValidatorId::new(5),
+            0,
+            vec![],
+            vec![make_test_tx(0xFF, 0)],
+        );
+        let batch_id = batch.batch_id;
+        let batch_ref = BatchRef::new(ValidatorId::new(5), batch_id);
+
+        // Record it as missing
+        mempool.record_missing_batch(batch_ref, ValidatorId::new(2), 1000);
+        assert!(mempool.is_batch_missing(&batch_id));
+        assert_eq!(mempool.missing_batch_count(), 1);
+
+        // Handle the batch response
+        let was_missing = mempool
+            .handle_batch_response(batch)
+            .expect("handle response should succeed");
+        assert!(was_missing, "batch should have been missing");
+
+        // Batch should now exist and not be missing
+        assert!(mempool.has_batch(&batch_id));
+        assert!(!mempool.is_batch_missing(&batch_id));
+        assert_eq!(mempool.missing_batch_count(), 0);
+    }
+
+    #[test]
+    fn test_dag_mempool_handle_batch_response_not_missing() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        // Create a batch
+        let batch = QbindBatch::new(
+            ValidatorId::new(5),
+            0,
+            vec![],
+            vec![make_test_tx(0xAA, 0)],
+        );
+        let batch_id = batch.batch_id;
+
+        // Don't record it as missing, just handle the response
+        let was_missing = mempool
+            .handle_batch_response(batch)
+            .expect("handle response should succeed");
+        assert!(!was_missing, "batch should not have been missing");
+
+        // Batch should now exist
+        assert!(mempool.has_batch(&batch_id));
+    }
+
+    #[test]
+    fn test_dag_mempool_handle_batch_response_duplicate() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        // Create and insert a batch
+        let batch = QbindBatch::new(
+            ValidatorId::new(5),
+            0,
+            vec![],
+            vec![make_test_tx(0xBB, 0)],
+        );
+        let batch_id = batch.batch_id;
+
+        mempool
+            .insert_remote_batch(batch.clone())
+            .expect("insert should succeed");
+        assert!(mempool.has_batch(&batch_id));
+
+        // Handle response for already-existing batch
+        let was_missing = mempool
+            .handle_batch_response(batch)
+            .expect("handle response should succeed");
+        assert!(!was_missing, "batch was already present");
+    }
+
+    #[test]
+    fn test_dag_mempool_get_batch() {
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
+
+        // Non-existent batch
+        let none = mempool.get_batch(&[0xCC; 32]);
+        assert!(none.is_none());
+
+        // Create and insert a batch
+        let batch = QbindBatch::new(
+            ValidatorId::new(5),
+            42,
+            vec![],
+            vec![make_test_tx(0xDD, 123)],
+        );
+        let batch_id = batch.batch_id;
+
+        mempool
+            .insert_remote_batch(batch.clone())
+            .expect("insert should succeed");
+
+        // Get the batch
+        let retrieved = mempool.get_batch(&batch_id).expect("batch should exist");
+        assert_eq!(retrieved.batch_id, batch_id);
+        assert_eq!(retrieved.creator, ValidatorId::new(5));
+        assert_eq!(retrieved.view_hint, 42);
+        assert_eq!(retrieved.txs.len(), 1);
+    }
+
+    #[test]
+    fn test_dag_mempool_metrics_missing_batch() {
+        use std::sync::Arc;
+
+        let metrics = Arc::new(DagMempoolMetrics::new());
+        let mempool = InMemoryDagMempool::new(ValidatorId::new(1)).with_metrics(metrics.clone());
+
+        // Create a batch with known content
+        let batch = QbindBatch::new(
+            ValidatorId::new(99),
+            0,
+            vec![],
+            vec![make_test_tx(0xEE, 0)],
+        );
+        let batch_id = batch.batch_id;
+        let batch_ref = BatchRef::new(ValidatorId::new(99), batch_id);
+
+        // Record the batch as missing using the actual batch_id
+        mempool.record_missing_batch(batch_ref, ValidatorId::new(2), 1000);
+
+        assert_eq!(metrics.missing_batches_recorded(), 1);
+        assert_eq!(metrics.missing_batches_fetched(), 0);
+
+        // Now handle the batch response (simulating fetch completion)
+        let was_missing = mempool
+            .handle_batch_response(batch)
+            .expect("handle should succeed");
+        assert!(was_missing, "batch should have been tracked as missing");
+
+        // Verify metrics were updated
+        assert_eq!(metrics.missing_batches_fetched(), 1);
+        assert_eq!(mempool.missing_batch_count(), 0);
+        assert!(mempool.has_batch(&batch_id));
+    }
+
+    #[test]
+    fn test_dag_mempool_metrics_format_includes_t182() {
+        let metrics = DagMempoolMetrics::new();
+
+        metrics.inc_missing_batches_recorded();
+        metrics.inc_missing_batches_recorded();
+        metrics.inc_missing_batches_fetched();
+
+        let output = metrics.format_metrics();
+
+        assert!(output.contains("qbind_dag_missing_batches_recorded 2"));
+        assert!(output.contains("qbind_dag_missing_batches_fetched 1"));
     }
 }
