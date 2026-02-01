@@ -86,7 +86,7 @@ pub type BatchId = [u8; 32];
 /// - `batch_id`: The SHA3-256 hash identifying the batch
 ///
 /// Batch references are used in parent links to form the DAG structure.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct BatchRef {
     /// The validator who created the referenced batch.
     pub creator: ValidatorId,
@@ -115,7 +115,7 @@ impl BatchRef {
 ///
 /// The signature covers the batch signing preimage (domain-separated),
 /// NOT the full batch including transactions.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BatchSignature {
     /// The raw signature bytes.
     pub bytes: Vec<u8>,
@@ -641,7 +641,7 @@ impl MissingBatchInfo {
 ///
 /// Where `parents_root` and `tx_root` are SHA3-256 hashes of the respective
 /// arrays, providing a compact commitment for signing.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QbindBatch {
     /// Unique identifier for this batch (SHA3-256 of canonical encoding).
     pub batch_id: BatchId,
@@ -1031,6 +1031,46 @@ pub fn compute_tx_id(tx: &QbindTransaction) -> TxId {
     bytes.extend_from_slice(&tx.sender);
     bytes.extend_from_slice(&tx.nonce.to_le_bytes());
     sha3_256(&bytes)
+}
+
+// ============================================================================
+// T183: Wire Encoding Helpers for Batch Fetch
+// ============================================================================
+
+/// Encode a BatchRef for wire transmission (T183).
+///
+/// Uses bincode for deterministic encoding. The resulting bytes can be
+/// embedded in `DagNetMsg::BatchRequest { data }` for P2P transmission.
+pub fn encode_batch_ref(batch_ref: &BatchRef) -> Vec<u8> {
+    bincode::serialize(batch_ref).expect("BatchRef encoding should not fail")
+}
+
+/// Decode a BatchRef from wire format (T183).
+///
+/// # Errors
+///
+/// Returns `DagMempoolError::Invalid` if the data is malformed.
+pub fn decode_batch_ref(data: &[u8]) -> Result<BatchRef, DagMempoolError> {
+    bincode::deserialize(data)
+        .map_err(|e| DagMempoolError::Invalid(format!("BatchRef decode: {}", e)))
+}
+
+/// Encode a QbindBatch for wire transmission (T183).
+///
+/// Uses bincode for deterministic encoding. The resulting bytes can be
+/// embedded in `DagNetMsg::BatchResponse { data }` for P2P transmission.
+pub fn encode_batch(batch: &QbindBatch) -> Vec<u8> {
+    bincode::serialize(batch).expect("QbindBatch encoding should not fail")
+}
+
+/// Decode a QbindBatch from wire format (T183).
+///
+/// # Errors
+///
+/// Returns `DagMempoolError::Invalid` if the data is malformed.
+pub fn decode_batch(data: &[u8]) -> Result<QbindBatch, DagMempoolError> {
+    bincode::deserialize(data)
+        .map_err(|e| DagMempoolError::Invalid(format!("QbindBatch decode: {}", e)))
 }
 
 // ============================================================================
@@ -1627,6 +1667,60 @@ impl InMemoryDagMempool {
             .map(|stored| stored.batch.clone())
     }
 
+    /// Drain missing batches ready for fetch requests (T183).
+    ///
+    /// Returns up to `max` batch references that should be fetched now,
+    /// respecting cooldown periods to avoid aggressive re-requesting.
+    /// This method also records fetch attempts for the returned batches.
+    ///
+    /// # Arguments
+    ///
+    /// * `max` - Maximum number of batch refs to return
+    /// * `now_ms` - Current timestamp in milliseconds
+    /// * `cooldown_ms` - Minimum time between fetch attempts (e.g., 1000ms)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `BatchRef` for batches ready to be fetched.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let now_ms = std::time::SystemTime::now()
+    ///     .duration_since(std::time::UNIX_EPOCH)
+    ///     .unwrap()
+    ///     .as_millis() as u64;
+    /// let cooldown_ms = 1000; // 1 second cooldown
+    /// let batch_refs = mempool.drain_missing_batches_for_fetch(8, now_ms, cooldown_ms);
+    /// for batch_ref in batch_refs {
+    ///     dag_p2p_client.broadcast_batch_request(&batch_ref);
+    /// }
+    /// ```
+    pub fn drain_missing_batches_for_fetch(
+        &self,
+        max: usize,
+        now_ms: u64,
+        cooldown_ms: u64,
+    ) -> Vec<BatchRef> {
+        let mut missing = self.missing_batches.write();
+        let mut result = Vec::with_capacity(max);
+
+        for info in missing.values_mut() {
+            if result.len() >= max {
+                break;
+            }
+            // Check cooldown: skip if last fetch was too recent
+            if info.last_fetch_ms > 0 && (now_ms.saturating_sub(info.last_fetch_ms)) < cooldown_ms {
+                continue;
+            }
+            // Record attempt and add to result
+            info.record_fetch_attempt(now_ms);
+            result.push(info.batch_ref.clone());
+        }
+
+        result
+    }
+
     /// Create a batch from pending transactions (internal helper).
     ///
     /// This is called when we have enough pending txs to form a batch.
@@ -2217,7 +2311,8 @@ impl DagMempoolMetrics {
 
     /// Increment the missing batches recorded counter.
     pub fn inc_missing_batches_recorded(&self) {
-        self.missing_batches_recorded.fetch_add(1, Ordering::Relaxed);
+        self.missing_batches_recorded
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get the total missing batches fetched.
@@ -2766,12 +2861,7 @@ mod tests {
         let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
 
         // Create and insert a batch
-        let batch = QbindBatch::new(
-            ValidatorId::new(5),
-            0,
-            vec![],
-            vec![make_test_tx(0xDD, 0)],
-        );
+        let batch = QbindBatch::new(ValidatorId::new(5), 0, vec![], vec![make_test_tx(0xDD, 0)]);
         let batch_id = batch.batch_id;
         let batch_ref = BatchRef::new(ValidatorId::new(5), batch_id);
 
@@ -2838,12 +2928,7 @@ mod tests {
         let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
 
         // Create a batch
-        let batch = QbindBatch::new(
-            ValidatorId::new(5),
-            0,
-            vec![],
-            vec![make_test_tx(0xFF, 0)],
-        );
+        let batch = QbindBatch::new(ValidatorId::new(5), 0, vec![], vec![make_test_tx(0xFF, 0)]);
         let batch_id = batch.batch_id;
         let batch_ref = BatchRef::new(ValidatorId::new(5), batch_id);
 
@@ -2869,12 +2954,7 @@ mod tests {
         let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
 
         // Create a batch
-        let batch = QbindBatch::new(
-            ValidatorId::new(5),
-            0,
-            vec![],
-            vec![make_test_tx(0xAA, 0)],
-        );
+        let batch = QbindBatch::new(ValidatorId::new(5), 0, vec![], vec![make_test_tx(0xAA, 0)]);
         let batch_id = batch.batch_id;
 
         // Don't record it as missing, just handle the response
@@ -2892,12 +2972,7 @@ mod tests {
         let mempool = InMemoryDagMempool::new(ValidatorId::new(1));
 
         // Create and insert a batch
-        let batch = QbindBatch::new(
-            ValidatorId::new(5),
-            0,
-            vec![],
-            vec![make_test_tx(0xBB, 0)],
-        );
+        let batch = QbindBatch::new(ValidatorId::new(5), 0, vec![], vec![make_test_tx(0xBB, 0)]);
         let batch_id = batch.batch_id;
 
         mempool
@@ -2949,12 +3024,7 @@ mod tests {
         let mempool = InMemoryDagMempool::new(ValidatorId::new(1)).with_metrics(metrics.clone());
 
         // Create a batch with known content
-        let batch = QbindBatch::new(
-            ValidatorId::new(99),
-            0,
-            vec![],
-            vec![make_test_tx(0xEE, 0)],
-        );
+        let batch = QbindBatch::new(ValidatorId::new(99), 0, vec![], vec![make_test_tx(0xEE, 0)]);
         let batch_id = batch.batch_id;
         let batch_ref = BatchRef::new(ValidatorId::new(99), batch_id);
 

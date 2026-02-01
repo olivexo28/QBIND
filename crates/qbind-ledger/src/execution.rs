@@ -74,7 +74,7 @@ impl UserPublicKey {
 ///
 /// Currently uses ML-DSA-44 (2420 bytes max). The suite_id is carried
 /// in the transaction itself.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct UserSignature {
     /// The raw signature bytes.
     pub bytes: Vec<u8>,
@@ -129,7 +129,7 @@ pub const TX_DOMAIN_TAG: &[u8] = b"QBIND:TX:v1";
 ///
 /// Use `verify_signature_with_chain_id()` with the sender's `UserPublicKey` and the
 /// chain ID for the network environment.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QbindTransaction {
     /// The account ID of the sender.
     pub sender: AccountId,

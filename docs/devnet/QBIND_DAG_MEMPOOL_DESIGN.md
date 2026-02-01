@@ -479,6 +479,44 @@ In TestNet Beta and MainNet, DAG batch dissemination will run atop the P2P overl
 
 This replaces the current static mesh broadcast with efficient gossip-based propagation.
 
+**T182-T183: DAG Batch Fetch-on-Miss v0**:
+
+T182 and T183 implement a basic fetch-on-miss protocol for DAG batch availability:
+
+| Component | Description |
+| :--- | :--- |
+| **Missing Batch Tracking** | `MissingBatchInfo` tracks batches we've seen acks for but don't have locally |
+| **BatchRequest/BatchResponse** | New `DagNetMsg` variants for requesting and receiving missing batches |
+| **DagP2pClient** | Helper for broadcasting batch requests and sending responses |
+| **DagFetchHandler** | Inbound handler that processes fetch requests/responses |
+| **Cooldown Logic** | `drain_missing_batches_for_fetch()` respects cooldown to avoid aggressive retries |
+
+**Protocol Flow**:
+
+```text
+1. Node A receives BatchAck for batch B from validator V
+2. Node A checks: do we have batch B? No.
+3. Node A calls record_missing_batch(batch_ref, V, timestamp)
+4. On tick: Node A calls drain_missing_batches_for_fetch(max, now, cooldown)
+5. For each returned BatchRef: Node A broadcasts BatchRequest via DagP2pClient
+6. Node B receives BatchRequest, looks up batch, sends BatchResponse if found
+7. Node A receives BatchResponse, calls handle_batch_response() to insert
+```
+
+**Current Limitations (v0)**:
+
+- Simple broadcast to all peers (no intelligent peer selection)
+- Basic cooldown-based retry (no exponential backoff)
+- No consensus-level coupling (certificates not required for commit)
+- Limited metrics (requests/responses/failures counted)
+
+**Future Enhancements (TestNet Beta / MainNet)**:
+
+- Targeted peer selection based on who sent acks
+- Exponential backoff with jitter
+- Consensus coupling: require certificates before commit
+- Certificate aggregation for efficiency
+
 **Success Criteria**:
 - Stable operation over weeks of TestNet.
 - Clear TPS improvement over FIFO.

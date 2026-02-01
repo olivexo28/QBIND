@@ -11,6 +11,7 @@ qbind-serde = { path = "../qbind-serde" }
 qbind-hash  = { path = "../qbind-hash" }
 rayon = "1.10"
 rocksdb = "0.22"
+serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 tempfile = "3.10"

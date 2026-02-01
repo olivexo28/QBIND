@@ -2162,6 +2162,7 @@ dependencies = [
  "qbind-types",
  "qbind-wire",
  "rand 0.8.5",
+ "serde",
  "sha3",
 ]
 
@@ -2211,6 +2212,7 @@ dependencies = [
  "qbind-wire",
  "rayon",
  "rocksdb",
+ "serde",
  "tempfile",
 ]
 

@@ -9,7 +9,7 @@
 //! ┌─────────────────────────────────────────────────────────────────┐
 //! │                    P2P Inbound Processing                       │
 //! │                                                                 │
-//! │  ┌─────────────────────────────────────────────────────────┐    │ 
+//! │  ┌─────────────────────────────────────────────────────────┐    │
 //! │  │              TcpKemTlsP2pService                        │    │
 //! │  │                     │                                   │    │
 //! │  │                     ▼                                   │    │
@@ -59,7 +59,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use crate::metrics::P2pMetrics;
-use crate::p2p::{ConsensusNetMsg, ControlMsg, DagNetMsg, P2pMessage};
+use crate::p2p::{ConsensusNetMsg, ControlMsg, DagNetMsg, NodeId, P2pMessage};
 
 // ============================================================================
 // Handler Traits
@@ -83,22 +83,43 @@ pub trait ConsensusInboundHandler: Send + Sync {
     fn handle_consensus_msg(&self, msg: ConsensusNetMsg);
 }
 
-/// Handler trait for inbound DAG mempool messages over P2P (T174).
+/// Handler trait for inbound DAG mempool messages over P2P (T174, T183).
 ///
 /// Implementations receive deserialized DAG messages and route them
 /// to the DAG mempool for processing.
+///
+/// # T183 Extension
+///
+/// The `handle_dag_msg_from` method allows handlers to receive sender context,
+/// which is required for `BatchRequest`/`BatchResponse` handling.
 pub trait DagInboundHandler: Send + Sync {
     /// Handle an inbound DAG message.
     ///
     /// # Arguments
     ///
-    /// * `msg` - The DAG network message (Batch, BatchAck, BatchCertificate)
+    /// * `msg` - The DAG network message (Batch, BatchAck, BatchCertificate, BatchRequest, BatchResponse)
     ///
     /// # Note
     ///
     /// This method should be non-blocking. Heavy processing should be
     /// dispatched to a background task or channel.
     fn handle_dag_msg(&self, msg: DagNetMsg);
+
+    /// Handle an inbound DAG message with sender context (T183).
+    ///
+    /// This method is called when the sender's identity is known, enabling
+    /// handlers to respond directly to the sender (e.g., for `BatchRequest`).
+    ///
+    /// The default implementation ignores the sender and calls `handle_dag_msg`.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The DAG network message
+    /// * `sender` - The NodeId of the peer who sent the message
+    fn handle_dag_msg_from(&self, msg: DagNetMsg, _sender: NodeId) {
+        // Default: ignore sender context, delegate to basic handler
+        self.handle_dag_msg(msg);
+    }
 }
 
 /// Handler trait for inbound control messages over P2P (T174).

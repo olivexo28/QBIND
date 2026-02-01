@@ -13,7 +13,19 @@
 ///
 /// Currently, `ValidatorId` wraps a `u64` and does not include cryptographic
 /// verification. A future task will bind this to actual validator keys.
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Default)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Hash,
+    Ord,
+    PartialOrd,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct ValidatorId(pub u64);
 
 impl ValidatorId {

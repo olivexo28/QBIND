@@ -484,7 +484,7 @@ Beta nodes may interoperate with Alpha-style nodes **if configuration is aligned
 
 | Item | Status | Target Task |
 | :--- | :--- | :--- |
-| DAG fetch-on-miss protocol | ⏳ Planned | Future |
+| DAG fetch-on-miss protocol | ✅ Implemented v0 | T182, T183 |
 | DAG consensus coupling | ⏳ Planned | Future |
 | Dynamic P2P discovery | ⏳ Planned | Future |
 | Peer liveness scoring | ⏳ Planned | Future |

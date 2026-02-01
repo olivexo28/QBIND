@@ -162,7 +162,7 @@ However, Beta introduces **new attack surfaces**:
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
 | **Availability enforcement gaps** | Certs are data-plane only; consensus doesn't require them | Medium | Planned |
-| **No fetch-on-miss** | Missing batches are ignored; data availability holes possible | Medium | Planned |
+| **No fetch-on-miss** | Missing batches are ignored; data availability holes possible | Medium | Partially Mitigated (T182, T183) |
 | **Certificate aggregation overhead** | No signature aggregation; large certificate sizes | Low | Planned |
 | **Coupling complexity** | Consensus coupling adds implementation risk | Medium | Planned |
 
@@ -171,15 +171,33 @@ However, Beta introduces **new attack surfaces**:
 - ✅ Domain-separated signing preimages prevent cross-chain replay
 - ✅ Cluster harness exercises DAG availability (T166)
 - ✅ **T180**: Beta preset sets DAG as default mempool mode (`mempool_mode = Dag`); cluster tests validate DAG-enabled scenarios
+- ✅ **T182**: Missing batch tracking infrastructure (`MissingBatchInfo`, `record_missing_batch()`, `get_missing_batches()`)
+- ✅ **T183**: P2P-enabled fetch-on-miss v0:
+  - `BatchRequest`/`BatchResponse` message types over P2P
+  - `DagP2pClient` for broadcasting fetch requests
+  - `DagFetchHandler` for processing inbound requests/responses
+  - `drain_missing_batches_for_fetch()` with cooldown-based retry
+  - Cluster-level tests validating fetch infrastructure
 
 **Planned Mitigations**:
 - [x] Beta configuration profile with DAG as default mempool (T180)
-- [ ] Batch fetch protocol for missing batches
+- [x] Batch fetch protocol for missing batches (T182, T183)
 - [ ] Consensus rule: require certs before commit
 - [ ] Certificate aggregation efficiency improvements
 - [ ] DAG metrics and alerting
+- [ ] Intelligent peer selection for fetch requests
+- [ ] Exponential backoff with jitter
 
-**Target Phase**: TestNet Beta (fetch, coupling)
+**Remaining Risk (T182, T183)**:
+
+Fetch-on-miss v0 provides basic data availability recovery but:
+- No consensus enforcement (certificates not required for commit)
+- Simple broadcast to all peers (no targeted fetching)
+- Basic cooldown-based retry (no exponential backoff)
+
+These will be addressed in future tasks before MainNet.
+
+**Target Phase**: TestNet Beta (fetch), MainNet (consensus coupling)
 
 ---
 

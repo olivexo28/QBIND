@@ -103,6 +103,11 @@ pub mod p2p;
 pub mod p2p_inbound;
 pub mod p2p_node_builder;
 pub mod p2p_tcp;
+
+// T183 DAG Fetch-on-Miss modules
+pub mod dag_fetch_handler;
+pub mod dag_net_p2p;
+
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -178,6 +183,11 @@ pub use dag_mempool::{
 
 // T182 DAG Batch Fetch-on-Miss exports
 pub use dag_mempool::MissingBatchInfo;
+
+// T183 DAG Fetch-on-Miss exports
+pub use dag_fetch_handler::{DagFetchHandler, DagFetchMetrics};
+pub use dag_mempool::{decode_batch, decode_batch_ref, encode_batch, encode_batch_ref};
+pub use dag_net_p2p::DagP2pClient;
 
 // T162 Node Config exports
 pub use node_config::{
