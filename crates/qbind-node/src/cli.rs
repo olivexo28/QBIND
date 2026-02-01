@@ -406,11 +406,19 @@ impl CliArgs {
         // If not using a profile, network flags apply directly.
         // If using a profile, still allow network-level overrides.
         if self.profile.is_some() {
-            // For profile mode, only override network if explicitly different from defaults
-            // This allows things like `--profile testnet-beta --network-mode local-mesh`
+            // For profile mode, check if user explicitly overrode network settings.
+            // Detection logic:
+            // - If --network-mode is anything other than the default "local-mesh", user explicitly set it
+            // - If --enable-p2p is true (non-default), user explicitly set it
+            //
+            // This allows: `--profile testnet-beta --network-mode local-mesh` to override
+            // Beta's P2P default back to LocalMesh for CI testing.
             let cli_network_mode = parse_network_mode(&self.network_mode);
-            if cli_network_mode != NetworkMode::LocalMesh || self.enable_p2p {
-                // User explicitly set network flags
+            let user_explicitly_set_network =
+                cli_network_mode != NetworkMode::LocalMesh || self.enable_p2p;
+
+            if user_explicitly_set_network {
+                // User explicitly set network flags - override the profile's defaults
                 config.network_mode = cli_network_mode;
                 config.network.enable_p2p = self.enable_p2p;
 
@@ -419,12 +427,12 @@ impl CliArgs {
                 }
             }
 
-            // Always allow P2P tuning overrides
+            // Always allow P2P tuning overrides (these have no "detection" default issue)
             config.network.max_outbound = self.p2p_max_outbound;
             config.network.max_inbound = self.p2p_max_inbound;
             config.network.gossip_fanout = self.p2p_gossip_fanout;
 
-            // Apply peer list
+            // Apply peer list if provided
             if !self.p2p_peers.is_empty() {
                 config.network.static_peers = self.p2p_peers.clone();
             }

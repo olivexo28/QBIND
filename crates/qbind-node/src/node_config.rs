@@ -497,11 +497,30 @@ impl std::fmt::Display for MempoolMode {
 ///
 /// Valid values: "fifo" | "dag"
 ///
-/// Returns `MempoolMode::Fifo` for unrecognized values (safe default).
+/// # Fallback Behavior
+///
+/// Returns `MempoolMode::Fifo` for unrecognized values. This is intentional
+/// to provide a safe default when parsing user input. Callers should validate
+/// input before calling this function if strict validation is needed.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// assert_eq!(parse_mempool_mode("dag"), MempoolMode::Dag);
+/// assert_eq!(parse_mempool_mode("fifo"), MempoolMode::Fifo);
+/// assert_eq!(parse_mempool_mode("invalid"), MempoolMode::Fifo); // Falls back to Fifo
+/// ```
 pub fn parse_mempool_mode(s: &str) -> MempoolMode {
     match s.to_lowercase().as_str() {
         "dag" => MempoolMode::Dag,
-        "fifo" | _ => MempoolMode::Fifo,
+        "fifo" => MempoolMode::Fifo,
+        other => {
+            eprintln!(
+                "[T180] Warning: Unrecognized mempool mode '{}', defaulting to Fifo",
+                other
+            );
+            MempoolMode::Fifo
+        }
     }
 }
 
