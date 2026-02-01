@@ -326,19 +326,30 @@ This section provides a Beta-specific view of key security areas. For the comple
 
 ## 7. Operational Profiles & CLI Defaults
 
-### 7.1 Beta Preset
+### 7.1 Beta Preset (T180)
 
-A "standard TestNet Beta node" uses the following configuration:
+As of T180, a canonical TestNet Beta preset is implemented. A "standard TestNet Beta node" can be started using the `--profile` CLI flag:
+
+```bash
+# Using the --profile flag (recommended)
+qbind-node --profile testnet-beta --data-dir /data/qbind
+
+# Or with the short flag
+qbind-node -P testnet-beta -d /data/qbind
+```
+
+This is equivalent to manually specifying all Beta defaults:
 
 ```bash
 qbind-node \
   --env testnet \
   --execution-profile vm-v0 \
   --enable-gas true \
-  --mempool-fee-priority true \
+  --enable-fee-priority true \
+  --mempool-mode dag \
+  --enable-dag-availability true \
   --network-mode p2p \
   --enable-p2p true \
-  --dag-enabled true \
   --data-dir /data/qbind
 ```
 
@@ -346,30 +357,55 @@ qbind-node \
 
 | Parameter | CLI Flag | Beta Default | Notes |
 | :--- | :--- | :--- | :--- |
+| **Profile** | `--profile` / `-P` | N/A | Use `testnet-beta` for canonical preset |
 | Environment | `--env` | `testnet` | Same as Alpha |
 | Execution Profile | `--execution-profile` | `vm-v0` | Same as Alpha |
-| Gas Enforcement | `--enable-gas` | `true` | **New in Beta** |
-| Fee Priority | `--mempool-fee-priority` | `true` | **New in Beta** |
-| Network Mode | `--network-mode` | `p2p` | **Changed in Beta** |
-| P2P Transport | `--enable-p2p` | `true` | **Changed in Beta** |
-| DAG Mempool | `--dag-enabled` | `true` | **Changed in Beta** |
-| Data Directory | `--data-dir` | Required | Persistent storage |
+| Gas Enforcement | `--enable-gas` | `true` | **Enabled in Beta** |
+| Fee Priority | `--enable-fee-priority` | `true` | **Enabled in Beta** |
+| Mempool Mode | `--mempool-mode` | `dag` | **DAG default in Beta** |
+| DAG Availability | `--enable-dag-availability` | `true` | **Enabled in Beta** |
+| Network Mode | `--network-mode` | `p2p` | **P2P default in Beta** |
+| P2P Transport | `--enable-p2p` | `true` | **Enabled in Beta** |
+| Data Directory | `--data-dir` / `-d` | Required | Persistent storage |
 
-### 7.3 NodeConfig Example
+### 7.3 NodeConfig Example (T180)
 
 ```rust
-// Beta-style NodeConfig
-let config = NodeConfig::testnet_beta()
-    .with_execution_profile(ExecutionProfile::VmV0)
-    .with_gas_config(ExecutionGasConfig::enabled())
-    .with_fee_priority(true)
-    .with_network_mode(NetworkMode::P2p)
-    .with_enable_p2p(true)
-    .with_dag_enabled(true)
+use qbind_node::{NodeConfig, ConfigProfile, MempoolMode, NetworkMode};
+
+// Option 1: Use the canonical preset (recommended)
+let config = NodeConfig::testnet_beta_preset()
     .with_data_dir("/data/qbind");
+
+// Option 2: Use from_profile for CLI integration
+let config = NodeConfig::from_profile(ConfigProfile::TestNetBeta)
+    .with_data_dir("/data/qbind");
+
+// Option 3: LocalMesh variant for CI/testing (no P2P multi-process)
+let test_config = NodeConfig::testnet_beta_preset_localmesh()
+    .with_data_dir("/tmp/qbind-test");
+
+// Verify Beta defaults
+assert!(config.gas_enabled);
+assert!(config.enable_fee_priority);
+assert_eq!(config.mempool_mode, MempoolMode::Dag);
+assert_eq!(config.network_mode, NetworkMode::P2p);
+assert!(config.dag_availability_enabled);
 ```
 
-**Note**: Actual CLI flags may be wired in later tasks. This section is declarative.
+### 7.4 CLI Override Behavior
+
+When using `--profile`, individual flags can still override specific settings:
+
+```bash
+# Beta profile but with gas disabled (for comparison testing)
+qbind-node --profile testnet-beta --enable-gas false --data-dir /data/qbind
+
+# Beta profile but with LocalMesh (for single-machine testing)
+qbind-node --profile testnet-beta --network-mode local-mesh --data-dir /data/qbind
+```
+
+Override warnings are logged when a profile is modified by explicit flags.
 
 ---
 

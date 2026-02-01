@@ -718,13 +718,22 @@ TestNet Beta extends Alpha with:
 - **DAG mempool as default** — FIFO mempool becomes fallback only
 - **P2P networking as default** — LocalMesh becomes dev/harness only
 
+### T180: Beta Configuration Profile
+
+As of T180, the Beta configuration profile is **implemented and tested**:
+
+- `NodeConfig::testnet_beta_preset()` provides canonical Beta defaults
+- CLI flag `--profile testnet-beta` enables Beta mode
+- Cluster harness tests validate Beta behavior in LocalMesh mode
+- See [QBIND_TESTNET_BETA_SPEC.md §7](./QBIND_TESTNET_BETA_SPEC.md#7-operational-profiles--cli-defaults) for details
+
 ---
 
 ## Appendix A: Related Documents
 
 - [QBIND TestNet Alpha Audit & Readiness](./QBIND_TESTNET_ALPHA_AUDIT.md) — Risk and readiness checklist (T176)
-- [QBIND TestNet Beta Specification](./QBIND_TESTNET_BETA_SPEC.md) — TestNet Beta architecture (T178)
-- [QBIND TestNet Beta Audit Skeleton](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) — Beta risk tracker (T178)
+- [QBIND TestNet Beta Specification](./QBIND_TESTNET_BETA_SPEC.md) — TestNet Beta architecture (T178, T180)
+- [QBIND TestNet Beta Audit Skeleton](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) — Beta risk tracker (T178, T180)
 - [QBIND Gas and Fee Model Design](./QBIND_GAS_AND_FEES_DESIGN.md) — Gas and fee specification (T167)
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet v0 specification and freeze
 - [QBIND Parallel Execution Design](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) — Stage A/B parallelism

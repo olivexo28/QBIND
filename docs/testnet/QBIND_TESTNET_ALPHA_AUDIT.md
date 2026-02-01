@@ -25,8 +25,10 @@ TestNet Alpha is the first public test network for QBIND, extending the DevNet v
 | :--- | :--- | :--- | :--- |
 | **DevNet v0** | DevNet | ✅ Frozen (T161) | Baseline for TestNet Alpha; nonce-only execution |
 | **TestNet Alpha** | TestNet | ✅ Feature-bounded | Extends DevNet with VM v0, persistence, DAG certs, P2P opt-in |
-| **TestNet Beta** | TestNet | ⏳ Planned | Full gas enforcement, DAG default, dynamic P2P |
+| **TestNet Beta** | TestNet | ✅ Profile Implemented (T180) | Full gas enforcement, DAG default, P2P default |
 | **MainNet** | MainNet | ⏳ Planned | Production-ready with HSM, full security audit |
+
+> **T180 Update**: The TestNet Beta configuration profile is now implemented. See [QBIND_TESTNET_BETA_SPEC.md](./QBIND_TESTNET_BETA_SPEC.md) for the Beta specification and `--profile testnet-beta` CLI usage.
 
 ### 1.3 Auditability Statement
 
