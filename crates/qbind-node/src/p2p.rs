@@ -24,8 +24,8 @@
 //! │  │                   P2pService                        │    │
 //! │  │   broadcast() / send_to() / subscribe()             │    │
 //! │  └─────────────────────────────────────────────────────┘    │
-//! │                           │                                  │
-//! └───────────────────────────┼──────────────────────────────────┘
+//! │                           │                                 │
+//! └───────────────────────────┼─────────────────────────────────┘
 //!                             ▼
 //!                    KEMTLS Transport
 //! ```
@@ -179,7 +179,7 @@ pub enum ConsensusNetMsg {
     NewView(Vec<u8>),
 }
 
-/// DAG mempool network messages for P2P transport (T170, T173).
+/// DAG mempool network messages for P2P transport (T170, T173, T182).
 ///
 /// This enum wraps the existing DAG mempool message types for P2P transport.
 /// Messages are serialized using bincode for wire encoding.
@@ -189,6 +189,8 @@ pub enum ConsensusNetMsg {
 /// - `Batch`: A batch of transactions created by a validator
 /// - `BatchAck`: Acknowledgment of a stored batch
 /// - `BatchCertificate`: Availability certificate proving 2f+1 acks
+/// - `BatchRequest`: Request for a batch that the node doesn't have (T182)
+/// - `BatchResponse`: Response containing a requested batch (T182)
 ///
 /// # Wire Format
 ///
@@ -213,6 +215,33 @@ pub enum DagNetMsg {
     /// Contains the serialized `BatchCertificate` data.
     BatchCertificate {
         /// Serialized certificate data.
+        data: Vec<u8>,
+    },
+
+    /// Request for a batch that the node doesn't have (T182).
+    ///
+    /// When a node sees a `BatchAck` for a batch it doesn't have, it can
+    /// send a `BatchRequest` to peers to fetch the missing batch.
+    ///
+    /// # Wire Format
+    ///
+    /// Contains the serialized `BatchRef` identifying the requested batch.
+    BatchRequest {
+        /// Serialized `BatchRef` data (creator + batch_id).
+        data: Vec<u8>,
+    },
+
+    /// Response containing a requested batch (T182).
+    ///
+    /// Sent in response to a `BatchRequest`. If the responder has the batch,
+    /// it sends the full batch data. If not, the response may be empty or
+    /// the request may be ignored.
+    ///
+    /// # Wire Format
+    ///
+    /// Contains the serialized `QbindBatch` data if the batch is available.
+    BatchResponse {
+        /// Serialized `QbindBatch` data, or empty if batch not available.
         data: Vec<u8>,
     },
 }
@@ -522,5 +551,103 @@ mod tests {
         let service = NullP2pService::new(local_id);
 
         assert_eq!(service.local_node_id(), local_id);
+    }
+
+    // ========================================================================
+    // T182: BatchRequest and BatchResponse Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dag_net_msg_batch_request() {
+        let msg = DagNetMsg::BatchRequest {
+            data: vec![1, 2, 3, 4, 5],
+        };
+        if let DagNetMsg::BatchRequest { data } = msg {
+            assert_eq!(data, vec![1, 2, 3, 4, 5]);
+        } else {
+            panic!("Expected BatchRequest");
+        }
+    }
+
+    #[test]
+    fn test_dag_net_msg_batch_response() {
+        let msg = DagNetMsg::BatchResponse {
+            data: vec![10, 20, 30, 40, 50],
+        };
+        if let DagNetMsg::BatchResponse { data } = msg {
+            assert_eq!(data, vec![10, 20, 30, 40, 50]);
+        } else {
+            panic!("Expected BatchResponse");
+        }
+    }
+
+    #[test]
+    fn test_dag_net_msg_batch_response_empty() {
+        // Empty response is valid (batch not available)
+        let msg = DagNetMsg::BatchResponse { data: vec![] };
+        if let DagNetMsg::BatchResponse { data } = msg {
+            assert!(data.is_empty());
+        } else {
+            panic!("Expected BatchResponse");
+        }
+    }
+
+    #[test]
+    fn test_p2p_message_dag_request_response() {
+        // Test that request/response variants can be wrapped in P2pMessage
+        let _request = P2pMessage::Dag(DagNetMsg::BatchRequest {
+            data: vec![0xAA; 40], // BatchRef is 40 bytes
+        });
+        let _response = P2pMessage::Dag(DagNetMsg::BatchResponse {
+            data: vec![0xBB; 100], // Some batch data
+        });
+    }
+
+    #[test]
+    fn test_dag_net_msg_serialization_roundtrip() {
+        // Test that new variants can be serialized/deserialized via bincode
+        let original_request = DagNetMsg::BatchRequest {
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        let encoded = bincode::serialize(&original_request).expect("serialize should succeed");
+        let decoded: DagNetMsg =
+            bincode::deserialize(&encoded).expect("deserialize should succeed");
+
+        if let DagNetMsg::BatchRequest { data } = decoded {
+            assert_eq!(data, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        } else {
+            panic!("Expected BatchRequest after deserialization");
+        }
+
+        let original_response = DagNetMsg::BatchResponse {
+            data: vec![10, 20, 30],
+        };
+        let encoded = bincode::serialize(&original_response).expect("serialize should succeed");
+        let decoded: DagNetMsg =
+            bincode::deserialize(&encoded).expect("deserialize should succeed");
+
+        if let DagNetMsg::BatchResponse { data } = decoded {
+            assert_eq!(data, vec![10, 20, 30]);
+        } else {
+            panic!("Expected BatchResponse after deserialization");
+        }
+    }
+
+    #[test]
+    fn test_all_dag_net_msg_variants_serialize() {
+        // Ensure all variants serialize without panic
+        let variants: Vec<DagNetMsg> = vec![
+            DagNetMsg::Batch { data: vec![1] },
+            DagNetMsg::BatchAck { data: vec![2] },
+            DagNetMsg::BatchCertificate { data: vec![3] },
+            DagNetMsg::BatchRequest { data: vec![4] },
+            DagNetMsg::BatchResponse { data: vec![5] },
+        ];
+
+        for variant in variants {
+            let encoded = bincode::serialize(&variant).expect("all variants should serialize");
+            let _decoded: DagNetMsg =
+                bincode::deserialize(&encoded).expect("all variants should deserialize");
+        }
     }
 }

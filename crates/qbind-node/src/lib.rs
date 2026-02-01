@@ -176,6 +176,9 @@ pub use dag_mempool::{
     BatchAck, BatchAckResult, BatchAckTracker, BatchCertificate, SignatureBytes,
 };
 
+// T182 DAG Batch Fetch-on-Miss exports
+pub use dag_mempool::MissingBatchInfo;
+
 // T162 Node Config exports
 pub use node_config::{
     parse_environment, NodeConfig, ParseEnvironmentError, DEFAULT_ENVIRONMENT, VALID_ENVIRONMENTS,
