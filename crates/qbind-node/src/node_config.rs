@@ -451,6 +451,147 @@ impl std::fmt::Display for ExecutionProfile {
 /// );
 /// assert_eq!(vm_config.execution_profile, ExecutionProfile::VmV0);
 /// ```
+// ============================================================================
+// T180: MempoolMode – Selects between FIFO and DAG mempool
+// ============================================================================
+
+/// Mempool mode for transaction management (T180).
+///
+/// This enum determines which mempool implementation is used:
+///
+/// - **Fifo**: Traditional FIFO mempool (default for DevNet/TestNet Alpha)
+/// - **Dag**: DAG-based mempool with availability certificates (default for TestNet Beta)
+///
+/// # Phased Rollout
+///
+/// - **DevNet v0**: `Fifo` (default and only option)
+/// - **TestNet Alpha**: `Fifo` default; DAG opt-in
+/// - **TestNet Beta**: `Dag` default; FIFO fallback for testing
+/// - **MainNet**: `Dag` required
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MempoolMode {
+    /// FIFO mempool (traditional queue-based).
+    ///
+    /// Transactions are ordered by arrival time.
+    /// Simple and deterministic, suitable for dev/test.
+    #[default]
+    Fifo,
+
+    /// DAG mempool with availability certificates.
+    ///
+    /// Validators create batches that form a DAG structure.
+    /// Provides improved throughput and fairness.
+    Dag,
+}
+
+impl std::fmt::Display for MempoolMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MempoolMode::Fifo => write!(f, "fifo"),
+            MempoolMode::Dag => write!(f, "dag"),
+        }
+    }
+}
+
+/// Parse a mempool mode from a string.
+///
+/// Valid values: "fifo" | "dag"
+///
+/// # Fallback Behavior
+///
+/// Returns `MempoolMode::Fifo` for unrecognized values. This is intentional
+/// to provide a safe default when parsing user input. Callers should validate
+/// input before calling this function if strict validation is needed.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// assert_eq!(parse_mempool_mode("dag"), MempoolMode::Dag);
+/// assert_eq!(parse_mempool_mode("fifo"), MempoolMode::Fifo);
+/// assert_eq!(parse_mempool_mode("invalid"), MempoolMode::Fifo); // Falls back to Fifo
+/// ```
+pub fn parse_mempool_mode(s: &str) -> MempoolMode {
+    match s.to_lowercase().as_str() {
+        "dag" => MempoolMode::Dag,
+        "fifo" => MempoolMode::Fifo,
+        other => {
+            eprintln!(
+                "[T180] Warning: Unrecognized mempool mode '{}', defaulting to Fifo",
+                other
+            );
+            MempoolMode::Fifo
+        }
+    }
+}
+
+// ============================================================================
+// T180: Configuration Profile – Preset configurations for different network phases
+// ============================================================================
+
+/// Configuration profile for preset network configurations (T180).
+///
+/// This enum represents canonical configurations for different network phases:
+///
+/// - **DevNetV0**: Frozen DevNet configuration (NonceOnly, FIFO, LocalMesh)
+/// - **TestNetAlpha**: TestNet Alpha configuration (VmV0, FIFO default, LocalMesh default)
+/// - **TestNetBeta**: TestNet Beta configuration (VmV0, gas-on, DAG default, P2P default)
+///
+/// Using a profile ensures consistent configuration across deployments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigProfile {
+    /// DevNet v0 frozen configuration.
+    ///
+    /// - Environment: DevNet
+    /// - Execution: NonceOnly
+    /// - Gas: Disabled
+    /// - Mempool: FIFO
+    /// - Network: LocalMesh
+    DevNetV0,
+
+    /// TestNet Alpha configuration.
+    ///
+    /// - Environment: TestNet
+    /// - Execution: VmV0
+    /// - Gas: Disabled (opt-in)
+    /// - Mempool: FIFO (DAG opt-in)
+    /// - Network: LocalMesh (P2P opt-in)
+    TestNetAlpha,
+
+    /// TestNet Beta v0 configuration (T180).
+    ///
+    /// - Environment: TestNet
+    /// - Execution: VmV0
+    /// - Gas: Enabled by default
+    /// - Fee Priority: Enabled by default
+    /// - Mempool: DAG by default (FIFO fallback)
+    /// - Network: P2P by default (LocalMesh fallback)
+    TestNetBeta,
+}
+
+impl std::fmt::Display for ConfigProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigProfile::DevNetV0 => write!(f, "devnet-v0"),
+            ConfigProfile::TestNetAlpha => write!(f, "testnet-alpha"),
+            ConfigProfile::TestNetBeta => write!(f, "testnet-beta"),
+        }
+    }
+}
+
+/// Parse a configuration profile from a string.
+///
+/// Valid values: "devnet-v0" | "testnet-alpha" | "testnet-beta"
+///
+/// Returns `None` for unrecognized values.
+pub fn parse_config_profile(s: &str) -> Option<ConfigProfile> {
+    match s.to_lowercase().as_str() {
+        "devnet-v0" | "devnet" => Some(ConfigProfile::DevNetV0),
+        "testnet-alpha" | "alpha" => Some(ConfigProfile::TestNetAlpha),
+        "testnet-beta" | "beta" => Some(ConfigProfile::TestNetBeta),
+        _ => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeConfig {
     /// The network environment for this node.
@@ -483,6 +624,40 @@ pub struct NodeConfig {
     /// - `LocalMesh`: Existing local/loopback networking (default)
     /// - `P2p`: New P2P transport via `TcpKemTlsP2pService`
     pub network_mode: NetworkMode,
+
+    // ========================================================================
+    // T180: Additional configuration fields for TestNet Beta
+    // ========================================================================
+
+    /// Whether gas enforcement is enabled (T180).
+    ///
+    /// - DevNet / TestNet Alpha: `false` (disabled)
+    /// - TestNet Beta / MainNet: `true` (enabled)
+    pub gas_enabled: bool,
+
+    /// Whether fee-priority mempool ordering is enabled (T180).
+    ///
+    /// When `true`, transactions are ordered by `max_fee_per_gas` and `effective_fee`.
+    /// Requires `gas_enabled = true` to be meaningful.
+    ///
+    /// - DevNet / TestNet Alpha: `false` (disabled)
+    /// - TestNet Beta / MainNet: `true` (enabled)
+    pub enable_fee_priority: bool,
+
+    /// Mempool mode selection (T180).
+    ///
+    /// - DevNet / TestNet Alpha: `MempoolMode::Fifo` (default)
+    /// - TestNet Beta / MainNet: `MempoolMode::Dag` (default)
+    pub mempool_mode: MempoolMode,
+
+    /// Whether DAG availability certificates are enabled (T180).
+    ///
+    /// Only meaningful when `mempool_mode == MempoolMode::Dag`.
+    ///
+    /// - DevNet: `false` (disabled)
+    /// - TestNet Alpha: `false` (opt-in)
+    /// - TestNet Beta / MainNet: `true` (enabled)
+    pub dag_availability_enabled: bool,
 }
 
 impl Default for NodeConfig {
@@ -497,6 +672,11 @@ impl Default for NodeConfig {
             data_dir: None,
             network: NetworkTransportConfig::default(),
             network_mode: NetworkMode::LocalMesh,
+            // T180: DevNet defaults (gas/fee/DAG disabled)
+            gas_enabled: false,
+            enable_fee_priority: false,
+            mempool_mode: MempoolMode::Fifo,
+            dag_availability_enabled: false,
         }
     }
 }
@@ -512,6 +692,10 @@ impl NodeConfig {
             data_dir: None,
             network: NetworkTransportConfig::default(),
             network_mode: NetworkMode::LocalMesh,
+            gas_enabled: false,
+            enable_fee_priority: false,
+            mempool_mode: MempoolMode::Fifo,
+            dag_availability_enabled: false,
         }
     }
 
@@ -526,6 +710,10 @@ impl NodeConfig {
             data_dir: None,
             network: NetworkTransportConfig::default(),
             network_mode: NetworkMode::LocalMesh,
+            gas_enabled: false,
+            enable_fee_priority: false,
+            mempool_mode: MempoolMode::Fifo,
+            dag_availability_enabled: false,
         }
     }
 
@@ -549,6 +737,218 @@ impl NodeConfig {
     /// This is the recommended configuration for TestNet Alpha.
     pub fn testnet_vm_v0() -> Self {
         Self::with_profile(NetworkEnvironment::Testnet, ExecutionProfile::VmV0)
+    }
+
+    // ========================================================================
+    // T180: Configuration Profile Presets
+    // ========================================================================
+
+    /// Create a DevNet v0 preset configuration (T180).
+    ///
+    /// This is the canonical frozen DevNet configuration:
+    /// - Environment: DevNet
+    /// - Execution: NonceOnly
+    /// - Gas: Disabled
+    /// - Fee Priority: Disabled
+    /// - Mempool: FIFO
+    /// - Network: LocalMesh
+    /// - P2P: Disabled
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::NodeConfig;
+    ///
+    /// let config = NodeConfig::devnet_v0_preset();
+    /// assert!(!config.gas_enabled);
+    /// assert_eq!(config.mempool_mode, MempoolMode::Fifo);
+    /// ```
+    pub fn devnet_v0_preset() -> Self {
+        Self {
+            environment: NetworkEnvironment::Devnet,
+            execution_profile: ExecutionProfile::NonceOnly,
+            data_dir: None,
+            network: NetworkTransportConfig::disabled(),
+            network_mode: NetworkMode::LocalMesh,
+            gas_enabled: false,
+            enable_fee_priority: false,
+            mempool_mode: MempoolMode::Fifo,
+            dag_availability_enabled: false,
+        }
+    }
+
+    /// Create a TestNet Alpha preset configuration (T180).
+    ///
+    /// This is the canonical TestNet Alpha configuration:
+    /// - Environment: TestNet (QBIND_TESTNET_CHAIN_ID)
+    /// - Execution: VmV0
+    /// - Gas: Disabled (opt-in)
+    /// - Fee Priority: Disabled (opt-in)
+    /// - Mempool: FIFO (DAG opt-in)
+    /// - Network: LocalMesh (P2P opt-in)
+    /// - P2P: Disabled
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::NodeConfig;
+    /// use qbind_types::NetworkEnvironment;
+    ///
+    /// let config = NodeConfig::testnet_alpha_preset();
+    /// assert_eq!(config.environment, NetworkEnvironment::Testnet);
+    /// assert!(!config.gas_enabled);
+    /// ```
+    pub fn testnet_alpha_preset() -> Self {
+        Self {
+            environment: NetworkEnvironment::Testnet,
+            execution_profile: ExecutionProfile::VmV0,
+            data_dir: None,
+            network: NetworkTransportConfig::disabled(),
+            network_mode: NetworkMode::LocalMesh,
+            gas_enabled: false,
+            enable_fee_priority: false,
+            mempool_mode: MempoolMode::Fifo,
+            dag_availability_enabled: false,
+        }
+    }
+
+    /// Create a TestNet Beta v0 preset configuration (T180).
+    ///
+    /// This is the canonical TestNet Beta configuration as defined in
+    /// QBIND_TESTNET_BETA_SPEC.md:
+    ///
+    /// - Environment: TestNet (QBIND_TESTNET_CHAIN_ID - same as Alpha)
+    /// - Execution: VmV0 (same as Alpha)
+    /// - Gas: **Enabled by default**
+    /// - Fee Priority: **Enabled by default**
+    /// - Mempool: **DAG by default** (FIFO fallback for dev/harness)
+    /// - Network: **P2P by default** (LocalMesh for dev/harness)
+    /// - P2P: **Enabled by default**
+    /// - DAG Availability: **Enabled by default**
+    ///
+    /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
+    /// starting nodes, as Beta requires persistent state.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::NodeConfig;
+    /// use qbind_types::NetworkEnvironment;
+    ///
+    /// let config = NodeConfig::testnet_beta_preset()
+    ///     .with_data_dir("/data/qbind");
+    ///
+    /// assert_eq!(config.environment, NetworkEnvironment::Testnet);
+    /// assert!(config.gas_enabled);
+    /// assert!(config.enable_fee_priority);
+    /// assert_eq!(config.mempool_mode, MempoolMode::Dag);
+    /// assert_eq!(config.network_mode, NetworkMode::P2p);
+    /// assert!(config.network.enable_p2p);
+    /// assert!(config.dag_availability_enabled);
+    /// ```
+    pub fn testnet_beta_preset() -> Self {
+        Self {
+            environment: NetworkEnvironment::Testnet,
+            execution_profile: ExecutionProfile::VmV0,
+            data_dir: None, // Caller should set via with_data_dir()
+            network: NetworkTransportConfig::testnet_beta(),
+            network_mode: NetworkMode::P2p,
+            gas_enabled: true,
+            enable_fee_priority: true,
+            mempool_mode: MempoolMode::Dag,
+            dag_availability_enabled: true,
+        }
+    }
+
+    /// Create a configuration from a profile enum (T180).
+    ///
+    /// This is the recommended way to create configurations when using the
+    /// `--profile` CLI flag.
+    ///
+    /// # Arguments
+    ///
+    /// * `profile` - The configuration profile to use
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, ConfigProfile};
+    ///
+    /// let config = NodeConfig::from_profile(ConfigProfile::TestNetBeta);
+    /// assert!(config.gas_enabled);
+    /// ```
+    pub fn from_profile(profile: ConfigProfile) -> Self {
+        match profile {
+            ConfigProfile::DevNetV0 => Self::devnet_v0_preset(),
+            ConfigProfile::TestNetAlpha => Self::testnet_alpha_preset(),
+            ConfigProfile::TestNetBeta => Self::testnet_beta_preset(),
+        }
+    }
+
+    // ========================================================================
+    // T180: Builder methods for new configuration fields
+    // ========================================================================
+
+    /// Enable or disable gas enforcement (T180).
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether gas enforcement should be enabled
+    pub fn with_gas_enabled(mut self, enabled: bool) -> Self {
+        self.gas_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable fee-priority mempool ordering (T180).
+    ///
+    /// Note: Fee priority requires gas enforcement to be meaningful.
+    /// If you enable fee priority without gas, the configuration may
+    /// be automatically adjusted during enforcement.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether fee priority should be enabled
+    pub fn with_fee_priority(mut self, enabled: bool) -> Self {
+        self.enable_fee_priority = enabled;
+        self
+    }
+
+    /// Set the mempool mode (T180).
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The mempool mode (Fifo or Dag)
+    pub fn with_mempool_mode(mut self, mode: MempoolMode) -> Self {
+        self.mempool_mode = mode;
+        self
+    }
+
+    /// Enable or disable DAG availability certificates (T180).
+    ///
+    /// Only meaningful when `mempool_mode == MempoolMode::Dag`.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether DAG availability certificates should be enabled
+    pub fn with_dag_availability(mut self, enabled: bool) -> Self {
+        self.dag_availability_enabled = enabled;
+        self
+    }
+
+    /// Create a TestNet Beta preset with LocalMesh for CI-friendly testing (T180).
+    ///
+    /// This is the same as `testnet_beta_preset()` but forces:
+    /// - `network_mode = LocalMesh`
+    /// - `enable_p2p = false`
+    ///
+    /// Useful for cluster harness tests that need Beta configuration
+    /// without requiring actual P2P transport.
+    pub fn testnet_beta_preset_localmesh() -> Self {
+        Self {
+            network: NetworkTransportConfig::disabled(),
+            network_mode: NetworkMode::LocalMesh,
+            ..Self::testnet_beta_preset()
+        }
     }
 
     /// Create a MainNet configuration.
@@ -656,6 +1056,13 @@ impl NodeConfig {
     /// - P2P state (enabled/disabled)
     /// - Listen address (when P2P enabled)
     /// - Number of static peers
+    ///
+    /// # T180 Additions
+    ///
+    /// The startup info string now also includes:
+    /// - Gas enforcement state (gas=on/off)
+    /// - Fee priority state (fee-priority=on/off)
+    /// - Mempool mode (mempool=fifo/dag)
     pub fn startup_info_string(&self, validator_id: Option<&str>) -> String {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
@@ -674,15 +1081,22 @@ impl NodeConfig {
             "p2p=disabled".to_string()
         };
 
+        // Build T180 config info
+        let gas_str = if self.gas_enabled { "on" } else { "off" };
+        let fee_priority_str = if self.enable_fee_priority { "on" } else { "off" };
+
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={}",
             validator_str,
             self.environment,
             chain_id_hex,
             self.scope(),
             self.execution_profile,
             self.network_mode,
-            p2p_info
+            p2p_info,
+            gas_str,
+            fee_priority_str,
+            self.mempool_mode
         )
     }
 
@@ -1247,5 +1661,298 @@ mod tests {
 
         let enabled = NetworkTransportConfig::testnet_beta();
         assert!(enabled.is_p2p_enabled());
+    }
+
+    // ========================================================================
+    // T180: TestNet Beta Preset Tests
+    // ========================================================================
+
+    #[test]
+    fn test_devnet_v0_preset() {
+        let config = NodeConfig::devnet_v0_preset();
+
+        // Environment
+        assert_eq!(config.environment, NetworkEnvironment::Devnet);
+        assert_eq!(config.chain_id(), QBIND_DEVNET_CHAIN_ID);
+        assert_eq!(config.scope(), "DEV");
+
+        // Execution
+        assert_eq!(config.execution_profile, ExecutionProfile::NonceOnly);
+
+        // Gas (disabled)
+        assert!(!config.gas_enabled, "DevNet v0 should have gas disabled");
+
+        // Fee priority (disabled)
+        assert!(
+            !config.enable_fee_priority,
+            "DevNet v0 should have fee priority disabled"
+        );
+
+        // Mempool (FIFO)
+        assert_eq!(
+            config.mempool_mode,
+            MempoolMode::Fifo,
+            "DevNet v0 should use FIFO mempool"
+        );
+
+        // DAG availability (disabled)
+        assert!(
+            !config.dag_availability_enabled,
+            "DevNet v0 should have DAG availability disabled"
+        );
+
+        // Network (LocalMesh, P2P disabled)
+        assert_eq!(config.network_mode, NetworkMode::LocalMesh);
+        assert!(!config.network.enable_p2p);
+    }
+
+    #[test]
+    fn test_testnet_alpha_preset() {
+        let config = NodeConfig::testnet_alpha_preset();
+
+        // Environment
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert_eq!(config.chain_id(), QBIND_TESTNET_CHAIN_ID);
+        assert_eq!(config.scope(), "TST");
+
+        // Execution
+        assert_eq!(
+            config.execution_profile,
+            ExecutionProfile::VmV0,
+            "TestNet Alpha should use VmV0"
+        );
+
+        // Gas (disabled by default in Alpha)
+        assert!(
+            !config.gas_enabled,
+            "TestNet Alpha should have gas disabled by default"
+        );
+
+        // Fee priority (disabled by default in Alpha)
+        assert!(
+            !config.enable_fee_priority,
+            "TestNet Alpha should have fee priority disabled"
+        );
+
+        // Mempool (FIFO by default in Alpha)
+        assert_eq!(
+            config.mempool_mode,
+            MempoolMode::Fifo,
+            "TestNet Alpha should use FIFO mempool by default"
+        );
+
+        // DAG availability (disabled by default in Alpha)
+        assert!(
+            !config.dag_availability_enabled,
+            "TestNet Alpha should have DAG availability disabled by default"
+        );
+
+        // Network (LocalMesh by default, P2P disabled)
+        assert_eq!(config.network_mode, NetworkMode::LocalMesh);
+        assert!(!config.network.enable_p2p);
+    }
+
+    #[test]
+    fn test_testnet_beta_preset() {
+        let config = NodeConfig::testnet_beta_preset();
+
+        // Environment: Same chain ID as Alpha
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert_eq!(config.chain_id(), QBIND_TESTNET_CHAIN_ID);
+        assert_eq!(config.scope(), "TST");
+
+        // Execution: VmV0
+        assert_eq!(
+            config.execution_profile,
+            ExecutionProfile::VmV0,
+            "TestNet Beta should use VmV0"
+        );
+
+        // Gas: Enabled by default in Beta
+        assert!(
+            config.gas_enabled,
+            "TestNet Beta should have gas ENABLED by default"
+        );
+
+        // Fee priority: Enabled by default in Beta
+        assert!(
+            config.enable_fee_priority,
+            "TestNet Beta should have fee priority ENABLED by default"
+        );
+
+        // Mempool: DAG by default in Beta
+        assert_eq!(
+            config.mempool_mode,
+            MempoolMode::Dag,
+            "TestNet Beta should use DAG mempool by default"
+        );
+
+        // DAG availability: Enabled by default in Beta
+        assert!(
+            config.dag_availability_enabled,
+            "TestNet Beta should have DAG availability ENABLED by default"
+        );
+
+        // Network: P2P by default in Beta
+        assert_eq!(
+            config.network_mode,
+            NetworkMode::P2p,
+            "TestNet Beta should use P2P network mode by default"
+        );
+        assert!(
+            config.network.enable_p2p,
+            "TestNet Beta should have P2P ENABLED by default"
+        );
+    }
+
+    #[test]
+    fn test_testnet_beta_preset_localmesh() {
+        let config = NodeConfig::testnet_beta_preset_localmesh();
+
+        // Should have all Beta features
+        assert!(config.gas_enabled);
+        assert!(config.enable_fee_priority);
+        assert_eq!(config.mempool_mode, MempoolMode::Dag);
+        assert!(config.dag_availability_enabled);
+
+        // But with LocalMesh networking for CI-friendly tests
+        assert_eq!(
+            config.network_mode,
+            NetworkMode::LocalMesh,
+            "testnet_beta_preset_localmesh should use LocalMesh"
+        );
+        assert!(
+            !config.network.enable_p2p,
+            "testnet_beta_preset_localmesh should have P2P disabled"
+        );
+    }
+
+    #[test]
+    fn test_from_profile() {
+        // DevNet v0
+        let devnet = NodeConfig::from_profile(ConfigProfile::DevNetV0);
+        assert_eq!(devnet.environment, NetworkEnvironment::Devnet);
+        assert!(!devnet.gas_enabled);
+
+        // TestNet Alpha
+        let alpha = NodeConfig::from_profile(ConfigProfile::TestNetAlpha);
+        assert_eq!(alpha.environment, NetworkEnvironment::Testnet);
+        assert_eq!(alpha.execution_profile, ExecutionProfile::VmV0);
+        assert!(!alpha.gas_enabled);
+
+        // TestNet Beta
+        let beta = NodeConfig::from_profile(ConfigProfile::TestNetBeta);
+        assert_eq!(beta.environment, NetworkEnvironment::Testnet);
+        assert!(beta.gas_enabled);
+        assert!(beta.enable_fee_priority);
+        assert_eq!(beta.mempool_mode, MempoolMode::Dag);
+    }
+
+    #[test]
+    fn test_parse_config_profile() {
+        assert_eq!(
+            parse_config_profile("devnet-v0"),
+            Some(ConfigProfile::DevNetV0)
+        );
+        assert_eq!(
+            parse_config_profile("devnet"),
+            Some(ConfigProfile::DevNetV0)
+        );
+        assert_eq!(
+            parse_config_profile("testnet-alpha"),
+            Some(ConfigProfile::TestNetAlpha)
+        );
+        assert_eq!(
+            parse_config_profile("alpha"),
+            Some(ConfigProfile::TestNetAlpha)
+        );
+        assert_eq!(
+            parse_config_profile("testnet-beta"),
+            Some(ConfigProfile::TestNetBeta)
+        );
+        assert_eq!(
+            parse_config_profile("beta"),
+            Some(ConfigProfile::TestNetBeta)
+        );
+        assert_eq!(parse_config_profile("invalid"), None);
+        assert_eq!(parse_config_profile("TESTNET-BETA"), Some(ConfigProfile::TestNetBeta));
+    }
+
+    #[test]
+    fn test_parse_mempool_mode() {
+        assert_eq!(parse_mempool_mode("fifo"), MempoolMode::Fifo);
+        assert_eq!(parse_mempool_mode("FIFO"), MempoolMode::Fifo);
+        assert_eq!(parse_mempool_mode("dag"), MempoolMode::Dag);
+        assert_eq!(parse_mempool_mode("DAG"), MempoolMode::Dag);
+        assert_eq!(parse_mempool_mode("unknown"), MempoolMode::Fifo); // Default fallback
+    }
+
+    #[test]
+    fn test_presets_preserve_existing_behavior() {
+        // Verify that existing constructors still produce the same results
+        // (DevNet/TestNet Alpha defaults remain unchanged)
+
+        let default = NodeConfig::default();
+        assert_eq!(default.environment, NetworkEnvironment::Devnet);
+        assert_eq!(default.execution_profile, ExecutionProfile::NonceOnly);
+        assert!(!default.gas_enabled);
+        assert!(!default.enable_fee_priority);
+        assert_eq!(default.mempool_mode, MempoolMode::Fifo);
+        assert!(!default.dag_availability_enabled);
+        assert_eq!(default.network_mode, NetworkMode::LocalMesh);
+        assert!(!default.network.enable_p2p);
+
+        let devnet = NodeConfig::devnet();
+        assert_eq!(devnet.environment, NetworkEnvironment::Devnet);
+        assert!(!devnet.gas_enabled);
+
+        let testnet = NodeConfig::testnet();
+        assert_eq!(testnet.environment, NetworkEnvironment::Testnet);
+        assert!(!testnet.gas_enabled);
+
+        let testnet_vm_v0 = NodeConfig::testnet_vm_v0();
+        assert_eq!(testnet_vm_v0.environment, NetworkEnvironment::Testnet);
+        assert_eq!(testnet_vm_v0.execution_profile, ExecutionProfile::VmV0);
+        assert!(!testnet_vm_v0.gas_enabled); // Alpha default: gas off
+    }
+
+    #[test]
+    fn test_builder_methods() {
+        let config = NodeConfig::testnet_alpha_preset()
+            .with_gas_enabled(true)
+            .with_fee_priority(true)
+            .with_mempool_mode(MempoolMode::Dag)
+            .with_dag_availability(true);
+
+        assert!(config.gas_enabled);
+        assert!(config.enable_fee_priority);
+        assert_eq!(config.mempool_mode, MempoolMode::Dag);
+        assert!(config.dag_availability_enabled);
+    }
+
+    #[test]
+    fn test_startup_info_includes_t180_fields() {
+        let config = NodeConfig::testnet_beta_preset();
+        let info = config.startup_info_string(Some("V1"));
+
+        assert!(info.contains("gas=on"), "Should show gas=on for Beta");
+        assert!(
+            info.contains("fee-priority=on"),
+            "Should show fee-priority=on for Beta"
+        );
+        assert!(info.contains("mempool=dag"), "Should show mempool=dag for Beta");
+    }
+
+    #[test]
+    fn test_mempool_mode_display() {
+        assert_eq!(format!("{}", MempoolMode::Fifo), "fifo");
+        assert_eq!(format!("{}", MempoolMode::Dag), "dag");
+    }
+
+    #[test]
+    fn test_config_profile_display() {
+        assert_eq!(format!("{}", ConfigProfile::DevNetV0), "devnet-v0");
+        assert_eq!(format!("{}", ConfigProfile::TestNetAlpha), "testnet-alpha");
+        assert_eq!(format!("{}", ConfigProfile::TestNetBeta), "testnet-beta");
     }
 }

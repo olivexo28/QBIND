@@ -8,7 +8,7 @@
 //! These are single-process, in-memory tests. They do not test
 //! multi-process communication - that is covered by the runbook.
 
-use qbind_node::node_config::{ExecutionProfile, NetworkMode, NetworkTransportConfig, NodeConfig};
+use qbind_node::node_config::{ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig};
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
 
@@ -31,6 +31,10 @@ fn make_test_p2p_config() -> NodeConfig {
             static_peers: vec![],
         },
         network_mode: NetworkMode::P2p,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     }
 }
 
@@ -41,6 +45,10 @@ fn make_test_local_mesh_config() -> NodeConfig {
         data_dir: None,
         network: NetworkTransportConfig::default(),
         network_mode: NetworkMode::LocalMesh,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     }
 }
 

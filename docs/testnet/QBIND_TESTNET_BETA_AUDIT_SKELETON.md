@@ -78,9 +78,11 @@ However, Beta introduces **new attack surfaces**:
     - G4: Failed transactions don't consume fees
     - G5: Block gas limit is respected
   - `t179_gas_pipeline_proptests.rs`: Node-level gas pipeline tests
+- ✅ **T180**: Beta configuration preset (`NodeConfig::testnet_beta_preset()`) ensures gas-on is explicitly set and tested in cluster scenarios
 
 **Planned Mitigations**:
 - [x] Extend T177 property tests to cover gas-enabled scenarios (T179)
+- [x] Beta configuration profile with gas-on defaults (T180)
 - [ ] Fuzzing with gas-limit edge cases
 - [ ] Stress testing under high TPS with gas enforcement
 
@@ -131,9 +133,11 @@ However, Beta introduces **new attack surfaces**:
 - ✅ **T179**: Property tests for fee deduction correctness:
   - `t179_vm_v0_gas_proptests.rs`: Validates balance + fee conservation, no fee charge for failed txs
   - `t179_gas_pipeline_proptests.rs`: Validates mempool gas checks and block gas limit enforcement
+- ✅ **T180**: Beta preset enables fee-priority by default, with cluster tests exercising gas+fee scenarios
 
 **Planned Mitigations**:
 - [x] Property tests for fee deduction correctness (T179)
+- [x] Beta configuration profile with fee-priority enabled by default (T180)
 - [ ] Mempool eviction rate limiting
 - [ ] Fee market analysis and tuning
 - [ ] EIP-1559-style base fee (MainNet consideration)
@@ -157,8 +161,10 @@ However, Beta introduces **new attack surfaces**:
 - ✅ BatchAck and BatchCertificate implemented (T165)
 - ✅ Domain-separated signing preimages prevent cross-chain replay
 - ✅ Cluster harness exercises DAG availability (T166)
+- ✅ **T180**: Beta preset sets DAG as default mempool mode (`mempool_mode = Dag`); cluster tests validate DAG-enabled scenarios
 
 **Planned Mitigations**:
+- [x] Beta configuration profile with DAG as default mempool (T180)
 - [ ] Batch fetch protocol for missing batches
 - [ ] Consensus rule: require certs before commit
 - [ ] Certificate aggregation efficiency improvements
@@ -184,8 +190,10 @@ However, Beta introduces **new attack surfaces**:
 - ✅ Consensus and DAG messages wired through P2P (T173, T174)
 - ✅ Multi-process runbook available (T175)
 - ✅ KEMTLS encryption on all connections
+- ✅ **T180**: Beta preset sets P2P as default network mode (`network_mode = P2p`); ignored P2P smoke test available for manual validation
 
 **Planned Mitigations**:
+- [x] Beta configuration profile with P2P as default (T180)
 - [ ] Basic peer discovery protocol
 - [ ] Peer liveness scoring and eviction
 - [ ] Minimum peer diversity requirements
@@ -226,30 +234,32 @@ However, Beta introduces **new attack surfaces**:
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 1 | Gas enforcement enabled by default | ⏳ Planned | Config change required |
-| 2 | Fee-priority mempool enabled by default | ⏳ Planned | Config change required |
-| 3 | DAG mempool as default | ⏳ Planned | Config change required |
-| 4 | P2P networking as default | ⏳ Planned | Config change required |
+| 1 | Gas enforcement enabled by default | ✅ Ready | T180: `NodeConfig::testnet_beta_preset()` |
+| 2 | Fee-priority mempool enabled by default | ✅ Ready | T180: `NodeConfig::testnet_beta_preset()` |
+| 3 | DAG mempool as default | ✅ Ready | T180: `NodeConfig::testnet_beta_preset()` |
+| 4 | P2P networking as default | ✅ Ready | T180: `NodeConfig::testnet_beta_preset()` |
 | 5 | v0/v1 payload compatibility | ✅ Ready | T168 implementation |
+| 6 | Configuration profile CLI flag | ✅ Ready | T180: `--profile testnet-beta` |
 
 ### 3.2 Testing & Validation
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 6 | Gas-enabled property tests | ⏳ Planned | Future task |
-| 7 | Fee market stress tests | ⏳ Planned | Future task |
-| 8 | DAG-default cluster tests | ⏳ Planned | Future task |
-| 9 | P2P-default cluster tests | ✅ Ready | T174, T175 tests |
-| 10 | Multi-machine deployment test | ⏳ Planned | Future task |
+| 7 | Gas-enabled property tests | ✅ Ready | T179: `t179_vm_v0_gas_proptests.rs` |
+| 8 | Fee market stress tests | ⏳ Planned | Future task |
+| 9 | DAG-default cluster tests | ✅ Ready | T180: `test_testnet_beta_cluster_fifo_fallback_smoke` |
+| 10 | P2P-default cluster tests | ✅ Ready | T174, T175 tests; T180 `#[ignore]` P2P test |
+| 11 | Multi-machine deployment test | ⏳ Planned | Future task |
+| 12 | Beta config spec compliance test | ✅ Ready | T180: `test_testnet_beta_cluster_config_matches_spec` |
 
 ### 3.3 Documentation
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 11 | Beta specification | ✅ Ready | This document pair |
-| 12 | Beta audit skeleton | ✅ Ready | This document |
-| 13 | Beta operational runbook | ⏳ Planned | Future task |
-| 14 | Migration guide (Alpha → Beta) | ⏳ Planned | Future task |
+| 13 | Beta specification | ✅ Ready | `QBIND_TESTNET_BETA_SPEC.md` (updated T180) |
+| 14 | Beta audit skeleton | ✅ Ready | This document (updated T180) |
+| 15 | Beta operational runbook | ⏳ Planned | Future task |
+| 16 | Migration guide (Alpha → Beta) | ⏳ Planned | Future task |
 
 ---
 

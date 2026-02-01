@@ -7,7 +7,7 @@
 //! - Startup info string includes P2P state
 
 use qbind_node::node_config::{
-    parse_network_mode, parse_socket_addr, ExecutionProfile, NetworkMode, NetworkTransportConfig,
+    parse_network_mode, parse_socket_addr, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig,
     NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
@@ -72,6 +72,10 @@ fn test_p2p_config_local_mesh_disabled() {
             static_peers: vec![],
         },
         network_mode: NetworkMode::LocalMesh,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -99,6 +103,10 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
             static_peers: vec!["127.0.0.1:19001".to_string()],
         },
         network_mode: NetworkMode::P2p, // P2P mode requested
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -123,6 +131,10 @@ fn test_p2p_config_p2p_mode_enabled() {
             static_peers: vec!["127.0.0.1:19001".to_string()],
         },
         network_mode: NetworkMode::P2p,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -147,6 +159,10 @@ fn test_p2p_config_no_listen_addr_sets_default() {
             static_peers: vec![],
         },
         network_mode: NetworkMode::P2p,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -179,6 +195,10 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
             static_peers: vec![],
         },
         network_mode: NetworkMode::LocalMesh, // LocalMesh mode
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -260,6 +280,10 @@ fn test_startup_info_includes_network_mode() {
         data_dir: None,
         network: NetworkTransportConfig::default(),
         network_mode: NetworkMode::LocalMesh,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -278,6 +302,10 @@ fn test_startup_info_p2p_disabled() {
         data_dir: None,
         network: NetworkTransportConfig::default(),
         network_mode: NetworkMode::LocalMesh,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -304,6 +332,10 @@ fn test_startup_info_p2p_enabled() {
             static_peers: vec!["127.0.0.1:19001".to_string(), "127.0.0.1:19002".to_string()],
         },
         network_mode: NetworkMode::P2p,
+        gas_enabled: false,
+        enable_fee_priority: false,
+        mempool_mode: MempoolMode::Fifo,
+        dag_availability_enabled: false,
     };
 
     let info = config.startup_info_string(Some("V0"));

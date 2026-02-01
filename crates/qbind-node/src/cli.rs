@@ -36,8 +36,9 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use crate::node_config::{
-    parse_environment, parse_execution_profile, parse_network_mode, NetworkMode,
-    NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
+    parse_config_profile, parse_environment, parse_execution_profile, parse_mempool_mode,
+    parse_network_mode, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+    ParseEnvironmentError,
 };
 
 // ============================================================================
@@ -54,6 +55,27 @@ use crate::node_config::{
 #[command(version = "0.1.0")]
 #[command(about = "QBIND blockchain node with PQC consensus", long_about = None)]
 pub struct CliArgs {
+    // ========================================================================
+    // T180: Configuration Profile (takes precedence over individual settings)
+    // ========================================================================
+
+    /// Configuration profile: devnet-v0, testnet-alpha, or testnet-beta.
+    ///
+    /// When specified, provides a canonical configuration preset.
+    /// Individual settings below can still override specific values.
+    ///
+    /// - devnet-v0: Frozen DevNet (NonceOnly, FIFO, LocalMesh)
+    /// - testnet-alpha: TestNet Alpha (VmV0, gas off, FIFO, LocalMesh)
+    /// - testnet-beta: TestNet Beta (VmV0, gas on, DAG, P2P)
+    ///
+    /// If not specified, falls back to building config from individual flags.
+    #[arg(long = "profile", short = 'P')]
+    pub profile: Option<String>,
+
+    // ========================================================================
+    // Environment & Execution
+    // ========================================================================
+
     /// Network environment: devnet, testnet, or mainnet.
     ///
     /// Determines the chain ID and domain scope for signing operations.
@@ -68,6 +90,47 @@ pub struct CliArgs {
     /// Default: nonce-only
     #[arg(long = "execution-profile", default_value = "nonce-only")]
     pub execution_profile: String,
+
+    // ========================================================================
+    // T180: Gas & Fee Priority
+    // ========================================================================
+
+    /// Enable gas enforcement.
+    ///
+    /// When true, transactions are validated and executed with gas metering.
+    /// Default: false (DevNet/Alpha default). TestNet Beta preset enables this.
+    #[arg(long = "enable-gas")]
+    pub enable_gas: Option<bool>,
+
+    /// Enable fee-priority mempool ordering.
+    ///
+    /// When true, transactions are ordered by max_fee_per_gas and effective_fee.
+    /// Requires gas enforcement to be meaningful.
+    /// Default: false (DevNet/Alpha default). TestNet Beta preset enables this.
+    #[arg(long = "enable-fee-priority")]
+    pub enable_fee_priority: Option<bool>,
+
+    // ========================================================================
+    // T180: Mempool Mode
+    // ========================================================================
+
+    /// Mempool mode: fifo or dag.
+    ///
+    /// - fifo: Traditional FIFO queue (DevNet/Alpha default)
+    /// - dag: DAG-based mempool with batches (TestNet Beta default)
+    #[arg(long = "mempool-mode")]
+    pub mempool_mode: Option<String>,
+
+    /// Enable DAG availability certificates.
+    ///
+    /// Only meaningful when mempool-mode is 'dag'.
+    /// Default: false (Alpha default). TestNet Beta preset enables this.
+    #[arg(long = "enable-dag-availability")]
+    pub enable_dag_availability: Option<bool>,
+
+    // ========================================================================
+    // Network Mode & P2P
+    // ========================================================================
 
     /// Network mode: local-mesh or p2p.
     ///
@@ -105,6 +168,10 @@ pub struct CliArgs {
     #[arg(long = "p2p-peer", action = clap::ArgAction::Append)]
     pub p2p_peers: Vec<String>,
 
+    // ========================================================================
+    // Node Identity & Storage
+    // ========================================================================
+
     /// Validator ID (0-based index).
     ///
     /// The validator's index in the validator set.
@@ -117,6 +184,10 @@ pub struct CliArgs {
     /// When not specified, uses in-memory state only.
     #[arg(long = "data-dir", short = 'd')]
     pub data_dir: Option<PathBuf>,
+
+    // ========================================================================
+    // P2P Tuning
+    // ========================================================================
 
     /// Maximum outbound P2P connections.
     ///
@@ -155,6 +226,8 @@ pub enum CliError {
     },
     /// Configuration validation error.
     ConfigValidation(String),
+    /// Invalid profile string (T180).
+    InvalidProfile(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -169,6 +242,13 @@ impl std::fmt::Display for CliError {
                 write!(f, "invalid {} '{}': {}", field, value, reason)
             }
             CliError::ConfigValidation(msg) => write!(f, "config validation error: {}", msg),
+            CliError::InvalidProfile(s) => {
+                write!(
+                    f,
+                    "invalid profile '{}': expected 'devnet-v0', 'testnet-alpha', or 'testnet-beta'",
+                    s
+                )
+            }
         }
     }
 }
@@ -205,52 +285,162 @@ impl CliArgs {
     /// This method parses and validates all CLI arguments, building a complete
     /// NodeConfig suitable for node startup.
     ///
+    /// # T180: Profile-Based Configuration
+    ///
+    /// If `--profile` is specified, the base configuration comes from the
+    /// corresponding preset (devnet-v0, testnet-alpha, testnet-beta).
+    /// Individual flags then override specific values.
+    ///
     /// # Returns
     ///
     /// `Ok(NodeConfig)` if all arguments are valid.
     /// `Err(CliError)` if any argument is invalid.
     pub fn to_node_config(&self) -> Result<NodeConfig, CliError> {
-        // Parse environment
-        let environment = parse_environment(&self.environment)?;
-
-        // Parse execution profile
-        let execution_profile = parse_execution_profile(&self.execution_profile);
-
-        // Parse network mode
-        let network_mode = parse_network_mode(&self.network_mode);
-
-        // Parse P2P listen address
-        let listen_addr = if self.enable_p2p && network_mode == NetworkMode::P2p {
-            Some(self.p2p_listen_addr.clone())
+        // T180: If a profile is specified, start from the preset
+        let mut config = if let Some(ref profile_str) = self.profile {
+            match parse_config_profile(profile_str) {
+                Some(profile) => {
+                    let preset = NodeConfig::from_profile(profile);
+                    // Log that we're using a profile
+                    eprintln!(
+                        "[T180] Using configuration profile: {} (gas={}, fee-priority={}, mempool={}, network={})",
+                        profile,
+                        if preset.gas_enabled { "on" } else { "off" },
+                        if preset.enable_fee_priority { "on" } else { "off" },
+                        preset.mempool_mode,
+                        preset.network_mode
+                    );
+                    preset
+                }
+                None => {
+                    return Err(CliError::InvalidProfile(profile_str.clone()));
+                }
+            }
         } else {
-            None
+            // No profile specified, build from individual flags (legacy behavior)
+            // Parse environment
+            let environment = parse_environment(&self.environment)?;
+
+            // Parse execution profile
+            let execution_profile = parse_execution_profile(&self.execution_profile);
+
+            // Parse network mode
+            let network_mode = parse_network_mode(&self.network_mode);
+
+            // Parse P2P listen address
+            let listen_addr = if self.enable_p2p && network_mode == NetworkMode::P2p {
+                Some(self.p2p_listen_addr.clone())
+            } else {
+                None
+            };
+
+            // Parse P2P advertised address
+            let advertised_addr = self.p2p_advertised_addr.clone();
+
+            // Collect static peers
+            let static_peers = self.p2p_peers.clone();
+
+            // Build NetworkTransportConfig
+            let network = NetworkTransportConfig {
+                enable_p2p: self.enable_p2p,
+                max_outbound: self.p2p_max_outbound,
+                max_inbound: self.p2p_max_inbound,
+                gossip_fanout: self.p2p_gossip_fanout,
+                listen_addr,
+                advertised_addr,
+                static_peers,
+            };
+
+            NodeConfig {
+                environment,
+                execution_profile,
+                data_dir: self.data_dir.clone(),
+                network,
+                network_mode,
+                gas_enabled: false,
+                enable_fee_priority: false,
+                mempool_mode: MempoolMode::Fifo,
+                dag_availability_enabled: false,
+            }
         };
 
-        // Parse P2P advertised address
-        let advertised_addr = self.p2p_advertised_addr.clone();
+        // Apply CLI overrides on top of the base config (profile or legacy)
+        // Only override if the flag was explicitly provided
+        if let Some(gas) = self.enable_gas {
+            if self.profile.is_some() {
+                eprintln!("[T180] CLI override: gas_enabled = {}", gas);
+            }
+            config.gas_enabled = gas;
+        }
 
-        // Collect static peers
-        let static_peers = self.p2p_peers.clone();
+        if let Some(fee_priority) = self.enable_fee_priority {
+            if self.profile.is_some() {
+                eprintln!("[T180] CLI override: enable_fee_priority = {}", fee_priority);
+            }
+            config.enable_fee_priority = fee_priority;
+        }
 
-        // Build NetworkTransportConfig
-        let network = NetworkTransportConfig {
-            enable_p2p: self.enable_p2p,
-            max_outbound: self.p2p_max_outbound,
-            max_inbound: self.p2p_max_inbound,
-            gossip_fanout: self.p2p_gossip_fanout,
-            listen_addr,
-            advertised_addr,
-            static_peers,
-        };
+        if let Some(ref mempool_mode_str) = self.mempool_mode {
+            let mode = parse_mempool_mode(mempool_mode_str);
+            if self.profile.is_some() {
+                eprintln!("[T180] CLI override: mempool_mode = {}", mode);
+            }
+            config.mempool_mode = mode;
+        }
 
-        // Build NodeConfig
-        let mut config = NodeConfig {
-            environment,
-            execution_profile,
-            data_dir: self.data_dir.clone(),
-            network,
-            network_mode,
-        };
+        if let Some(dag_avail) = self.enable_dag_availability {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T180] CLI override: dag_availability_enabled = {}",
+                    dag_avail
+                );
+            }
+            config.dag_availability_enabled = dag_avail;
+        }
+
+        // Apply data_dir if specified
+        if let Some(ref data_dir) = self.data_dir {
+            config.data_dir = Some(data_dir.clone());
+        }
+
+        // If not using a profile, network flags apply directly.
+        // If using a profile, still allow network-level overrides.
+        if self.profile.is_some() {
+            // For profile mode, check if user explicitly overrode network settings.
+            // Detection logic:
+            // - If --network-mode is anything other than the default "local-mesh", user explicitly set it
+            // - If --enable-p2p is true (non-default), user explicitly set it
+            //
+            // This allows: `--profile testnet-beta --network-mode local-mesh` to override
+            // Beta's P2P default back to LocalMesh for CI testing.
+            let cli_network_mode = parse_network_mode(&self.network_mode);
+            let user_explicitly_set_network =
+                cli_network_mode != NetworkMode::LocalMesh || self.enable_p2p;
+
+            if user_explicitly_set_network {
+                // User explicitly set network flags - override the profile's defaults
+                config.network_mode = cli_network_mode;
+                config.network.enable_p2p = self.enable_p2p;
+
+                if self.enable_p2p && cli_network_mode == NetworkMode::P2p {
+                    config.network.listen_addr = Some(self.p2p_listen_addr.clone());
+                }
+            }
+
+            // Always allow P2P tuning overrides (these have no "detection" default issue)
+            config.network.max_outbound = self.p2p_max_outbound;
+            config.network.max_inbound = self.p2p_max_inbound;
+            config.network.gossip_fanout = self.p2p_gossip_fanout;
+
+            // Apply peer list if provided
+            if !self.p2p_peers.is_empty() {
+                config.network.static_peers = self.p2p_peers.clone();
+            }
+
+            if self.p2p_advertised_addr.is_some() {
+                config.network.advertised_addr = self.p2p_advertised_addr.clone();
+            }
+        }
 
         // Validate P2P configuration
         config.validate_p2p_config();
@@ -373,5 +563,173 @@ mod tests {
 
         args.validator_id = Some(5);
         assert_eq!(args.validator_id_str(), "V5");
+    }
+
+    // ========================================================================
+    // T180: Profile Flag Tests
+    // ========================================================================
+
+    #[test]
+    fn test_cli_profile_testnet_beta() {
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--profile", "testnet-beta"]).unwrap();
+
+        assert_eq!(args.profile, Some("testnet-beta".to_string()));
+
+        let config = args.to_node_config().unwrap();
+
+        // Verify Beta defaults
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert!(config.gas_enabled, "Beta profile should enable gas");
+        assert!(
+            config.enable_fee_priority,
+            "Beta profile should enable fee priority"
+        );
+        assert_eq!(
+            config.mempool_mode,
+            MempoolMode::Dag,
+            "Beta profile should use DAG mempool"
+        );
+        assert!(
+            config.dag_availability_enabled,
+            "Beta profile should enable DAG availability"
+        );
+        assert_eq!(
+            config.network_mode,
+            NetworkMode::P2p,
+            "Beta profile should use P2P network mode"
+        );
+        assert!(
+            config.network.enable_p2p,
+            "Beta profile should enable P2P"
+        );
+    }
+
+    #[test]
+    fn test_cli_profile_testnet_alpha() {
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--profile", "testnet-alpha"]).unwrap();
+
+        let config = args.to_node_config().unwrap();
+
+        // Verify Alpha defaults
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert!(
+            !config.gas_enabled,
+            "Alpha profile should have gas disabled"
+        );
+        assert!(
+            !config.enable_fee_priority,
+            "Alpha profile should have fee priority disabled"
+        );
+        assert_eq!(
+            config.mempool_mode,
+            MempoolMode::Fifo,
+            "Alpha profile should use FIFO mempool"
+        );
+        assert_eq!(
+            config.network_mode,
+            NetworkMode::LocalMesh,
+            "Alpha profile should use LocalMesh"
+        );
+    }
+
+    #[test]
+    fn test_cli_profile_devnet_v0() {
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--profile", "devnet-v0"]).unwrap();
+
+        let config = args.to_node_config().unwrap();
+
+        // Verify DevNet defaults
+        assert_eq!(config.environment, NetworkEnvironment::Devnet);
+        assert!(!config.gas_enabled);
+        assert!(!config.enable_fee_priority);
+        assert_eq!(config.mempool_mode, MempoolMode::Fifo);
+        assert_eq!(config.network_mode, NetworkMode::LocalMesh);
+    }
+
+    #[test]
+    fn test_cli_profile_with_override() {
+        // Start with Beta profile but override gas to false
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--profile",
+            "testnet-beta",
+            "--enable-gas",
+            "false",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+
+        // Gas should be overridden to false
+        assert!(
+            !config.gas_enabled,
+            "CLI override should disable gas"
+        );
+        // But other Beta defaults should remain
+        assert!(config.enable_fee_priority);
+        assert_eq!(config.mempool_mode, MempoolMode::Dag);
+    }
+
+    #[test]
+    fn test_cli_profile_invalid() {
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--profile", "invalid-profile"]).unwrap();
+
+        let result = args.to_node_config();
+        assert!(result.is_err());
+        match result {
+            Err(CliError::InvalidProfile(s)) => {
+                assert_eq!(s, "invalid-profile");
+            }
+            _ => panic!("Expected InvalidProfile error"),
+        }
+    }
+
+    #[test]
+    fn test_cli_profile_short_flag() {
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "-P", "beta"]).unwrap();
+
+        let config = args.to_node_config().unwrap();
+
+        // "beta" should be parsed as testnet-beta
+        assert!(config.gas_enabled);
+        assert!(config.enable_fee_priority);
+    }
+
+    #[test]
+    fn test_cli_default_values_include_t180_fields() {
+        let args = CliArgs::try_parse_from(["qbind-node"]).unwrap();
+
+        // New T180 fields should have None as default (not specified)
+        assert!(args.profile.is_none());
+        assert!(args.enable_gas.is_none());
+        assert!(args.enable_fee_priority.is_none());
+        assert!(args.mempool_mode.is_none());
+        assert!(args.enable_dag_availability.is_none());
+    }
+
+    #[test]
+    fn test_cli_legacy_mode_without_profile() {
+        // Without --profile, the legacy behavior should still work
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--env",
+            "testnet",
+            "--execution-profile",
+            "vm-v0",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+
+        // Should have DevNet-like defaults (gas off, fee off, FIFO)
+        assert_eq!(config.environment, NetworkEnvironment::Testnet);
+        assert!(!config.gas_enabled);
+        assert!(!config.enable_fee_priority);
+        assert_eq!(config.mempool_mode, MempoolMode::Fifo);
     }
 }
