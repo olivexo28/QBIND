@@ -645,7 +645,7 @@ impl SimpleValidatorNodeMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_config::{NetworkMode, NetworkTransportConfig};
+    use crate::node_config::{MempoolMode, NetworkMode, NetworkTransportConfig};
     use qbind_types::NetworkEnvironment;
 
     fn make_test_config() -> NodeConfig {
@@ -663,6 +663,11 @@ mod tests {
                 static_peers: vec![],
             },
             network_mode: NetworkMode::P2p,
+            // T180 fields
+            gas_enabled: false,
+            enable_fee_priority: false,
+            mempool_mode: MempoolMode::Fifo,
+            dag_availability_enabled: false,
         }
     }
 
