@@ -58,7 +58,6 @@ pub struct CliArgs {
     // ========================================================================
     // T180: Configuration Profile (takes precedence over individual settings)
     // ========================================================================
-
     /// Configuration profile: devnet-v0, testnet-alpha, or testnet-beta.
     ///
     /// When specified, provides a canonical configuration preset.
@@ -75,7 +74,6 @@ pub struct CliArgs {
     // ========================================================================
     // Environment & Execution
     // ========================================================================
-
     /// Network environment: devnet, testnet, or mainnet.
     ///
     /// Determines the chain ID and domain scope for signing operations.
@@ -94,7 +92,6 @@ pub struct CliArgs {
     // ========================================================================
     // T180: Gas & Fee Priority
     // ========================================================================
-
     /// Enable gas enforcement.
     ///
     /// When true, transactions are validated and executed with gas metering.
@@ -113,7 +110,6 @@ pub struct CliArgs {
     // ========================================================================
     // T180: Mempool Mode
     // ========================================================================
-
     /// Mempool mode: fifo or dag.
     ///
     /// - fifo: Traditional FIFO queue (DevNet/Alpha default)
@@ -131,7 +127,6 @@ pub struct CliArgs {
     // ========================================================================
     // Network Mode & P2P
     // ========================================================================
-
     /// Network mode: local-mesh or p2p.
     ///
     /// - local-mesh: Existing local/loopback networking (default)
@@ -171,7 +166,6 @@ pub struct CliArgs {
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================
-
     /// Validator ID (0-based index).
     ///
     /// The validator's index in the validator set.
@@ -188,7 +182,6 @@ pub struct CliArgs {
     // ========================================================================
     // P2P Tuning
     // ========================================================================
-
     /// Maximum outbound P2P connections.
     ///
     /// Default: 16
@@ -375,7 +368,10 @@ impl CliArgs {
 
         if let Some(fee_priority) = self.enable_fee_priority {
             if self.profile.is_some() {
-                eprintln!("[T180] CLI override: enable_fee_priority = {}", fee_priority);
+                eprintln!(
+                    "[T180] CLI override: enable_fee_priority = {}",
+                    fee_priority
+                );
             }
             config.enable_fee_priority = fee_priority;
         }
@@ -571,8 +567,7 @@ mod tests {
 
     #[test]
     fn test_cli_profile_testnet_beta() {
-        let args =
-            CliArgs::try_parse_from(["qbind-node", "--profile", "testnet-beta"]).unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--profile", "testnet-beta"]).unwrap();
 
         assert_eq!(args.profile, Some("testnet-beta".to_string()));
 
@@ -599,16 +594,12 @@ mod tests {
             NetworkMode::P2p,
             "Beta profile should use P2P network mode"
         );
-        assert!(
-            config.network.enable_p2p,
-            "Beta profile should enable P2P"
-        );
+        assert!(config.network.enable_p2p, "Beta profile should enable P2P");
     }
 
     #[test]
     fn test_cli_profile_testnet_alpha() {
-        let args =
-            CliArgs::try_parse_from(["qbind-node", "--profile", "testnet-alpha"]).unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--profile", "testnet-alpha"]).unwrap();
 
         let config = args.to_node_config().unwrap();
 
@@ -636,8 +627,7 @@ mod tests {
 
     #[test]
     fn test_cli_profile_devnet_v0() {
-        let args =
-            CliArgs::try_parse_from(["qbind-node", "--profile", "devnet-v0"]).unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--profile", "devnet-v0"]).unwrap();
 
         let config = args.to_node_config().unwrap();
 
@@ -664,10 +654,7 @@ mod tests {
         let config = args.to_node_config().unwrap();
 
         // Gas should be overridden to false
-        assert!(
-            !config.gas_enabled,
-            "CLI override should disable gas"
-        );
+        assert!(!config.gas_enabled, "CLI override should disable gas");
         // But other Beta defaults should remain
         assert!(config.enable_fee_priority);
         assert_eq!(config.mempool_mode, MempoolMode::Dag);
@@ -675,8 +662,7 @@ mod tests {
 
     #[test]
     fn test_cli_profile_invalid() {
-        let args =
-            CliArgs::try_parse_from(["qbind-node", "--profile", "invalid-profile"]).unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--profile", "invalid-profile"]).unwrap();
 
         let result = args.to_node_config();
         assert!(result.is_err());
@@ -690,8 +676,7 @@ mod tests {
 
     #[test]
     fn test_cli_profile_short_flag() {
-        let args =
-            CliArgs::try_parse_from(["qbind-node", "-P", "beta"]).unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "-P", "beta"]).unwrap();
 
         let config = args.to_node_config().unwrap();
 

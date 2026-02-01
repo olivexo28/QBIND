@@ -8,7 +8,9 @@
 //! These are single-process, in-memory tests. They do not test
 //! multi-process communication - that is covered by the runbook.
 
-use qbind_node::node_config::{ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig};
+use qbind_node::node_config::{
+    ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+};
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
 

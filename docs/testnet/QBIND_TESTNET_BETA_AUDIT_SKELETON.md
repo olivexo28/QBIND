@@ -79,10 +79,14 @@ However, Beta introduces **new attack surfaces**:
     - G5: Block gas limit is respected
   - `t179_gas_pipeline_proptests.rs`: Node-level gas pipeline tests
 - ✅ **T180**: Beta configuration preset (`NodeConfig::testnet_beta_preset()`) ensures gas-on is explicitly set and tested in cluster scenarios
+- ✅ **T181**: Beta fee-market soak harness provides cluster-level tests exercising gas-enabled execution:
+  - `test_testnet_beta_fee_market_localmesh_smoke`: CI-friendly fee-market smoke test
+  - `test_testnet_beta_fee_market_eviction`: Tests mempool behavior under pressure
 
 **Planned Mitigations**:
 - [x] Extend T177 property tests to cover gas-enabled scenarios (T179)
 - [x] Beta configuration profile with gas-on defaults (T180)
+- [x] Beta fee-market soak tests (T181)
 - [ ] Fuzzing with gas-limit edge cases
 - [ ] Stress testing under high TPS with gas enforcement
 
@@ -120,9 +124,9 @@ However, Beta introduces **new attack surfaces**:
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Fee market gaming** | Simple priority ordering may be gameable; front-running possible | High | Open |
+| **Fee market gaming** | Simple priority ordering may be gameable; front-running possible | High | Partially Mitigated |
 | **Gas limit manipulation** | Attackers may craft transactions to maximize gas usage | Medium | Partially Mitigated |
-| **Eviction attacks** | Attackers may flood mempool to evict legitimate low-fee txs | Medium | Open |
+| **Eviction attacks** | Attackers may flood mempool to evict legitimate low-fee txs | Medium | Partially Mitigated |
 | **Balance draining** | Bugs in fee deduction could drain accounts unexpectedly | Medium | Partially Mitigated |
 
 **Current Mitigations**:
@@ -134,10 +138,15 @@ However, Beta introduces **new attack surfaces**:
   - `t179_vm_v0_gas_proptests.rs`: Validates balance + fee conservation, no fee charge for failed txs
   - `t179_gas_pipeline_proptests.rs`: Validates mempool gas checks and block gas limit enforcement
 - ✅ **T180**: Beta preset enables fee-priority by default, with cluster tests exercising gas+fee scenarios
+- ✅ **T181**: Fee-market soak harness tests fee-priority mempool behavior under load:
+  - `test_testnet_beta_fee_market_localmesh_smoke`: Validates cluster operation with fee-priority enabled
+  - `test_testnet_beta_fee_market_eviction`: Validates eviction behavior with constrained mempool
+  - `test_testnet_beta_fee_market_p2p_smoke`: (ignored) P2P mode test
 
 **Planned Mitigations**:
 - [x] Property tests for fee deduction correctness (T179)
 - [x] Beta configuration profile with fee-priority enabled by default (T180)
+- [x] Fee market stress tests (T181)
 - [ ] Mempool eviction rate limiting
 - [ ] Fee market analysis and tuning
 - [ ] EIP-1559-style base fee (MainNet consideration)
@@ -246,9 +255,9 @@ However, Beta introduces **new attack surfaces**:
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
 | 7 | Gas-enabled property tests | ✅ Ready | T179: `t179_vm_v0_gas_proptests.rs` |
-| 8 | Fee market stress tests | ⏳ Planned | Future task |
+| 8 | Fee market stress tests | ✅ Ready | T181: `test_testnet_beta_fee_market_*` |
 | 9 | DAG-default cluster tests | ✅ Ready | T180: `test_testnet_beta_cluster_fifo_fallback_smoke` |
-| 10 | P2P-default cluster tests | ✅ Ready | T174, T175 tests; T180 `#[ignore]` P2P test |
+| 10 | P2P-default cluster tests | ✅ Ready | T174, T175 tests; T180 `#[ignore]` P2P test; T181 `#[ignore]` P2P test |
 | 11 | Multi-machine deployment test | ⏳ Planned | Future task |
 | 12 | Beta config spec compliance test | ✅ Ready | T180: `test_testnet_beta_cluster_config_matches_spec` |
 

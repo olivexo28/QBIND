@@ -167,6 +167,16 @@ Test files:
 - `qbind-ledger/tests/t179_vm_v0_gas_proptests.rs`: Ledger-level gas invariants (G1–G5)
 - `qbind-node/tests/t179_gas_pipeline_proptests.rs`: Node-level pipeline tests (P1–P3)
 
+### 3.6 Cluster-Level Fee-Market Tests (T181)
+
+Cluster-level fee-market soak tests validate Beta profile behavior under realistic conditions:
+
+- **Fee-Market Smoke Tests**: `test_testnet_beta_fee_market_localmesh_smoke` validates cluster operation with fee-priority enabled
+- **Eviction Behavior**: `test_testnet_beta_fee_market_eviction` tests mempool behavior under constrained capacity
+- **P2P Mode**: `test_testnet_beta_fee_market_p2p_smoke` (ignored) exercises fee-market with P2P transport
+
+Test file: `qbind-node/tests/t166_testnet_alpha_cluster_harness.rs` (T181 section)
+
 ---
 
 ## 4. Mempool & DAG
@@ -213,6 +223,15 @@ When fee-priority is enabled (Beta default), DAG batch construction and frontier
 3. **Transaction Ordering**: Within blocks, transactions are ordered by fee priority
 
 **Reference**: [QBIND_DAG_MEMPOOL_DESIGN.md §5.5](../devnet/QBIND_DAG_MEMPOOL_DESIGN.md) for gas model integration.
+
+### 4.4 Cluster-Level DAG Tests (T181)
+
+T181 provides cluster-level tests that exercise DAG mempool with Beta configuration:
+
+- `test_testnet_beta_fee_market_localmesh_smoke`: DAG mempool with fee-priority enabled
+- `test_testnet_beta_fee_market_eviction`: DAG mempool under constrained capacity
+
+Test file: `qbind-node/tests/t166_testnet_alpha_cluster_harness.rs` (T181 section)
 
 ---
 

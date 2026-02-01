@@ -7,8 +7,9 @@
 //! - Startup info string includes P2P state
 
 use qbind_node::node_config::{
-    parse_network_mode, parse_socket_addr, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig,
-    NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
+    parse_network_mode, parse_socket_addr, ExecutionProfile, MempoolMode, NetworkMode,
+    NetworkTransportConfig, NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE,
+    DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
 
