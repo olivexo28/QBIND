@@ -1593,27 +1593,27 @@ impl InMemoryDagMempool {
     pub fn handle_batch_response(&self, batch: QbindBatch) -> Result<bool, DagMempoolError> {
         let batch_id = batch.batch_id;
 
-        // Check if we already have this batch
+        // First, check and remove from missing_batches while holding the lock
+        // This reduces lock contention by doing the check and remove atomically
+        let was_tracked_as_missing = self.missing_batches.write().remove(&batch_id).is_some();
+
+        // Check if we already have this batch (separate lock from missing_batches)
         if self.has_batch(&batch_id) {
-            // Remove from missing if it was there (shouldn't be, but be safe)
-            self.missing_batches.write().remove(&batch_id);
+            // Already present, nothing to do
             return Ok(false);
         }
 
         // Insert the batch
         self.insert_remote_batch(batch)?;
 
-        // Remove from missing batches
-        let was_missing = self.missing_batches.write().remove(&batch_id).is_some();
-
-        // Update metrics
-        if let Some(ref m) = self.metrics {
-            if was_missing {
+        // Update metrics only if it was tracked as missing
+        if was_tracked_as_missing {
+            if let Some(ref m) = self.metrics {
                 m.inc_missing_batches_fetched();
             }
         }
 
-        Ok(was_missing)
+        Ok(was_tracked_as_missing)
     }
 
     /// Get a batch by ID (T182).
@@ -2948,25 +2948,32 @@ mod tests {
         let metrics = Arc::new(DagMempoolMetrics::new());
         let mempool = InMemoryDagMempool::new(ValidatorId::new(1)).with_metrics(metrics.clone());
 
-        // Record a missing batch
-        let batch_ref = BatchRef::new(ValidatorId::new(99), [0xEE; 32]);
-        mempool.record_missing_batch(batch_ref, ValidatorId::new(2), 1000);
-
-        assert_eq!(metrics.missing_batches_recorded(), 1);
-        assert_eq!(metrics.missing_batches_fetched(), 0);
-
-        // Create and handle response for the batch
-        let _batch = QbindBatch::new(
+        // Create a batch with known content
+        let batch = QbindBatch::new(
             ValidatorId::new(99),
             0,
             vec![],
             vec![make_test_tx(0xEE, 0)],
         );
-        // Note: The batch_id won't match since QbindBatch::new() computes it from content
-        // So let's just test the metrics directly
+        let batch_id = batch.batch_id;
+        let batch_ref = BatchRef::new(ValidatorId::new(99), batch_id);
 
-        metrics.inc_missing_batches_fetched();
+        // Record the batch as missing using the actual batch_id
+        mempool.record_missing_batch(batch_ref, ValidatorId::new(2), 1000);
+
+        assert_eq!(metrics.missing_batches_recorded(), 1);
+        assert_eq!(metrics.missing_batches_fetched(), 0);
+
+        // Now handle the batch response (simulating fetch completion)
+        let was_missing = mempool
+            .handle_batch_response(batch)
+            .expect("handle should succeed");
+        assert!(was_missing, "batch should have been tracked as missing");
+
+        // Verify metrics were updated
         assert_eq!(metrics.missing_batches_fetched(), 1);
+        assert_eq!(mempool.missing_batch_count(), 0);
+        assert!(mempool.has_batch(&batch_id));
     }
 
     #[test]
