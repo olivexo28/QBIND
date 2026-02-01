@@ -196,9 +196,7 @@ pub use node_config::NetworkTransportConfig;
 pub use node_config::{parse_network_mode, NetworkMode};
 
 // T180 Configuration Profile and Mempool Mode exports
-pub use node_config::{
-    parse_config_profile, parse_mempool_mode, ConfigProfile, MempoolMode,
-};
+pub use node_config::{parse_config_profile, parse_mempool_mode, ConfigProfile, MempoolMode};
 
 // T170 P2P Service exports
 pub use p2p::{

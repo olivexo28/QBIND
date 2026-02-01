@@ -628,7 +628,6 @@ pub struct NodeConfig {
     // ========================================================================
     // T180: Additional configuration fields for TestNet Beta
     // ========================================================================
-
     /// Whether gas enforcement is enabled (T180).
     ///
     /// - DevNet / TestNet Alpha: `false` (disabled)
@@ -1083,7 +1082,11 @@ impl NodeConfig {
 
         // Build T180 config info
         let gas_str = if self.gas_enabled { "on" } else { "off" };
-        let fee_priority_str = if self.enable_fee_priority { "on" } else { "off" };
+        let fee_priority_str = if self.enable_fee_priority {
+            "on"
+        } else {
+            "off"
+        };
 
         format!(
             "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={}",
@@ -1875,7 +1878,10 @@ mod tests {
             Some(ConfigProfile::TestNetBeta)
         );
         assert_eq!(parse_config_profile("invalid"), None);
-        assert_eq!(parse_config_profile("TESTNET-BETA"), Some(ConfigProfile::TestNetBeta));
+        assert_eq!(
+            parse_config_profile("TESTNET-BETA"),
+            Some(ConfigProfile::TestNetBeta)
+        );
     }
 
     #[test]
@@ -1940,7 +1946,10 @@ mod tests {
             info.contains("fee-priority=on"),
             "Should show fee-priority=on for Beta"
         );
-        assert!(info.contains("mempool=dag"), "Should show mempool=dag for Beta");
+        assert!(
+            info.contains("mempool=dag"),
+            "Should show mempool=dag for Beta"
+        );
     }
 
     #[test]
