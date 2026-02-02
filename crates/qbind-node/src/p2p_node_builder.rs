@@ -668,6 +668,8 @@ mod tests {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            // T186 field
+            stage_b_enabled: false,
         }
     }
 

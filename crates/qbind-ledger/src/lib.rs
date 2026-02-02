@@ -56,3 +56,6 @@ pub use parallel_exec::{
     build_conflict_graph, build_parallel_schedule, extract_all_read_write_sets,
     extract_read_write_set, ConflictGraph, ParallelSchedule, TxIndex, TxReadWriteSet,
 };
+
+// T186: Stage B production parallel execution exports
+pub use parallel_exec::{execute_block_stage_b, StageBExecStats};
