@@ -41,6 +41,7 @@ fn make_test_proposal(height: u64, suite_id: u16, proposer_index: u16) -> BlockP
             timestamp: 1704067200 + height, // Unique timestamp per height
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![

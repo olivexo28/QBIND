@@ -301,6 +301,7 @@ fn test_proposal_signing_preimage_differs_by_chain_id() {
             timestamp: 12345,
             payload_kind: 0,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: Some(QuorumCertificate {
             version: 1,

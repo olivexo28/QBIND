@@ -160,9 +160,8 @@ fn make_proposal(
             timestamp: 0,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
-        qc: None,
-        txs: vec![],
         signature: TEST_SIGNATURE.to_vec(),
     }
 }
@@ -192,6 +191,7 @@ fn make_proposal_with_qc(
             timestamp: 0,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: Some(qc),
         txs: vec![],

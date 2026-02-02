@@ -476,6 +476,7 @@ mod tests {
                 timestamp: 1704067200, // 2024-01-01 00:00:00 UTC
                 payload_kind: 0,       // Normal
                 next_epoch: 0,
+                batch_commitment: [0u8; 32],
             },
             qc: None,
             txs: Vec::new(),

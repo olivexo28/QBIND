@@ -43,6 +43,7 @@ fn make_test_proposal(height: u64, round: u64) -> std::sync::Arc<BlockProposal> 
             timestamp: 1704067200 + height,
             payload_kind: 0,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: Vec::new(),
