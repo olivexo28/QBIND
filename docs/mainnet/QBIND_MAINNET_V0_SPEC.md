@@ -1,0 +1,605 @@
+# QBIND MainNet v0 Specification
+
+**Task**: T184  
+**Status**: Design Specification  
+**Date**: 2026-02-02
+
+---
+
+## 1. Scope & Positioning
+
+### 1.1 What "MainNet v0" Means
+
+MainNet v0 is the **first production, economic-value-carrying network** for QBIND. It extends the TestNet Beta architecture with stronger requirements for security, reliability, and operational maturity.
+
+- **Network Environment**: `NetworkEnvironment::Mainnet` (`QBIND_MAINNET_CHAIN_ID = 0x51424E444D41494E`)
+- **Execution Profile**: `ExecutionProfile::VmV0` (transfer-only, sequential) with **Stage B parallelism available**
+- **Configuration Profile**: MainNet-specific defaults with production-hardened settings
+
+**Key Distinction**: MainNet v0 uses the same core protocol as TestNet Beta but with:
+- **Economic value**: Real assets at stake, requiring stronger safety guarantees
+- **Production-grade operations**: HSM support, monitoring, incident response
+- **Audit requirements**: External security audit completed before launch
+- **Governance constraints**: On-chain validator set with stake requirements
+
+### 1.2 Relationship to TestNet Beta
+
+MainNet v0 builds directly on TestNet Beta:
+
+| Aspect | TestNet Beta | MainNet v0 |
+| :--- | :--- | :--- |
+| **Chain ID** | `QBIND_TESTNET_CHAIN_ID` | `QBIND_MAINNET_CHAIN_ID` |
+| **Gas Enforcement** | Enabled (default) | **Required** (cannot be disabled) |
+| **Fee Policy** | Burn-only | **Hybrid (burn + proposer reward)** |
+| **Mempool** | DAG (default) | DAG (**only** for validators) |
+| **P2P** | P2P (default) | P2P (**required**, no LocalMesh) |
+| **State** | RocksDB (required) | RocksDB (**mandatory**, no in-memory) |
+| **Keys** | EncryptedFs / loopback signer | **HSM-ready** (production signer required) |
+| **Parallelism** | Sequential only | **Stage B available** (conflict-graph) |
+| **Availability** | Certs v1 (data-plane) | **Consensus-coupled** certificates |
+| **Discovery** | Static peers | **Dynamic discovery** + static fallback |
+| **Audit** | Skeleton tracking | **Full external audit required** |
+
+### 1.3 Phase Comparison Table
+
+| Phase | Execution | Gas/Fees | Mempool | Networking | Persistence | Parallelism | Availability Certs |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **DevNet v0** | NonceOnly | None | FIFO | LocalMesh | In-memory | Stage A | None |
+| **TestNet Alpha** | VmV0 | Design only | FIFO + DAG opt-in | LocalMesh + P2P opt-in | RocksDB | Sequential | v1 opt-in |
+| **TestNet Beta** | VmV0 (gas-on) | Enforced (burn) | DAG default | P2P default | RocksDB | Sequential | v1 default |
+| **MainNet v0** | VmV0 (gas-on) | Enforced (hybrid) | DAG only | P2P required | RocksDB mandatory | **Stage B available** | **Consensus-coupled** |
+
+### 1.4 Intended Use Case
+
+MainNet v0 is the **production network** for QBIND:
+
+- Real economic value is transferred on-chain
+- Validators stake real tokens and face slashing for misbehavior
+- Users expect high availability and security
+- All protocol changes require governance approval
+
+---
+
+## 2. Execution & State
+
+### 2.1 Execution Profile
+
+MainNet v0 uses `ExecutionProfile::VmV0` with mandatory gas enforcement:
+
+- **Transaction Type**: Transfer-only (recipient + amount + gas_limit + max_fee_per_gas)
+- **Account State**: Nonce + Balance per account
+- **Execution Order**: Deterministic (sequential or Stage B parallel)
+- **Payload Format**: `TransferPayloadV1` (72 bytes) **required**; v0 format rejected
+
+### 2.2 Stage B Parallel Execution
+
+Stage B conflict-graph-based parallel execution is **available** for MainNet v0:
+
+| Aspect | MainNet v0 Status | Notes |
+| :--- | :--- | :--- |
+| **Implementation** | Ready (T171) | Skeleton complete, tested |
+| **Production Wiring** | **MainNet v0 launch requirement** | Must be available |
+| **Default Behavior** | Operator-configurable | Can enable/disable per node |
+| **Determinism** | Guaranteed | Same inputs → same outputs |
+
+**Stage B Algorithm Summary** (from [QBIND_PARALLEL_EXECUTION_DESIGN.md](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md)):
+
+1. Extract read/write sets for each transaction
+2. Build conflict graph based on account overlap
+3. Generate parallel schedule (topological layering)
+4. Execute layers in parallel with Rayon
+5. Merge results deterministically
+
+**Critical Invariant**: All validators MUST produce identical state regardless of parallel vs sequential execution.
+
+### 2.3 State Persistence
+
+RocksDB-backed persistent account state is **mandatory** for all MainNet v0 nodes:
+
+| Requirement | MainNet v0 |
+| :--- | :--- |
+| **Persistent Storage** | Required (`data_dir` must be configured) |
+| **In-Memory Mode** | **Not allowed** for validators |
+| **Caching** | `CachedPersistentAccountState` (write-through) |
+| **Crash Recovery** | WAL-based; state flushed at block boundaries |
+
+### 2.4 State Growth Management
+
+MainNet v0 introduces state growth management expectations:
+
+| Feature | MainNet v0 Status | Notes |
+| :--- | :--- | :--- |
+| **State Pruning** | **Required** | Configurable retention period |
+| **Archival Nodes** | Supported | Full history retention (no pruning) |
+| **Snapshots** | **Required** | Periodic state snapshots for fast sync |
+| **State Size Monitoring** | Required | Metrics + alerting |
+
+**Node Types by Pruning Policy**:
+
+| Node Type | Pruning | State Retention |
+| :--- | :--- | :--- |
+| **Validator Node** | Enabled | Recent N blocks (configurable) |
+| **Full Node (Pruned)** | Enabled | Recent N blocks |
+| **Archival Node** | Disabled | Full history |
+
+### 2.5 MainNet-Only Invariants
+
+The following invariants are **enforced** for MainNet v0:
+
+1. **No in-memory-only validator nodes**: All validators MUST use persistent storage
+2. **No LocalMesh networking**: P2P transport is required
+3. **No gas-disabled mode**: Gas enforcement cannot be turned off
+4. **No v0 payloads**: Only `TransferPayloadV1` accepted
+5. **No loopback signer**: Production signing required (HSM or EncryptedFs)
+
+---
+
+## 3. Gas & Fees
+
+### 3.1 Gas Enforcement
+
+Gas enforcement is **mandatory** for MainNet v0:
+
+| Parameter | MainNet v0 Default | Governance |
+| :--- | :--- | :--- |
+| `ExecutionGasConfig.enabled` | `true` (cannot be false) | Not adjustable |
+| `BLOCK_GAS_LIMIT_DEFAULT` | 30,000,000 | Adjustable |
+| `MINIMUM_GAS_LIMIT` | 21,000 | Not adjustable |
+| `GAS_BASE_TX` | 21,000 | Governance-adjustable |
+| `GAS_PER_ACCOUNT_READ` | 2,600 | Governance-adjustable |
+| `GAS_PER_ACCOUNT_WRITE` | 5,000 | Governance-adjustable |
+
+### 3.2 Fee Distribution Policy
+
+MainNet v0 uses a **hybrid fee distribution** model:
+
+| Component | Percentage | Recipient | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Base Fee Burn** | 50% | Burned (destroyed) | Deflationary pressure |
+| **Proposer Reward** | 50% | Block proposer | Incentive to include txs |
+
+```rust
+fn distribute_fee(actual_fee: u128, proposer: AccountId, state: &mut State) {
+    let burn_amount = actual_fee / 2;
+    let proposer_reward = actual_fee - burn_amount;
+    
+    // Burn 50%
+    // (fee is simply removed from circulation)
+    
+    // Reward proposer 50%
+    state.credit_balance(proposer, proposer_reward);
+}
+```
+
+**Governance**: Fee distribution percentages are adjustable via on-chain governance.
+
+### 3.3 Fee-Priority Mempool
+
+Fee-priority ordering is **mandatory** for MainNet v0:
+
+| Parameter | MainNet v0 Default |
+| :--- | :--- |
+| `enable_fee_priority` | `true` (cannot be false) |
+
+**Priority Ordering**:
+
+```
+priority(tx) = (max_fee_per_gas, effective_fee, arrival_id)
+```
+
+### 3.4 Future Fee Market Upgrades
+
+MainNet v0 uses a simple priority fee model. Future upgrades may include:
+
+| Feature | Target Phase | Description |
+| :--- | :--- | :--- |
+| **EIP-1559-style base fee** | MainNet v1+ | Dynamic base fee based on block utilization |
+| **Priority fee tipping** | MainNet v1+ | Explicit tip to proposer |
+| **Fee oracle** | MainNet v1+ | On-chain fee estimation |
+
+These upgrades are **out of scope** for MainNet v0.
+
+### 3.5 Required Test Coverage
+
+MainNet readiness requires the following gas/fee tests to pass:
+
+| Test Category | Test Files | Requirement |
+| :--- | :--- | :--- |
+| **Gas property tests** | `t179_vm_v0_gas_proptests.rs` | **Mandatory CI** |
+| **Fee conservation** | G2 property (balance + fees) | **Mandatory CI** |
+| **Block gas limit** | G5 property | **Mandatory CI** |
+| **Fee-market cluster tests** | `test_testnet_beta_fee_market_*` | **Mandatory CI** |
+| **Eviction behavior** | `test_testnet_beta_fee_market_eviction` | **Mandatory CI** |
+
+---
+
+## 4. Mempool & DAG
+
+### 4.1 DAG as Production Mode
+
+For MainNet v0 validator nodes, DAG mempool is the **only** supported mode:
+
+| Mode | MainNet v0 Validators | Other Uses |
+| :--- | :--- | :--- |
+| **DAG Mempool** | **Required** | Production |
+| **FIFO Mempool** | **Not allowed** | Dev/harness only |
+
+### 4.2 Availability Certificates
+
+DAG availability certificates are **required** components for MainNet v0:
+
+| Component | MainNet v0 Status | Description |
+| :--- | :--- | :--- |
+| **BatchAck** | Required | Validator acknowledgment of batch receipt |
+| **BatchCertificate** | Required | 2f+1 acks proving data availability |
+| **Fetch-on-miss** | Required (T182, T183) | Recovery protocol for missing batches |
+| **Consensus coupling** | **Required** | Proposals must only commit certified batches |
+
+### 4.3 Consensus Coupling to DAG
+
+**MainNet v0 requirement**: HotStuff proposals MUST only commit batches that have valid availability certificates.
+
+| Rule | Description | Enforcement |
+| :--- | :--- | :--- |
+| **Certificate Required** | Batches without certificates cannot be proposed | Block validation |
+| **Certificate Validity** | Certificates must have 2f+1 valid signatures | Block validation |
+| **No Uncertified Batches** | Leader cannot include uncertified data | Block construction |
+
+**Protocol Flow (MainNet)**:
+
+```
+1. Validator creates batch → broadcasts to all validators
+2. Validators receive batch → issue BatchAck
+3. Author collects 2f+1 acks → forms BatchCertificate
+4. Only certified batches are eligible for consensus ordering
+5. HotStuff leader proposes frontier of certified batches
+6. Validators verify all proposed batches have valid certs
+7. On 3-chain commit → execute transactions from certified batches
+```
+
+### 4.4 DoS Protections and Fee-Aware Eviction
+
+MainNet v0 requires stronger DoS protections in the DAG mempool:
+
+| Protection | MainNet v0 Status |
+| :--- | :--- |
+| **Fee-aware eviction** | Required (T169) |
+| **Rate limiting per sender** | Required |
+| **Stake-weighted quotas** | MainNet v0.x (post-launch) |
+| **Batch size limits** | Required |
+
+### 4.5 MainNet vs Beta: DAG Requirements
+
+| Feature | TestNet Beta | MainNet v0 | MainNet v0.x |
+| :--- | :--- | :--- | :--- |
+| DAG mempool | Default | **Required** | Required |
+| Availability certs | v1 (data-plane) | **Consensus-coupled** | Consensus-coupled |
+| Fetch-on-miss | v0 (basic) | **Required** | Enhanced |
+| Fee-aware eviction | Enabled | **Required** | Required |
+| Stake-weighted quotas | Not implemented | Planned | **Required** |
+
+---
+
+## 5. Networking / P2P
+
+### 5.1 P2P Transport v1 (KEMTLS-Based)
+
+P2P transport is the **only** supported mode for MainNet v0 validators:
+
+| Mode | MainNet v0 Validators | Notes |
+| :--- | :--- | :--- |
+| **P2P (KEMTLS)** | **Required** | Production mode |
+| **LocalMesh** | **Not allowed** | Dev/harness only |
+
+### 5.2 MainNet P2P Requirements
+
+MainNet v0 has stronger P2P requirements compared to TestNet Beta:
+
+| Requirement | TestNet Beta | MainNet v0 |
+| :--- | :--- | :--- |
+| **Transport** | P2P default | P2P **required** |
+| **Discovery** | Static peers | **Dynamic discovery** + static fallback |
+| **Peer diversity** | Guideline | **Enforced** (min 2 ASNs) |
+| **Liveness scoring** | Not implemented | **Required** |
+| **Anti-eclipse** | Basic | **Production-grade** |
+
+### 5.3 Dynamic Peer Discovery
+
+MainNet v0 requires dynamic peer discovery:
+
+| Feature | MainNet v0 Status | Description |
+| :--- | :--- | :--- |
+| **Peer exchange protocol** | **Required** | Validators share known peers |
+| **Static peer fallback** | Supported | Configured bootstrap nodes |
+| **Discovery interval** | Configurable | Default: 30 seconds |
+| **Max discovered peers** | Configurable | Default: 100 |
+
+### 5.4 Anti-Eclipse Constraints
+
+MainNet v0 enforces anti-eclipse measures:
+
+| Constraint | MainNet v0 Requirement | Enforcement |
+| :--- | :--- | :--- |
+| **Minimum outbound connections** | 8 validators | Node startup check |
+| **Peer diversity (ASN)** | ≥2 distinct ASNs | Soft requirement (logged warning) |
+| **Peer diversity (region)** | ≥2 regions | Operator guideline |
+| **Max connections per IP range** | 4 per /24 | Connection limit |
+| **Random peer selection** | Required | Prevents deterministic isolation |
+
+### 5.5 Liveness Scoring and Reconnection
+
+MainNet v0 requires peer liveness scoring:
+
+| Feature | MainNet v0 Status |
+| :--- | :--- |
+| **Heartbeat protocol** | Required (30s interval) |
+| **Liveness scoring** | Required (track responsiveness) |
+| **Automatic reconnection** | Required (exponential backoff) |
+| **Peer eviction** | Required (low-score peers removed) |
+
+### 5.6 P2P Implementation Status
+
+From [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md):
+
+| Component | TestNet Alpha | MainNet v0 Required |
+| :--- | :--- | :--- |
+| KEMTLS transport | ✅ T172 | Yes |
+| Consensus/DAG over P2P | ✅ T173 | Yes |
+| P2P receive path | ✅ T174 | Yes |
+| Node P2P wiring | ✅ T175 | Yes |
+| Peer health monitoring | ⏳ Planned | **Yes** |
+| Dynamic discovery | ⏳ Planned | **Yes** |
+| Anti-eclipse measures | ⏳ Planned | **Yes** |
+| Liveness scoring | ⏳ Planned | **Yes** |
+
+---
+
+## 6. Security & Risk Posture (MainNet View)
+
+This section summarizes key security areas and the "risk budget" for MainNet v0. Detailed risk tracking lives in [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md).
+
+### 6.1 Execution/VM Security
+
+| Risk Area | MainNet v0 Mitigation |
+| :--- | :--- |
+| **Non-determinism** | Property tests (T177, T179); Stage B determinism proofs |
+| **State corruption** | Safe integer arithmetic; fuzzing coverage |
+| **Gas accounting bugs** | Gas property tests (G1-G5); fee conservation checks |
+| **Parallelism bugs** | Stage B vs sequential comparison tests |
+
+**Risk Budget**: VM execution is considered **low-to-medium risk** after T177/T179 property testing.
+
+### 6.2 Gas/Fees and Fee Market Economics
+
+| Risk Area | MainNet v0 Mitigation |
+| :--- | :--- |
+| **Fee market manipulation** | Simple priority model; EIP-1559 deferred |
+| **Balance draining** | Property tests verify fee deduction correctness |
+| **DoS via spam** | Gas enforcement + fee-priority eviction |
+| **Economic attacks** | Burn + proposer hybrid prevents centralization |
+
+**Risk Budget**: Fee market is **medium risk**; simple model reduces complexity but may be gameable.
+
+### 6.3 DAG Availability and Consensus Coupling
+
+| Risk Area | MainNet v0 Mitigation |
+| :--- | :--- |
+| **Data availability holes** | Fetch-on-miss protocol (T182, T183) |
+| **Consensus liveness** | Certificate-gated proposals |
+| **Certificate forgery** | ML-DSA-44 signatures; 2f+1 quorum |
+| **Batch equivocation** | Domain-separated signing preimages |
+
+**Risk Budget**: DAG availability is **medium risk**; consensus coupling is new surface area.
+
+### 6.4 P2P Topology and Anti-Eclipse
+
+| Risk Area | MainNet v0 Mitigation |
+| :--- | :--- |
+| **Eclipse attacks** | Peer diversity requirements; random selection |
+| **Sybil attacks** | Permissioned validator set (stake-weighted) |
+| **DoS/bandwidth** | Rate limiting; bounded queues |
+| **Network partitions** | Multi-region guidelines; reconnection policies |
+
+**Risk Budget**: P2P topology is **medium-high risk**; requires production validation.
+
+### 6.5 Key Management and Remote Signer / HSM
+
+| Risk Area | MainNet v0 Mitigation |
+| :--- | :--- |
+| **Key compromise** | HSM support required for validators |
+| **Key separation** | Consensus keys separate from network keys |
+| **Key rotation** | Rotation hooks implemented |
+| **Remote signing** | Production signer required (no loopback) |
+
+**Risk Budget**: Key management is **high risk** area; HSM support critical for MainNet.
+
+### 6.6 Risk Summary Table
+
+| Area | Severity | MainNet v0 Status | Notes |
+| :--- | :--- | :--- | :--- |
+| Execution/VM | Medium | Partially Mitigated | Stage B needs validation |
+| Gas/Fees | Medium | Partially Mitigated | Simple model; future EIP-1559 |
+| DAG/Availability | Medium | Partially Mitigated | Consensus coupling new |
+| P2P/Eclipse | Medium-High | Planned | Production validation needed |
+| Key Management | High | Planned | HSM support required |
+
+---
+
+## 7. Operational Profiles & CLI Defaults
+
+### 7.1 MainNet Profile
+
+A canonical MainNet profile should be available via the `--profile` CLI flag:
+
+```bash
+# Using the --profile flag (recommended)
+qbind-node --profile mainnet --data-dir /data/qbind
+
+# Or with the short flag
+qbind-node -P mainnet -d /data/qbind
+```
+
+### 7.2 MainNet Configuration Parameters
+
+| Parameter | CLI Flag | MainNet Default | Notes |
+| :--- | :--- | :--- | :--- |
+| **Profile** | `--profile` / `-P` | N/A | Use `mainnet` for canonical preset |
+| Environment | `--env` | `mainnet` | **MainNet chain ID** |
+| Execution Profile | `--execution-profile` | `vm-v0` | Same as Beta |
+| Gas Enforcement | `--enable-gas` | `true` | **Cannot be disabled** |
+| Fee Priority | `--enable-fee-priority` | `true` | **Cannot be disabled** |
+| Mempool Mode | `--mempool-mode` | `dag` | **DAG only** for validators |
+| DAG Availability | `--enable-dag-availability` | `true` | **Required** |
+| Network Mode | `--network-mode` | `p2p` | **P2P only** for validators |
+| P2P Transport | `--enable-p2p` | `true` | **Required** |
+| Stage B Parallel | `--enable-stage-b` | `true` | **Enabled by default** |
+| Discovery | `--enable-discovery` | `true` | **Required** |
+| Data Directory | `--data-dir` / `-d` | Required | **Mandatory** |
+| Signer Mode | `--signer-mode` | `hsm` or `encrypted-fs` | **No loopback** |
+
+### 7.3 NodeConfig Example (MainNet)
+
+```rust
+use qbind_node::{NodeConfig, ConfigProfile, MempoolMode, NetworkMode};
+
+// Option 1: Use the canonical preset (recommended)
+let config = NodeConfig::mainnet_preset()
+    .with_data_dir("/data/qbind")
+    .with_signer_mode(SignerMode::Hsm);
+
+// Option 2: Use from_profile for CLI integration
+let config = NodeConfig::from_profile(ConfigProfile::MainNet)
+    .with_data_dir("/data/qbind");
+
+// Verify MainNet defaults
+assert!(config.gas_enabled);
+assert!(config.enable_fee_priority);
+assert_eq!(config.mempool_mode, MempoolMode::Dag);
+assert_eq!(config.network_mode, NetworkMode::P2p);
+assert!(config.dag_availability_enabled);
+assert!(config.consensus_coupling_enabled); // MainNet-only
+assert!(config.stage_b_enabled);
+assert!(config.discovery_enabled);
+```
+
+### 7.4 Standard MainNet Validator Node
+
+A "standard MainNet validator node" should be started with:
+
+```bash
+qbind-node \
+  --profile mainnet \
+  --data-dir /data/qbind \
+  --signer-mode hsm \
+  --hsm-config /etc/qbind/hsm.toml \
+  --validator-id 42 \
+  --p2p-listen-addr 0.0.0.0:9000 \
+  --p2p-advertised-addr validator42.qbind.network:9000 \
+  --bootstrap-peers mainnet-bootstrap-1.qbind.network:9000,mainnet-bootstrap-2.qbind.network:9000
+```
+
+---
+
+## 8. Compatibility & Migration
+
+### 8.1 TestNet Beta → MainNet v0 Roadmap
+
+| Step | Description | Coordination Required |
+| :--- | :--- | :--- |
+| 1 | Complete all MainNet-blocking tasks | Engineering |
+| 2 | External security audit | External auditor |
+| 3 | Genesis block creation | Governance |
+| 4 | Validator onboarding | Validators |
+| 5 | MainNet launch | All parties |
+
+### 8.2 Configuration Changes
+
+| Configuration | TestNet Beta | MainNet v0 | Migration Impact |
+| :--- | :--- | :--- | :--- |
+| **Chain ID** | TestNet | **MainNet** | New genesis required |
+| **Domain tags** | `QBIND:TST:*:v1` | `QBIND:MAIN:*:v1` | Signatures incompatible |
+| **Fee policy** | Burn only | Hybrid | Protocol change |
+| **Consensus coupling** | Data-plane certs | Consensus-coupled | Protocol change |
+| **Payload format** | v0 + v1 | **v1 only** | Client migration |
+
+### 8.3 Misconfiguration Handling
+
+| Scenario | MainNet v0 Behavior |
+| :--- | :--- |
+| **Gas disabled** | Node refuses to start |
+| **LocalMesh mode** | Node refuses to start (validator) |
+| **In-memory state** | Node refuses to start (validator) |
+| **v0 payload submitted** | Transaction rejected at mempool |
+| **Uncertified batch proposed** | Block rejected by validators |
+| **Wrong chain ID** | Signatures invalid; consensus failure |
+
+---
+
+## 9. Roadmap: Ready vs Pending
+
+### 9.1 Required and Ready for MainNet v0
+
+| Item | Status | Reference |
+| :--- | :--- | :--- |
+| VM v0 execution semantics | ✅ Ready | [QBIND_TESTNET_ALPHA_SPEC.md §2](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) |
+| RocksDB state persistence | ✅ Ready | [QBIND_TESTNET_ALPHA_SPEC.md §4.4](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) |
+| Gas enforcement | ✅ Ready | T168 |
+| Fee-priority mempool | ✅ Ready | T169 |
+| DAG mempool + availability certs v1 | ✅ Ready | T158, T165 |
+| P2P transport v1 | ✅ Ready | T172, T173, T174, T175 |
+| Property-based tests (T177) | ✅ Ready | T177 |
+| Gas-aware property tests (T179) | ✅ Ready | T179 |
+| Beta configuration profile | ✅ Ready | T180 |
+| Fetch-on-miss v0 | ✅ Ready | T182, T183 |
+| Stage B parallel skeleton | ✅ Ready | T171 |
+
+### 9.2 Required but Pending (MainNet Blockers)
+
+| Item | Status | Blocking Task |
+| :--- | :--- | :--- |
+| **Consensus coupling to DAG** | ⏳ Pending | Future task |
+| **Dynamic peer discovery** | ⏳ Pending | Future task |
+| **Peer liveness scoring** | ⏳ Pending | Future task |
+| **Anti-eclipse enforcement** | ⏳ Pending | Future task |
+| **State pruning** | ⏳ Pending | Future task |
+| **State snapshots** | ⏳ Pending | Future task |
+| **HSM production integration** | ⏳ Pending | Future task |
+| **Hybrid fee distribution** | ⏳ Pending | Future task |
+| **Stage B production wiring** | ⏳ Pending | Future task |
+| **MainNet configuration profile** | ⏳ Pending | Future task |
+| **External security audit** | ⏳ Pending | External |
+
+### 9.3 Out of Scope for MainNet v0
+
+| Item | Target Phase | Notes |
+| :--- | :--- | :--- |
+| EIP-1559-style fee market | MainNet v1+ | Simple priority for v0 |
+| Smart contracts | MainNet v1+ | Transfer-only in v0 |
+| ZK L2 integration | MainNet v2+ | Future work |
+| Light client support | MainNet v1+ | Full nodes only in v0 |
+| Cross-shard transactions | MainNet v2+ | Single-shard in v0 |
+| Validator slashing | MainNet v0.x | Post-launch enhancement |
+| Stake-weighted DAG quotas | MainNet v0.x | Post-launch enhancement |
+
+---
+
+## 10. Related Documents
+
+| Document | Path | Description |
+| :--- | :--- | :--- |
+| **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
+| TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture |
+| TestNet Beta Audit | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |
+| TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
+| TestNet Alpha Audit | [QBIND_TESTNET_ALPHA_AUDIT.md](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md) | Alpha risk and readiness |
+| Gas and Fees Design | [QBIND_GAS_AND_FEES_DESIGN.md](../testnet/QBIND_GAS_AND_FEES_DESIGN.md) | Gas and fee specification |
+| DAG Mempool Design | [QBIND_DAG_MEMPOOL_DESIGN.md](../devnet/QBIND_DAG_MEMPOOL_DESIGN.md) | DAG architecture |
+| Parallel Execution Design | [QBIND_PARALLEL_EXECUTION_DESIGN.md](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) | Stage A/B parallelism |
+| P2P Network Design | [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md) | P2P networking architecture |
+| P2P TestNet Alpha Guide | [QBIND_P2P_TESTNET_ALPHA_GUIDE.md](../network/QBIND_P2P_TESTNET_ALPHA_GUIDE.md) | Multi-process runbook |
+| DevNet v0 Freeze | [QBIND_DEVNET_V0_FREEZE.md](../devnet/QBIND_DEVNET_V0_FREEZE.md) | DevNet v0 baseline |
+| Chain ID and Domains | [QBIND_CHAIN_ID_AND_DOMAINS.md](../devnet/QBIND_CHAIN_ID_AND_DOMAINS.md) | Domain separation |
+
+---
+
+*End of Document*
