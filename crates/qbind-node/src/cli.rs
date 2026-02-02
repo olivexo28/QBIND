@@ -418,10 +418,7 @@ impl CliArgs {
         // T186: Apply Stage B override
         if let Some(stage_b) = self.enable_stage_b {
             if self.profile.is_some() {
-                eprintln!(
-                    "[T186] CLI override: stage_b_enabled = {}",
-                    stage_b
-                );
+                eprintln!("[T186] CLI override: stage_b_enabled = {}", stage_b);
             }
             config.stage_b_enabled = stage_b;
         }

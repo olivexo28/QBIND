@@ -122,13 +122,25 @@ fn from_profile_mainnet_uses_mainnet_preset() {
 
     // All fields should match (except data_dir which is None in both)
     assert_eq!(from_profile.environment, direct_preset.environment);
-    assert_eq!(from_profile.execution_profile, direct_preset.execution_profile);
+    assert_eq!(
+        from_profile.execution_profile,
+        direct_preset.execution_profile
+    );
     assert_eq!(from_profile.gas_enabled, direct_preset.gas_enabled);
-    assert_eq!(from_profile.enable_fee_priority, direct_preset.enable_fee_priority);
+    assert_eq!(
+        from_profile.enable_fee_priority,
+        direct_preset.enable_fee_priority
+    );
     assert_eq!(from_profile.mempool_mode, direct_preset.mempool_mode);
-    assert_eq!(from_profile.dag_availability_enabled, direct_preset.dag_availability_enabled);
+    assert_eq!(
+        from_profile.dag_availability_enabled,
+        direct_preset.dag_availability_enabled
+    );
     assert_eq!(from_profile.network_mode, direct_preset.network_mode);
-    assert_eq!(from_profile.network.enable_p2p, direct_preset.network.enable_p2p);
+    assert_eq!(
+        from_profile.network.enable_p2p,
+        direct_preset.network.enable_p2p
+    );
 }
 
 /// Test that parse_config_profile accepts "mainnet" and variants.
@@ -165,8 +177,7 @@ fn config_profile_mainnet_display() {
 /// Test that a valid MainNet config passes validation.
 #[test]
 fn validate_mainnet_invariants_accepts_canonical_config() {
-    let config = NodeConfig::mainnet_preset()
-        .with_data_dir("/data/qbind");
+    let config = NodeConfig::mainnet_preset().with_data_dir("/data/qbind");
 
     let result = config.validate_mainnet_invariants();
     assert!(
@@ -270,8 +281,7 @@ fn validate_mainnet_invariants_rejects_localmesh_network() {
 #[test]
 fn validate_mainnet_invariants_rejects_p2p_disabled() {
     // Create a config with P2P mode but enable_p2p=false
-    let mut config = NodeConfig::mainnet_preset()
-        .with_data_dir("/data/qbind");
+    let mut config = NodeConfig::mainnet_preset().with_data_dir("/data/qbind");
     config.network.enable_p2p = false;
 
     let result = config.validate_mainnet_invariants();
@@ -303,8 +313,7 @@ fn validate_mainnet_invariants_rejects_missing_data_dir() {
 fn validate_mainnet_invariants_rejects_wrong_environment() {
     // Start with TestNet Beta (which has all features enabled)
     // but wrong environment
-    let mut config = NodeConfig::testnet_beta_preset()
-        .with_data_dir("/data/qbind");
+    let mut config = NodeConfig::testnet_beta_preset().with_data_dir("/data/qbind");
     // Manually set all the flags that MainNet requires
     config.gas_enabled = true;
     config.enable_fee_priority = true;
@@ -377,8 +386,7 @@ fn mainnet_config_error_display_messages() {
 /// Test that startup_info_string includes MainNet-specific fields.
 #[test]
 fn startup_info_string_includes_mainnet_fields() {
-    let config = NodeConfig::mainnet_preset()
-        .with_data_dir("/data/qbind");
+    let config = NodeConfig::mainnet_preset().with_data_dir("/data/qbind");
 
     let info = config.startup_info_string(Some("V1"));
 
@@ -488,7 +496,10 @@ fn cli_profile_mainnet_builds_mainnet_preset() {
         NetworkEnvironment::Mainnet,
         "CLI --profile mainnet should produce MainNet environment"
     );
-    assert!(config.gas_enabled, "CLI --profile mainnet should enable gas");
+    assert!(
+        config.gas_enabled,
+        "CLI --profile mainnet should enable gas"
+    );
     assert!(
         config.enable_fee_priority,
         "CLI --profile mainnet should enable fee priority"
@@ -529,10 +540,7 @@ fn cli_profile_mainnet_with_bad_override_fails_validation() {
 
     // Config construction should succeed (override is applied)
     let config = args.to_node_config().unwrap();
-    assert!(
-        !config.gas_enabled,
-        "CLI override should have disabled gas"
-    );
+    assert!(!config.gas_enabled, "CLI override should have disabled gas");
 
     // But MainNet validation should fail
     let result = config.validate_mainnet_invariants();
@@ -550,17 +558,11 @@ fn cli_profile_mainnet_with_bad_override_fails_validation() {
 /// Test: CLI short flag -P mainnet works.
 #[test]
 fn cli_short_flag_mainnet_works() {
-    let args = CliArgs::try_parse_from([
-        "qbind-node",
-        "-P",
-        "mainnet",
-        "-d",
-        "/tmp/qbind",
-    ])
-    .unwrap();
+    let args =
+        CliArgs::try_parse_from(["qbind-node", "-P", "mainnet", "-d", "/tmp/qbind"]).unwrap();
 
     let config = args.to_node_config().unwrap();
-    
+
     // Verify full MainNet preset
     assert_eq!(config.environment, NetworkEnvironment::Mainnet);
     assert!(config.gas_enabled);
@@ -583,7 +585,7 @@ fn cli_profile_mainnet_v0_accepted() {
     .unwrap();
 
     let config = args.to_node_config().unwrap();
-    
+
     // Verify full MainNet preset
     assert_eq!(config.environment, NetworkEnvironment::Mainnet);
     assert!(config.gas_enabled);
@@ -594,12 +596,7 @@ fn cli_profile_mainnet_v0_accepted() {
 /// Test: CLI profile error message includes "mainnet".
 #[test]
 fn cli_invalid_profile_error_includes_mainnet() {
-    let args = CliArgs::try_parse_from([
-        "qbind-node",
-        "--profile",
-        "invalid-profile",
-    ])
-    .unwrap();
+    let args = CliArgs::try_parse_from(["qbind-node", "--profile", "invalid-profile"]).unwrap();
 
     let result = args.to_node_config();
     assert!(result.is_err());

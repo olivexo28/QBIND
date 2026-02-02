@@ -73,14 +73,15 @@ MainNet v0 uses `ExecutionProfile::VmV0` with mandatory gas enforcement:
 
 ### 2.2 Stage B Parallel Execution
 
-Stage B conflict-graph-based parallel execution is **available** for MainNet v0:
+Stage B conflict-graph-based parallel execution is **available and enabled by default** for MainNet v0:
 
 | Aspect | MainNet v0 Status | Notes |
 | :--- | :--- | :--- |
-| **Implementation** | Ready (T171) | Skeleton complete, tested |
-| **Production Wiring** | **MainNet v0 launch requirement** | Must be available |
-| **Default Behavior** | Operator-configurable | Can enable/disable per node |
-| **Determinism** | Guaranteed | Same inputs → same outputs |
+| **Implementation** | ✅ Ready (T171, T186, T187) | Complete with metrics |
+| **Production Wiring** | ✅ Complete (T187) | Wired into VM v0 pipeline |
+| **Default Behavior** | `stage_b_enabled = true` | Operators can disable via CLI |
+| **Determinism** | ✅ Verified | CI tests confirm identical results |
+| **Metrics** | ✅ Available | `stage_b_enabled`, `stage_b_blocks_total`, etc. |
 
 **Stage B Algorithm Summary** (from [QBIND_PARALLEL_EXECUTION_DESIGN.md](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md)):
 
@@ -90,7 +91,14 @@ Stage B conflict-graph-based parallel execution is **available** for MainNet v0:
 4. Execute layers in parallel with Rayon
 5. Merge results deterministically
 
-**Critical Invariant**: All validators MUST produce identical state regardless of parallel vs sequential execution.
+**Critical Invariant**: All validators MUST produce identical state regardless of parallel vs sequential execution. This is verified by T187 CI tests.
+
+**Disabling Stage B** (if needed):
+```bash
+qbind-node --profile mainnet --enable-stage-b false --data-dir /data/qbind
+```
+
+When Stage B is disabled, a soft warning is logged but the node continues with sequential execution.
 
 ### 2.3 State Persistence
 

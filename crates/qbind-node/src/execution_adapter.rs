@@ -69,9 +69,10 @@ use std::time::Instant;
 
 use crossbeam_channel::{bounded, Receiver, Sender, TrySendError};
 use qbind_ledger::{
-    CachedPersistentAccountState, ExecutionEngine, ExecutionEngineError, InMemoryAccountState,
-    InMemoryState, ParallelExecConfig, PersistentAccountState, QbindTransaction,
-    RocksDbAccountState, SenderPartitionedNonceExecutor, StateUpdater, VmV0ExecutionEngine,
+    execute_block_stage_b, AccountStateUpdater, AccountStateView, CachedPersistentAccountState,
+    ExecutionEngine, ExecutionEngineError, InMemoryAccountState, InMemoryState, ParallelExecConfig,
+    PersistentAccountState, QbindTransaction, RocksDbAccountState, SenderPartitionedNonceExecutor,
+    StateUpdater, TransferPayload, VmV0ExecutionEngine,
 };
 use qbind_types::Hash32;
 use qbind_wire::consensus::BlockProposal;
@@ -105,6 +106,50 @@ impl FlushableState for InMemoryAccountState {
 impl<P: PersistentAccountState> FlushableState for CachedPersistentAccountState<P> {
     fn flush_state(&self) -> Result<(), qbind_ledger::StorageError> {
         self.flush()
+    }
+}
+
+// ============================================================================
+// T187: Stage B State Extraction Helper
+// ============================================================================
+
+/// Extract accounts touched by transactions into an InMemoryAccountState.
+///
+/// This function reads the sender and recipient accounts from the source state
+/// and creates a snapshot suitable for Stage B execution.
+fn extract_touched_accounts<S: AccountStateView>(
+    state: &S,
+    transactions: &[QbindTransaction],
+) -> InMemoryAccountState {
+    use std::collections::HashSet;
+
+    let mut touched = HashSet::new();
+
+    for tx in transactions {
+        touched.insert(tx.sender);
+
+        // Try to decode recipient from payload
+        if let Some(transfer) = TransferPayload::decode(&tx.payload) {
+            touched.insert(transfer.recipient);
+        }
+    }
+
+    let mut snapshot = InMemoryAccountState::new();
+    for account in touched {
+        let account_state = state.get_account_state(&account);
+        snapshot.set_account_state(&account, account_state);
+    }
+
+    snapshot
+}
+
+/// Apply state changes from Stage B execution back to the main state.
+fn apply_state_changes<S: AccountStateUpdater + AccountStateView>(
+    state: &mut S,
+    final_state: &InMemoryAccountState,
+) {
+    for (account, account_state) in final_state.iter() {
+        state.set_account_state(account, account_state.clone());
     }
 }
 
@@ -819,9 +864,13 @@ impl SingleThreadExecutionService {
     ) {
         let engine = VmV0ExecutionEngine::new();
 
-        // T186: Log Stage B status
+        // T187: Log Stage B status at startup
         if stage_b_enabled {
-            eprintln!("[T186] VM v0 Stage B parallel execution enabled");
+            eprintln!(
+                "[T187] VM v0 Stage B parallel execution enabled (conflict-graph scheduler active)"
+            );
+        } else {
+            eprintln!("[T187] VM v0 Stage B parallel execution disabled (sequential execution)");
         }
 
         // T164: Initialize state backend based on configuration
@@ -907,6 +956,11 @@ impl SingleThreadExecutionService {
         is_persistent: bool,
         stage_b_enabled: bool,
     ) {
+        // T187: Set Stage B enabled metric at startup
+        if let Some(ref m) = metrics {
+            m.set_stage_b_enabled(stage_b_enabled);
+        }
+
         loop {
             // Check for shutdown
             if shutdown.load(Ordering::SeqCst) {
@@ -923,26 +977,47 @@ impl SingleThreadExecutionService {
                     let block_start = Instant::now();
                     let tx_count = task.block.tx_count();
 
-                    // T186: Stage B is enabled but currently only works optimally with in-memory state.
-                    // For now, we use sequential execution and log when Stage B would be available.
-                    // Full Stage B wiring with persistent state support is a future enhancement.
-                    //
-                    // The Stage B executor (execute_block_stage_b) is available in qbind-ledger
-                    // and produces identical results as sequential execution.
-                    let results = if stage_b_enabled && !is_persistent && tx_count > 1 {
+                    // T187: Actual Stage B execution path
+                    // Stage B uses conflict-graph parallel execution when enabled.
+                    // It produces identical state and receipts as sequential execution.
+                    let (results, stage_b_used, stage_b_stats) = if stage_b_enabled && tx_count > 1
+                    {
                         // Stage B path: use conflict-graph parallel execution
-                        // This requires InMemoryAccountState, which we'd need to extract from S.
-                        // For now, fall back to sequential with a log message.
-                        // TODO(T186+): Implement full Stage B integration with state abstraction.
+                        // Extract touched accounts into a snapshot for Stage B execution
+                        let snapshot = extract_touched_accounts(state, &task.block.txs);
+                        let stage_b_start = Instant::now();
+
+                        // Execute using Stage B parallel scheduler
+                        let (stage_b_results, final_state, stats) =
+                            execute_block_stage_b(&task.block.txs, &snapshot);
+
+                        // Apply state changes back to main state
+                        apply_state_changes(state, &final_state);
+
+                        let stage_b_duration = stage_b_start.elapsed();
+
+                        // T187: Record Stage B metrics
+                        if let Some(ref m) = metrics {
+                            m.inc_stage_b_parallel();
+                            m.record_stage_b_levels(stats.level_count);
+                            m.record_stage_b_parallel_time(stage_b_duration);
+                        }
+
                         eprintln!(
-                            "[T186] Stage B requested for block {} ({} txs) but falling back to sequential",
+                            "[T187] Stage B executed block {} ({} txs, {} levels, max_level_size={}, parallel={}) in {:?}",
                             task.block.height(),
-                            tx_count
+                            tx_count,
+                            stats.level_count,
+                            stats.max_level_size,
+                            stats.used_parallel,
+                            stage_b_duration
                         );
-                        engine.execute_block(state, &task.block.txs)
+
+                        (stage_b_results, true, Some(stats))
                     } else {
                         // Sequential path: existing behavior
-                        engine.execute_block(state, &task.block.txs)
+                        let results = engine.execute_block(state, &task.block.txs);
+                        (results, false, None)
                     };
 
                     // T164: Flush state after block execution if using persistent backend
@@ -968,8 +1043,13 @@ impl SingleThreadExecutionService {
                         m.add_txs_applied(success_count);
                         m.record_block_apply(block_duration);
 
-                        // VM v0 is sequential (or Stage B fallback), set parallel workers to 1
-                        m.set_parallel_workers_active(1);
+                        // T187: Set workers based on Stage B stats
+                        if let Some(ref stats) = stage_b_stats {
+                            m.set_parallel_workers_active(stats.workers_used);
+                        } else {
+                            // Sequential execution uses 1 worker
+                            m.set_parallel_workers_active(1);
+                        }
                         m.record_parallel_block_time(block_duration);
 
                         // Record errors by type
@@ -1003,15 +1083,19 @@ impl SingleThreadExecutionService {
                     }
 
                     // Brief log (no sensitive content)
-                    if tx_count > 0 {
+                    if tx_count > 0 && !stage_b_used {
                         let persistence_info = if is_persistent {
                             "persistent"
                         } else {
                             "in-memory"
                         };
-                        let stage_b_info = if stage_b_enabled { ", stage_b=enabled" } else { "" };
+                        let stage_b_info = if stage_b_enabled {
+                            ", stage_b=enabled"
+                        } else {
+                            ""
+                        };
                         eprintln!(
-                            "[T186] Applied block {} ({} txs, VM v0 sequential, {}{}) in {:?}",
+                            "[T187] Applied block {} ({} txs, VM v0 sequential, {}{}) in {:?}",
                             task.block.height(),
                             tx_count,
                             persistence_info,

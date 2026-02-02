@@ -63,7 +63,9 @@ async fn main() {
 
     // T185: Validate MainNet invariants if using MainNet profile
     if let Some(ref profile_str) = args.profile {
-        if let Some(ConfigProfile::MainNet) = qbind_node::node_config::parse_config_profile(profile_str) {
+        if let Some(ConfigProfile::MainNet) =
+            qbind_node::node_config::parse_config_profile(profile_str)
+        {
             if let Err(e) = config.validate_mainnet_invariants() {
                 eprintln!("[T185] ERROR: MainNet configuration validation failed!");
                 eprintln!("[T185] {}", e);
