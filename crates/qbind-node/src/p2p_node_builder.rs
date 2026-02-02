@@ -645,7 +645,7 @@ impl SimpleValidatorNodeMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_config::{MempoolMode, NetworkMode, NetworkTransportConfig};
+    use crate::node_config::{DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig};
     use qbind_types::NetworkEnvironment;
 
     fn make_test_config() -> NodeConfig {
@@ -668,6 +668,8 @@ mod tests {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            // T189 field
+            dag_coupling_mode: DagCouplingMode::Off,
             // T186 field
             stage_b_enabled: false,
         }
