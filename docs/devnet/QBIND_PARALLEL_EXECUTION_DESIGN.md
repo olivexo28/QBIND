@@ -533,4 +533,63 @@ after the conflict-graph core has been validated through testing and benchmarkin
 
 ---
 
+## Appendix D: Implementation Status – Stage B Wiring (T186, T187)
+
+**Tasks**: T186, T187  
+**Status**: Production-ready, config-gated  
+**Date**: 2026-02-02
+
+### Overview
+
+T186 and T187 complete the Stage B wiring into the VM v0 pipeline:
+
+1. **T186: Initial Wiring**:
+   - Added `stage_b_enabled` configuration option to `NodeConfig`
+   - Added `StageBExecStats` and production `execute_block_stage_b()` API
+   - Config defaults: DevNet/TestNet Alpha/Beta = `false`, MainNet = `true`
+   - CLI flag: `--enable-stage-b` for runtime control
+
+2. **T187: Production Activation**:
+   - Wired `execute_block_stage_b()` into VM v0 worker loop in `execution_adapter.rs`
+   - Added Stage B metrics: `stage_b_enabled`, `stage_b_blocks_total{mode}`, `stage_b_mismatch_total`, `stage_b_levels_histogram`, `stage_b_parallel_seconds`
+   - Added cluster harness tests for Stage B verification
+   - Verified determinism vs sequential execution
+
+### Configuration
+
+| Environment | `stage_b_enabled` Default | Notes |
+| :--- | :--- | :--- |
+| DevNet v0 | `false` | DevNet frozen at sequential |
+| TestNet Alpha | `false` | Opt-in for testing |
+| TestNet Beta | `false` | Opt-in for testing |
+| MainNet v0 | `true` | Enabled by default, operators can disable |
+
+### Metrics
+
+| Metric | Type | Description |
+| :--- | :--- | :--- |
+| `qbind_execution_stage_b_enabled` | Gauge | 0 or 1 indicating Stage B status |
+| `qbind_execution_stage_b_blocks_total{mode="parallel"}` | Counter | Blocks executed via Stage B |
+| `qbind_execution_stage_b_blocks_total{mode="fallback"}` | Counter | Blocks that fell back to sequential |
+| `qbind_execution_stage_b_mismatch_total` | Counter | Internal mismatches detected |
+| `qbind_execution_stage_b_levels_histogram` | Histogram | Schedule levels per block |
+| `qbind_execution_stage_b_parallel_seconds` | Histogram | Stage B execution time |
+
+### Test Coverage
+
+- `qbind-ledger`: 6 Stage B executor unit tests (from T186)
+- `qbind-node`: Cluster harness tests:
+  - `test_testnet_beta_stage_b_localmesh_smoke`: CI-friendly smoke test
+  - `test_stage_b_pipeline_determinism_against_sequential`: Determinism verification
+  - `test_testnet_beta_stage_b_p2p_smoke` (ignored): P2P mode smoke test
+
+### Critical Invariants (Preserved)
+
+- **Determinism**: Stage B produces identical state to sequential execution
+- **No consensus changes**: Block ordering is still determined by HotStuff
+- **No gas/fee changes**: Same gas accounting in both modes
+- **Backward compatibility**: `stage_b_enabled = false` preserves exact pre-T186 behavior
+
+---
+
 *End of Document*

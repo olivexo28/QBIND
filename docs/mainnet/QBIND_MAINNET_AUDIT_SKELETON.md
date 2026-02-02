@@ -50,13 +50,13 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Area | Related Tasks | Risk Status | Notes |
 | :--- | :--- | :--- | :--- |
-| **Execution & VM** | T163, T164, T171, T177, T179 | Partially Mitigated | Stage B needs production wiring |
+| **Execution & VM** | T163, T164, T171, T177, T179, T186, T187 | Partially Mitigated | Stage B wired and tested (T186, T187) |
 | **State Persistence & Growth** | T164 | Partially Mitigated | Pruning & snapshots pending |
 | **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181 | Partially Mitigated | Hybrid fee distribution pending |
 | **Mempool & DAG** | T158, T165, T182, T183 | Partially Mitigated | Consensus coupling pending |
 | **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
-| **Observability & Ops** | T154, T155, T157, T158 | Partially Mitigated | MainNet runbooks pending |
+| **Observability & Ops** | T154, T155, T157, T158, T187 | Partially Mitigated | Stage B metrics added (T187); MainNet runbooks pending |
 | **Governance / Upgrades** | — | Open | Not implemented |
 
 ---
@@ -259,8 +259,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | 2 | Gas-enabled property tests pass in CI (G1-G5) | ✅ Ready | `t179_vm_v0_gas_proptests.rs` |
 | 3 | Balance + fee conservation verified | ✅ Ready | G2 property test |
 | 4 | Stage B parallel execution skeleton tested | ✅ Ready | T171 tests |
-| 5 | Stage B production wiring complete | ⏳ Pending | Future task |
-| 6 | Stage B vs sequential determinism verified | ⏳ Pending | Future task |
+| 5 | Stage B production wiring complete | ✅ Ready | T186, T187 - wired into VM v0 pipeline |
+| 6 | Stage B vs sequential determinism verified | ✅ Ready | T187 `test_stage_b_pipeline_determinism_against_sequential` |
 
 ### 4.2 State Persistence & Growth
 
@@ -321,14 +321,14 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 | Category | Ready | Pending | Total |
 | :--- | :--- | :--- | :--- |
-| Execution & VM | 4 | 2 | 6 |
+| Execution & VM | 6 | 0 | 6 |
 | State Persistence | 1 | 2 | 3 |
 | Gas/Fees | 2 | 2 | 4 |
 | Mempool & DAG | 2 | 3 | 5 |
 | Networking / P2P | 0 | 5 | 5 |
 | Keys & HSM | 0 | 3 | 3 |
 | Operations | 2 | 3 | 5 |
-| **Total** | **11** | **20** | **31** |
+| **Total** | **13** | **18** | **31** |
 
 ---
 
@@ -396,9 +396,11 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T18x | State | State snapshots | MN-R3 |
 | T18x | Keys | HSM production integration | MN-R5 |
 | T18x | Gas/Fees | Hybrid fee distribution | MN-R2 |
-| T18x | Execution | Stage B production wiring | MN-R1 |
+| ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | T18x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
+
+> **Note**: Stage B production wiring completed in T186 + T187 (strikethrough above).
 
 ---
 
