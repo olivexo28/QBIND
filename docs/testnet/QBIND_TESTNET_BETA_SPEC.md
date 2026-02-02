@@ -503,10 +503,30 @@ Beta nodes may interoperate with Alpha-style nodes **if configuration is aligned
 
 ---
 
-## 10. Related Documents
+## 10. Path to MainNet
+
+For the next phase of the network roadmap (MainNet v0), see [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md).
+
+MainNet v0 extends Beta with:
+
+- **Hybrid fee distribution** — Burn + proposer reward (vs burn-only in Beta)
+- **Consensus-coupled DAG** — Proposals must only commit certified batches
+- **Stage B parallelism** — Conflict-graph-based parallel execution available
+- **Dynamic P2P discovery** — Validators can find new peers automatically
+- **Anti-eclipse measures** — Peer diversity requirements enforced
+- **HSM production mode** — Hardware security module support for validators
+- **External security audit** — Required before MainNet launch
+
+For MainNet risk tracking and readiness checklist, see [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md).
+
+---
+
+## 11. Related Documents
 
 | Document | Path | Description |
 | :--- | :--- | :--- |
+| **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet v0 architecture |
+| **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk tracker |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](./QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
 | TestNet Alpha Audit | [QBIND_TESTNET_ALPHA_AUDIT.md](./QBIND_TESTNET_ALPHA_AUDIT.md) | Alpha risk and readiness |
 | TestNet Beta Audit Skeleton | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |

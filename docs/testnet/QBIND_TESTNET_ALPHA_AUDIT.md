@@ -389,6 +389,10 @@ This section summarizes what remains out-of-scope for Alpha and the explicit goa
                                                └─────────────────┘
 ```
 
+> **Note (T184)**: For MainNet v0 specifications and risk tracking, see:
+> - [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) — MainNet architecture
+> - [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) — MainNet readiness checklist
+
 ---
 
 ## 7. Appendix: Task Index (T163–T177)
@@ -422,6 +426,8 @@ This table maps TestNet Alpha tasks to their areas and documentation coverage.
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](./QBIND_TESTNET_ALPHA_SPEC.md) | Full TestNet Alpha architecture |
 | TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](./QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture (T178) |
 | TestNet Beta Audit Skeleton | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker (T178) |
+| **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet v0 architecture (T184) |
+| **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk tracker (T184) |
 | Gas and Fees Design | [QBIND_GAS_AND_FEES_DESIGN.md](./QBIND_GAS_AND_FEES_DESIGN.md) | Gas and fee model (T167) |
 | DevNet v0 Freeze | [QBIND_DEVNET_V0_FREEZE.md](../devnet/QBIND_DEVNET_V0_FREEZE.md) | DevNet v0 baseline |
 | DevNet Audit Log | [QBIND_DEVNET_AUDIT.md](../devnet/QBIND_DEVNET_AUDIT.md) | DevNet task tracking |
