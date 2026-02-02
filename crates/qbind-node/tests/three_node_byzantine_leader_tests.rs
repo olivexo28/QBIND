@@ -162,6 +162,8 @@ fn make_proposal(
             next_epoch: 0,
             batch_commitment: [0u8; 32],
         },
+        qc: None,
+        txs: vec![],
         signature: TEST_SIGNATURE.to_vec(),
     }
 }

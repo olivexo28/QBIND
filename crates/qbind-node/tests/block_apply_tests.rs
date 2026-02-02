@@ -325,6 +325,9 @@ fn node_rejects_block_with_extra_bytes_after_tx() {
             next_epoch: 0,
             batch_commitment: [0u8; 32],
         },
+        qc: None,
+        txs: vec![blob],
+        signature: vec![],
     };
 
     let result = node.apply_block(&mut store, &proposal);
