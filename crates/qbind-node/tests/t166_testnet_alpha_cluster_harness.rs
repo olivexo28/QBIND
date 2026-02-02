@@ -3129,19 +3129,23 @@ fn test_testnet_beta_dag_fetch_on_miss_p2p_smoke() {
 fn test_testnet_beta_stage_b_localmesh_smoke() {
     eprintln!("[T187] Starting Stage B LocalMesh smoke test");
 
+    // T187: Test parameters
+    const NUM_SENDERS: usize = 4;
+    const TXS_PER_SENDER: u64 = 3;
+
     // Beta-style config with Stage B enabled
     let cfg = TestnetAlphaClusterConfig::minimal()
         .with_dag_mempool(false) // Use FIFO for simplicity
         .with_dag_availability_enabled(false)
-        .with_num_senders(4)
-        .with_txs_per_sender(5)
+        .with_num_senders(NUM_SENDERS)
+        .with_txs_per_sender(TXS_PER_SENDER)
         .with_stage_b_enabled(true) // T187: Enable Stage B
         .with_timeout(20);
 
     let mut cluster = TestnetAlphaClusterHandle::start(cfg.clone()).expect("cluster should start");
 
     // Initialize multiple test accounts (needed for parallel execution)
-    let sender_ids: Vec<AccountId> = (0..4).map(|i| [0xA0 + i as u8; 32]).collect();
+    let sender_ids: Vec<AccountId> = (0..NUM_SENDERS).map(|i| [0xA0 + i as u8; 32]).collect();
     let recipient_id: AccountId = [0xFF; 32];
     let initial_balance = 1_000_000u128;
 
@@ -3156,7 +3160,7 @@ fn test_testnet_beta_stage_b_localmesh_smoke() {
     let transfer_amount = 100u128;
     for (nonce, sender_id) in sender_ids.iter().enumerate() {
         // Each sender submits multiple transactions
-        for sub_nonce in 0..3u64 {
+        for sub_nonce in 0..TXS_PER_SENDER {
             let payload = TransferPayload::new(recipient_id, transfer_amount).encode();
             let tx = QbindTransaction::new(*sender_id, (nonce as u64) + sub_nonce, payload);
             let node_idx = nonce % cluster.num_nodes();
@@ -3164,7 +3168,8 @@ fn test_testnet_beta_stage_b_localmesh_smoke() {
         }
     }
 
-    eprintln!("[T187] Submitted {} transactions", sender_ids.len() * 3);
+    let total_txs = NUM_SENDERS * TXS_PER_SENDER as usize;
+    eprintln!("[T187] Submitted {} transactions", total_txs);
 
     // Run consensus steps
     let ticks = cluster.step(100);
@@ -3347,6 +3352,10 @@ fn test_stage_b_pipeline_determinism_against_sequential() {
 fn test_testnet_beta_stage_b_p2p_smoke() {
     eprintln!("[T187] Starting Stage B P2P smoke test");
 
+    // T187: Test parameters
+    const NUM_SENDERS: usize = 3;
+    const TXS_PER_SENDER: u64 = 5;
+
     // Beta config with P2P and Stage B enabled
     let cfg = TestnetAlphaClusterConfig::minimal()
         .with_dag_mempool(true)
@@ -3358,7 +3367,7 @@ fn test_testnet_beta_stage_b_p2p_smoke() {
     let mut cluster = TestnetAlphaClusterHandle::start(cfg.clone()).expect("cluster should start");
 
     // Initialize accounts
-    let sender_ids: Vec<AccountId> = (0..3).map(|i| [0xE0 + i as u8; 32]).collect();
+    let sender_ids: Vec<AccountId> = (0..NUM_SENDERS).map(|i| [0xE0 + i as u8; 32]).collect();
     let recipient_id: AccountId = [0xEF; 32];
 
     for sender_id in &sender_ids {
@@ -3369,7 +3378,7 @@ fn test_testnet_beta_stage_b_p2p_smoke() {
 
     // Submit transactions
     for (nonce, sender_id) in sender_ids.iter().enumerate() {
-        for sub_nonce in 0..5u64 {
+        for sub_nonce in 0..TXS_PER_SENDER {
             let payload = TransferPayload::new(recipient_id, 100).encode();
             let tx = QbindTransaction::new(*sender_id, (nonce as u64) + sub_nonce, payload);
             let _ = cluster.submit_tx(nonce % cluster.num_nodes(), tx);
