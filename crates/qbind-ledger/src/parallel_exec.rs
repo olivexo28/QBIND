@@ -383,11 +383,11 @@ pub struct StageBExecStats {
 /// Uses per-account locks for lock-free parallel execution within a level.
 /// The scheduler guarantees no two transactions in the same level touch
 /// the same account, so write conflicts should not occur in practice.
-pub struct PerAccountStateT186 {
+pub struct StageBPerAccountState {
     accounts: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<AccountId, std::sync::Arc<std::sync::RwLock<crate::AccountState>>>>>,
 }
 
-impl PerAccountStateT186 {
+impl StageBPerAccountState {
     /// Create a new per-account state.
     pub fn new() -> Self {
         Self {
@@ -451,17 +451,17 @@ impl PerAccountStateT186 {
     }
 }
 
-impl Default for PerAccountStateT186 {
+impl Default for StageBPerAccountState {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Execute a single transaction against PerAccountStateT186 (T186).
+/// Execute a single transaction against StageBPerAccountState (T186).
 ///
 /// This manually implements the VM v0 execution logic against the
 /// per-account state wrapper for parallel execution.
-fn execute_tx_on_per_account_t186(state: &PerAccountStateT186, tx: &crate::QbindTransaction) -> crate::VmV0TxResult {
+fn execute_tx_on_stage_b_state(state: &StageBPerAccountState, tx: &crate::QbindTransaction) -> crate::VmV0TxResult {
     use crate::{TransferPayload, VmV0Error};
 
     // Decode payload
@@ -577,7 +577,7 @@ pub fn execute_block_stage_b(
     let workers_used = rayon::current_num_threads();
 
     // Create per-account state from initial state
-    let state = PerAccountStateT186::from_in_memory(initial_state);
+    let state = StageBPerAccountState::from_in_memory(initial_state);
 
     // Results array (pre-allocated for each transaction)
     let results: std::sync::Arc<std::sync::RwLock<Vec<Option<crate::VmV0TxResult>>>> =
@@ -590,7 +590,7 @@ pub fn execute_block_stage_b(
             .par_iter()
             .map(|&tx_idx| {
                 let tx = &transactions[tx_idx.0];
-                let result = execute_tx_on_per_account_t186(&state, tx);
+                let result = execute_tx_on_stage_b_state(&state, tx);
                 (tx_idx.0, result)
             })
             .collect();

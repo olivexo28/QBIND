@@ -1461,7 +1461,7 @@ impl NodeConfig {
         // Stage B is compiled and available; operators can choose to enable/disable it.
         if !self.stage_b_enabled {
             eprintln!(
-                "[T186] MainNet: stage_b_enabled=false – allowed, but parallel execution \
+                "[T186] MainNet: stage_b_enabled=false -- allowed, but parallel execution \
                  is recommended once fully audited."
             );
         }
