@@ -384,7 +384,14 @@ pub struct StageBExecStats {
 /// The scheduler guarantees no two transactions in the same level touch
 /// the same account, so write conflicts should not occur in practice.
 pub struct StageBPerAccountState {
-    accounts: std::sync::Arc<std::sync::RwLock<std::collections::HashMap<AccountId, std::sync::Arc<std::sync::RwLock<crate::AccountState>>>>>,
+    accounts: std::sync::Arc<
+        std::sync::RwLock<
+            std::collections::HashMap<
+                AccountId,
+                std::sync::Arc<std::sync::RwLock<crate::AccountState>>,
+            >,
+        >,
+    >,
 }
 
 impl StageBPerAccountState {
@@ -399,7 +406,10 @@ impl StageBPerAccountState {
     pub fn from_in_memory(state: &crate::InMemoryAccountState) -> Self {
         let mut accounts = std::collections::HashMap::new();
         for (account, account_state) in state.iter() {
-            accounts.insert(*account, std::sync::Arc::new(std::sync::RwLock::new(account_state.clone())));
+            accounts.insert(
+                *account,
+                std::sync::Arc::new(std::sync::RwLock::new(account_state.clone())),
+            );
         }
         Self {
             accounts: std::sync::Arc::new(std::sync::RwLock::new(accounts)),
@@ -407,7 +417,10 @@ impl StageBPerAccountState {
     }
 
     /// Get the lock for a specific account, creating it if necessary.
-    fn get_account_lock(&self, account: &AccountId) -> std::sync::Arc<std::sync::RwLock<crate::AccountState>> {
+    fn get_account_lock(
+        &self,
+        account: &AccountId,
+    ) -> std::sync::Arc<std::sync::RwLock<crate::AccountState>> {
         // First, try to read
         {
             let accounts = self.accounts.read().unwrap();
@@ -420,7 +433,9 @@ impl StageBPerAccountState {
         let mut accounts = self.accounts.write().unwrap();
         accounts
             .entry(*account)
-            .or_insert_with(|| std::sync::Arc::new(std::sync::RwLock::new(crate::AccountState::default())))
+            .or_insert_with(|| {
+                std::sync::Arc::new(std::sync::RwLock::new(crate::AccountState::default()))
+            })
             .clone()
     }
 
@@ -461,7 +476,10 @@ impl Default for StageBPerAccountState {
 ///
 /// This manually implements the VM v0 execution logic against the
 /// per-account state wrapper for parallel execution.
-fn execute_tx_on_stage_b_state(state: &StageBPerAccountState, tx: &crate::QbindTransaction) -> crate::VmV0TxResult {
+fn execute_tx_on_stage_b_state(
+    state: &StageBPerAccountState,
+    tx: &crate::QbindTransaction,
+) -> crate::VmV0TxResult {
     use crate::{TransferPayload, VmV0Error};
 
     // Decode payload
@@ -549,7 +567,11 @@ fn execute_tx_on_stage_b_state(state: &StageBPerAccountState, tx: &crate::QbindT
 pub fn execute_block_stage_b(
     transactions: &[crate::QbindTransaction],
     initial_state: &crate::InMemoryAccountState,
-) -> (Vec<crate::VmV0TxResult>, crate::InMemoryAccountState, StageBExecStats) {
+) -> (
+    Vec<crate::VmV0TxResult>,
+    crate::InMemoryAccountState,
+    StageBExecStats,
+) {
     use rayon::prelude::*;
 
     if transactions.is_empty() {
@@ -1397,9 +1419,9 @@ mod tests {
 
         // Mix of parallel and sequential txs
         let transactions = vec![
-            make_transfer_tx(0x01, 0x11, 0, 50),  // A -> X
-            make_transfer_tx(0x02, 0x12, 0, 50),  // B -> Y (parallel with above)
-            make_transfer_tx(0x01, 0x13, 1, 50),  // A -> Z (sequential with first)
+            make_transfer_tx(0x01, 0x11, 0, 50), // A -> X
+            make_transfer_tx(0x02, 0x12, 0, 50), // B -> Y (parallel with above)
+            make_transfer_tx(0x01, 0x13, 1, 50), // A -> Z (sequential with first)
         ];
 
         // Execute with Stage B
@@ -1420,13 +1442,25 @@ mod tests {
         // Final state should match
         let sender_a_sb = stage_b_state.get_account_state(&sender_a);
         let sender_a_sq = seq_state.get_account_state(&sender_a);
-        assert_eq!(sender_a_sb.balance, sender_a_sq.balance, "Sender A balance mismatch");
-        assert_eq!(sender_a_sb.nonce, sender_a_sq.nonce, "Sender A nonce mismatch");
+        assert_eq!(
+            sender_a_sb.balance, sender_a_sq.balance,
+            "Sender A balance mismatch"
+        );
+        assert_eq!(
+            sender_a_sb.nonce, sender_a_sq.nonce,
+            "Sender A nonce mismatch"
+        );
 
         let sender_b_sb = stage_b_state.get_account_state(&sender_b);
         let sender_b_sq = seq_state.get_account_state(&sender_b);
-        assert_eq!(sender_b_sb.balance, sender_b_sq.balance, "Sender B balance mismatch");
-        assert_eq!(sender_b_sb.nonce, sender_b_sq.nonce, "Sender B nonce mismatch");
+        assert_eq!(
+            sender_b_sb.balance, sender_b_sq.balance,
+            "Sender B balance mismatch"
+        );
+        assert_eq!(
+            sender_b_sb.nonce, sender_b_sq.nonce,
+            "Sender B nonce mismatch"
+        );
     }
 
     #[test]

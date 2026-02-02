@@ -678,7 +678,6 @@ pub struct NodeConfig {
     // ========================================================================
     // T186: Stage B Parallel Execution Configuration
     // ========================================================================
-
     /// Whether Stage B conflict-graph parallel execution is enabled (T186).
     ///
     /// When `true` and `execution_profile == ExecutionProfile::VmV0`, the node
@@ -2437,10 +2436,16 @@ mod tests {
     #[test]
     fn test_stage_b_builder_method() {
         let config = NodeConfig::testnet_beta_preset().with_stage_b_enabled(true);
-        assert!(config.stage_b_enabled, "with_stage_b_enabled(true) should enable Stage B");
+        assert!(
+            config.stage_b_enabled,
+            "with_stage_b_enabled(true) should enable Stage B"
+        );
 
         let config2 = NodeConfig::mainnet_preset().with_stage_b_enabled(false);
-        assert!(!config2.stage_b_enabled, "with_stage_b_enabled(false) should disable Stage B");
+        assert!(
+            !config2.stage_b_enabled,
+            "with_stage_b_enabled(false) should disable Stage B"
+        );
     }
 
     #[test]
@@ -2477,8 +2482,7 @@ mod tests {
 
     #[test]
     fn test_mainnet_validates_with_stage_b_enabled() {
-        let config = NodeConfig::mainnet_preset()
-            .with_data_dir("/tmp/test");
+        let config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
 
         // MainNet validation should pass
         let result = config.validate_mainnet_invariants();
