@@ -517,6 +517,18 @@ MainNet v0 extends Beta with:
 - **HSM production mode** — Hardware security module support for validators
 - **External security audit** — Required before MainNet launch
 
+### 10.1 MainNet Configuration Profile (T185)
+
+The **MainNet profile** (`--profile mainnet`) is the canonical entry point for MainNet v0 nodes
+and is implemented via T185. It provides:
+
+- `ConfigProfile::MainNet` enum variant and `NodeConfig::mainnet_preset()`
+- `validate_mainnet_invariants()` safety rails that refuse to start misconfigured nodes
+- Strict enforcement of: gas enabled, fee-priority enabled, DAG mempool, P2P required, data directory required
+
+**Note**: DevNet and TestNet Alpha/Beta profiles remain unaffected. The MainNet profile is a
+superset of Beta with additional mandatory constraints.
+
 For MainNet risk tracking and readiness checklist, see [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md).
 
 ---

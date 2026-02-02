@@ -73,6 +73,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R4** | P2P & Eclipse Resistance | High | Partially Mitigated | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
 | **MN-R5** | Key Management & Remote Signing | Critical | Open | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | Partially Mitigated | [Spec §7](./QBIND_MAINNET_V0_SPEC.md#7-operational-profiles--cli-defaults) |
+| **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 
 ---
 
@@ -310,10 +311,11 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 27 | MainNet configuration profile implemented | ⏳ Pending | Future task |
-| 28 | MainNet operational runbook complete | ⏳ Pending | Future task |
-| 29 | External security audit completed | ⏳ Pending | External |
-| 30 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
+| 27 | MainNet configuration profile implemented | ✅ Ready | T185 |
+| 28 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
+| 29 | MainNet operational runbook complete | ⏳ Pending | Future task |
+| 30 | External security audit completed | ⏳ Pending | External |
+| 31 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
 
 ### 4.8 Readiness Summary
 
@@ -325,8 +327,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | Mempool & DAG | 2 | 3 | 5 |
 | Networking / P2P | 0 | 5 | 5 |
 | Keys & HSM | 0 | 3 | 3 |
-| Operations | 0 | 4 | 4 |
-| **Total** | **9** | **21** | **30** |
+| Operations | 2 | 3 | 5 |
+| **Total** | **11** | **20** | **31** |
 
 ---
 
@@ -380,6 +382,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T182 | DAG | Missing batch tracking | MN-R3 |
 | T183 | DAG | Fetch-on-miss v0 | MN-R3 |
 | T184 | Spec | **MainNet v0 spec + audit** | All |
+| T185 | Config | **MainNet configuration profile + safety rails** | MN-R6, MN-R7 |
 
 ### 5.4 Future MainNet Tasks (T18x+)
 
@@ -394,7 +397,6 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T18x | Keys | HSM production integration | MN-R5 |
 | T18x | Gas/Fees | Hybrid fee distribution | MN-R2 |
 | T18x | Execution | Stage B production wiring | MN-R1 |
-| T18x | Config | MainNet configuration profile | MN-R6 |
 | T18x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 

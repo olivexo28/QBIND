@@ -56,9 +56,9 @@ use crate::node_config::{
 #[command(about = "QBIND blockchain node with PQC consensus", long_about = None)]
 pub struct CliArgs {
     // ========================================================================
-    // T180: Configuration Profile (takes precedence over individual settings)
+    // T180/T185: Configuration Profile (takes precedence over individual settings)
     // ========================================================================
-    /// Configuration profile: devnet-v0, testnet-alpha, or testnet-beta.
+    /// Configuration profile: devnet-v0, testnet-alpha, testnet-beta, or mainnet.
     ///
     /// When specified, provides a canonical configuration preset.
     /// Individual settings below can still override specific values.
@@ -66,8 +66,11 @@ pub struct CliArgs {
     /// - devnet-v0: Frozen DevNet (NonceOnly, FIFO, LocalMesh)
     /// - testnet-alpha: TestNet Alpha (VmV0, gas off, FIFO, LocalMesh)
     /// - testnet-beta: TestNet Beta (VmV0, gas on, DAG, P2P)
+    /// - mainnet: MainNet v0 (VmV0, gas required, DAG required, P2P required)
     ///
     /// If not specified, falls back to building config from individual flags.
+    ///
+    /// NOTE: MainNet profile enforces strict invariants. See validate_mainnet_invariants().
     #[arg(long = "profile", short = 'P')]
     pub profile: Option<String>,
 
@@ -219,8 +222,10 @@ pub enum CliError {
     },
     /// Configuration validation error.
     ConfigValidation(String),
-    /// Invalid profile string (T180).
+    /// Invalid profile string (T180, T185).
     InvalidProfile(String),
+    /// MainNet configuration invariant violation (T185).
+    MainnetConfigInvalid(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -238,9 +243,12 @@ impl std::fmt::Display for CliError {
             CliError::InvalidProfile(s) => {
                 write!(
                     f,
-                    "invalid profile '{}': expected 'devnet-v0', 'testnet-alpha', or 'testnet-beta'",
+                    "invalid profile '{}': expected 'devnet-v0', 'testnet-alpha', 'testnet-beta', or 'mainnet'",
                     s
                 )
+            }
+            CliError::MainnetConfigInvalid(msg) => {
+                write!(f, "MainNet configuration invalid: {}", msg)
             }
         }
     }

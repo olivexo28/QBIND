@@ -528,13 +528,14 @@ pub fn parse_mempool_mode(s: &str) -> MempoolMode {
 // T180: Configuration Profile – Preset configurations for different network phases
 // ============================================================================
 
-/// Configuration profile for preset network configurations (T180).
+/// Configuration profile for preset network configurations (T180, T185).
 ///
 /// This enum represents canonical configurations for different network phases:
 ///
 /// - **DevNetV0**: Frozen DevNet configuration (NonceOnly, FIFO, LocalMesh)
 /// - **TestNetAlpha**: TestNet Alpha configuration (VmV0, FIFO default, LocalMesh default)
 /// - **TestNetBeta**: TestNet Beta configuration (VmV0, gas-on, DAG default, P2P default)
+/// - **MainNet**: MainNet v0 configuration (VmV0, gas-on mandatory, DAG mandatory, P2P required)
 ///
 /// Using a profile ensures consistent configuration across deployments.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -566,6 +567,20 @@ pub enum ConfigProfile {
     /// - Mempool: DAG by default (FIFO fallback)
     /// - Network: P2P by default (LocalMesh fallback)
     TestNetBeta,
+
+    /// MainNet v0 configuration (T185).
+    ///
+    /// - Environment: MainNet (QBIND_MAINNET_CHAIN_ID)
+    /// - Execution: VmV0
+    /// - Gas: Enabled (**cannot be disabled**)
+    /// - Fee Priority: Enabled (**cannot be disabled**)
+    /// - Mempool: DAG (**required** for validators)
+    /// - Network: P2P (**required** for validators)
+    /// - DAG Availability: Enabled (**required**)
+    /// - Data Dir: **Required** (no in-memory validators)
+    ///
+    /// See QBIND_MAINNET_V0_SPEC.md for full specification.
+    MainNet,
 }
 
 impl std::fmt::Display for ConfigProfile {
@@ -574,13 +589,14 @@ impl std::fmt::Display for ConfigProfile {
             ConfigProfile::DevNetV0 => write!(f, "devnet-v0"),
             ConfigProfile::TestNetAlpha => write!(f, "testnet-alpha"),
             ConfigProfile::TestNetBeta => write!(f, "testnet-beta"),
+            ConfigProfile::MainNet => write!(f, "mainnet"),
         }
     }
 }
 
 /// Parse a configuration profile from a string.
 ///
-/// Valid values: "devnet-v0" | "testnet-alpha" | "testnet-beta"
+/// Valid values: "devnet-v0" | "testnet-alpha" | "testnet-beta" | "mainnet"
 ///
 /// Returns `None` for unrecognized values.
 pub fn parse_config_profile(s: &str) -> Option<ConfigProfile> {
@@ -588,6 +604,7 @@ pub fn parse_config_profile(s: &str) -> Option<ConfigProfile> {
         "devnet-v0" | "devnet" => Some(ConfigProfile::DevNetV0),
         "testnet-alpha" | "alpha" => Some(ConfigProfile::TestNetAlpha),
         "testnet-beta" | "beta" => Some(ConfigProfile::TestNetBeta),
+        "mainnet" | "mainnet-v0" => Some(ConfigProfile::MainNet),
         _ => None,
     }
 }
@@ -859,7 +876,85 @@ impl NodeConfig {
         }
     }
 
-    /// Create a configuration from a profile enum (T180).
+    /// Create a MainNet v0 preset configuration (T185).
+    ///
+    /// This is the canonical MainNet configuration as defined in
+    /// QBIND_MAINNET_V0_SPEC.md:
+    ///
+    /// - Environment: MainNet (QBIND_MAINNET_CHAIN_ID)
+    /// - Execution: VmV0
+    /// - Gas: **Enabled (cannot be disabled)**
+    /// - Fee Priority: **Enabled (cannot be disabled)**
+    /// - Mempool: **DAG (required for validators)**
+    /// - Network: **P2P (required for validators)**
+    /// - P2P: **Enabled (required)**
+    /// - DAG Availability: **Enabled (required)**
+    ///
+    /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
+    /// starting nodes. MainNet validators cannot use in-memory-only storage.
+    ///
+    /// # Safety Rails
+    ///
+    /// After constructing a MainNet config, you should call
+    /// `validate_mainnet_invariants()` before startup to ensure all
+    /// MainNet-required invariants are satisfied. This validation is
+    /// automatically performed when using the CLI with `--profile mainnet`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::NodeConfig;
+    /// use qbind_types::NetworkEnvironment;
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_data_dir("/data/qbind");
+    ///
+    /// // Validate before startup
+    /// config.validate_mainnet_invariants().expect("MainNet config invalid");
+    ///
+    /// assert_eq!(config.environment, NetworkEnvironment::Mainnet);
+    /// assert!(config.gas_enabled);
+    /// assert!(config.enable_fee_priority);
+    /// assert_eq!(config.mempool_mode, MempoolMode::Dag);
+    /// assert_eq!(config.network_mode, NetworkMode::P2p);
+    /// assert!(config.network.enable_p2p);
+    /// assert!(config.dag_availability_enabled);
+    /// ```
+    pub fn mainnet_preset() -> Self {
+        Self {
+            environment: NetworkEnvironment::Mainnet,
+            execution_profile: ExecutionProfile::VmV0,
+            data_dir: None, // Caller MUST set via with_data_dir()
+            network: NetworkTransportConfig::mainnet(),
+            network_mode: NetworkMode::P2p,
+            gas_enabled: true,
+            enable_fee_priority: true,
+            mempool_mode: MempoolMode::Dag,
+            dag_availability_enabled: true,
+        }
+    }
+
+    /// Create a MainNet preset with LocalMesh for single-machine testing (T185).
+    ///
+    /// This is the same as `mainnet_preset()` but forces:
+    /// - `network_mode = LocalMesh`
+    /// - `enable_p2p = false`
+    ///
+    /// **WARNING**: This configuration is **NOT** valid for real MainNet
+    /// validators. It is provided only for single-machine development/testing
+    /// scenarios where P2P transport is impractical.
+    ///
+    /// This configuration will **fail** `validate_mainnet_invariants()`.
+    /// Use only for local harness tests.
+    pub fn mainnet_preset_localmesh() -> Self {
+        Self {
+            network: NetworkTransportConfig::disabled(),
+            network_mode: NetworkMode::LocalMesh,
+            ..Self::mainnet_preset()
+        }
+    }
+
+    /// Create a configuration from a profile enum (T180, T185).
     ///
     /// This is the recommended way to create configurations when using the
     /// `--profile` CLI flag.
@@ -875,12 +970,16 @@ impl NodeConfig {
     ///
     /// let config = NodeConfig::from_profile(ConfigProfile::TestNetBeta);
     /// assert!(config.gas_enabled);
+    ///
+    /// let mainnet = NodeConfig::from_profile(ConfigProfile::MainNet);
+    /// assert_eq!(mainnet.environment, NetworkEnvironment::Mainnet);
     /// ```
     pub fn from_profile(profile: ConfigProfile) -> Self {
         match profile {
             ConfigProfile::DevNetV0 => Self::devnet_v0_preset(),
             ConfigProfile::TestNetAlpha => Self::testnet_alpha_preset(),
             ConfigProfile::TestNetBeta => Self::testnet_beta_preset(),
+            ConfigProfile::MainNet => Self::mainnet_preset(),
         }
     }
 
@@ -1062,6 +1161,11 @@ impl NodeConfig {
     /// - Gas enforcement state (gas=on/off)
     /// - Fee priority state (fee-priority=on/off)
     /// - Mempool mode (mempool=fifo/dag)
+    ///
+    /// # T185 Additions
+    ///
+    /// The startup info string now also includes:
+    /// - DAG availability state (dag_availability=enabled/disabled)
     pub fn startup_info_string(&self, validator_id: Option<&str>) -> String {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
@@ -1087,9 +1191,14 @@ impl NodeConfig {
         } else {
             "off"
         };
+        let dag_availability_str = if self.dag_availability_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        };
 
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={} dag_availability={}",
             validator_str,
             self.environment,
             chain_id_hex,
@@ -1099,7 +1208,8 @@ impl NodeConfig {
             p2p_info,
             gas_str,
             fee_priority_str,
-            self.mempool_mode
+            self.mempool_mode,
+            dag_availability_str
         )
     }
 
@@ -1181,7 +1291,239 @@ impl NodeConfig {
     pub fn is_p2p_mode(&self) -> bool {
         self.network_mode == NetworkMode::P2p && self.network.enable_p2p
     }
+
+    // ========================================================================
+    // T185: MainNet Safety Rails
+    // ========================================================================
+
+    /// Validate that this configuration satisfies MainNet invariants (T185).
+    ///
+    /// MainNet v0 requires strict configuration to ensure validator safety.
+    /// This method checks all mandatory invariants and returns an error
+    /// describing the first violation found.
+    ///
+    /// # MainNet Invariants
+    ///
+    /// 1. `environment` == `NetworkEnvironment::Mainnet`
+    /// 2. `gas_enabled` == `true` (cannot be disabled)
+    /// 3. `enable_fee_priority` == `true` (cannot be disabled)
+    /// 4. `mempool_mode` == `MempoolMode::Dag` (required for validators)
+    /// 5. `dag_availability_enabled` == `true` (required)
+    /// 6. `network_mode` == `NetworkMode::P2p` (required for validators)
+    /// 7. `network.enable_p2p` == `true` (required)
+    /// 8. `data_dir` is set (no in-memory-only validators)
+    ///
+    /// # Usage
+    ///
+    /// This method should be called during node startup when
+    /// `--profile mainnet` is specified. If validation fails, the node
+    /// should refuse to start.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if all invariants are satisfied.
+    /// `Err(MainnetConfigError)` describing the first violation.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_data_dir("/data/qbind");
+    ///
+    /// match config.validate_mainnet_invariants() {
+    ///     Ok(()) => println!("MainNet config valid"),
+    ///     Err(e) => {
+    ///         eprintln!("MainNet config invalid: {}", e);
+    ///         std::process::exit(1);
+    ///     }
+    /// }
+    /// ```
+    pub fn validate_mainnet_invariants(&self) -> Result<(), MainnetConfigError> {
+        // 1. Environment must be MainNet
+        if self.environment != NetworkEnvironment::Mainnet {
+            return Err(MainnetConfigError::WrongEnvironment {
+                expected: NetworkEnvironment::Mainnet,
+                actual: self.environment,
+            });
+        }
+
+        // 2. Gas must be enabled
+        if !self.gas_enabled {
+            return Err(MainnetConfigError::GasDisabled);
+        }
+
+        // 3. Fee priority must be enabled
+        if !self.enable_fee_priority {
+            return Err(MainnetConfigError::FeePriorityDisabled);
+        }
+
+        // 4. Mempool mode must be DAG
+        if self.mempool_mode != MempoolMode::Dag {
+            return Err(MainnetConfigError::WrongMempoolMode {
+                expected: MempoolMode::Dag,
+                actual: self.mempool_mode,
+            });
+        }
+
+        // 5. DAG availability must be enabled
+        if !self.dag_availability_enabled {
+            return Err(MainnetConfigError::DagAvailabilityDisabled);
+        }
+
+        // 6. Network mode must be P2P
+        if self.network_mode != NetworkMode::P2p {
+            return Err(MainnetConfigError::WrongNetworkMode {
+                expected: NetworkMode::P2p,
+                actual: self.network_mode,
+            });
+        }
+
+        // 7. P2P must be enabled
+        if !self.network.enable_p2p {
+            return Err(MainnetConfigError::P2pDisabled);
+        }
+
+        // 8. Data directory must be set (no in-memory validators)
+        if self.data_dir.is_none() {
+            return Err(MainnetConfigError::MissingDataDir);
+        }
+
+        // TODO(future): Add stricter rules for validators vs non-validators
+        // when the code has a way to distinguish between them.
+        // For now, all invariants are enforced unconditionally.
+
+        // TODO(future): Enforce HSM signer mode for validators.
+        // Currently deferred to a dedicated HSM task.
+
+        Ok(())
+    }
 }
+
+// ============================================================================
+// T185: MainNet Configuration Error
+// ============================================================================
+
+/// Error indicating a MainNet configuration invariant violation (T185).
+///
+/// These errors are returned by `NodeConfig::validate_mainnet_invariants()`
+/// when the configuration violates one of the MainNet v0 requirements.
+///
+/// MainNet nodes MUST refuse to start if any of these invariants are violated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MainnetConfigError {
+    /// The network environment is not MainNet.
+    WrongEnvironment {
+        expected: NetworkEnvironment,
+        actual: NetworkEnvironment,
+    },
+
+    /// Gas enforcement is disabled.
+    ///
+    /// MainNet requires gas enforcement to be enabled. Transactions
+    /// without gas metering could allow DoS attacks or infinite loops.
+    GasDisabled,
+
+    /// Fee-priority mempool ordering is disabled.
+    ///
+    /// MainNet requires fee-priority ordering for fair transaction
+    /// inclusion and economic sustainability.
+    FeePriorityDisabled,
+
+    /// Mempool mode is not DAG.
+    ///
+    /// MainNet validators must use DAG mempool for availability
+    /// certificates and consensus coupling.
+    WrongMempoolMode {
+        expected: MempoolMode,
+        actual: MempoolMode,
+    },
+
+    /// DAG availability certificates are disabled.
+    ///
+    /// MainNet requires availability certificates for data availability
+    /// guarantees and consensus safety.
+    DagAvailabilityDisabled,
+
+    /// Network mode is not P2P.
+    ///
+    /// MainNet validators must use P2P transport. LocalMesh is only
+    /// allowed for DevNet/TestNet harness testing.
+    WrongNetworkMode {
+        expected: NetworkMode,
+        actual: NetworkMode,
+    },
+
+    /// P2P transport is disabled.
+    ///
+    /// MainNet validators must have P2P enabled for production networking.
+    P2pDisabled,
+
+    /// Data directory is not configured.
+    ///
+    /// MainNet validators must use persistent storage. In-memory-only
+    /// nodes cannot safely participate in consensus.
+    MissingDataDir,
+}
+
+impl std::fmt::Display for MainnetConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MainnetConfigError::WrongEnvironment { expected, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: environment must be {} but is {}",
+                    expected, actual
+                )
+            }
+            MainnetConfigError::GasDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: gas enforcement must be enabled (--enable-gas=true)"
+                )
+            }
+            MainnetConfigError::FeePriorityDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: fee-priority ordering must be enabled (--enable-fee-priority=true)"
+                )
+            }
+            MainnetConfigError::WrongMempoolMode { expected, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: mempool mode must be {} but is {} (--mempool-mode=dag)",
+                    expected, actual
+                )
+            }
+            MainnetConfigError::DagAvailabilityDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: DAG availability certificates must be enabled (--enable-dag-availability=true)"
+                )
+            }
+            MainnetConfigError::WrongNetworkMode { expected, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: network mode must be {} but is {} (--network-mode=p2p)",
+                    expected, actual
+                )
+            }
+            MainnetConfigError::P2pDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: P2P transport must be enabled (--enable-p2p=true)"
+                )
+            }
+            MainnetConfigError::MissingDataDir => {
+                write!(
+                    f,
+                    "MainNet invariant violated: data directory must be configured (--data-dir=/path/to/data)"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for MainnetConfigError {}
 
 // ============================================================================
 // CLI Parsing Helpers

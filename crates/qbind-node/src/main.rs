@@ -1,4 +1,4 @@
-//! T175: QBIND Node Binary Entry Point
+//! T175/T185: QBIND Node Binary Entry Point
 //!
 //! This is the main entry point for the qbind-node binary.
 //! It parses CLI arguments, builds the node configuration, and starts
@@ -20,15 +20,30 @@
 //!   --p2p-peer 127.0.0.1:19001 \
 //!   --p2p-peer 127.0.0.1:19002 \
 //!   --validator-id 0
+//!
+//! # MainNet v0 (requires all invariants satisfied)
+//! qbind-node \
+//!   --profile mainnet \
+//!   --data-dir /data/qbind \
+//!   --p2p-listen-addr 0.0.0.0:9000 \
+//!   --p2p-peer mainnet-bootstrap-1.qbind.network:9000 \
+//!   --validator-id 0
 //! ```
 //!
 //! # DevNet v0 Freeze
 //!
 //! DevNet defaults remain `LocalMesh` + `enable_p2p = false` to preserve
 //! the DevNet v0 freeze. P2P mode is opt-in for TestNet Alpha experimentation.
+//!
+//! # MainNet Safety Rails (T185)
+//!
+//! When `--profile mainnet` is specified, the node validates all MainNet
+//! invariants before startup. If any invariant is violated (e.g., gas disabled,
+//! P2P disabled, no data directory), the node refuses to start with a clear
+//! error message.
 
 use qbind_node::cli::CliArgs;
-use qbind_node::node_config::NetworkMode;
+use qbind_node::node_config::{ConfigProfile, NetworkMode};
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 
 /// Main entry point for qbind-node binary.
@@ -45,6 +60,20 @@ async fn main() {
             std::process::exit(1);
         }
     };
+
+    // T185: Validate MainNet invariants if using MainNet profile
+    if let Some(ref profile_str) = args.profile {
+        if let Some(ConfigProfile::MainNet) = qbind_node::node_config::parse_config_profile(profile_str) {
+            if let Err(e) = config.validate_mainnet_invariants() {
+                eprintln!("[T185] ERROR: MainNet configuration validation failed!");
+                eprintln!("[T185] {}", e);
+                eprintln!("[T185] MainNet nodes must satisfy all invariants.");
+                eprintln!("[T185] See QBIND_MAINNET_V0_SPEC.md for requirements.");
+                std::process::exit(1);
+            }
+            eprintln!("[T185] MainNet invariants validated successfully.");
+        }
+    }
 
     // Validate P2P configuration (may modify config)
     let p2p_enabled = config.validate_p2p_config();
