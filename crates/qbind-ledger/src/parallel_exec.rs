@@ -1255,4 +1255,197 @@ mod tests {
         assert_eq!(schedule1, schedule2);
         assert_eq!(schedule2, schedule3);
     }
+
+    // ========================================================================
+    // T186: Stage B Production Executor Tests
+    // ========================================================================
+
+    use crate::AccountStateView;
+    // ========================================================================
+
+    #[test]
+    fn test_stage_b_exec_empty_block() {
+        let initial_state = crate::InMemoryAccountState::new();
+        let transactions: Vec<crate::QbindTransaction> = vec![];
+
+        let (results, final_state, stats) = execute_block_stage_b(&transactions, &initial_state);
+
+        assert!(results.is_empty());
+        assert_eq!(stats.tx_count, 0);
+        assert_eq!(stats.level_count, 0);
+        // Empty state should be unchanged
+        assert!(final_state.iter().count() == 0);
+    }
+
+    #[test]
+    fn test_stage_b_exec_single_tx() {
+        use crate::{AccountState, AccountStateUpdater};
+
+        let mut initial_state = crate::InMemoryAccountState::new();
+        let sender = test_account_id(0xAA);
+        let recipient = test_account_id(0xBB);
+
+        // Initialize sender with balance
+        initial_state.set_account_state(&sender, AccountState::with_balance(1000));
+
+        let transactions = vec![make_transfer_tx(0xAA, 0xBB, 0, 100)];
+
+        let (results, final_state, stats) = execute_block_stage_b(&transactions, &initial_state);
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].success);
+        assert_eq!(stats.tx_count, 1);
+        assert_eq!(stats.level_count, 1);
+
+        // Verify state changes
+        assert_eq!(final_state.get_account_state(&sender).balance, 900);
+        assert_eq!(final_state.get_account_state(&sender).nonce, 1);
+        assert_eq!(final_state.get_account_state(&recipient).balance, 100);
+    }
+
+    #[test]
+    fn test_stage_b_exec_parallel_non_conflicting() {
+        use crate::{AccountState, AccountStateUpdater};
+
+        let mut initial_state = crate::InMemoryAccountState::new();
+
+        // Set up 4 independent senders
+        let sender_a = test_account_id(0x01);
+        let sender_b = test_account_id(0x02);
+        let sender_c = test_account_id(0x03);
+        let sender_d = test_account_id(0x04);
+
+        initial_state.set_account_state(&sender_a, AccountState::with_balance(1000));
+        initial_state.set_account_state(&sender_b, AccountState::with_balance(1000));
+        initial_state.set_account_state(&sender_c, AccountState::with_balance(1000));
+        initial_state.set_account_state(&sender_d, AccountState::with_balance(1000));
+
+        // 4 non-conflicting transfers (each to a unique recipient)
+        let transactions = vec![
+            make_transfer_tx(0x01, 0x11, 0, 100),
+            make_transfer_tx(0x02, 0x12, 0, 100),
+            make_transfer_tx(0x03, 0x13, 0, 100),
+            make_transfer_tx(0x04, 0x14, 0, 100),
+        ];
+
+        let (results, final_state, stats) = execute_block_stage_b(&transactions, &initial_state);
+
+        assert_eq!(results.len(), 4);
+        for result in &results {
+            assert!(result.success);
+        }
+
+        // Non-conflicting txs should be parallel (single level)
+        assert_eq!(stats.tx_count, 4);
+        assert_eq!(stats.level_count, 1);
+        assert_eq!(stats.max_level_size, 4);
+        assert!(stats.used_parallel);
+
+        // Verify final state
+        assert_eq!(final_state.get_account_state(&sender_a).balance, 900);
+        assert_eq!(final_state.get_account_state(&sender_b).balance, 900);
+        assert_eq!(final_state.get_account_state(&sender_c).balance, 900);
+        assert_eq!(final_state.get_account_state(&sender_d).balance, 900);
+    }
+
+    #[test]
+    fn test_stage_b_exec_sequential_conflicting() {
+        use crate::{AccountState, AccountStateUpdater};
+
+        let mut initial_state = crate::InMemoryAccountState::new();
+        let sender = test_account_id(0xAA);
+
+        initial_state.set_account_state(&sender, AccountState::with_balance(1000));
+
+        // 3 sequential transfers from the same sender (must be sequential)
+        let transactions = vec![
+            make_transfer_tx(0xAA, 0x01, 0, 100),
+            make_transfer_tx(0xAA, 0x02, 1, 100),
+            make_transfer_tx(0xAA, 0x03, 2, 100),
+        ];
+
+        let (results, final_state, stats) = execute_block_stage_b(&transactions, &initial_state);
+
+        assert_eq!(results.len(), 3);
+        for result in &results {
+            assert!(result.success);
+        }
+
+        // Conflicting txs should be sequential (3 levels)
+        assert_eq!(stats.tx_count, 3);
+        assert_eq!(stats.level_count, 3);
+        assert_eq!(stats.max_level_size, 1);
+        assert!(!stats.used_parallel);
+
+        // Verify final state
+        assert_eq!(final_state.get_account_state(&sender).balance, 700);
+        assert_eq!(final_state.get_account_state(&sender).nonce, 3);
+    }
+
+    #[test]
+    fn test_stage_b_exec_matches_sequential() {
+        use crate::{AccountState, AccountStateUpdater, VmV0ExecutionEngine};
+
+        let mut initial_state = crate::InMemoryAccountState::new();
+
+        // Set up multiple senders
+        let sender_a = test_account_id(0x01);
+        let sender_b = test_account_id(0x02);
+
+        initial_state.set_account_state(&sender_a, AccountState::with_balance(1000));
+        initial_state.set_account_state(&sender_b, AccountState::with_balance(1000));
+
+        // Mix of parallel and sequential txs
+        let transactions = vec![
+            make_transfer_tx(0x01, 0x11, 0, 50),  // A -> X
+            make_transfer_tx(0x02, 0x12, 0, 50),  // B -> Y (parallel with above)
+            make_transfer_tx(0x01, 0x13, 1, 50),  // A -> Z (sequential with first)
+        ];
+
+        // Execute with Stage B
+        let (stage_b_results, stage_b_state, _stats) =
+            execute_block_stage_b(&transactions, &initial_state);
+
+        // Execute sequentially for comparison
+        let engine = VmV0ExecutionEngine::new();
+        let mut seq_state = initial_state.clone();
+        let seq_results = engine.execute_block(&mut seq_state, &transactions);
+
+        // Results should match
+        assert_eq!(stage_b_results.len(), seq_results.len());
+        for (sb, sq) in stage_b_results.iter().zip(seq_results.iter()) {
+            assert_eq!(sb.success, sq.success, "Result success mismatch");
+        }
+
+        // Final state should match
+        let sender_a_sb = stage_b_state.get_account_state(&sender_a);
+        let sender_a_sq = seq_state.get_account_state(&sender_a);
+        assert_eq!(sender_a_sb.balance, sender_a_sq.balance, "Sender A balance mismatch");
+        assert_eq!(sender_a_sb.nonce, sender_a_sq.nonce, "Sender A nonce mismatch");
+
+        let sender_b_sb = stage_b_state.get_account_state(&sender_b);
+        let sender_b_sq = seq_state.get_account_state(&sender_b);
+        assert_eq!(sender_b_sb.balance, sender_b_sq.balance, "Sender B balance mismatch");
+        assert_eq!(sender_b_sb.nonce, sender_b_sq.nonce, "Sender B nonce mismatch");
+    }
+
+    #[test]
+    fn test_stage_b_stats_populated() {
+        use crate::{AccountState, AccountStateUpdater};
+
+        let mut initial_state = crate::InMemoryAccountState::new();
+        let sender = test_account_id(0xAA);
+        initial_state.set_account_state(&sender, AccountState::with_balance(1000));
+
+        let transactions = vec![make_transfer_tx(0xAA, 0xBB, 0, 100)];
+
+        let (_results, _final_state, stats) = execute_block_stage_b(&transactions, &initial_state);
+
+        assert_eq!(stats.tx_count, 1);
+        assert_eq!(stats.level_count, 1);
+        assert_eq!(stats.avg_level_size, 1.0);
+        assert_eq!(stats.max_level_size, 1);
+        assert!(!stats.used_parallel);
+        assert!(stats.workers_used > 0); // Rayon should report workers
+    }
 }

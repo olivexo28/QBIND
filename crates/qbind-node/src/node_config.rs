@@ -2384,4 +2384,107 @@ mod tests {
         assert_eq!(format!("{}", ConfigProfile::TestNetAlpha), "testnet-alpha");
         assert_eq!(format!("{}", ConfigProfile::TestNetBeta), "testnet-beta");
     }
+
+    // ========================================================================
+    // T186: Stage B Parallel Execution Tests
+    // ========================================================================
+
+    #[test]
+    fn test_stage_b_disabled_by_default() {
+        let config = NodeConfig::default();
+        assert!(
+            !config.stage_b_enabled,
+            "Stage B should be disabled by default"
+        );
+    }
+
+    #[test]
+    fn test_stage_b_devnet_preset() {
+        let config = NodeConfig::devnet_v0_preset();
+        assert!(
+            !config.stage_b_enabled,
+            "DevNet v0 preset should have Stage B disabled"
+        );
+    }
+
+    #[test]
+    fn test_stage_b_testnet_alpha_preset() {
+        let config = NodeConfig::testnet_alpha_preset();
+        assert!(
+            !config.stage_b_enabled,
+            "TestNet Alpha preset should have Stage B disabled"
+        );
+    }
+
+    #[test]
+    fn test_stage_b_testnet_beta_preset() {
+        let config = NodeConfig::testnet_beta_preset();
+        assert!(
+            !config.stage_b_enabled,
+            "TestNet Beta preset should have Stage B disabled (opt-in available)"
+        );
+    }
+
+    #[test]
+    fn test_stage_b_mainnet_preset() {
+        let config = NodeConfig::mainnet_preset();
+        assert!(
+            config.stage_b_enabled,
+            "MainNet preset should have Stage B enabled by default"
+        );
+    }
+
+    #[test]
+    fn test_stage_b_builder_method() {
+        let config = NodeConfig::testnet_beta_preset().with_stage_b_enabled(true);
+        assert!(config.stage_b_enabled, "with_stage_b_enabled(true) should enable Stage B");
+
+        let config2 = NodeConfig::mainnet_preset().with_stage_b_enabled(false);
+        assert!(!config2.stage_b_enabled, "with_stage_b_enabled(false) should disable Stage B");
+    }
+
+    #[test]
+    fn test_stage_b_in_startup_info() {
+        let config_enabled = NodeConfig::mainnet_preset();
+        let info_enabled = config_enabled.startup_info_string(Some("V1"));
+        assert!(
+            info_enabled.contains("stage_b=enabled"),
+            "Startup info should show stage_b=enabled for MainNet"
+        );
+
+        let config_disabled = NodeConfig::testnet_alpha_preset();
+        let info_disabled = config_disabled.startup_info_string(Some("V1"));
+        assert!(
+            info_disabled.contains("stage_b=disabled"),
+            "Startup info should show stage_b=disabled for TestNet Alpha"
+        );
+    }
+
+    #[test]
+    fn test_mainnet_validates_with_stage_b_disabled() {
+        // Create a MainNet config but with Stage B disabled via override
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_stage_b_enabled(false);
+
+        // MainNet validation should still pass (Stage B is allowed but not required)
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_ok(),
+            "MainNet validation should pass even with Stage B disabled (it's allowed, not required)"
+        );
+    }
+
+    #[test]
+    fn test_mainnet_validates_with_stage_b_enabled() {
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test");
+
+        // MainNet validation should pass
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_ok(),
+            "MainNet validation should pass with Stage B enabled"
+        );
+    }
 }
