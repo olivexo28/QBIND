@@ -674,6 +674,25 @@ pub struct NodeConfig {
     /// - TestNet Alpha: `false` (opt-in)
     /// - TestNet Beta / MainNet: `true` (enabled)
     pub dag_availability_enabled: bool,
+
+    // ========================================================================
+    // T186: Stage B Parallel Execution Configuration
+    // ========================================================================
+
+    /// Whether Stage B conflict-graph parallel execution is enabled (T186).
+    ///
+    /// When `true` and `execution_profile == ExecutionProfile::VmV0`, the node
+    /// uses the Stage B conflict-graph scheduler to execute blocks in parallel.
+    /// When `false`, blocks are executed sequentially (existing behavior).
+    ///
+    /// Stage B produces identical state and receipts as sequential execution
+    /// but uses multiple cores for improved throughput.
+    ///
+    /// - DevNet v0: `false` (disabled)
+    /// - TestNet Alpha: `false` (disabled)
+    /// - TestNet Beta: `false` (disabled by default; opt-in available)
+    /// - MainNet v0: `true` (enabled by default; operators can override)
+    pub stage_b_enabled: bool,
 }
 
 impl Default for NodeConfig {
@@ -693,6 +712,8 @@ impl Default for NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            // T186: Stage B disabled by default
+            stage_b_enabled: false,
         }
     }
 }
@@ -712,6 +733,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            stage_b_enabled: false,
         }
     }
 
@@ -730,6 +752,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            stage_b_enabled: false,
         }
     }
 
@@ -769,6 +792,7 @@ impl NodeConfig {
     /// - Mempool: FIFO
     /// - Network: LocalMesh
     /// - P2P: Disabled
+    /// - Stage B: Disabled (T186)
     ///
     /// # Example
     ///
@@ -790,6 +814,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            stage_b_enabled: false,
         }
     }
 
@@ -803,6 +828,7 @@ impl NodeConfig {
     /// - Mempool: FIFO (DAG opt-in)
     /// - Network: LocalMesh (P2P opt-in)
     /// - P2P: Disabled
+    /// - Stage B: Disabled (T186)
     ///
     /// # Example
     ///
@@ -825,6 +851,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            stage_b_enabled: false,
         }
     }
 
@@ -841,6 +868,7 @@ impl NodeConfig {
     /// - Network: **P2P by default** (LocalMesh for dev/harness)
     /// - P2P: **Enabled by default**
     /// - DAG Availability: **Enabled by default**
+    /// - Stage B: **Disabled by default** (T186: opt-in available for testing)
     ///
     /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
     /// starting nodes, as Beta requires persistent state.
@@ -873,6 +901,7 @@ impl NodeConfig {
             enable_fee_priority: true,
             mempool_mode: MempoolMode::Dag,
             dag_availability_enabled: true,
+            stage_b_enabled: false, // T186: Disabled by default for Beta
         }
     }
 
@@ -889,6 +918,7 @@ impl NodeConfig {
     /// - Network: **P2P (required for validators)**
     /// - P2P: **Enabled (required)**
     /// - DAG Availability: **Enabled (required)**
+    /// - Stage B: **Enabled by default** (T186: parallel execution available)
     ///
     /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
     /// starting nodes. MainNet validators cannot use in-memory-only storage.
@@ -919,6 +949,7 @@ impl NodeConfig {
     /// assert_eq!(config.network_mode, NetworkMode::P2p);
     /// assert!(config.network.enable_p2p);
     /// assert!(config.dag_availability_enabled);
+    /// assert!(config.stage_b_enabled);
     /// ```
     pub fn mainnet_preset() -> Self {
         Self {
@@ -931,6 +962,7 @@ impl NodeConfig {
             enable_fee_priority: true,
             mempool_mode: MempoolMode::Dag,
             dag_availability_enabled: true,
+            stage_b_enabled: true, // T186: Enabled by default for MainNet
         }
     }
 
@@ -1030,6 +1062,29 @@ impl NodeConfig {
     /// * `enabled` - Whether DAG availability certificates should be enabled
     pub fn with_dag_availability(mut self, enabled: bool) -> Self {
         self.dag_availability_enabled = enabled;
+        self
+    }
+
+    /// Enable or disable Stage B parallel execution (T186).
+    ///
+    /// When enabled and `execution_profile == ExecutionProfile::VmV0`, the node
+    /// uses conflict-graph-based parallel execution for improved throughput.
+    ///
+    /// Stage B produces identical state and receipts as sequential execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether Stage B parallel execution should be enabled
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::testnet_beta_preset()
+    ///     .with_stage_b_enabled(true);  // Opt-in for testing
+    /// assert!(config.stage_b_enabled);
+    /// ```
+    pub fn with_stage_b_enabled(mut self, enabled: bool) -> Self {
+        self.stage_b_enabled = enabled;
         self
     }
 
@@ -1166,6 +1221,11 @@ impl NodeConfig {
     ///
     /// The startup info string now also includes:
     /// - DAG availability state (dag_availability=enabled/disabled)
+    ///
+    /// # T186 Additions
+    ///
+    /// The startup info string now also includes:
+    /// - Stage B parallel execution state (stage_b=enabled/disabled)
     pub fn startup_info_string(&self, validator_id: Option<&str>) -> String {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
@@ -1197,8 +1257,15 @@ impl NodeConfig {
             "disabled"
         };
 
+        // T186: Stage B parallel execution state
+        let stage_b_str = if self.stage_b_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        };
+
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={} dag_availability={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={} dag_availability={} stage_b={}",
             validator_str,
             self.environment,
             chain_id_hex,
@@ -1209,7 +1276,8 @@ impl NodeConfig {
             gas_str,
             fee_priority_str,
             self.mempool_mode,
-            dag_availability_str
+            dag_availability_str,
+            stage_b_str
         )
     }
 
@@ -1386,6 +1454,16 @@ impl NodeConfig {
         // 8. Data directory must be set (no in-memory validators)
         if self.data_dir.is_none() {
             return Err(MainnetConfigError::MissingDataDir);
+        }
+
+        // T186: Stage B is allowed but not required for MainNet.
+        // Log a warning if disabled, but do not fail startup.
+        // Stage B is compiled and available; operators can choose to enable/disable it.
+        if !self.stage_b_enabled {
+            eprintln!(
+                "[T186] MainNet: stage_b_enabled=false – allowed, but parallel execution \
+                 is recommended once fully audited."
+            );
         }
 
         // TODO(future): Add stricter rules for validators vs non-validators
