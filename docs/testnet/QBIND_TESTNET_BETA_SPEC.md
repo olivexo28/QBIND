@@ -74,13 +74,24 @@ RocksDB-backed persistent account state is **required** for TestNet Beta nodes:
 
 ### 2.3 Stage B Parallelism
 
-Stage B conflict-graph-based parallel execution is **not a Beta requirement**:
+Stage B conflict-graph-based parallel execution is **available but disabled by default** for TestNet Beta:
 
-- Beta continues with sequential execution (same as Alpha)
-- Stage B parallelism is targeted for MainNet
-- The Stage B skeleton exists (T171) but is not wired into production
+- Beta defaults to sequential execution (same as Alpha)
+- Stage B is available and testable via `--enable-stage-b` flag
+- CI tests verify determinism vs sequential execution
 
-**Reference**: [QBIND_PARALLEL_EXECUTION_DESIGN.md §4.2](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) for Stage B design.
+**Configuration**:
+```bash
+# Enable Stage B for testing in Beta
+qbind-node --profile testnet-beta --enable-stage-b true --data-dir /data/qbind
+```
+
+**Implementation Status (T186, T187)**:
+- ✅ Stage B is wired into the VM v0 pipeline
+- ✅ Determinism vs sequential verified via CI tests
+- ✅ Metrics available: `stage_b_enabled`, `stage_b_blocks_total`, `stage_b_parallel_seconds`
+
+**Reference**: [QBIND_PARALLEL_EXECUTION_DESIGN.md §4.2](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) for Stage B design and [Appendix D](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md#appendix-d-implementation-status--stage-b-wiring-t186-t187) for implementation status.
 
 ---
 

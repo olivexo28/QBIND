@@ -3337,6 +3337,36 @@ pub struct ExecutionMetrics {
     parallel_block_bucket_over_100ms: AtomicU64,
     /// Times we intentionally fell back to sequential - T157.
     parallel_fallback_total: AtomicU64,
+
+    // ========================================================================
+    // T187: Stage B parallel execution metrics
+    // ========================================================================
+    /// Stage B enabled gauge (0 or 1) - T187.
+    stage_b_enabled: AtomicU64,
+    /// Stage B blocks executed in parallel mode - T187.
+    stage_b_blocks_parallel: AtomicU64,
+    /// Stage B blocks executed in fallback mode - T187.
+    stage_b_blocks_fallback: AtomicU64,
+    /// Stage B mismatch/internal error count - T187.
+    stage_b_mismatch_total: AtomicU64,
+    /// Stage B levels histogram: < 4 levels.
+    stage_b_levels_bucket_4: AtomicU64,
+    /// Stage B levels histogram: < 16 levels.
+    stage_b_levels_bucket_16: AtomicU64,
+    /// Stage B levels histogram: < 64 levels.
+    stage_b_levels_bucket_64: AtomicU64,
+    /// Stage B levels histogram: >= 64 levels.
+    stage_b_levels_bucket_over_64: AtomicU64,
+    /// Stage B parallel execution time sum in milliseconds - T187.
+    stage_b_parallel_time_ms_sum: AtomicU64,
+    /// Stage B execution time bucket: < 1ms.
+    stage_b_parallel_bucket_1ms: AtomicU64,
+    /// Stage B execution time bucket: < 10ms.
+    stage_b_parallel_bucket_10ms: AtomicU64,
+    /// Stage B execution time bucket: < 100ms.
+    stage_b_parallel_bucket_100ms: AtomicU64,
+    /// Stage B execution time bucket: >= 100ms.
+    stage_b_parallel_bucket_over_100ms: AtomicU64,
 }
 
 impl ExecutionMetrics {
@@ -3567,6 +3597,124 @@ impl ExecutionMetrics {
         self.parallel_fallback_total.load(Ordering::Relaxed)
     }
 
+    // ========================================================================
+    // T187: Stage B parallel execution metrics
+    // ========================================================================
+
+    /// Set the Stage B enabled gauge (T187).
+    ///
+    /// Call this on service creation to indicate Stage B status.
+    pub fn set_stage_b_enabled(&self, enabled: bool) {
+        self.stage_b_enabled
+            .store(if enabled { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
+    /// Get Stage B enabled status (T187).
+    pub fn stage_b_enabled(&self) -> u64 {
+        self.stage_b_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Increment Stage B parallel blocks counter (T187).
+    ///
+    /// Call this when Stage B path runs successfully.
+    pub fn inc_stage_b_parallel(&self) {
+        self.stage_b_blocks_parallel.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get Stage B parallel blocks count (T187).
+    pub fn stage_b_blocks_parallel(&self) -> u64 {
+        self.stage_b_blocks_parallel.load(Ordering::Relaxed)
+    }
+
+    /// Increment Stage B fallback blocks counter (T187).
+    ///
+    /// Call this when Stage B path encounters an error and falls back to sequential.
+    pub fn inc_stage_b_fallback(&self) {
+        self.stage_b_blocks_fallback.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get Stage B fallback blocks count (T187).
+    pub fn stage_b_blocks_fallback(&self) -> u64 {
+        self.stage_b_blocks_fallback.load(Ordering::Relaxed)
+    }
+
+    /// Increment Stage B mismatch counter (T187).
+    ///
+    /// Call this when Stage B encounters an internal mismatch or unexpected violation.
+    pub fn inc_stage_b_mismatch(&self) {
+        self.stage_b_mismatch_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get Stage B mismatch count (T187).
+    pub fn stage_b_mismatch_total(&self) -> u64 {
+        self.stage_b_mismatch_total.load(Ordering::Relaxed)
+    }
+
+    /// Record Stage B schedule levels (T187).
+    ///
+    /// Records the number of levels in the parallel schedule for histogram tracking.
+    pub fn record_stage_b_levels(&self, level_count: usize) {
+        if level_count < 4 {
+            self.stage_b_levels_bucket_4.fetch_add(1, Ordering::Relaxed);
+        } else if level_count < 16 {
+            self.stage_b_levels_bucket_16
+                .fetch_add(1, Ordering::Relaxed);
+        } else if level_count < 64 {
+            self.stage_b_levels_bucket_64
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.stage_b_levels_bucket_over_64
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get Stage B levels histogram buckets (T187).
+    pub fn stage_b_levels_buckets(&self) -> (u64, u64, u64, u64) {
+        (
+            self.stage_b_levels_bucket_4.load(Ordering::Relaxed),
+            self.stage_b_levels_bucket_16.load(Ordering::Relaxed),
+            self.stage_b_levels_bucket_64.load(Ordering::Relaxed),
+            self.stage_b_levels_bucket_over_64.load(Ordering::Relaxed),
+        )
+    }
+
+    /// Record Stage B parallel execution time (T187).
+    pub fn record_stage_b_parallel_time(&self, duration: std::time::Duration) {
+        let millis = duration.as_millis() as u64;
+        self.stage_b_parallel_time_ms_sum
+            .fetch_add(millis, Ordering::Relaxed);
+
+        if millis < 1 {
+            self.stage_b_parallel_bucket_1ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else if millis < 10 {
+            self.stage_b_parallel_bucket_10ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else if millis < 100 {
+            self.stage_b_parallel_bucket_100ms
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.stage_b_parallel_bucket_over_100ms
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get Stage B parallel time sum in milliseconds (T187).
+    pub fn stage_b_parallel_time_ms_sum(&self) -> u64 {
+        self.stage_b_parallel_time_ms_sum.load(Ordering::Relaxed)
+    }
+
+    /// Get Stage B parallel time histogram buckets (T187).
+    pub fn stage_b_parallel_buckets(&self) -> (u64, u64, u64, u64) {
+        (
+            self.stage_b_parallel_bucket_1ms.load(Ordering::Relaxed),
+            self.stage_b_parallel_bucket_10ms.load(Ordering::Relaxed),
+            self.stage_b_parallel_bucket_100ms.load(Ordering::Relaxed),
+            self.stage_b_parallel_bucket_over_100ms
+                .load(Ordering::Relaxed),
+        )
+    }
+
     /// Format execution metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -3689,6 +3837,73 @@ impl ExecutionMetrics {
         output.push_str(&format!(
             "qbind_execution_parallel_fallback_total {}\n",
             self.parallel_fallback_total()
+        ));
+
+        // T187: Stage B parallel execution metrics
+        output.push_str("\n# T187: Stage B parallel execution metrics\n");
+        output.push_str(&format!(
+            "qbind_execution_stage_b_enabled {}\n",
+            self.stage_b_enabled()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_blocks_total{{mode=\"parallel\"}} {}\n",
+            self.stage_b_blocks_parallel()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_blocks_total{{mode=\"fallback\"}} {}\n",
+            self.stage_b_blocks_fallback()
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_mismatch_total {}\n",
+            self.stage_b_mismatch_total()
+        ));
+
+        // Stage B levels histogram
+        let (sb4, sb16, sb64, sb_over) = self.stage_b_levels_buckets();
+        let sb_total = sb4 + sb16 + sb64 + sb_over;
+        output.push_str(&format!(
+            "qbind_execution_stage_b_levels_histogram_bucket{{le=\"4\"}} {}\n",
+            sb4
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_levels_histogram_bucket{{le=\"16\"}} {}\n",
+            sb4 + sb16
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_levels_histogram_bucket{{le=\"64\"}} {}\n",
+            sb4 + sb16 + sb64
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_levels_histogram_bucket{{le=\"+Inf\"}} {}\n",
+            sb_total
+        ));
+
+        // Stage B parallel time histogram
+        let (sbt1, sbt10, sbt100, sbt_over) = self.stage_b_parallel_buckets();
+        let sbt_total = sbt1 + sbt10 + sbt100 + sbt_over;
+        output.push_str(&format!(
+            "qbind_execution_stage_b_parallel_seconds_bucket{{le=\"0.001\"}} {}\n",
+            sbt1
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_parallel_seconds_bucket{{le=\"0.01\"}} {}\n",
+            sbt1 + sbt10
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_parallel_seconds_bucket{{le=\"0.1\"}} {}\n",
+            sbt1 + sbt10 + sbt100
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_parallel_seconds_bucket{{le=\"+Inf\"}} {}\n",
+            sbt_total
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_parallel_seconds_sum {}\n",
+            self.stage_b_parallel_time_ms_sum() as f64 / 1000.0
+        ));
+        output.push_str(&format!(
+            "qbind_execution_stage_b_parallel_seconds_count {}\n",
+            sbt_total
         ));
 
         output
