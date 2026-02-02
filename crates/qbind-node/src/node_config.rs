@@ -525,6 +525,96 @@ pub fn parse_mempool_mode(s: &str) -> MempoolMode {
 }
 
 // ============================================================================
+// T189: DagCouplingMode – DAG–consensus coupling configuration
+// ============================================================================
+
+/// DAG–consensus coupling mode (T189).
+///
+/// Controls how the consensus layer interacts with DAG availability certificates.
+/// See QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md §6 for detailed semantics.
+///
+/// # Phased Rollout
+///
+/// - **DevNet v0**: `Off` (coupling disabled)
+/// - **TestNet Alpha**: `Off` (coupling disabled)
+/// - **TestNet Beta**: `Off` (optionally `Warn` for testing/transition)
+/// - **MainNet v0**: `Enforce` (coupling required)
+///
+/// # Mode Semantics
+///
+/// | Mode | Proposal Construction | Vote Validation | Commit |
+/// | :--- | :--- | :--- | :--- |
+/// | `Off` | No restrictions | No DAG checks | Normal |
+/// | `Warn` | No restrictions | Log warnings for uncertified batches | Normal |
+/// | `Enforce` | Only certified batches | Reject uncertified batches | Only certified |
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DagCouplingMode {
+    /// Off: No coupling; consensus ignores DAG certificates.
+    ///
+    /// Used in: DevNet v0, TestNet Alpha, TestNet Beta (default).
+    /// Proposals and votes do not require batch certificates.
+    #[default]
+    Off,
+
+    /// Warn: Log warnings for uncertified batches but don't reject.
+    ///
+    /// Used in: Testing/transition scenarios.
+    /// Proposals can include uncertified batches, but warnings are logged.
+    /// Validators vote normally but log warnings for missing certs.
+    Warn,
+
+    /// Enforce: Reject proposals with uncertified batches.
+    ///
+    /// Used in: MainNet v0.
+    /// Proposals must only include certified batches.
+    /// Validators reject proposals with uncertified or invalid certificates.
+    /// All committed transactions must belong to certified batches.
+    Enforce,
+}
+
+impl std::fmt::Display for DagCouplingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DagCouplingMode::Off => write!(f, "off"),
+            DagCouplingMode::Warn => write!(f, "warn"),
+            DagCouplingMode::Enforce => write!(f, "enforce"),
+        }
+    }
+}
+
+/// Parse a DAG coupling mode from a string (T189).
+///
+/// Valid values: "off" | "warn" | "enforce" (case-insensitive)
+///
+/// # Returns
+///
+/// `Some(DagCouplingMode)` if valid, `None` for unrecognized values.
+/// Unlike `parse_mempool_mode`, this function does NOT fall back to a default
+/// because coupling mode is a critical configuration that should be explicit.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_dag_coupling_mode;
+///
+/// assert_eq!(parse_dag_coupling_mode("off"), Some(DagCouplingMode::Off));
+/// assert_eq!(parse_dag_coupling_mode("warn"), Some(DagCouplingMode::Warn));
+/// assert_eq!(parse_dag_coupling_mode("enforce"), Some(DagCouplingMode::Enforce));
+/// assert_eq!(parse_dag_coupling_mode("invalid"), None);
+/// ```
+pub fn parse_dag_coupling_mode(s: &str) -> Option<DagCouplingMode> {
+    match s.to_lowercase().as_str() {
+        "off" => Some(DagCouplingMode::Off),
+        "warn" => Some(DagCouplingMode::Warn),
+        "enforce" => Some(DagCouplingMode::Enforce),
+        _ => None,
+    }
+}
+
+/// Valid DAG coupling mode values for CLI help text.
+pub const VALID_DAG_COUPLING_MODES: &[&str] = &["off", "warn", "enforce"];
+
+// ============================================================================
 // T180: Configuration Profile – Preset configurations for different network phases
 // ============================================================================
 
@@ -676,6 +766,20 @@ pub struct NodeConfig {
     pub dag_availability_enabled: bool,
 
     // ========================================================================
+    // T189: DAG–Consensus Coupling Configuration
+    // ========================================================================
+    /// DAG–consensus coupling mode (T189).
+    ///
+    /// Controls how the consensus layer interacts with DAG availability certificates.
+    /// See QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md §6 for detailed semantics.
+    ///
+    /// - DevNet v0: `Off` (coupling disabled)
+    /// - TestNet Alpha: `Off` (coupling disabled)
+    /// - TestNet Beta: `Off` (optionally `Warn` for testing/transition)
+    /// - MainNet v0: `Enforce` (coupling required; cannot be changed)
+    pub dag_coupling_mode: DagCouplingMode,
+
+    // ========================================================================
     // T186: Stage B Parallel Execution Configuration
     // ========================================================================
     /// Whether Stage B conflict-graph parallel execution is enabled (T186).
@@ -711,6 +815,8 @@ impl Default for NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            // T189: DAG coupling disabled for DevNet
+            dag_coupling_mode: DagCouplingMode::Off,
             // T186: Stage B disabled by default
             stage_b_enabled: false,
         }
@@ -732,6 +838,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            dag_coupling_mode: DagCouplingMode::Off,
             stage_b_enabled: false,
         }
     }
@@ -751,6 +858,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            dag_coupling_mode: DagCouplingMode::Off,
             stage_b_enabled: false,
         }
     }
@@ -791,6 +899,7 @@ impl NodeConfig {
     /// - Mempool: FIFO
     /// - Network: LocalMesh
     /// - P2P: Disabled
+    /// - DAG Coupling: Off (T189)
     /// - Stage B: Disabled (T186)
     ///
     /// # Example
@@ -813,6 +922,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            dag_coupling_mode: DagCouplingMode::Off, // T189: Coupling disabled for DevNet
             stage_b_enabled: false,
         }
     }
@@ -827,6 +937,7 @@ impl NodeConfig {
     /// - Mempool: FIFO (DAG opt-in)
     /// - Network: LocalMesh (P2P opt-in)
     /// - P2P: Disabled
+    /// - DAG Coupling: Off (T189)
     /// - Stage B: Disabled (T186)
     ///
     /// # Example
@@ -850,6 +961,7 @@ impl NodeConfig {
             enable_fee_priority: false,
             mempool_mode: MempoolMode::Fifo,
             dag_availability_enabled: false,
+            dag_coupling_mode: DagCouplingMode::Off, // T189: Coupling disabled for Alpha
             stage_b_enabled: false,
         }
     }
@@ -867,6 +979,7 @@ impl NodeConfig {
     /// - Network: **P2P by default** (LocalMesh for dev/harness)
     /// - P2P: **Enabled by default**
     /// - DAG Availability: **Enabled by default**
+    /// - DAG Coupling: **Off** (T189: optionally Warn for experiments)
     /// - Stage B: **Disabled by default** (T186: opt-in available for testing)
     ///
     /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
@@ -900,6 +1013,7 @@ impl NodeConfig {
             enable_fee_priority: true,
             mempool_mode: MempoolMode::Dag,
             dag_availability_enabled: true,
+            dag_coupling_mode: DagCouplingMode::Off, // T189: Off for Beta (optionally Warn)
             stage_b_enabled: false, // T186: Disabled by default for Beta
         }
     }
@@ -917,6 +1031,7 @@ impl NodeConfig {
     /// - Network: **P2P (required for validators)**
     /// - P2P: **Enabled (required)**
     /// - DAG Availability: **Enabled (required)**
+    /// - DAG Coupling: **Enforce (required)** (T189)
     /// - Stage B: **Enabled by default** (T186: parallel execution available)
     ///
     /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
@@ -949,6 +1064,7 @@ impl NodeConfig {
     /// assert!(config.network.enable_p2p);
     /// assert!(config.dag_availability_enabled);
     /// assert!(config.stage_b_enabled);
+    /// assert_eq!(config.dag_coupling_mode, DagCouplingMode::Enforce);
     /// ```
     pub fn mainnet_preset() -> Self {
         Self {
@@ -961,6 +1077,7 @@ impl NodeConfig {
             enable_fee_priority: true,
             mempool_mode: MempoolMode::Dag,
             dag_availability_enabled: true,
+            dag_coupling_mode: DagCouplingMode::Enforce, // T189: Required for MainNet
             stage_b_enabled: true, // T186: Enabled by default for MainNet
         }
     }
@@ -1061,6 +1178,26 @@ impl NodeConfig {
     /// * `enabled` - Whether DAG availability certificates should be enabled
     pub fn with_dag_availability(mut self, enabled: bool) -> Self {
         self.dag_availability_enabled = enabled;
+        self
+    }
+
+    /// Set the DAG–consensus coupling mode (T189).
+    ///
+    /// Controls how the consensus layer interacts with DAG availability certificates.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The DAG coupling mode to use
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::testnet_beta_preset()
+    ///     .with_dag_coupling_mode(DagCouplingMode::Warn);  // Enable warnings for testing
+    /// assert_eq!(config.dag_coupling_mode, DagCouplingMode::Warn);
+    /// ```
+    pub fn with_dag_coupling_mode(mut self, mode: DagCouplingMode) -> Self {
+        self.dag_coupling_mode = mode;
         self
     }
 
@@ -1225,6 +1362,11 @@ impl NodeConfig {
     ///
     /// The startup info string now also includes:
     /// - Stage B parallel execution state (stage_b=enabled/disabled)
+    ///
+    /// # T189 Additions
+    ///
+    /// The startup info string now also includes:
+    /// - DAG coupling mode (dag_coupling=off/warn/enforce)
     pub fn startup_info_string(&self, validator_id: Option<&str>) -> String {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
@@ -1264,7 +1406,7 @@ impl NodeConfig {
         };
 
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={} dag_availability={} stage_b={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={} dag_availability={} dag_coupling={} stage_b={}",
             validator_str,
             self.environment,
             chain_id_hex,
@@ -1276,6 +1418,7 @@ impl NodeConfig {
             fee_priority_str,
             self.mempool_mode,
             dag_availability_str,
+            self.dag_coupling_mode,
             stage_b_str
         )
     }
@@ -1437,7 +1580,14 @@ impl NodeConfig {
             return Err(MainnetConfigError::DagAvailabilityDisabled);
         }
 
-        // 6. Network mode must be P2P
+        // 6. DAG coupling must be Enforce (T189)
+        if self.dag_coupling_mode != DagCouplingMode::Enforce {
+            return Err(MainnetConfigError::DagCouplingNotEnforced {
+                actual: self.dag_coupling_mode,
+            });
+        }
+
+        // 7. Network mode must be P2P
         if self.network_mode != NetworkMode::P2p {
             return Err(MainnetConfigError::WrongNetworkMode {
                 expected: NetworkMode::P2p,
@@ -1445,12 +1595,12 @@ impl NodeConfig {
             });
         }
 
-        // 7. P2P must be enabled
+        // 8. P2P must be enabled
         if !self.network.enable_p2p {
             return Err(MainnetConfigError::P2pDisabled);
         }
 
-        // 8. Data directory must be set (no in-memory validators)
+        // 9. Data directory must be set (no in-memory validators)
         if self.data_dir.is_none() {
             return Err(MainnetConfigError::MissingDataDir);
         }
@@ -1521,6 +1671,14 @@ pub enum MainnetConfigError {
     /// guarantees and consensus safety.
     DagAvailabilityDisabled,
 
+    /// DAG coupling mode is not Enforce (T189).
+    ///
+    /// MainNet requires DAG–consensus coupling to be enforced.
+    /// Proposals with uncertified batches must be rejected.
+    DagCouplingNotEnforced {
+        actual: DagCouplingMode,
+    },
+
     /// Network mode is not P2P.
     ///
     /// MainNet validators must use P2P transport. LocalMesh is only
@@ -1575,6 +1733,13 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: DAG availability certificates must be enabled (--enable-dag-availability=true)"
+                )
+            }
+            MainnetConfigError::DagCouplingNotEnforced { actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: dag_coupling_mode must be Enforce but is {} (--dag-coupling-mode=enforce)",
+                    actual
                 )
             }
             MainnetConfigError::WrongNetworkMode { expected, actual } => {
@@ -2490,5 +2655,203 @@ mod tests {
             result.is_ok(),
             "MainNet validation should pass with Stage B enabled"
         );
+    }
+
+    // ========================================================================
+    // T189: DAG Coupling Mode Tests
+    // ========================================================================
+
+    #[test]
+    fn test_dag_coupling_mode_default() {
+        let mode = DagCouplingMode::default();
+        assert_eq!(mode, DagCouplingMode::Off);
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_display() {
+        assert_eq!(format!("{}", DagCouplingMode::Off), "off");
+        assert_eq!(format!("{}", DagCouplingMode::Warn), "warn");
+        assert_eq!(format!("{}", DagCouplingMode::Enforce), "enforce");
+    }
+
+    #[test]
+    fn test_parse_dag_coupling_mode_valid() {
+        // Case-insensitive matching
+        assert_eq!(parse_dag_coupling_mode("off"), Some(DagCouplingMode::Off));
+        assert_eq!(parse_dag_coupling_mode("OFF"), Some(DagCouplingMode::Off));
+        assert_eq!(parse_dag_coupling_mode("Off"), Some(DagCouplingMode::Off));
+        assert_eq!(parse_dag_coupling_mode("warn"), Some(DagCouplingMode::Warn));
+        assert_eq!(parse_dag_coupling_mode("WARN"), Some(DagCouplingMode::Warn));
+        assert_eq!(
+            parse_dag_coupling_mode("enforce"),
+            Some(DagCouplingMode::Enforce)
+        );
+        assert_eq!(
+            parse_dag_coupling_mode("ENFORCE"),
+            Some(DagCouplingMode::Enforce)
+        );
+    }
+
+    #[test]
+    fn test_parse_dag_coupling_mode_invalid() {
+        assert_eq!(parse_dag_coupling_mode("invalid"), None);
+        assert_eq!(parse_dag_coupling_mode(""), None);
+        assert_eq!(parse_dag_coupling_mode("on"), None);
+        assert_eq!(parse_dag_coupling_mode("enabled"), None);
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_devnet_preset() {
+        let config = NodeConfig::devnet_v0_preset();
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Off,
+            "DevNet v0 preset should have dag_coupling_mode = Off"
+        );
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_testnet_alpha_preset() {
+        let config = NodeConfig::testnet_alpha_preset();
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Off,
+            "TestNet Alpha preset should have dag_coupling_mode = Off"
+        );
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_testnet_beta_preset() {
+        let config = NodeConfig::testnet_beta_preset();
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Off,
+            "TestNet Beta preset should have dag_coupling_mode = Off (optionally Warn)"
+        );
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_mainnet_preset() {
+        let config = NodeConfig::mainnet_preset();
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Enforce,
+            "MainNet preset should have dag_coupling_mode = Enforce"
+        );
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_builder_method() {
+        let config = NodeConfig::testnet_beta_preset()
+            .with_dag_coupling_mode(DagCouplingMode::Warn);
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Warn,
+            "with_dag_coupling_mode(Warn) should set mode to Warn"
+        );
+
+        let config2 = NodeConfig::mainnet_preset()
+            .with_dag_coupling_mode(DagCouplingMode::Off);
+        assert_eq!(
+            config2.dag_coupling_mode,
+            DagCouplingMode::Off,
+            "with_dag_coupling_mode(Off) should set mode to Off"
+        );
+    }
+
+    #[test]
+    fn test_dag_coupling_mode_in_startup_info() {
+        let config_enforce = NodeConfig::mainnet_preset();
+        let info_enforce = config_enforce.startup_info_string(Some("V1"));
+        assert!(
+            info_enforce.contains("dag_coupling=enforce"),
+            "Startup info should show dag_coupling=enforce for MainNet"
+        );
+
+        let config_off = NodeConfig::testnet_alpha_preset();
+        let info_off = config_off.startup_info_string(Some("V1"));
+        assert!(
+            info_off.contains("dag_coupling=off"),
+            "Startup info should show dag_coupling=off for TestNet Alpha"
+        );
+
+        let config_warn = NodeConfig::testnet_beta_preset()
+            .with_dag_coupling_mode(DagCouplingMode::Warn);
+        let info_warn = config_warn.startup_info_string(Some("V1"));
+        assert!(
+            info_warn.contains("dag_coupling=warn"),
+            "Startup info should show dag_coupling=warn when set"
+        );
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_coupling_not_enforce() {
+        // Create a MainNet config but with coupling mode set to Off
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_dag_coupling_mode(DagCouplingMode::Off);
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail when dag_coupling_mode != Enforce"
+        );
+        match result {
+            Err(MainnetConfigError::DagCouplingNotEnforced { actual }) => {
+                assert_eq!(actual, DagCouplingMode::Off);
+            }
+            _ => panic!(
+                "Expected DagCouplingNotEnforced error, got: {:?}",
+                result
+            ),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_coupling_warn() {
+        // Create a MainNet config but with coupling mode set to Warn
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_dag_coupling_mode(DagCouplingMode::Warn);
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail when dag_coupling_mode = Warn"
+        );
+        match result {
+            Err(MainnetConfigError::DagCouplingNotEnforced { actual }) => {
+                assert_eq!(actual, DagCouplingMode::Warn);
+            }
+            _ => panic!(
+                "Expected DagCouplingNotEnforced error, got: {:?}",
+                result
+            ),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_accepts_coupling_enforce() {
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_dag_coupling_mode(DagCouplingMode::Enforce);
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_ok(),
+            "MainNet validation should pass when dag_coupling_mode = Enforce"
+        );
+    }
+
+    #[test]
+    fn test_dag_coupling_error_display() {
+        let error = MainnetConfigError::DagCouplingNotEnforced {
+            actual: DagCouplingMode::Off,
+        };
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("dag_coupling_mode"));
+        assert!(error_str.contains("Enforce"));
+        assert!(error_str.contains("off"));
+        assert!(error_str.contains("--dag-coupling-mode=enforce"));
     }
 }

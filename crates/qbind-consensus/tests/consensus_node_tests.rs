@@ -155,6 +155,7 @@ fn basic_block_proposal() -> BlockProposal {
             timestamp: 1234567890,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: Some(qc),
         txs: Vec::new(),

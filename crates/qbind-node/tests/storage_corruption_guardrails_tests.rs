@@ -67,6 +67,7 @@ fn make_test_proposal(height: u64, epoch: u64) -> BlockProposal {
             timestamp: 1704067200 + height,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![],

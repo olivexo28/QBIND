@@ -300,6 +300,7 @@ pub fn create_mldsa44_proposal(
             timestamp: 0,
             payload_kind,
             next_epoch,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![],

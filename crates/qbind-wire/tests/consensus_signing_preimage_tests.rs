@@ -209,6 +209,7 @@ fn make_dummy_block_proposal() -> BlockProposal {
             timestamp: 1234567890,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![],
@@ -246,6 +247,7 @@ fn make_proposal_with_qc() -> BlockProposal {
             timestamp: 1234567890,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: Some(qc),
         txs: vec![vec![0x01, 0x02, 0x03], vec![0x04, 0x05]],
@@ -307,6 +309,7 @@ fn proposal_signing_preimage_stable_for_fields() {
             timestamp: 1234567890,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![],
@@ -331,6 +334,7 @@ fn proposal_signing_preimage_stable_for_fields() {
     // timestamp: u64 LE (1234567890)
     // payload_kind: u8 (0) - T102.1
     // next_epoch: u64 LE (0) - T102.1
+    // batch_commitment: [0x00; 32] - T189
     // qc_len: u32 LE (0)
     // (no qc_bytes)
     // (no txs)
@@ -350,6 +354,7 @@ fn proposal_signing_preimage_stable_for_fields() {
     expected.extend_from_slice(&1234567890u64.to_le_bytes()); // timestamp
     expected.push(0u8); // payload_kind (T102.1)
     expected.extend_from_slice(&0u64.to_le_bytes()); // next_epoch (T102.1)
+    expected.extend_from_slice(&[0u8; 32]); // batch_commitment (T189)
     expected.extend_from_slice(&0u32.to_le_bytes()); // qc_len = 0
 
     assert_eq!(
@@ -357,7 +362,7 @@ fn proposal_signing_preimage_stable_for_fields() {
         "BlockProposal signing preimage does not match expected layout"
     );
 
-    // T159: Hard-coded expected bytes updated for chain-aware domain tag
+    // T189: Hard-coded expected bytes updated for batch_commitment field
     // "QBIND:DEV:PROPOSAL:v1" (21 bytes)
     let expected_bytes: Vec<u8> = vec![
         // "QBIND:DEV:PROPOSAL:v1" (21 bytes)
@@ -379,7 +384,10 @@ fn proposal_signing_preimage_stable_for_fields() {
         0x00, 0x00, 0x00, 0x00, // timestamp: 1234567890 (LE)
         0xd2, 0x02, 0x96, 0x49, 0x00, 0x00, 0x00, 0x00, // payload_kind: 0 (T102.1)
         0x00, // next_epoch: 0 (LE) (T102.1)
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // qc_len: 0 (LE)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // batch_commitment: [0x00; 32] (T189)
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, // qc_len: 0 (LE)
         0x00, 0x00, 0x00, 0x00,
     ];
     assert_eq!(
@@ -442,9 +450,10 @@ fn proposal_signing_preimage_length_no_qc_no_txs() {
     // timestamp: 8
     // payload_kind: 1 (T102.1)
     // next_epoch: 8 (T102.1)
+    // batch_commitment: 32 (T189)
     // qc_len: 4
-    // Total: 21 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 4 = 143
-    let expected_len = 21 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 4;
+    // Total: 21 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 32 + 4 = 175
+    let expected_len = 21 + 1 + 4 + 8 + 8 + 8 + 32 + 32 + 2 + 2 + 4 + 8 + 1 + 8 + 32 + 4;
     assert_eq!(preimage.len(), expected_len);
 }
 

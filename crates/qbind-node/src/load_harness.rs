@@ -315,6 +315,7 @@ impl LoadGenerator {
                 timestamp: 0,
                 payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
                 next_epoch: 0,
+                batch_commitment: [0u8; 32],
             },
             qc: None,
             txs: vec![],

@@ -7,8 +7,8 @@
 //! - Startup info string includes P2P state
 
 use qbind_node::node_config::{
-    parse_network_mode, parse_socket_addr, ExecutionProfile, MempoolMode, NetworkMode,
-    NetworkTransportConfig, NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE,
+    parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, MempoolMode,
+    NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE,
     DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
@@ -77,6 +77,7 @@ fn test_p2p_config_local_mesh_disabled() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -109,6 +110,7 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -138,6 +140,7 @@ fn test_p2p_config_p2p_mode_enabled() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -167,6 +170,7 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -204,6 +208,7 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -290,6 +295,7 @@ fn test_startup_info_includes_network_mode() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -313,6 +319,7 @@ fn test_startup_info_p2p_disabled() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 
@@ -344,6 +351,7 @@ fn test_startup_info_p2p_enabled() {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     };
 

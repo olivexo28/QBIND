@@ -36,9 +36,9 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use crate::node_config::{
-    parse_config_profile, parse_environment, parse_execution_profile, parse_mempool_mode,
-    parse_network_mode, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
-    ParseEnvironmentError,
+    parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
+    parse_mempool_mode, parse_network_mode, DagCouplingMode, MempoolMode, NetworkMode,
+    NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
 };
 
 // ============================================================================
@@ -140,6 +140,20 @@ pub struct CliArgs {
     pub enable_stage_b: Option<bool>,
 
     // ========================================================================
+    // T189: DAG Coupling Mode
+    // ========================================================================
+    /// DAG–consensus coupling mode: off, warn, or enforce.
+    ///
+    /// Controls how the consensus layer interacts with DAG availability certificates:
+    /// - off: No coupling; consensus ignores DAG certificates (DevNet/TestNet default)
+    /// - warn: Log warnings for uncertified batches but don't reject (testing)
+    /// - enforce: Reject proposals with uncertified batches (MainNet required)
+    ///
+    /// MainNet profile requires `enforce` mode.
+    #[arg(long = "dag-coupling-mode")]
+    pub dag_coupling_mode: Option<String>,
+
+    // ========================================================================
     // Network Mode & P2P
     // ========================================================================
     /// Network mode: local-mesh or p2p.
@@ -238,6 +252,8 @@ pub enum CliError {
     InvalidProfile(String),
     /// MainNet configuration invariant violation (T185).
     MainnetConfigInvalid(String),
+    /// Invalid DAG coupling mode string (T189).
+    InvalidDagCouplingMode(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -261,6 +277,13 @@ impl std::fmt::Display for CliError {
             }
             CliError::MainnetConfigInvalid(msg) => {
                 write!(f, "MainNet configuration invalid: {}", msg)
+            }
+            CliError::InvalidDagCouplingMode(s) => {
+                write!(
+                    f,
+                    "invalid dag-coupling-mode '{}': expected 'off', 'warn', or 'enforce'",
+                    s
+                )
             }
         }
     }
@@ -374,6 +397,7 @@ impl CliArgs {
                 enable_fee_priority: false,
                 mempool_mode: MempoolMode::Fifo,
                 dag_availability_enabled: false,
+                dag_coupling_mode: DagCouplingMode::Off,
                 stage_b_enabled: false,
             }
         };
@@ -413,6 +437,21 @@ impl CliArgs {
                 );
             }
             config.dag_availability_enabled = dag_avail;
+        }
+
+        // T189: Apply DAG coupling mode override
+        if let Some(ref coupling_mode_str) = self.dag_coupling_mode {
+            match parse_dag_coupling_mode(coupling_mode_str) {
+                Some(mode) => {
+                    if self.profile.is_some() {
+                        eprintln!("[T189] CLI override: dag_coupling_mode = {}", mode);
+                    }
+                    config.dag_coupling_mode = mode;
+                }
+                None => {
+                    return Err(CliError::InvalidDagCouplingMode(coupling_mode_str.clone()));
+                }
+            }
         }
 
         // T186: Apply Stage B override
@@ -745,5 +784,136 @@ mod tests {
         assert!(!config.gas_enabled);
         assert!(!config.enable_fee_priority);
         assert_eq!(config.mempool_mode, MempoolMode::Fifo);
+    }
+
+    // ========================================================================
+    // T189: DAG Coupling Mode CLI Tests
+    // ========================================================================
+
+    #[test]
+    fn test_cli_dag_coupling_mode_flag() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--dag-coupling-mode",
+            "enforce",
+        ])
+        .unwrap();
+
+        assert_eq!(args.dag_coupling_mode, Some("enforce".to_string()));
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_off() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--dag-coupling-mode",
+            "off",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+        assert_eq!(config.dag_coupling_mode, DagCouplingMode::Off);
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_warn() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--dag-coupling-mode",
+            "warn",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+        assert_eq!(config.dag_coupling_mode, DagCouplingMode::Warn);
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_enforce() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--dag-coupling-mode",
+            "enforce",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+        assert_eq!(config.dag_coupling_mode, DagCouplingMode::Enforce);
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_invalid() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--dag-coupling-mode",
+            "invalid",
+        ])
+        .unwrap();
+
+        let result = args.to_node_config();
+        assert!(result.is_err());
+        match result {
+            Err(CliError::InvalidDagCouplingMode(s)) => {
+                assert_eq!(s, "invalid");
+            }
+            _ => panic!("Expected InvalidDagCouplingMode error"),
+        }
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_case_insensitive() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--dag-coupling-mode",
+            "ENFORCE",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+        assert_eq!(config.dag_coupling_mode, DagCouplingMode::Enforce);
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_with_profile() {
+        // Profile mainnet sets Enforce by default
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--profile",
+            "mainnet",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Enforce,
+            "MainNet profile should default to Enforce"
+        );
+    }
+
+    #[test]
+    fn test_cli_dag_coupling_mode_override_profile() {
+        // Start with testnet-beta profile (Off) and override to Warn
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--profile",
+            "testnet-beta",
+            "--dag-coupling-mode",
+            "warn",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+        assert_eq!(
+            config.dag_coupling_mode,
+            DagCouplingMode::Warn,
+            "CLI override should set dag_coupling_mode to Warn"
+        );
+    }
+
+    #[test]
+    fn test_cli_default_dag_coupling_mode_none() {
+        let args = CliArgs::try_parse_from(["qbind-node"]).unwrap();
+        assert!(args.dag_coupling_mode.is_none());
     }
 }

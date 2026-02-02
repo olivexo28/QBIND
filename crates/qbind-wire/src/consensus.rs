@@ -339,6 +339,177 @@ impl WireDecode for QuorumCertificate {
 pub const PAYLOAD_KIND_NORMAL: u8 = 0;
 pub const PAYLOAD_KIND_RECONFIG: u8 = 1;
 
+// ============================================================================
+// T189: DAG Coupling Types
+// ============================================================================
+
+/// Batch commitment type alias (T189).
+///
+/// A 32-byte Merkle root over the ordered list of `CertifiedBatchRef`s.
+/// This commitment is included in the block header when DAG coupling is
+/// enabled, and is part of the `block_hash` computation.
+///
+/// When no batches are included (e.g., DevNet/TestNet without coupling),
+/// this field is all zeros.
+pub type BatchCommitment = Hash32;
+
+/// A null batch commitment (all zeros).
+///
+/// Used when DAG coupling is disabled or when a block has no certified batches.
+pub const NULL_BATCH_COMMITMENT: BatchCommitment = [0u8; 32];
+
+/// A reference to a certified batch for consensus coupling (T189).
+///
+/// This type combines a batch reference (creator + batch_id) with the
+/// digest of its certificate, enabling validators to verify that:
+/// - The batch exists and is certified (has 2f+1 acks)
+/// - The batch data is available before voting
+///
+/// # Wire Format
+///
+/// ```text
+/// creator:      u64   // 8 bytes, LE (validator ID)
+/// batch_id:     [u8; 32]  // 32 bytes
+/// cert_digest:  [u8; 32]  // 32 bytes (H(BatchCertificate))
+/// ```
+///
+/// Total size: 72 bytes
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// let cbr = CertifiedBatchRef {
+///     creator: 1,
+///     batch_id: [0xAB; 32],
+///     cert_digest: [0xCD; 32],
+/// };
+/// let encoded = cbr.canonical_bytes();
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CertifiedBatchRef {
+    /// The validator who created the batch.
+    pub creator: u64,
+    /// The batch ID (SHA3-256 hash identifying the batch content).
+    pub batch_id: Hash32,
+    /// The digest of the BatchCertificate (H(BatchCertificate)).
+    ///
+    /// This binds the batch to its specific certificate, ensuring that
+    /// the certificate cannot be substituted.
+    pub cert_digest: Hash32,
+}
+
+impl CertifiedBatchRef {
+    /// Create a new certified batch reference.
+    pub fn new(creator: u64, batch_id: Hash32, cert_digest: Hash32) -> Self {
+        Self {
+            creator,
+            batch_id,
+            cert_digest,
+        }
+    }
+
+    /// Compute canonical encoding for hashing.
+    ///
+    /// Format: creator (8 bytes, LE) || batch_id (32 bytes) || cert_digest (32 bytes)
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(8 + 32 + 32);
+        out.extend_from_slice(&self.creator.to_le_bytes());
+        out.extend_from_slice(&self.batch_id);
+        out.extend_from_slice(&self.cert_digest);
+        out
+    }
+
+    /// Compute the hash of this certified batch reference.
+    ///
+    /// Uses SHA3-256 over the canonical encoding.
+    pub fn hash(&self) -> Hash32 {
+        use sha3::{Digest, Sha3_256};
+        let canonical = self.canonical_bytes();
+        let mut hasher = Sha3_256::new();
+        hasher.update(&canonical);
+        let result = hasher.finalize();
+        let mut h = [0u8; 32];
+        h.copy_from_slice(&result);
+        h
+    }
+}
+
+impl WireEncode for CertifiedBatchRef {
+    fn encode(&self, out: &mut Vec<u8>) {
+        put_u64(out, self.creator);
+        put_bytes(out, &self.batch_id);
+        put_bytes(out, &self.cert_digest);
+    }
+}
+
+impl WireDecode for CertifiedBatchRef {
+    fn decode(input: &mut &[u8]) -> Result<Self, WireError> {
+        let creator = get_u64(input)?;
+        let batch_id_bytes = get_bytes(input, 32)?;
+        let mut batch_id = [0u8; 32];
+        batch_id.copy_from_slice(batch_id_bytes);
+        let cert_digest_bytes = get_bytes(input, 32)?;
+        let mut cert_digest = [0u8; 32];
+        cert_digest.copy_from_slice(cert_digest_bytes);
+        Ok(CertifiedBatchRef {
+            creator,
+            batch_id,
+            cert_digest,
+        })
+    }
+}
+
+/// Compute a batch commitment from an ordered list of certified batch refs.
+///
+/// The batch commitment is a Merkle root over the hashes of all
+/// `CertifiedBatchRef`s in the proposal. This binds the block to the
+/// specific set of batches and certificates it includes.
+///
+/// # Algorithm
+///
+/// 1. Hash each `CertifiedBatchRef` using SHA3-256
+/// 2. Concatenate all hashes in order
+/// 3. Hash the concatenation to produce the root
+///
+/// For an empty list, returns `NULL_BATCH_COMMITMENT`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_wire::consensus::{compute_batch_commitment, CertifiedBatchRef};
+///
+/// let refs = vec![
+///     CertifiedBatchRef::new(1, [0xAA; 32], [0xBB; 32]),
+///     CertifiedBatchRef::new(2, [0xCC; 32], [0xDD; 32]),
+/// ];
+/// let commitment = compute_batch_commitment(&refs);
+/// ```
+pub fn compute_batch_commitment(refs: &[CertifiedBatchRef]) -> BatchCommitment {
+    use sha3::{Digest, Sha3_256};
+
+    if refs.is_empty() {
+        return NULL_BATCH_COMMITMENT;
+    }
+
+    // Concatenate all hashes
+    let mut concat = Vec::with_capacity(refs.len() * 32);
+    for cbr in refs {
+        concat.extend_from_slice(&cbr.hash());
+    }
+
+    // Hash the concatenation to produce the root
+    let mut hasher = Sha3_256::new();
+    hasher.update(&concat);
+    let result = hasher.finalize();
+    let mut commitment = [0u8; 32];
+    commitment.copy_from_slice(&result);
+    commitment
+}
+
+// ============================================================================
+// BlockHeader
+// ============================================================================
+
 /// BlockHeader (without embedded QC):
 /// msg_type:       u8   // 0x03
 /// version:        u8
@@ -354,6 +525,7 @@ pub const PAYLOAD_KIND_RECONFIG: u8 = 1;
 /// timestamp:      u64
 /// payload_kind:   u8   // 0 = Normal, 1 = Reconfig (T102.1)
 /// next_epoch:     u64  // only meaningful if payload_kind == Reconfig (T102.1)
+/// batch_commitment: Hash32 // Merkle root over CertifiedBatchRefs (T189)
 /// qc_len:         u32   // length in bytes of QC encoding that follows
 ///
 /// # Wire Format Change (T81)
@@ -372,6 +544,14 @@ pub const PAYLOAD_KIND_RECONFIG: u8 = 1;
 /// information. When `payload_kind == PAYLOAD_KIND_RECONFIG`, the `next_epoch`
 /// field indicates the epoch to transition to when this block commits.
 /// When `payload_kind == PAYLOAD_KIND_NORMAL`, `next_epoch` is ignored (set to 0).
+///
+/// # Wire Format Change (T189)
+///
+/// Added `batch_commitment` field to carry the Merkle root over CertifiedBatchRefs.
+/// When DAG coupling is enabled, this field commits to all certified batches
+/// included in the block. When coupling is disabled, this field is all zeros.
+/// The block_hash computation includes this field, ensuring votes bind to
+/// the batch commitment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BlockHeader {
     pub version: u8,
@@ -396,28 +576,38 @@ pub struct BlockHeader {
     /// Only meaningful when `payload_kind == PAYLOAD_KIND_RECONFIG`.
     /// Set to 0 for normal blocks.
     pub next_epoch: u64,
+    /// Batch commitment for DAG coupling (T189).
+    ///
+    /// Merkle root over the ordered list of `CertifiedBatchRef`s included
+    /// in this block. When DAG coupling is disabled or no batches are
+    /// included, this field is `NULL_BATCH_COMMITMENT` (all zeros).
+    ///
+    /// This field is included in the `block_hash` computation, ensuring
+    /// that votes over a block also commit to the batch certificates.
+    pub batch_commitment: BatchCommitment,
 }
 
 /// BlockProposal wire structure:
-/// msg_type:        u8    // 0x03
-/// version:         u8
-/// chain_id:        u32
-/// epoch:           u64   // epoch number (T101)
-/// height:          u64
-/// round:           u64
-/// parent_block_id: [u8;32]
-/// payload_hash:    [u8;32]
-/// proposer_index:  u16
-/// suite_id:        u16   // consensus signature suite identifier
-/// tx_count:        u32
-/// timestamp:       u64
-/// payload_kind:    u8    // 0 = Normal, 1 = Reconfig (T102.1)
-/// next_epoch:      u64   // epoch to transition to if reconfig (T102.1)
-/// qc_len:          u32   // length in bytes of QC encoding that follows
-/// qc_bytes:        [u8; qc_len]
-/// txs:             sequence of (u32 len, bytes[len])
-/// sig_len:         u16
-/// signature:       [u8; sig_len]
+/// msg_type:          u8    // 0x03
+/// version:           u8
+/// chain_id:          u32
+/// epoch:             u64   // epoch number (T101)
+/// height:            u64
+/// round:             u64
+/// parent_block_id:   [u8;32]
+/// payload_hash:      [u8;32]
+/// proposer_index:    u16
+/// suite_id:          u16   // consensus signature suite identifier
+/// tx_count:          u32
+/// timestamp:         u64
+/// payload_kind:      u8    // 0 = Normal, 1 = Reconfig (T102.1)
+/// next_epoch:        u64   // epoch to transition to if reconfig (T102.1)
+/// batch_commitment:  [u8;32]  // Merkle root over CertifiedBatchRefs (T189)
+/// qc_len:            u32   // length in bytes of QC encoding that follows
+/// qc_bytes:          [u8; qc_len]
+/// txs:               sequence of (u32 len, bytes[len])
+/// sig_len:           u16
+/// signature:         [u8; sig_len]
 ///
 /// # Wire Format Change (T81)
 ///
@@ -432,6 +622,11 @@ pub struct BlockHeader {
 ///
 /// Added `payload_kind` (u8) and `next_epoch` (u64) fields to carry reconfig
 /// information. This enables marking blocks as epoch-change blocks.
+///
+/// # Wire Format Change (T189)
+///
+/// Added `batch_commitment` field (32 bytes) to commit to certified batches
+/// for DAG–consensus coupling. This field is included before qc_len.
 ///
 /// **Backwards Compatibility**: This is a devnet-only wire format change.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -472,6 +667,8 @@ impl WireEncode for BlockProposal {
         // T102.1: Encode payload_kind and next_epoch
         put_u8(out, self.header.payload_kind);
         put_u64(out, self.header.next_epoch);
+        // T189: Encode batch_commitment
+        put_bytes(out, &self.header.batch_commitment);
         put_u32(out, qc_len);
 
         // Append QC bytes
@@ -518,6 +715,10 @@ impl WireDecode for BlockProposal {
         // T102.1: Decode payload_kind and next_epoch
         let payload_kind = get_u8(input)?;
         let next_epoch = get_u64(input)?;
+        // T189: Decode batch_commitment
+        let batch_commitment_bytes = get_bytes(input, 32)?;
+        let mut batch_commitment = [0u8; 32];
+        batch_commitment.copy_from_slice(batch_commitment_bytes);
         let qc_len = get_u32(input)? as usize;
 
         let qc = if qc_len > 0 {
@@ -554,6 +755,7 @@ impl WireDecode for BlockProposal {
                 timestamp,
                 payload_kind,
                 next_epoch,
+                batch_commitment,
             },
             qc,
             txs,
@@ -593,6 +795,7 @@ impl BlockProposal {
     /// timestamp:        u64
     /// payload_kind:     u8           (T102.1)
     /// next_epoch:       u64          (T102.1)
+    /// batch_commitment: [u8; 32]     (T189)
     /// qc_len:           u32
     /// qc_bytes:         [u8; qc_len]  (full WireEncode of QC if present)
     /// txs:              sequence of (u32 len, bytes[len])
@@ -616,6 +819,11 @@ impl BlockProposal {
     ///
     /// Domain tag is now chain-aware. Use `signing_preimage_with_chain_id()`
     /// with the appropriate `ChainId` for cross-chain isolation.
+    ///
+    /// # Wire Format Change (T189)
+    ///
+    /// Added `batch_commitment` to the preimage. This ensures that votes over
+    /// a block commit to the batch certificates included in the proposal.
     ///
     /// # Stability
     ///
@@ -654,6 +862,8 @@ impl BlockProposal {
         // T102.1: Include payload_kind and next_epoch in preimage
         put_u8(&mut out, self.header.payload_kind);
         put_u64(&mut out, self.header.next_epoch);
+        // T189: Include batch_commitment in preimage
+        put_bytes(&mut out, &self.header.batch_commitment);
 
         // QC (length-prefixed)
         put_u32(&mut out, qc_len);
@@ -694,6 +904,7 @@ impl BlockProposal {
     /// timestamp:        u64
     /// payload_kind:     u8           (T102.1)
     /// next_epoch:       u64          (T102.1)
+    /// batch_commitment: [u8; 32]     (T189)
     /// qc_len:           u32
     /// qc_bytes:         [u8; qc_len]  (full WireEncode of QC if present)
     /// txs:              sequence of (u32 len, bytes[len])

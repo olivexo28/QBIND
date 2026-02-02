@@ -273,6 +273,7 @@ fn make_block_proposal(
             timestamp: 1234567890,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc,
         txs: (0..tx_count).map(|i| vec![i as u8]).collect(),

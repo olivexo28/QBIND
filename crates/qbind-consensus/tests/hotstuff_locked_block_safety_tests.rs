@@ -61,6 +61,7 @@ fn make_proposal(view: u64, parent_block_id: [u8; 32], proposer_index: u16) -> B
             timestamp: 0,
             payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![],

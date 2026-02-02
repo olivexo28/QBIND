@@ -285,6 +285,7 @@ pub fn run_simple_tps_bench(config: BenchConfig) -> BenchResult {
                 timestamp: 1704067200 + block_height,
                 payload_kind: 0,
                 next_epoch: 0,
+                batch_commitment: [0u8; 32],
             },
             qc: None,
             txs: Vec::new(),
