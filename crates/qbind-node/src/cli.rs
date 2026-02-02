@@ -128,6 +128,18 @@ pub struct CliArgs {
     pub enable_dag_availability: Option<bool>,
 
     // ========================================================================
+    // T186: Stage B Parallel Execution
+    // ========================================================================
+    /// Enable Stage B parallel execution.
+    ///
+    /// When enabled, uses conflict-graph-based parallel execution for VM v0.
+    /// Produces identical results as sequential execution but with improved throughput.
+    ///
+    /// Default: false (DevNet/Alpha/Beta default). MainNet preset enables this.
+    #[arg(long = "enable-stage-b")]
+    pub enable_stage_b: Option<bool>,
+
+    // ========================================================================
     // Network Mode & P2P
     // ========================================================================
     /// Network mode: local-mesh or p2p.
@@ -362,6 +374,7 @@ impl CliArgs {
                 enable_fee_priority: false,
                 mempool_mode: MempoolMode::Fifo,
                 dag_availability_enabled: false,
+                stage_b_enabled: false,
             }
         };
 
@@ -400,6 +413,17 @@ impl CliArgs {
                 );
             }
             config.dag_availability_enabled = dag_avail;
+        }
+
+        // T186: Apply Stage B override
+        if let Some(stage_b) = self.enable_stage_b {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T186] CLI override: stage_b_enabled = {}",
+                    stage_b
+                );
+            }
+            config.stage_b_enabled = stage_b;
         }
 
         // Apply data_dir if specified
