@@ -429,7 +429,7 @@ This section summarizes key security areas and the "risk budget" for MainNet v0.
 
 ### 7.1 MainNet Profile
 
-A canonical MainNet profile should be available via the `--profile` CLI flag:
+A canonical MainNet profile is available via the `--profile` CLI flag:
 
 ```bash
 # Using the --profile flag (recommended)
@@ -438,6 +438,11 @@ qbind-node --profile mainnet --data-dir /data/qbind
 # Or with the short flag
 qbind-node -P mainnet -d /data/qbind
 ```
+
+> **Implementation Status (T185)**: The MainNet profile is implemented in code via
+> `ConfigProfile::MainNet` and `NodeConfig::mainnet_preset()`. The startup path
+> validates all MainNet invariants via `validate_mainnet_invariants()` and refuses
+> to start if any invariant is violated.
 
 ### 7.2 MainNet Configuration Parameters
 
@@ -552,6 +557,7 @@ qbind-node \
 | Beta configuration profile | ✅ Ready | T180 |
 | Fetch-on-miss v0 | ✅ Ready | T182, T183 |
 | Stage B parallel skeleton | ✅ Ready | T171 |
+| **MainNet configuration profile** | ✅ Ready | T185 |
 
 ### 9.2 Required but Pending (MainNet Blockers)
 
@@ -566,7 +572,6 @@ qbind-node \
 | **HSM production integration** | ⏳ Pending | Future task |
 | **Hybrid fee distribution** | ⏳ Pending | Future task |
 | **Stage B production wiring** | ⏳ Pending | Future task |
-| **MainNet configuration profile** | ⏳ Pending | Future task |
 | **External security audit** | ⏳ Pending | External |
 
 ### 9.3 Out of Scope for MainNet v0
