@@ -247,6 +247,15 @@ DAG availability certificates are **required** components for MainNet v0:
 
 **MainNet v0 requirement**: HotStuff proposals MUST only commit batches that have valid availability certificates.
 
+> **📋 Design Reference**: The complete DAG–HotStuff consensus coupling semantics are specified in [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) (T188). This includes:
+> - Full protocol flow (batch → cert → proposal → vote → commit)
+> - Invariants (I1–I5) for MainNet v0 coupling
+> - Block header structure with `batch_commitment`
+> - Safety and liveness analysis
+> - Phase-by-phase configuration (`dag_coupling_mode`)
+>
+> **Implementation Status**: Design complete (T188). Implementation pending in T189–T192.
+
 | Rule | Description | Enforcement |
 | :--- | :--- | :--- |
 | **Certificate Required** | Batches without certificates cannot be proposed | Block validation |
@@ -264,6 +273,8 @@ DAG availability certificates are **required** components for MainNet v0:
 6. Validators verify all proposed batches have valid certs
 7. On 3-chain commit → execute transactions from certified batches
 ```
+
+For detailed protocol steps, object definitions, and invariant specifications, see [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md §3](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md#3-protocol-flow-with-coupling).
 
 ### 4.4 DoS Protections and Fee-Aware Eviction
 
@@ -601,6 +612,7 @@ qbind-node \
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
+| **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture |
 | TestNet Beta Audit | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
