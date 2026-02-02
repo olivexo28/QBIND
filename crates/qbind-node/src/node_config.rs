@@ -1388,7 +1388,7 @@ impl NodeConfig {
             return Err(MainnetConfigError::MissingDataDir);
         }
 
-        // TODO(T185): Add stricter rules for validators vs non-validators
+        // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
 

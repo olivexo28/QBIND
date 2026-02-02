@@ -560,7 +560,14 @@ fn cli_short_flag_mainnet_works() {
     .unwrap();
 
     let config = args.to_node_config().unwrap();
+    
+    // Verify full MainNet preset
     assert_eq!(config.environment, NetworkEnvironment::Mainnet);
+    assert!(config.gas_enabled);
+    assert!(config.enable_fee_priority);
+    assert_eq!(config.mempool_mode, MempoolMode::Dag);
+    assert_eq!(config.network_mode, NetworkMode::P2p);
+    assert!(config.dag_availability_enabled);
 }
 
 /// Test: CLI --profile mainnet-v0 is accepted.
@@ -576,7 +583,12 @@ fn cli_profile_mainnet_v0_accepted() {
     .unwrap();
 
     let config = args.to_node_config().unwrap();
+    
+    // Verify full MainNet preset
     assert_eq!(config.environment, NetworkEnvironment::Mainnet);
+    assert!(config.gas_enabled);
+    assert!(config.enable_fee_priority);
+    assert_eq!(config.mempool_mode, MempoolMode::Dag);
 }
 
 /// Test: CLI profile error message includes "mainnet".
