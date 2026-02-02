@@ -170,6 +170,7 @@ fn test_proposal_job_preimage_matches_wire() {
             timestamp: 12345,
             payload_kind: 0,
             next_epoch: 0,
+            batch_commitment: [0u8; 32],
         },
         qc: None,
         txs: vec![],

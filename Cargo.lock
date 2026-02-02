@@ -2296,6 +2296,7 @@ name = "qbind-wire"
 version = "0.1.0"
 dependencies = [
  "qbind-types",
+ "sha3",
 ]
 
 [[package]]

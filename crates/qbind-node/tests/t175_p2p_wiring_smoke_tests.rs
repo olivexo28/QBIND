@@ -9,7 +9,8 @@
 //! multi-process communication - that is covered by the runbook.
 
 use qbind_node::node_config::{
-    ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+    DagCouplingMode, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig,
+    NodeConfig,
 };
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
@@ -37,6 +38,7 @@ fn make_test_p2p_config() -> NodeConfig {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     }
 }
@@ -52,6 +54,7 @@ fn make_test_local_mesh_config() -> NodeConfig {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
     }
 }
