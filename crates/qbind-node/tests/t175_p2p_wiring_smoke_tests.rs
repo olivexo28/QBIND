@@ -37,6 +37,7 @@ fn make_test_p2p_config() -> NodeConfig {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        stage_b_enabled: false,
     }
 }
 
@@ -51,6 +52,7 @@ fn make_test_local_mesh_config() -> NodeConfig {
         enable_fee_priority: false,
         mempool_mode: MempoolMode::Fifo,
         dag_availability_enabled: false,
+        stage_b_enabled: false,
     }
 }
 
