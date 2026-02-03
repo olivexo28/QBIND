@@ -449,7 +449,10 @@ impl CertifiedFrontier {
 
     /// Compute the CertifiedBatchRef list for the batch_commitment.
     pub fn to_certified_batch_refs(&self) -> Vec<qbind_wire::consensus::CertifiedBatchRef> {
-        self.entries.iter().map(|e| e.to_certified_batch_ref()).collect()
+        self.entries
+            .iter()
+            .map(|e| e.to_certified_batch_ref())
+            .collect()
     }
 
     /// Flatten the batches into a deduplicated transaction list.

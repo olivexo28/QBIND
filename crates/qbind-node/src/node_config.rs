@@ -1014,7 +1014,7 @@ impl NodeConfig {
             mempool_mode: MempoolMode::Dag,
             dag_availability_enabled: true,
             dag_coupling_mode: DagCouplingMode::Off, // T189: Off for Beta (optionally Warn)
-            stage_b_enabled: false, // T186: Disabled by default for Beta
+            stage_b_enabled: false,                  // T186: Disabled by default for Beta
         }
     }
 
@@ -1078,7 +1078,7 @@ impl NodeConfig {
             mempool_mode: MempoolMode::Dag,
             dag_availability_enabled: true,
             dag_coupling_mode: DagCouplingMode::Enforce, // T189: Required for MainNet
-            stage_b_enabled: true, // T186: Enabled by default for MainNet
+            stage_b_enabled: true,                       // T186: Enabled by default for MainNet
         }
     }
 
@@ -1675,9 +1675,7 @@ pub enum MainnetConfigError {
     ///
     /// MainNet requires DAG–consensus coupling to be enforced.
     /// Proposals with uncertified batches must be rejected.
-    DagCouplingNotEnforced {
-        actual: DagCouplingMode,
-    },
+    DagCouplingNotEnforced { actual: DagCouplingMode },
 
     /// Network mode is not P2P.
     ///
@@ -2742,16 +2740,15 @@ mod tests {
 
     #[test]
     fn test_dag_coupling_mode_builder_method() {
-        let config = NodeConfig::testnet_beta_preset()
-            .with_dag_coupling_mode(DagCouplingMode::Warn);
+        let config =
+            NodeConfig::testnet_beta_preset().with_dag_coupling_mode(DagCouplingMode::Warn);
         assert_eq!(
             config.dag_coupling_mode,
             DagCouplingMode::Warn,
             "with_dag_coupling_mode(Warn) should set mode to Warn"
         );
 
-        let config2 = NodeConfig::mainnet_preset()
-            .with_dag_coupling_mode(DagCouplingMode::Off);
+        let config2 = NodeConfig::mainnet_preset().with_dag_coupling_mode(DagCouplingMode::Off);
         assert_eq!(
             config2.dag_coupling_mode,
             DagCouplingMode::Off,
@@ -2775,8 +2772,8 @@ mod tests {
             "Startup info should show dag_coupling=off for TestNet Alpha"
         );
 
-        let config_warn = NodeConfig::testnet_beta_preset()
-            .with_dag_coupling_mode(DagCouplingMode::Warn);
+        let config_warn =
+            NodeConfig::testnet_beta_preset().with_dag_coupling_mode(DagCouplingMode::Warn);
         let info_warn = config_warn.startup_info_string(Some("V1"));
         assert!(
             info_warn.contains("dag_coupling=warn"),
@@ -2800,10 +2797,7 @@ mod tests {
             Err(MainnetConfigError::DagCouplingNotEnforced { actual }) => {
                 assert_eq!(actual, DagCouplingMode::Off);
             }
-            _ => panic!(
-                "Expected DagCouplingNotEnforced error, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected DagCouplingNotEnforced error, got: {:?}", result),
         }
     }
 
@@ -2823,10 +2817,7 @@ mod tests {
             Err(MainnetConfigError::DagCouplingNotEnforced { actual }) => {
                 assert_eq!(actual, DagCouplingMode::Warn);
             }
-            _ => panic!(
-                "Expected DagCouplingNotEnforced error, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected DagCouplingNotEnforced error, got: {:?}", result),
         }
     }
 

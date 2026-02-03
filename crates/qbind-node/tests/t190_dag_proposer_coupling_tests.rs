@@ -79,7 +79,9 @@ fn test_certified_frontier_empty_when_availability_disabled() {
 
     // Add a batch
     let txs = vec![make_test_tx(0x11, 0, 0xAA)];
-    mempool.insert_local_txs(txs).expect("insert should succeed");
+    mempool
+        .insert_local_txs(txs)
+        .expect("insert should succeed");
 
     // Select certified frontier - should be empty since availability is disabled
     let frontier = mempool.select_certified_frontier();
@@ -125,11 +127,20 @@ fn test_certified_frontier_includes_certified_batches() {
         .expect("insert should succeed");
 
     // Certify it with 2 acks (meets quorum)
-    certify_batch(&mempool, &batch, &[ValidatorId::new(2), ValidatorId::new(3)], 1);
+    certify_batch(
+        &mempool,
+        &batch,
+        &[ValidatorId::new(2), ValidatorId::new(3)],
+        1,
+    );
 
     // Select certified frontier - should include the batch
     let frontier = mempool.select_certified_frontier();
-    assert_eq!(frontier.len(), 1, "Frontier should have one certified batch");
+    assert_eq!(
+        frontier.len(),
+        1,
+        "Frontier should have one certified batch"
+    );
     assert_eq!(frontier.entries[0].batch.batch_id, batch.batch_id);
 }
 
@@ -146,11 +157,20 @@ fn test_certified_frontier_excludes_committed_batches() {
         .expect("insert should succeed");
 
     // Certify it
-    certify_batch(&mempool, &batch, &[ValidatorId::new(2), ValidatorId::new(3)], 1);
+    certify_batch(
+        &mempool,
+        &batch,
+        &[ValidatorId::new(2), ValidatorId::new(3)],
+        1,
+    );
 
     // Verify it's in the frontier
     let frontier = mempool.select_certified_frontier();
-    assert_eq!(frontier.len(), 1, "Frontier should have one batch before commit");
+    assert_eq!(
+        frontier.len(),
+        1,
+        "Frontier should have one batch before commit"
+    );
 
     // Mark the transaction as committed
     mempool.mark_committed(&[tx]);
@@ -177,7 +197,12 @@ fn test_certified_frontier_entry_to_batch_ref() {
     mempool
         .insert_remote_batch(batch.clone())
         .expect("insert should succeed");
-    certify_batch(&mempool, &batch, &[ValidatorId::new(2), ValidatorId::new(3)], 10);
+    certify_batch(
+        &mempool,
+        &batch,
+        &[ValidatorId::new(2), ValidatorId::new(3)],
+        10,
+    );
 
     // Get the frontier
     let frontier = mempool.select_certified_frontier();
@@ -211,8 +236,18 @@ fn test_different_certs_produce_different_digests() {
         .expect("insert should succeed");
 
     // Certify both with different signers
-    certify_batch(&mempool, &batch1, &[ValidatorId::new(2), ValidatorId::new(3)], 10);
-    certify_batch(&mempool, &batch2, &[ValidatorId::new(3), ValidatorId::new(4)], 10);
+    certify_batch(
+        &mempool,
+        &batch1,
+        &[ValidatorId::new(2), ValidatorId::new(3)],
+        10,
+    );
+    certify_batch(
+        &mempool,
+        &batch2,
+        &[ValidatorId::new(3), ValidatorId::new(4)],
+        10,
+    );
 
     // Get the frontier
     let frontier = mempool.select_certified_frontier();
@@ -331,7 +366,12 @@ fn test_flatten_txs_returns_batch_transactions() {
     let batch = make_test_batch(ValidatorId::new(5), 1, vec![tx1, tx2]);
 
     mempool.insert_remote_batch(batch.clone()).unwrap();
-    certify_batch(&mempool, &batch, &[ValidatorId::new(10), ValidatorId::new(11)], 1);
+    certify_batch(
+        &mempool,
+        &batch,
+        &[ValidatorId::new(10), ValidatorId::new(11)],
+        1,
+    );
 
     let frontier = mempool.select_certified_frontier();
     let txs = frontier.flatten_txs(100);
@@ -351,7 +391,12 @@ fn test_flatten_txs_respects_limit() {
     let batch = make_test_batch(ValidatorId::new(5), 1, txs);
 
     mempool.insert_remote_batch(batch.clone()).unwrap();
-    certify_batch(&mempool, &batch, &[ValidatorId::new(10), ValidatorId::new(11)], 1);
+    certify_batch(
+        &mempool,
+        &batch,
+        &[ValidatorId::new(10), ValidatorId::new(11)],
+        1,
+    );
 
     let frontier = mempool.select_certified_frontier();
 
@@ -471,7 +516,12 @@ fn test_frontier_to_batch_commitment() {
     // Add and certify a batch
     let batch = make_test_batch(ValidatorId::new(5), 1, vec![make_test_tx(0x55, 0, 0xBB)]);
     mempool.insert_remote_batch(batch.clone()).unwrap();
-    certify_batch(&mempool, &batch, &[ValidatorId::new(10), ValidatorId::new(11)], 1);
+    certify_batch(
+        &mempool,
+        &batch,
+        &[ValidatorId::new(10), ValidatorId::new(11)],
+        1,
+    );
 
     // Get frontier and compute commitment
     let frontier = mempool.select_certified_frontier();
