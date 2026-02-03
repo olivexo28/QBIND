@@ -141,7 +141,8 @@ pub use consensus_node::{
 };
 pub use consensus_sim::{NodeConsensusSim, NodeConsensusSimError};
 pub use hotstuff_node_sim::{
-    DagCouplingValidationResult, NodeHotstuffHarness, NodeHotstuffHarnessError, ProposerSource,
+    DagCouplingBlockCheckResult, DagCouplingValidationResult, NodeHotstuffHarness,
+    NodeHotstuffHarnessError, ProposerSource,
 };
 pub use identity_map::PeerValidatorMap;
 pub use ledger_bridge::{InMemoryNodeLedgerHarness, NodeLedgerError, NodeLedgerHarness};

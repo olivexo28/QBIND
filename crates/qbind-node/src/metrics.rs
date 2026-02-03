@@ -4401,15 +4401,21 @@ impl P2pMetrics {
 // DagCouplingMetrics - DAG coupling validation metrics (T191)
 // ============================================================================
 
-/// Metrics for DAG coupling validation on the validator side (T191).
+/// Metrics for DAG coupling validation on the validator side (T191, T192).
 ///
 /// Tracks validation outcomes by mode and result type, as well as rejections
-/// when in Enforce mode.
+/// when in Enforce mode. Also tracks block-level invariant checks (T192).
 ///
 /// # Prometheus-style naming
 ///
+/// ## Proposal Validation (T191)
 /// - `qbind_dag_coupling_validation_total{mode="...", result="..."}` → `validation_total(mode, result)`
 /// - `qbind_dag_coupling_rejected_total{reason="..."}` → `rejected_total(reason)`
+///
+/// ## Block-Level Invariant Checks (T192)
+/// - `qbind_dag_coupling_block_check_total{mode="...", result="..."}` → `block_check_total(result)`
+/// - `qbind_dag_coupling_block_mismatch_total` → `block_mismatch_total()`
+/// - `qbind_dag_coupling_block_missing_total` → `block_missing_total()`
 #[derive(Debug, Default)]
 pub struct DagCouplingMetrics {
     // Validation totals by result (all modes)
@@ -4425,6 +4431,13 @@ pub struct DagCouplingMetrics {
     rejected_uncoupled_mismatch: AtomicU64,
     rejected_unknown_batches: AtomicU64,
     rejected_internal_error: AtomicU64,
+
+    // T192: Block-level invariant check totals
+    block_check_not_checked: AtomicU64,
+    block_check_ok: AtomicU64,
+    block_check_missing: AtomicU64,
+    block_check_mismatch: AtomicU64,
+    block_check_internal_error: AtomicU64,
 }
 
 impl DagCouplingMetrics {
@@ -4455,6 +4468,28 @@ impl DagCouplingMetrics {
             "internal_error" => self.rejected_internal_error.load(Ordering::Relaxed),
             _ => 0,
         }
+    }
+
+    /// Get block-level invariant check count for a specific result (T192).
+    pub fn block_check_total(&self, result: &str) -> u64 {
+        match result {
+            "not_checked" => self.block_check_not_checked.load(Ordering::Relaxed),
+            "ok" => self.block_check_ok.load(Ordering::Relaxed),
+            "missing" => self.block_check_missing.load(Ordering::Relaxed),
+            "mismatch" => self.block_check_mismatch.load(Ordering::Relaxed),
+            "internal_error" => self.block_check_internal_error.load(Ordering::Relaxed),
+            _ => 0,
+        }
+    }
+
+    /// Get total count of block-level mismatch violations (T192).
+    pub fn block_mismatch_total(&self) -> u64 {
+        self.block_check_mismatch.load(Ordering::Relaxed)
+    }
+
+    /// Get total count of block-level missing commitment violations (T192).
+    pub fn block_missing_total(&self) -> u64 {
+        self.block_check_missing.load(Ordering::Relaxed)
     }
 
     /// Record a validation result.
@@ -4508,6 +4543,29 @@ impl DagCouplingMetrics {
         }
     }
 
+    /// Record a block-level invariant check result (T192).
+    pub fn record_block_check(&self, result: &str) {
+        match result {
+            "not_checked" => {
+                self.block_check_not_checked.fetch_add(1, Ordering::Relaxed);
+            }
+            "ok" => {
+                self.block_check_ok.fetch_add(1, Ordering::Relaxed);
+            }
+            "missing" => {
+                self.block_check_missing.fetch_add(1, Ordering::Relaxed);
+            }
+            "mismatch" => {
+                self.block_check_mismatch.fetch_add(1, Ordering::Relaxed);
+            }
+            "internal_error" => {
+                self.block_check_internal_error
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+
     /// Format metrics for Prometheus export.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -4555,6 +4613,39 @@ impl DagCouplingMetrics {
         output.push_str(&format!(
             "qbind_dag_coupling_rejected_total{{reason=\"internal_error\"}} {}\n",
             self.rejected_internal_error.load(Ordering::Relaxed)
+        ));
+
+        // T192: Block-level invariant check totals
+        output.push_str("\n# T192: Block-level DAG coupling invariant check metrics\n");
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_check_total{{result=\"not_checked\"}} {}\n",
+            self.block_check_not_checked.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_check_total{{result=\"ok\"}} {}\n",
+            self.block_check_ok.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_check_total{{result=\"missing\"}} {}\n",
+            self.block_check_missing.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_check_total{{result=\"mismatch\"}} {}\n",
+            self.block_check_mismatch.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_check_total{{result=\"internal_error\"}} {}\n",
+            self.block_check_internal_error.load(Ordering::Relaxed)
+        ));
+
+        // T192: Convenience counters for violations
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_mismatch_total {}\n",
+            self.block_check_mismatch.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_block_missing_total {}\n",
+            self.block_check_missing.load(Ordering::Relaxed)
         ));
 
         output
@@ -4789,6 +4880,34 @@ impl NodeMetrics {
                 }
             }
         }
+    }
+
+    /// Record a DAG coupling block-level invariant check result (T192).
+    ///
+    /// This method records the outcome of the post-commit block-level invariant
+    /// check that verifies committed blocks have valid batch_commitment fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The check result from `check_dag_coupling_invariant_for_committed_block()`
+    /// * `mode` - The current DAG coupling mode
+    pub fn record_dag_coupling_block_check(
+        &self,
+        result: &crate::hotstuff_node_sim::DagCouplingBlockCheckResult,
+        #[allow(unused_variables)] mode: &crate::node_config::DagCouplingMode,
+    ) {
+        use crate::hotstuff_node_sim::DagCouplingBlockCheckResult;
+
+        // Record block check result
+        let result_str = match result {
+            DagCouplingBlockCheckResult::NotChecked => "not_checked",
+            DagCouplingBlockCheckResult::Ok => "ok",
+            DagCouplingBlockCheckResult::MissingCommitment => "missing",
+            DagCouplingBlockCheckResult::Mismatch => "mismatch",
+            DagCouplingBlockCheckResult::InternalError(_) => "internal_error",
+        };
+        self.dag_coupling.record_block_check(result_str);
+        // Note: `mode` is reserved for future use (e.g., mode-specific metrics labels)
     }
 
     /// Set the network environment for metrics export (T162).
