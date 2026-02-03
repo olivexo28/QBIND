@@ -4894,7 +4894,7 @@ impl NodeMetrics {
     pub fn record_dag_coupling_block_check(
         &self,
         result: &crate::hotstuff_node_sim::DagCouplingBlockCheckResult,
-        mode: &crate::node_config::DagCouplingMode,
+        #[allow(unused_variables)] mode: &crate::node_config::DagCouplingMode,
     ) {
         use crate::hotstuff_node_sim::DagCouplingBlockCheckResult;
 
@@ -4907,9 +4907,7 @@ impl NodeMetrics {
             DagCouplingBlockCheckResult::InternalError(_) => "internal_error",
         };
         self.dag_coupling.record_block_check(result_str);
-
-        // Avoid unused variable warning
-        let _ = mode;
+        // Note: `mode` is reserved for future use (e.g., mode-specific metrics labels)
     }
 
     /// Set the network environment for metrics export (T162).

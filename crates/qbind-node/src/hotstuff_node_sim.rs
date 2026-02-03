@@ -1576,6 +1576,23 @@ impl NodeHotstuffHarness {
     ///
     /// If any condition is false, returns `NotChecked`.
     ///
+    /// # Post-Commit Frontier Limitation
+    ///
+    /// **Important**: This check runs *after* `mark_committed()` is called on the
+    /// DAG mempool, which prunes committed batches from the certified frontier.
+    /// As a result:
+    ///
+    /// - If the committed block's batches were the entire frontier, the local
+    ///   frontier will be empty post-commit.
+    /// - In this case, we cannot verify the commitment by recomputation.
+    /// - We return `Ok` if the frontier is empty but the commitment is non-NULL,
+    ///   since the commitment was present (the pre-vote validation in T191 would
+    ///   have verified it).
+    ///
+    /// A more robust check would require tracking the pre-commit frontier or
+    /// having the header carry the actual batch refs. This is noted for future
+    /// enhancement.
+    ///
     /// # Arguments
     ///
     /// * `header` - The block header of the committed block to check.
@@ -1678,16 +1695,19 @@ impl NodeHotstuffHarness {
     ///
     /// Called after `check_dag_coupling_invariant_for_committed_block()` to
     /// update Prometheus-style counters.
+    ///
+    /// # Note
+    ///
+    /// The `header` parameter is currently unused but kept for future extensibility
+    /// (e.g., logging block height/view in metrics labels).
     fn record_dag_coupling_block_metrics(
         &self,
         result: &DagCouplingBlockCheckResult,
-        header: &qbind_wire::consensus::BlockHeader,
+        #[allow(unused_variables)] header: &qbind_wire::consensus::BlockHeader,
     ) {
         if let Some(ref metrics) = self.metrics {
             metrics.record_dag_coupling_block_check(result, &self.dag_coupling_mode);
         }
-        // Avoid unused variable warning
-        let _ = header;
     }
 
     /// Log a DAG coupling block invariant violation (T192).
