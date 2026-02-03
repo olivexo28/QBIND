@@ -940,7 +940,39 @@ This section outlines concrete steps for follow-up implementation tasks. No Rust
 - Integration test: validator fetches missing batch before voting
 - Integration test: validator rejects if fetch times out
 
-### 7.4 T192: Extend Cluster Harness Tests for Consensus-Coupled DAG
+### 7.4 T192: Block-Level Invariant Probes & Safety Checks
+
+**Scope**: Post-commit observational checks and metrics for DAG coupling invariants.
+
+T192 *hardens* the coupling path by adding:
+1. Block-level invariant checks to detect violations in committed blocks
+2. Metrics and logging for operator visibility
+3. End-to-end tests asserting the "only commit certified batches" regime
+
+**Changes**:
+- Add `DagCouplingBlockCheckResult` enum:
+  - `NotChecked`: Coupling not required under current config
+  - `Ok`: Header.commitment matches local certified frontier
+  - `MissingCommitment`: Required but commitment missing or NULL
+  - `Mismatch`: Commitment present but does not match local recomputation
+  - `InternalError`: Unexpected failure during check
+- Add `check_dag_coupling_invariant_for_committed_block()` method:
+  - Gate: Only runs when `mempool_mode == Dag`, `dag_availability_enabled == true`, and `dag_coupling_mode == Enforce`
+  - Called post-commit, after execution adapter applies block
+  - Purely observational (no consensus rule changes)
+- Extend `DagCouplingMetrics` with block-level counters:
+  - `qbind_dag_coupling_block_check_total{mode, result}`
+  - `qbind_dag_coupling_block_mismatch_total`
+  - `qbind_dag_coupling_block_missing_total`
+- Add logging for violations (WARN/ERROR level)
+
+**Test Impact**:
+- Unit tests for `DagCouplingBlockCheckResult` enum
+- Unit tests for metrics counters
+- Integration tests for happy path, missing commitment, and mismatch scenarios
+- Tests for Off/Warn mode (should return `NotChecked`)
+
+### 7.5 T192: Cluster Harness Tests for Consensus-Coupled DAG
 
 **Scope**: End-to-end tests validating full DAG–consensus coupling.
 

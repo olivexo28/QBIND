@@ -276,6 +276,13 @@ DAG availability certificates are **required** components for MainNet v0:
 
 For detailed protocol steps, object definitions, and invariant specifications, see [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md §3](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md#3-protocol-flow-with-coupling).
 
+**Operator Monitoring (T192)**: MainNet v0 nodes expose metrics and logging for DAG-coupling invariant violations. Operators are expected to monitor:
+- `qbind_dag_coupling_validation_total{result="..."}` - proposal validation outcomes
+- `qbind_dag_coupling_block_check_total{result="..."}` - post-commit block checks
+- `qbind_dag_coupling_block_mismatch_total` / `qbind_dag_coupling_block_missing_total` - violation counters
+
+Any non-zero violation counters should be investigated. See [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md §7.4](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md#74-t192-block-level-invariant-probes--safety-checks) for details.
+
 ### 4.4 DoS Protections and Fee-Aware Eviction
 
 MainNet v0 requires stronger DoS protections in the DAG mempool:
