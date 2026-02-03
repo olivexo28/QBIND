@@ -1403,28 +1403,30 @@ impl NodeHotstuffHarness {
     /// Log a DAG coupling warning for Warn mode (T191).
     ///
     /// Called when dag_coupling_mode is Warn and validation failed.
-    fn log_dag_coupling_warning(&self, proposal: &BlockProposal, result: &DagCouplingValidationResult) {
+    fn log_dag_coupling_warning(
+        &self,
+        proposal: &BlockProposal,
+        result: &DagCouplingValidationResult,
+    ) {
         eprintln!(
             "[T191] DAG coupling warning: proposal view={} height={} from proposer_index={} \
              has coupling issue: {} (dag_coupling_mode=warn, proceeding to vote)",
-            proposal.header.round,
-            proposal.header.height,
-            proposal.header.proposer_index,
-            result
+            proposal.header.round, proposal.header.height, proposal.header.proposer_index, result
         );
     }
 
     /// Log a DAG coupling rejection for Enforce mode (T191).
     ///
     /// Called when dag_coupling_mode is Enforce and validation failed.
-    fn log_dag_coupling_rejection(&self, proposal: &BlockProposal, result: &DagCouplingValidationResult) {
+    fn log_dag_coupling_rejection(
+        &self,
+        proposal: &BlockProposal,
+        result: &DagCouplingValidationResult,
+    ) {
         eprintln!(
             "[T191] DAG coupling REJECTED: proposal view={} height={} from proposer_index={} \
              rejected due to: {} (dag_coupling_mode=enforce, NOT voting)",
-            proposal.header.round,
-            proposal.header.height,
-            proposal.header.proposer_index,
-            result
+            proposal.header.round, proposal.header.height, proposal.header.proposer_index, result
         );
     }
 
@@ -1452,8 +1454,7 @@ impl NodeHotstuffHarness {
             crate::node_config::DagCouplingMode::Warn => {
                 // Log warning if validation failed, but always proceed
                 match result {
-                    DagCouplingValidationResult::Ok
-                    | DagCouplingValidationResult::NotRequired => {}
+                    DagCouplingValidationResult::Ok | DagCouplingValidationResult::NotRequired => {}
                     _ => {
                         self.log_dag_coupling_warning(proposal, &result);
                     }
@@ -1463,8 +1464,9 @@ impl NodeHotstuffHarness {
             crate::node_config::DagCouplingMode::Enforce => {
                 // Reject if validation failed
                 match result {
-                    DagCouplingValidationResult::Ok
-                    | DagCouplingValidationResult::NotRequired => true,
+                    DagCouplingValidationResult::Ok | DagCouplingValidationResult::NotRequired => {
+                        true
+                    }
                     DagCouplingValidationResult::UncoupledMissing
                     | DagCouplingValidationResult::UncoupledMismatch
                     | DagCouplingValidationResult::UnknownBatches
