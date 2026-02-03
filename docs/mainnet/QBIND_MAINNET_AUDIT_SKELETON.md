@@ -83,7 +83,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Fork on consensus coupling** | DAG consensus coupling is new; may introduce consensus bugs | Critical | Design Ready (T188), Implementation Pending |
+| **Fork on consensus coupling** | DAG consensus coupling is new; may introduce consensus bugs | Critical | Partially Mitigated (T188-T192) |
 | **Availability certificate bugs** | Invalid/forged certs could cause consensus divergence | High | Partially Mitigated |
 | **HotStuff safety violations** | Bugs in 3-chain commit rule could cause safety failures | Critical | Mitigated (DevNet) |
 | **View-change liveness** | Leader failure could stall consensus | Medium | Mitigated (DevNet) |
@@ -94,14 +94,17 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ Domain-separated signing preimages (T159)
 - ✅ DAG availability certificates v1 (T165)
 - ✅ **DAG–HotStuff coupling design complete (T188)** — see [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md)
-- ⏳ Consensus coupling implementation pending (T189–T192)
+- ✅ **Proposer-side DAG coupling (T190)** — certified frontier selection
+- ✅ **Validator-side DAG coupling enforcement (T191)** — pre-vote validation
+- ✅ **Block-level invariant probes (T192)** — post-commit observational checks
 
 **Additional MainNet Requirements**:
 - [x] **Consensus coupling design** — T188 complete
-- [ ] Consensus coupling implementation (T189: config + block format)
-- [ ] Proposer-side enforcement (T190)
-- [ ] Validator-side enforcement (T191)
-- [ ] Cluster harness tests for coupling (T192)
+- [x] Consensus coupling implementation (T189: config + block format)
+- [x] Proposer-side enforcement (T190)
+- [x] Validator-side enforcement (T191)
+- [x] Block-level invariant probes (T192) — metrics/logging for operator visibility
+- [ ] Cluster harness tests for coupling (T192 — partial, more tests needed)
 - [ ] Formal verification of consensus rules (optional but recommended)
 - [ ] Chaos testing for view-change scenarios
 - [ ] External security audit of consensus path
@@ -290,38 +293,39 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | :--- | :--- | :--- | :--- |
 | 14 | DAG mempool is only mode for MainNet validators | ⏳ Pending | Future task |
 | 15 | DAG–HotStuff consensus coupling design complete | ✅ Ready | T188 [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) |
-| 16 | DAG availability certificates enforced by consensus | ⏳ Pending | T191 (design ready T188) |
-| 17 | Proposals only commit certified batches | ⏳ Pending | T190 (design ready T188) |
+| 16 | DAG availability certificates enforced by consensus | ✅ Ready | T191 validator-side enforcement |
+| 17 | Proposals only commit certified batches | ✅ Ready | T190 proposer-side enforcement |
 | 18 | Fetch-on-miss recovers missing batches | ✅ Ready | T182, T183 tests |
 | 19 | Fee-aware eviction implemented | ✅ Ready | T169 |
+| 20 | Block-level coupling invariant probes | ✅ Ready | T192 `check_dag_coupling_invariant_for_committed_block()` |
 
 ### 4.5 Networking / P2P
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 20 | P2P transport is only mode for MainNet validators | ⏳ Pending | Future task |
-| 21 | Dynamic peer discovery protocol implemented | ⏳ Pending | Future task |
-| 22 | Peer liveness scoring removes unresponsive peers | ⏳ Pending | Future task |
-| 23 | Anti-eclipse: no single peer can trivially eclipse 1/3+ validators | ⏳ Pending | Future task |
-| 24 | P2P topology tests demonstrate peer diversity | ⏳ Pending | Future task |
+| 21 | P2P transport is only mode for MainNet validators | ⏳ Pending | Future task |
+| 22 | Dynamic peer discovery protocol implemented | ⏳ Pending | Future task |
+| 23 | Peer liveness scoring removes unresponsive peers | ⏳ Pending | Future task |
+| 24 | Anti-eclipse: no single peer can trivially eclipse 1/3+ validators | ⏳ Pending | Future task |
+| 25 | P2P topology tests demonstrate peer diversity | ⏳ Pending | Future task |
 
 ### 4.6 Keys & HSM
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 25 | HSM production integration available | ⏳ Pending | Future task |
-| 26 | Loopback signer rejected for MainNet profile | ⏳ Pending | Future task |
-| 27 | Key rotation procedures documented | ⏳ Pending | Future task |
+| 26 | HSM production integration available | ⏳ Pending | Future task |
+| 27 | Loopback signer rejected for MainNet profile | ⏳ Pending | Future task |
+| 28 | Key rotation procedures documented | ⏳ Pending | Future task |
 
 ### 4.7 Operations & Security
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 28 | MainNet configuration profile implemented | ✅ Ready | T185 |
-| 29 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
-| 30 | MainNet operational runbook complete | ⏳ Pending | Future task |
-| 31 | External security audit completed | ⏳ Pending | External |
-| 32 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
+| 29 | MainNet configuration profile implemented | ✅ Ready | T185 |
+| 30 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
+| 31 | MainNet operational runbook complete | ⏳ Pending | Future task |
+| 32 | External security audit completed | ⏳ Pending | External |
+| 33 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
 
 ### 4.8 Readiness Summary
 
@@ -330,11 +334,11 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | Execution & VM | 6 | 0 | 6 |
 | State Persistence | 1 | 2 | 3 |
 | Gas/Fees | 2 | 2 | 4 |
-| Mempool & DAG | 3 | 3 | 6 |
+| Mempool & DAG | 6 | 1 | 7 |
 | Networking / P2P | 0 | 5 | 5 |
 | Keys & HSM | 0 | 3 | 3 |
 | Operations | 2 | 3 | 5 |
-| **Total** | **14** | **18** | **32** |
+| **Total** | **17** | **16** | **33** |
 
 ---
 
@@ -390,15 +394,15 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T184 | Spec | **MainNet v0 spec + audit** | All |
 | T185 | Config | **MainNet configuration profile + safety rails** | MN-R6, MN-R7 |
 | **T188** | **Design** | **DAG–HotStuff consensus coupling design** | **MN-R1** |
+| **T189** | **Config** | **Wire `dag_coupling_mode` config + block format** | **MN-R1** |
+| **T190** | **Consensus** | **Proposer-side enforcement (certified frontier)** | **MN-R1** |
+| **T191** | **Consensus** | **Validator-side enforcement (verify certs before vote)** | **MN-R1** |
+| **T192** | **Observability** | **Block-level invariant probes & metrics** | **MN-R1** |
 
-### 5.4 Future MainNet Tasks (T189+)
+### 5.4 Future MainNet Tasks (T193+)
 
 | Task (Planned) | Area | Summary | MainNet Risk Category |
 | :--- | :--- | :--- | :--- |
-| **T189** | Config | Wire `dag_coupling_mode` config + block format | MN-R1 |
-| **T190** | Consensus | Proposer-side enforcement (only certified batches) | MN-R1 |
-| **T191** | Consensus | Validator-side enforcement (verify certs before vote) | MN-R1 |
-| **T192** | Testing | Cluster harness tests for consensus-coupled DAG | MN-R1 |
 | T19x | P2P | Dynamic peer discovery | MN-R4 |
 | T19x | P2P | Peer liveness scoring | MN-R4 |
 | T19x | P2P | Anti-eclipse enforcement | MN-R4 |
@@ -412,7 +416,13 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 > **Note**: Stage B production wiring completed in T186 + T187 (strikethrough above).
 >
-> **Note**: DAG–HotStuff consensus coupling design completed in T188. Implementation tasks are T189–T192. See [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) for the design specification.
+> **Note**: DAG–HotStuff consensus coupling design completed in T188. Implementation tasks T189–T192 complete:
+> - T189: `DagCouplingMode` enum, `batch_commitment` in `BlockHeader`
+> - T190: Proposer builds proposals from certified frontier
+> - T191: Validators validate DAG coupling before voting
+> - T192: Block-level invariant probes, metrics, and unit tests
+>
+> See [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) for the design specification.
 
 ---
 
