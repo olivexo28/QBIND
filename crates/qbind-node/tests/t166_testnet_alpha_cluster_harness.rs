@@ -385,7 +385,8 @@ impl TestnetAlphaClusterConfig {
             num_validators: 4,
             use_dag_mempool: false,
             enable_dag_availability: false,
-            dag_coupling_mode: qbind_node::DagCouplingMode::Off, // T191: Off by default
+            // T191: Off by default for DevNet/TestNet Alpha compatibility
+            dag_coupling_mode: qbind_node::DagCouplingMode::Off,
             initial_balance: 1_000_000,
             txs_per_sender: 5,
             num_senders: 4,

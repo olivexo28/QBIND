@@ -20,20 +20,24 @@ use qbind_wire::consensus::{
 // Test Helpers
 // ============================================================================
 
+/// Create a test account ID with the given byte in the first position.
 fn test_account_id(byte: u8) -> [u8; 32] {
     let mut id = [0u8; 32];
     id[0] = byte;
     id
 }
 
+/// Create a test transaction with a 32-byte payload filled with the specified byte.
 fn make_test_tx(sender_byte: u8, nonce: u64, payload_byte: u8) -> QbindTransaction {
     QbindTransaction::new(test_account_id(sender_byte), nonce, vec![payload_byte; 32])
 }
 
+/// Create a test batch with no parent dependencies.
 fn make_test_batch(creator: ValidatorId, view_hint: u64, txs: Vec<QbindTransaction>) -> QbindBatch {
     QbindBatch::new(creator, view_hint, vec![], txs)
 }
 
+/// Create an unsigned test acknowledgment with suite_id=100 (ML-DSA-44).
 fn make_test_ack(batch_ref: BatchRef, validator_id: ValidatorId, view_hint: u64) -> BatchAck {
     BatchAck::new_unsigned(batch_ref, validator_id, view_hint, 100)
 }
