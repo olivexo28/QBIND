@@ -4397,6 +4397,170 @@ impl P2pMetrics {
     }
 }
 
+// ============================================================================
+// DagCouplingMetrics - DAG coupling validation metrics (T191)
+// ============================================================================
+
+/// Metrics for DAG coupling validation on the validator side (T191).
+///
+/// Tracks validation outcomes by mode and result type, as well as rejections
+/// when in Enforce mode.
+///
+/// # Prometheus-style naming
+///
+/// - `qbind_dag_coupling_validation_total{mode="...", result="..."}` → `validation_total(mode, result)`
+/// - `qbind_dag_coupling_rejected_total{reason="..."}` → `rejected_total(reason)`
+#[derive(Debug, Default)]
+pub struct DagCouplingMetrics {
+    // Validation totals by result (all modes)
+    validation_ok: AtomicU64,
+    validation_not_required: AtomicU64,
+    validation_uncoupled_missing: AtomicU64,
+    validation_uncoupled_mismatch: AtomicU64,
+    validation_unknown_batches: AtomicU64,
+    validation_internal_error: AtomicU64,
+
+    // Rejection totals by reason (Enforce mode only)
+    rejected_uncoupled_missing: AtomicU64,
+    rejected_uncoupled_mismatch: AtomicU64,
+    rejected_unknown_batches: AtomicU64,
+    rejected_internal_error: AtomicU64,
+}
+
+impl DagCouplingMetrics {
+    /// Create a new DagCouplingMetrics instance.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get validation count for a specific result.
+    pub fn validation_total(&self, result: &str) -> u64 {
+        match result {
+            "ok" => self.validation_ok.load(Ordering::Relaxed),
+            "not_required" => self.validation_not_required.load(Ordering::Relaxed),
+            "uncoupled_missing" => self.validation_uncoupled_missing.load(Ordering::Relaxed),
+            "uncoupled_mismatch" => self.validation_uncoupled_mismatch.load(Ordering::Relaxed),
+            "unknown_batches" => self.validation_unknown_batches.load(Ordering::Relaxed),
+            "internal_error" => self.validation_internal_error.load(Ordering::Relaxed),
+            _ => 0,
+        }
+    }
+
+    /// Get rejection count for a specific reason.
+    pub fn rejected_total(&self, reason: &str) -> u64 {
+        match reason {
+            "uncoupled_missing" => self.rejected_uncoupled_missing.load(Ordering::Relaxed),
+            "uncoupled_mismatch" => self.rejected_uncoupled_mismatch.load(Ordering::Relaxed),
+            "unknown_batches" => self.rejected_unknown_batches.load(Ordering::Relaxed),
+            "internal_error" => self.rejected_internal_error.load(Ordering::Relaxed),
+            _ => 0,
+        }
+    }
+
+    /// Record a validation result.
+    pub fn record_validation(&self, result: &str) {
+        match result {
+            "ok" => {
+                self.validation_ok.fetch_add(1, Ordering::Relaxed);
+            }
+            "not_required" => {
+                self.validation_not_required.fetch_add(1, Ordering::Relaxed);
+            }
+            "uncoupled_missing" => {
+                self.validation_uncoupled_missing
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "uncoupled_mismatch" => {
+                self.validation_uncoupled_mismatch
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "unknown_batches" => {
+                self.validation_unknown_batches
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "internal_error" => {
+                self.validation_internal_error
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+
+    /// Record a rejection (Enforce mode only).
+    pub fn record_rejection(&self, reason: &str) {
+        match reason {
+            "uncoupled_missing" => {
+                self.rejected_uncoupled_missing
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "uncoupled_mismatch" => {
+                self.rejected_uncoupled_mismatch
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "unknown_batches" => {
+                self.rejected_unknown_batches
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            "internal_error" => {
+                self.rejected_internal_error.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+    }
+
+    /// Format metrics for Prometheus export.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("# DAG coupling validation metrics (T191)\n");
+
+        // Validation totals
+        output.push_str(&format!(
+            "qbind_dag_coupling_validation_total{{result=\"ok\"}} {}\n",
+            self.validation_ok.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_validation_total{{result=\"not_required\"}} {}\n",
+            self.validation_not_required.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_validation_total{{result=\"uncoupled_missing\"}} {}\n",
+            self.validation_uncoupled_missing.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_validation_total{{result=\"uncoupled_mismatch\"}} {}\n",
+            self.validation_uncoupled_mismatch.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_validation_total{{result=\"unknown_batches\"}} {}\n",
+            self.validation_unknown_batches.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_validation_total{{result=\"internal_error\"}} {}\n",
+            self.validation_internal_error.load(Ordering::Relaxed)
+        ));
+
+        // Rejection totals
+        output.push_str(&format!(
+            "qbind_dag_coupling_rejected_total{{reason=\"uncoupled_missing\"}} {}\n",
+            self.rejected_uncoupled_missing.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_rejected_total{{reason=\"uncoupled_mismatch\"}} {}\n",
+            self.rejected_uncoupled_mismatch.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_rejected_total{{reason=\"unknown_batches\"}} {}\n",
+            self.rejected_unknown_batches.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_dag_coupling_rejected_total{{reason=\"internal_error\"}} {}\n",
+            self.rejected_internal_error.load(Ordering::Relaxed)
+        ));
+
+        output
+    }
+}
+
 #[derive(Debug)]
 pub struct NodeMetrics {
     network: NetworkMetrics,
@@ -4438,6 +4602,8 @@ pub struct NodeMetrics {
     environment: std::sync::RwLock<Option<EnvironmentMetrics>>,
     /// P2P transport metrics (T172).
     p2p: P2pMetrics,
+    /// DAG coupling validation metrics (T191).
+    dag_coupling: DagCouplingMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -4471,6 +4637,7 @@ impl NodeMetrics {
             signer_keystore: SignerKeystoreMetrics::new(),
             environment: std::sync::RwLock::new(None),
             p2p: P2pMetrics::new(),
+            dag_coupling: DagCouplingMetrics::new(),
         }
     }
 
@@ -4567,6 +4734,61 @@ impl NodeMetrics {
     /// Get P2P transport metrics (T172).
     pub fn p2p(&self) -> &P2pMetrics {
         &self.p2p
+    }
+
+    /// Get DAG coupling validation metrics (T191).
+    pub fn dag_coupling(&self) -> &DagCouplingMetrics {
+        &self.dag_coupling
+    }
+
+    /// Record a DAG coupling validation result (T191).
+    ///
+    /// This method records both the validation outcome and, if in Enforce mode,
+    /// the rejection reason.
+    ///
+    /// # Arguments
+    ///
+    /// * `result` - The validation result from `validate_dag_coupling_for_proposal()`
+    /// * `mode` - The current DAG coupling mode
+    pub fn record_dag_coupling_validation(
+        &self,
+        result: &crate::hotstuff_node_sim::DagCouplingValidationResult,
+        mode: &crate::node_config::DagCouplingMode,
+    ) {
+        use crate::hotstuff_node_sim::DagCouplingValidationResult;
+        use crate::node_config::DagCouplingMode;
+
+        // Record validation result
+        let result_str = match result {
+            DagCouplingValidationResult::Ok => "ok",
+            DagCouplingValidationResult::NotRequired => "not_required",
+            DagCouplingValidationResult::UncoupledMissing => "uncoupled_missing",
+            DagCouplingValidationResult::UncoupledMismatch => "uncoupled_mismatch",
+            DagCouplingValidationResult::UnknownBatches => "unknown_batches",
+            DagCouplingValidationResult::InternalError(_) => "internal_error",
+        };
+        self.dag_coupling.record_validation(result_str);
+
+        // In Enforce mode, also record rejection if validation failed
+        if *mode == DagCouplingMode::Enforce {
+            match result {
+                DagCouplingValidationResult::UncoupledMissing => {
+                    self.dag_coupling.record_rejection("uncoupled_missing");
+                }
+                DagCouplingValidationResult::UncoupledMismatch => {
+                    self.dag_coupling.record_rejection("uncoupled_mismatch");
+                }
+                DagCouplingValidationResult::UnknownBatches => {
+                    self.dag_coupling.record_rejection("unknown_batches");
+                }
+                DagCouplingValidationResult::InternalError(_) => {
+                    self.dag_coupling.record_rejection("internal_error");
+                }
+                DagCouplingValidationResult::Ok | DagCouplingValidationResult::NotRequired => {
+                    // No rejection
+                }
+            }
+        }
     }
 
     /// Set the network environment for metrics export (T162).
@@ -4940,6 +5162,10 @@ impl NodeMetrics {
         if let Some(env_metrics) = self.environment() {
             output.push_str(&env_metrics.format_metrics());
         }
+
+        // DAG coupling validation metrics (T191)
+        output.push('\n');
+        output.push_str(&self.dag_coupling.format_metrics());
 
         output
     }

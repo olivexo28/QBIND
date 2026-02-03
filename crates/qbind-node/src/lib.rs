@@ -140,7 +140,9 @@ pub use consensus_node::{
     ConsensusNode, ConsensusNodeError as NetConsensusNodeError, NodeCommitInfo, NodeCommittedBlock,
 };
 pub use consensus_sim::{NodeConsensusSim, NodeConsensusSimError};
-pub use hotstuff_node_sim::{NodeHotstuffHarness, NodeHotstuffHarnessError, ProposerSource};
+pub use hotstuff_node_sim::{
+    DagCouplingValidationResult, NodeHotstuffHarness, NodeHotstuffHarnessError, ProposerSource,
+};
 pub use identity_map::PeerValidatorMap;
 pub use ledger_bridge::{InMemoryNodeLedgerHarness, NodeLedgerError, NodeLedgerHarness};
 
@@ -249,8 +251,8 @@ pub use load_harness::{
     LoopbackNetService,
 };
 pub use metrics::{
-    CommitMetrics, ConsensusProgressMetrics, ConsensusT154Metrics, DisconnectReason,
-    EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
+    CommitMetrics, ConsensusProgressMetrics, ConsensusT154Metrics, DagCouplingMetrics,
+    DisconnectReason, EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
     KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, NetworkMetrics, NodeMetrics,
     OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics, SignRequestKind,
     SignerKeystoreMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp,
