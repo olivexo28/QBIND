@@ -361,6 +361,133 @@ impl BatchCertificate {
     pub fn has_signer(&self, validator_id: ValidatorId) -> bool {
         self.signers.contains(&validator_id)
     }
+
+    /// Compute the digest of this certificate.
+    ///
+    /// The digest is SHA3-256 over a canonical encoding of the certificate,
+    /// used for CertifiedBatchRef binding.
+    pub fn digest(&self) -> [u8; 32] {
+        let mut bytes = Vec::new();
+        // batch_ref (creator + batch_id)
+        bytes.extend_from_slice(&self.batch_ref.canonical_bytes());
+        // view (8 bytes, LE)
+        bytes.extend_from_slice(&self.view.to_le_bytes());
+        // number of signers (4 bytes, LE)
+        bytes.extend_from_slice(&(self.signers.len() as u32).to_le_bytes());
+        // signers (each 8 bytes, LE)
+        for signer in &self.signers {
+            bytes.extend_from_slice(&signer.as_u64().to_le_bytes());
+        }
+        sha3_256(&bytes)
+    }
+}
+
+// ============================================================================
+// T190: Certified Frontier for DAG Coupling
+// ============================================================================
+
+/// A certified batch entry in the frontier (T190).
+///
+/// Contains both the batch data and its certificate, along with the
+/// CertifiedBatchRef needed for the block header's batch_commitment.
+#[derive(Clone, Debug)]
+pub struct CertifiedFrontierEntry {
+    /// The batch data.
+    pub batch: QbindBatch,
+    /// The certificate proving data availability.
+    pub certificate: BatchCertificate,
+}
+
+impl CertifiedFrontierEntry {
+    /// Compute the CertifiedBatchRef for this entry.
+    ///
+    /// Used when building the batch_commitment in the block header.
+    pub fn to_certified_batch_ref(&self) -> qbind_wire::consensus::CertifiedBatchRef {
+        qbind_wire::consensus::CertifiedBatchRef {
+            creator: self.batch.creator.as_u64(),
+            batch_id: self.batch.batch_id,
+            cert_digest: self.certificate.digest(),
+        }
+    }
+}
+
+/// The certified frontier: all certified batches not yet committed (T190).
+///
+/// This struct represents the set of batches that have valid BatchCertificates
+/// and are eligible for inclusion in consensus-coupled proposals.
+///
+/// ## Ordering
+///
+/// Entries are sorted deterministically by `(view, creator, batch_id)` to ensure
+/// all validators produce identical proposals from the same DAG state.
+#[derive(Clone, Debug, Default)]
+pub struct CertifiedFrontier {
+    /// Certified batches eligible for proposal, sorted deterministically.
+    pub entries: Vec<CertifiedFrontierEntry>,
+}
+
+impl CertifiedFrontier {
+    /// Create an empty certified frontier.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Check if the frontier is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get the number of certified batches.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Get the total number of transactions across all certified batches.
+    pub fn total_tx_count(&self) -> usize {
+        self.entries.iter().map(|e| e.batch.txs.len()).sum()
+    }
+
+    /// Compute the CertifiedBatchRef list for the batch_commitment.
+    pub fn to_certified_batch_refs(&self) -> Vec<qbind_wire::consensus::CertifiedBatchRef> {
+        self.entries
+            .iter()
+            .map(|e| e.to_certified_batch_ref())
+            .collect()
+    }
+
+    /// Flatten the batches into a deduplicated transaction list.
+    ///
+    /// Transactions are returned in deterministic order:
+    /// - Batches are already sorted by (view, creator, batch_id)
+    /// - Within each batch, transactions preserve their original order
+    /// - Duplicates (same sender+nonce) are removed, keeping first occurrence
+    ///
+    /// # Arguments
+    ///
+    /// * `max_txs` - Maximum number of transactions to return
+    ///
+    /// # Returns
+    ///
+    /// A vector of transactions ready for inclusion in a block.
+    pub fn flatten_txs(&self, max_txs: usize) -> Vec<QbindTransaction> {
+        let mut result = Vec::with_capacity(max_txs);
+        let mut seen: HashSet<TxId> = HashSet::new();
+
+        for entry in &self.entries {
+            for tx in &entry.batch.txs {
+                if result.len() >= max_txs {
+                    return result;
+                }
+                let tx_id = compute_tx_id(tx);
+                if !seen.contains(&tx_id) {
+                    seen.insert(tx_id);
+                    result.push(tx.clone());
+                }
+            }
+        }
+
+        result
+    }
 }
 
 // ============================================================================
@@ -1164,6 +1291,22 @@ pub trait DagMempool: Send + Sync {
     ///
     /// A vector of transactions ready for inclusion in a block.
     fn select_frontier_txs(&self, max_txs: usize) -> Vec<QbindTransaction>;
+
+    /// Select the certified frontier for DAG-coupled proposals (T190).
+    ///
+    /// Returns the set of certified batches that:
+    /// - Have valid BatchCertificates (2f+1 acks)
+    /// - Have not been fully committed
+    /// - Are available locally
+    ///
+    /// The frontier is sorted deterministically by `(view_hint, creator, batch_id)`
+    /// to ensure all validators produce identical proposals from the same state.
+    ///
+    /// # Returns
+    ///
+    /// A `CertifiedFrontier` containing all eligible certified batches.
+    /// Returns an empty frontier if availability is not enabled.
+    fn select_certified_frontier(&self) -> CertifiedFrontier;
 
     /// Mark transactions as committed after a block is finalized.
     ///
@@ -2048,6 +2191,51 @@ impl DagMempool for InMemoryDagMempool {
         result
     }
 
+    fn select_certified_frontier(&self) -> CertifiedFrontier {
+        // If availability is not enabled, return an empty frontier
+        if !self.availability_enabled {
+            return CertifiedFrontier::new();
+        }
+
+        let inner = self.inner.read();
+        let tracker = self.ack_tracker.read();
+
+        let mut entries: Vec<CertifiedFrontierEntry> = Vec::new();
+
+        // Collect all batches that have certificates and are not fully committed
+        for (batch_id, stored) in &inner.batches_by_id {
+            // Skip fully committed batches
+            if stored.fully_committed {
+                continue;
+            }
+
+            // Check if this batch has a certificate
+            if let Some(cert) = tracker.certificate(batch_id) {
+                entries.push(CertifiedFrontierEntry {
+                    batch: stored.batch.clone(),
+                    certificate: cert.clone(),
+                });
+            }
+        }
+
+        // Sort deterministically by (view_hint, creator, batch_id)
+        // This ensures all validators produce identical proposals from the same state
+        entries.sort_by(|a, b| {
+            (a.batch.view_hint, a.batch.creator, a.batch.batch_id).cmp(&(
+                b.batch.view_hint,
+                b.batch.creator,
+                b.batch.batch_id,
+            ))
+        });
+
+        // Update metrics
+        if let Some(ref m) = self.metrics {
+            m.inc_certified_frontier_select_total();
+        }
+
+        CertifiedFrontier { entries }
+    }
+
     fn mark_committed(&self, committed: &[QbindTransaction]) {
         let mut inner = self.inner.write();
 
@@ -2165,6 +2353,10 @@ pub struct DagMempoolMetrics {
     missing_batches_recorded: AtomicU64,
     /// Total number of missing batches successfully fetched.
     missing_batches_fetched: AtomicU64,
+
+    // T190: Certified frontier selection metrics
+    /// Number of certified frontier selection operations.
+    certified_frontier_select_total: AtomicU64,
 }
 
 impl DagMempoolMetrics {
@@ -2325,6 +2517,21 @@ impl DagMempoolMetrics {
         self.missing_batches_fetched.fetch_add(1, Ordering::Relaxed);
     }
 
+    // ========================================================================
+    // T190: Certified Frontier Selection Metrics
+    // ========================================================================
+
+    /// Get the total certified frontier selection operations.
+    pub fn certified_frontier_select_total(&self) -> u64 {
+        self.certified_frontier_select_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the certified frontier selection counter.
+    pub fn inc_certified_frontier_select_total(&self) {
+        self.certified_frontier_select_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Format metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -2380,6 +2587,13 @@ impl DagMempoolMetrics {
         output.push_str(&format!(
             "qbind_dag_missing_batches_fetched {}\n",
             self.missing_batches_fetched()
+        ));
+
+        // T190: Certified frontier selection metrics
+        output.push_str("\n# DAG Coupling Metrics (T190)\n");
+        output.push_str(&format!(
+            "qbind_dag_certified_frontier_select_total {}\n",
+            self.certified_frontier_select_total()
         ));
         output
     }

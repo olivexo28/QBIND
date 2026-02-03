@@ -792,24 +792,15 @@ mod tests {
 
     #[test]
     fn test_cli_dag_coupling_mode_flag() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--dag-coupling-mode",
-            "enforce",
-        ])
-        .unwrap();
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--dag-coupling-mode", "enforce"]).unwrap();
 
         assert_eq!(args.dag_coupling_mode, Some("enforce".to_string()));
     }
 
     #[test]
     fn test_cli_dag_coupling_mode_off() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--dag-coupling-mode",
-            "off",
-        ])
-        .unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--dag-coupling-mode", "off"]).unwrap();
 
         let config = args.to_node_config().unwrap();
         assert_eq!(config.dag_coupling_mode, DagCouplingMode::Off);
@@ -817,12 +808,7 @@ mod tests {
 
     #[test]
     fn test_cli_dag_coupling_mode_warn() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--dag-coupling-mode",
-            "warn",
-        ])
-        .unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--dag-coupling-mode", "warn"]).unwrap();
 
         let config = args.to_node_config().unwrap();
         assert_eq!(config.dag_coupling_mode, DagCouplingMode::Warn);
@@ -830,12 +816,8 @@ mod tests {
 
     #[test]
     fn test_cli_dag_coupling_mode_enforce() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--dag-coupling-mode",
-            "enforce",
-        ])
-        .unwrap();
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--dag-coupling-mode", "enforce"]).unwrap();
 
         let config = args.to_node_config().unwrap();
         assert_eq!(config.dag_coupling_mode, DagCouplingMode::Enforce);
@@ -843,12 +825,8 @@ mod tests {
 
     #[test]
     fn test_cli_dag_coupling_mode_invalid() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--dag-coupling-mode",
-            "invalid",
-        ])
-        .unwrap();
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--dag-coupling-mode", "invalid"]).unwrap();
 
         let result = args.to_node_config();
         assert!(result.is_err());
@@ -862,12 +840,8 @@ mod tests {
 
     #[test]
     fn test_cli_dag_coupling_mode_case_insensitive() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--dag-coupling-mode",
-            "ENFORCE",
-        ])
-        .unwrap();
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--dag-coupling-mode", "ENFORCE"]).unwrap();
 
         let config = args.to_node_config().unwrap();
         assert_eq!(config.dag_coupling_mode, DagCouplingMode::Enforce);
@@ -876,12 +850,7 @@ mod tests {
     #[test]
     fn test_cli_dag_coupling_mode_with_profile() {
         // Profile mainnet sets Enforce by default
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--profile",
-            "mainnet",
-        ])
-        .unwrap();
+        let args = CliArgs::try_parse_from(["qbind-node", "--profile", "mainnet"]).unwrap();
 
         let config = args.to_node_config().unwrap();
         assert_eq!(

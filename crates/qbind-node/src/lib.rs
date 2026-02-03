@@ -184,6 +184,9 @@ pub use dag_mempool::{
 // T182 DAG Batch Fetch-on-Miss exports
 pub use dag_mempool::MissingBatchInfo;
 
+// T190 DAG Coupling exports
+pub use dag_mempool::{CertifiedFrontier, CertifiedFrontierEntry};
+
 // T183 DAG Fetch-on-Miss exports
 pub use dag_fetch_handler::{DagFetchHandler, DagFetchMetrics};
 pub use dag_mempool::{decode_batch, decode_batch_ref, encode_batch, encode_batch_ref};
@@ -213,6 +216,9 @@ pub use node_config::{parse_config_profile, parse_mempool_mode, ConfigProfile, M
 
 // T185 MainNet Safety Rails exports
 pub use node_config::MainnetConfigError;
+
+// T189/T190 DAG Coupling Mode exports
+pub use node_config::{parse_dag_coupling_mode, DagCouplingMode, VALID_DAG_COUPLING_MODES};
 
 // T170 P2P Service exports
 pub use p2p::{

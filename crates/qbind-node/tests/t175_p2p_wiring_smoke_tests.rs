@@ -9,8 +9,7 @@
 //! multi-process communication - that is covered by the runbook.
 
 use qbind_node::node_config::{
-    DagCouplingMode, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig,
-    NodeConfig,
+    DagCouplingMode, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
 };
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
