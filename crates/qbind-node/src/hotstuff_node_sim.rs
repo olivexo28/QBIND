@@ -465,6 +465,20 @@ pub struct NodeHotstuffHarness {
     ///
     /// Controls how many transactions are pulled from the mempool for proposals.
     max_txs_per_block: usize,
+
+    /// Whether DAG availability certificates are enabled (T190).
+    ///
+    /// When true and using DAG mempool, the proposer can use certified frontier
+    /// for building proposals.
+    dag_availability_enabled: bool,
+
+    /// DAG–consensus coupling mode (T190).
+    ///
+    /// Controls how the proposer handles DAG coupling:
+    /// - `Off`: No coupling, use normal transaction selection
+    /// - `Warn`: Use certified frontier but don't fail if empty
+    /// - `Enforce`: Only use certified frontier, skip proposal if empty
+    dag_coupling_mode: crate::node_config::DagCouplingMode,
 }
 
 // Manual Debug implementation because Arc<dyn ConsensusStorage> doesn't implement Debug
@@ -500,6 +514,8 @@ impl std::fmt::Debug for NodeHotstuffHarness {
             .field("execution_adapter", &self.execution_adapter.is_some())
             .field("async_execution", &self.async_execution.is_some())
             .field("max_txs_per_block", &self.max_txs_per_block)
+            .field("dag_availability_enabled", &self.dag_availability_enabled)
+            .field("dag_coupling_mode", &self.dag_coupling_mode)
             .finish()
     }
 }
@@ -591,6 +607,8 @@ impl NodeHotstuffHarness {
             execution_adapter: None,
             async_execution: None, // T155: Async execution disabled by default
             max_txs_per_block: 1000, // Default max txs per block
+            dag_availability_enabled: false, // T190: DAG availability disabled by default
+            dag_coupling_mode: crate::node_config::DagCouplingMode::Off, // T190: Coupling off by default
         })
     }
 
@@ -1126,6 +1144,62 @@ impl NodeHotstuffHarness {
     pub fn with_max_txs_per_block(mut self, max_txs: usize) -> Self {
         self.max_txs_per_block = max_txs;
         self
+    }
+
+    /// Enable or disable DAG availability tracking (T190).
+    ///
+    /// When enabled, the proposer can use the certified frontier for building
+    /// proposals when `dag_coupling_mode` is not `Off`.
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether DAG availability is enabled
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    pub fn with_dag_availability_enabled(mut self, enabled: bool) -> Self {
+        self.dag_availability_enabled = enabled;
+        self
+    }
+
+    /// Check if DAG availability is enabled (T190).
+    pub fn dag_availability_enabled(&self) -> bool {
+        self.dag_availability_enabled
+    }
+
+    /// Set the DAG–consensus coupling mode (T190).
+    ///
+    /// Controls how the proposer handles DAG coupling:
+    /// - `Off`: No coupling, use normal transaction selection
+    /// - `Warn`: Use certified frontier but don't fail if empty
+    /// - `Enforce`: Only use certified frontier, skip proposal if empty
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The coupling mode to use
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_node::node_config::DagCouplingMode;
+    ///
+    /// let harness = harness
+    ///     .with_dag_availability_enabled(true)
+    ///     .with_dag_coupling_mode(DagCouplingMode::Enforce);
+    /// ```
+    pub fn with_dag_coupling_mode(mut self, mode: crate::node_config::DagCouplingMode) -> Self {
+        self.dag_coupling_mode = mode;
+        self
+    }
+
+    /// Get the current DAG coupling mode (T190).
+    pub fn dag_coupling_mode(&self) -> crate::node_config::DagCouplingMode {
+        self.dag_coupling_mode
     }
 
     /// Get the epoch state provider, if attached.
@@ -2554,32 +2628,120 @@ impl NodeHotstuffHarness {
         &mut self,
         mut action: ConsensusEngineAction<ValidatorId>,
     ) -> Result<(), NodeHotstuffHarnessError> {
-        // T151/T158: Populate proposal with transactions from mempool BEFORE signing
+        // T151/T158/T190: Populate proposal with transactions from mempool BEFORE signing
         if let ConsensusEngineAction::BroadcastProposal(ref mut proposal) = action {
-            // T158: Select transactions based on proposer_source
-            let txs: Vec<qbind_ledger::QbindTransaction> = match self.proposer_source {
-                ProposerSource::DagMempool => {
-                    // T158: Use DAG mempool for transaction selection
-                    if let Some(ref dag_mempool) = self.dag_mempool {
-                        dag_mempool.select_frontier_txs(self.max_txs_per_block)
+            // T190: Determine if we should use DAG-coupled proposal building
+            let use_dag_coupling = self.proposer_source == ProposerSource::DagMempool
+                && self.dag_availability_enabled
+                && self.dag_coupling_mode != crate::node_config::DagCouplingMode::Off;
+
+            // T158/T190: Select transactions based on proposer_source and coupling mode
+            let (txs, certified_batch_refs): (
+                Vec<qbind_ledger::QbindTransaction>,
+                Option<Vec<qbind_wire::consensus::CertifiedBatchRef>>,
+            ) = if use_dag_coupling {
+                // T190: Use certified frontier for DAG-coupled proposals
+                if let Some(ref dag_mempool) = self.dag_mempool {
+                    let frontier = dag_mempool.select_certified_frontier();
+
+                    if frontier.is_empty() {
+                        // Handle empty certified frontier based on mode
+                        match self.dag_coupling_mode {
+                            crate::node_config::DagCouplingMode::Enforce => {
+                                // In Enforce mode, skip proposal if no certified batches
+                                eprintln!(
+                                    "[T190] No certified frontier available; skipping proposal \
+                                     (dag_coupling_mode=enforce)"
+                                );
+                                // Return empty proposal that will be skipped
+                                (Vec::new(), Some(Vec::new()))
+                            }
+                            crate::node_config::DagCouplingMode::Warn => {
+                                // In Warn mode, log warning and fall back to normal selection
+                                eprintln!(
+                                    "[T190] No certified frontier available; falling back to \
+                                     uncertified batches (dag_coupling_mode=warn)"
+                                );
+                                (
+                                    dag_mempool.select_frontier_txs(self.max_txs_per_block),
+                                    None, // No batch commitment for uncertified batches
+                                )
+                            }
+                            crate::node_config::DagCouplingMode::Off => {
+                                // This branch shouldn't be reached due to use_dag_coupling check
+                                (
+                                    dag_mempool.select_frontier_txs(self.max_txs_per_block),
+                                    None,
+                                )
+                            }
+                        }
                     } else {
-                        // Fallback to FIFO if DAG mempool not configured
-                        if let Some(ref mempool) = self.mempool {
-                            mempool.get_block_candidates(self.max_txs_per_block)
+                        // We have certified batches - use them
+                        let refs = frontier.to_certified_batch_refs();
+                        let txs = frontier.flatten_txs(self.max_txs_per_block);
+
+                        eprintln!(
+                            "[T190] Using certified frontier: {} batches, {} txs \
+                             (dag_coupling_mode={})",
+                            refs.len(),
+                            txs.len(),
+                            self.dag_coupling_mode
+                        );
+
+                        (txs, Some(refs))
+                    }
+                } else {
+                    // Fallback to FIFO if DAG mempool not configured
+                    if let Some(ref mempool) = self.mempool {
+                        (mempool.get_block_candidates(self.max_txs_per_block), None)
+                    } else {
+                        (Vec::new(), None)
+                    }
+                }
+            } else {
+                // Original behavior: no DAG coupling
+                match self.proposer_source {
+                    ProposerSource::DagMempool => {
+                        // T158: Use DAG mempool for transaction selection (uncoupled)
+                        if let Some(ref dag_mempool) = self.dag_mempool {
+                            (
+                                dag_mempool.select_frontier_txs(self.max_txs_per_block),
+                                None,
+                            )
                         } else {
-                            Vec::new()
+                            // Fallback to FIFO if DAG mempool not configured
+                            if let Some(ref mempool) = self.mempool {
+                                (mempool.get_block_candidates(self.max_txs_per_block), None)
+                            } else {
+                                (Vec::new(), None)
+                            }
+                        }
+                    }
+                    ProposerSource::FifoMempool => {
+                        // T151: Use traditional FIFO mempool
+                        if let Some(ref mempool) = self.mempool {
+                            (mempool.get_block_candidates(self.max_txs_per_block), None)
+                        } else {
+                            (Vec::new(), None)
                         }
                     }
                 }
-                ProposerSource::FifoMempool => {
-                    // T151: Use traditional FIFO mempool
-                    if let Some(ref mempool) = self.mempool {
-                        mempool.get_block_candidates(self.max_txs_per_block)
-                    } else {
-                        Vec::new()
-                    }
-                }
             };
+
+            // T190: Compute and set batch_commitment if we have certified batch refs
+            if let Some(ref refs) = certified_batch_refs {
+                if !refs.is_empty() {
+                    let commitment = qbind_wire::consensus::compute_batch_commitment(refs);
+                    proposal.header.batch_commitment = commitment;
+                } else {
+                    // Empty refs means we're in Enforce mode with no certified batches
+                    // Set NULL commitment and the proposal will be skipped
+                    proposal.header.batch_commitment = qbind_wire::consensus::NULL_BATCH_COMMITMENT;
+                }
+            } else {
+                // No coupling - use NULL commitment
+                proposal.header.batch_commitment = qbind_wire::consensus::NULL_BATCH_COMMITMENT;
+            }
 
             // Serialize transactions to Vec<Vec<u8>>
             // For now, use simple serialization: for QbindTransaction, we need to encode it
