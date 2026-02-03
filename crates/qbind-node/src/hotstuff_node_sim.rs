@@ -175,6 +175,81 @@ pub enum ProposerSource {
     DagMempool,
 }
 
+// ============================================================================
+// DAG Coupling Validation Result (T191)
+// ============================================================================
+
+/// Result of validating DAG coupling for an incoming proposal (T191).
+///
+/// This enum captures the possible outcomes of checking whether a proposal
+/// is correctly coupled to the DAG (certified batches) from the validator's
+/// perspective.
+///
+/// # Design Invariants
+///
+/// Per the T188 design document:
+/// - I1: Every tx must belong to a certified batch
+/// - I2: Certificates are unforgeable and properly bound
+/// - I3: Validators never vote for unknown/uncertified batches
+/// - I5: HotStuff safety is preserved (coupling adds preconditions, not new paths)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DagCouplingValidationResult {
+    /// Proposal is correctly coupled to the DAG.
+    ///
+    /// The batch_commitment matches local certified frontier.
+    Ok,
+
+    /// Coupling is not required under current configuration.
+    ///
+    /// This occurs when:
+    /// - `dag_coupling_mode == DagCouplingMode::Off`
+    /// - `mempool_mode != MempoolMode::Dag`
+    /// - `dag_availability_enabled == false`
+    NotRequired,
+
+    /// Coupling required but proposal has no or NULL batch_commitment.
+    ///
+    /// This violates I1: transactions must come from certified batches.
+    UncoupledMissing,
+
+    /// Proposal's batch_commitment doesn't match local DAG state.
+    ///
+    /// The commitment is present but differs from what we compute
+    /// from our certified frontier. This could indicate:
+    /// - Different certified batch sets between proposer and validator
+    /// - Tampering with the commitment
+    /// - Desynchronized DAG state
+    UncoupledMismatch,
+
+    /// batch_commitment is valid but underlying batches are not locally available.
+    ///
+    /// This is a softer failure than UncoupledMismatch - the commitment might
+    /// be valid but we can't verify it because we're missing the batch data
+    /// or certificates. The fetch-on-miss mechanism (T182/T183) might resolve this.
+    UnknownBatches,
+
+    /// An internal error occurred during validation.
+    ///
+    /// This captures unexpected failures that shouldn't happen under normal
+    /// operation, such as lock poisoning or internal inconsistencies.
+    InternalError(String),
+}
+
+impl std::fmt::Display for DagCouplingValidationResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DagCouplingValidationResult::Ok => write!(f, "ok"),
+            DagCouplingValidationResult::NotRequired => write!(f, "not_required"),
+            DagCouplingValidationResult::UncoupledMissing => write!(f, "uncoupled_missing"),
+            DagCouplingValidationResult::UncoupledMismatch => write!(f, "uncoupled_mismatch"),
+            DagCouplingValidationResult::UnknownBatches => write!(f, "unknown_batches"),
+            DagCouplingValidationResult::InternalError(msg) => {
+                write!(f, "internal_error: {}", msg)
+            }
+        }
+    }
+}
+
 impl From<NodeConsensusSimError> for NodeHotstuffHarnessError {
     fn from(e: NodeConsensusSimError) -> Self {
         NodeHotstuffHarnessError::Sim(e)
@@ -1202,6 +1277,208 @@ impl NodeHotstuffHarness {
         self.dag_coupling_mode
     }
 
+    // ========================================================================
+    // T191: Validator-Side DAG Coupling Validation
+    // ========================================================================
+
+    /// Validate DAG coupling for an incoming proposal (T191).
+    ///
+    /// This function checks whether a proposal is correctly coupled to the DAG
+    /// from the validator's perspective. It implements the I1-I3 invariants from
+    /// the T188 design document.
+    ///
+    /// # Coupling Requirements
+    ///
+    /// Coupling is required when ALL of the following hold:
+    /// - `proposer_source == ProposerSource::DagMempool`
+    /// - `dag_availability_enabled == true`
+    /// - `dag_coupling_mode != DagCouplingMode::Off`
+    ///
+    /// # Validation Checks (when coupling is required)
+    ///
+    /// 1. **Presence of batch_commitment**: Proposal must have non-NULL commitment.
+    /// 2. **Matching commitment**: Proposal's commitment must match local DAG state.
+    ///
+    /// # Returns
+    ///
+    /// A `DagCouplingValidationResult` indicating the outcome of validation.
+    /// This function has no side effects - the caller handles mode-specific
+    /// behavior (logging, metrics, vote rejection).
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let result = harness.validate_dag_coupling_for_proposal(&proposal);
+    /// match result {
+    ///     DagCouplingValidationResult::Ok => { /* proceed to vote */ }
+    ///     DagCouplingValidationResult::NotRequired => { /* proceed to vote */ }
+    ///     _ => { /* handle violation based on coupling mode */ }
+    /// }
+    /// ```
+    pub fn validate_dag_coupling_for_proposal(
+        &self,
+        proposal: &BlockProposal,
+    ) -> DagCouplingValidationResult {
+        // Check if coupling is required
+        // Coupling is required when:
+        // 1. proposer_source == DagMempool
+        // 2. dag_availability_enabled == true
+        // 3. dag_coupling_mode != Off
+
+        if self.proposer_source != ProposerSource::DagMempool {
+            return DagCouplingValidationResult::NotRequired;
+        }
+
+        if !self.dag_availability_enabled {
+            return DagCouplingValidationResult::NotRequired;
+        }
+
+        if self.dag_coupling_mode == crate::node_config::DagCouplingMode::Off {
+            return DagCouplingValidationResult::NotRequired;
+        }
+
+        // Coupling is required - perform validation
+
+        // Check 1: Presence of batch_commitment
+        // NULL_BATCH_COMMITMENT is [0u8; 32]
+        if proposal.header.batch_commitment == qbind_wire::consensus::NULL_BATCH_COMMITMENT {
+            return DagCouplingValidationResult::UncoupledMissing;
+        }
+
+        // Check 2: Matching commitment with local DAG state
+        let dag_mempool = match &self.dag_mempool {
+            Some(mp) => mp,
+            None => {
+                // No DAG mempool attached but coupling is required
+                // This is a configuration error
+                return DagCouplingValidationResult::InternalError(
+                    "dag coupling required but no dag_mempool attached".to_string(),
+                );
+            }
+        };
+
+        // Select our certified frontier
+        let frontier = dag_mempool.select_certified_frontier();
+
+        if frontier.is_empty() {
+            // We have no certified batches locally.
+            // The proposal has a non-NULL commitment, so either:
+            // - We're missing batches that the proposer has
+            // - The proposer is ahead of us in DAG state
+            // Mark as UnknownBatches since we can't verify
+            return DagCouplingValidationResult::UnknownBatches;
+        }
+
+        // Compute local commitment from our certified frontier
+        let local_refs = frontier.to_certified_batch_refs();
+        let local_commitment = qbind_wire::consensus::compute_batch_commitment(&local_refs);
+
+        // Compare commitments
+        if local_commitment != proposal.header.batch_commitment {
+            // Commitments don't match.
+            // This could be because:
+            // 1. We're missing some batches the proposer has
+            // 2. We have batches the proposer doesn't have
+            // 3. Certificate digests differ (different acker sets)
+            //
+            // For now, we classify this as UncoupledMismatch.
+            // A more sophisticated implementation could check if missing
+            // batches are being tracked via the missing batch tracker.
+            return DagCouplingValidationResult::UncoupledMismatch;
+        }
+
+        DagCouplingValidationResult::Ok
+    }
+
+    /// Record DAG coupling validation metrics (T191).
+    ///
+    /// This helper records metrics for DAG coupling validation outcomes.
+    /// Called by the proposal handling path after validation.
+    fn record_dag_coupling_metrics(&self, result: &DagCouplingValidationResult) {
+        if let Some(ref metrics) = self.metrics {
+            metrics.record_dag_coupling_validation(result, &self.dag_coupling_mode);
+        }
+    }
+
+    /// Log a DAG coupling warning for Warn mode (T191).
+    ///
+    /// Called when dag_coupling_mode is Warn and validation failed.
+    fn log_dag_coupling_warning(
+        &self,
+        proposal: &BlockProposal,
+        result: &DagCouplingValidationResult,
+    ) {
+        eprintln!(
+            "[T191] DAG coupling warning: proposal view={} height={} from proposer_index={} \
+             has coupling issue: {} (dag_coupling_mode=warn, proceeding to vote)",
+            proposal.header.round, proposal.header.height, proposal.header.proposer_index, result
+        );
+    }
+
+    /// Log a DAG coupling rejection for Enforce mode (T191).
+    ///
+    /// Called when dag_coupling_mode is Enforce and validation failed.
+    fn log_dag_coupling_rejection(
+        &self,
+        proposal: &BlockProposal,
+        result: &DagCouplingValidationResult,
+    ) {
+        eprintln!(
+            "[T191] DAG coupling REJECTED: proposal view={} height={} from proposer_index={} \
+             rejected due to: {} (dag_coupling_mode=enforce, NOT voting)",
+            proposal.header.round, proposal.header.height, proposal.header.proposer_index, result
+        );
+    }
+
+    /// Check DAG coupling and decide whether to proceed with voting (T191).
+    ///
+    /// This is the main entry point for validator-side DAG coupling enforcement.
+    /// It validates the proposal, records metrics, logs as appropriate, and
+    /// returns whether the validator should proceed to vote.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the validator should proceed to vote on this proposal.
+    /// `false` if the validator should reject the proposal (only in Enforce mode).
+    fn should_vote_after_dag_coupling_check(&self, proposal: &BlockProposal) -> bool {
+        let result = self.validate_dag_coupling_for_proposal(proposal);
+
+        // Record metrics for all modes
+        self.record_dag_coupling_metrics(&result);
+
+        match self.dag_coupling_mode {
+            crate::node_config::DagCouplingMode::Off => {
+                // Coupling disabled - always proceed
+                true
+            }
+            crate::node_config::DagCouplingMode::Warn => {
+                // Log warning if validation failed, but always proceed
+                match result {
+                    DagCouplingValidationResult::Ok | DagCouplingValidationResult::NotRequired => {}
+                    _ => {
+                        self.log_dag_coupling_warning(proposal, &result);
+                    }
+                }
+                true
+            }
+            crate::node_config::DagCouplingMode::Enforce => {
+                // Reject if validation failed
+                match result {
+                    DagCouplingValidationResult::Ok | DagCouplingValidationResult::NotRequired => {
+                        true
+                    }
+                    DagCouplingValidationResult::UncoupledMissing
+                    | DagCouplingValidationResult::UncoupledMismatch
+                    | DagCouplingValidationResult::UnknownBatches
+                    | DagCouplingValidationResult::InternalError(_) => {
+                        self.log_dag_coupling_rejection(proposal, &result);
+                        false
+                    }
+                }
+            }
+        }
+    }
+
     /// Get the epoch state provider, if attached.
     pub fn epoch_state_provider(&self) -> Option<&Arc<dyn EpochStateProvider>> {
         self.epoch_state_provider.as_ref()
@@ -2034,6 +2311,12 @@ impl NodeHotstuffHarness {
                 // committed blocks proposed by other validators.
                 self.block_store.insert(proposal.clone())?;
 
+                // T191: Validate DAG coupling before processing proposal
+                if !self.should_vote_after_dag_coupling_check(&proposal) {
+                    // Coupling validation failed in Enforce mode - reject proposal
+                    return Ok(());
+                }
+
                 // Look up the ValidatorId for this peer
                 let from_validator = self
                     .sim
@@ -2091,6 +2374,12 @@ impl NodeHotstuffHarness {
             ConsensusNetworkEvent::IncomingProposal { from, proposal } => {
                 // Store the incoming proposal in the block store (idempotent).
                 self.block_store.insert(proposal.clone())?;
+
+                // T191: Validate DAG coupling before processing proposal
+                if !self.should_vote_after_dag_coupling_check(&proposal) {
+                    // Coupling validation failed in Enforce mode - reject proposal
+                    return Ok(());
+                }
 
                 // Look up the ValidatorId for this peer
                 let from_validator = self
