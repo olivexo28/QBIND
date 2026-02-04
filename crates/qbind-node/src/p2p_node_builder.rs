@@ -646,6 +646,7 @@ impl SimpleValidatorNodeMapping {
 mod tests {
     use super::*;
     use crate::node_config::{DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig};
+    use qbind_ledger::FeeDistributionPolicy;
     use qbind_types::NetworkEnvironment;
 
     fn make_test_config() -> NodeConfig {
@@ -672,6 +673,8 @@ mod tests {
             dag_coupling_mode: DagCouplingMode::Off,
             // T186 field
             stage_b_enabled: false,
+            // T193 field
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
     }
 
