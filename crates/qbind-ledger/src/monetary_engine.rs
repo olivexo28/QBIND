@@ -348,6 +348,375 @@ fn compute_phase_recommendation(inputs: &MonetaryInputs) -> PhaseTransitionRecom
 }
 
 // ============================================================================
+// T197: Monetary Mode & Seigniorage Types
+// ============================================================================
+
+/// Mode controlling the monetary engine's behavior.
+///
+/// This determines whether the engine:
+/// - Computes and applies decisions (Active)
+/// - Computes decisions for metrics only (Shadow)
+/// - Does nothing (Off)
+///
+/// # Phased Rollout
+///
+/// - **DevNet v0**: `Off` – no issuance, no decisions
+/// - **TestNet Alpha**: `Shadow` – decisions + metrics only
+/// - **TestNet Beta**: `Shadow` – decisions + metrics only
+/// - **MainNet v0**: `Shadow` – governance can flip to `Active` later
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MonetaryMode {
+    /// Off: No decisions, no metrics, no issuance.
+    ///
+    /// The monetary engine is completely disabled.
+    /// Use for DevNet or when monetary policy is not yet needed.
+    #[default]
+    Off,
+
+    /// Shadow: Decisions + metrics, no state changes.
+    ///
+    /// The engine computes monetary decisions and exposes them via
+    /// metrics and logs, but does not mint tokens or modify balances.
+    /// Use for testing and observability before enabling issuance.
+    Shadow,
+
+    /// Active: Decisions + metrics + minting + seigniorage split.
+    ///
+    /// The engine computes decisions and actually mints tokens,
+    /// distributing them to the configured seigniorage accounts.
+    Active,
+}
+
+impl std::fmt::Display for MonetaryMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MonetaryMode::Off => write!(f, "off"),
+            MonetaryMode::Shadow => write!(f, "shadow"),
+            MonetaryMode::Active => write!(f, "active"),
+        }
+    }
+}
+
+/// Parse a monetary mode from a string (case-insensitive).
+///
+/// # Arguments
+///
+/// * `s` - The string to parse ("off", "shadow", or "active")
+///
+/// # Returns
+///
+/// `Some(MonetaryMode)` if valid, `None` for unrecognized values.
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::monetary_engine::parse_monetary_mode;
+///
+/// assert_eq!(parse_monetary_mode("off"), Some(qbind_ledger::MonetaryMode::Off));
+/// assert_eq!(parse_monetary_mode("SHADOW"), Some(qbind_ledger::MonetaryMode::Shadow));
+/// assert_eq!(parse_monetary_mode("Active"), Some(qbind_ledger::MonetaryMode::Active));
+/// assert_eq!(parse_monetary_mode("invalid"), None);
+/// ```
+pub fn parse_monetary_mode(s: &str) -> Option<MonetaryMode> {
+    match s.to_lowercase().as_str() {
+        "off" => Some(MonetaryMode::Off),
+        "shadow" => Some(MonetaryMode::Shadow),
+        "active" => Some(MonetaryMode::Active),
+        _ => None,
+    }
+}
+
+/// Valid monetary mode values for CLI help text.
+pub const VALID_MONETARY_MODES: &[&str] = &["off", "shadow", "active"];
+
+// ============================================================================
+// T197: Seigniorage Split Configuration
+// ============================================================================
+
+/// Seigniorage split configuration in basis points (bps).
+///
+/// Determines how newly minted tokens are distributed among:
+/// - Validators (reward pool)
+/// - Treasury (protocol development)
+/// - Insurance (slashing/security fund)
+/// - Community (grants, ecosystem growth)
+///
+/// All values are in basis points where 10,000 bps = 100%.
+/// The sum of all fields must equal 10,000.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeigniorageSplit {
+    /// Basis points allocated to validators (staking rewards pool).
+    pub validators_bps: u16,
+    /// Basis points allocated to the protocol treasury.
+    pub treasury_bps: u16,
+    /// Basis points allocated to the insurance fund.
+    pub insurance_bps: u16,
+    /// Basis points allocated to community programs.
+    pub community_bps: u16,
+}
+
+impl SeigniorageSplit {
+    /// Total basis points that the split must sum to (100%).
+    pub const BPS_TOTAL: u32 = 10_000;
+
+    /// Create a new seigniorage split.
+    ///
+    /// # Arguments
+    ///
+    /// * `validators_bps` - Basis points for validators
+    /// * `treasury_bps` - Basis points for treasury
+    /// * `insurance_bps` - Basis points for insurance
+    /// * `community_bps` - Basis points for community
+    ///
+    /// # Panics
+    ///
+    /// Panics if the sum does not equal 10,000.
+    pub fn new(
+        validators_bps: u16,
+        treasury_bps: u16,
+        insurance_bps: u16,
+        community_bps: u16,
+    ) -> Self {
+        let split = Self {
+            validators_bps,
+            treasury_bps,
+            insurance_bps,
+            community_bps,
+        };
+        assert!(
+            split.is_valid(),
+            "SeigniorageSplit sum must equal 10,000, got {}",
+            split.sum()
+        );
+        split
+    }
+
+    /// Check if this split is valid (sums to 10,000 bps).
+    pub fn is_valid(&self) -> bool {
+        self.sum() == Self::BPS_TOTAL
+    }
+
+    /// Calculate the sum of all split components.
+    pub fn sum(&self) -> u32 {
+        self.validators_bps as u32
+            + self.treasury_bps as u32
+            + self.insurance_bps as u32
+            + self.community_bps as u32
+    }
+
+    /// Validate this split and return an error message if invalid.
+    pub fn validate(&self) -> Result<(), String> {
+        let sum = self.sum();
+        if sum == Self::BPS_TOTAL {
+            Ok(())
+        } else {
+            Err(format!(
+                "SeigniorageSplit must sum to {} bps, got {} bps",
+                Self::BPS_TOTAL,
+                sum
+            ))
+        }
+    }
+}
+
+/// Default seigniorage split for MainNet:
+/// - 50% validators
+/// - 30% treasury
+/// - 10% insurance
+/// - 10% community
+pub const SEIGNIORAGE_SPLIT_MAINNET_DEFAULT: SeigniorageSplit = SeigniorageSplit {
+    validators_bps: 5_000, // 50%
+    treasury_bps: 3_000,   // 30%
+    insurance_bps: 1_000,  // 10%
+    community_bps: 1_000,  // 10%
+};
+
+impl Default for SeigniorageSplit {
+    fn default() -> Self {
+        SEIGNIORAGE_SPLIT_MAINNET_DEFAULT
+    }
+}
+
+// ============================================================================
+// T197: Seigniorage Accounting
+// ============================================================================
+
+/// Result of computing seigniorage split for a given issuance amount.
+///
+/// This struct records how the total issuance is distributed among
+/// the four buckets. The sum of all bucket amounts must equal `total_issuance`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SeigniorageAccounting {
+    /// Total tokens issued in this period.
+    pub total_issuance: u128,
+    /// Tokens allocated to the validator reward pool.
+    pub to_validators: u128,
+    /// Tokens allocated to the protocol treasury.
+    pub to_treasury: u128,
+    /// Tokens allocated to the insurance fund.
+    pub to_insurance: u128,
+    /// Tokens allocated to community programs.
+    pub to_community: u128,
+}
+
+impl SeigniorageAccounting {
+    /// Check if the accounting is balanced (all parts sum to total).
+    pub fn is_balanced(&self) -> bool {
+        self.to_validators
+            .saturating_add(self.to_treasury)
+            .saturating_add(self.to_insurance)
+            .saturating_add(self.to_community)
+            == self.total_issuance
+    }
+}
+
+/// Compute the seigniorage split for a given total issuance amount.
+///
+/// This function distributes `total_issuance` tokens among four buckets
+/// according to the provided `split` configuration.
+///
+/// # Algorithm
+///
+/// Uses integer arithmetic only:
+/// 1. Compute validators, insurance, and community amounts via floor division
+/// 2. Assign any remainder to treasury to ensure exact conservation
+///
+/// This guarantees:
+/// - All bucket amounts are ≥ 0
+/// - The sum equals exactly `total_issuance`
+/// - Results are deterministic for the same inputs
+///
+/// # Arguments
+///
+/// * `total_issuance` - Total tokens to distribute
+/// * `split` - The basis-point split configuration
+///
+/// # Returns
+///
+/// A `SeigniorageAccounting` struct with the distributed amounts.
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::monetary_engine::{compute_seigniorage_split, SeigniorageSplit};
+///
+/// let split = SeigniorageSplit::new(5_000, 3_000, 1_000, 1_000);
+/// let accounting = compute_seigniorage_split(1_000_000, &split);
+///
+/// assert_eq!(accounting.to_validators, 500_000);
+/// assert_eq!(accounting.to_treasury, 300_000);
+/// assert_eq!(accounting.to_insurance, 100_000);
+/// assert_eq!(accounting.to_community, 100_000);
+/// assert!(accounting.is_balanced());
+/// ```
+pub fn compute_seigniorage_split(
+    total_issuance: u128,
+    split: &SeigniorageSplit,
+) -> SeigniorageAccounting {
+    if total_issuance == 0 {
+        return SeigniorageAccounting::default();
+    }
+
+    let bps_total = SeigniorageSplit::BPS_TOTAL as u128;
+
+    // Compute three buckets via floor division
+    let to_validators = total_issuance
+        .saturating_mul(split.validators_bps as u128)
+        .saturating_div(bps_total);
+    let to_insurance = total_issuance
+        .saturating_mul(split.insurance_bps as u128)
+        .saturating_div(bps_total);
+    let to_community = total_issuance
+        .saturating_mul(split.community_bps as u128)
+        .saturating_div(bps_total);
+
+    // Assign remainder to treasury to ensure exact conservation
+    let allocated = to_validators
+        .saturating_add(to_insurance)
+        .saturating_add(to_community);
+    let to_treasury = total_issuance.saturating_sub(allocated);
+
+    SeigniorageAccounting {
+        total_issuance,
+        to_validators,
+        to_treasury,
+        to_insurance,
+        to_community,
+    }
+}
+
+// ============================================================================
+// T197: Monetary Accounts Configuration
+// ============================================================================
+
+/// Account identifiers for seigniorage distribution.
+///
+/// These are the destination accounts where newly minted tokens are credited.
+/// In Active mode, the monetary engine transfers seigniorage to these accounts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonetaryAccounts {
+    /// Account ID for the validator reward pool.
+    /// Individual validator rewards are distributed from this pool later.
+    pub validator_pool: [u8; 32],
+    /// Account ID for the protocol treasury.
+    pub treasury: [u8; 32],
+    /// Account ID for the insurance/security fund.
+    pub insurance: [u8; 32],
+    /// Account ID for community programs.
+    pub community: [u8; 32],
+}
+
+impl MonetaryAccounts {
+    /// Create monetary accounts from raw byte arrays.
+    pub fn new(
+        validator_pool: [u8; 32],
+        treasury: [u8; 32],
+        insurance: [u8; 32],
+        community: [u8; 32],
+    ) -> Self {
+        Self {
+            validator_pool,
+            treasury,
+            insurance,
+            community,
+        }
+    }
+
+    /// Create test/dummy monetary accounts for DevNet/TestNet.
+    ///
+    /// These accounts use predictable values derived from their names.
+    /// NOT for production use.
+    pub fn test_accounts() -> Self {
+        Self {
+            validator_pool: Self::derive_test_account(b"validator_pool"),
+            treasury: Self::derive_test_account(b"treasury"),
+            insurance: Self::derive_test_account(b"insurance"),
+            community: Self::derive_test_account(b"community"),
+        }
+    }
+
+    /// Derive a test account ID from a seed.
+    fn derive_test_account(seed: &[u8]) -> [u8; 32] {
+        let mut result = [0u8; 32];
+        // Simple derivation: fill with seed bytes, padded/truncated
+        for (i, byte) in seed.iter().cycle().take(32).enumerate() {
+            result[i] = *byte;
+        }
+        result
+    }
+
+    /// Check if all accounts are distinct (no duplicate account IDs).
+    pub fn all_distinct(&self) -> bool {
+        self.validator_pool != self.treasury
+            && self.validator_pool != self.insurance
+            && self.validator_pool != self.community
+            && self.treasury != self.insurance
+            && self.treasury != self.community
+            && self.insurance != self.community
+    }
+}
+
+// ============================================================================
 // Unit Tests (basic sanity checks; comprehensive tests in t195_monetary_engine_tests.rs)
 // ============================================================================
 

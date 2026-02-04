@@ -224,6 +224,12 @@ pub use node_config::MainnetConfigError;
 // T189/T190 DAG Coupling Mode exports
 pub use node_config::{parse_dag_coupling_mode, DagCouplingMode, VALID_DAG_COUPLING_MODES};
 
+// T197 Monetary Mode exports (re-exported from qbind-ledger)
+pub use qbind_ledger::{
+    parse_monetary_mode, MonetaryAccounts, MonetaryMode, SeigniorageSplit,
+    SEIGNIORAGE_SPLIT_MAINNET_DEFAULT, VALID_MONETARY_MODES,
+};
+
 // T170 P2P Service exports
 pub use p2p::{
     ConsensusNetMsg, ControlMsg, DagNetMsg, NodeId, NullP2pService, P2pMessage, P2pService,
