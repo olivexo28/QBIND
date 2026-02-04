@@ -1822,6 +1822,13 @@ impl NodeConfig {
             if let Err(e) = self.seigniorage_split.validate() {
                 return Err(MainnetConfigError::SeigniorageSplitInvalid(e));
             }
+
+            // T201: Verify monetary accounts are properly configured
+            if let Some(ref accounts) = self.monetary_accounts {
+                if !accounts.is_valid_for_mainnet() {
+                    return Err(MainnetConfigError::MonetaryAccountsInvalid);
+                }
+            }
         }
 
         // TODO(future): Add stricter rules for validators vs non-validators
@@ -1931,6 +1938,13 @@ pub enum MainnetConfigError {
     ///
     /// The seigniorage split must sum to 10,000 basis points (100%).
     SeigniorageSplitInvalid(String),
+
+    /// Monetary accounts are invalid for MainNet (T201).
+    ///
+    /// When monetary mode is Active, all four monetary accounts must:
+    /// - Be distinct (no duplicates)
+    /// - Be non-zero addresses
+    MonetaryAccountsInvalid,
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -2018,6 +2032,12 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: seigniorage split is invalid: {}",
                     e
+                )
+            }
+            MainnetConfigError::MonetaryAccountsInvalid => {
+                write!(
+                    f,
+                    "MainNet invariant violated: monetary accounts must be distinct non-zero addresses when monetary mode is 'active' (T201)"
                 )
             }
         }
@@ -3105,5 +3125,127 @@ mod tests {
         assert!(error_str.contains("Enforce"));
         assert!(error_str.contains("off"));
         assert!(error_str.contains("--dag-coupling-mode=enforce"));
+    }
+
+    // ========================================================================
+    // T201: Monetary Accounts Validation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_mainnet_validation_rejects_monetary_accounts_with_zero_address() {
+        // Create a MainNet config with Active mode and zero treasury address
+        let mut accounts = MonetaryAccounts::test_accounts();
+        accounts.treasury = [0u8; 32]; // Zero address
+
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_monetary_mode(MonetaryMode::Active)
+            .with_monetary_accounts(accounts);
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail when monetary accounts contain zero address"
+        );
+        match result {
+            Err(MainnetConfigError::MonetaryAccountsInvalid) => (),
+            _ => panic!(
+                "Expected MonetaryAccountsInvalid error, got: {:?}",
+                result
+            ),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_monetary_accounts_with_duplicates() {
+        // Create a MainNet config with Active mode and duplicate addresses
+        let test_addr = [1u8; 32];
+        let accounts = MonetaryAccounts::new(
+            test_addr, // validator_pool
+            test_addr, // treasury (duplicate!)
+            [2u8; 32], // insurance
+            [3u8; 32], // community
+        );
+
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_monetary_mode(MonetaryMode::Active)
+            .with_monetary_accounts(accounts);
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail when monetary accounts have duplicates"
+        );
+        match result {
+            Err(MainnetConfigError::MonetaryAccountsInvalid) => (),
+            _ => panic!(
+                "Expected MonetaryAccountsInvalid error, got: {:?}",
+                result
+            ),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_accepts_valid_monetary_accounts() {
+        // Create a MainNet config with Active mode and valid accounts
+        let accounts = MonetaryAccounts::new(
+            [1u8; 32], // validator_pool
+            [2u8; 32], // treasury
+            [3u8; 32], // insurance
+            [4u8; 32], // community
+        );
+
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_monetary_mode(MonetaryMode::Active)
+            .with_monetary_accounts(accounts);
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_ok(),
+            "MainNet validation should pass with valid monetary accounts: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_monetary_accounts_is_valid_for_mainnet() {
+        // Test the is_valid_for_mainnet method directly
+        let valid_accounts = MonetaryAccounts::new(
+            [1u8; 32],
+            [2u8; 32],
+            [3u8; 32],
+            [4u8; 32],
+        );
+        assert!(valid_accounts.is_valid_for_mainnet());
+
+        // Zero address should fail
+        let accounts_with_zero = MonetaryAccounts::new(
+            [0u8; 32],
+            [2u8; 32],
+            [3u8; 32],
+            [4u8; 32],
+        );
+        assert!(!accounts_with_zero.is_valid_for_mainnet());
+
+        // Duplicates should fail
+        let accounts_with_dup = MonetaryAccounts::new(
+            [1u8; 32],
+            [1u8; 32],
+            [3u8; 32],
+            [4u8; 32],
+        );
+        assert!(!accounts_with_dup.is_valid_for_mainnet());
+    }
+
+    #[test]
+    fn test_monetary_accounts_invalid_error_display() {
+        let error = MainnetConfigError::MonetaryAccountsInvalid;
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("monetary accounts"));
+        assert!(error_str.contains("distinct"));
+        assert!(error_str.contains("non-zero"));
+        assert!(error_str.contains("T201"));
     }
 }
