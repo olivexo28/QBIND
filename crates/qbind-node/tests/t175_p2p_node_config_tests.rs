@@ -80,7 +80,7 @@ fn test_p2p_config_local_mesh_disabled() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -114,7 +114,7 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -145,7 +145,7 @@ fn test_p2p_config_p2p_mode_enabled() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -176,7 +176,7 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -215,7 +215,7 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -303,7 +303,7 @@ fn test_startup_info_includes_network_mode() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -328,7 +328,7 @@ fn test_startup_info_p2p_disabled() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -361,7 +361,7 @@ fn test_startup_info_p2p_enabled() {
         dag_availability_enabled: false,
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
-            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        fee_distribution_policy: FeeDistributionPolicy::burn_only(),
     };
 
     let info = config.startup_info_string(Some("V0"));

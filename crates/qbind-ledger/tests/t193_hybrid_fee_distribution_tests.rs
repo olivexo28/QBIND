@@ -98,7 +98,8 @@ fn test_burn_only_stats() {
         .map(|i| create_v1_transfer(&sender, &recipient, 1000, i, 50_000, 10))
         .collect();
 
-    let (results, stats) = engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
+    let (results, stats) =
+        engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
 
     assert_eq!(stats.txs_executed, 3);
     assert_eq!(stats.txs_succeeded, 3);
@@ -138,7 +139,8 @@ fn test_mainnet_hybrid_distribution() {
 
     // Execute a transfer
     let tx = create_v1_transfer(&sender, &recipient, 1000, 0, 50_000, 10);
-    let (results, stats) = engine.execute_block_with_proposer_and_stats(&mut state, &[tx], &proposer);
+    let (results, stats) =
+        engine.execute_block_with_proposer_and_stats(&mut state, &[tx], &proposer);
 
     assert_eq!(results.len(), 1);
     assert!(results[0].success);
@@ -191,7 +193,8 @@ fn test_mainnet_multiple_transactions() {
         .map(|i| create_v1_transfer(&sender, &recipient, 10_000, i, 50_000, 10))
         .collect();
 
-    let (results, stats) = engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
+    let (results, stats) =
+        engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
 
     assert_eq!(stats.txs_executed, 5);
     assert_eq!(stats.txs_succeeded, 5);
@@ -425,7 +428,8 @@ fn test_mixed_success_failure_fee_distribution() {
         create_v1_transfer(&sender, &recipient, 10_000, 3, 50_000, 10), // Nonce skip - fail
     ];
 
-    let (results, stats) = engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
+    let (results, stats) =
+        engine.execute_block_with_proposer_and_stats(&mut state, &txs, &proposer);
 
     // 2 should succeed, 1 should fail (nonce mismatch)
     assert!(results[0].success);
@@ -433,13 +437,21 @@ fn test_mixed_success_failure_fee_distribution() {
     assert!(!results[2].success);
 
     // Only successful txs contribute to fees
-    let successful_fees: u128 = results.iter().filter(|r| r.success).map(|r| r.fee_paid).sum();
+    let successful_fees: u128 = results
+        .iter()
+        .filter(|r| r.success)
+        .map(|r| r.fee_paid)
+        .sum();
     let successful_proposer: u128 = results
         .iter()
         .filter(|r| r.success)
         .map(|r| r.fee_to_proposer)
         .sum();
-    let successful_burned: u128 = results.iter().filter(|r| r.success).map(|r| r.fee_burned).sum();
+    let successful_burned: u128 = results
+        .iter()
+        .filter(|r| r.success)
+        .map(|r| r.fee_burned)
+        .sum();
 
     assert_eq!(stats.total_fees_to_proposer, successful_proposer);
     assert_eq!(stats.total_fees_burned, successful_burned);
@@ -477,7 +489,10 @@ fn test_execute_block_without_proposer_burns_all() {
     // Fee was distributed according to policy, but proposer portion wasn't credited
     // (since no proposer was provided)
     // The result still tracks what WOULD have been distributed
-    assert!(results[0].fee_to_proposer > 0, "Policy specifies proposer reward");
+    assert!(
+        results[0].fee_to_proposer > 0,
+        "Policy specifies proposer reward"
+    );
     assert!(results[0].fee_burned > 0, "Policy specifies burn portion");
 }
 

@@ -555,9 +555,8 @@ impl FeeDistributionPolicy {
         }
 
         // Compute proposer reward first (rounds down)
-        let proposer_reward = total_fee
-            .saturating_mul(self.proposer_bps as u128)
-            / (BPS_100_PERCENT as u128);
+        let proposer_reward =
+            total_fee.saturating_mul(self.proposer_bps as u128) / (BPS_100_PERCENT as u128);
 
         // Burn amount is the remainder (ensures exact conservation)
         let burn_amount = total_fee.saturating_sub(proposer_reward);
@@ -577,11 +576,7 @@ impl std::fmt::Display for FeeDistributionPolicy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let burn_pct = self.burn_bps as f64 / 100.0;
         let proposer_pct = self.proposer_bps as f64 / 100.0;
-        write!(
-            f,
-            "burn={:.1}% proposer={:.1}%",
-            burn_pct, proposer_pct
-        )
+        write!(f, "burn={:.1}% proposer={:.1}%", burn_pct, proposer_pct)
     }
 }
 

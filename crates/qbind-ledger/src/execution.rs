@@ -2023,8 +2023,10 @@ impl VmV0ExecutionEngine {
         state.set_account_state(&recipient, new_recipient_state);
 
         // Step 10: Distribute fee according to policy (T193)
-        let (fee_burned, fee_to_proposer) =
-            self.gas_config.fee_distribution_policy.distribute_fee(total_fee);
+        let (fee_burned, fee_to_proposer) = self
+            .gas_config
+            .fee_distribution_policy
+            .distribute_fee(total_fee);
 
         // Step 11: Credit proposer if there's a reward and proposer is provided
         if fee_to_proposer > 0 {
