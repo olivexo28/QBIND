@@ -31,18 +31,21 @@ fn test_config() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0,
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
+            ema_lambda_bps: 700,
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,
             inflation_floor_annual: 0.0,
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10,
+            ema_lambda_bps: 300,
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,
             inflation_floor_annual: 0.01,
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08,
+            ema_lambda_bps: 150,
         },
         alpha_fee_offset: 1.0,
     }
@@ -83,6 +86,7 @@ fn test_full_t200_pipeline() {
         epoch_index: 100,
         raw_epoch_fees: 1000, // Low fees
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: total_stake,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.6,

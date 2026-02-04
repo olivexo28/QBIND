@@ -133,6 +133,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ Fee-market cluster tests (T181)
 - ✅ Hybrid fee distribution implemented (T193)
 - ✅ **Monetary policy design complete (T194)** — see [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md)
+- ✅ **EMA-based fee smoothing (T202)** — consensus-level EMA with phase-dependent λ
 
 **Additional MainNet Requirements**:
 - [x] Hybrid fee distribution (burn + proposer) implementation (T193)
@@ -140,8 +141,10 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Monetary engine core implementation (T195) — Engine Core Ready
 - [x] Monetary telemetry / shadow mode (T196) — Telemetry Ready (nodes compute recommended inflation but do not enact it)
 - [x] Epoch monetary state (T199) — **Ready** (consensus-tracked per-epoch monetary state with phase, fee inputs, and inflation rate)
-- [ ] Seigniorage distribution to validators (T200) — Pending
-- [ ] Treasury/insurance/community routing (T201) — Pending
+- [x] Seigniorage distribution to validators (T200) — **Ready** (stake-proportional reward distribution)
+- [x] Treasury/insurance/community routing (T201) — **Ready** (seigniorage split and application logic)
+- [x] EMA-based fee smoothing (T202) — **Ready** (per-epoch EMA with phase-dependent λ)
+- [ ] Rate-of-change limiters (T203) — Pending
 - [ ] Fee market analysis under adversarial conditions
 - [ ] Mempool eviction rate limiting
 - [ ] External audit of fee accounting code
