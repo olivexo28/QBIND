@@ -646,7 +646,7 @@ impl SimpleValidatorNodeMapping {
 mod tests {
     use super::*;
     use crate::node_config::{DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig};
-    use qbind_ledger::FeeDistributionPolicy;
+    use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_types::NetworkEnvironment;
 
     fn make_test_config() -> NodeConfig {
@@ -675,6 +675,10 @@ mod tests {
             stage_b_enabled: false,
             // T193 field
             fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+            // T197 fields
+            monetary_mode: MonetaryMode::Off,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 

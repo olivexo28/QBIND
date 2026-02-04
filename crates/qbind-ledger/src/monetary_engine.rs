@@ -471,7 +471,12 @@ impl SeigniorageSplit {
     /// # Panics
     ///
     /// Panics if the sum does not equal 10,000.
-    pub fn new(validators_bps: u16, treasury_bps: u16, insurance_bps: u16, community_bps: u16) -> Self {
+    pub fn new(
+        validators_bps: u16,
+        treasury_bps: u16,
+        insurance_bps: u16,
+        community_bps: u16,
+    ) -> Self {
         let split = Self {
             validators_bps,
             treasury_bps,
@@ -604,7 +609,10 @@ impl SeigniorageAccounting {
 /// assert_eq!(accounting.to_community, 100_000);
 /// assert!(accounting.is_balanced());
 /// ```
-pub fn compute_seigniorage_split(total_issuance: u128, split: &SeigniorageSplit) -> SeigniorageAccounting {
+pub fn compute_seigniorage_split(
+    total_issuance: u128,
+    split: &SeigniorageSplit,
+) -> SeigniorageAccounting {
     if total_issuance == 0 {
         return SeigniorageAccounting::default();
     }

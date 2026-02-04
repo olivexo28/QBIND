@@ -60,10 +60,7 @@ fn test_seigniorage_split_conservation() {
             sum, total, total
         );
 
-        assert!(
-            accounting.is_balanced(),
-            "is_balanced() should return true"
-        );
+        assert!(accounting.is_balanced(), "is_balanced() should return true");
 
         // All amounts should be non-negative (they're u128, so this is always true)
         // but we verify explicitly

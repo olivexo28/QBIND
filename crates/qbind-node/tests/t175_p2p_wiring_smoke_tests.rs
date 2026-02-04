@@ -8,7 +8,7 @@
 //! These are single-process, in-memory tests. They do not test
 //! multi-process communication - that is covered by the runbook.
 
-use qbind_ledger::FeeDistributionPolicy;
+use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     DagCouplingMode, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
 };
@@ -41,6 +41,10 @@ fn make_test_p2p_config() -> NodeConfig {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        // T197: Monetary mode defaults
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     }
 }
 
@@ -58,6 +62,10 @@ fn make_test_local_mesh_config() -> NodeConfig {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        // T197: Monetary mode defaults
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     }
 }
 
