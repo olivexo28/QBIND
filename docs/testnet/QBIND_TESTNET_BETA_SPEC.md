@@ -521,6 +521,7 @@ For the next phase of the network roadmap (MainNet v0), see [QBIND_MAINNET_V0_SP
 MainNet v0 extends Beta with:
 
 - **Hybrid fee distribution** — Burn + proposer reward (vs burn-only in Beta)
+- **Formal monetary policy** — Three-phase inflation model with PQC cost adjustments and EMA-smoothed fee offsets; see [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) (T194)
 - **Consensus-coupled DAG** — Proposals must only commit certified batches
 - **Stage B parallelism** — Conflict-graph-based parallel execution available
 - **Dynamic P2P discovery** — Validators can find new peers automatically
@@ -542,6 +543,18 @@ superset of Beta with additional mandatory constraints.
 
 For MainNet risk tracking and readiness checklist, see [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md).
 
+### 10.2 MainNet Monetary Policy (T194)
+
+The canonical specification for MainNet monetary behavior is [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md). Key elements include:
+
+- **Phase Model**: Bootstrap (0–3y) → Transition (3–7y) → Mature (7y+) with time and economic readiness gates
+- **PQC-Adjusted Inflation**: Target rates account for ML-DSA-44/ML-KEM-768 computational overhead (~7.5–9% in Bootstrap)
+- **Fee-Based Offset**: EMA-smoothed fee revenue reduces required inflation; capped by floor in Mature phase
+- **Seigniorage Split**: Validators (82%), Treasury (12%), Insurance (4%), Community (2%)
+- **Parameter Governance**: Hard-coded vs tunable parameters clearly defined; oracle hints reserved for Phase 2+
+
+**Implementation Status**: Design complete (T194). Implementation pending in T195+ tasks.
+
 ---
 
 ## 11. Related Documents
@@ -550,6 +563,7 @@ For MainNet risk tracking and readiness checklist, see [QBIND_MAINNET_AUDIT_SKEL
 | :--- | :--- | :--- |
 | **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet v0 architecture |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk tracker |
+| **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](./QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
 | TestNet Alpha Audit | [QBIND_TESTNET_ALPHA_AUDIT.md](./QBIND_TESTNET_ALPHA_AUDIT.md) | Alpha risk and readiness |
 | TestNet Beta Audit Skeleton | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |
