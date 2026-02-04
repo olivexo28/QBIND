@@ -236,15 +236,17 @@ MainNet v0 operates under a formal monetary policy framework that integrates inf
 > - T195: Engine core (`compute_monetary_decision`) ✅ Complete
 > - T196: Node-level telemetry (shadow mode) ✅ Complete — nodes compute and expose recommended inflation via metrics but do not yet enact it
 > - T199: Epoch monetary state ✅ Complete — consensus-tracked per-epoch monetary state containing phase, fee coverage inputs, and chosen inflation rate
-> - T200–T201: Actual seigniorage/issuance wiring ⏳ Pending
+> - T200–T201: Seigniorage/issuance wiring ✅ Complete — validator reward distribution and application logic
+> - T202: EMA-based fee smoothing ✅ **Ready** — per-epoch EMA with phase-dependent λ integrated into monetary pipeline
 
-**MainNet v0 Monetary Epoch State** (T199):
+**MainNet v0 Monetary Epoch State** (T199 + T202):
 
-MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, fee coverage inputs, and chosen inflation rate. Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
+MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, EMA-smoothed fee inputs, and chosen inflation rate. Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
 
 | Aspect | MainNet v0 Behavior |
 | :--- | :--- |
 | **Epoch State** | `MonetaryEpochState` computed at each epoch boundary |
+| **EMA Smoothing** | `ema_fees_per_epoch` with phase-dependent λ (T202) |
 | **Default Mode** | Shadow (metrics + state, no balance changes) |
 | **Epoch Detection** | Height-based via `epoch_for_height(height, blocks_per_epoch)` |
 | **Inflation Calc** | Deterministic via `compute_epoch_state()` calling T195 engine |
@@ -256,6 +258,9 @@ MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containin
 | :--- | :--- | :--- |
 | **Initial Phase** | Bootstrap | Hard-coded |
 | **R_target (Bootstrap)** | 7.5–9.0% annual (PQC-adjusted) | Tunable within bounds |
+| **EMA λ (Bootstrap)** | 700 bps (7%) | Tunable [50, 1500] |
+| **EMA λ (Transition)** | 300 bps (3%) | Tunable [20, 500] |
+| **EMA λ (Mature)** | 150 bps (1.5%) | Tunable [10, 200] |
 | **Fee Burn Ratio** | 50% | Hard-coded (T193) |
 | **Proposer Reward Ratio** | 50% | Hard-coded (T193) |
 | **Validators Seigniorage Share** | 82% | Tunable [75%, 90%] |
