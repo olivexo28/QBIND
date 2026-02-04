@@ -258,7 +258,7 @@ fn test_validator_rewards_conservation_unequal_stakes() {
 
 /// Test: Zero stake produces zero issuance without panics.
 #[test]
-fn test_zero_stake_or_zero_issuance_behaviour_zero_stake() {
+fn test_zero_stake_or_zero_issuance_behavior_zero_stake() {
     let split = mainnet_split();
     let stakes: Vec<ValidatorStake> = vec![];
     let epoch_state = test_epoch_state(100, 0, 0.0775);
@@ -273,7 +273,7 @@ fn test_zero_stake_or_zero_issuance_behaviour_zero_stake() {
 
 /// Test: Zero inflation rate produces zero issuance.
 #[test]
-fn test_zero_stake_or_zero_issuance_behaviour_zero_inflation() {
+fn test_zero_stake_or_zero_issuance_behavior_zero_inflation() {
     let split = mainnet_split();
     let stakes = equal_validator_stakes(4, 1_000_000);
     let epoch_state = test_epoch_state(100, 1_000_000, 0.0); // 0% inflation
@@ -287,7 +287,7 @@ fn test_zero_stake_or_zero_issuance_behaviour_zero_inflation() {
 
 /// Test: Zero epochs per year produces zero issuance.
 #[test]
-fn test_zero_stake_or_zero_issuance_behaviour_zero_epochs() {
+fn test_zero_stake_or_zero_issuance_behavior_zero_epochs() {
     let split = mainnet_split();
     let stakes = equal_validator_stakes(4, 1_000_000);
     let epoch_state = test_epoch_state(100, 1_000_000, 0.0775);
@@ -301,7 +301,7 @@ fn test_zero_stake_or_zero_issuance_behaviour_zero_epochs() {
 
 /// Test: Empty validator set with non-zero stake.
 #[test]
-fn test_zero_stake_or_zero_issuance_behaviour_empty_validators() {
+fn test_zero_stake_or_zero_issuance_behavior_empty_validators() {
     let split = mainnet_split();
     let stakes: Vec<ValidatorStake> = vec![];
     let epoch_state = test_epoch_state(100, 1_000_000, 0.0775);
