@@ -192,6 +192,11 @@ pub fn compute_smoothed_annual_fee_revenue(
 ) -> u128 {
     // Option A: Simple annualization without smoothing
     // smoothed_annual_fee_revenue = fees_this_epoch * epochs_per_year
+    //
+    // Note: The `_previous_smoothed` and `_phase_params` parameters are included
+    // for forward compatibility with Option B EMA smoothing (T202–T205).
+    // When EMA is implemented, this function will use phase_params.fee_smoothing_half_life_days
+    // to compute λ and apply: new_smoothed = λ * annualized_fees + (1 - λ) * previous_smoothed
     raw_epoch_fees.saturating_mul(epochs_per_year as u128)
 }
 
@@ -235,12 +240,16 @@ pub fn compute_epoch_state(
 
     // Step 2: Compute fee coverage ratio
     // fee_coverage = smoothed_annual_fee_revenue / (staked_supply * r_target)
-    let fee_coverage_ratio = if inputs.staked_supply > 0 && params.r_target_annual > f64::EPSILON {
-        let security_budget = (inputs.staked_supply as f64) * params.r_target_annual;
-        (smoothed_annual_fee_revenue as f64) / security_budget
-    } else {
-        0.0
-    };
+    // Use a business-logic-based minimum (0.0001 = 0.01%) rather than f64::EPSILON
+    // since r_target_annual represents meaningful inflation rates (typically 1-12%).
+    const MIN_R_TARGET_FOR_COVERAGE: f64 = 0.0001;
+    let fee_coverage_ratio =
+        if inputs.staked_supply > 0 && params.r_target_annual > MIN_R_TARGET_FOR_COVERAGE {
+            let security_budget = (inputs.staked_supply as f64) * params.r_target_annual;
+            (smoothed_annual_fee_revenue as f64) / security_budget
+        } else {
+            0.0
+        };
 
     // Step 3: Build MonetaryInputs for T195 engine
     let monetary_inputs = MonetaryInputs {
