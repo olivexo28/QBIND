@@ -718,11 +718,19 @@ pub struct MonetaryState {
 
 **Scope**: Wire monetary policy into the reward distribution system.
 
-| Task | Deliverable | Acceptance |
-| :--- | :--- | :--- |
-| **T199** | Inflation calculation per epoch | Correct r_inf values in test scenarios |
-| **T200** | Seigniorage distribution to validators | Rewards credited correctly |
-| **T201** | Treasury/insurance/community routing | Funds routed to designated accounts |
+| Task | Deliverable | Acceptance | Status |
+| :--- | :--- | :--- | :--- |
+| **T199** | Inflation calculation per epoch | Correct r_inf values in test scenarios | ✅ **Implemented** |
+| **T200** | Seigniorage distribution to validators | Rewards credited correctly | ⏳ Pending |
+| **T201** | Treasury/insurance/community routing | Funds routed to designated accounts | ⏳ Pending |
+
+**T199 Implementation Notes** (2026-02-04):
+- Epoch-level, consensus-tracked monetary state added (`MonetaryEpochState`)
+- Deterministic `compute_epoch_state()` function bridges epoch inputs to T195 monetary engine
+- Epoch boundary detection via `epoch_for_height()` and `is_epoch_boundary()` helpers
+- MonetaryMode semantics integrated (Off/Shadow/Active)
+- Metrics extended with epoch-level gauges and counters
+- Seigniorage application remains pending (T200/T201)
 
 **Integration Points**:
 - Execution engine: Distribute rewards at epoch boundaries

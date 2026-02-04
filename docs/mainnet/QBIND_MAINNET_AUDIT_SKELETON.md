@@ -139,7 +139,9 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Monetary policy design specification (T194) — Design Ready
 - [x] Monetary engine core implementation (T195) — Engine Core Ready
 - [x] Monetary telemetry / shadow mode (T196) — Telemetry Ready (nodes compute recommended inflation but do not enact it)
-- [ ] Monetary policy wiring / seigniorage (T197+) — Wiring Pending
+- [x] Epoch monetary state (T199) — **Ready** (consensus-tracked per-epoch monetary state with phase, fee inputs, and inflation rate)
+- [ ] Seigniorage distribution to validators (T200) — Pending
+- [ ] Treasury/insurance/community routing (T201) — Pending
 - [ ] Fee market analysis under adversarial conditions
 - [ ] Mempool eviction rate limiting
 - [ ] External audit of fee accounting code
