@@ -35,6 +35,7 @@
 //! let chain_id = config.chain_id();
 //! ```
 
+use qbind_ledger::FeeDistributionPolicy;
 use qbind_types::{ChainId, NetworkEnvironment};
 use std::path::PathBuf;
 
@@ -796,6 +797,22 @@ pub struct NodeConfig {
     /// - TestNet Beta: `false` (disabled by default; opt-in available)
     /// - MainNet v0: `true` (enabled by default; operators can override)
     pub stage_b_enabled: bool,
+
+    // ========================================================================
+    // T193: Fee Distribution Policy Configuration
+    // ========================================================================
+    /// Fee distribution policy for transaction fees (T193).
+    ///
+    /// Determines how fees are split between burning (deflationary pressure)
+    /// and proposer rewards (incentive to include transactions).
+    ///
+    /// - DevNet v0: `burn_only()` (all fees burned, no proposer rewards)
+    /// - TestNet Alpha: `burn_only()` (all fees burned)
+    /// - TestNet Beta: `burn_only()` (all fees burned)
+    /// - MainNet v0: `mainnet_default()` (50% burn, 50% proposer)
+    ///
+    /// Only meaningful when `gas_enabled = true`.
+    pub fee_distribution_policy: FeeDistributionPolicy,
 }
 
 impl Default for NodeConfig {
@@ -819,6 +836,8 @@ impl Default for NodeConfig {
             dag_coupling_mode: DagCouplingMode::Off,
             // T186: Stage B disabled by default
             stage_b_enabled: false,
+            // T193: Burn-only fee distribution for DevNet
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
     }
 }
@@ -840,6 +859,7 @@ impl NodeConfig {
             dag_availability_enabled: false,
             dag_coupling_mode: DagCouplingMode::Off,
             stage_b_enabled: false,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
     }
 
@@ -860,6 +880,7 @@ impl NodeConfig {
             dag_availability_enabled: false,
             dag_coupling_mode: DagCouplingMode::Off,
             stage_b_enabled: false,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
     }
 
@@ -901,6 +922,7 @@ impl NodeConfig {
     /// - P2P: Disabled
     /// - DAG Coupling: Off (T189)
     /// - Stage B: Disabled (T186)
+    /// - Fee Distribution: Burn-only (T193)
     ///
     /// # Example
     ///
@@ -924,6 +946,7 @@ impl NodeConfig {
             dag_availability_enabled: false,
             dag_coupling_mode: DagCouplingMode::Off, // T189: Coupling disabled for DevNet
             stage_b_enabled: false,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
         }
     }
 
@@ -939,6 +962,7 @@ impl NodeConfig {
     /// - P2P: Disabled
     /// - DAG Coupling: Off (T189)
     /// - Stage B: Disabled (T186)
+    /// - Fee Distribution: Burn-only (T193)
     ///
     /// # Example
     ///
@@ -963,6 +987,7 @@ impl NodeConfig {
             dag_availability_enabled: false,
             dag_coupling_mode: DagCouplingMode::Off, // T189: Coupling disabled for Alpha
             stage_b_enabled: false,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
         }
     }
 
@@ -981,6 +1006,7 @@ impl NodeConfig {
     /// - DAG Availability: **Enabled by default**
     /// - DAG Coupling: **Off** (T189: optionally Warn for experiments)
     /// - Stage B: **Disabled by default** (T186: opt-in available for testing)
+    /// - Fee Distribution: **Burn-only** (T193: testing uses burn-only for simplicity)
     ///
     /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
     /// starting nodes, as Beta requires persistent state.
@@ -1015,6 +1041,7 @@ impl NodeConfig {
             dag_availability_enabled: true,
             dag_coupling_mode: DagCouplingMode::Off, // T189: Off for Beta (optionally Warn)
             stage_b_enabled: false,                  // T186: Disabled by default for Beta
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
         }
     }
 
@@ -1033,6 +1060,7 @@ impl NodeConfig {
     /// - DAG Availability: **Enabled (required)**
     /// - DAG Coupling: **Enforce (required)** (T189)
     /// - Stage B: **Enabled by default** (T186: parallel execution available)
+    /// - Fee Distribution: **50% burn / 50% proposer** (T193: MainNet default)
     ///
     /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
     /// starting nodes. MainNet validators cannot use in-memory-only storage.
@@ -1079,6 +1107,7 @@ impl NodeConfig {
             dag_availability_enabled: true,
             dag_coupling_mode: DagCouplingMode::Enforce, // T189: Required for MainNet
             stage_b_enabled: true,                       // T186: Enabled by default for MainNet
+            fee_distribution_policy: FeeDistributionPolicy::mainnet_default(), // T193: 50/50 split
         }
     }
 
@@ -1221,6 +1250,30 @@ impl NodeConfig {
     /// ```
     pub fn with_stage_b_enabled(mut self, enabled: bool) -> Self {
         self.stage_b_enabled = enabled;
+        self
+    }
+
+    /// Set the fee distribution policy (T193).
+    ///
+    /// Determines how transaction fees are split between burning and
+    /// proposer rewards.
+    ///
+    /// # Arguments
+    ///
+    /// * `policy` - The fee distribution policy to use
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_ledger::FeeDistributionPolicy;
+    ///
+    /// // Custom 70% burn, 30% proposer
+    /// let policy = FeeDistributionPolicy::new(7_000, 3_000);
+    /// let config = NodeConfig::testnet_beta_preset()
+    ///     .with_fee_distribution_policy(policy);
+    /// ```
+    pub fn with_fee_distribution_policy(mut self, policy: FeeDistributionPolicy) -> Self {
+        self.fee_distribution_policy = policy;
         self
     }
 
@@ -1367,6 +1420,11 @@ impl NodeConfig {
     ///
     /// The startup info string now also includes:
     /// - DAG coupling mode (dag_coupling=off/warn/enforce)
+    ///
+    /// # T193 Additions
+    ///
+    /// The startup info string now also includes:
+    /// - Fee distribution policy (fee_distribution=burn-only or burn=X% proposer=Y%)
     pub fn startup_info_string(&self, validator_id: Option<&str>) -> String {
         let validator_str = validator_id.unwrap_or("none");
         let chain_id_hex = format!("0x{:016x}", self.chain_id().as_u64());
@@ -1405,8 +1463,15 @@ impl NodeConfig {
             "disabled"
         };
 
+        // T193: Fee distribution policy
+        let fee_dist_str = if self.fee_distribution_policy.is_burn_only() {
+            "burn-only".to_string()
+        } else {
+            format!("{}", self.fee_distribution_policy)
+        };
+
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} mempool={} dag_availability={} dag_coupling={} stage_b={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} fee_distribution={} mempool={} dag_availability={} dag_coupling={} stage_b={}",
             validator_str,
             self.environment,
             chain_id_hex,
@@ -1416,6 +1481,7 @@ impl NodeConfig {
             p2p_info,
             gas_str,
             fee_priority_str,
+            fee_dist_str,
             self.mempool_mode,
             dag_availability_str,
             self.dag_coupling_mode,
@@ -1605,6 +1671,15 @@ impl NodeConfig {
             return Err(MainnetConfigError::MissingDataDir);
         }
 
+        // 10. Fee distribution must be MainNet default (T193)
+        let mainnet_policy = FeeDistributionPolicy::mainnet_default();
+        if self.fee_distribution_policy != mainnet_policy {
+            return Err(MainnetConfigError::WrongFeeDistributionPolicy {
+                expected: mainnet_policy,
+                actual: self.fee_distribution_policy,
+            });
+        }
+
         // T186: Stage B is allowed but not required for MainNet.
         // Log a warning if disabled, but do not fail startup.
         // Stage B is compiled and available; operators can choose to enable/disable it.
@@ -1696,6 +1771,15 @@ pub enum MainnetConfigError {
     /// MainNet validators must use persistent storage. In-memory-only
     /// nodes cannot safely participate in consensus.
     MissingDataDir,
+
+    /// Fee distribution policy is not the MainNet default (T193).
+    ///
+    /// MainNet requires the 50% burn / 50% proposer fee distribution
+    /// policy for economic integrity.
+    WrongFeeDistributionPolicy {
+        expected: FeeDistributionPolicy,
+        actual: FeeDistributionPolicy,
+    },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -1757,6 +1841,13 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: data directory must be configured (--data-dir=/path/to/data)"
+                )
+            }
+            MainnetConfigError::WrongFeeDistributionPolicy { expected, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: fee distribution policy must be {} but is {} (T193)",
+                    expected, actual
                 )
             }
         }

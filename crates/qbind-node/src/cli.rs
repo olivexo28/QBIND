@@ -40,6 +40,7 @@ use crate::node_config::{
     parse_mempool_mode, parse_network_mode, DagCouplingMode, MempoolMode, NetworkMode,
     NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
 };
+use qbind_ledger::FeeDistributionPolicy;
 
 // ============================================================================
 // CLI Arguments
@@ -399,6 +400,7 @@ impl CliArgs {
                 dag_availability_enabled: false,
                 dag_coupling_mode: DagCouplingMode::Off,
                 stage_b_enabled: false,
+                fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
             }
         };
 

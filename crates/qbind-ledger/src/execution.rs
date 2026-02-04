@@ -1630,7 +1630,7 @@ impl std::fmt::Display for VmV0Error {
 
 impl std::error::Error for VmV0Error {}
 
-/// Result of executing a VM v0 transaction (T163, T168).
+/// Result of executing a VM v0 transaction (T163, T168, T193).
 #[derive(Debug, Clone)]
 pub struct VmV0TxResult {
     /// Whether the transaction was successful.
@@ -1640,9 +1640,16 @@ pub struct VmV0TxResult {
     /// Gas used by this transaction (T168).
     /// Only meaningful when gas enforcement is enabled.
     pub gas_used: u64,
-    /// Fee paid (burned) by this transaction (T168).
+    /// Fee paid (total deducted from sender) by this transaction (T168).
     /// Only meaningful when gas enforcement is enabled.
+    /// This equals `fee_burned + fee_to_proposer`.
     pub fee_paid: u128,
+    /// Fee burned (removed from circulation) by this transaction (T193).
+    /// Only meaningful when gas enforcement is enabled.
+    pub fee_burned: u128,
+    /// Fee credited to block proposer by this transaction (T193).
+    /// Only meaningful when gas enforcement is enabled and proposer rewards are active.
+    pub fee_to_proposer: u128,
 }
 
 impl VmV0TxResult {
@@ -1653,16 +1660,43 @@ impl VmV0TxResult {
             error: None,
             gas_used: 0,
             fee_paid: 0,
+            fee_burned: 0,
+            fee_to_proposer: 0,
         }
     }
 
     /// Create a success result with gas information (T168).
+    /// Assumes all fees are burned (backward compatible).
     pub fn success_with_gas(gas_used: u64, fee_paid: u128) -> Self {
         Self {
             success: true,
             error: None,
             gas_used,
             fee_paid,
+            fee_burned: fee_paid, // Backward compatible: all burned
+            fee_to_proposer: 0,
+        }
+    }
+
+    /// Create a success result with full fee distribution (T193).
+    ///
+    /// # Arguments
+    ///
+    /// * `gas_used` - Gas consumed by the transaction
+    /// * `fee_burned` - Portion of fee that was burned
+    /// * `fee_to_proposer` - Portion of fee credited to proposer
+    pub fn success_with_fee_distribution(
+        gas_used: u64,
+        fee_burned: u128,
+        fee_to_proposer: u128,
+    ) -> Self {
+        Self {
+            success: true,
+            error: None,
+            gas_used,
+            fee_paid: fee_burned.saturating_add(fee_to_proposer),
+            fee_burned,
+            fee_to_proposer,
         }
     }
 
@@ -1673,6 +1707,8 @@ impl VmV0TxResult {
             error: Some(error),
             gas_used: 0,
             fee_paid: 0,
+            fee_burned: 0,
+            fee_to_proposer: 0,
         }
     }
 
@@ -1683,6 +1719,8 @@ impl VmV0TxResult {
             error: Some(error),
             gas_used,
             fee_paid: 0,
+            fee_burned: 0,
+            fee_to_proposer: 0,
         }
     }
 }
@@ -1885,10 +1923,31 @@ impl VmV0ExecutionEngine {
     /// Execute a transaction with gas enforcement (T168).
     ///
     /// This is the gas-aware execution path used when `gas_config.enabled = true`.
+    /// Uses burn-only fee distribution (backward compatible).
     fn execute_tx_with_gas<S: AccountStateUpdater>(
         &self,
         state: &mut S,
         tx: &QbindTransaction,
+    ) -> VmV0TxResult {
+        self.execute_tx_with_gas_and_proposer(state, tx, None)
+    }
+
+    /// Execute a transaction with gas enforcement and optional proposer reward (T168, T193).
+    ///
+    /// This is the gas-aware execution path that supports hybrid fee distribution.
+    /// When a proposer is provided and the fee policy has proposer rewards, the
+    /// proposer's account will be credited.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The mutable account state
+    /// * `tx` - The transaction to execute
+    /// * `proposer` - Optional proposer account to credit rewards to
+    fn execute_tx_with_gas_and_proposer<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        tx: &QbindTransaction,
+        proposer: Option<&AccountId>,
     ) -> VmV0TxResult {
         use crate::execution_gas::{
             compute_gas_for_vm_v0_tx, decode_transfer_payload, TransferPayloadDecoded,
@@ -1920,8 +1979,8 @@ impl VmV0ExecutionEngine {
         };
 
         // Step 4: Compute fee (fee = gas_cost * max_fee_per_gas)
-        let fee = (gas_cost as u128) * max_fee_per_gas;
-        let total_debit = amount.saturating_add(fee);
+        let total_fee = (gas_cost as u128) * max_fee_per_gas;
+        let total_debit = amount.saturating_add(total_fee);
 
         // Step 5: Fetch sender's current state
         let sender_state = state.get_account_state(&tx.sender);
@@ -1963,9 +2022,29 @@ impl VmV0ExecutionEngine {
         };
         state.set_account_state(&recipient, new_recipient_state);
 
-        // Success with gas information
-        // Note: Fee is burned (not credited to anyone) per TestNet policy
-        VmV0TxResult::success_with_gas(gas_cost, fee)
+        // Step 10: Distribute fee according to policy (T193)
+        let (fee_burned, fee_to_proposer) = self
+            .gas_config
+            .fee_distribution_policy
+            .distribute_fee(total_fee);
+
+        // Step 11: Credit proposer if there's a reward and proposer is provided
+        if fee_to_proposer > 0 {
+            if let Some(proposer_id) = proposer {
+                let proposer_state = state.get_account_state(proposer_id);
+                let new_proposer_state = AccountState {
+                    nonce: proposer_state.nonce,
+                    balance: proposer_state.balance + fee_to_proposer,
+                };
+                state.set_account_state(proposer_id, new_proposer_state);
+            }
+            // If no proposer provided but policy has proposer rewards, the rewards are
+            // effectively burned (this maintains backward compatibility for tests that
+            // don't provide a proposer).
+        }
+
+        // Success with full fee distribution information
+        VmV0TxResult::success_with_fee_distribution(gas_cost, fee_burned, fee_to_proposer)
     }
 
     /// Execute a block of transactions sequentially.
@@ -2044,6 +2123,117 @@ impl VmV0ExecutionEngine {
         results
     }
 
+    /// Execute a block with gas enforcement and proposer rewards (T193).
+    ///
+    /// This method is used when hybrid fee distribution is enabled.
+    /// A portion of transaction fees will be credited to the proposer's account.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The mutable account state
+    /// * `transactions` - The transactions to execute in order
+    /// * `proposer` - The block proposer's account ID (receives fee rewards)
+    ///
+    /// # Returns
+    ///
+    /// A vector of `VmV0TxResult` in the same order as the input transactions.
+    ///
+    /// # Fee Distribution
+    ///
+    /// For each successful transaction, the fee is split according to
+    /// `self.gas_config.fee_distribution_policy`:
+    /// - The burn portion is removed from circulation (sender pays, nobody receives)
+    /// - The proposer portion is credited to the proposer's account
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let engine = VmV0ExecutionEngine::with_gas_config(
+    ///     ExecutionGasConfig::mainnet()  // 50% burn, 50% proposer
+    /// );
+    ///
+    /// let proposer = test_account_id(0xFF);
+    /// let results = engine.execute_block_with_proposer(&mut state, &txs, &proposer);
+    ///
+    /// // Proposer should have received 50% of all fees
+    /// let proposer_balance = state.get_account_state(&proposer).balance;
+    /// ```
+    pub fn execute_block_with_proposer<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        transactions: &[QbindTransaction],
+        proposer: &AccountId,
+    ) -> Vec<VmV0TxResult> {
+        if !self.gas_config.enabled {
+            // If gas is disabled, no fees to distribute
+            return self.execute_block(state, transactions);
+        }
+
+        use crate::execution_gas::{compute_gas_for_vm_v0_tx, MINIMUM_GAS_LIMIT};
+
+        let block_gas_limit = self.gas_config.block_gas_limit;
+        let mut block_gas_used: u64 = 0;
+        let mut results = Vec::with_capacity(transactions.len());
+
+        for tx in transactions {
+            // Pre-compute gas cost to check block limit
+            let gas_cost = compute_gas_for_vm_v0_tx(tx)
+                .map(|r| r.gas_cost)
+                .unwrap_or(MINIMUM_GAS_LIMIT);
+
+            // Check if adding this tx would exceed block gas limit
+            if block_gas_used.saturating_add(gas_cost) > block_gas_limit {
+                break;
+            }
+
+            // Execute the transaction with proposer rewards
+            let result = self.execute_tx_with_gas_and_proposer(state, tx, Some(proposer));
+
+            if result.success {
+                block_gas_used = block_gas_used.saturating_add(result.gas_used);
+            }
+
+            results.push(result);
+        }
+
+        results
+    }
+
+    /// Execute a block with proposer rewards and return block statistics (T193).
+    ///
+    /// This variant returns both the transaction results and block-level statistics,
+    /// including the total fees credited to the proposer.
+    ///
+    /// # Arguments
+    ///
+    /// * `state` - The mutable account state
+    /// * `transactions` - The transactions to execute in order
+    /// * `proposer` - The block proposer's account ID (receives fee rewards)
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (results, stats) where:
+    /// - results: Vector of `VmV0TxResult` for each transaction
+    /// - stats: `VmV0BlockStats` with block-level gas and fee information
+    pub fn execute_block_with_proposer_and_stats<S: AccountStateUpdater>(
+        &self,
+        state: &mut S,
+        transactions: &[QbindTransaction],
+        proposer: &AccountId,
+    ) -> (Vec<VmV0TxResult>, VmV0BlockStats) {
+        let results = self.execute_block_with_proposer(state, transactions, proposer);
+
+        let stats = VmV0BlockStats {
+            total_gas_used: results.iter().map(|r| r.gas_used).sum(),
+            total_fees_burned: results.iter().map(|r| r.fee_burned).sum(),
+            total_fees_to_proposer: results.iter().map(|r| r.fee_to_proposer).sum(),
+            txs_executed: results.len(),
+            txs_succeeded: results.iter().filter(|r| r.success).count(),
+        };
+
+        (results, stats)
+    }
+
     /// Execute a block with gas enforcement and return block statistics (T168).
     ///
     /// This variant returns both the transaction results and block-level statistics.
@@ -2071,7 +2261,8 @@ impl VmV0ExecutionEngine {
 
         let stats = VmV0BlockStats {
             total_gas_used: results.iter().map(|r| r.gas_used).sum(),
-            total_fees_burned: results.iter().map(|r| r.fee_paid).sum(),
+            total_fees_burned: results.iter().map(|r| r.fee_burned).sum(),
+            total_fees_to_proposer: results.iter().map(|r| r.fee_to_proposer).sum(),
             txs_executed: results.len(),
             txs_succeeded: results.iter().filter(|r| r.success).count(),
         };
@@ -2080,17 +2271,27 @@ impl VmV0ExecutionEngine {
     }
 }
 
-/// Block-level execution statistics (T168).
+/// Block-level execution statistics (T168, T193).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VmV0BlockStats {
     /// Total gas used by all executed transactions.
     pub total_gas_used: u64,
     /// Total fees burned (removed from supply) by all transactions.
     pub total_fees_burned: u128,
+    /// Total fees credited to block proposer by all transactions (T193).
+    pub total_fees_to_proposer: u128,
     /// Number of transactions executed (may be less than submitted if block limit reached).
     pub txs_executed: usize,
     /// Number of transactions that succeeded.
     pub txs_succeeded: usize,
+}
+
+impl VmV0BlockStats {
+    /// Get the total fees charged (burned + proposer).
+    pub fn total_fees(&self) -> u128 {
+        self.total_fees_burned
+            .saturating_add(self.total_fees_to_proposer)
+    }
 }
 
 // ============================================================================
