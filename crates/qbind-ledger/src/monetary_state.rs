@@ -573,6 +573,385 @@ pub fn compute_validator_rewards(
 }
 
 // ============================================================================
+// T201: Seigniorage Application & Routing
+// ============================================================================
+
+use crate::monetary_engine::{
+    compute_seigniorage_split, MonetaryAccounts, MonetaryMode, SeigniorageAccounting,
+    SeigniorageSplit,
+};
+
+/// MainNet default seigniorage split: 82% validators, 12% treasury, 4% insurance, 2% community.
+///
+/// This follows the QBIND_MAINNET_V0_SPEC §4.1 parameters.
+pub const SEIGNIORAGE_SPLIT_MAINNET_T201: SeigniorageSplit = SeigniorageSplit {
+    validators_bps: 8_200, // 82%
+    treasury_bps: 1_200,   // 12%
+    insurance_bps: 400,    // 4%
+    community_bps: 200,    // 2%
+};
+
+/// Result of applying seigniorage at an epoch boundary.
+///
+/// This struct captures all computed values and the actions taken, allowing
+/// the caller to verify conservation invariants and update metrics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeigniorageApplicationResult {
+    /// The epoch index this result applies to.
+    pub epoch_index: u64,
+
+    /// Total issuance computed for this epoch.
+    pub total_issuance: u128,
+
+    /// Seigniorage accounting breakdown (validators/treasury/insurance/community).
+    pub accounting: SeigniorageAccounting,
+
+    /// Per-validator reward distribution (if computed).
+    /// This is `None` if the stake invariant check failed.
+    pub validator_distribution: Option<ValidatorRewardDistribution>,
+
+    /// Whether balance changes were actually applied.
+    /// `true` only when mode is Active and all computations succeeded.
+    pub balances_updated: bool,
+
+    /// The monetary mode under which this result was computed.
+    pub mode: MonetaryMode,
+}
+
+impl SeigniorageApplicationResult {
+    /// Create a result for Off mode (nothing computed or applied).
+    pub fn off_mode(epoch_index: u64) -> Self {
+        Self {
+            epoch_index,
+            total_issuance: 0,
+            accounting: SeigniorageAccounting::default(),
+            validator_distribution: None,
+            balances_updated: false,
+            mode: MonetaryMode::Off,
+        }
+    }
+
+    /// Create a result for a computed seigniorage (Shadow or Active mode).
+    pub fn computed(
+        epoch_index: u64,
+        total_issuance: u128,
+        accounting: SeigniorageAccounting,
+        validator_distribution: Option<ValidatorRewardDistribution>,
+        balances_updated: bool,
+        mode: MonetaryMode,
+    ) -> Self {
+        Self {
+            epoch_index,
+            total_issuance,
+            accounting,
+            validator_distribution,
+            balances_updated,
+            mode,
+        }
+    }
+
+    /// Check if the issuance conservation invariant holds.
+    ///
+    /// Returns `true` if the sum of all seigniorage buckets equals total_issuance.
+    pub fn is_conserved(&self) -> bool {
+        self.accounting.is_balanced()
+    }
+
+    /// Check if validator rewards conservation invariant holds.
+    ///
+    /// Returns `true` if:
+    /// - There is no validator distribution (empty validators or zero issuance), OR
+    /// - The sum of all validator rewards equals the validators bucket.
+    pub fn validator_rewards_conserved(&self) -> bool {
+        match &self.validator_distribution {
+            None => true, // No distribution means nothing to verify
+            Some(dist) => dist.total_distributed == self.accounting.to_validators,
+        }
+    }
+}
+
+/// Compute epoch seigniorage without applying balance changes.
+///
+/// This function performs all the T200/T201 calculations:
+/// 1. Compute epoch issuance from MonetaryEpochState
+/// 2. Split issuance among validators/treasury/insurance/community
+/// 3. Distribute validator slice to individual validators
+///
+/// It does NOT modify any account balances - that is the caller's responsibility
+/// when `mode == MonetaryMode::Active`.
+///
+/// # Arguments
+///
+/// * `epoch_state` - The computed monetary epoch state (from T199)
+/// * `epochs_per_year` - Number of epochs per year (for issuance calculation)
+/// * `split` - The seigniorage split configuration
+/// * `validator_stakes` - Slice of validator stakes (must be in deterministic order)
+/// * `mode` - The monetary mode (Off/Shadow/Active)
+///
+/// # Returns
+///
+/// A `SeigniorageApplicationResult` with all computed values.
+/// If mode is Off, returns an empty result with no computations.
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::monetary_state::{
+///     compute_epoch_seigniorage, MonetaryEpochState, ValidatorStake,
+///     SEIGNIORAGE_SPLIT_MAINNET_T201,
+/// };
+/// use qbind_ledger::MonetaryMode;
+///
+/// let mut state = MonetaryEpochState::default();
+/// state.epoch_index = 100;
+/// state.staked_supply = 10_000_000;
+/// state.decision.recommended_r_inf_annual = 0.0775;
+///
+/// let stakes = vec![
+///     ValidatorStake { validator_id: 1, stake: 5_000_000 },
+///     ValidatorStake { validator_id: 2, stake: 5_000_000 },
+/// ];
+///
+/// let result = compute_epoch_seigniorage(
+///     &state,
+///     100, // epochs per year
+///     &SEIGNIORAGE_SPLIT_MAINNET_T201,
+///     &stakes,
+///     MonetaryMode::Shadow,
+/// );
+///
+/// assert!(result.is_conserved());
+/// assert!(result.validator_rewards_conserved());
+/// ```
+pub fn compute_epoch_seigniorage(
+    epoch_state: &MonetaryEpochState,
+    epochs_per_year: u64,
+    split: &SeigniorageSplit,
+    validator_stakes: &[ValidatorStake],
+    mode: MonetaryMode,
+) -> SeigniorageApplicationResult {
+    // Off mode: do nothing
+    if mode == MonetaryMode::Off {
+        return SeigniorageApplicationResult::off_mode(epoch_state.epoch_index);
+    }
+
+    // Step 1: Compute epoch issuance
+    let total_issuance = compute_epoch_issuance(epoch_state, epochs_per_year);
+
+    // Step 2: Split issuance
+    let accounting = compute_seigniorage_split(total_issuance, split);
+
+    // Step 3: Compute validator rewards distribution
+    let validator_distribution = if accounting.to_validators > 0 && !validator_stakes.is_empty() {
+        let expected_stake = epoch_state.staked_supply;
+        compute_validator_rewards(accounting.to_validators, validator_stakes, expected_stake)
+    } else {
+        // Zero validators issuance or no validators - create empty distribution
+        if validator_stakes.is_empty() {
+            Some(ValidatorRewardDistribution {
+                rewards: vec![],
+                total_distributed: 0,
+                total_validators_issuance: accounting.to_validators,
+                expected_staked_supply: epoch_state.staked_supply,
+                actual_staked_supply: 0,
+            })
+        } else {
+            // Compute with zero issuance to get proper structure
+            compute_validator_rewards(0, validator_stakes, epoch_state.staked_supply)
+        }
+    };
+
+    // Balances are only updated in Active mode (by the caller after this returns)
+    let balances_updated = false;
+
+    SeigniorageApplicationResult::computed(
+        epoch_state.epoch_index,
+        total_issuance,
+        accounting,
+        validator_distribution,
+        balances_updated,
+        mode,
+    )
+}
+
+/// Trait for applying seigniorage balance changes to accounts.
+///
+/// This trait abstracts over the actual state mutation, allowing the
+/// seigniorage application logic to work with different state backends.
+pub trait SeigniorageStateMutator {
+    /// Credit an amount to an account, creating it if it doesn't exist.
+    ///
+    /// # Arguments
+    ///
+    /// * `account` - The 32-byte account identifier
+    /// * `amount` - The amount to credit
+    ///
+    /// # Returns
+    ///
+    /// `true` if the credit succeeded, `false` otherwise.
+    fn credit_account(&mut self, account: &[u8; 32], amount: u128) -> bool;
+}
+
+/// Apply seigniorage balance changes in Active mode.
+///
+/// This function takes a computed `SeigniorageApplicationResult` and applies
+/// the balance changes to the accounts via the provided state mutator.
+///
+/// # Arguments
+///
+/// * `result` - The computed seigniorage result (must have mode == Active)
+/// * `accounts` - The monetary accounts configuration (destination addresses)
+/// * `validator_accounts` - Function to look up validator staking account by ID
+/// * `state` - The state mutator for applying balance changes
+///
+/// # Returns
+///
+/// A new `SeigniorageApplicationResult` with `balances_updated = true` if successful,
+/// or the original result if mode is not Active or if any credit fails.
+///
+/// # Safety
+///
+/// This function MUST only be called when:
+/// - The result was computed with `mode == MonetaryMode::Active`
+/// - All monetary accounts are properly configured
+/// - The validator_accounts function returns valid addresses for all validators
+pub fn apply_seigniorage_balances<F>(
+    mut result: SeigniorageApplicationResult,
+    accounts: &MonetaryAccounts,
+    validator_accounts: F,
+    state: &mut impl SeigniorageStateMutator,
+) -> SeigniorageApplicationResult
+where
+    F: Fn(u64) -> [u8; 32],
+{
+    // Only apply balances in Active mode
+    if result.mode != MonetaryMode::Active {
+        return result;
+    }
+
+    // Skip if no issuance
+    if result.total_issuance == 0 {
+        result.balances_updated = true;
+        return result;
+    }
+
+    // Credit treasury
+    if result.accounting.to_treasury > 0 {
+        if !state.credit_account(&accounts.treasury, result.accounting.to_treasury) {
+            // TODO(T201): Add stricter error handling in production
+            eprintln!(
+                "[T201] Warning: Failed to credit treasury account, epoch={}",
+                result.epoch_index
+            );
+            return result;
+        }
+    }
+
+    // Credit insurance
+    if result.accounting.to_insurance > 0 {
+        if !state.credit_account(&accounts.insurance, result.accounting.to_insurance) {
+            eprintln!(
+                "[T201] Warning: Failed to credit insurance account, epoch={}",
+                result.epoch_index
+            );
+            return result;
+        }
+    }
+
+    // Credit community
+    if result.accounting.to_community > 0 {
+        if !state.credit_account(&accounts.community, result.accounting.to_community) {
+            eprintln!(
+                "[T201] Warning: Failed to credit community account, epoch={}",
+                result.epoch_index
+            );
+            return result;
+        }
+    }
+
+    // Credit individual validator rewards
+    if let Some(ref distribution) = result.validator_distribution {
+        for reward in &distribution.rewards {
+            if reward.reward > 0 {
+                let validator_account = validator_accounts(reward.validator_id);
+                if !state.credit_account(&validator_account, reward.reward) {
+                    eprintln!(
+                        "[T201] Warning: Failed to credit validator {} account, epoch={}",
+                        reward.validator_id, result.epoch_index
+                    );
+                    return result;
+                }
+            }
+        }
+    }
+
+    result.balances_updated = true;
+    result
+}
+
+/// Process epoch boundary seigniorage based on monetary mode.
+///
+/// This is the top-level function that handles the complete T201 workflow:
+///
+/// - **Off mode**: Returns immediately with no computation
+/// - **Shadow mode**: Computes seigniorage and returns result (no balance changes)
+/// - **Active mode**: Computes seigniorage and applies balance changes
+///
+/// # Arguments
+///
+/// * `epoch_state` - The computed monetary epoch state (from T199)
+/// * `epochs_per_year` - Number of epochs per year
+/// * `split` - The seigniorage split configuration
+/// * `validator_stakes` - Slice of validator stakes
+/// * `mode` - The monetary mode
+/// * `accounts` - Optional monetary accounts (required for Active mode)
+/// * `validator_accounts` - Function to look up validator account by ID
+/// * `state` - Optional state mutator (required for Active mode)
+///
+/// # Returns
+///
+/// A `SeigniorageApplicationResult` describing what was computed and applied.
+///
+/// # Panics
+///
+/// Does not panic. If Active mode is used without accounts or state, balance
+/// changes are simply not applied (logged as warnings).
+pub fn process_epoch_seigniorage<F, S>(
+    epoch_state: &MonetaryEpochState,
+    epochs_per_year: u64,
+    split: &SeigniorageSplit,
+    validator_stakes: &[ValidatorStake],
+    mode: MonetaryMode,
+    accounts: Option<&MonetaryAccounts>,
+    validator_accounts: F,
+    state: Option<&mut S>,
+) -> SeigniorageApplicationResult
+where
+    F: Fn(u64) -> [u8; 32],
+    S: SeigniorageStateMutator,
+{
+    // Compute seigniorage (Off mode returns early)
+    let result = compute_epoch_seigniorage(epoch_state, epochs_per_year, split, validator_stakes, mode);
+
+    // For Shadow mode or Off mode, return the result as-is
+    if mode != MonetaryMode::Active {
+        return result;
+    }
+
+    // Active mode: apply balance changes if we have accounts and state
+    match (accounts, state) {
+        (Some(accts), Some(s)) => apply_seigniorage_balances(result, accts, validator_accounts, s),
+        _ => {
+            eprintln!(
+                "[T201] Warning: Active mode but missing accounts or state, epoch={}",
+                result.epoch_index
+            );
+            result
+        }
+    }
+}
+
+// ============================================================================
 // Unit Tests
 // ============================================================================
 

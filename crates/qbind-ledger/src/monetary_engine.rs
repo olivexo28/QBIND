@@ -714,6 +714,27 @@ impl MonetaryAccounts {
             && self.treasury != self.community
             && self.insurance != self.community
     }
+
+    /// Check if any account is the zero address (all zeros).
+    ///
+    /// For MainNet, all monetary accounts must be non-zero addresses.
+    /// This validation is required for T201 seigniorage routing.
+    pub fn has_zero_address(&self) -> bool {
+        let zero = [0u8; 32];
+        self.validator_pool == zero
+            || self.treasury == zero
+            || self.insurance == zero
+            || self.community == zero
+    }
+
+    /// Check if all accounts are valid for MainNet use (T201).
+    ///
+    /// Returns `true` if:
+    /// - All accounts are distinct
+    /// - No account is the zero address
+    pub fn is_valid_for_mainnet(&self) -> bool {
+        self.all_distinct() && !self.has_zero_address()
+    }
 }
 
 // ============================================================================
