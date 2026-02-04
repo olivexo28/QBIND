@@ -327,6 +327,252 @@ pub fn is_epoch_boundary(height: u64, last_epoch: u64, blocks_per_epoch: u64) ->
 }
 
 // ============================================================================
+// T200: Epoch Issuance Computation
+// ============================================================================
+
+/// Number of epochs per year for MainNet (assuming 10-minute epochs).
+/// 365 days × 24 hours × 6 epochs/hour = 52,560 epochs/year.
+/// This is the constant from the design doc: QBIND_MONETARY_POLICY_DESIGN.md §4.2.
+pub const MAINNET_EPOCHS_PER_YEAR: u64 = 52_560;
+
+/// Compute the total issuance for a single epoch.
+///
+/// This implements the epoch issuance formula from QBIND_MONETARY_POLICY_DESIGN.md §4.2:
+/// ```text
+/// issuance_epoch = r_inf × S_t / epochs_per_year
+/// ```
+///
+/// # Arguments
+///
+/// * `epoch_state` - The computed monetary epoch state (from T199)
+/// * `epochs_per_year` - Number of epochs per year (use `MAINNET_EPOCHS_PER_YEAR` for production)
+///
+/// # Returns
+///
+/// The total issuance for this epoch in base token units.
+///
+/// # Algorithm
+///
+/// Uses integer arithmetic with basis points (bps) for determinism:
+/// 1. Get r_inf_annual_bps (e.g., 775 bps = 7.75%)
+/// 2. Compute: issuance = (staked_supply × r_inf_bps) / (epochs_per_year × 10,000)
+///
+/// The division by 10,000 converts from basis points to a fraction.
+///
+/// # Overflow Safety
+///
+/// Uses `saturating_mul` and `checked_div` to prevent overflow.
+/// For realistic MainNet values (staked_supply ≤ 10^18, r_inf_bps ≤ 12,000),
+/// the intermediate product fits comfortably in u128.
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::monetary_state::{compute_epoch_issuance, MonetaryEpochState, MAINNET_EPOCHS_PER_YEAR};
+///
+/// let mut state = MonetaryEpochState::default();
+/// state.staked_supply = 1_000_000_000_000; // 1 trillion tokens
+/// state.decision.recommended_r_inf_annual = 0.0775; // 7.75%
+///
+/// let issuance = compute_epoch_issuance(&state, MAINNET_EPOCHS_PER_YEAR);
+/// // issuance ≈ 1e12 × 0.0775 / 52560 ≈ 1,474,924 tokens per epoch
+/// assert!(issuance > 1_000_000); // Approximately 1.47M per epoch
+/// ```
+pub fn compute_epoch_issuance(epoch_state: &MonetaryEpochState, epochs_per_year: u64) -> u128 {
+    if epochs_per_year == 0 {
+        return 0;
+    }
+
+    let staked_supply = epoch_state.staked_supply;
+    let r_inf_bps = epoch_state.r_inf_annual_bps() as u128;
+
+    // issuance = (staked_supply × r_inf_bps) / (epochs_per_year × 10,000)
+    // We use saturating_mul for safety, though overflow is unlikely for realistic values.
+    let numerator = staked_supply.saturating_mul(r_inf_bps);
+    let denominator = (epochs_per_year as u128).saturating_mul(10_000);
+
+    // Note: denominator cannot be zero here since epochs_per_year > 0 (checked above)
+    // and 10_000 is a constant. Using standard division.
+    numerator / denominator
+}
+
+// ============================================================================
+// T200: Validator Reward Distribution
+// ============================================================================
+
+/// Represents a single validator's stake for reward distribution.
+///
+/// This is a lightweight struct used as input to `compute_validator_rewards`.
+/// The `validator_id` is a u64 matching the consensus layer's `ValidatorId` type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValidatorStake {
+    /// The validator's unique identifier.
+    pub validator_id: u64,
+    /// The validator's staked amount in base token units.
+    pub stake: u128,
+}
+
+/// Represents a computed reward for a single validator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ValidatorReward {
+    /// The validator's unique identifier.
+    pub validator_id: u64,
+    /// The reward amount in base token units.
+    pub reward: u128,
+}
+
+/// Result of computing validator rewards for an epoch.
+///
+/// This struct contains:
+/// - The per-validator reward amounts
+/// - Accounting totals for audit/verification
+///
+/// # Invariant
+///
+/// The sum of all `rewards[i].reward` must equal `total_distributed`.
+/// Call `is_balanced()` to verify this invariant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorRewardDistribution {
+    /// Per-validator reward amounts (same order as input stakes).
+    pub rewards: Vec<ValidatorReward>,
+    /// Total amount distributed (should equal sum of all rewards).
+    pub total_distributed: u128,
+    /// Input total validators issuance (for reference).
+    pub total_validators_issuance: u128,
+    /// Input expected staked supply (for reference).
+    pub expected_staked_supply: u128,
+    /// Actual sum of stakes from input (for invariant checking).
+    pub actual_staked_supply: u128,
+}
+
+impl ValidatorRewardDistribution {
+    /// Check if the distribution is balanced (all rewards sum to total_distributed).
+    pub fn is_balanced(&self) -> bool {
+        let sum: u128 = self.rewards.iter().map(|r| r.reward).sum();
+        sum == self.total_distributed
+    }
+
+    /// Check if the stake invariant holds (actual stake matches expected).
+    pub fn stake_invariant_ok(&self) -> bool {
+        self.actual_staked_supply == self.expected_staked_supply
+    }
+}
+
+/// Compute per-validator rewards from the total validators' issuance.
+///
+/// This function distributes `total_validators_issuance` tokens among validators
+/// proportionally to their stake.
+///
+/// # Algorithm
+///
+/// Uses integer arithmetic only for determinism:
+/// 1. Validate that sum of stakes equals `expected_staked_supply`
+/// 2. For each validator i: reward_i = floor(total_issuance × stake_i / total_stake)
+/// 3. Assign any remainder to the last validator (deterministic ordering)
+///
+/// This guarantees:
+/// - All reward amounts are ≥ 0
+/// - Sum of rewards equals exactly `total_validators_issuance`
+/// - Results are deterministic for the same inputs
+///
+/// # Arguments
+///
+/// * `total_validators_issuance` - Total tokens to distribute to validators
+/// * `stakes` - Slice of validator stakes. **Note**: For consensus determinism, the caller
+///   must ensure this slice has a consistent ordering across all validators (e.g., sorted
+///   by `validator_id`). This function does not enforce ordering.
+/// * `expected_staked_supply` - Expected sum of all stakes (for invariant checking)
+///
+/// # Returns
+///
+/// * `Some(ValidatorRewardDistribution)` if the stake invariant holds
+/// * `None` if `sum(stakes)` does not equal `expected_staked_supply`
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::monetary_state::{compute_validator_rewards, ValidatorStake};
+///
+/// let stakes = vec![
+///     ValidatorStake { validator_id: 1, stake: 100 },
+///     ValidatorStake { validator_id: 2, stake: 200 },
+///     ValidatorStake { validator_id: 3, stake: 300 },
+/// ];
+///
+/// let distribution = compute_validator_rewards(600, &stakes, 600).unwrap();
+///
+/// assert_eq!(distribution.rewards[0].reward, 100); // 1/6 of 600
+/// assert_eq!(distribution.rewards[1].reward, 200); // 2/6 of 600
+/// assert_eq!(distribution.rewards[2].reward, 300); // 3/6 of 600
+/// assert!(distribution.is_balanced());
+/// ```
+pub fn compute_validator_rewards(
+    total_validators_issuance: u128,
+    stakes: &[ValidatorStake],
+    expected_staked_supply: u128,
+) -> Option<ValidatorRewardDistribution> {
+    // Calculate actual staked supply
+    let actual_staked_supply: u128 = stakes.iter().map(|s| s.stake).sum();
+
+    // Check stake invariant
+    if actual_staked_supply != expected_staked_supply {
+        return None;
+    }
+
+    // Handle edge cases
+    if stakes.is_empty() || actual_staked_supply == 0 || total_validators_issuance == 0 {
+        let rewards: Vec<ValidatorReward> = stakes
+            .iter()
+            .map(|s| ValidatorReward {
+                validator_id: s.validator_id,
+                reward: 0,
+            })
+            .collect();
+
+        return Some(ValidatorRewardDistribution {
+            rewards,
+            total_distributed: 0,
+            total_validators_issuance,
+            expected_staked_supply,
+            actual_staked_supply,
+        });
+    }
+
+    // Compute per-validator rewards using floor division
+    let mut rewards = Vec::with_capacity(stakes.len());
+    let mut allocated: u128 = 0;
+
+    for stake in stakes.iter() {
+        // reward_i = floor(total_issuance × stake_i / total_stake)
+        let reward = total_validators_issuance
+            .saturating_mul(stake.stake)
+            .saturating_div(actual_staked_supply);
+
+        rewards.push(ValidatorReward {
+            validator_id: stake.validator_id,
+            reward,
+        });
+
+        allocated = allocated.saturating_add(reward);
+    }
+
+    // Assign remainder to the last validator for exact conservation
+    let remainder = total_validators_issuance.saturating_sub(allocated);
+    if remainder > 0 && !rewards.is_empty() {
+        let last_idx = rewards.len() - 1;
+        rewards[last_idx].reward = rewards[last_idx].reward.saturating_add(remainder);
+    }
+
+    Some(ValidatorRewardDistribution {
+        rewards,
+        total_distributed: total_validators_issuance,
+        total_validators_issuance,
+        expected_staked_supply,
+        actual_staked_supply,
+    })
+}
+
+// ============================================================================
 // Unit Tests
 // ============================================================================
 
@@ -562,5 +808,255 @@ mod tests {
         assert_eq!(state.smoothed_annual_fee_revenue, 0);
         assert_eq!(state.staked_supply, 0);
         assert_eq!(state.fee_coverage_ratio, 0.0);
+    }
+
+    // ========================================================================
+    // T200: Epoch Issuance Tests
+    // ========================================================================
+
+    #[test]
+    fn test_compute_epoch_issuance_basic() {
+        let mut state = MonetaryEpochState::default();
+        state.staked_supply = 1_000_000_000; // 1 billion tokens
+        state.decision.recommended_r_inf_annual = 0.0775; // 7.75%
+
+        // Using 100 epochs/year for simple math
+        // issuance = (1e9 * 775) / (100 * 10000) = 775e9 / 1e6 = 775_000
+        let issuance = compute_epoch_issuance(&state, 100);
+        assert_eq!(issuance, 775_000);
+    }
+
+    #[test]
+    fn test_compute_epoch_issuance_mainnet_values() {
+        let mut state = MonetaryEpochState::default();
+        state.staked_supply = 1_000_000_000_000; // 1 trillion tokens
+        state.decision.recommended_r_inf_annual = 0.0775; // 7.75% = 775 bps
+
+        // With MAINNET_EPOCHS_PER_YEAR = 52,560:
+        // r_inf_bps = round(0.0775 * 10000) = 775
+        // issuance = (1e12 * 775) / (52560 * 10000)
+        // = 775_000_000_000_000 / 525_600_000 = 1_474_505 (floor division)
+        let issuance = compute_epoch_issuance(&state, MAINNET_EPOCHS_PER_YEAR);
+
+        assert_eq!(issuance, 1_474_505);
+    }
+
+    #[test]
+    fn test_compute_epoch_issuance_zero_stake() {
+        let mut state = MonetaryEpochState::default();
+        state.staked_supply = 0;
+        state.decision.recommended_r_inf_annual = 0.0775;
+
+        let issuance = compute_epoch_issuance(&state, 100);
+        assert_eq!(issuance, 0);
+    }
+
+    #[test]
+    fn test_compute_epoch_issuance_zero_inflation() {
+        let mut state = MonetaryEpochState::default();
+        state.staked_supply = 1_000_000_000;
+        state.decision.recommended_r_inf_annual = 0.0;
+
+        let issuance = compute_epoch_issuance(&state, 100);
+        assert_eq!(issuance, 0);
+    }
+
+    #[test]
+    fn test_compute_epoch_issuance_zero_epochs_per_year() {
+        let mut state = MonetaryEpochState::default();
+        state.staked_supply = 1_000_000_000;
+        state.decision.recommended_r_inf_annual = 0.0775;
+
+        // Edge case: should return 0, not panic
+        let issuance = compute_epoch_issuance(&state, 0);
+        assert_eq!(issuance, 0);
+    }
+
+    #[test]
+    fn test_compute_epoch_issuance_large_values() {
+        let mut state = MonetaryEpochState::default();
+        // Large but realistic value (100 trillion tokens)
+        state.staked_supply = 100_000_000_000_000;
+        state.decision.recommended_r_inf_annual = 0.12; // 12% = max cap
+
+        let issuance = compute_epoch_issuance(&state, MAINNET_EPOCHS_PER_YEAR);
+
+        // Should not overflow and produce reasonable value
+        // issuance = 100e12 * 1200 / (52560 * 10000) = 1.2e17 / 5.256e8 ≈ 228,310,502
+        assert!(issuance > 0);
+        assert!(issuance < state.staked_supply);
+    }
+
+    // ========================================================================
+    // T200: Validator Reward Distribution Tests
+    // ========================================================================
+
+    #[test]
+    fn test_compute_validator_rewards_basic() {
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 100 },
+            ValidatorStake { validator_id: 2, stake: 200 },
+            ValidatorStake { validator_id: 3, stake: 300 },
+        ];
+
+        let distribution = compute_validator_rewards(600, &stakes, 600).unwrap();
+
+        assert_eq!(distribution.rewards.len(), 3);
+        assert_eq!(distribution.rewards[0].validator_id, 1);
+        assert_eq!(distribution.rewards[0].reward, 100); // 100/600 * 600 = 100
+        assert_eq!(distribution.rewards[1].validator_id, 2);
+        assert_eq!(distribution.rewards[1].reward, 200); // 200/600 * 600 = 200
+        assert_eq!(distribution.rewards[2].validator_id, 3);
+        assert_eq!(distribution.rewards[2].reward, 300); // 300/600 * 600 = 300
+
+        assert!(distribution.is_balanced());
+        assert!(distribution.stake_invariant_ok());
+        assert_eq!(distribution.total_distributed, 600);
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_with_rounding() {
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 100 },
+            ValidatorStake { validator_id: 2, stake: 100 },
+            ValidatorStake { validator_id: 3, stake: 100 },
+        ];
+
+        // 1000 tokens split 3 ways = 333 each, remainder 1 to last
+        let distribution = compute_validator_rewards(1000, &stakes, 300).unwrap();
+
+        assert_eq!(distribution.rewards[0].reward, 333);
+        assert_eq!(distribution.rewards[1].reward, 333);
+        assert_eq!(distribution.rewards[2].reward, 334); // Gets remainder
+
+        assert!(distribution.is_balanced());
+        assert_eq!(distribution.total_distributed, 1000);
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_stake_mismatch() {
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 100 },
+            ValidatorStake { validator_id: 2, stake: 200 },
+        ];
+
+        // Expected stake doesn't match actual (300 != 500)
+        let result = compute_validator_rewards(600, &stakes, 500);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_empty_stakes() {
+        let stakes: Vec<ValidatorStake> = vec![];
+
+        let distribution = compute_validator_rewards(1000, &stakes, 0).unwrap();
+
+        assert!(distribution.rewards.is_empty());
+        assert_eq!(distribution.total_distributed, 0);
+        assert!(distribution.is_balanced());
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_zero_issuance() {
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 100 },
+            ValidatorStake { validator_id: 2, stake: 200 },
+        ];
+
+        let distribution = compute_validator_rewards(0, &stakes, 300).unwrap();
+
+        assert_eq!(distribution.rewards[0].reward, 0);
+        assert_eq!(distribution.rewards[1].reward, 0);
+        assert_eq!(distribution.total_distributed, 0);
+        assert!(distribution.is_balanced());
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_single_validator() {
+        let stakes = vec![ValidatorStake { validator_id: 42, stake: 1000 }];
+
+        let distribution = compute_validator_rewards(5000, &stakes, 1000).unwrap();
+
+        assert_eq!(distribution.rewards.len(), 1);
+        assert_eq!(distribution.rewards[0].validator_id, 42);
+        assert_eq!(distribution.rewards[0].reward, 5000);
+        assert!(distribution.is_balanced());
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_conservation() {
+        // Test with various issuance amounts to ensure conservation
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 17 },
+            ValidatorStake { validator_id: 2, stake: 23 },
+            ValidatorStake { validator_id: 3, stake: 41 },
+            ValidatorStake { validator_id: 4, stake: 19 },
+        ];
+        let total_stake: u128 = stakes.iter().map(|s| s.stake).sum();
+
+        for issuance in [0, 1, 7, 100, 999, 1000, 10007, 1_000_000] {
+            let distribution = compute_validator_rewards(issuance, &stakes, total_stake).unwrap();
+
+            let sum_rewards: u128 = distribution.rewards.iter().map(|r| r.reward).sum();
+            assert_eq!(
+                sum_rewards, issuance,
+                "Conservation failed for issuance {}",
+                issuance
+            );
+            assert!(distribution.is_balanced());
+        }
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_deterministic() {
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 123 },
+            ValidatorStake { validator_id: 2, stake: 456 },
+            ValidatorStake { validator_id: 3, stake: 789 },
+        ];
+        let total_stake: u128 = stakes.iter().map(|s| s.stake).sum();
+
+        let dist1 = compute_validator_rewards(10000, &stakes, total_stake).unwrap();
+        let dist2 = compute_validator_rewards(10000, &stakes, total_stake).unwrap();
+
+        assert_eq!(dist1, dist2, "Results should be deterministic");
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_large_values() {
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 10_000_000_000_000 },
+            ValidatorStake { validator_id: 2, stake: 20_000_000_000_000 },
+            ValidatorStake { validator_id: 3, stake: 30_000_000_000_000 },
+        ];
+        let total_stake: u128 = stakes.iter().map(|s| s.stake).sum(); // 60 trillion
+
+        // Distribute 1 trillion tokens
+        let distribution = compute_validator_rewards(1_000_000_000_000, &stakes, total_stake).unwrap();
+
+        // 1/6 of 1 trillion = ~166.67 billion
+        assert!(distribution.rewards[0].reward > 166_000_000_000);
+        assert!(distribution.rewards[0].reward < 167_000_000_000);
+
+        assert!(distribution.is_balanced());
+        assert_eq!(distribution.total_distributed, 1_000_000_000_000);
+    }
+
+    #[test]
+    fn test_compute_validator_rewards_unequal_stakes() {
+        // One validator has vastly more stake than others
+        let stakes = vec![
+            ValidatorStake { validator_id: 1, stake: 1 },
+            ValidatorStake { validator_id: 2, stake: 1 },
+            ValidatorStake { validator_id: 3, stake: 999_998 },
+        ];
+
+        let distribution = compute_validator_rewards(1_000_000, &stakes, 1_000_000).unwrap();
+
+        // Validator 3 should get almost all the rewards
+        assert_eq!(distribution.rewards[0].reward, 1);
+        assert_eq!(distribution.rewards[1].reward, 1);
+        assert_eq!(distribution.rewards[2].reward, 999_998);
+        assert!(distribution.is_balanced());
     }
 }
