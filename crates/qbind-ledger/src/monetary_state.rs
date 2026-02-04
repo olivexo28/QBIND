@@ -391,10 +391,8 @@ pub fn compute_epoch_issuance(epoch_state: &MonetaryEpochState, epochs_per_year:
     let numerator = staked_supply.saturating_mul(r_inf_bps);
     let denominator = (epochs_per_year as u128).saturating_mul(10_000);
 
-    if denominator == 0 {
-        return 0;
-    }
-
+    // Note: denominator cannot be zero here since epochs_per_year > 0 (checked above)
+    // and 10_000 is a constant. Using standard division.
     numerator / denominator
 }
 
@@ -480,7 +478,9 @@ impl ValidatorRewardDistribution {
 /// # Arguments
 ///
 /// * `total_validators_issuance` - Total tokens to distribute to validators
-/// * `stakes` - Slice of validator stakes (must be sorted by validator_id for determinism)
+/// * `stakes` - Slice of validator stakes. **Note**: For consensus determinism, the caller
+///   must ensure this slice has a consistent ordering across all validators (e.g., sorted
+///   by `validator_id`). This function does not enforce ordering.
 /// * `expected_staked_supply` - Expected sum of all stakes (for invariant checking)
 ///
 /// # Returns

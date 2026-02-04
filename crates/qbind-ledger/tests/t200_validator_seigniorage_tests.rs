@@ -209,19 +209,22 @@ fn test_rewards_proportional_to_stake() {
 /// Test: Rounding remainder goes to last validator (deterministic).
 #[test]
 fn test_rounding_remainder_assignment() {
-    // 7 validators with equal stake, distribute 1000 tokens
-    // 1000 / 7 = 142 each, remainder 6 goes to last
+    // 7 validators with 100 stake each = 700 total stake, distribute 1000 tokens
+    // Each validator gets: floor(1000 * 100 / 700) = floor(142.857...) = 142
+    // Total allocated: 7 * 142 = 994
+    // Remainder: 1000 - 994 = 6
+    // Last validator gets: 142 + 6 = 148
     let stakes: Vec<ValidatorStake> = (1..=7)
         .map(|id| ValidatorStake { validator_id: id, stake: 100 })
         .collect();
 
     let distribution = compute_validator_rewards(1000, &stakes, 700).unwrap();
 
-    // First 6 get floor(1000 * 100 / 700) = floor(142.857) = 142
+    // First 6 get floor(1000 * 100 / 700) = 142
     for i in 0..6 {
         assert_eq!(distribution.rewards[i].reward, 142);
     }
-    // Last gets 142 + remainder = 142 + 148 = 148
+    // Last gets 142 + remainder (6) = 148
     assert_eq!(distribution.rewards[6].reward, 148);
 
     // Total must be exactly 1000
