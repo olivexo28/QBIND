@@ -132,9 +132,12 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ Gas property tests (T179)
 - ✅ Fee-market cluster tests (T181)
 - ✅ Hybrid fee distribution implemented (T193)
+- ✅ **Monetary policy design complete (T194)** — see [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md)
 
 **Additional MainNet Requirements**:
 - [x] Hybrid fee distribution (burn + proposer) implementation (T193)
+- [x] Monetary policy design specification (T194) — Design ready; implementation pending T195+
+- [ ] Monetary policy implementation (T195–T205)
 - [ ] Fee market analysis under adversarial conditions
 - [ ] Mempool eviction rate limiting
 - [ ] External audit of fee accounting code
@@ -398,6 +401,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T190** | **Consensus** | **Proposer-side enforcement (certified frontier)** | **MN-R1** |
 | **T191** | **Consensus** | **Validator-side enforcement (verify certs before vote)** | **MN-R1** |
 | **T192** | **Observability** | **Block-level invariant probes & metrics** | **MN-R1** |
+| **T194** | **Design** | **Monetary policy & monetary engine design** | **MN-R2** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 
@@ -425,6 +429,15 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - T192: Block-level invariant probes, metrics, and unit tests
 >
 > See [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) for the design specification.
+>
+> **Note**: Monetary policy and monetary engine design completed in T194. This provides:
+> - Three-phase model (Bootstrap / Transition / Mature) with time and economic readiness gates
+> - PQC-adjusted inflation targets and EMA-based fee smoothing
+> - Seigniorage allocation and integration with hybrid fee distribution (T193)
+> - Parameter classification (hard-coded vs governance-tunable vs future/oracle-driven)
+> - Implementation roadmap for T195+ tasks
+>
+> See [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) for the design specification.
 
 ---
 
@@ -439,6 +452,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 - [QBIND TestNet Alpha Audit](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md) — Alpha risks
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet baseline
 - [QBIND DevNet Audit](../devnet/QBIND_DEVNET_AUDIT.md) — DevNet risks
+- [QBIND Monetary Policy Design](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — Monetary policy specification (T194)
 
 ### 6.2 References To This Document
 
@@ -446,6 +460,7 @@ The following documents should reference this MainNet audit:
 
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1
+- [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — References audit for MN-R2
 - [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) — "Path to MainNet" section
 - [QBIND_DEVNET_V0_FREEZE.md](../devnet/QBIND_DEVNET_V0_FREEZE.md) — Roadmap summary
 - [QBIND_TESTNET_ALPHA_AUDIT.md](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md) — Roadmap section
