@@ -40,7 +40,7 @@ use crate::node_config::{
     parse_mempool_mode, parse_network_mode, DagCouplingMode, MempoolMode, NetworkMode,
     NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
 };
-use qbind_ledger::FeeDistributionPolicy;
+use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 
 // ============================================================================
 // CLI Arguments
@@ -155,6 +155,20 @@ pub struct CliArgs {
     pub dag_coupling_mode: Option<String>,
 
     // ========================================================================
+    // T197: Monetary Mode
+    // ========================================================================
+    /// Monetary engine mode: off, shadow, or active.
+    ///
+    /// Controls the monetary engine's behavior:
+    /// - off: No decisions, no metrics, no issuance (DevNet default)
+    /// - shadow: Decisions + metrics only, no state changes (TestNet default)
+    /// - active: Decisions + metrics + minting + seigniorage split
+    ///
+    /// MainNet profile requires at least `shadow` mode (cannot be `off`).
+    #[arg(long = "monetary-mode")]
+    pub monetary_mode: Option<String>,
+
+    // ========================================================================
     // Network Mode & P2P
     // ========================================================================
     /// Network mode: local-mesh or p2p.
@@ -255,6 +269,8 @@ pub enum CliError {
     MainnetConfigInvalid(String),
     /// Invalid DAG coupling mode string (T189).
     InvalidDagCouplingMode(String),
+    /// Invalid monetary mode string (T197).
+    InvalidMonetaryMode(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -283,6 +299,13 @@ impl std::fmt::Display for CliError {
                 write!(
                     f,
                     "invalid dag-coupling-mode '{}': expected 'off', 'warn', or 'enforce'",
+                    s
+                )
+            }
+            CliError::InvalidMonetaryMode(s) => {
+                write!(
+                    f,
+                    "invalid monetary-mode '{}': expected 'off', 'shadow', or 'active'",
                     s
                 )
             }
@@ -401,6 +424,10 @@ impl CliArgs {
                 dag_coupling_mode: DagCouplingMode::Off,
                 stage_b_enabled: false,
                 fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
+                // T197: Default to Off for backward compatibility
+                monetary_mode: MonetaryMode::Off,
+                monetary_accounts: None,
+                seigniorage_split: SeigniorageSplit::default(),
             }
         };
 
@@ -452,6 +479,21 @@ impl CliArgs {
                 }
                 None => {
                     return Err(CliError::InvalidDagCouplingMode(coupling_mode_str.clone()));
+                }
+            }
+        }
+
+        // T197: Apply monetary mode override
+        if let Some(ref monetary_mode_str) = self.monetary_mode {
+            match parse_monetary_mode(monetary_mode_str) {
+                Some(mode) => {
+                    if self.profile.is_some() {
+                        eprintln!("[T197] CLI override: monetary_mode = {}", mode);
+                    }
+                    config.monetary_mode = mode;
+                }
+                None => {
+                    return Err(CliError::InvalidMonetaryMode(monetary_mode_str.clone()));
                 }
             }
         }

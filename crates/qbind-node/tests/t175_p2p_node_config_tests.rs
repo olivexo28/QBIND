@@ -6,7 +6,7 @@
 //! - Address parsing for `--p2p-listen-addr` and `--p2p-peer`
 //! - Startup info string includes P2P state
 
-use qbind_ledger::FeeDistributionPolicy;
+use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, MempoolMode,
     NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE,
@@ -81,6 +81,9 @@ fn test_p2p_config_local_mesh_disabled() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -115,6 +118,9 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -146,6 +152,9 @@ fn test_p2p_config_p2p_mode_enabled() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -177,6 +186,9 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -216,6 +228,9 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -304,6 +319,9 @@ fn test_startup_info_includes_network_mode() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -329,6 +347,9 @@ fn test_startup_info_p2p_disabled() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -362,6 +383,9 @@ fn test_startup_info_p2p_enabled() {
         dag_coupling_mode: DagCouplingMode::Off,
         stage_b_enabled: false,
         fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+        monetary_mode: MonetaryMode::Off,
+        monetary_accounts: None,
+        seigniorage_split: SeigniorageSplit::default(),
     };
 
     let info = config.startup_info_string(Some("V0"));

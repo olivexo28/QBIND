@@ -35,7 +35,7 @@
 //! let chain_id = config.chain_id();
 //! ```
 
-use qbind_ledger::FeeDistributionPolicy;
+use qbind_ledger::{FeeDistributionPolicy, MonetaryAccounts, MonetaryMode, SeigniorageSplit};
 use qbind_types::{ChainId, NetworkEnvironment};
 use std::path::PathBuf;
 
@@ -813,6 +813,33 @@ pub struct NodeConfig {
     ///
     /// Only meaningful when `gas_enabled = true`.
     pub fee_distribution_policy: FeeDistributionPolicy,
+
+    // ========================================================================
+    // T197: Monetary Mode Configuration
+    // ========================================================================
+    /// Monetary engine mode (T197).
+    ///
+    /// Controls whether the monetary engine is active, in shadow mode, or off.
+    ///
+    /// - DevNet v0: `Off` (no issuance, no decisions)
+    /// - TestNet Alpha: `Shadow` (decisions + metrics only)
+    /// - TestNet Beta: `Shadow` (decisions + metrics only)
+    /// - MainNet v0: `Shadow` (governance can flip to Active later)
+    pub monetary_mode: MonetaryMode,
+
+    /// Seigniorage accounts for Active mode (T197).
+    ///
+    /// When `monetary_mode == Active`, these accounts receive newly minted tokens.
+    /// Must be `Some(..)` for Active mode on MainNet.
+    /// Can be `None` for Off/Shadow modes.
+    pub monetary_accounts: Option<MonetaryAccounts>,
+
+    /// Seigniorage split configuration (T197).
+    ///
+    /// Determines how newly minted tokens are distributed among
+    /// validators, treasury, insurance, and community.
+    /// Only meaningful when `monetary_mode == Active`.
+    pub seigniorage_split: SeigniorageSplit,
 }
 
 impl Default for NodeConfig {
@@ -838,6 +865,10 @@ impl Default for NodeConfig {
             stage_b_enabled: false,
             // T193: Burn-only fee distribution for DevNet
             fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+            // T197: Monetary mode off for DevNet
+            monetary_mode: MonetaryMode::Off,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 }
@@ -860,6 +891,10 @@ impl NodeConfig {
             dag_coupling_mode: DagCouplingMode::Off,
             stage_b_enabled: false,
             fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+            // T197: Default to Off for backward compatibility
+            monetary_mode: MonetaryMode::Off,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 
@@ -881,6 +916,10 @@ impl NodeConfig {
             dag_coupling_mode: DagCouplingMode::Off,
             stage_b_enabled: false,
             fee_distribution_policy: FeeDistributionPolicy::burn_only(),
+            // T197: Default to Off for backward compatibility
+            monetary_mode: MonetaryMode::Off,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 
@@ -923,6 +962,7 @@ impl NodeConfig {
     /// - DAG Coupling: Off (T189)
     /// - Stage B: Disabled (T186)
     /// - Fee Distribution: Burn-only (T193)
+    /// - Monetary Mode: Off (T197)
     ///
     /// # Example
     ///
@@ -947,6 +987,10 @@ impl NodeConfig {
             dag_coupling_mode: DagCouplingMode::Off, // T189: Coupling disabled for DevNet
             stage_b_enabled: false,
             fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
+            // T197: Monetary mode off for DevNet
+            monetary_mode: MonetaryMode::Off,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 
@@ -963,6 +1007,7 @@ impl NodeConfig {
     /// - DAG Coupling: Off (T189)
     /// - Stage B: Disabled (T186)
     /// - Fee Distribution: Burn-only (T193)
+    /// - Monetary Mode: Shadow (T197)
     ///
     /// # Example
     ///
@@ -988,6 +1033,10 @@ impl NodeConfig {
             dag_coupling_mode: DagCouplingMode::Off, // T189: Coupling disabled for Alpha
             stage_b_enabled: false,
             fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
+            // T197: Shadow mode for TestNet Alpha
+            monetary_mode: MonetaryMode::Shadow,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 
@@ -1007,6 +1056,7 @@ impl NodeConfig {
     /// - DAG Coupling: **Off** (T189: optionally Warn for experiments)
     /// - Stage B: **Disabled by default** (T186: opt-in available for testing)
     /// - Fee Distribution: **Burn-only** (T193: testing uses burn-only for simplicity)
+    /// - Monetary Mode: **Shadow** (T197: decisions + metrics only)
     ///
     /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
     /// starting nodes, as Beta requires persistent state.
@@ -1042,6 +1092,10 @@ impl NodeConfig {
             dag_coupling_mode: DagCouplingMode::Off, // T189: Off for Beta (optionally Warn)
             stage_b_enabled: false,                  // T186: Disabled by default for Beta
             fee_distribution_policy: FeeDistributionPolicy::burn_only(), // T193
+            // T197: Shadow mode for TestNet Beta
+            monetary_mode: MonetaryMode::Shadow,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 
@@ -1061,6 +1115,7 @@ impl NodeConfig {
     /// - DAG Coupling: **Enforce (required)** (T189)
     /// - Stage B: **Enabled by default** (T186: parallel execution available)
     /// - Fee Distribution: **50% burn / 50% proposer** (T193: MainNet default)
+    /// - Monetary Mode: **Shadow** (T197: governance can flip to Active later)
     ///
     /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
     /// starting nodes. MainNet validators cannot use in-memory-only storage.
@@ -1108,6 +1163,10 @@ impl NodeConfig {
             dag_coupling_mode: DagCouplingMode::Enforce, // T189: Required for MainNet
             stage_b_enabled: true,                       // T186: Enabled by default for MainNet
             fee_distribution_policy: FeeDistributionPolicy::mainnet_default(), // T193: 50/50 split
+            // T197: Shadow mode by default, governance can flip to Active later
+            monetary_mode: MonetaryMode::Shadow,
+            monetary_accounts: None,
+            seigniorage_split: SeigniorageSplit::default(),
         }
     }
 
@@ -1274,6 +1333,65 @@ impl NodeConfig {
     /// ```
     pub fn with_fee_distribution_policy(mut self, policy: FeeDistributionPolicy) -> Self {
         self.fee_distribution_policy = policy;
+        self
+    }
+
+    /// Set the monetary mode (T197).
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The monetary mode to use (Off, Shadow, or Active)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_ledger::MonetaryMode;
+    ///
+    /// let config = NodeConfig::testnet_alpha_preset()
+    ///     .with_monetary_mode(MonetaryMode::Active);
+    /// ```
+    pub fn with_monetary_mode(mut self, mode: MonetaryMode) -> Self {
+        self.monetary_mode = mode;
+        self
+    }
+
+    /// Set the monetary accounts for Active mode (T197).
+    ///
+    /// # Arguments
+    ///
+    /// * `accounts` - The accounts to receive seigniorage
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_ledger::MonetaryAccounts;
+    ///
+    /// let accounts = MonetaryAccounts::test_accounts();
+    /// let config = NodeConfig::testnet_alpha_preset()
+    ///     .with_monetary_accounts(accounts);
+    /// ```
+    pub fn with_monetary_accounts(mut self, accounts: MonetaryAccounts) -> Self {
+        self.monetary_accounts = Some(accounts);
+        self
+    }
+
+    /// Set the seigniorage split configuration (T197).
+    ///
+    /// # Arguments
+    ///
+    /// * `split` - The seigniorage split in basis points
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_ledger::SeigniorageSplit;
+    ///
+    /// let split = SeigniorageSplit::new(6_000, 2_000, 1_000, 1_000);
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_seigniorage_split(split);
+    /// ```
+    pub fn with_seigniorage_split(mut self, split: SeigniorageSplit) -> Self {
+        self.seigniorage_split = split;
         self
     }
 
@@ -1690,6 +1808,22 @@ impl NodeConfig {
             );
         }
 
+        // 11. Monetary mode must not be Off (T197)
+        // MainNet must at least compute + expose decisions.
+        if self.monetary_mode == MonetaryMode::Off {
+            return Err(MainnetConfigError::MonetaryModeOff);
+        }
+
+        // 12. If monetary mode is Active, accounts and split must be valid (T197)
+        if self.monetary_mode == MonetaryMode::Active {
+            if self.monetary_accounts.is_none() {
+                return Err(MainnetConfigError::MonetaryAccountsMissing);
+            }
+            if let Err(e) = self.seigniorage_split.validate() {
+                return Err(MainnetConfigError::SeigniorageSplitInvalid(e));
+            }
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -1780,6 +1914,23 @@ pub enum MainnetConfigError {
         expected: FeeDistributionPolicy,
         actual: FeeDistributionPolicy,
     },
+
+    /// Monetary mode is Off (T197).
+    ///
+    /// MainNet must at least compute and expose monetary decisions.
+    /// Off mode is not allowed for MainNet.
+    MonetaryModeOff,
+
+    /// Monetary accounts missing when Active mode (T197).
+    ///
+    /// When monetary mode is Active, valid seigniorage accounts must
+    /// be configured to receive newly minted tokens.
+    MonetaryAccountsMissing,
+
+    /// Seigniorage split is invalid (T197).
+    ///
+    /// The seigniorage split must sum to 10,000 basis points (100%).
+    SeigniorageSplitInvalid(String),
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -1848,6 +1999,25 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: fee distribution policy must be {} but is {} (T193)",
                     expected, actual
+                )
+            }
+            MainnetConfigError::MonetaryModeOff => {
+                write!(
+                    f,
+                    "MainNet invariant violated: monetary mode must not be 'off' (--monetary-mode=shadow or --monetary-mode=active)"
+                )
+            }
+            MainnetConfigError::MonetaryAccountsMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated: monetary accounts must be configured when monetary mode is 'active'"
+                )
+            }
+            MainnetConfigError::SeigniorageSplitInvalid(e) => {
+                write!(
+                    f,
+                    "MainNet invariant violated: seigniorage split is invalid: {}",
+                    e
                 )
             }
         }

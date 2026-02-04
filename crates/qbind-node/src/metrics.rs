@@ -4437,6 +4437,30 @@ pub struct MonetaryMetrics {
 
     /// Total monetary decisions computed
     decisions_total: AtomicU64,
+
+    // ========================================================================
+    // T197: Monetary Mode & Seigniorage Metrics
+    // ========================================================================
+    /// Current monetary mode (0=Off, 1=Shadow, 2=Active)
+    mode: AtomicU64,
+
+    /// Total issuance to validators (monotonically increasing counter)
+    issuance_validators_total: AtomicU64,
+
+    /// Total issuance to treasury (monotonically increasing counter)
+    issuance_treasury_total: AtomicU64,
+
+    /// Total issuance to insurance (monotonically increasing counter)
+    issuance_insurance_total: AtomicU64,
+
+    /// Total issuance to community (monotonically increasing counter)
+    issuance_community_total: AtomicU64,
+
+    /// Total decisions applied in shadow mode
+    decisions_applied_shadow_total: AtomicU64,
+
+    /// Total decisions applied in active mode
+    decisions_applied_active_total: AtomicU64,
 }
 
 impl MonetaryMetrics {
@@ -4555,6 +4579,110 @@ impl MonetaryMetrics {
         self.inc_decisions();
     }
 
+    // ========================================================================
+    // T197: Monetary Mode & Seigniorage Metrics
+    // ========================================================================
+
+    /// Get current monetary mode as integer (0=Off, 1=Shadow, 2=Active).
+    pub fn mode(&self) -> u64 {
+        self.mode.load(Ordering::Relaxed)
+    }
+
+    /// Set current monetary mode.
+    pub fn set_mode(&self, mode: u64) {
+        self.mode.store(mode, Ordering::Relaxed);
+    }
+
+    /// Get total issuance to validators.
+    pub fn issuance_validators_total(&self) -> u64 {
+        self.issuance_validators_total.load(Ordering::Relaxed)
+    }
+
+    /// Add issuance to validators counter.
+    pub fn add_issuance_validators(&self, amount: u64) {
+        self.issuance_validators_total
+            .fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Get total issuance to treasury.
+    pub fn issuance_treasury_total(&self) -> u64 {
+        self.issuance_treasury_total.load(Ordering::Relaxed)
+    }
+
+    /// Add issuance to treasury counter.
+    pub fn add_issuance_treasury(&self, amount: u64) {
+        self.issuance_treasury_total
+            .fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Get total issuance to insurance.
+    pub fn issuance_insurance_total(&self) -> u64 {
+        self.issuance_insurance_total.load(Ordering::Relaxed)
+    }
+
+    /// Add issuance to insurance counter.
+    pub fn add_issuance_insurance(&self, amount: u64) {
+        self.issuance_insurance_total
+            .fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Get total issuance to community.
+    pub fn issuance_community_total(&self) -> u64 {
+        self.issuance_community_total.load(Ordering::Relaxed)
+    }
+
+    /// Add issuance to community counter.
+    pub fn add_issuance_community(&self, amount: u64) {
+        self.issuance_community_total
+            .fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Get total decisions applied in shadow mode.
+    pub fn decisions_applied_shadow_total(&self) -> u64 {
+        self.decisions_applied_shadow_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment shadow mode decisions counter.
+    pub fn inc_decisions_applied_shadow(&self) {
+        self.decisions_applied_shadow_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total decisions applied in active mode.
+    pub fn decisions_applied_active_total(&self) -> u64 {
+        self.decisions_applied_active_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment active mode decisions counter.
+    pub fn inc_decisions_applied_active(&self) {
+        self.decisions_applied_active_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record seigniorage issuance (T197).
+    ///
+    /// Call this after computing seigniorage split to update issuance counters.
+    /// Amounts are in the smallest token unit (e.g., wei).
+    ///
+    /// # Arguments
+    ///
+    /// * `to_validators` - Amount issued to validator pool
+    /// * `to_treasury` - Amount issued to treasury
+    /// * `to_insurance` - Amount issued to insurance fund
+    /// * `to_community` - Amount issued to community programs
+    pub fn record_seigniorage_issuance(
+        &self,
+        to_validators: u64,
+        to_treasury: u64,
+        to_insurance: u64,
+        to_community: u64,
+    ) {
+        self.add_issuance_validators(to_validators);
+        self.add_issuance_treasury(to_treasury);
+        self.add_issuance_insurance(to_insurance);
+        self.add_issuance_community(to_community);
+    }
+
     /// Format metrics as Prometheus exposition format.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -4584,6 +4712,34 @@ impl MonetaryMetrics {
         output.push_str(&format!(
             "qbind_monetary_decisions_total {}\n",
             self.decisions_total()
+        ));
+
+        // T197: Monetary mode and seigniorage metrics
+        output.push_str("\n# T197: Monetary mode and seigniorage metrics\n");
+        output.push_str(&format!("qbind_monetary_mode {}\n", self.mode()));
+        output.push_str(&format!(
+            "qbind_monetary_issuance_total{{bucket=\"validators\"}} {}\n",
+            self.issuance_validators_total()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_issuance_total{{bucket=\"treasury\"}} {}\n",
+            self.issuance_treasury_total()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_issuance_total{{bucket=\"insurance\"}} {}\n",
+            self.issuance_insurance_total()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_issuance_total{{bucket=\"community\"}} {}\n",
+            self.issuance_community_total()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_decisions_applied_total{{mode=\"shadow\"}} {}\n",
+            self.decisions_applied_shadow_total()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_decisions_applied_total{{mode=\"active\"}} {}\n",
+            self.decisions_applied_active_total()
         ));
 
         output

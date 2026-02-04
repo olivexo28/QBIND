@@ -67,3 +67,10 @@ pub use monetary_engine::{
     compute_monetary_decision, MonetaryDecision, MonetaryEngineConfig, MonetaryInputs,
     MonetaryPhase, PhaseParameters, PhaseTransitionRecommendation,
 };
+
+// T197: Monetary Seigniorage exports
+pub use monetary_engine::{
+    compute_seigniorage_split, parse_monetary_mode, MonetaryAccounts, MonetaryMode,
+    SeigniorageAccounting, SeigniorageSplit, SEIGNIORAGE_SPLIT_MAINNET_DEFAULT,
+    VALID_MONETARY_MODES,
+};
