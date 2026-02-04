@@ -6,6 +6,7 @@ pub mod error;
 pub mod execution;
 pub mod execution_gas;
 pub mod monetary_engine;
+pub mod monetary_state;
 pub mod parallel_exec;
 pub mod program;
 pub mod store;
@@ -73,4 +74,10 @@ pub use monetary_engine::{
     compute_seigniorage_split, parse_monetary_mode, MonetaryAccounts, MonetaryMode,
     SeigniorageAccounting, SeigniorageSplit, SEIGNIORAGE_SPLIT_MAINNET_DEFAULT,
     VALID_MONETARY_MODES,
+};
+
+// T199: Monetary Epoch State exports
+pub use monetary_state::{
+    compute_epoch_state, compute_smoothed_annual_fee_revenue, epoch_for_height, is_epoch_boundary,
+    MonetaryEpochInputs, MonetaryEpochState, DEFAULT_BLOCKS_PER_EPOCH, DEFAULT_EPOCHS_PER_YEAR,
 };

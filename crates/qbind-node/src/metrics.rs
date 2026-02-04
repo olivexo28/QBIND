@@ -4461,6 +4461,16 @@ pub struct MonetaryMetrics {
 
     /// Total decisions applied in active mode
     decisions_applied_active_total: AtomicU64,
+
+    // ========================================================================
+    // T199: Monetary Epoch State Metrics
+    // ========================================================================
+    /// Last epoch index where monetary state was updated
+    last_epoch_index: AtomicU64,
+
+    /// Total epoch-level monetary decisions computed (T199)
+    /// Increments once per epoch when MonetaryMode != Off
+    epoch_decisions_total: AtomicU64,
 }
 
 impl MonetaryMetrics {
@@ -4683,6 +4693,68 @@ impl MonetaryMetrics {
         self.add_issuance_community(to_community);
     }
 
+    // ========================================================================
+    // T199: Monetary Epoch State Metrics
+    // ========================================================================
+
+    /// Get last epoch index where monetary state was updated.
+    pub fn last_epoch_index(&self) -> u64 {
+        self.last_epoch_index.load(Ordering::Relaxed)
+    }
+
+    /// Set last epoch index.
+    pub fn set_last_epoch_index(&self, epoch: u64) {
+        self.last_epoch_index.store(epoch, Ordering::Relaxed);
+    }
+
+    /// Get total epoch-level monetary decisions computed (T199).
+    pub fn epoch_decisions_total(&self) -> u64 {
+        self.epoch_decisions_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment epoch-level decisions counter (T199).
+    pub fn inc_epoch_decisions(&self) {
+        self.epoch_decisions_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record an epoch-level monetary decision (T199).
+    ///
+    /// Call this when updating MonetaryEpochState at an epoch boundary.
+    /// Updates the last epoch index, relevant gauges, and increments the
+    /// appropriate mode-specific counter (shadow or active).
+    ///
+    /// # Arguments
+    ///
+    /// * `epoch_index` - The epoch index being updated
+    /// * `r_target_bps` - Target annual inflation rate in basis points
+    /// * `r_inf_bps` - Recommended annual inflation rate in basis points
+    /// * `phase` - Current monetary phase (0=Bootstrap, 1=Transition, 2=Mature)
+    /// * `fee_coverage_ratio` - Fee coverage ratio
+    /// * `mode` - Current monetary mode (1=Shadow, 2=Active)
+    pub fn record_epoch_decision(
+        &self,
+        epoch_index: u64,
+        r_target_bps: u64,
+        r_inf_bps: u64,
+        phase: u64,
+        fee_coverage_ratio: f64,
+        mode: u64,
+    ) {
+        self.set_last_epoch_index(epoch_index);
+        self.set_r_target_annual_bps(r_target_bps);
+        self.set_r_inf_annual_bps(r_inf_bps);
+        self.set_phase(phase);
+        self.set_fee_coverage_ratio(fee_coverage_ratio);
+        self.inc_epoch_decisions();
+
+        // Increment mode-specific counter
+        match mode {
+            1 => self.inc_decisions_applied_shadow(),
+            2 => self.inc_decisions_applied_active(),
+            _ => {} // Off mode (0) doesn't record
+        }
+    }
+
     /// Format metrics as Prometheus exposition format.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -4740,6 +4812,17 @@ impl MonetaryMetrics {
         output.push_str(&format!(
             "qbind_monetary_decisions_applied_total{{mode=\"active\"}} {}\n",
             self.decisions_applied_active_total()
+        ));
+
+        // T199: Epoch-level monetary state metrics
+        output.push_str("\n# T199: Epoch-level monetary state metrics\n");
+        output.push_str(&format!(
+            "qbind_monetary_epoch_last_index {}\n",
+            self.last_epoch_index()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_epoch_decisions_total {}\n",
+            self.epoch_decisions_total()
         ));
 
         output

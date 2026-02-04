@@ -155,7 +155,7 @@ pub enum PhaseTransitionRecommendation {
 }
 
 /// The computed monetary decision output.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MonetaryDecision {
     /// The effective PQC-adjusted target rate (R_target * pqc_mult).
     pub effective_r_target_annual: f64,
