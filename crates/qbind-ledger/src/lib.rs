@@ -43,12 +43,13 @@ pub use execution::{
 };
 
 // T168: Gas accounting and fee model exports
+// T193: Fee distribution policy exports
 pub use execution_gas::{
     compute_gas_for_vm_v0_tx, decode_transfer_payload, gas_for_standard_transfer,
-    gas_for_transfer_v0, ExecutionGasConfig, GasComputeResult, TransferPayloadDecoded,
-    TransferPayloadV1, VmGasError, BLOCK_GAS_LIMIT_DEFAULT, DEFAULT_V0_GAS_LIMIT, GAS_BASE_TX,
-    GAS_PER_ACCOUNT_READ, GAS_PER_ACCOUNT_WRITE, GAS_PER_BYTE_PAYLOAD, MINIMUM_GAS_LIMIT,
-    TRANSFER_PAYLOAD_V1_SIZE,
+    gas_for_transfer_v0, ExecutionGasConfig, FeeDistributionPolicy, GasComputeResult,
+    TransferPayloadDecoded, TransferPayloadV1, VmGasError, BLOCK_GAS_LIMIT_DEFAULT,
+    BPS_100_PERCENT, DEFAULT_V0_GAS_LIMIT, GAS_BASE_TX, GAS_PER_ACCOUNT_READ,
+    GAS_PER_ACCOUNT_WRITE, GAS_PER_BYTE_PAYLOAD, MINIMUM_GAS_LIMIT, TRANSFER_PAYLOAD_V1_SIZE,
 };
 
 // T171: Stage B parallel execution skeleton exports

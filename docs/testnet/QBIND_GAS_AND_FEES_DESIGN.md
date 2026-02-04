@@ -359,6 +359,16 @@ For MainNet, a hybrid model is recommended:
 
 **Governance**: Fee distribution percentages should be governance-adjustable parameters.
 
+> **Implementation Note (T193)**: The hybrid fee distribution model has been implemented:
+>
+> - `FeeDistributionPolicy` struct in `qbind-ledger/src/execution_gas.rs`
+> - `execute_block_with_proposer()` method on `VmV0ExecutionEngine`
+> - MainNet preset (`NodeConfig::mainnet_preset()`) defaults to 50% burn / 50% proposer
+> - TestNet presets use burn-only for simplicity during testing
+> - Policy is configurable via `with_fee_distribution_policy()` builder method
+>
+> The implementation uses basis points (bps) for precision: 5,000 bps = 50%.
+
 ### 5.4 Fee Sink Account (TestNet Option)
 
 If burning is undesirable for testing (e.g., to track total fees collected):

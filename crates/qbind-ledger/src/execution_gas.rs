@@ -377,20 +377,224 @@ pub fn decode_transfer_payload(bytes: &[u8]) -> Result<TransferPayloadDecoded, V
 }
 
 // ============================================================================
+// T193: Fee Distribution Policy
+// ============================================================================
+
+/// Fee distribution policy for hybrid burn + proposer reward (T193).
+///
+/// This struct defines how transaction fees are distributed between:
+/// - Burning (deflationary pressure)
+/// - Proposer reward (incentive to include transactions)
+///
+/// Values are specified in basis points (bps), where 10,000 bps = 100%.
+/// The `burn_bps` and `proposer_bps` must sum to exactly 10,000.
+///
+/// # Environments
+///
+/// - **DevNet**: `BURN_ONLY` (10,000 / 0) - all fees burned
+/// - **TestNet Alpha**: `BURN_ONLY` (10,000 / 0) - all fees burned
+/// - **TestNet Beta**: `BURN_ONLY` (10,000 / 0) - all fees burned
+/// - **MainNet v0**: `MAINNET_V0_DEFAULT` (5,000 / 5,000) - 50% burned, 50% to proposer
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_ledger::FeeDistributionPolicy;
+///
+/// // Use burn-only policy (TestNet default)
+/// let policy = FeeDistributionPolicy::burn_only();
+/// assert_eq!(policy.burn_bps, 10_000);
+/// assert_eq!(policy.proposer_bps, 0);
+///
+/// // Use MainNet default (50/50 split)
+/// let mainnet_policy = FeeDistributionPolicy::mainnet_default();
+/// assert_eq!(mainnet_policy.burn_bps, 5_000);
+/// assert_eq!(mainnet_policy.proposer_bps, 5_000);
+///
+/// // Compute distribution for a fee
+/// let (burn, proposer) = mainnet_policy.distribute_fee(1000);
+/// assert_eq!(burn, 500);
+/// assert_eq!(proposer, 500);
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FeeDistributionPolicy {
+    /// Basis points (0-10,000) of fees to burn.
+    ///
+    /// 10,000 = 100% burned (burn-only policy).
+    /// 5,000 = 50% burned (MainNet default).
+    pub burn_bps: u16,
+
+    /// Basis points (0-10,000) of fees to reward to block proposer.
+    ///
+    /// 0 = 0% to proposer (burn-only policy).
+    /// 5,000 = 50% to proposer (MainNet default).
+    pub proposer_bps: u16,
+}
+
+/// Total basis points representing 100%.
+pub const BPS_100_PERCENT: u16 = 10_000;
+
+impl FeeDistributionPolicy {
+    /// Create a new fee distribution policy.
+    ///
+    /// # Arguments
+    ///
+    /// * `burn_bps` - Basis points to burn (0-10,000)
+    /// * `proposer_bps` - Basis points to reward proposer (0-10,000)
+    ///
+    /// # Panics
+    ///
+    /// Panics if `burn_bps + proposer_bps != 10,000`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_ledger::FeeDistributionPolicy;
+    ///
+    /// // 70% burn, 30% proposer
+    /// let policy = FeeDistributionPolicy::new(7_000, 3_000);
+    /// ```
+    pub fn new(burn_bps: u16, proposer_bps: u16) -> Self {
+        assert_eq!(
+            burn_bps.saturating_add(proposer_bps),
+            BPS_100_PERCENT,
+            "burn_bps ({}) + proposer_bps ({}) must equal {}",
+            burn_bps,
+            proposer_bps,
+            BPS_100_PERCENT
+        );
+        Self {
+            burn_bps,
+            proposer_bps,
+        }
+    }
+
+    /// Create a new fee distribution policy, returning an error if invalid.
+    ///
+    /// # Arguments
+    ///
+    /// * `burn_bps` - Basis points to burn (0-10,000)
+    /// * `proposer_bps` - Basis points to reward proposer (0-10,000)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(FeeDistributionPolicy)` if valid, `Err` if bps don't sum to 10,000.
+    pub fn try_new(burn_bps: u16, proposer_bps: u16) -> Result<Self, &'static str> {
+        if burn_bps.saturating_add(proposer_bps) != BPS_100_PERCENT {
+            return Err("burn_bps + proposer_bps must equal 10,000");
+        }
+        Ok(Self {
+            burn_bps,
+            proposer_bps,
+        })
+    }
+
+    /// Create a burn-only policy (DevNet / TestNet default).
+    ///
+    /// All fees are burned, nothing goes to the proposer.
+    pub const fn burn_only() -> Self {
+        Self {
+            burn_bps: BPS_100_PERCENT,
+            proposer_bps: 0,
+        }
+    }
+
+    /// Create the MainNet v0 default policy (50% burn, 50% proposer).
+    ///
+    /// This is the canonical fee distribution for MainNet v0:
+    /// - 50% of fees are burned (deflationary pressure)
+    /// - 50% of fees go to the block proposer (incentive)
+    pub const fn mainnet_default() -> Self {
+        Self {
+            burn_bps: 5_000,
+            proposer_bps: 5_000,
+        }
+    }
+
+    /// Check if this is a burn-only policy (no proposer rewards).
+    pub fn is_burn_only(&self) -> bool {
+        self.proposer_bps == 0
+    }
+
+    /// Distribute a fee according to this policy.
+    ///
+    /// # Arguments
+    ///
+    /// * `total_fee` - The total fee to distribute
+    ///
+    /// # Returns
+    ///
+    /// A tuple of `(burn_amount, proposer_reward)` where:
+    /// - `burn_amount + proposer_reward == total_fee`
+    /// - `burn_amount` is the portion to burn (remove from circulation)
+    /// - `proposer_reward` is the portion to credit to the block proposer
+    ///
+    /// # Rounding
+    ///
+    /// The proposer reward is computed first with integer division (rounding down).
+    /// The burn amount is `total_fee - proposer_reward` to ensure exact conservation.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_ledger::FeeDistributionPolicy;
+    ///
+    /// let policy = FeeDistributionPolicy::mainnet_default();
+    /// let (burn, proposer) = policy.distribute_fee(1000);
+    /// assert_eq!(burn + proposer, 1000); // Conservation guaranteed
+    /// ```
+    pub fn distribute_fee(&self, total_fee: u128) -> (u128, u128) {
+        if self.proposer_bps == 0 {
+            // Burn-only: fast path
+            return (total_fee, 0);
+        }
+
+        if self.burn_bps == 0 {
+            // Proposer-only: fast path
+            return (0, total_fee);
+        }
+
+        // Compute proposer reward first (rounds down)
+        let proposer_reward =
+            total_fee.saturating_mul(self.proposer_bps as u128) / (BPS_100_PERCENT as u128);
+
+        // Burn amount is the remainder (ensures exact conservation)
+        let burn_amount = total_fee.saturating_sub(proposer_reward);
+
+        (burn_amount, proposer_reward)
+    }
+}
+
+impl Default for FeeDistributionPolicy {
+    /// Default is burn-only for backward compatibility.
+    fn default() -> Self {
+        Self::burn_only()
+    }
+}
+
+impl std::fmt::Display for FeeDistributionPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let burn_pct = self.burn_bps as f64 / 100.0;
+        let proposer_pct = self.proposer_bps as f64 / 100.0;
+        write!(f, "burn={:.1}% proposer={:.1}%", burn_pct, proposer_pct)
+    }
+}
+
+// ============================================================================
 // Execution Gas Configuration
 // ============================================================================
 
 /// Configuration for gas enforcement in VM v0 execution.
 ///
-/// This struct controls whether gas accounting is enabled and the
-/// per-block gas limit.
+/// This struct controls whether gas accounting is enabled, the
+/// per-block gas limit, and the fee distribution policy.
 ///
 /// # Environments
 ///
 /// - **DevNet**: `enabled = false` (no gas enforcement, DevNet is frozen)
 /// - **TestNet Alpha**: `enabled = false` by default (preserves current behavior)
-/// - **TestNet Beta**: `enabled = true` (full gas enforcement)
-/// - **MainNet**: `enabled = true` (full gas enforcement)
+/// - **TestNet Beta**: `enabled = true` (full gas enforcement, burn-only fees)
+/// - **MainNet**: `enabled = true` (full gas enforcement, hybrid fee distribution)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionGasConfig {
     /// Whether gas enforcement is enabled.
@@ -402,7 +606,7 @@ pub struct ExecutionGasConfig {
     ///
     /// When `true`:
     /// - Per-transaction gas limits are enforced
-    /// - Fees are deducted (burned in TestNet)
+    /// - Fees are deducted and distributed per `fee_distribution_policy`
     /// - Per-block gas limit is enforced
     pub enabled: bool,
 
@@ -410,6 +614,13 @@ pub struct ExecutionGasConfig {
     ///
     /// Default: `BLOCK_GAS_LIMIT_DEFAULT` (30,000,000)
     pub block_gas_limit: u64,
+
+    /// Fee distribution policy (T193).
+    ///
+    /// Determines how fees are split between burning and proposer rewards.
+    ///
+    /// Default: `FeeDistributionPolicy::burn_only()` for backward compatibility.
+    pub fee_distribution_policy: FeeDistributionPolicy,
 }
 
 impl Default for ExecutionGasConfig {
@@ -417,6 +628,7 @@ impl Default for ExecutionGasConfig {
         Self {
             enabled: false, // Disabled by default for backward compatibility
             block_gas_limit: BLOCK_GAS_LIMIT_DEFAULT,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
     }
 }
@@ -427,11 +639,12 @@ impl ExecutionGasConfig {
         Self::default()
     }
 
-    /// Create an enabled gas configuration for TestNet/MainNet.
+    /// Create an enabled gas configuration for TestNet (burn-only).
     pub fn enabled() -> Self {
         Self {
             enabled: true,
             block_gas_limit: BLOCK_GAS_LIMIT_DEFAULT,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
     }
 
@@ -440,7 +653,45 @@ impl ExecutionGasConfig {
         Self {
             enabled: true,
             block_gas_limit,
+            fee_distribution_policy: FeeDistributionPolicy::burn_only(),
         }
+    }
+
+    /// Create an enabled configuration for MainNet v0 (T193).
+    ///
+    /// Uses the MainNet default fee distribution policy (50% burn, 50% proposer).
+    pub fn mainnet() -> Self {
+        Self {
+            enabled: true,
+            block_gas_limit: BLOCK_GAS_LIMIT_DEFAULT,
+            fee_distribution_policy: FeeDistributionPolicy::mainnet_default(),
+        }
+    }
+
+    /// Create an enabled configuration with a custom fee distribution policy.
+    pub fn enabled_with_policy(policy: FeeDistributionPolicy) -> Self {
+        Self {
+            enabled: true,
+            block_gas_limit: BLOCK_GAS_LIMIT_DEFAULT,
+            fee_distribution_policy: policy,
+        }
+    }
+
+    /// Set the fee distribution policy.
+    pub fn with_fee_policy(mut self, policy: FeeDistributionPolicy) -> Self {
+        self.fee_distribution_policy = policy;
+        self
+    }
+
+    /// Set the block gas limit.
+    pub fn with_block_gas_limit(mut self, limit: u64) -> Self {
+        self.block_gas_limit = limit;
+        self
+    }
+
+    /// Check if this configuration uses hybrid (non-burn-only) fee distribution.
+    pub fn has_proposer_rewards(&self) -> bool {
+        !self.fee_distribution_policy.is_burn_only()
     }
 }
 
@@ -603,5 +854,189 @@ mod tests {
             format!("{}", err3),
             "insufficient balance for fee: have 100, need 200"
         );
+    }
+
+    // ========================================================================
+    // T193: FeeDistributionPolicy Tests
+    // ========================================================================
+
+    #[test]
+    fn test_fee_distribution_policy_burn_only() {
+        let policy = FeeDistributionPolicy::burn_only();
+        assert_eq!(policy.burn_bps, 10_000);
+        assert_eq!(policy.proposer_bps, 0);
+        assert!(policy.is_burn_only());
+    }
+
+    #[test]
+    fn test_fee_distribution_policy_mainnet_default() {
+        let policy = FeeDistributionPolicy::mainnet_default();
+        assert_eq!(policy.burn_bps, 5_000);
+        assert_eq!(policy.proposer_bps, 5_000);
+        assert!(!policy.is_burn_only());
+    }
+
+    #[test]
+    fn test_fee_distribution_policy_new() {
+        let policy = FeeDistributionPolicy::new(7_000, 3_000);
+        assert_eq!(policy.burn_bps, 7_000);
+        assert_eq!(policy.proposer_bps, 3_000);
+    }
+
+    #[test]
+    fn test_fee_distribution_policy_try_new_valid() {
+        let policy = FeeDistributionPolicy::try_new(8_000, 2_000).unwrap();
+        assert_eq!(policy.burn_bps, 8_000);
+        assert_eq!(policy.proposer_bps, 2_000);
+    }
+
+    #[test]
+    fn test_fee_distribution_policy_try_new_invalid() {
+        // Sum != 10,000
+        assert!(FeeDistributionPolicy::try_new(5_000, 4_000).is_err());
+        assert!(FeeDistributionPolicy::try_new(11_000, 0).is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "must equal")]
+    fn test_fee_distribution_policy_new_panics_invalid() {
+        FeeDistributionPolicy::new(5_000, 4_000);
+    }
+
+    #[test]
+    fn test_fee_distribution_burn_only() {
+        let policy = FeeDistributionPolicy::burn_only();
+
+        // 100% burn
+        let (burn, proposer) = policy.distribute_fee(1000);
+        assert_eq!(burn, 1000);
+        assert_eq!(proposer, 0);
+        assert_eq!(burn + proposer, 1000);
+
+        // Zero fee
+        let (burn, proposer) = policy.distribute_fee(0);
+        assert_eq!(burn, 0);
+        assert_eq!(proposer, 0);
+
+        // Large fee
+        let (burn, proposer) = policy.distribute_fee(u128::MAX);
+        assert_eq!(burn, u128::MAX);
+        assert_eq!(proposer, 0);
+    }
+
+    #[test]
+    fn test_fee_distribution_mainnet_default() {
+        let policy = FeeDistributionPolicy::mainnet_default();
+
+        // 50/50 split
+        let (burn, proposer) = policy.distribute_fee(1000);
+        assert_eq!(burn, 500);
+        assert_eq!(proposer, 500);
+        assert_eq!(burn + proposer, 1000);
+
+        // Odd number (rounding)
+        let (burn, proposer) = policy.distribute_fee(1001);
+        // 1001 * 5000 / 10000 = 500 (proposer)
+        // 1001 - 500 = 501 (burn)
+        assert_eq!(proposer, 500);
+        assert_eq!(burn, 501);
+        assert_eq!(burn + proposer, 1001);
+
+        // Zero fee
+        let (burn, proposer) = policy.distribute_fee(0);
+        assert_eq!(burn, 0);
+        assert_eq!(proposer, 0);
+    }
+
+    #[test]
+    fn test_fee_distribution_custom_70_30() {
+        let policy = FeeDistributionPolicy::new(7_000, 3_000);
+
+        let (burn, proposer) = policy.distribute_fee(1000);
+        // 1000 * 3000 / 10000 = 300 (proposer)
+        // 1000 - 300 = 700 (burn)
+        assert_eq!(proposer, 300);
+        assert_eq!(burn, 700);
+        assert_eq!(burn + proposer, 1000);
+    }
+
+    #[test]
+    fn test_fee_distribution_proposer_only() {
+        let policy = FeeDistributionPolicy::new(0, 10_000);
+
+        let (burn, proposer) = policy.distribute_fee(1000);
+        assert_eq!(burn, 0);
+        assert_eq!(proposer, 1000);
+        assert_eq!(burn + proposer, 1000);
+    }
+
+    #[test]
+    fn test_fee_distribution_conservation_property() {
+        // Property: For any fee and any valid policy, burn + proposer == total_fee
+        let policies = [
+            FeeDistributionPolicy::burn_only(),
+            FeeDistributionPolicy::mainnet_default(),
+            FeeDistributionPolicy::new(0, 10_000),
+            FeeDistributionPolicy::new(3_333, 6_667),
+            FeeDistributionPolicy::new(9_999, 1),
+        ];
+
+        let fees: Vec<u128> = vec![0, 1, 100, 999, 1000, 10000, 100001, u128::MAX / 2];
+
+        for policy in &policies {
+            for &fee in &fees {
+                let (burn, proposer) = policy.distribute_fee(fee);
+                assert_eq!(
+                    burn + proposer,
+                    fee,
+                    "Conservation failed for fee={} with policy {:?}",
+                    fee,
+                    policy
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_fee_distribution_policy_display() {
+        let policy = FeeDistributionPolicy::mainnet_default();
+        let s = format!("{}", policy);
+        assert!(s.contains("burn=50.0%"));
+        assert!(s.contains("proposer=50.0%"));
+    }
+
+    #[test]
+    fn test_execution_gas_config_mainnet() {
+        let config = ExecutionGasConfig::mainnet();
+        assert!(config.enabled);
+        assert_eq!(config.block_gas_limit, BLOCK_GAS_LIMIT_DEFAULT);
+        assert_eq!(
+            config.fee_distribution_policy,
+            FeeDistributionPolicy::mainnet_default()
+        );
+        assert!(config.has_proposer_rewards());
+    }
+
+    #[test]
+    fn test_execution_gas_config_default_is_burn_only() {
+        let config = ExecutionGasConfig::default();
+        assert!(config.fee_distribution_policy.is_burn_only());
+        assert!(!config.has_proposer_rewards());
+    }
+
+    #[test]
+    fn test_execution_gas_config_with_fee_policy() {
+        let policy = FeeDistributionPolicy::new(6_000, 4_000);
+        let config = ExecutionGasConfig::enabled().with_fee_policy(policy);
+        assert_eq!(config.fee_distribution_policy.burn_bps, 6_000);
+        assert_eq!(config.fee_distribution_policy.proposer_bps, 4_000);
+    }
+
+    #[test]
+    fn test_execution_gas_config_enabled_with_policy() {
+        let policy = FeeDistributionPolicy::mainnet_default();
+        let config = ExecutionGasConfig::enabled_with_policy(policy);
+        assert!(config.enabled);
+        assert!(!config.fee_distribution_policy.is_burn_only());
     }
 }

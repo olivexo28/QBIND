@@ -596,7 +596,7 @@ qbind-node \
 | **State pruning** | ⏳ Pending | Future task |
 | **State snapshots** | ⏳ Pending | Future task |
 | **HSM production integration** | ⏳ Pending | Future task |
-| **Hybrid fee distribution** | ⏳ Pending | Future task |
+| **Hybrid fee distribution** | ✅ Implemented | T193 |
 | **Stage B production wiring** | ⏳ Pending | Future task |
 | **External security audit** | ⏳ Pending | External |
 

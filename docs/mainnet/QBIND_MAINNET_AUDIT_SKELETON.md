@@ -52,7 +52,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | :--- | :--- | :--- | :--- |
 | **Execution & VM** | T163, T164, T171, T177, T179, T186, T187 | Partially Mitigated | Stage B wired and tested (T186, T187) |
 | **State Persistence & Growth** | T164 | Partially Mitigated | Pruning & snapshots pending |
-| **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181 | Partially Mitigated | Hybrid fee distribution pending |
+| **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181, T193 | Partially Mitigated | Hybrid fee distribution implemented (T193) |
 | **Mempool & DAG** | T158, T165, T182, T183 | Partially Mitigated | Consensus coupling pending |
 | **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
@@ -121,7 +121,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | :--- | :--- | :--- | :--- |
 | **Fee market gaming** | Priority fee model may be gameable; front-running possible | High | Partially Mitigated |
 | **Balance draining** | Bugs in fee deduction could drain accounts | High | Partially Mitigated |
-| **Proposer reward manipulation** | Proposer could game fee distribution | Medium | Open |
+| **Proposer reward manipulation** | Proposer could game fee distribution | Medium | Partially Mitigated |
 | **Gas limit manipulation** | Attackers craft txs to maximize gas | Medium | Partially Mitigated |
 | **Eviction attacks** | Flood mempool to evict legitimate txs | Medium | Partially Mitigated |
 
@@ -131,10 +131,10 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ Fee-priority mempool implemented (T169)
 - ✅ Gas property tests (T179)
 - ✅ Fee-market cluster tests (T181)
-- ⏳ Hybrid fee distribution pending
+- ✅ Hybrid fee distribution implemented (T193)
 
 **Additional MainNet Requirements**:
-- [ ] Hybrid fee distribution (burn + proposer) implementation
+- [x] Hybrid fee distribution (burn + proposer) implementation (T193)
 - [ ] Fee market analysis under adversarial conditions
 - [ ] Mempool eviction rate limiting
 - [ ] External audit of fee accounting code
@@ -284,7 +284,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | :--- | :--- | :--- | :--- |
 | 10 | Gas enforcement cannot be disabled on MainNet | ⏳ Pending | Future task |
 | 11 | Fee-priority mempool is default and required | ✅ Ready | T169, T180 |
-| 12 | Hybrid fee distribution (burn + proposer) implemented | ⏳ Pending | Future task |
+| 12 | Hybrid fee distribution (burn + proposer) implemented | ✅ Ready | T193 `FeeDistributionPolicy`, `execute_block_with_proposer()` |
 | 13 | Fee-market cluster tests pass | ✅ Ready | `test_testnet_beta_fee_market_*` |
 
 ### 4.4 Mempool & DAG
@@ -409,12 +409,14 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T19x | State | State pruning | MN-R3 |
 | T19x | State | State snapshots | MN-R3 |
 | T19x | Keys | HSM production integration | MN-R5 |
-| T19x | Gas/Fees | Hybrid fee distribution | MN-R2 |
+| ~~T193~~ | ~~Gas/Fees~~ | ~~Hybrid fee distribution~~ | ~~MN-R2~~ |
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 
 > **Note**: Stage B production wiring completed in T186 + T187 (strikethrough above).
+>
+> **Note**: Hybrid fee distribution completed in T193 (strikethrough above). Implements 50% burn / 50% proposer split per MainNet v0 spec.
 >
 > **Note**: DAG–HotStuff consensus coupling design completed in T188. Implementation tasks T189–T192 complete:
 > - T189: `DagCouplingMode` enum, `batch_commitment` in `BlockHeader`
