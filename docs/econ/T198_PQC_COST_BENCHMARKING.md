@@ -115,29 +115,43 @@ Reference values:
 - Typical ML-DSA-44 verify: 200-500 μs
 - Resulting β_compute: 0.20 - 0.35
 
-#### β_bandwidth (Signature Size Overhead)
+#### β_bandwidth (Bandwidth Premium Factor)
 
+The raw size ratio formula:
 ```
-β_bandwidth = (ml_dsa44_sig_size - ecdsa_sig_size) / ecdsa_sig_size
+raw_ratio = (ml_dsa44_sig_size - ecdsa_sig_size) / ecdsa_sig_size
 ```
 
 Reference values:
 - ECDSA signature: 64 bytes
 - ML-DSA-44 signature: 2,420 bytes
-- Size ratio: ~37.8x larger
-- Suggested β_bandwidth: 0.10 - 0.20 (moderated by block size economics)
+- Raw size ratio: ~37.8x larger
 
-#### β_storage (Key Storage Overhead)
+**Important**: The raw ratio (~36.8 overhead) is too large to use directly as an inflation adjustment. The β_bandwidth premium is a **moderated policy multiplier** that captures the marginal cost impact on validator economics after accounting for:
+- Economies of scale in bandwidth costs
+- Batching and compression efficiencies
+- Network-level amortization
 
+Suggested β_bandwidth: 0.10 - 0.20
+
+#### β_storage (Storage Premium Factor)
+
+The raw size ratio formula:
 ```
-β_storage = (ml_dsa44_pk_size - ecdsa_pk_size) / ecdsa_pk_size
+raw_ratio = (ml_dsa44_pk_size - ecdsa_pk_size) / ecdsa_pk_size
 ```
 
 Reference values:
 - ECDSA public key: 33 bytes (compressed)
 - ML-DSA-44 public key: 1,312 bytes
-- Size ratio: ~39.8x larger
-- Suggested β_storage: 0.05 - 0.10
+- Raw size ratio: ~39.8x larger
+
+**Important**: Like β_bandwidth, the β_storage premium is a **moderated policy multiplier**, not the raw size ratio. It captures the marginal cost impact after accounting for:
+- SSD/storage cost amortization
+- State pruning efficiencies
+- Account churn rates
+
+Suggested β_storage: 0.05 - 0.10
 
 ### Recommended Process
 
@@ -200,7 +214,7 @@ Reference values:
 
 ### How Premiums Affect Inflation
 
-The PQC multiplier increases the effective inflation target:
+The PQC premiums are **moderated policy multipliers** that adjust the inflation target to compensate validators for PQC-related costs. The multiplier is applied additively:
 
 ```
 pqc_mult = 1.0 + β_compute + β_bandwidth + β_storage
@@ -211,6 +225,8 @@ effective_r_target = r_target_base * pqc_mult
                    = 0.05 * 1.55
                    = 0.0775 (7.75%)
 ```
+
+**Note**: The premium values (0.30, 0.15, 0.10) are not raw overhead ratios. They are calibrated to capture the marginal cost impact on validator economics while avoiding excessive inflation. The raw size ratios (~37-40x for PQC vs ECDSA) would result in unreasonably high inflation if used directly.
 
 This compensates validators for the additional PQC costs.
 

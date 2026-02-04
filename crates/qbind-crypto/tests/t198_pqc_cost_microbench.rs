@@ -534,15 +534,19 @@ fn t198_pqc_premium_calibration_helper() {
     println!("Example MonetaryEngineConfig premium values:");
     println!("```rust");
     println!("MonetaryEngineConfig {{");
-    println!("    pqc_premium_compute: 0.30,   // 30% CPU overhead");
-    println!("    pqc_premium_bandwidth: 0.15, // 15% bandwidth overhead");
-    println!("    pqc_premium_storage: 0.10,   // 10% storage overhead");
+    println!("    pqc_premium_compute: 0.30,   // Policy multiplier (not raw overhead ratio)");
+    println!("    pqc_premium_bandwidth: 0.15, // Policy multiplier (not raw size ratio)");
+    println!("    pqc_premium_storage: 0.10,   // Policy multiplier (not raw size ratio)");
     println!("    // ... other fields ...");
     println!("}}");
     println!("```\n");
 
-    println!("Note: These are starting values. Run benchmarks on your hardware");
-    println!("and adjust based on actual measurements vs. classical alternatives.");
+    println!("Note: These are moderated policy multipliers, NOT the raw overhead ratios.");
+    println!("The raw ratios (37.8x for signatures, 39.8x for keys) are too large to use");
+    println!("directly as inflation adjustments. The premiums capture the marginal cost");
+    println!("impact on validator economics after accounting for economies of scale.");
+    println!("\nRun benchmarks on your hardware and adjust based on actual measurements");
+    println!("vs. classical alternatives and network economics.");
 }
 
 // ============================================================================
