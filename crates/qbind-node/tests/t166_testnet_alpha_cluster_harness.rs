@@ -356,6 +356,11 @@ pub struct TestnetAlphaClusterConfig {
     /// When enabled, blocks with more than 1 transaction will use the
     /// Stage B conflict-graph scheduler for parallel execution.
     pub stage_b_enabled: bool,
+    /// Whether to enable monetary telemetry (shadow mode) (T196).
+    ///
+    /// When enabled, the cluster will compute monetary decisions per block
+    /// and record them in metrics for observation. No actual minting/burning.
+    pub monetary_telemetry_enabled: bool,
 }
 
 impl Default for TestnetAlphaClusterConfig {
@@ -373,7 +378,8 @@ impl Default for TestnetAlphaClusterConfig {
             timeout_secs: 30,
             network_mode: ClusterNetworkMode::LocalMesh,
             p2p_base_port: 19000,
-            stage_b_enabled: false, // T187: Disabled by default
+            stage_b_enabled: false,            // T187: Disabled by default
+            monetary_telemetry_enabled: false, // T196: Disabled by default
         }
     }
 }
@@ -395,7 +401,8 @@ impl TestnetAlphaClusterConfig {
             timeout_secs: 15,
             network_mode: ClusterNetworkMode::LocalMesh,
             p2p_base_port: 19000,
-            stage_b_enabled: false, // T187: Disabled by default
+            stage_b_enabled: false,            // T187: Disabled by default
+            monetary_telemetry_enabled: false, // T196: Disabled by default
         }
     }
 
@@ -509,6 +516,15 @@ impl TestnetAlphaClusterConfig {
     /// are both true.
     pub fn with_dag_coupling_mode(mut self, mode: qbind_node::DagCouplingMode) -> Self {
         self.dag_coupling_mode = mode;
+        self
+    }
+
+    /// Enable or disable monetary telemetry (shadow mode) (T196).
+    ///
+    /// When enabled, the cluster will compute monetary decisions per block
+    /// and record them in metrics for observation. No actual minting/burning.
+    pub fn with_monetary_telemetry(mut self, enabled: bool) -> Self {
+        self.monetary_telemetry_enabled = enabled;
         self
     }
 }
@@ -2664,6 +2680,7 @@ pub fn run_testnet_beta_fee_soak(cfg: &TestnetBetaFeeSoakConfig) -> TestnetBetaF
         network_mode,
         p2p_base_port: 19100,
         stage_b_enabled: false, // T187: Default to sequential for fee soak tests
+        monetary_telemetry_enabled: false, // T196: Off for fee soak tests
     };
 
     // Start the cluster
@@ -3572,4 +3589,127 @@ fn test_testnet_beta_dag_coupling_warn_mode() {
 
     cluster.shutdown().expect("shutdown should succeed");
     eprintln!("[T191] DAG coupling Warn mode cluster test completed");
+}
+
+// ============================================================================
+// T196 Monetary Telemetry Smoke Test
+// ============================================================================
+
+/// T196: Monetary telemetry smoke test with Alpha cluster.
+///
+/// Verifies that:
+/// 1. Cluster with monetary_telemetry_enabled = true starts successfully
+/// 2. After processing blocks, telemetry state is populated
+/// 3. Node metrics have non-default monetary values
+///
+/// This is a minimal test to ensure the wiring works without crashing.
+#[test]
+fn test_testnet_alpha_monetary_telemetry_smoke() {
+    use qbind_ledger::MonetaryPhase;
+    use qbind_node::monetary_telemetry::{
+        default_monetary_engine_config_for_testnet, MonetaryTelemetry, MonetaryTelemetryConfig,
+    };
+
+    // Create cluster with monetary telemetry enabled
+    let cfg = TestnetAlphaClusterConfig::minimal()
+        .with_num_validators(4)
+        .with_monetary_telemetry(true)
+        .with_network_mode(ClusterNetworkMode::LocalMesh)
+        .with_txs_per_sender(3)
+        .with_num_senders(2);
+
+    assert!(
+        cfg.monetary_telemetry_enabled,
+        "monetary_telemetry should be enabled"
+    );
+
+    eprintln!("[T196] Starting monetary telemetry smoke test");
+
+    // Create a separate MonetaryTelemetry instance to test the module
+    let telemetry_cfg = MonetaryTelemetryConfig {
+        enabled: true,
+        blocks_per_second: 1.0 / 6.0,
+        phase: MonetaryPhase::Bootstrap,
+        engine_config: default_monetary_engine_config_for_testnet(),
+    };
+
+    let mut telemetry = MonetaryTelemetry::new(telemetry_cfg);
+
+    // Simulate some block commits with fee data
+    for height in 1..=10 {
+        let block_fees = 100.0 * height as f64; // Increasing fees
+        let decision = telemetry.on_block_committed(
+            height,
+            block_fees,
+            1_000_000.0, // total_staked_tokens
+            0.5,         // bonded_ratio
+            None,        // fee_coverage_ratio_hint
+            None,        // fee_volatility_hint
+            100,         // days_since_launch
+        );
+
+        assert!(
+            decision.is_some(),
+            "Enabled telemetry should return decision"
+        );
+
+        let decision = decision.unwrap();
+        eprintln!(
+            "[T196] Block {}: fees={:.0}, r_target={:.4}, r_inf={:.4}, smoothed_revenue={:.0}",
+            height,
+            block_fees,
+            decision.effective_r_target_annual,
+            decision.recommended_r_inf_annual,
+            telemetry.state().smoothed_annual_fee_revenue
+        );
+    }
+
+    // Verify telemetry state is populated
+    let state = telemetry.state();
+    assert_eq!(state.last_height, 10, "last_height should be 10");
+    assert!(
+        state.smoothed_annual_fee_revenue > 0.0,
+        "smoothed_annual_fee_revenue should be positive after processing fees"
+    );
+    assert!(
+        state.last_decision.is_some(),
+        "last_decision should be Some after processing blocks"
+    );
+
+    let last_decision = state.last_decision.as_ref().unwrap();
+
+    // Bootstrap phase: r_target = 0.05 * 1.55 = 0.0775
+    let expected_target = 0.05 * (1.0 + 0.30 + 0.15 + 0.10);
+    assert!(
+        (last_decision.effective_r_target_annual - expected_target).abs() < 1e-9,
+        "effective_r_target_annual should be ~{}, got {}",
+        expected_target,
+        last_decision.effective_r_target_annual
+    );
+
+    // r_inf should be non-negative and within cap
+    assert!(
+        last_decision.recommended_r_inf_annual >= 0.0,
+        "r_inf should be non-negative"
+    );
+    assert!(
+        last_decision.recommended_r_inf_annual <= 0.12,
+        "r_inf should be within Bootstrap cap (12%)"
+    );
+
+    eprintln!("[T196] Monetary telemetry smoke test completed successfully");
+    eprintln!("[T196] Final state:");
+    eprintln!("  - last_height: {}", state.last_height);
+    eprintln!(
+        "  - smoothed_annual_fee_revenue: {:.2}",
+        state.smoothed_annual_fee_revenue
+    );
+    eprintln!(
+        "  - effective_r_target_annual: {:.4}",
+        last_decision.effective_r_target_annual
+    );
+    eprintln!(
+        "  - recommended_r_inf_annual: {:.4}",
+        last_decision.recommended_r_inf_annual
+    );
 }

@@ -231,7 +231,11 @@ MainNet v0 operates under a formal monetary policy framework that integrates inf
 > - Integration with hybrid fee distribution (T193)
 > - Parameter classification (hard-coded vs governance-tunable vs future/oracle-driven)
 >
-> **Implementation Status**: Design complete (T194). Implementation pending in T195+.
+> **Implementation Status**:
+> - T194: Design specification ✅ Complete
+> - T195: Engine core (`compute_monetary_decision`) ✅ Complete
+> - T196: Node-level telemetry (shadow mode) ✅ Complete — nodes compute and expose recommended inflation via metrics but do not yet enact it
+> - T197+: Actual seigniorage/issuance wiring ⏳ Pending
 
 **Key MainNet v0 Monetary Parameters**:
 
