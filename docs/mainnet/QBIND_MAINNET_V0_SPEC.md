@@ -219,6 +219,31 @@ MainNet readiness requires the following gas/fee tests to pass:
 | **Fee-market cluster tests** | `test_testnet_beta_fee_market_*` | **Mandatory CI** |
 | **Eviction behavior** | `test_testnet_beta_fee_market_eviction` | **Mandatory CI** |
 
+### 3.6 Monetary Policy
+
+MainNet v0 operates under a formal monetary policy framework that integrates inflation, fee distribution, and validator rewards into a unified security budget model.
+
+> **📋 Design Reference**: The complete monetary policy specification is provided in [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) (T194). This includes:
+> - Three-phase model (Bootstrap / Transition / Mature) with time and economic readiness gates
+> - PQC-adjusted inflation targets accounting for ML-DSA-44/ML-KEM-768 computational overhead
+> - EMA-based fee smoothing to prevent inflation volatility
+> - Seigniorage allocation (validators / treasury / insurance / community)
+> - Integration with hybrid fee distribution (T193)
+> - Parameter classification (hard-coded vs governance-tunable vs future/oracle-driven)
+>
+> **Implementation Status**: Design complete (T194). Implementation pending in T195+.
+
+**Key MainNet v0 Monetary Parameters**:
+
+| Parameter | MainNet v0 Value | Governance |
+| :--- | :--- | :--- |
+| **Initial Phase** | Bootstrap | Hard-coded |
+| **R_target (Bootstrap)** | 7.5–9.0% annual (PQC-adjusted) | Tunable within bounds |
+| **Fee Burn Ratio** | 50% | Hard-coded (T193) |
+| **Proposer Reward Ratio** | 50% | Hard-coded (T193) |
+| **Validators Seigniorage Share** | 82% | Tunable [75%, 90%] |
+| **Inflation Floor (Bootstrap)** | 0% | Hard-coded |
+
 ---
 
 ## 4. Mempool & DAG
@@ -620,6 +645,7 @@ qbind-node \
 | :--- | :--- | :--- |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
+| **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
 | TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture |
 | TestNet Beta Audit | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
