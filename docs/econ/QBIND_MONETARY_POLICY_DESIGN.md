@@ -767,6 +767,45 @@ pub struct MonetaryState {
 
 ---
 
+### 7.6 Implementation Status
+
+**Current Status** (as of T196):
+
+| Task | Component | Status | Notes |
+| :--- | :--- | :--- | :--- |
+| **T194** | Design Specification | ✅ Complete | This document |
+| **T195** | Monetary Engine Core | ✅ Complete | `qbind-ledger::monetary_engine` |
+| **T196** | Telemetry & Shadow Mode | ✅ Complete | `qbind-node::monetary_telemetry` |
+| **T197+** | Seigniorage Wiring | ⏳ Pending | Actual mint/burn logic |
+
+**What's Implemented** (T195–T196):
+
+- `MonetaryPhase` enum (Bootstrap, Transition, Mature)
+- `PhaseParameters` with target rates, floors, caps, EMA half-life
+- `MonetaryEngineConfig` with PQC premium factors
+- `compute_monetary_decision()` pure function
+- `PhaseTransitionRecommendation` heuristics
+- `MonetaryTelemetry` node-level service for shadow mode
+- `MonetaryMetrics` Prometheus gauges for observability
+- EMA-based fee smoothing with configurable half-life
+
+**Shadow Mode** (T196):
+
+The telemetry module computes and exposes what the monetary engine *would* do under current workloads, without:
+- Modifying validator rewards
+- Actual mint/burn operations
+- Supply changes
+
+This allows operators to observe the computed inflation rate and phase recommendations in metrics/logs before production wiring is enabled.
+
+**Code Locations**:
+- Engine: `crates/qbind-ledger/src/monetary_engine.rs`
+- Telemetry: `crates/qbind-node/src/monetary_telemetry.rs`
+- Metrics: `crates/qbind-node/src/metrics.rs` (MonetaryMetrics)
+- Tests: `crates/qbind-node/tests/t196_monetary_telemetry_tests.rs`
+
+---
+
 ## 8. Related Documents
 
 | Document | Path | Description |

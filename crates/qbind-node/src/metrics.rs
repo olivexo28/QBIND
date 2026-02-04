@@ -4398,6 +4398,199 @@ impl P2pMetrics {
 }
 
 // ============================================================================
+// MonetaryMetrics - Monetary engine telemetry metrics (T196)
+// ============================================================================
+
+/// Metrics for the monetary engine telemetry (shadow mode) (T196).
+///
+/// Exposes the monetary engine's computed values for observability without
+/// affecting actual token balances or supply.
+///
+/// # Prometheus-style naming
+///
+/// - `qbind_monetary_phase` → `phase()` (0=Bootstrap, 1=Transition, 2=Mature)
+/// - `qbind_monetary_r_target_annual_bps` → `r_target_annual_bps()`
+/// - `qbind_monetary_r_inf_annual_bps` → `r_inf_annual_bps()`
+/// - `qbind_monetary_fee_coverage_ratio` → `fee_coverage_ratio()`
+/// - `qbind_monetary_phase_recommendation` → `phase_recommendation()` (0=Stay, 1=Advance, 2=HoldBack)
+/// - `qbind_monetary_smoothed_annual_fee_revenue` → `smoothed_annual_fee_revenue()`
+/// - `qbind_monetary_decisions_total` → `decisions_total()`
+#[derive(Debug, Default)]
+pub struct MonetaryMetrics {
+    /// Current phase as an integer (0=Bootstrap, 1=Transition, 2=Mature)
+    phase: AtomicU64,
+
+    /// Target annual inflation rate in basis points (1 bps = 0.01%)
+    r_target_annual_bps: AtomicU64,
+
+    /// Recommended annual inflation rate in basis points
+    r_inf_annual_bps: AtomicU64,
+
+    /// Fee coverage ratio (scaled by 1e6 for precision)
+    fee_coverage_ratio_scaled: AtomicU64,
+
+    /// Phase recommendation (0=Stay, 1=Advance, 2=HoldBack)
+    phase_recommendation: AtomicU64,
+
+    /// Smoothed annual fee revenue (scaled by 1e6 for precision)
+    smoothed_annual_fee_revenue_scaled: AtomicU64,
+
+    /// Total monetary decisions computed
+    decisions_total: AtomicU64,
+}
+
+impl MonetaryMetrics {
+    /// Create a new MonetaryMetrics instance.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get current monetary phase as integer.
+    pub fn phase(&self) -> u64 {
+        self.phase.load(Ordering::Relaxed)
+    }
+
+    /// Set current monetary phase.
+    pub fn set_phase(&self, phase: u64) {
+        self.phase.store(phase, Ordering::Relaxed);
+    }
+
+    /// Get target annual inflation rate in basis points.
+    pub fn r_target_annual_bps(&self) -> u64 {
+        self.r_target_annual_bps.load(Ordering::Relaxed)
+    }
+
+    /// Set target annual inflation rate in basis points.
+    pub fn set_r_target_annual_bps(&self, bps: u64) {
+        self.r_target_annual_bps.store(bps, Ordering::Relaxed);
+    }
+
+    /// Get recommended annual inflation rate in basis points.
+    pub fn r_inf_annual_bps(&self) -> u64 {
+        self.r_inf_annual_bps.load(Ordering::Relaxed)
+    }
+
+    /// Set recommended annual inflation rate in basis points.
+    pub fn set_r_inf_annual_bps(&self, bps: u64) {
+        self.r_inf_annual_bps.store(bps, Ordering::Relaxed);
+    }
+
+    /// Get fee coverage ratio (returns scaled value, divide by 1e6 for actual).
+    pub fn fee_coverage_ratio_scaled(&self) -> u64 {
+        self.fee_coverage_ratio_scaled.load(Ordering::Relaxed)
+    }
+
+    /// Set fee coverage ratio (provide actual ratio, will be scaled by 1e6).
+    pub fn set_fee_coverage_ratio(&self, ratio: f64) {
+        let scaled = (ratio * 1_000_000.0).clamp(0.0, u64::MAX as f64) as u64;
+        self.fee_coverage_ratio_scaled
+            .store(scaled, Ordering::Relaxed);
+    }
+
+    /// Get phase recommendation as integer (0=Stay, 1=Advance, 2=HoldBack).
+    pub fn phase_recommendation(&self) -> u64 {
+        self.phase_recommendation.load(Ordering::Relaxed)
+    }
+
+    /// Set phase recommendation.
+    pub fn set_phase_recommendation(&self, recommendation: u64) {
+        self.phase_recommendation
+            .store(recommendation, Ordering::Relaxed);
+    }
+
+    /// Get smoothed annual fee revenue (returns scaled value, divide by 1e6 for actual).
+    pub fn smoothed_annual_fee_revenue_scaled(&self) -> u64 {
+        self.smoothed_annual_fee_revenue_scaled
+            .load(Ordering::Relaxed)
+    }
+
+    /// Set smoothed annual fee revenue (provide actual value, will be scaled by 1e6).
+    pub fn set_smoothed_annual_fee_revenue(&self, revenue: f64) {
+        let scaled = (revenue * 1_000_000.0).clamp(0.0, u64::MAX as f64) as u64;
+        self.smoothed_annual_fee_revenue_scaled
+            .store(scaled, Ordering::Relaxed);
+    }
+
+    /// Get total number of monetary decisions computed.
+    pub fn decisions_total(&self) -> u64 {
+        self.decisions_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment decisions counter.
+    pub fn inc_decisions(&self) {
+        self.decisions_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a monetary decision and update all relevant gauges.
+    ///
+    /// This is a convenience method that updates all gauges from a `MonetaryDecision`
+    /// and the associated state.
+    ///
+    /// # Arguments
+    ///
+    /// * `decision` - The computed monetary decision
+    /// * `phase` - The current monetary phase (0=Bootstrap, 1=Transition, 2=Mature)
+    /// * `fee_coverage_ratio` - The fee coverage ratio used in the computation
+    /// * `smoothed_annual_fee_revenue` - The smoothed annual fee revenue
+    pub fn record_decision(
+        &self,
+        effective_r_target_annual: f64,
+        recommended_r_inf_annual: f64,
+        phase: u64,
+        phase_recommendation: u64,
+        fee_coverage_ratio: f64,
+        smoothed_annual_fee_revenue: f64,
+    ) {
+        // Convert rates to basis points (1 bps = 0.01% = 0.0001)
+        let r_target_bps =
+            (effective_r_target_annual * 10_000.0).clamp(0.0, u64::MAX as f64) as u64;
+        let r_inf_bps = (recommended_r_inf_annual * 10_000.0).clamp(0.0, u64::MAX as f64) as u64;
+
+        self.set_phase(phase);
+        self.set_r_target_annual_bps(r_target_bps);
+        self.set_r_inf_annual_bps(r_inf_bps);
+        self.set_fee_coverage_ratio(fee_coverage_ratio);
+        self.set_phase_recommendation(phase_recommendation);
+        self.set_smoothed_annual_fee_revenue(smoothed_annual_fee_revenue);
+        self.inc_decisions();
+    }
+
+    /// Format metrics as Prometheus exposition format.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# T196: Monetary engine telemetry metrics (shadow mode)\n");
+
+        output.push_str(&format!("qbind_monetary_phase {}\n", self.phase()));
+        output.push_str(&format!(
+            "qbind_monetary_r_target_annual_bps {}\n",
+            self.r_target_annual_bps()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_r_inf_annual_bps {}\n",
+            self.r_inf_annual_bps()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_fee_coverage_ratio_scaled {}\n",
+            self.fee_coverage_ratio_scaled()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_phase_recommendation {}\n",
+            self.phase_recommendation()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_smoothed_annual_fee_revenue_scaled {}\n",
+            self.smoothed_annual_fee_revenue_scaled()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_decisions_total {}\n",
+            self.decisions_total()
+        ));
+
+        output
+    }
+}
+
+// ============================================================================
 // DagCouplingMetrics - DAG coupling validation metrics (T191)
 // ============================================================================
 
@@ -4695,6 +4888,8 @@ pub struct NodeMetrics {
     p2p: P2pMetrics,
     /// DAG coupling validation metrics (T191).
     dag_coupling: DagCouplingMetrics,
+    /// Monetary engine telemetry metrics (T196).
+    monetary: MonetaryMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -4729,6 +4924,7 @@ impl NodeMetrics {
             environment: std::sync::RwLock::new(None),
             p2p: P2pMetrics::new(),
             dag_coupling: DagCouplingMetrics::new(),
+            monetary: MonetaryMetrics::new(),
         }
     }
 
@@ -4830,6 +5026,11 @@ impl NodeMetrics {
     /// Get DAG coupling validation metrics (T191).
     pub fn dag_coupling(&self) -> &DagCouplingMetrics {
         &self.dag_coupling
+    }
+
+    /// Get monetary engine telemetry metrics (T196).
+    pub fn monetary(&self) -> &MonetaryMetrics {
+        &self.monetary
     }
 
     /// Record a DAG coupling validation result (T191).
@@ -5285,6 +5486,9 @@ impl NodeMetrics {
         // DAG coupling validation metrics (T191)
         output.push('\n');
         output.push_str(&self.dag_coupling.format_metrics());
+
+        // Monetary engine telemetry metrics (T196)
+        output.push_str(&self.monetary.format_metrics());
 
         output
     }

@@ -97,6 +97,7 @@ pub mod load_harness;
 pub mod mempool;
 pub mod metrics;
 pub mod metrics_http;
+pub mod monetary_telemetry;
 pub mod net_service;
 pub mod node_config;
 pub mod p2p;
@@ -254,9 +255,9 @@ pub use load_harness::{
 pub use metrics::{
     CommitMetrics, ConsensusProgressMetrics, ConsensusT154Metrics, DagCouplingMetrics,
     DisconnectReason, EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
-    KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, NetworkMetrics, NodeMetrics,
-    OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics, SignRequestKind,
-    SignerKeystoreMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp,
+    KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, MonetaryMetrics, NetworkMetrics,
+    NodeMetrics, OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics,
+    SignRequestKind, SignerKeystoreMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp,
     ValidatorEquivocationMetrics, ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics,
     MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
 };
@@ -334,6 +335,12 @@ pub use consensus_network_facade::{
 // T173: P2P consensus network exports
 pub use consensus_net_p2p::{
     P2pConsensusNetwork, SimpleValidatorNodeMapping, ValidatorNodeMapping,
+};
+
+// T196: Monetary engine telemetry exports
+pub use monetary_telemetry::{
+    default_monetary_engine_config_for_testnet, MonetaryTelemetry, MonetaryTelemetryConfig,
+    MonetaryTelemetryState,
 };
 
 use std::sync::Arc;
