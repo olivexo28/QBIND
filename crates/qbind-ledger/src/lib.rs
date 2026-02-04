@@ -5,6 +5,7 @@ pub mod context;
 pub mod error;
 pub mod execution;
 pub mod execution_gas;
+pub mod monetary_engine;
 pub mod parallel_exec;
 pub mod program;
 pub mod store;
@@ -60,3 +61,9 @@ pub use parallel_exec::{
 
 // T186: Stage B production parallel execution exports
 pub use parallel_exec::{execute_block_stage_b, StageBExecStats};
+
+// T195: Monetary Engine v1 exports
+pub use monetary_engine::{
+    compute_monetary_decision, MonetaryDecision, MonetaryEngineConfig, MonetaryInputs,
+    MonetaryPhase, PhaseParameters, PhaseTransitionRecommendation,
+};
