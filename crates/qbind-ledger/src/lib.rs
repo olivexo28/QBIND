@@ -87,3 +87,9 @@ pub use monetary_state::{
     compute_epoch_issuance, compute_validator_rewards, ValidatorReward, ValidatorRewardDistribution,
     ValidatorStake, MAINNET_EPOCHS_PER_YEAR,
 };
+
+// T201: Seigniorage Application & Routing exports
+pub use monetary_state::{
+    apply_seigniorage_balances, compute_epoch_seigniorage, process_epoch_seigniorage,
+    SeigniorageApplicationResult, SeigniorageStateMutator, SEIGNIORAGE_SPLIT_MAINNET_T201,
+};
