@@ -235,7 +235,20 @@ MainNet v0 operates under a formal monetary policy framework that integrates inf
 > - T194: Design specification ✅ Complete
 > - T195: Engine core (`compute_monetary_decision`) ✅ Complete
 > - T196: Node-level telemetry (shadow mode) ✅ Complete — nodes compute and expose recommended inflation via metrics but do not yet enact it
-> - T197+: Actual seigniorage/issuance wiring ⏳ Pending
+> - T199: Epoch monetary state ✅ Complete — consensus-tracked per-epoch monetary state containing phase, fee coverage inputs, and chosen inflation rate
+> - T200–T201: Actual seigniorage/issuance wiring ⏳ Pending
+
+**MainNet v0 Monetary Epoch State** (T199):
+
+MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, fee coverage inputs, and chosen inflation rate. Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
+
+| Aspect | MainNet v0 Behavior |
+| :--- | :--- |
+| **Epoch State** | `MonetaryEpochState` computed at each epoch boundary |
+| **Default Mode** | Shadow (metrics + state, no balance changes) |
+| **Epoch Detection** | Height-based via `epoch_for_height(height, blocks_per_epoch)` |
+| **Inflation Calc** | Deterministic via `compute_epoch_state()` calling T195 engine |
+| **Metrics** | Epoch-level gauges exposed via `/metrics` endpoint |
 
 **Key MainNet v0 Monetary Parameters**:
 
