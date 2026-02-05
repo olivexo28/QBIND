@@ -235,7 +235,9 @@ impl StateRetentionConfig {
     /// Returns `true` if pruning is enabled and the height is a multiple
     /// of `prune_interval_blocks`.
     pub fn should_prune_at_height(&self, height: u64) -> bool {
-        self.is_enabled() && self.prune_interval_blocks > 0 && height % self.prune_interval_blocks == 0
+        self.is_enabled()
+            && self.prune_interval_blocks > 0
+            && height.is_multiple_of(self.prune_interval_blocks)
     }
 }
 
