@@ -2594,7 +2594,7 @@ impl AsyncPeerManager for AsyncPeerManagerImpl {
     }
 
     async fn broadcast_proposal(&self, proposal: BlockProposal) -> Result<(), NetworkError> {
-        let msg = NetMessage::BlockProposal(proposal);
+        let msg = NetMessage::BlockProposal(Box::new(proposal));
         self.broadcast(msg)
             .await
             .map_err(|e| NetworkError::Other(e.to_string()))

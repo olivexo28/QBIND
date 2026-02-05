@@ -72,10 +72,15 @@ impl ValidatorContext {
 /// This enum represents the possible network actions that result from processing
 /// consensus events. The node is responsible for actually executing these actions
 /// on the network.
+///
+/// Note: `BroadcastProposal` is boxed to reduce enum size variance per clippy's
+/// `large_enum_variant` suggestion.
 #[derive(Debug, Clone)]
 pub enum ConsensusEngineAction<Id> {
     /// Broadcast a new proposal to all validators.
-    BroadcastProposal(BlockProposal),
+    ///
+    /// Note: Boxed to reduce the overall size of this enum.
+    BroadcastProposal(Box<BlockProposal>),
 
     /// Broadcast a vote to all validators (or according to policy).
     BroadcastVote(Vote),
@@ -768,7 +773,7 @@ mod tests {
         let mut net: MockConsensusNetwork<u64> = MockConsensusNetwork::new();
 
         let proposal = make_dummy_proposal(1, 0);
-        let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal };
+        let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal: Box::new(proposal) };
 
         let actions = driver.step(&mut net, Some(event)).unwrap();
 
@@ -795,7 +800,7 @@ mod tests {
 
         // Second event: proposal
         let proposal = make_dummy_proposal(1, 0);
-        let event2 = ConsensusNetworkEvent::IncomingProposal { from: 2, proposal };
+        let event2 = ConsensusNetworkEvent::IncomingProposal { from: 2, proposal: Box::new(proposal) };
         let _ = driver.step(&mut net, Some(event2)).unwrap();
 
         // Third event: another vote
@@ -951,7 +956,7 @@ mod tests {
         let proposal = make_dummy_proposal(1, 0);
         let event = ConsensusNetworkEvent::IncomingProposal {
             from: ValidatorId::new(999),
-            proposal,
+            proposal: Box::new(proposal),
         };
 
         let actions = driver.step(&mut net, Some(event)).unwrap();

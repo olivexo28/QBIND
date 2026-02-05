@@ -52,6 +52,9 @@ impl std::error::Error for NetworkError {}
 /// The `Id` type parameter represents the peer identifier. This allows the
 /// trait to be generic over different ID types used in different contexts
 /// (e.g., `PeerId` in the node vs. `u64` in tests).
+///
+/// Note: `IncomingProposal` contains a boxed `BlockProposal` to reduce enum size
+/// variance per clippy's `large_enum_variant` suggestion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConsensusNetworkEvent<Id> {
     /// An incoming vote from a peer.
@@ -66,7 +69,9 @@ pub enum ConsensusNetworkEvent<Id> {
         /// The peer that sent the proposal.
         from: Id,
         /// The block proposal message.
-        proposal: BlockProposal,
+        ///
+        /// Note: Boxed to reduce the overall size of this enum.
+        proposal: Box<BlockProposal>,
     },
     // In future: PeerConnected, PeerDisconnected, etc.
 }
@@ -277,7 +282,7 @@ mod tests {
         });
         mock.enqueue_event(ConsensusNetworkEvent::IncomingProposal {
             from: 200,
-            proposal: proposal.clone(),
+            proposal: Box::new(proposal.clone()),
         });
         mock.enqueue_event(ConsensusNetworkEvent::IncomingVote {
             from: 300,
@@ -300,7 +305,7 @@ mod tests {
             ConsensusNetworkEvent::IncomingProposal { from: 200, .. }
         ));
         if let ConsensusNetworkEvent::IncomingProposal { proposal: p, .. } = event2 {
-            assert_eq!(p, proposal);
+            assert_eq!(*p, proposal);
         }
 
         let event3 = mock.recv_one().unwrap();
@@ -356,7 +361,7 @@ mod tests {
         });
         mock.enqueue_event(ConsensusNetworkEvent::IncomingProposal {
             from: 200,
-            proposal: proposal.clone(),
+            proposal: Box::new(proposal.clone()),
         });
         mock.enqueue_event(ConsensusNetworkEvent::IncomingVote {
             from: 300,
@@ -383,7 +388,7 @@ mod tests {
             ConsensusNetworkEvent::IncomingProposal { from: 200, .. }
         ));
         if let ConsensusNetworkEvent::IncomingProposal { proposal: p, .. } = event2 {
-            assert_eq!(p, proposal);
+            assert_eq!(*p, proposal);
         }
 
         let event3 = mock.try_recv_one().unwrap();

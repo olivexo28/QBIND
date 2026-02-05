@@ -259,7 +259,7 @@ impl LoadGenerator {
         } else {
             Some(ConsensusNetworkEvent::IncomingProposal {
                 from: PeerId(self.messages_sent % 100),
-                proposal: self.make_synthetic_proposal(),
+                proposal: Box::new(self.make_synthetic_proposal()),
             })
         }
     }
