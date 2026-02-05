@@ -2116,6 +2116,10 @@ impl AsyncPeerManagerImpl {
                     // Handle ping/pong internally (future enhancement)
                     (None, Some(InboundMsgKind::Other))
                 }
+                NetMessage::PeerListMsg(_) => {
+                    // T205: Discovery message - handled by discovery layer
+                    (None, Some(InboundMsgKind::Other))
+                }
             };
 
             // Record per-peer inbound metric (T90.4)
@@ -2368,6 +2372,10 @@ impl AsyncPeerManagerImpl {
                     Some(InboundMsgKind::Proposal),
                 ),
                 NetMessage::Ping(_) | NetMessage::Pong(_) => (None, Some(InboundMsgKind::Other)),
+                NetMessage::PeerListMsg(_) => {
+                    // T205: Discovery message - handled by discovery layer
+                    (None, Some(InboundMsgKind::Other))
+                }
             };
 
             // Record per-peer inbound metric

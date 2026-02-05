@@ -170,6 +170,10 @@ impl<'a> ConsensusNetAdapter<'a> {
                     }
                     // Continue loop to receive next message.
                 }
+                NetMessage::PeerListMsg(_) => {
+                    // T205: Discovery message - handled by discovery layer.
+                    // Continue loop to receive next message.
+                }
             }
         }
     }
@@ -208,6 +212,11 @@ impl<'a> ConsensusNetAdapter<'a> {
                         if let Some(peer) = self.peers.get_peer_mut(from) {
                             peer.handle_incoming_pong(nonce);
                         }
+                        // Return None so caller can poll again without blocking.
+                        Ok(None)
+                    }
+                    NetMessage::PeerListMsg(_) => {
+                        // T205: Discovery message - handled by discovery layer.
                         // Return None so caller can poll again without blocking.
                         Ok(None)
                     }

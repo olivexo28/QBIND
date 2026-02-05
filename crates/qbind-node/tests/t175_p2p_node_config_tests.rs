@@ -15,6 +15,35 @@ use qbind_node::node_config::{
 use qbind_types::NetworkEnvironment;
 
 // ============================================================================
+// Helper to create NetworkTransportConfig with T205 fields
+// ============================================================================
+
+fn make_network_config(
+    enable_p2p: bool,
+    listen_addr: Option<String>,
+    advertised_addr: Option<String>,
+    static_peers: Vec<String>,
+) -> NetworkTransportConfig {
+    NetworkTransportConfig {
+        enable_p2p,
+        max_outbound: 16,
+        max_inbound: 64,
+        gossip_fanout: 6,
+        listen_addr,
+        advertised_addr,
+        static_peers,
+        // T205: Discovery and liveness defaults
+        discovery_enabled: false,
+        discovery_interval_secs: 30,
+        max_known_peers: 200,
+        target_outbound_peers: 8,
+        liveness_probe_interval_secs: 30,
+        liveness_failure_threshold: 3,
+        liveness_min_score: 30,
+    }
+}
+
+// ============================================================================
 // Part 1: Network Mode Parsing Tests
 // ============================================================================
 
@@ -64,15 +93,7 @@ fn test_p2p_config_local_mesh_disabled() {
         environment: NetworkEnvironment::Testnet,
         execution_profile: ExecutionProfile::VmV0,
         data_dir: None,
-        network: NetworkTransportConfig {
-            enable_p2p: false,
-            max_outbound: 16,
-            max_inbound: 64,
-            gossip_fanout: 6,
-            listen_addr: None,
-            advertised_addr: None,
-            static_peers: vec![],
-        },
+        network: make_network_config(false, None, None, vec![]),
         network_mode: NetworkMode::LocalMesh,
         gas_enabled: false,
         enable_fee_priority: false,
@@ -101,15 +122,12 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         environment: NetworkEnvironment::Testnet,
         execution_profile: ExecutionProfile::VmV0,
         data_dir: None,
-        network: NetworkTransportConfig {
-            enable_p2p: false, // Not enabled
-            max_outbound: 16,
-            max_inbound: 64,
-            gossip_fanout: 6,
-            listen_addr: Some("127.0.0.1:19000".to_string()),
-            advertised_addr: None,
-            static_peers: vec!["127.0.0.1:19001".to_string()],
-        },
+        network: make_network_config(
+            false, // Not enabled
+            Some("127.0.0.1:19000".to_string()),
+            None,
+            vec!["127.0.0.1:19001".to_string()],
+        ),
         network_mode: NetworkMode::P2p, // P2P mode requested
         gas_enabled: false,
         enable_fee_priority: false,
@@ -135,15 +153,12 @@ fn test_p2p_config_p2p_mode_enabled() {
         environment: NetworkEnvironment::Testnet,
         execution_profile: ExecutionProfile::VmV0,
         data_dir: None,
-        network: NetworkTransportConfig {
-            enable_p2p: true,
-            max_outbound: 16,
-            max_inbound: 64,
-            gossip_fanout: 6,
-            listen_addr: Some("0.0.0.0:19000".to_string()),
-            advertised_addr: None,
-            static_peers: vec!["127.0.0.1:19001".to_string()],
-        },
+        network: make_network_config(
+            true,
+            Some("0.0.0.0:19000".to_string()),
+            None,
+            vec!["127.0.0.1:19001".to_string()],
+        ),
         network_mode: NetworkMode::P2p,
         gas_enabled: false,
         enable_fee_priority: false,
@@ -169,15 +184,7 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         environment: NetworkEnvironment::Testnet,
         execution_profile: ExecutionProfile::VmV0,
         data_dir: None,
-        network: NetworkTransportConfig {
-            enable_p2p: true,
-            max_outbound: 16,
-            max_inbound: 64,
-            gossip_fanout: 6,
-            listen_addr: None, // No listen address
-            advertised_addr: None,
-            static_peers: vec![],
-        },
+        network: make_network_config(true, None, None, vec![]),
         network_mode: NetworkMode::P2p,
         gas_enabled: false,
         enable_fee_priority: false,
@@ -211,15 +218,12 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         environment: NetworkEnvironment::Testnet,
         execution_profile: ExecutionProfile::VmV0,
         data_dir: None,
-        network: NetworkTransportConfig {
-            enable_p2p: true, // Enabled but...
-            max_outbound: 16,
-            max_inbound: 64,
-            gossip_fanout: 6,
-            listen_addr: Some("127.0.0.1:19000".to_string()),
-            advertised_addr: None,
-            static_peers: vec![],
-        },
+        network: make_network_config(
+            true, // Enabled but...
+            Some("127.0.0.1:19000".to_string()),
+            None,
+            vec![],
+        ),
         network_mode: NetworkMode::LocalMesh, // LocalMesh mode
         gas_enabled: false,
         enable_fee_priority: false,
@@ -366,15 +370,12 @@ fn test_startup_info_p2p_enabled() {
         environment: NetworkEnvironment::Testnet,
         execution_profile: ExecutionProfile::VmV0,
         data_dir: None,
-        network: NetworkTransportConfig {
-            enable_p2p: true,
-            max_outbound: 16,
-            max_inbound: 64,
-            gossip_fanout: 6,
-            listen_addr: Some("0.0.0.0:19000".to_string()),
-            advertised_addr: None,
-            static_peers: vec!["127.0.0.1:19001".to_string(), "127.0.0.1:19002".to_string()],
-        },
+        network: make_network_config(
+            true,
+            Some("0.0.0.0:19000".to_string()),
+            None,
+            vec!["127.0.0.1:19001".to_string(), "127.0.0.1:19002".to_string()],
+        ),
         network_mode: NetworkMode::P2p,
         gas_enabled: false,
         enable_fee_priority: false,

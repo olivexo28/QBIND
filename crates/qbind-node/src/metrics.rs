@@ -4290,10 +4290,10 @@ use crate::channel_config::ChannelCapacityConfig;
 // ============================================================================
 // P2pMetrics - P2P transport metrics (T172)
 // ============================================================================
-/// Metrics for P2P transport layer (T172).
+/// Metrics for P2P transport layer (T172, T205).
 ///
 /// Tracks connection counts, bytes sent/received, and message flow for the
-/// P2P transport service.
+/// P2P transport service. Extended in T205 to include discovery and liveness metrics.
 ///
 /// # Prometheus-style naming
 ///
@@ -4302,6 +4302,17 @@ use crate::channel_config::ChannelCapacityConfig;
 /// - `qbind_p2p_bytes_received_total` → `bytes_received_total()`
 /// - `qbind_p2p_messages_sent_total{kind="..."}` → `messages_sent_total(kind)`
 /// - `qbind_p2p_messages_received_total{kind="..."}` → `messages_received_total(kind)`
+///
+/// ## T205 Discovery/Liveness Metrics
+///
+/// - `qbind_p2p_outbound_peers` → `outbound_peers()`
+/// - `qbind_p2p_inbound_peers` → `inbound_peers()`
+/// - `qbind_p2p_known_peers` → `known_peers()`
+/// - `qbind_p2p_discovery_enabled` → `discovery_enabled()` (0/1)
+/// - `qbind_p2p_peer_discovered_total` → `peer_discovered_total()`
+/// - `qbind_p2p_peer_evicted_total{reason="liveness"}` → `peer_evicted_liveness_total()`
+/// - `qbind_p2p_heartbeat_sent_total` → `heartbeat_sent_total()`
+/// - `qbind_p2p_heartbeat_failed_total` → `heartbeat_failed_total()`
 #[derive(Debug, Default)]
 pub struct P2pMetrics {
     connections_current: AtomicU64,
@@ -4313,6 +4324,24 @@ pub struct P2pMetrics {
     messages_received_consensus: AtomicU64,
     messages_received_dag: AtomicU64,
     messages_received_control: AtomicU64,
+
+    // T205: Discovery and liveness metrics
+    /// Current number of outbound peer connections.
+    outbound_peers: AtomicU64,
+    /// Current number of inbound peer connections.
+    inbound_peers: AtomicU64,
+    /// Current number of known peers in the peer table.
+    known_peers: AtomicU64,
+    /// Whether discovery is enabled (0 or 1).
+    discovery_enabled: AtomicU64,
+    /// Total number of peers discovered via peer exchange.
+    peer_discovered_total: AtomicU64,
+    /// Total number of peers evicted due to liveness failure.
+    peer_evicted_liveness_total: AtomicU64,
+    /// Total number of heartbeat Pings sent.
+    heartbeat_sent_total: AtomicU64,
+    /// Total number of heartbeats that failed (no Pong received).
+    heartbeat_failed_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -4394,6 +4423,92 @@ impl P2pMetrics {
             "control" => self.messages_received_control.load(Ordering::Relaxed),
             _ => 0,
         }
+    }
+
+    // ========================================================================
+    // T205: Discovery and Liveness Metrics
+    // ========================================================================
+
+    /// Get current number of outbound peer connections.
+    pub fn outbound_peers(&self) -> u64 {
+        self.outbound_peers.load(Ordering::Relaxed)
+    }
+
+    /// Set current number of outbound peer connections.
+    pub fn set_outbound_peers(&self, count: u64) {
+        self.outbound_peers.store(count, Ordering::Relaxed);
+    }
+
+    /// Get current number of inbound peer connections.
+    pub fn inbound_peers(&self) -> u64 {
+        self.inbound_peers.load(Ordering::Relaxed)
+    }
+
+    /// Set current number of inbound peer connections.
+    pub fn set_inbound_peers(&self, count: u64) {
+        self.inbound_peers.store(count, Ordering::Relaxed);
+    }
+
+    /// Get current number of known peers in the peer table.
+    pub fn known_peers(&self) -> u64 {
+        self.known_peers.load(Ordering::Relaxed)
+    }
+
+    /// Set current number of known peers in the peer table.
+    pub fn set_known_peers(&self, count: u64) {
+        self.known_peers.store(count, Ordering::Relaxed);
+    }
+
+    /// Get whether discovery is enabled (0 or 1).
+    pub fn discovery_enabled(&self) -> u64 {
+        self.discovery_enabled.load(Ordering::Relaxed)
+    }
+
+    /// Set whether discovery is enabled.
+    pub fn set_discovery_enabled(&self, enabled: bool) {
+        self.discovery_enabled
+            .store(if enabled { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
+    /// Get total number of peers discovered via peer exchange.
+    pub fn peer_discovered_total(&self) -> u64 {
+        self.peer_discovered_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the peer discovered counter.
+    pub fn inc_peer_discovered(&self) {
+        self.peer_discovered_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total number of peers evicted due to liveness failure.
+    pub fn peer_evicted_liveness_total(&self) -> u64 {
+        self.peer_evicted_liveness_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the peer evicted (liveness) counter.
+    pub fn inc_peer_evicted_liveness(&self) {
+        self.peer_evicted_liveness_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total number of heartbeat Pings sent.
+    pub fn heartbeat_sent_total(&self) -> u64 {
+        self.heartbeat_sent_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the heartbeat sent counter.
+    pub fn inc_heartbeat_sent(&self) {
+        self.heartbeat_sent_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total number of heartbeats that failed.
+    pub fn heartbeat_failed_total(&self) -> u64 {
+        self.heartbeat_failed_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the heartbeat failed counter.
+    pub fn inc_heartbeat_failed(&self) {
+        self.heartbeat_failed_total.fetch_add(1, Ordering::Relaxed);
     }
 }
 
