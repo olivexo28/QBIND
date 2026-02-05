@@ -693,6 +693,8 @@ mod tests {
             monetary_mode: MonetaryMode::Off,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208 field
+            state_retention: crate::node_config::StateRetentionConfig::disabled(),
         }
     }
 
