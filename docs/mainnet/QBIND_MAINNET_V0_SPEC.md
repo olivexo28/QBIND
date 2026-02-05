@@ -238,18 +238,20 @@ MainNet v0 operates under a formal monetary policy framework that integrates inf
 > - T199: Epoch monetary state ✅ Complete — consensus-tracked per-epoch monetary state containing phase, fee coverage inputs, and chosen inflation rate
 > - T200–T201: Seigniorage/issuance wiring ✅ Complete — validator reward distribution and application logic
 > - T202: EMA-based fee smoothing ✅ **Ready** — per-epoch EMA with phase-dependent λ integrated into monetary pipeline
+> - T203: Rate-of-change limiters ✅ **Ready** — consensus-side per-epoch Δ-limit on annual inflation, per phase, applied after floor/cap
 
-**MainNet v0 Monetary Epoch State** (T199 + T202):
+**MainNet v0 Monetary Epoch State** (T199 + T202 + T203):
 
-MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, EMA-smoothed fee inputs, and chosen inflation rate. Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
+MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, EMA-smoothed fee inputs, and chosen inflation rate. The inflation rate is subject to per-epoch rate-of-change limits (T203) to ensure smooth transitions. Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
 
 | Aspect | MainNet v0 Behavior |
 | :--- | :--- |
 | **Epoch State** | `MonetaryEpochState` computed at each epoch boundary |
 | **EMA Smoothing** | `ema_fees_per_epoch` with phase-dependent λ (T202) |
+| **Rate-of-Change Limit** | `max_delta_r_inf_per_epoch_bps` per phase (T203) |
 | **Default Mode** | Shadow (metrics + state, no balance changes) |
 | **Epoch Detection** | Height-based via `epoch_for_height(height, blocks_per_epoch)` |
-| **Inflation Calc** | Deterministic via `compute_epoch_state()` calling T195 engine |
+| **Inflation Calc** | Deterministic via `compute_epoch_state()` calling T195 engine with Δ-limit |
 | **Metrics** | Epoch-level gauges exposed via `/metrics` endpoint |
 
 **Key MainNet v0 Monetary Parameters**:
@@ -261,6 +263,9 @@ MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containin
 | **EMA λ (Bootstrap)** | 700 bps (7%) | Tunable [50, 1500] |
 | **EMA λ (Transition)** | 300 bps (3%) | Tunable [20, 500] |
 | **EMA λ (Mature)** | 150 bps (1.5%) | Tunable [10, 200] |
+| **Max Δ r_inf (Bootstrap)** | 25 bps (0.25%) per epoch | Tunable within bounds |
+| **Max Δ r_inf (Transition)** | 10 bps (0.10%) per epoch | Tunable within bounds |
+| **Max Δ r_inf (Mature)** | 5 bps (0.05%) per epoch | Tunable within bounds |
 | **Fee Burn Ratio** | 50% | Hard-coded (T193) |
 | **Proposer Reward Ratio** | 50% | Hard-coded (T193) |
 | **Validators Seigniorage Share** | 82% | Tunable [75%, 90%] |

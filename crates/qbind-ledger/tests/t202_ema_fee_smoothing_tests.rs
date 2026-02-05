@@ -30,6 +30,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
             ema_lambda_bps: 700, // 7% for Bootstrap
+            max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,
@@ -37,6 +38,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10,
             ema_lambda_bps: 300, // 3% for Transition
+            max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,
@@ -44,6 +46,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08,
             ema_lambda_bps: 150, // 1.5% for Mature
+            max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
     }
@@ -63,6 +66,7 @@ fn default_inputs() -> MonetaryEpochInputs {
         days_since_launch: 100,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None, // T203: No previous rate for epoch 0
     }
 }
 
@@ -231,6 +235,7 @@ fn test_epoch_0_initialization() {
         days_since_launch: 1,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state = compute_epoch_state(&config, &inputs);
@@ -264,6 +269,7 @@ fn test_epoch_1_plus_ema_recurrence() {
         days_since_launch: 1,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state_0 = compute_epoch_state(&config, &inputs_0);
     assert_eq!(state_0.ema_fees_per_epoch, 1000);
@@ -280,6 +286,7 @@ fn test_epoch_1_plus_ema_recurrence() {
         days_since_launch: 4,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state_1 = compute_epoch_state(&config, &inputs_1);
 
@@ -302,6 +309,7 @@ fn test_epoch_1_plus_ema_recurrence() {
         days_since_launch: 7,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state_2 = compute_epoch_state(&config, &inputs_2);
 
@@ -339,6 +347,7 @@ fn test_multi_epoch_gradual_change() {
             days_since_launch: 100 + epoch * 3,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
         };
         let state = compute_epoch_state(&config, &inputs);
         assert_eq!(
@@ -361,6 +370,7 @@ fn test_multi_epoch_gradual_change() {
         days_since_launch: 115,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state_spike = compute_epoch_state(&config, &spike_inputs);
 
@@ -396,6 +406,7 @@ fn test_smoothed_annual_is_ema_times_epochs() {
         days_since_launch: 115,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state = compute_epoch_state(&config, &inputs);
 
@@ -424,6 +435,7 @@ fn test_r_inf_changes_smoothly() {
         days_since_launch: 100,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state_0 = compute_epoch_state(&config, &inputs_0);
     let r_inf_0 = state_0.decision.recommended_r_inf_annual;
@@ -440,6 +452,7 @@ fn test_r_inf_changes_smoothly() {
         days_since_launch: 103,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
     let state_1 = compute_epoch_state(&config, &inputs_1);
     let r_inf_1 = state_1.decision.recommended_r_inf_annual;
@@ -583,6 +596,7 @@ fn test_compute_ema_fee_revenue_direct() {
         fee_smoothing_half_life_days: 30.0,
         max_annual_inflation_cap: 0.12,
         ema_lambda_bps: 700,
+        max_delta_r_inf_per_epoch_bps: 25, // T203
     };
 
     // Epoch 0 initialization

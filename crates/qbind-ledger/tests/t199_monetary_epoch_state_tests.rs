@@ -31,6 +31,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12, // 12% cap
             ema_lambda_bps: 700,             // T202: 7% EMA factor
+            max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,       // 4% base
@@ -38,6 +39,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10, // 10% cap
             ema_lambda_bps: 300,             // T202: 3% EMA factor
+            max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,        // 3% base
@@ -45,6 +47,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08, // 8% cap
             ema_lambda_bps: 150,             // T202: 1.5% EMA factor
+            max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
     }
@@ -63,6 +66,7 @@ fn default_inputs() -> MonetaryEpochInputs {
         days_since_launch: 100,
         fee_volatility: 1.0,
         epochs_per_year: 100, // Simple: 100 epochs per year for testing
+        prev_r_inf_annual_bps: None, // T203: No previous rate for epoch 0
     }
 }
 
@@ -92,6 +96,7 @@ fn test_basic_epoch_decision() {
         days_since_launch: 100,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state_0 = compute_epoch_state(&config, &inputs_0);
@@ -113,6 +118,7 @@ fn test_basic_epoch_decision() {
         days_since_launch: 103, // ~3 days later
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state_1 = compute_epoch_state(&config, &inputs_1);
@@ -134,6 +140,7 @@ fn test_basic_epoch_decision() {
         days_since_launch: 106,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state_2 = compute_epoch_state(&config, &inputs_2);
@@ -191,6 +198,7 @@ fn test_zero_fees_positive_stake() {
         days_since_launch: 100,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state = compute_epoch_state(&config, &inputs);
@@ -221,6 +229,7 @@ fn test_zero_stake_edge_case() {
         days_since_launch: 0,
         fee_volatility: 0.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     // Should not panic
@@ -252,6 +261,7 @@ fn test_zero_fees_zero_stake() {
         days_since_launch: 0,
         fee_volatility: 0.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state = compute_epoch_state(&config, &inputs);
@@ -286,6 +296,7 @@ fn test_r_inf_bounds() {
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -326,6 +337,7 @@ fn test_r_inf_monotonic_decreasing_with_fees() {
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -363,6 +375,7 @@ fn test_phase_consistency_bootstrap() {
             days_since_launch: 100 + epoch * 3,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -494,6 +507,7 @@ fn test_fee_coverage_ratio() {
         days_since_launch: 100,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state = compute_epoch_state(&config, &inputs);
@@ -641,6 +655,7 @@ fn test_mature_phase_floor() {
         days_since_launch: 10 * 365,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state = compute_epoch_state(&config, &inputs);
@@ -714,6 +729,7 @@ fn test_large_values() {
         days_since_launch: 500,
         fee_volatility: 0.5,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None,
     };
 
     let state = compute_epoch_state(&config, &inputs);
@@ -755,6 +771,7 @@ fn test_determinism() {
         days_since_launch: 1500,
         fee_volatility: 0.8,
         epochs_per_year: 122,
+        prev_r_inf_annual_bps: None,
     };
 
     let state1 = compute_epoch_state(&config, &inputs.clone());

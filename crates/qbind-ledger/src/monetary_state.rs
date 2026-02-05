@@ -83,6 +83,11 @@ pub struct MonetaryEpochInputs {
 
     /// Number of epochs per year (for annualization).
     pub epochs_per_year: u64,
+
+    /// Previous epoch's final annual inflation rate in basis points (T203).
+    /// Used for rate-of-change limiting. Set to None for the first epoch.
+    /// When None, no Δ-limit clamping is applied.
+    pub prev_r_inf_annual_bps: Option<u32>,
 }
 
 impl Default for MonetaryEpochInputs {
@@ -98,6 +103,7 @@ impl Default for MonetaryEpochInputs {
             days_since_launch: 0,
             fee_volatility: 0.0,
             epochs_per_year: DEFAULT_EPOCHS_PER_YEAR,
+            prev_r_inf_annual_bps: None,
         }
     }
 }
@@ -235,6 +241,66 @@ pub fn ema_step(prev_ema: u128, fees_t: u128, lambda_bps: u16) -> u128 {
     num / 10_000
 }
 
+// ============================================================================
+// Rate-of-Change Limiting (T203)
+// ============================================================================
+
+/// Clamp the inflation rate change to not exceed the maximum delta per epoch (T203).
+///
+/// This function enforces smooth transitions in the inflation rate by limiting
+/// how much the rate can change from one epoch to the next. It prevents sudden
+/// jumps that could destabilize validator economics or cause market shocks.
+///
+/// # Arguments
+///
+/// * `r_prev_bps` - Previous epoch's final inflation rate in basis points
+/// * `r_bounded_bps` - Current epoch's inflation rate (after floor/cap) in basis points
+/// * `max_delta_bps` - Maximum allowed change per epoch in basis points
+///
+/// # Returns
+///
+/// The clamped inflation rate in basis points, guaranteed to be within
+/// `[r_prev_bps - max_delta_bps, r_prev_bps + max_delta_bps]`.
+///
+/// # Special Cases
+///
+/// - If `max_delta_bps == 0`, returns `r_prev_bps` (no change allowed)
+/// - Uses saturating arithmetic to prevent overflow/underflow
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::clamp_inflation_rate_change;
+///
+/// // Clamp upward movement: 1000 → 1500, max_delta=200 → 1200
+/// assert_eq!(clamp_inflation_rate_change(1000, 1500, 200), 1200);
+///
+/// // Clamp downward movement: 1000 → 300, max_delta=200 → 800
+/// assert_eq!(clamp_inflation_rate_change(1000, 300, 200), 800);
+///
+/// // No clamp needed when within band
+/// assert_eq!(clamp_inflation_rate_change(1000, 1100, 200), 1100);
+/// ```
+pub fn clamp_inflation_rate_change(r_prev_bps: u32, r_bounded_bps: u32, max_delta_bps: u32) -> u32 {
+    // If max_delta is 0, no change is allowed (edge case / defensive)
+    if max_delta_bps == 0 {
+        return r_prev_bps;
+    }
+
+    if r_bounded_bps > r_prev_bps {
+        // Rate is increasing: clamp to upper bound
+        let upper = r_prev_bps.saturating_add(max_delta_bps);
+        core::cmp::min(r_bounded_bps, upper)
+    } else if r_bounded_bps < r_prev_bps {
+        // Rate is decreasing: clamp to lower bound
+        let lower = r_prev_bps.saturating_sub(max_delta_bps);
+        core::cmp::max(r_bounded_bps, lower)
+    } else {
+        // No change
+        r_prev_bps
+    }
+}
+
 /// Compute the smoothed annual fee revenue for this epoch.
 ///
 /// **T202 Update**: This function now uses EMA-based smoothing with phase-dependent λ.
@@ -307,14 +373,25 @@ pub fn compute_smoothed_annual_fee_revenue(
 ///
 /// This is the core function that bridges epoch inputs to the T195 monetary engine.
 ///
-/// # Algorithm (T202 Updated)
+/// # Algorithm (T203 Updated)
 ///
-/// 1. Compute EMA-smoothed fees per epoch using phase-dependent λ
+/// 1. Compute EMA-smoothed fees per epoch using phase-dependent λ (T202)
 /// 2. Annualize the EMA fees to get smoothed_annual_fee_revenue
 /// 3. Compute fee coverage ratio
 /// 4. Build MonetaryInputs for T195 engine
-/// 5. Call compute_monetary_decision()
-/// 6. Package into MonetaryEpochState
+/// 5. Call compute_monetary_decision() to get unclamped decision (with floor/cap)
+/// 6. Apply rate-of-change limiting (T203) — clamp inflation rate change
+/// 7. Package into MonetaryEpochState with clamped decision
+///
+/// # Rate-of-Change Limiting (T203)
+///
+/// The Δ-limit is applied after floor/cap clamping from T195:
+/// - If `prev_r_inf_annual_bps` is Some, clamp the rate to not exceed
+///   `max_delta_r_inf_per_epoch_bps` change from the previous epoch
+/// - If `prev_r_inf_annual_bps` is None (epoch 0), no clamping is applied
+///
+/// This ensures smooth transitions in the inflation rate, preventing sudden
+/// jumps that could destabilize validator economics or cause market shocks.
 ///
 /// # Arguments
 ///
@@ -363,10 +440,37 @@ pub fn compute_epoch_state(
         days_since_launch: inputs.days_since_launch,
     };
 
-    // Step 4: Call the T195 monetary engine
-    let decision = compute_monetary_decision(config, &monetary_inputs);
+    // Step 4: Call the T195 monetary engine (unclamped, but with floor/cap)
+    let decision_unclamped = compute_monetary_decision(config, &monetary_inputs);
 
-    // Step 5: Package into MonetaryEpochState
+    // Step 5: Apply rate-of-change limiting (T203)
+    // Convert the unclamped rate from f64 to u32 bps for clamping
+    let r_bounded_bps = (decision_unclamped.recommended_r_inf_annual * 10_000.0).round() as u32;
+
+    let r_inf_final_bps = match inputs.prev_r_inf_annual_bps {
+        Some(prev_bps) => {
+            // Apply Δ-limit: clamp to previous ± max_delta
+            clamp_inflation_rate_change(prev_bps, r_bounded_bps, params.max_delta_r_inf_per_epoch_bps)
+        }
+        None => {
+            // Epoch 0 or no previous state: no clamping
+            r_bounded_bps
+        }
+    };
+
+    // Convert back to f64 for the final decision
+    let r_inf_final = (r_inf_final_bps as f64) / 10_000.0;
+
+    // Build final decision with clamped rate
+    let decision = MonetaryDecision {
+        effective_r_target_annual: decision_unclamped.effective_r_target_annual,
+        recommended_r_inf_annual: r_inf_final,
+        inflation_floor_applied: decision_unclamped.inflation_floor_applied,
+        inflation_cap_applied: decision_unclamped.inflation_cap_applied,
+        phase_recommendation: decision_unclamped.phase_recommendation,
+    };
+
+    // Step 6: Package into MonetaryEpochState
     MonetaryEpochState {
         epoch_index: inputs.epoch_index,
         phase: inputs.phase,
@@ -1073,6 +1177,7 @@ mod tests {
                 fee_smoothing_half_life_days: 30.0,
                 max_annual_inflation_cap: 0.12,
                 ema_lambda_bps: 700, // T202: 7% EMA factor
+                max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
             },
             transition: PhaseParameters {
                 r_target_annual: 0.04,
@@ -1080,6 +1185,7 @@ mod tests {
                 fee_smoothing_half_life_days: 60.0,
                 max_annual_inflation_cap: 0.10,
                 ema_lambda_bps: 300, // T202: 3% EMA factor
+                max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
             },
             mature: PhaseParameters {
                 r_target_annual: 0.03,
@@ -1087,6 +1193,7 @@ mod tests {
                 fee_smoothing_half_life_days: 90.0,
                 max_annual_inflation_cap: 0.08,
                 ema_lambda_bps: 150, // T202: 1.5% EMA factor
+                max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
             },
             alpha_fee_offset: 1.0,
         }
@@ -1128,6 +1235,7 @@ mod tests {
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
             ema_lambda_bps: 700,
+            max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         };
 
         // 1000 fees per epoch, 100 epochs per year = 100,000 annualized
@@ -1153,6 +1261,7 @@ mod tests {
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -1190,6 +1299,7 @@ mod tests {
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -1230,6 +1340,7 @@ mod tests {
             days_since_launch: 0,
             fee_volatility: 0.0,
             epochs_per_year: 100,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -1259,6 +1370,7 @@ mod tests {
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -1284,6 +1396,7 @@ mod tests {
             days_since_launch: 100, // Too early for transition
             fee_volatility: 1.0,
             epochs_per_year: 100,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);

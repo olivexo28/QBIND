@@ -777,7 +777,7 @@ pub struct MonetaryState {
 
 ### 7.6 Implementation Status
 
-**Current Status** (as of T202):
+**Current Status** (as of T203):
 
 | Task | Component | Status | Notes |
 | :--- | :--- | :--- | :--- |
@@ -789,12 +789,12 @@ pub struct MonetaryState {
 | **T200** | Validator Seigniorage | ✅ Complete | `qbind-ledger::monetary_state` |
 | **T201** | Seigniorage Application | ✅ Complete | `qbind-ledger::monetary_state` |
 | **T202** | EMA Fee Smoothing | ✅ Complete | `qbind-ledger::monetary_state` |
-| **T203+** | Rate Limiters | ⏳ Pending | Inflation change caps |
+| **T203** | Rate-of-Change Limiters | ✅ Complete | `qbind-ledger::monetary_state` |
 
-**What's Implemented** (T195–T202):
+**What's Implemented** (T195–T203):
 
 - `MonetaryPhase` enum (Bootstrap, Transition, Mature)
-- `PhaseParameters` with target rates, floors, caps, EMA lambda (T202)
+- `PhaseParameters` with target rates, floors, caps, EMA lambda (T202), max_delta (T203)
 - `MonetaryEngineConfig` with PQC premium factors and validation
 - `compute_monetary_decision()` pure function
 - `PhaseTransitionRecommendation` heuristics
@@ -805,6 +805,10 @@ pub struct MonetaryState {
 - **T202**: `ema_fees_per_epoch` field in MonetaryEpochState
 - **T202**: `compute_ema_fee_revenue()` for EMA-based annual fee computation
 - **T202**: `smoothed_annual_fee_revenue` now uses EMA-smoothed fees
+- **T203**: `max_delta_r_inf_per_epoch_bps` in PhaseParameters (Bootstrap: 25, Transition: 10, Mature: 5)
+- **T203**: `clamp_inflation_rate_change()` helper for rate-of-change limiting
+- **T203**: `prev_r_inf_annual_bps` field in MonetaryEpochInputs
+- **T203**: Rate clamping applied in `compute_epoch_state()` after floor/cap
 
 **EMA Fee Smoothing** (T202):
 
@@ -813,6 +817,22 @@ The consensus-level monetary pipeline now uses EMA-based fee smoothing:
 - Subsequent epochs apply: `EMA_t = λ × fees_t + (1 - λ) × EMA_{t-1}`
 - Phase-dependent λ values provide faster response in Bootstrap, maximum stability in Mature
 - This prevents inflation rate spikes from short-term fee volatility
+
+**Rate-of-Change Limiting** (T203):
+
+The monetary engine enforces maximum epoch-to-epoch changes in the annual inflation rate:
+
+- **Formula**: `r_inf_final = clamp(r_bounded, r_prev ± max_delta)`
+- **Order of operations**: 
+  1. Compute unclamped rate (T195 with fees, EMA, PQC premiums)
+  2. Apply floor/cap bounds
+  3. Apply Δ-limit relative to previous epoch's final rate
+- **Phase-specific limits** (in basis points per epoch):
+  - Bootstrap: 25 bps (0.25% max change) — faster response during establishment
+  - Transition: 10 bps (0.10% max change) — balanced response during growth
+  - Mature: 5 bps (0.05% max change) — maximum stability for long-term operation
+- **Epoch 0 behavior**: No clamping applied when no previous rate exists
+- **Rationale**: Prevents abrupt shocks to validator economics, ensures predictable rate transitions across phase changes
 
 **Shadow Mode** (T196):
 
@@ -828,7 +848,7 @@ This allows operators to observe the computed inflation rate and phase recommend
 - State: `crates/qbind-ledger/src/monetary_state.rs`
 - Telemetry: `crates/qbind-node/src/monetary_telemetry.rs`
 - Metrics: `crates/qbind-node/src/metrics.rs` (MonetaryMetrics)
-- Tests: `crates/qbind-ledger/tests/t202_ema_fee_smoothing_tests.rs`
+- Tests: `crates/qbind-ledger/tests/` (T195–T203 test files)
 
 ---
 
