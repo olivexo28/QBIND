@@ -108,7 +108,10 @@ fn driver_drops_proposals_when_verifier_rejects() {
 
     // Send a proposal
     let proposal = make_dummy_proposal(1, 0);
-    let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal: Box::new(proposal) };
+    let event = ConsensusNetworkEvent::IncomingProposal {
+        from: 99,
+        proposal: Box::new(proposal),
+    };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();
 
@@ -145,7 +148,10 @@ fn driver_with_noop_verifier_behaves_like_before() {
 
     // Send a proposal
     let proposal = make_dummy_proposal(1, 0);
-    let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal: Box::new(proposal) };
+    let event = ConsensusNetworkEvent::IncomingProposal {
+        from: 99,
+        proposal: Box::new(proposal),
+    };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();
 
@@ -176,7 +182,10 @@ fn driver_without_verifier_accepts_all() {
 
     // Send a proposal
     let proposal = make_dummy_proposal(1, 0);
-    let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal: Box::new(proposal) };
+    let event = ConsensusNetworkEvent::IncomingProposal {
+        from: 99,
+        proposal: Box::new(proposal),
+    };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();
 
@@ -270,7 +279,10 @@ fn driver_verifier_selective_accept_reject() {
 
     // Send a proposal - should be rejected
     let proposal = make_dummy_proposal(1, 0);
-    let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal: Box::new(proposal) };
+    let event = ConsensusNetworkEvent::IncomingProposal {
+        from: 99,
+        proposal: Box::new(proposal),
+    };
     let _ = driver.step(&mut net, Some(event)).unwrap();
 
     assert_eq!(driver.proposals_received(), 0);
