@@ -773,7 +773,10 @@ mod tests {
         let mut net: MockConsensusNetwork<u64> = MockConsensusNetwork::new();
 
         let proposal = make_dummy_proposal(1, 0);
-        let event = ConsensusNetworkEvent::IncomingProposal { from: 99, proposal: Box::new(proposal) };
+        let event = ConsensusNetworkEvent::IncomingProposal {
+            from: 99,
+            proposal: Box::new(proposal),
+        };
 
         let actions = driver.step(&mut net, Some(event)).unwrap();
 
@@ -800,7 +803,10 @@ mod tests {
 
         // Second event: proposal
         let proposal = make_dummy_proposal(1, 0);
-        let event2 = ConsensusNetworkEvent::IncomingProposal { from: 2, proposal: Box::new(proposal) };
+        let event2 = ConsensusNetworkEvent::IncomingProposal {
+            from: 2,
+            proposal: Box::new(proposal),
+        };
         let _ = driver.step(&mut net, Some(event2)).unwrap();
 
         // Third event: another vote
