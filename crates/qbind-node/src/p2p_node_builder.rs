@@ -662,6 +662,14 @@ mod tests {
                 listen_addr: Some("127.0.0.1:0".to_string()),
                 advertised_addr: None,
                 static_peers: vec![],
+                // T205: Discovery and liveness defaults for test
+                discovery_enabled: false,
+                discovery_interval_secs: 30,
+                max_known_peers: 200,
+                target_outbound_peers: 8,
+                liveness_probe_interval_secs: 30,
+                liveness_failure_threshold: 3,
+                liveness_min_score: 30,
             },
             network_mode: NetworkMode::P2p,
             // T180 fields
