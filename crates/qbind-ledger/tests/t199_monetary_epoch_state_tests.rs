@@ -29,24 +29,24 @@ fn test_config() -> MonetaryEngineConfig {
             r_target_annual: 0.05,       // 5% base
             inflation_floor_annual: 0.0, // no floor in Bootstrap
             fee_smoothing_half_life_days: 30.0,
-            max_annual_inflation_cap: 0.12, // 12% cap
-            ema_lambda_bps: 700,             // T202: 7% EMA factor
+            max_annual_inflation_cap: 0.12,    // 12% cap
+            ema_lambda_bps: 700,               // T202: 7% EMA factor
             max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,       // 4% base
             inflation_floor_annual: 0.0, // no floor in Transition
             fee_smoothing_half_life_days: 60.0,
-            max_annual_inflation_cap: 0.10, // 10% cap
-            ema_lambda_bps: 300,             // T202: 3% EMA factor
+            max_annual_inflation_cap: 0.10,    // 10% cap
+            ema_lambda_bps: 300,               // T202: 3% EMA factor
             max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,        // 3% base
             inflation_floor_annual: 0.01, // 1% floor in Mature
             fee_smoothing_half_life_days: 90.0,
-            max_annual_inflation_cap: 0.08, // 8% cap
-            ema_lambda_bps: 150,             // T202: 1.5% EMA factor
+            max_annual_inflation_cap: 0.08,   // 8% cap
+            ema_lambda_bps: 150,              // T202: 1.5% EMA factor
             max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
@@ -66,7 +66,7 @@ fn default_inputs() -> MonetaryEpochInputs {
         bonded_ratio: 0.5,
         days_since_launch: 100,
         fee_volatility: 1.0,
-        epochs_per_year: 100, // Simple: 100 epochs per year for testing
+        epochs_per_year: 100,        // Simple: 100 epochs per year for testing
         prev_r_inf_annual_bps: None, // T203: No previous rate for epoch 0
     }
 }
@@ -298,13 +298,13 @@ fn test_r_inf_bounds() {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
-        circulating_supply: 100_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
-        prev_r_inf_annual_bps: None,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -340,13 +340,13 @@ fn test_r_inf_monotonic_decreasing_with_fees() {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
-        circulating_supply: 100_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100,
             fee_volatility: 1.0,
             epochs_per_year: 100,
-        prev_r_inf_annual_bps: None,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -379,13 +379,13 @@ fn test_phase_consistency_bootstrap() {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
-        circulating_supply: 100_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap, // Fixed phase
             bonded_ratio: 0.5,
             days_since_launch: 100 + epoch * 3,
             fee_volatility: 1.0,
             epochs_per_year: 100,
-        prev_r_inf_annual_bps: None,
+            prev_r_inf_annual_bps: None,
         };
 
         let state = compute_epoch_state(&config, &inputs);
@@ -428,15 +428,9 @@ fn test_different_phases() {
     // Transition: 0.04 * 1.55 = 0.062
     // Mature: 0.03 * 1.55 = 0.0465
 
-    assert!(
-        (state_bootstrap.decision.effective_r_target_annual - 0.0775).abs() < 1e-6
-    );
-    assert!(
-        (state_transition.decision.effective_r_target_annual - 0.062).abs() < 1e-6
-    );
-    assert!(
-        (state_mature.decision.effective_r_target_annual - 0.0465).abs() < 1e-6
-    );
+    assert!((state_bootstrap.decision.effective_r_target_annual - 0.0775).abs() < 1e-6);
+    assert!((state_transition.decision.effective_r_target_annual - 0.062).abs() < 1e-6);
+    assert!((state_mature.decision.effective_r_target_annual - 0.0465).abs() < 1e-6);
 
     // Phase transitions should be reflected in the state
     assert_eq!(state_bootstrap.phase, MonetaryPhase::Bootstrap);
@@ -634,7 +628,8 @@ fn test_phase_transition_recommendation() {
     // Let's verify the recommendation is either Advance or HoldBack based on computed coverage
     assert!(
         state_advance.decision.phase_recommendation == PhaseTransitionRecommendation::Advance
-            || state_advance.decision.phase_recommendation == PhaseTransitionRecommendation::HoldBack
+            || state_advance.decision.phase_recommendation
+                == PhaseTransitionRecommendation::HoldBack
     );
 }
 
@@ -791,5 +786,8 @@ fn test_determinism() {
     let state1 = compute_epoch_state(&config, &inputs.clone());
     let state2 = compute_epoch_state(&config, &inputs);
 
-    assert_eq!(state1, state2, "Epoch state computation should be deterministic");
+    assert_eq!(
+        state1, state2,
+        "Epoch state computation should be deterministic"
+    );
 }

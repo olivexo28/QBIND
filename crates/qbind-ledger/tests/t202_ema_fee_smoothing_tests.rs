@@ -29,7 +29,7 @@ fn test_config() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0,
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
-            ema_lambda_bps: 700, // 7% for Bootstrap
+            ema_lambda_bps: 700,               // 7% for Bootstrap
             max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
@@ -37,7 +37,7 @@ fn test_config() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0,
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10,
-            ema_lambda_bps: 300, // 3% for Transition
+            ema_lambda_bps: 300,               // 3% for Transition
             max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
@@ -45,7 +45,7 @@ fn test_config() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.01,
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08,
-            ema_lambda_bps: 150, // 1.5% for Mature
+            ema_lambda_bps: 150,              // 1.5% for Mature
             max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
@@ -347,13 +347,13 @@ fn test_multi_epoch_gradual_change() {
             previous_smoothed_annual_fee_revenue: prev_smoothed,
             previous_ema_fees_per_epoch: if epoch == 0 { 0 } else { prev_ema },
             staked_supply: 10_000_000,
-        circulating_supply: 100_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100 + epoch * 3,
             fee_volatility: 1.0,
             epochs_per_year: 100,
-        prev_r_inf_annual_bps: None,
+            prev_r_inf_annual_bps: None,
         };
         let state = compute_epoch_state(&config, &inputs);
         assert_eq!(
@@ -523,7 +523,10 @@ fn test_large_values_no_overflow() {
     let ema = ema_step(large_prev, large_fees, 5000);
 
     // Result should be reasonable (average of two equal values)
-    assert_eq!(ema, large_prev, "Large values should produce average without overflow");
+    assert_eq!(
+        ema, large_prev,
+        "Large values should produce average without overflow"
+    );
 }
 
 /// Test: Saturating arithmetic prevents overflow.
@@ -536,7 +539,10 @@ fn test_saturating_arithmetic() {
     let ema = ema_step(max_val, max_val, 5000);
 
     // Result should be valid (not garbage from overflow)
-    assert!(ema <= max_val, "Result should not exceed input due to saturation");
+    assert!(
+        ema <= max_val,
+        "Result should not exceed input due to saturation"
+    );
 }
 
 /// Test: λ = 0 (edge case, should be rejected by validation but ema_step handles it).

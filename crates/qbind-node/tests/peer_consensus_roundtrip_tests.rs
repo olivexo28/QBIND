@@ -440,7 +440,7 @@ fn peer_single_block_proposal_roundtrip() {
         // Receive a BlockProposal message from client
         let msg = peer.recv_msg().expect("server recv_msg failed");
         match msg {
-            NetMessage::BlockProposal(bp) => bp,
+            NetMessage::BlockProposal(bp) => *bp,
             other => panic!("expected BlockProposal, got {:?}", other),
         }
     });
@@ -452,7 +452,7 @@ fn peer_single_block_proposal_roundtrip() {
     // Build a small dummy BlockProposal
     let proposal = make_dummy_block_proposal();
 
-    let msg = NetMessage::BlockProposal(proposal.clone());
+    let msg = NetMessage::BlockProposal(Box::new(proposal.clone()));
     peer.send_msg(&msg).expect("client send_msg failed");
 
     // Join server thread and verify proposal

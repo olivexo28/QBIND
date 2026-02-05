@@ -1002,7 +1002,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
 
         // Return both actions: broadcast proposal and broadcast leader's vote
         vec![
-            ConsensusEngineAction::BroadcastProposal(proposal),
+            ConsensusEngineAction::BroadcastProposal(Box::new(proposal)),
             ConsensusEngineAction::BroadcastVote(vote),
         ]
     }

@@ -14,8 +14,8 @@
 use qbind_ledger::{
     compute_epoch_state, compute_fee_coverage_ratio_bps, compute_phase_transition,
     compute_stake_ratio_bps, MonetaryEngineConfig, MonetaryEpochInputs, MonetaryPhase,
-    PhaseParameters, PhaseTransitionReason, EPOCHS_PER_YEAR_10_MIN,
-    EPOCH_MATURE_START, EPOCH_TRANSITION_START, FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS,
+    PhaseParameters, PhaseTransitionReason, EPOCHS_PER_YEAR_10_MIN, EPOCH_MATURE_START,
+    EPOCH_TRANSITION_START, FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS,
     FEE_COVERAGE_TRANSITION_TO_MATURE_BPS, STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS,
     STAKE_RATIO_TRANSITION_TO_MATURE_BPS,
 };
@@ -34,24 +34,24 @@ fn test_config() -> MonetaryEngineConfig {
             r_target_annual: 0.05,       // 5% base
             inflation_floor_annual: 0.0, // no floor in Bootstrap
             fee_smoothing_half_life_days: 30.0,
-            max_annual_inflation_cap: 0.12, // 12% cap
-            ema_lambda_bps: 700,             // T202: 7% EMA factor
+            max_annual_inflation_cap: 0.12,    // 12% cap
+            ema_lambda_bps: 700,               // T202: 7% EMA factor
             max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,       // 4% base
             inflation_floor_annual: 0.0, // no floor in Transition
             fee_smoothing_half_life_days: 60.0,
-            max_annual_inflation_cap: 0.10, // 10% cap
-            ema_lambda_bps: 300,             // T202: 3% EMA factor
+            max_annual_inflation_cap: 0.10,    // 10% cap
+            ema_lambda_bps: 300,               // T202: 3% EMA factor
             max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,        // 3% base
             inflation_floor_annual: 0.01, // 1% floor in Mature
             fee_smoothing_half_life_days: 90.0,
-            max_annual_inflation_cap: 0.08, // 8% cap
-            ema_lambda_bps: 150,             // T202: 1.5% EMA factor
+            max_annual_inflation_cap: 0.08,   // 8% cap
+            ema_lambda_bps: 150,              // T202: 1.5% EMA factor
             max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
@@ -90,9 +90,9 @@ fn test_epoch_constants_are_correct() {
 
     // Verify thresholds
     assert_eq!(FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS, 2000); // 20%
-    assert_eq!(STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS, 3000);  // 30%
-    assert_eq!(FEE_COVERAGE_TRANSITION_TO_MATURE_BPS, 5000);    // 50%
-    assert_eq!(STAKE_RATIO_TRANSITION_TO_MATURE_BPS, 4000);     // 40%
+    assert_eq!(STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS, 3000); // 30%
+    assert_eq!(FEE_COVERAGE_TRANSITION_TO_MATURE_BPS, 5000); // 50%
+    assert_eq!(STAKE_RATIO_TRANSITION_TO_MATURE_BPS, 4000); // 40%
 }
 
 // ============================================================================
@@ -106,8 +106,8 @@ fn test_no_early_transition_before_time_gates_bootstrap() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Bootstrap,
         EPOCH_TRANSITION_START - 1, // Just before threshold
-        10000,                       // 100% fee coverage (perfect)
-        10000,                       // 100% stake ratio (perfect)
+        10000,                      // 100% fee coverage (perfect)
+        10000,                      // 100% stake ratio (perfect)
     );
 
     assert_eq!(outcome.next_phase, MonetaryPhase::Bootstrap);
@@ -121,8 +121,8 @@ fn test_no_early_transition_before_time_gates_transition() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Transition,
         EPOCH_MATURE_START - 1, // Just before threshold
-        10000,                   // 100% fee coverage (perfect)
-        10000,                   // 100% stake ratio (perfect)
+        10000,                  // 100% fee coverage (perfect)
+        10000,                  // 100% stake ratio (perfect)
     );
 
     assert_eq!(outcome.next_phase, MonetaryPhase::Transition);
@@ -153,8 +153,8 @@ fn test_bootstrap_to_transition_all_gates_satisfied() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Bootstrap,
         EPOCH_TRANSITION_START, // Exactly at threshold
-        2500,                    // 25% fee coverage (>= 20%)
-        3500,                    // 35% stake ratio (>= 30%)
+        2500,                   // 25% fee coverage (>= 20%)
+        3500,                   // 35% stake ratio (>= 30%)
     );
 
     assert_eq!(outcome.next_phase, MonetaryPhase::Transition);
@@ -201,7 +201,7 @@ fn test_bootstrap_stays_when_stake_ratio_too_low() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Bootstrap,
         EPOCH_TRANSITION_START,
-        FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS,     // Exactly 20%
+        FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS, // Exactly 20%
         STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS - 1, // Just below 30%
     );
 
@@ -233,8 +233,8 @@ fn test_transition_to_mature_all_gates_satisfied() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Transition,
         EPOCH_MATURE_START, // Exactly at threshold
-        6000,                // 60% fee coverage (>= 50%)
-        5000,                // 50% stake ratio (>= 40%)
+        6000,               // 60% fee coverage (>= 50%)
+        5000,               // 50% stake ratio (>= 40%)
     );
 
     assert_eq!(outcome.next_phase, MonetaryPhase::Mature);
@@ -281,7 +281,7 @@ fn test_transition_stays_when_stake_ratio_too_low() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Transition,
         EPOCH_MATURE_START,
-        FEE_COVERAGE_TRANSITION_TO_MATURE_BPS,     // Exactly 50%
+        FEE_COVERAGE_TRANSITION_TO_MATURE_BPS,    // Exactly 50%
         STAKE_RATIO_TRANSITION_TO_MATURE_BPS - 1, // Just below 40%
     );
 
@@ -329,10 +329,10 @@ fn test_mature_never_returns_to_transition() {
 fn test_mature_stays_mature_with_any_metrics() {
     // Mature phase with various metric combinations
     let test_cases = vec![
-        (0, 0),           // Zero metrics
-        (10000, 10000),   // Perfect metrics
-        (5000, 5000),     // Medium metrics
-        (100, 100),       // Low metrics
+        (0, 0),         // Zero metrics
+        (10000, 10000), // Perfect metrics
+        (5000, 5000),   // Medium metrics
+        (100, 100),     // Low metrics
     ];
 
     for (fee_coverage, stake_ratio) in test_cases {
@@ -365,8 +365,8 @@ fn test_cannot_skip_transition_phase() {
     let outcome = compute_phase_transition(
         MonetaryPhase::Bootstrap,
         EPOCH_MATURE_START, // At Mature threshold, but still in Bootstrap
-        10000,               // Perfect fee coverage
-        10000,               // Perfect stake ratio
+        10000,              // Perfect fee coverage
+        10000,              // Perfect stake ratio
     );
 
     // Should advance to Transition, not Mature
@@ -521,9 +521,13 @@ fn test_epoch_state_includes_phase_transition_fields() {
     assert_eq!(state.phase_prev, MonetaryPhase::Bootstrap);
     assert!(!state.phase_transition_applied);
     assert_eq!(state.stake_ratio_bps, 1000); // 10% = 1000 bps
-    // fee_coverage_ratio_bps can be 0 if fees are 0
-    // r_inf_annual_bps should be the target rate (775 bps for 7.75%) when no fee offset
-    assert!(state.r_inf_annual_bps > 0, "r_inf_annual_bps should be > 0 when no fee offset, got {}", state.r_inf_annual_bps);
+                                             // fee_coverage_ratio_bps can be 0 if fees are 0
+                                             // r_inf_annual_bps should be the target rate (775 bps for 7.75%) when no fee offset
+    assert!(
+        state.r_inf_annual_bps > 0,
+        "r_inf_annual_bps should be > 0 when no fee offset, got {}",
+        state.r_inf_annual_bps
+    );
 }
 
 #[test]
@@ -536,7 +540,7 @@ fn test_epoch_state_transition_applied() {
         raw_epoch_fees: 100_000_000, // High fees for good coverage
         previous_smoothed_annual_fee_revenue: 0,
         previous_ema_fees_per_epoch: 100_000_000,
-        staked_supply: 5_000_000,     // 50% staked (> 30% threshold)
+        staked_supply: 5_000_000, // 50% staked (> 30% threshold)
         circulating_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -625,12 +629,7 @@ fn test_zero_circulating_supply() {
 #[test]
 fn test_maximum_epoch_values() {
     // Test with very large epoch values
-    let outcome = compute_phase_transition(
-        MonetaryPhase::Transition,
-        u64::MAX - 1,
-        10000,
-        10000,
-    );
+    let outcome = compute_phase_transition(MonetaryPhase::Transition, u64::MAX - 1, 10000, 10000);
 
     // Should advance to Mature since time gate is definitely met
     assert_eq!(outcome.next_phase, MonetaryPhase::Mature);

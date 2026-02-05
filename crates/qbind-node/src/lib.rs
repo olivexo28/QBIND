@@ -113,6 +113,9 @@ pub mod dag_net_p2p;
 pub mod p2p_discovery;
 pub mod p2p_liveness;
 
+// T206 P2P Anti-Eclipse Diversity module
+pub mod p2p_diversity;
+
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -227,6 +230,13 @@ pub use node_config::MainnetConfigError;
 
 // T189/T190 DAG Coupling Mode exports
 pub use node_config::{parse_dag_coupling_mode, DagCouplingMode, VALID_DAG_COUPLING_MODES};
+
+// T206 P2P Anti-Eclipse Diversity exports
+pub use p2p_diversity::{
+    parse_diversity_mode, DiversityCheckResult, DiversityClassifier, DiversityConfig,
+    DiversityEnforcementMode, DiversityMetrics, DiversityState, PeerBucketId,
+    VALID_DIVERSITY_MODES,
+};
 
 // T197 Monetary Mode exports (re-exported from qbind-ledger)
 pub use qbind_ledger::{

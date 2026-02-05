@@ -1890,7 +1890,7 @@ mod tests {
             },
             ConsensusNetworkEvent::IncomingProposal {
                 from: PeerId(200),
-                proposal: proposal.clone(),
+                proposal: Box::new(proposal.clone()),
             },
         ];
 
@@ -1951,7 +1951,7 @@ mod tests {
             },
             ConsensusNetworkEvent::IncomingProposal {
                 from: PeerId(200),
-                proposal: proposal.clone(),
+                proposal: Box::new(proposal.clone()),
             },
         ];
 
@@ -2060,7 +2060,7 @@ mod tests {
         inbound_tx
             .send(ConsensusNetworkEvent::IncomingProposal {
                 from: PeerId(200),
-                proposal: proposal.clone(),
+                proposal: Box::new(proposal.clone()),
             })
             .await
             .unwrap();

@@ -73,6 +73,12 @@ fn create_test_config(port: u16) -> NetworkTransportConfig {
         liveness_probe_interval_secs: 30,
         liveness_failure_threshold: 3,
         liveness_min_score: 30,
+        // T206: Diversity defaults for test
+        diversity_mode: qbind_node::p2p_diversity::DiversityEnforcementMode::Off,
+        max_peers_per_ipv4_prefix24: 2,
+        max_peers_per_ipv4_prefix16: 8,
+        min_outbound_diversity_buckets: 4,
+        max_single_bucket_fraction_bps: 2500,
     }
 }
 
@@ -282,6 +288,12 @@ fn test_network_transport_config() {
         liveness_probe_interval_secs: 30,
         liveness_failure_threshold: 3,
         liveness_min_score: 30,
+        // T206: Diversity defaults for test
+        diversity_mode: qbind_node::p2p_diversity::DiversityEnforcementMode::Off,
+        max_peers_per_ipv4_prefix24: 2,
+        max_peers_per_ipv4_prefix16: 8,
+        min_outbound_diversity_buckets: 4,
+        max_single_bucket_fraction_bps: 2500,
     };
 
     assert!(custom.enable_p2p);

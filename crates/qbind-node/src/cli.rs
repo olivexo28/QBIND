@@ -40,6 +40,7 @@ use crate::node_config::{
     parse_mempool_mode, parse_network_mode, DagCouplingMode, MempoolMode, NetworkMode,
     NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
 };
+use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 
 // ============================================================================
@@ -244,6 +245,20 @@ pub struct CliArgs {
     /// Default: 6
     #[arg(long = "p2p-gossip-fanout", default_value = "6")]
     pub p2p_gossip_fanout: usize,
+
+    // ========================================================================
+    // T206: P2P Diversity Mode (Anti-Eclipse)
+    // ========================================================================
+    /// P2P diversity enforcement mode: off, warn, or enforce (T206).
+    ///
+    /// Controls anti-eclipse IP-prefix diversity constraints:
+    /// - off: No diversity checks (DevNet, TestNet Alpha default)
+    /// - warn: Log warnings but allow connections (TestNet Beta default)
+    /// - enforce: Reject connections that violate limits (MainNet required)
+    ///
+    /// MainNet profile requires `enforce` mode.
+    #[arg(long = "p2p-diversity-mode")]
+    pub p2p_diversity_mode: Option<String>,
 }
 
 // ============================================================================
@@ -271,6 +286,8 @@ pub enum CliError {
     InvalidDagCouplingMode(String),
     /// Invalid monetary mode string (T197).
     InvalidMonetaryMode(String),
+    /// Invalid diversity mode string (T206).
+    InvalidDiversityMode(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -306,6 +323,13 @@ impl std::fmt::Display for CliError {
                 write!(
                     f,
                     "invalid monetary-mode '{}': expected 'off', 'shadow', or 'active'",
+                    s
+                )
+            }
+            CliError::InvalidDiversityMode(s) => {
+                write!(
+                    f,
+                    "invalid p2p-diversity-mode '{}': expected 'off', 'warn', or 'enforce'",
                     s
                 )
             }
@@ -418,6 +442,12 @@ impl CliArgs {
                 liveness_probe_interval_secs: 30,
                 liveness_failure_threshold: 3,
                 liveness_min_score: 30,
+                // T206: Diversity defaults (Off for legacy path)
+                diversity_mode: crate::p2p_diversity::DiversityEnforcementMode::Off,
+                max_peers_per_ipv4_prefix24: 2,
+                max_peers_per_ipv4_prefix16: 8,
+                min_outbound_diversity_buckets: 4,
+                max_single_bucket_fraction_bps: 2500,
             };
 
             NodeConfig {
@@ -513,6 +543,21 @@ impl CliArgs {
                 eprintln!("[T186] CLI override: stage_b_enabled = {}", stage_b);
             }
             config.stage_b_enabled = stage_b;
+        }
+
+        // T206: Apply diversity mode override
+        if let Some(ref diversity_mode_str) = self.p2p_diversity_mode {
+            match parse_diversity_mode(diversity_mode_str) {
+                Some(mode) => {
+                    if self.profile.is_some() {
+                        eprintln!("[T206] CLI override: diversity_mode = {}", mode);
+                    }
+                    config.network.diversity_mode = mode;
+                }
+                None => {
+                    return Err(CliError::InvalidDiversityMode(diversity_mode_str.clone()));
+                }
+            }
         }
 
         // Apply data_dir if specified

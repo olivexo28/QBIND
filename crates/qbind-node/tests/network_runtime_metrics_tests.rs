@@ -179,11 +179,11 @@ async fn network_worker_metrics_inbound_proposal_increment() {
     let events = vec![
         ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(1),
-            proposal: make_dummy_proposal(1, 0),
+            proposal: Box::new(make_dummy_proposal(1, 0)),
         },
         ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(2),
-            proposal: make_dummy_proposal(2, 0),
+            proposal: Box::new(make_dummy_proposal(2, 0)),
         },
     ];
 
@@ -216,7 +216,7 @@ async fn network_worker_metrics_mixed_events() {
         },
         ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(2),
-            proposal: make_dummy_proposal(2, 0),
+            proposal: Box::new(make_dummy_proposal(2, 0)),
         },
         ConsensusNetworkEvent::IncomingVote {
             from: PeerId(3),
@@ -224,7 +224,7 @@ async fn network_worker_metrics_mixed_events() {
         },
         ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(4),
-            proposal: make_dummy_proposal(4, 0),
+            proposal: Box::new(make_dummy_proposal(4, 0)),
         },
         ConsensusNetworkEvent::IncomingVote {
             from: PeerId(5),

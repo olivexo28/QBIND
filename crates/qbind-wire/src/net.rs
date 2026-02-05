@@ -409,7 +409,7 @@ impl WireDecode for PeerInfo {
     fn decode(input: &mut &[u8]) -> Result<Self, WireError> {
         let mut peer_id = [0u8; 32];
         let peer_id_slice = get_bytes(input, 32)?;
-        peer_id.copy_from_slice(&peer_id_slice);
+        peer_id.copy_from_slice(peer_id_slice);
 
         let addr_len = get_u16(input)? as usize;
         if addr_len > 256 {
@@ -494,7 +494,11 @@ pub enum NetMessage {
     /// A consensus vote message.
     ConsensusVote(Vote),
     /// A block proposal message.
-    BlockProposal(BlockProposal),
+    ///
+    /// Note: `BlockProposal` is boxed to reduce the overall size of `NetMessage`.
+    /// This addresses clippy's `large_enum_variant` warning by avoiding a large
+    /// size difference between enum variants while preserving the API semantics.
+    BlockProposal(Box<BlockProposal>),
 }
 
 impl WireEncode for NetMessage {
@@ -546,7 +550,7 @@ impl WireDecode for NetMessage {
             }
             MSG_TYPE_NET_BLOCK_PROPOSAL => {
                 let b = BlockProposal::decode(input)?;
-                Ok(NetMessage::BlockProposal(b))
+                Ok(NetMessage::BlockProposal(Box::new(b)))
             }
             _ => Err(WireError::InvalidValue("unknown NetMessage msg_type")),
         }

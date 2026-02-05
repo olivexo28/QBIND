@@ -833,24 +833,24 @@ mod tests {
                 r_target_annual: 0.05,       // 5% base
                 inflation_floor_annual: 0.0, // no floor
                 fee_smoothing_half_life_days: 30.0,
-                max_annual_inflation_cap: 0.12, // 12% cap
-                ema_lambda_bps: 700,             // T202: 7% EMA factor for Bootstrap
+                max_annual_inflation_cap: 0.12,    // 12% cap
+                ema_lambda_bps: 700,               // T202: 7% EMA factor for Bootstrap
                 max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
             },
             transition: PhaseParameters {
                 r_target_annual: 0.04,       // 4% base
                 inflation_floor_annual: 0.0, // no floor
                 fee_smoothing_half_life_days: 60.0,
-                max_annual_inflation_cap: 0.10, // 10% cap
-                ema_lambda_bps: 300,             // T202: 3% EMA factor for Transition
+                max_annual_inflation_cap: 0.10,    // 10% cap
+                ema_lambda_bps: 300,               // T202: 3% EMA factor for Transition
                 max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
             },
             mature: PhaseParameters {
                 r_target_annual: 0.03,        // 3% base
                 inflation_floor_annual: 0.01, // 1% floor
                 fee_smoothing_half_life_days: 90.0,
-                max_annual_inflation_cap: 0.08, // 8% cap
-                ema_lambda_bps: 150,             // T202: 1.5% EMA factor for Mature
+                max_annual_inflation_cap: 0.08,   // 8% cap
+                ema_lambda_bps: 150,              // T202: 1.5% EMA factor for Mature
                 max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
             },
             alpha_fee_offset: 1.0,

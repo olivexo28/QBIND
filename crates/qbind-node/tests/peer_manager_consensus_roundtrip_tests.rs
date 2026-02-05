@@ -501,7 +501,7 @@ fn peer_manager_broadcast_block_proposal() {
     let proposal = make_dummy_block_proposal();
 
     // Broadcast the BlockProposal to all peers
-    mgr.broadcast(&NetMessage::BlockProposal(proposal.clone()))
+    mgr.broadcast(&NetMessage::BlockProposal(Box::new(proposal.clone())))
         .expect("client broadcast failed");
 
     // Wait for server threads to finish
@@ -513,12 +513,12 @@ fn peer_manager_broadcast_block_proposal() {
     let msg2 = rx2.recv().expect("recv from channel2 failed");
 
     match msg1 {
-        NetMessage::BlockProposal(bp) => assert_eq!(bp, proposal),
+        NetMessage::BlockProposal(bp) => assert_eq!(*bp, proposal),
         other => panic!("expected BlockProposal, got {:?}", other),
     }
 
     match msg2 {
-        NetMessage::BlockProposal(bp) => assert_eq!(bp, proposal),
+        NetMessage::BlockProposal(bp) => assert_eq!(*bp, proposal),
         other => panic!("expected BlockProposal, got {:?}", other),
     }
 }

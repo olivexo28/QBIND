@@ -534,7 +534,7 @@ fn governed_verifier_handles_proposals_in_driver() {
 
     let event = ConsensusNetworkEvent::IncomingProposal {
         from: ValidatorId::new(1),
-        proposal: valid_proposal,
+        proposal: Box::new(valid_proposal),
     };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();
@@ -557,7 +557,7 @@ fn governed_verifier_handles_proposals_in_driver() {
 
     let event = ConsensusNetworkEvent::IncomingProposal {
         from: ValidatorId::new(1),
-        proposal: invalid_proposal,
+        proposal: Box::new(invalid_proposal),
     };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();

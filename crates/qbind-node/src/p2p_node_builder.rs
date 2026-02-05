@@ -670,6 +670,12 @@ mod tests {
                 liveness_probe_interval_secs: 30,
                 liveness_failure_threshold: 3,
                 liveness_min_score: 30,
+                // T206: Diversity defaults for test
+                diversity_mode: crate::p2p_diversity::DiversityEnforcementMode::Off,
+                max_peers_per_ipv4_prefix24: 2,
+                max_peers_per_ipv4_prefix16: 8,
+                min_outbound_diversity_buckets: 4,
+                max_single_bucket_fraction_bps: 2500,
             },
             network_mode: NetworkMode::P2p,
             // T180 fields

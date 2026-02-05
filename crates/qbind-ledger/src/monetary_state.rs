@@ -188,7 +188,6 @@ pub struct MonetaryEpochState {
     // ========================================================================
     // T204: Phase Transition Fields
     // ========================================================================
-
     /// Fee coverage ratio in basis points (0–10,000).
     /// Computed as: `(smoothed_annual_fee_revenue / target_security_budget) * 10,000`
     /// where target_security_budget = staked_supply * r_target.
@@ -224,8 +223,7 @@ impl Default for MonetaryEpochState {
                 recommended_r_inf_annual: 0.0,
                 inflation_floor_applied: false,
                 inflation_cap_applied: false,
-                phase_recommendation:
-                    crate::monetary_engine::PhaseTransitionRecommendation::Stay,
+                phase_recommendation: crate::monetary_engine::PhaseTransitionRecommendation::Stay,
             },
             fee_coverage_ratio: 0.0,
             // T204 fields
@@ -604,12 +602,15 @@ pub fn compute_ema_fee_revenue(
     let ema_fees_per_epoch = if epoch_index == 0 && previous_ema_fees == 0 {
         raw_epoch_fees
     } else {
-        ema_step(previous_ema_fees, raw_epoch_fees, phase_params.ema_lambda_bps)
+        ema_step(
+            previous_ema_fees,
+            raw_epoch_fees,
+            phase_params.ema_lambda_bps,
+        )
     };
 
     // Annualize the EMA fees
-    let smoothed_annual_fee_revenue =
-        ema_fees_per_epoch.saturating_mul(epochs_per_year as u128);
+    let smoothed_annual_fee_revenue = ema_fees_per_epoch.saturating_mul(epochs_per_year as u128);
 
     (ema_fees_per_epoch, smoothed_annual_fee_revenue)
 }
@@ -631,7 +632,10 @@ pub fn compute_ema_fee_revenue(
 /// # Returns
 ///
 /// The smoothed annual fee revenue for this epoch.
-#[deprecated(since = "0.1.0", note = "Use compute_ema_fee_revenue for T202 EMA behavior")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use compute_ema_fee_revenue for T202 EMA behavior"
+)]
 pub fn compute_smoothed_annual_fee_revenue(
     raw_epoch_fees: u128,
     _previous_smoothed: u128,
@@ -745,7 +749,11 @@ pub fn compute_epoch_state(
     let r_inf_final_bps = match inputs.prev_r_inf_annual_bps {
         Some(prev_bps) => {
             // Apply Δ-limit: clamp to previous ± max_delta
-            clamp_inflation_rate_change(prev_bps, r_bounded_bps, params.max_delta_r_inf_per_epoch_bps)
+            clamp_inflation_rate_change(
+                prev_bps,
+                r_bounded_bps,
+                params.max_delta_r_inf_per_epoch_bps,
+            )
         }
         None => {
             // Epoch 0 or no previous state: no clamping
@@ -1449,7 +1457,8 @@ where
     S: SeigniorageStateMutator,
 {
     // Compute seigniorage (Off mode returns early)
-    let result = compute_epoch_seigniorage(epoch_state, epochs_per_year, split, validator_stakes, mode);
+    let result =
+        compute_epoch_seigniorage(epoch_state, epochs_per_year, split, validator_stakes, mode);
 
     // For Shadow mode or Off mode, return the result as-is
     if mode != MonetaryMode::Active {
@@ -1488,7 +1497,7 @@ mod tests {
                 inflation_floor_annual: 0.0,
                 fee_smoothing_half_life_days: 30.0,
                 max_annual_inflation_cap: 0.12,
-                ema_lambda_bps: 700, // T202: 7% EMA factor
+                ema_lambda_bps: 700,               // T202: 7% EMA factor
                 max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
             },
             transition: PhaseParameters {
@@ -1496,7 +1505,7 @@ mod tests {
                 inflation_floor_annual: 0.0,
                 fee_smoothing_half_life_days: 60.0,
                 max_annual_inflation_cap: 0.10,
-                ema_lambda_bps: 300, // T202: 3% EMA factor
+                ema_lambda_bps: 300,               // T202: 3% EMA factor
                 max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
             },
             mature: PhaseParameters {
@@ -1504,7 +1513,7 @@ mod tests {
                 inflation_floor_annual: 0.01,
                 fee_smoothing_half_life_days: 90.0,
                 max_annual_inflation_cap: 0.08,
-                ema_lambda_bps: 150, // T202: 1.5% EMA factor
+                ema_lambda_bps: 150,              // T202: 1.5% EMA factor
                 max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
             },
             alpha_fee_offset: 1.0,
@@ -1820,9 +1829,18 @@ mod tests {
     #[test]
     fn test_compute_validator_rewards_basic() {
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 100 },
-            ValidatorStake { validator_id: 2, stake: 200 },
-            ValidatorStake { validator_id: 3, stake: 300 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 100,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 200,
+            },
+            ValidatorStake {
+                validator_id: 3,
+                stake: 300,
+            },
         ];
 
         let distribution = compute_validator_rewards(600, &stakes, 600).unwrap();
@@ -1843,9 +1861,18 @@ mod tests {
     #[test]
     fn test_compute_validator_rewards_with_rounding() {
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 100 },
-            ValidatorStake { validator_id: 2, stake: 100 },
-            ValidatorStake { validator_id: 3, stake: 100 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 100,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 100,
+            },
+            ValidatorStake {
+                validator_id: 3,
+                stake: 100,
+            },
         ];
 
         // 1000 tokens split 3 ways = 333 each, remainder 1 to last
@@ -1862,8 +1889,14 @@ mod tests {
     #[test]
     fn test_compute_validator_rewards_stake_mismatch() {
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 100 },
-            ValidatorStake { validator_id: 2, stake: 200 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 100,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 200,
+            },
         ];
 
         // Expected stake doesn't match actual (300 != 500)
@@ -1885,8 +1918,14 @@ mod tests {
     #[test]
     fn test_compute_validator_rewards_zero_issuance() {
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 100 },
-            ValidatorStake { validator_id: 2, stake: 200 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 100,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 200,
+            },
         ];
 
         let distribution = compute_validator_rewards(0, &stakes, 300).unwrap();
@@ -1899,7 +1938,10 @@ mod tests {
 
     #[test]
     fn test_compute_validator_rewards_single_validator() {
-        let stakes = vec![ValidatorStake { validator_id: 42, stake: 1000 }];
+        let stakes = vec![ValidatorStake {
+            validator_id: 42,
+            stake: 1000,
+        }];
 
         let distribution = compute_validator_rewards(5000, &stakes, 1000).unwrap();
 
@@ -1913,10 +1955,22 @@ mod tests {
     fn test_compute_validator_rewards_conservation() {
         // Test with various issuance amounts to ensure conservation
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 17 },
-            ValidatorStake { validator_id: 2, stake: 23 },
-            ValidatorStake { validator_id: 3, stake: 41 },
-            ValidatorStake { validator_id: 4, stake: 19 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 17,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 23,
+            },
+            ValidatorStake {
+                validator_id: 3,
+                stake: 41,
+            },
+            ValidatorStake {
+                validator_id: 4,
+                stake: 19,
+            },
         ];
         let total_stake: u128 = stakes.iter().map(|s| s.stake).sum();
 
@@ -1936,9 +1990,18 @@ mod tests {
     #[test]
     fn test_compute_validator_rewards_deterministic() {
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 123 },
-            ValidatorStake { validator_id: 2, stake: 456 },
-            ValidatorStake { validator_id: 3, stake: 789 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 123,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 456,
+            },
+            ValidatorStake {
+                validator_id: 3,
+                stake: 789,
+            },
         ];
         let total_stake: u128 = stakes.iter().map(|s| s.stake).sum();
 
@@ -1951,14 +2014,24 @@ mod tests {
     #[test]
     fn test_compute_validator_rewards_large_values() {
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 10_000_000_000_000 },
-            ValidatorStake { validator_id: 2, stake: 20_000_000_000_000 },
-            ValidatorStake { validator_id: 3, stake: 30_000_000_000_000 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 10_000_000_000_000,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 20_000_000_000_000,
+            },
+            ValidatorStake {
+                validator_id: 3,
+                stake: 30_000_000_000_000,
+            },
         ];
         let total_stake: u128 = stakes.iter().map(|s| s.stake).sum(); // 60 trillion
 
         // Distribute 1 trillion tokens
-        let distribution = compute_validator_rewards(1_000_000_000_000, &stakes, total_stake).unwrap();
+        let distribution =
+            compute_validator_rewards(1_000_000_000_000, &stakes, total_stake).unwrap();
 
         // 1/6 of 1 trillion = ~166.67 billion
         assert!(distribution.rewards[0].reward > 166_000_000_000);
@@ -1972,9 +2045,18 @@ mod tests {
     fn test_compute_validator_rewards_unequal_stakes() {
         // One validator has vastly more stake than others
         let stakes = vec![
-            ValidatorStake { validator_id: 1, stake: 1 },
-            ValidatorStake { validator_id: 2, stake: 1 },
-            ValidatorStake { validator_id: 3, stake: 999_998 },
+            ValidatorStake {
+                validator_id: 1,
+                stake: 1,
+            },
+            ValidatorStake {
+                validator_id: 2,
+                stake: 1,
+            },
+            ValidatorStake {
+                validator_id: 3,
+                stake: 999_998,
+            },
         ];
 
         let distribution = compute_validator_rewards(1_000_000, &stakes, 1_000_000).unwrap();

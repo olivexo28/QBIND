@@ -115,7 +115,7 @@ impl<'a> ConsensusNetAdapter<'a> {
         &mut self,
         proposal: &BlockProposal,
     ) -> Result<(), ConsensusNetError> {
-        let msg = NetMessage::BlockProposal(proposal.clone());
+        let msg = NetMessage::BlockProposal(Box::new(proposal.clone()));
         self.peers.broadcast(&msg)?;
         Ok(())
     }
@@ -154,7 +154,7 @@ impl<'a> ConsensusNetAdapter<'a> {
                     return Ok(ConsensusNetEvent::IncomingVote { from, vote });
                 }
                 NetMessage::BlockProposal(proposal) => {
-                    return Ok(ConsensusNetEvent::IncomingProposal { from, proposal });
+                    return Ok(ConsensusNetEvent::IncomingProposal { from, proposal: *proposal });
                 }
                 NetMessage::Ping(nonce) => {
                     // Reply with Pong and continue receiving.
@@ -197,7 +197,7 @@ impl<'a> ConsensusNetAdapter<'a> {
                         Ok(Some(ConsensusNetEvent::IncomingVote { from, vote }))
                     }
                     NetMessage::BlockProposal(proposal) => {
-                        Ok(Some(ConsensusNetEvent::IncomingProposal { from, proposal }))
+                        Ok(Some(ConsensusNetEvent::IncomingProposal { from, proposal: *proposal }))
                     }
                     NetMessage::Ping(nonce) => {
                         // Reply with Pong.
@@ -275,7 +275,7 @@ impl<'a> ConsensusNetwork for ConsensusNetAdapter<'a> {
                 ConsensusNetworkEvent::IncomingVote { from, vote }
             }
             ConsensusNetEvent::IncomingProposal { from, proposal } => {
-                ConsensusNetworkEvent::IncomingProposal { from, proposal }
+                ConsensusNetworkEvent::IncomingProposal { from, proposal: Box::new(proposal) }
             }
         };
 
@@ -292,7 +292,7 @@ impl<'a> ConsensusNetwork for ConsensusNetAdapter<'a> {
                         ConsensusNetworkEvent::IncomingVote { from, vote }
                     }
                     ConsensusNetEvent::IncomingProposal { from, proposal } => {
-                        ConsensusNetworkEvent::IncomingProposal { from, proposal }
+                        ConsensusNetworkEvent::IncomingProposal { from, proposal: Box::new(proposal) }
                     }
                 };
                 Ok(Some(mapped))

@@ -157,11 +157,11 @@ fn roundtrip_block_proposal_through_net_message() {
         signature: vec![],
     };
 
-    let msg = NetMessage::BlockProposal(proposal.clone());
+    let msg = NetMessage::BlockProposal(Box::new(proposal.clone()));
     let bytes = msg.encode_to_vec().expect("encode should succeed");
     let decoded = NetMessage::decode_from_slice(&bytes).expect("decode should succeed");
 
-    assert_eq!(decoded, NetMessage::BlockProposal(proposal));
+    assert_eq!(decoded, NetMessage::BlockProposal(Box::new(proposal)));
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn encode_small_block_proposal_succeeds_within_limit() {
         signature: vec![],
     };
 
-    let msg = NetMessage::BlockProposal(proposal);
+    let msg = NetMessage::BlockProposal(Box::new(proposal));
     let result = msg.encode_to_vec();
     assert!(result.is_ok());
     let bytes = result.unwrap();
@@ -224,7 +224,7 @@ fn encode_oversized_block_proposal_returns_too_large_error() {
         signature: vec![],
     };
 
-    let msg = NetMessage::BlockProposal(proposal);
+    let msg = NetMessage::BlockProposal(Box::new(proposal));
     let result = msg.encode_to_vec();
 
     assert!(result.is_err());
@@ -280,7 +280,7 @@ fn mixed_message_sequence_roundtrip() {
     let messages: Vec<NetMessage> = vec![
         NetMessage::Ping(1),
         NetMessage::ConsensusVote(vote),
-        NetMessage::BlockProposal(proposal),
+        NetMessage::BlockProposal(Box::new(proposal)),
         NetMessage::Pong(2),
     ];
 

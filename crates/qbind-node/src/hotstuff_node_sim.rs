@@ -2578,10 +2578,10 @@ impl NodeHotstuffHarness {
                 // Store the incoming proposal in the block store (idempotent).
                 // This ensures that followers have proposals available for
                 // committed blocks proposed by other validators.
-                self.block_store.insert(proposal.clone())?;
+                self.block_store.insert((*proposal).clone())?;
 
                 // T191: Validate DAG coupling before processing proposal
-                if !self.should_vote_after_dag_coupling_check(&proposal) {
+                if !self.should_vote_after_dag_coupling_check(&*proposal) {
                     // Coupling validation failed in Enforce mode - reject proposal
                     return Ok(());
                 }
@@ -2642,10 +2642,10 @@ impl NodeHotstuffHarness {
         match event {
             ConsensusNetworkEvent::IncomingProposal { from, proposal } => {
                 // Store the incoming proposal in the block store (idempotent).
-                self.block_store.insert(proposal.clone())?;
+                self.block_store.insert((*proposal).clone())?;
 
                 // T191: Validate DAG coupling before processing proposal
-                if !self.should_vote_after_dag_coupling_check(&proposal) {
+                if !self.should_vote_after_dag_coupling_check(&*proposal) {
                     // Coupling validation failed in Enforce mode - reject proposal
                     return Ok(());
                 }
@@ -2673,7 +2673,7 @@ impl NodeHotstuffHarness {
                 // Submit job (best effort - drop if queue full)
                 if pool.submit(job).is_ok() {
                     // Store pending proposal for later processing
-                    self.pending_proposals.insert(key, proposal);
+                    self.pending_proposals.insert(key, *proposal);
                 } else {
                     #[cfg(debug_assertions)]
                     eprintln!(

@@ -572,7 +572,7 @@ fn consensus_node_receives_block_proposal_event_via_trait() {
     match event {
         ConsensusNetworkEvent::IncomingProposal { from, proposal } => {
             assert_eq!(from, PeerId(1)); // Server assigns PeerId(1) to first inbound peer
-            assert_eq!(proposal, expected_proposal);
+            assert_eq!(*proposal, expected_proposal);
         }
         other => panic!("expected IncomingProposal, got {:?}", other),
     }

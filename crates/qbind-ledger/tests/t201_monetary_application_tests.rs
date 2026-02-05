@@ -63,7 +63,11 @@ fn mainnet_split() -> SeigniorageSplit {
 }
 
 /// Returns a test epoch state with the given staked supply and inflation rate.
-fn test_epoch_state(epoch_index: u64, staked_supply: u128, r_inf_annual: f64) -> MonetaryEpochState {
+fn test_epoch_state(
+    epoch_index: u64,
+    staked_supply: u128,
+    r_inf_annual: f64,
+) -> MonetaryEpochState {
     let mut state = MonetaryEpochState::default();
     state.epoch_index = epoch_index;
     state.staked_supply = staked_supply;
@@ -139,7 +143,8 @@ fn test_epoch_issuance_conservation() {
     let epoch_state = test_epoch_state(100, 1_000_000_000, 0.0775); // 7.75% inflation
     let stakes = equal_validator_stakes(4, 1_000_000_000);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     // Verify conservation
     assert!(result.is_conserved(), "Issuance should equal sum of splits");
@@ -194,7 +199,8 @@ fn test_validator_rewards_conservation() {
     let stakes = equal_validator_stakes(4, 10_000_000);
     let epoch_state = test_epoch_state(100, 10_000_000, 0.0775);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     assert!(
         result.validator_rewards_conserved(),
@@ -237,7 +243,8 @@ fn test_validator_rewards_conservation_unequal_stakes() {
     let total_stake: u128 = stakes.iter().map(|s| s.stake).sum();
     let epoch_state = test_epoch_state(100, total_stake, 0.0775);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     assert!(result.is_conserved());
     assert!(result.validator_rewards_conserved());
@@ -269,7 +276,8 @@ fn test_zero_stake_or_zero_issuance_behavior_zero_stake() {
     let stakes: Vec<ValidatorStake> = vec![];
     let epoch_state = test_epoch_state(100, 0, 0.0775);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     // Should not panic, should produce zero issuance
     assert_eq!(result.total_issuance, 0);
@@ -284,7 +292,8 @@ fn test_zero_stake_or_zero_issuance_behavior_zero_inflation() {
     let stakes = equal_validator_stakes(4, 1_000_000);
     let epoch_state = test_epoch_state(100, 1_000_000, 0.0); // 0% inflation
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     assert_eq!(result.total_issuance, 0);
     assert!(result.is_conserved());
@@ -312,7 +321,8 @@ fn test_zero_stake_or_zero_issuance_behavior_empty_validators() {
     let stakes: Vec<ValidatorStake> = vec![];
     let epoch_state = test_epoch_state(100, 1_000_000, 0.0775);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     // Should still compute issuance (for treasury/insurance/community)
     // but validators portion won't have distribution
@@ -404,7 +414,10 @@ fn test_monetary_mode_shadow_updates_metrics_only() {
 
     // Shadow mode should compute values
     assert_eq!(result.mode, MonetaryMode::Shadow);
-    assert!(result.total_issuance > 0, "Should compute positive issuance");
+    assert!(
+        result.total_issuance > 0,
+        "Should compute positive issuance"
+    );
     assert!(result.is_conserved());
     assert!(result.validator_rewards_conserved());
 
@@ -529,7 +542,10 @@ fn test_monetary_mode_active_without_accounts() {
     // Should compute values but NOT update balances
     assert_eq!(result.mode, MonetaryMode::Active);
     assert!(result.total_issuance > 0);
-    assert!(!result.balances_updated, "Should not update without accounts");
+    assert!(
+        !result.balances_updated,
+        "Should not update without accounts"
+    );
     assert_eq!(state.total_supply(), 0);
 }
 
@@ -586,7 +602,8 @@ fn test_mainnet_split_percentages() {
     let epoch_state = test_epoch_state(100, 10_000_000, 0.0775);
     let stakes = equal_validator_stakes(4, 10_000_000);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     // Verify percentages (allow for rounding)
     let total = result.total_issuance as f64;
@@ -737,7 +754,8 @@ fn test_large_values() {
     let stakes = equal_validator_stakes(100, large_stake);
     let epoch_state = test_epoch_state(100, large_stake, 0.0775);
 
-    let result = compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
+    let result =
+        compute_epoch_seigniorage(&epoch_state, 100, &split, &stakes, MonetaryMode::Shadow);
 
     assert!(result.total_issuance > 0);
     assert!(result.is_conserved());

@@ -32,24 +32,24 @@ fn test_config() -> MonetaryEngineConfig {
             r_target_annual: 0.05,       // 5% base (7.75% PQC-adjusted)
             inflation_floor_annual: 0.0, // no floor in Bootstrap
             fee_smoothing_half_life_days: 30.0,
-            max_annual_inflation_cap: 0.12, // 12% cap
-            ema_lambda_bps: 700,             // T202: 7% EMA factor
+            max_annual_inflation_cap: 0.12,    // 12% cap
+            ema_lambda_bps: 700,               // T202: 7% EMA factor
             max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,       // 4% base
             inflation_floor_annual: 0.0, // no floor in Transition
             fee_smoothing_half_life_days: 60.0,
-            max_annual_inflation_cap: 0.10, // 10% cap
-            ema_lambda_bps: 300,             // T202: 3% EMA factor
+            max_annual_inflation_cap: 0.10,    // 10% cap
+            ema_lambda_bps: 300,               // T202: 3% EMA factor
             max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,        // 3% base
             inflation_floor_annual: 0.01, // 1% floor in Mature
             fee_smoothing_half_life_days: 90.0,
-            max_annual_inflation_cap: 0.08, // 8% cap
-            ema_lambda_bps: 150,             // T202: 1.5% EMA factor
+            max_annual_inflation_cap: 0.08,   // 8% cap
+            ema_lambda_bps: 150,              // T202: 1.5% EMA factor
             max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
@@ -119,7 +119,10 @@ fn test_clamp_upward_movement() {
     // r_prev = 1000 bps (10%), r_bounded = 1500 bps (15%), max_delta = 200 bps (2%)
     // Expected: 1000 + 200 = 1200 bps
     let result = clamp_inflation_rate_change(1000, 1500, 200);
-    assert_eq!(result, 1200, "Upward movement should be clamped to 1200 bps");
+    assert_eq!(
+        result, 1200,
+        "Upward movement should be clamped to 1200 bps"
+    );
 }
 
 /// Test: Clamp downward movement (rate decreasing).
@@ -128,7 +131,10 @@ fn test_clamp_downward_movement() {
     // r_prev = 1000 bps, r_bounded = 300 bps, max_delta = 200 bps
     // Expected: 1000 - 200 = 800 bps
     let result = clamp_inflation_rate_change(1000, 300, 200);
-    assert_eq!(result, 800, "Downward movement should be clamped to 800 bps");
+    assert_eq!(
+        result, 800,
+        "Downward movement should be clamped to 800 bps"
+    );
 }
 
 /// Test: No clamp when within band.
@@ -141,7 +147,10 @@ fn test_no_clamp_within_band() {
 
     // Same for downward
     let result2 = clamp_inflation_rate_change(1000, 850, 200);
-    assert_eq!(result2, 850, "No clamping should occur when within band (downward)");
+    assert_eq!(
+        result2, 850,
+        "No clamping should occur when within band (downward)"
+    );
 }
 
 /// Test: No change when r_bounded == r_prev.
@@ -158,7 +167,10 @@ fn test_zero_max_delta() {
     assert_eq!(result, 1000, "Zero max_delta should prevent any change");
 
     let result2 = clamp_inflation_rate_change(1000, 300, 0);
-    assert_eq!(result2, 1000, "Zero max_delta should prevent any change (downward)");
+    assert_eq!(
+        result2, 1000,
+        "Zero max_delta should prevent any change (downward)"
+    );
 }
 
 /// Test: Saturating arithmetic for large values.
@@ -175,7 +187,11 @@ fn test_saturating_arithmetic() {
     // Test overflow prevention
     let result3 = clamp_inflation_rate_change(u32::MAX - 50, u32::MAX, u32::MAX);
     // With max_delta = u32::MAX, upper bound would overflow, but saturating_add handles it
-    assert_eq!(result3, u32::MAX, "Should handle overflow with saturating_add");
+    assert_eq!(
+        result3,
+        u32::MAX,
+        "Should handle overflow with saturating_add"
+    );
 }
 
 // ============================================================================
@@ -236,7 +252,7 @@ fn test_convergence_multiple_epochs() {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: prev_ema,
             staked_supply: 10_000_000,
-        circulating_supply: 100_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100 + (epoch * 3) as u64,
@@ -303,7 +319,8 @@ fn test_phase_specific_limits() {
     };
 
     let bootstrap_state = compute_epoch_state(&config, &bootstrap_inputs);
-    let bootstrap_delta = ((bootstrap_state.decision.recommended_r_inf_annual * 10_000.0).round() as i32 - 775).abs();
+    let bootstrap_delta =
+        ((bootstrap_state.decision.recommended_r_inf_annual * 10_000.0).round() as i32 - 775).abs();
     assert!(
         bootstrap_delta <= 25,
         "Bootstrap phase delta {} should be <= 25 bps",
@@ -327,7 +344,9 @@ fn test_phase_specific_limits() {
     };
 
     let transition_state = compute_epoch_state(&config, &transition_inputs);
-    let transition_delta = ((transition_state.decision.recommended_r_inf_annual * 10_000.0).round() as i32 - 620).abs();
+    let transition_delta =
+        ((transition_state.decision.recommended_r_inf_annual * 10_000.0).round() as i32 - 620)
+            .abs();
     assert!(
         transition_delta <= 10,
         "Transition phase delta {} should be <= 10 bps",
@@ -351,7 +370,8 @@ fn test_phase_specific_limits() {
     };
 
     let mature_state = compute_epoch_state(&config, &mature_inputs);
-    let mature_delta = ((mature_state.decision.recommended_r_inf_annual * 10_000.0).round() as i32 - 465).abs();
+    let mature_delta =
+        ((mature_state.decision.recommended_r_inf_annual * 10_000.0).round() as i32 - 465).abs();
     assert!(
         mature_delta <= 5,
         "Mature phase delta {} should be <= 5 bps",
@@ -382,7 +402,7 @@ fn test_monotonicity_increasing_fees() {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: prev_ema,
             staked_supply: 10_000_000,
-        circulating_supply: 100_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100 + (epoch * 3) as u64,
@@ -568,9 +588,14 @@ fn test_config_validation_delta_must_be_positive() {
     config.bootstrap.max_delta_r_inf_per_epoch_bps = 0;
 
     let result = config.validate();
-    assert!(result.is_err(), "Config with zero max_delta should fail validation");
     assert!(
-        result.unwrap_err().contains("max_delta_r_inf_per_epoch_bps"),
+        result.is_err(),
+        "Config with zero max_delta should fail validation"
+    );
+    assert!(
+        result
+            .unwrap_err()
+            .contains("max_delta_r_inf_per_epoch_bps"),
         "Error should mention max_delta_r_inf_per_epoch_bps"
     );
 }
@@ -613,13 +638,11 @@ fn test_determinism() {
 
     // All results should be identical
     assert_eq!(
-        state1.decision.recommended_r_inf_annual,
-        state2.decision.recommended_r_inf_annual,
+        state1.decision.recommended_r_inf_annual, state2.decision.recommended_r_inf_annual,
         "Rate should be deterministic"
     );
     assert_eq!(
-        state2.decision.recommended_r_inf_annual,
-        state3.decision.recommended_r_inf_annual,
+        state2.decision.recommended_r_inf_annual, state3.decision.recommended_r_inf_annual,
         "Rate should be deterministic"
     );
 }

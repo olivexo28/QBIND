@@ -206,11 +206,7 @@ impl std::fmt::Display for EvictionReason {
                 )
             }
             EvictionReason::LowScore { score, threshold } => {
-                write!(
-                    f,
-                    "liveness score {} below threshold {}",
-                    score, threshold
-                )
+                write!(f, "liveness score {} below threshold {}", score, threshold)
             }
         }
     }
@@ -651,9 +647,6 @@ mod tests {
             score: 20,
             threshold: 30,
         };
-        assert_eq!(
-            reason2.to_string(),
-            "liveness score 20 below threshold 30"
-        );
+        assert_eq!(reason2.to_string(), "liveness score 20 below threshold 30");
     }
 }

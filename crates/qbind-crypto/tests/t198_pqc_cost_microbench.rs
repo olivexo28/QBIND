@@ -466,10 +466,7 @@ fn t198_pqc_size_report() {
 
     // Transaction overhead estimate
     println!("\nPer-transaction PQC overhead:");
-    println!(
-        "  Signature overhead: {} bytes",
-        ML_DSA_44_SIGNATURE_SIZE
-    );
+    println!("  Signature overhead: {} bytes", ML_DSA_44_SIGNATURE_SIZE);
     println!(
         "  For 1000 txs/block: {} KB additional",
         (1000 * ML_DSA_44_SIGNATURE_SIZE) / 1024
@@ -509,14 +506,9 @@ fn t198_pqc_premium_calibration_helper() {
 
     // Bandwidth premium (β_bandwidth)
     println!("β_bandwidth (signature size overhead):");
-    println!(
-        "  Formula: (ml_dsa44_sig_size - ecdsa_sig_size) / ecdsa_sig_size"
-    );
+    println!("  Formula: (ml_dsa44_sig_size - ecdsa_sig_size) / ecdsa_sig_size");
     println!("  ECDSA signature: 64 bytes");
-    println!(
-        "  ML-DSA-44 signature: {} bytes",
-        ML_DSA_44_SIGNATURE_SIZE
-    );
+    println!("  ML-DSA-44 signature: {} bytes", ML_DSA_44_SIGNATURE_SIZE);
     let bandwidth_ratio = ML_DSA_44_SIGNATURE_SIZE as f64 / 64.0;
     println!("  Size ratio: {:.1}x", bandwidth_ratio);
     println!("  Suggested β_bandwidth: 0.10 - 0.20\n");
@@ -525,7 +517,10 @@ fn t198_pqc_premium_calibration_helper() {
     println!("β_storage (key storage overhead):");
     println!("  Formula: (ml_dsa44_pk_size - ecdsa_pk_size) / ecdsa_pk_size");
     println!("  ECDSA public key: 33 bytes (compressed)");
-    println!("  ML-DSA-44 public key: {} bytes", ML_DSA_44_PUBLIC_KEY_SIZE);
+    println!(
+        "  ML-DSA-44 public key: {} bytes",
+        ML_DSA_44_PUBLIC_KEY_SIZE
+    );
     let storage_ratio = ML_DSA_44_PUBLIC_KEY_SIZE as f64 / 33.0;
     println!("  Size ratio: {:.1}x", storage_ratio);
     println!("  Suggested β_storage: 0.05 - 0.10\n");
