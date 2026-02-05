@@ -40,6 +40,36 @@ pub const DEFAULT_BLOCKS_PER_EPOCH: u64 = 25920;
 pub const DEFAULT_EPOCHS_PER_YEAR: u64 = 122;
 
 // ============================================================================
+// T204: Phase Transition Constants
+// ============================================================================
+
+/// Number of epochs per year for 10-minute epochs (from design doc).
+/// 365 days × 24 hours × 6 epochs/hour = 52,560 epochs/year.
+pub const EPOCHS_PER_YEAR_10_MIN: u64 = 52_560;
+
+/// Epoch threshold for Bootstrap → Transition transition (~3 years).
+/// Uses 10-minute epochs as defined in the monetary policy design doc.
+pub const EPOCH_TRANSITION_START: u64 = 3 * EPOCHS_PER_YEAR_10_MIN; // 157,680
+
+/// Epoch threshold for Transition → Mature transition (~7 years).
+/// Uses 10-minute epochs as defined in the monetary policy design doc.
+pub const EPOCH_MATURE_START: u64 = 7 * EPOCHS_PER_YEAR_10_MIN; // 367,920
+
+// Economic gate thresholds (T204, from design doc §2.3.2)
+
+/// Minimum fee coverage ratio for Bootstrap → Transition (0.20 = 20%).
+pub const FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS: u32 = 2000;
+
+/// Minimum stake ratio for Bootstrap → Transition (0.30 = 30%).
+pub const STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS: u32 = 3000;
+
+/// Minimum fee coverage ratio for Transition → Mature (0.50 = 50%).
+pub const FEE_COVERAGE_TRANSITION_TO_MATURE_BPS: u32 = 5000;
+
+/// Minimum stake ratio for Transition → Mature (0.40 = 40%).
+pub const STAKE_RATIO_TRANSITION_TO_MATURE_BPS: u32 = 4000;
+
+// ============================================================================
 // MonetaryEpochInputs
 // ============================================================================
 
@@ -65,6 +95,11 @@ pub struct MonetaryEpochInputs {
 
     /// Total staked supply at the time of the epoch boundary.
     pub staked_supply: u128,
+
+    /// Circulating supply at the time of the epoch boundary (T204).
+    /// Used to compute stake ratio for phase transition checks.
+    /// Set to 0 if unknown (stake ratio will be 0).
+    pub circulating_supply: u128,
 
     /// Current monetary phase.
     pub phase: MonetaryPhase,
@@ -98,6 +133,7 @@ impl Default for MonetaryEpochInputs {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 0,
+            circulating_supply: 0,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.0,
             days_since_launch: 0,
@@ -121,7 +157,7 @@ pub struct MonetaryEpochState {
     /// The epoch index this state corresponds to.
     pub epoch_index: u64,
 
-    /// The monetary phase at the time of this decision.
+    /// The monetary phase at the time of this decision (after any transition).
     pub phase: MonetaryPhase,
 
     /// EMA-smoothed fees per epoch (T202).
@@ -148,6 +184,31 @@ pub struct MonetaryEpochState {
     /// Fee coverage ratio: smoothed_annual_fee_revenue / (staked_supply * r_target).
     /// Dimensionless, used for metrics and phase transition checks.
     pub fee_coverage_ratio: f64,
+
+    // ========================================================================
+    // T204: Phase Transition Fields
+    // ========================================================================
+
+    /// Fee coverage ratio in basis points (0–10,000).
+    /// Computed as: `(smoothed_annual_fee_revenue / target_security_budget) * 10,000`
+    /// where target_security_budget = staked_supply * r_target.
+    pub fee_coverage_ratio_bps: u32,
+
+    /// Stake ratio in basis points (0–10,000).
+    /// Computed as: `(staked_supply / circulating_supply) * 10,000`
+    pub stake_ratio_bps: u32,
+
+    /// Whether a phase transition was applied this epoch.
+    /// `true` if `phase != phase_prev`.
+    pub phase_transition_applied: bool,
+
+    /// The monetary phase before any transition was applied.
+    /// For epochs with no transition, `phase_prev == phase`.
+    pub phase_prev: MonetaryPhase,
+
+    /// The final clamped annual inflation rate in basis points (T203/T204).
+    /// Stored for use as `prev_r_inf_annual_bps` in the next epoch.
+    pub r_inf_annual_bps: u32,
 }
 
 impl Default for MonetaryEpochState {
@@ -167,6 +228,12 @@ impl Default for MonetaryEpochState {
                     crate::monetary_engine::PhaseTransitionRecommendation::Stay,
             },
             fee_coverage_ratio: 0.0,
+            // T204 fields
+            fee_coverage_ratio_bps: 0,
+            stake_ratio_bps: 0,
+            phase_transition_applied: false,
+            phase_prev: MonetaryPhase::Bootstrap,
+            r_inf_annual_bps: 0,
         }
     }
 }
@@ -183,6 +250,216 @@ impl MonetaryEpochState {
     pub fn r_target_annual_bps(&self) -> u64 {
         (self.decision.effective_r_target_annual * 10_000.0).round() as u64
     }
+}
+
+// ============================================================================
+// T204: Phase Transition Types and Logic
+// ============================================================================
+
+/// Reason for the phase transition outcome (T204).
+///
+/// This enum provides diagnostic information about why a phase transition
+/// did or did not occur.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhaseTransitionReason {
+    /// No transition: already in the target phase or terminal phase.
+    None,
+    /// Time gate not met: epoch_index is below the required threshold.
+    TimeGateNotMet,
+    /// Economic gates not met: one or more thresholds not satisfied.
+    EconomicGatesNotMet,
+    /// Advanced from Bootstrap to Transition: all gates satisfied.
+    AdvancedBootstrapToTransition,
+    /// Advanced from Transition to Mature: all gates satisfied.
+    AdvancedTransitionToMature,
+}
+
+/// Outcome of the phase transition check (T204).
+///
+/// Contains the next phase and the reason for the decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhaseTransitionOutcome {
+    /// The phase after applying any transition.
+    pub next_phase: MonetaryPhase,
+    /// The reason for this outcome.
+    pub reason: PhaseTransitionReason,
+}
+
+/// Volatility gate stub for T204.
+///
+/// For T204, volatility gating is not enforced. This function always returns `true`.
+/// T205 will replace this with a real metric threshold check.
+#[inline]
+fn volatility_gate_stub_ok() -> bool {
+    // T204: Always true. T205 will implement real volatility gating.
+    true
+}
+
+/// Compute the phase transition outcome based on time and economic gates (T204).
+///
+/// This is a pure, deterministic function that implements the phase state machine
+/// from the monetary policy design doc §2.3 and §2.4.
+///
+/// # Algorithm
+///
+/// 1. If already in Mature phase: stay (terminal phase).
+/// 2. For Bootstrap → Transition:
+///    - Check time gate: `epoch_index >= EPOCH_TRANSITION_START`
+///    - Check economic gates: fee_coverage >= 20%, stake_ratio >= 30%, volatility OK
+///    - If all gates pass: advance to Transition
+/// 3. For Transition → Mature:
+///    - Check time gate: `epoch_index >= EPOCH_MATURE_START`
+///    - Check economic gates: fee_coverage >= 50%, stake_ratio >= 40%, volatility OK
+///    - If all gates pass: advance to Mature
+///
+/// # Monotonicity Guarantees
+///
+/// - Phase never goes backwards (Transition→Bootstrap, Mature→Transition).
+/// - Phase never skips (Bootstrap→Mature directly).
+/// - Once in Mature, always remains in Mature.
+///
+/// # Arguments
+///
+/// * `current_phase` - The phase at the start of this epoch.
+/// * `epoch_index` - The current epoch index (0-based).
+/// * `fee_coverage_ratio_bps` - Fee coverage ratio in basis points (0–10,000).
+/// * `stake_ratio_bps` - Stake ratio in basis points (0–10,000).
+///
+/// # Returns
+///
+/// A `PhaseTransitionOutcome` containing the next phase and the reason.
+pub fn compute_phase_transition(
+    current_phase: MonetaryPhase,
+    epoch_index: u64,
+    fee_coverage_ratio_bps: u32,
+    stake_ratio_bps: u32,
+) -> PhaseTransitionOutcome {
+    match current_phase {
+        MonetaryPhase::Bootstrap => {
+            // Check time gate for Bootstrap → Transition
+            if epoch_index < EPOCH_TRANSITION_START {
+                return PhaseTransitionOutcome {
+                    next_phase: MonetaryPhase::Bootstrap,
+                    reason: PhaseTransitionReason::TimeGateNotMet,
+                };
+            }
+
+            // Time gate met; check economic gates
+            let fee_coverage_ok =
+                fee_coverage_ratio_bps >= FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS;
+            let stake_ratio_ok = stake_ratio_bps >= STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS;
+            let volatility_ok = volatility_gate_stub_ok();
+
+            if fee_coverage_ok && stake_ratio_ok && volatility_ok {
+                PhaseTransitionOutcome {
+                    next_phase: MonetaryPhase::Transition,
+                    reason: PhaseTransitionReason::AdvancedBootstrapToTransition,
+                }
+            } else {
+                PhaseTransitionOutcome {
+                    next_phase: MonetaryPhase::Bootstrap,
+                    reason: PhaseTransitionReason::EconomicGatesNotMet,
+                }
+            }
+        }
+
+        MonetaryPhase::Transition => {
+            // Check time gate for Transition → Mature
+            if epoch_index < EPOCH_MATURE_START {
+                return PhaseTransitionOutcome {
+                    next_phase: MonetaryPhase::Transition,
+                    reason: PhaseTransitionReason::TimeGateNotMet,
+                };
+            }
+
+            // Time gate met; check economic gates
+            let fee_coverage_ok = fee_coverage_ratio_bps >= FEE_COVERAGE_TRANSITION_TO_MATURE_BPS;
+            let stake_ratio_ok = stake_ratio_bps >= STAKE_RATIO_TRANSITION_TO_MATURE_BPS;
+            let volatility_ok = volatility_gate_stub_ok();
+
+            if fee_coverage_ok && stake_ratio_ok && volatility_ok {
+                PhaseTransitionOutcome {
+                    next_phase: MonetaryPhase::Mature,
+                    reason: PhaseTransitionReason::AdvancedTransitionToMature,
+                }
+            } else {
+                PhaseTransitionOutcome {
+                    next_phase: MonetaryPhase::Transition,
+                    reason: PhaseTransitionReason::EconomicGatesNotMet,
+                }
+            }
+        }
+
+        MonetaryPhase::Mature => {
+            // Terminal phase: always stay in Mature
+            PhaseTransitionOutcome {
+                next_phase: MonetaryPhase::Mature,
+                reason: PhaseTransitionReason::None,
+            }
+        }
+    }
+}
+
+/// Compute the stake ratio in basis points (T204).
+///
+/// stake_ratio_bps = (staked_supply / circulating_supply) * 10,000
+///
+/// # Arguments
+///
+/// * `staked_supply` - Total staked supply.
+/// * `circulating_supply` - Total circulating supply.
+///
+/// # Returns
+///
+/// The stake ratio in basis points (0–10,000). Returns 0 if circulating_supply is 0.
+pub fn compute_stake_ratio_bps(staked_supply: u128, circulating_supply: u128) -> u32 {
+    if circulating_supply == 0 {
+        return 0;
+    }
+    // Compute: (staked_supply * 10_000) / circulating_supply
+    let ratio = staked_supply
+        .saturating_mul(10_000)
+        .checked_div(circulating_supply)
+        .unwrap_or(0);
+    // Clamp to 10,000 (100%) max
+    core::cmp::min(ratio, 10_000) as u32
+}
+
+/// Compute the fee coverage ratio in basis points (T204).
+///
+/// fee_coverage_ratio_bps = (smoothed_annual_fee_revenue / target_security_budget) * 10,000
+/// where target_security_budget = staked_supply * r_target_annual
+///
+/// # Arguments
+///
+/// * `smoothed_annual_fee_revenue` - EMA-smoothed annual fee revenue.
+/// * `staked_supply` - Total staked supply.
+/// * `r_target_annual` - Target annual inflation rate (e.g., 0.05 for 5%).
+///
+/// # Returns
+///
+/// The fee coverage ratio in basis points (0–10,000+). Returns 0 if target budget is 0.
+pub fn compute_fee_coverage_ratio_bps(
+    smoothed_annual_fee_revenue: u128,
+    staked_supply: u128,
+    r_target_annual: f64,
+) -> u32 {
+    // Compute target security budget
+    const MIN_R_TARGET: f64 = 0.0001; // Minimum meaningful rate
+    if staked_supply == 0 || r_target_annual < MIN_R_TARGET {
+        return 0;
+    }
+
+    let target_security_budget = (staked_supply as f64) * r_target_annual;
+    if target_security_budget < f64::EPSILON {
+        return 0;
+    }
+
+    // Compute fee coverage ratio in bps
+    let ratio_bps = (smoothed_annual_fee_revenue as f64 / target_security_budget) * 10_000.0;
+
+    // Clamp to valid u32 range (can exceed 10,000 if fees exceed budget)
+    ratio_bps.clamp(0.0, u32::MAX as f64).round() as u32
 }
 
 // ============================================================================
@@ -373,15 +650,17 @@ pub fn compute_smoothed_annual_fee_revenue(
 ///
 /// This is the core function that bridges epoch inputs to the T195 monetary engine.
 ///
-/// # Algorithm (T203 Updated)
+/// # Algorithm (T204 Updated)
 ///
 /// 1. Compute EMA-smoothed fees per epoch using phase-dependent λ (T202)
 /// 2. Annualize the EMA fees to get smoothed_annual_fee_revenue
-/// 3. Compute fee coverage ratio
-/// 4. Build MonetaryInputs for T195 engine
-/// 5. Call compute_monetary_decision() to get unclamped decision (with floor/cap)
-/// 6. Apply rate-of-change limiting (T203) — clamp inflation rate change
-/// 7. Package into MonetaryEpochState with clamped decision
+/// 3. Compute fee coverage ratio (f64 and bps)
+/// 4. Compute stake ratio in bps (T204)
+/// 5. Build MonetaryInputs for T195 engine
+/// 6. Call compute_monetary_decision() to get unclamped decision (with floor/cap)
+/// 7. Apply rate-of-change limiting (T203) — clamp inflation rate change
+/// 8. Apply phase transition logic (T204) — check time and economic gates
+/// 9. Package into MonetaryEpochState with clamped decision and phase transition info
 ///
 /// # Rate-of-Change Limiting (T203)
 ///
@@ -390,8 +669,14 @@ pub fn compute_smoothed_annual_fee_revenue(
 ///   `max_delta_r_inf_per_epoch_bps` change from the previous epoch
 /// - If `prev_r_inf_annual_bps` is None (epoch 0), no clamping is applied
 ///
-/// This ensures smooth transitions in the inflation rate, preventing sudden
-/// jumps that could destabilize validator economics or cause market shocks.
+/// # Phase Transition (T204)
+///
+/// After computing the monetary decision, we check if a phase transition should occur:
+/// - Time gates: epoch must be >= EPOCH_TRANSITION_START or EPOCH_MATURE_START
+/// - Economic gates: fee coverage and stake ratio must meet thresholds
+/// - Volatility gate: stubbed as always-true for T204 (T205 will implement)
+///
+/// Phase transitions are monotonic: never backwards, never skip phases.
 ///
 /// # Arguments
 ///
@@ -400,7 +685,7 @@ pub fn compute_smoothed_annual_fee_revenue(
 ///
 /// # Returns
 ///
-/// A new `MonetaryEpochState` containing the computed decision.
+/// A new `MonetaryEpochState` containing the computed decision and phase transition info.
 pub fn compute_epoch_state(
     config: &MonetaryEngineConfig,
     inputs: &MonetaryEpochInputs,
@@ -416,7 +701,7 @@ pub fn compute_epoch_state(
         inputs.epoch_index,
     );
 
-    // Step 2: Compute fee coverage ratio
+    // Step 2: Compute fee coverage ratio (f64 for backward compatibility)
     // fee_coverage = smoothed_annual_fee_revenue / (staked_supply * r_target)
     // Use a business-logic-based minimum (0.0001 = 0.01%) rather than f64::EPSILON
     // since r_target_annual represents meaningful inflation rates (typically 1-12%).
@@ -429,7 +714,17 @@ pub fn compute_epoch_state(
             0.0
         };
 
-    // Step 3: Build MonetaryInputs for T195 engine
+    // Step 3: Compute fee coverage ratio in bps (T204)
+    let fee_coverage_ratio_bps = compute_fee_coverage_ratio_bps(
+        smoothed_annual_fee_revenue,
+        inputs.staked_supply,
+        params.r_target_annual,
+    );
+
+    // Step 4: Compute stake ratio in bps (T204)
+    let stake_ratio_bps = compute_stake_ratio_bps(inputs.staked_supply, inputs.circulating_supply);
+
+    // Step 5: Build MonetaryInputs for T195 engine
     let monetary_inputs = MonetaryInputs {
         phase: inputs.phase,
         total_staked_tokens: inputs.staked_supply as f64,
@@ -440,10 +735,10 @@ pub fn compute_epoch_state(
         days_since_launch: inputs.days_since_launch,
     };
 
-    // Step 4: Call the T195 monetary engine (unclamped, but with floor/cap)
+    // Step 6: Call the T195 monetary engine (unclamped, but with floor/cap)
     let decision_unclamped = compute_monetary_decision(config, &monetary_inputs);
 
-    // Step 5: Apply rate-of-change limiting (T203)
+    // Step 7: Apply rate-of-change limiting (T203)
     // Convert the unclamped rate from f64 to u32 bps for clamping
     let r_bounded_bps = (decision_unclamped.recommended_r_inf_annual * 10_000.0).round() as u32;
 
@@ -470,15 +765,32 @@ pub fn compute_epoch_state(
         phase_recommendation: decision_unclamped.phase_recommendation,
     };
 
-    // Step 6: Package into MonetaryEpochState
+    // Step 8: Apply phase transition logic (T204)
+    let transition_outcome = compute_phase_transition(
+        inputs.phase,
+        inputs.epoch_index,
+        fee_coverage_ratio_bps,
+        stake_ratio_bps,
+    );
+
+    let next_phase = transition_outcome.next_phase;
+    let phase_transition_applied = next_phase != inputs.phase;
+
+    // Step 9: Package into MonetaryEpochState
     MonetaryEpochState {
         epoch_index: inputs.epoch_index,
-        phase: inputs.phase,
+        phase: next_phase,
         ema_fees_per_epoch,
         smoothed_annual_fee_revenue,
         staked_supply: inputs.staked_supply,
         decision,
         fee_coverage_ratio,
+        // T204 fields
+        fee_coverage_ratio_bps,
+        stake_ratio_bps,
+        phase_transition_applied,
+        phase_prev: inputs.phase,
+        r_inf_annual_bps: r_inf_final_bps,
     }
 }
 
@@ -1256,6 +1568,7 @@ mod tests {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100,
@@ -1294,6 +1607,7 @@ mod tests {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0, // First epoch, no previous EMA
             staked_supply: 10_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100,
@@ -1334,7 +1648,8 @@ mod tests {
             raw_epoch_fees: 1000,
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
-            staked_supply: 0, // Edge case: zero stake
+            staked_supply: 0,
+            circulating_supply: 100_000_000, // Edge case: zero stake
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.0,
             days_since_launch: 0,
@@ -1365,6 +1680,7 @@ mod tests {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 1_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100,
@@ -1391,6 +1707,7 @@ mod tests {
             previous_smoothed_annual_fee_revenue: 0,
             previous_ema_fees_per_epoch: 0,
             staked_supply: 1_000_000,
+            circulating_supply: 100_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
             days_since_launch: 100, // Too early for transition

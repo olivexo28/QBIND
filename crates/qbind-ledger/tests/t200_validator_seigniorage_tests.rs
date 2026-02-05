@@ -91,6 +91,7 @@ fn test_full_t200_pipeline() {
         previous_smoothed_annual_fee_revenue: 0,
         previous_ema_fees_per_epoch: 0,
         staked_supply: total_stake,
+        circulating_supply: 100_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.6,
         days_since_launch: 365,

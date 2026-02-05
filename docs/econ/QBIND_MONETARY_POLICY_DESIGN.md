@@ -777,7 +777,7 @@ pub struct MonetaryState {
 
 ### 7.6 Implementation Status
 
-**Current Status** (as of T203):
+**Current Status** (as of T204):
 
 | Task | Component | Status | Notes |
 | :--- | :--- | :--- | :--- |
@@ -790,8 +790,9 @@ pub struct MonetaryState {
 | **T201** | Seigniorage Application | ✅ Complete | `qbind-ledger::monetary_state` |
 | **T202** | EMA Fee Smoothing | ✅ Complete | `qbind-ledger::monetary_state` |
 | **T203** | Rate-of-Change Limiters | ✅ Complete | `qbind-ledger::monetary_state` |
+| **T204** | Phase Transition Logic | ✅ Complete | `qbind-ledger::monetary_state` |
 
-**What's Implemented** (T195–T203):
+**What's Implemented** (T195–T204):
 
 - `MonetaryPhase` enum (Bootstrap, Transition, Mature)
 - `PhaseParameters` with target rates, floors, caps, EMA lambda (T202), max_delta (T203)
@@ -833,6 +834,38 @@ The monetary engine enforces maximum epoch-to-epoch changes in the annual inflat
   - Mature: 5 bps (0.05% max change) — maximum stability for long-term operation
 - **Epoch 0 behavior**: No clamping applied when no previous rate exists
 - **Rationale**: Prevents abrupt shocks to validator economics, ensures predictable rate transitions across phase changes
+
+**Phase Transition Logic** (T204):
+
+MainNet v0 enforces time gates, fee coverage, and staking participation at the consensus level:
+
+- **Time Gates** (using 10-minute epochs, ~52,560 epochs/year):
+  - Bootstrap → Transition: `epoch_index >= 157,680` (~3 years)
+  - Transition → Mature: `epoch_index >= 367,920` (~7 years)
+- **Economic Gates** (in basis points):
+  - Bootstrap → Transition: fee_coverage ≥ 20%, stake_ratio ≥ 30%
+  - Transition → Mature: fee_coverage ≥ 50%, stake_ratio ≥ 40%
+- **Volatility Gating**: Instrumented and monitored; consensus enforcement deferred to T205
+- **Monotonicity Guarantees**:
+  - Phase never goes backwards (Transition→Bootstrap, Mature→Transition)
+  - Phase never skips (Bootstrap→Mature directly)
+  - Once in Mature, always remains in Mature
+- **New Fields in MonetaryEpochState**:
+  - `stake_ratio_bps`: Stake ratio in basis points
+  - `fee_coverage_ratio_bps`: Fee coverage ratio in basis points
+  - `phase_transition_applied`: Whether a transition occurred
+  - `phase_prev`: Phase before any transition
+  - `r_inf_annual_bps`: Final clamped inflation rate in basis points
+- **New Field in MonetaryEpochInputs**:
+  - `circulating_supply`: Required for stake ratio calculation
+- **Helper Functions**:
+  - `compute_phase_transition()`: Pure function implementing the phase state machine
+  - `compute_stake_ratio_bps()`: Compute stake ratio in basis points
+  - `compute_fee_coverage_ratio_bps()`: Compute fee coverage ratio in basis points
+- **Metrics**:
+  - `qbind_monetary_stake_ratio_bps`: Current stake ratio
+  - `qbind_monetary_fee_coverage_ratio_bps`: Current fee coverage ratio
+  - `qbind_monetary_phase_transitions_total{from, to}`: Phase transition counter
 
 **Shadow Mode** (T196):
 

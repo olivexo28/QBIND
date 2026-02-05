@@ -239,16 +239,32 @@ MainNet v0 operates under a formal monetary policy framework that integrates inf
 > - T200–T201: Seigniorage/issuance wiring ✅ Complete — validator reward distribution and application logic
 > - T202: EMA-based fee smoothing ✅ **Ready** — per-epoch EMA with phase-dependent λ integrated into monetary pipeline
 > - T203: Rate-of-change limiters ✅ **Ready** — consensus-side per-epoch Δ-limit on annual inflation, per phase, applied after floor/cap
+> - T204: Phase transition logic ✅ **Ready** — consensus-enforced time and economic gates for automatic phase transitions
 
-**MainNet v0 Monetary Epoch State** (T199 + T202 + T203):
+**MainNet v0 Monetary Phase State Machine** (T204):
 
-MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, EMA-smoothed fee inputs, and chosen inflation rate. The inflation rate is subject to per-epoch rate-of-change limits (T203) to ensure smooth transitions. Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
+MainNet v0 implements a consensus-tracked monetary phase state machine with the following properties:
+
+- **Initial Phase**: Bootstrap at genesis
+- **Time Gates** (using 10-minute epochs, ~52,560 epochs/year):
+  - Bootstrap → Transition: epoch ≥ 157,680 (~3 years)
+  - Transition → Mature: epoch ≥ 367,920 (~7 years)
+- **Economic Gates**:
+  - Bootstrap → Transition: fee_coverage ≥ 20%, stake_ratio ≥ 30%
+  - Transition → Mature: fee_coverage ≥ 50%, stake_ratio ≥ 40%
+- **Volatility Gate**: Instrumented; consensus enforcement deferred to T205
+- **Monotonicity**: No backwards transitions; no phase skipping; Mature is terminal
+
+**MainNet v0 Monetary Epoch State** (T199 + T202 + T203 + T204):
+
+MainNet v0 nodes maintain a consensus-tracked per-epoch monetary state containing the current phase, EMA-smoothed fee inputs, and chosen inflation rate. The inflation rate is subject to per-epoch rate-of-change limits (T203) to ensure smooth transitions. Phase transitions are automatic when time and economic gates are satisfied (T204). Actual seigniorage application is controlled by `monetary_mode` and is initially deployed in Shadow mode.
 
 | Aspect | MainNet v0 Behavior |
 | :--- | :--- |
 | **Epoch State** | `MonetaryEpochState` computed at each epoch boundary |
 | **EMA Smoothing** | `ema_fees_per_epoch` with phase-dependent λ (T202) |
 | **Rate-of-Change Limit** | `max_delta_r_inf_per_epoch_bps` per phase (T203) |
+| **Phase Transitions** | Automatic via `compute_phase_transition()` (T204) |
 | **Default Mode** | Shadow (metrics + state, no balance changes) |
 | **Epoch Detection** | Height-based via `epoch_for_height(height, blocks_per_epoch)` |
 | **Inflation Calc** | Deterministic via `compute_epoch_state()` calling T195 engine with Δ-limit |
