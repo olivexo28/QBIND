@@ -4342,6 +4342,24 @@ pub struct P2pMetrics {
     heartbeat_sent_total: AtomicU64,
     /// Total number of heartbeats that failed (no Pong received).
     heartbeat_failed_total: AtomicU64,
+
+    // T206: Diversity (anti-eclipse) metrics
+    /// Current diversity mode (0=Off, 1=Warn, 2=Enforce).
+    diversity_mode: AtomicU64,
+    /// Current number of distinct outbound buckets.
+    diversity_distinct_buckets: AtomicU64,
+    /// Current max bucket fraction of outbound peers (basis points).
+    diversity_max_bucket_fraction_bps: AtomicU64,
+    /// Total peers rejected due to /24 prefix limit.
+    peer_rejected_prefix24_total: AtomicU64,
+    /// Total peers rejected due to /16 prefix limit.
+    peer_rejected_prefix16_total: AtomicU64,
+    /// Total peers rejected due to max fraction limit.
+    peer_rejected_max_fraction_total: AtomicU64,
+    /// Total diversity violations in warn mode.
+    diversity_violation_warn_total: AtomicU64,
+    /// Total diversity violations in enforce mode.
+    diversity_violation_enforce_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -4509,6 +4527,231 @@ impl P2pMetrics {
     /// Increment the heartbeat failed counter.
     pub fn inc_heartbeat_failed(&self) {
         self.heartbeat_failed_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ========================================================================
+    // T206: Diversity (Anti-Eclipse) Metrics
+    // ========================================================================
+
+    /// Get current diversity mode (0=Off, 1=Warn, 2=Enforce).
+    pub fn diversity_mode(&self) -> u64 {
+        self.diversity_mode.load(Ordering::Relaxed)
+    }
+
+    /// Set current diversity mode.
+    pub fn set_diversity_mode(&self, mode: u64) {
+        self.diversity_mode.store(mode, Ordering::Relaxed);
+    }
+
+    /// Get current number of distinct outbound buckets.
+    pub fn diversity_distinct_buckets(&self) -> u64 {
+        self.diversity_distinct_buckets.load(Ordering::Relaxed)
+    }
+
+    /// Set current number of distinct outbound buckets.
+    pub fn set_diversity_distinct_buckets(&self, count: u64) {
+        self.diversity_distinct_buckets
+            .store(count, Ordering::Relaxed);
+    }
+
+    /// Get current max bucket fraction of outbound peers (basis points).
+    pub fn diversity_max_bucket_fraction_bps(&self) -> u64 {
+        self.diversity_max_bucket_fraction_bps
+            .load(Ordering::Relaxed)
+    }
+
+    /// Set current max bucket fraction.
+    pub fn set_diversity_max_bucket_fraction_bps(&self, bps: u64) {
+        self.diversity_max_bucket_fraction_bps
+            .store(bps, Ordering::Relaxed);
+    }
+
+    /// Get total peers rejected due to /24 prefix limit.
+    pub fn peer_rejected_prefix24_total(&self) -> u64 {
+        self.peer_rejected_prefix24_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment peers rejected due to /24 prefix limit.
+    pub fn inc_peer_rejected_prefix24(&self) {
+        self.peer_rejected_prefix24_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total peers rejected due to /16 prefix limit.
+    pub fn peer_rejected_prefix16_total(&self) -> u64 {
+        self.peer_rejected_prefix16_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment peers rejected due to /16 prefix limit.
+    pub fn inc_peer_rejected_prefix16(&self) {
+        self.peer_rejected_prefix16_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total peers rejected due to max fraction limit.
+    pub fn peer_rejected_max_fraction_total(&self) -> u64 {
+        self.peer_rejected_max_fraction_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Increment peers rejected due to max fraction limit.
+    pub fn inc_peer_rejected_max_fraction(&self) {
+        self.peer_rejected_max_fraction_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a peer rejection by reason.
+    pub fn record_peer_rejected_diversity(&self, reason: &str) {
+        match reason {
+            "prefix24" => self.inc_peer_rejected_prefix24(),
+            "prefix16" => self.inc_peer_rejected_prefix16(),
+            "max_fraction" => self.inc_peer_rejected_max_fraction(),
+            _ => {}
+        }
+    }
+
+    /// Get total diversity violations in warn mode.
+    pub fn diversity_violation_warn_total(&self) -> u64 {
+        self.diversity_violation_warn_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment diversity violations in warn mode.
+    pub fn inc_diversity_violation_warn(&self) {
+        self.diversity_violation_warn_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total diversity violations in enforce mode.
+    pub fn diversity_violation_enforce_total(&self) -> u64 {
+        self.diversity_violation_enforce_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Increment diversity violations in enforce mode.
+    pub fn inc_diversity_violation_enforce(&self) {
+        self.diversity_violation_enforce_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a diversity violation by mode.
+    pub fn record_diversity_violation(&self, mode: &str) {
+        match mode {
+            "warn" => self.inc_diversity_violation_warn(),
+            "enforce" => self.inc_diversity_violation_enforce(),
+            _ => {}
+        }
+    }
+
+    /// Format P2P metrics as Prometheus-compatible output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+
+        output.push_str("# P2P transport metrics (T172)\n");
+        output.push_str(&format!(
+            "qbind_p2p_connections_current {}\n",
+            self.connections_current()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_bytes_sent_total {}\n",
+            self.bytes_sent_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_bytes_received_total {}\n",
+            self.bytes_received_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_messages_sent_total{{kind=\"consensus\"}} {}\n",
+            self.messages_sent_total("consensus")
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_messages_sent_total{{kind=\"dag\"}} {}\n",
+            self.messages_sent_total("dag")
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_messages_sent_total{{kind=\"control\"}} {}\n",
+            self.messages_sent_total("control")
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_messages_received_total{{kind=\"consensus\"}} {}\n",
+            self.messages_received_total("consensus")
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_messages_received_total{{kind=\"dag\"}} {}\n",
+            self.messages_received_total("dag")
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_messages_received_total{{kind=\"control\"}} {}\n",
+            self.messages_received_total("control")
+        ));
+
+        // T205: Discovery and liveness metrics
+        output.push_str("\n# P2P discovery metrics (T205)\n");
+        output.push_str(&format!(
+            "qbind_p2p_outbound_peers {}\n",
+            self.outbound_peers()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_inbound_peers {}\n",
+            self.inbound_peers()
+        ));
+        output.push_str(&format!("qbind_p2p_known_peers {}\n", self.known_peers()));
+        output.push_str(&format!(
+            "qbind_p2p_discovery_enabled {}\n",
+            self.discovery_enabled()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_peer_discovered_total {}\n",
+            self.peer_discovered_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_peer_evicted_total{{reason=\"liveness\"}} {}\n",
+            self.peer_evicted_liveness_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_heartbeat_sent_total {}\n",
+            self.heartbeat_sent_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_heartbeat_failed_total {}\n",
+            self.heartbeat_failed_total()
+        ));
+
+        // T206: Diversity metrics
+        output.push_str("\n# P2P diversity metrics (T206)\n");
+        output.push_str(&format!(
+            "qbind_p2p_diversity_mode {}\n",
+            self.diversity_mode()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_diversity_distinct_buckets {}\n",
+            self.diversity_distinct_buckets()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_diversity_max_bucket_fraction_bps {}\n",
+            self.diversity_max_bucket_fraction_bps()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_peer_rejected_diversity_total{{reason=\"prefix24\"}} {}\n",
+            self.peer_rejected_prefix24_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_peer_rejected_diversity_total{{reason=\"prefix16\"}} {}\n",
+            self.peer_rejected_prefix16_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_peer_rejected_diversity_total{{reason=\"max_fraction\"}} {}\n",
+            self.peer_rejected_max_fraction_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_diversity_violation_total{{mode=\"warn\"}} {}\n",
+            self.diversity_violation_warn_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_diversity_violation_total{{mode=\"enforce\"}} {}\n",
+            self.diversity_violation_enforce_total()
+        ));
+
+        output
     }
 }
 

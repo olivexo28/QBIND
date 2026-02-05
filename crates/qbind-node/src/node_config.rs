@@ -266,6 +266,51 @@ pub struct NetworkTransportConfig {
     ///
     /// Default: 30
     pub liveness_min_score: u8,
+
+    // ========================================================================
+    // T206: Diversity Configuration (Anti-Eclipse)
+    // ========================================================================
+    /// Diversity enforcement mode for anti-eclipse constraints (T206).
+    ///
+    /// Controls how the P2P layer enforces IP-prefix diversity limits:
+    /// - Off: No diversity checks (DevNet, TestNet Alpha default)
+    /// - Warn: Log warnings but allow connections (TestNet Beta default)
+    /// - Enforce: Reject connections that violate limits (MainNet required)
+    ///
+    /// MainNet profile requires `Enforce` mode.
+    pub diversity_mode: crate::p2p_diversity::DiversityEnforcementMode,
+
+    /// Maximum peers per IPv4 /24 prefix (T206).
+    ///
+    /// Limits the number of connections from the same /24 subnet.
+    /// Helps prevent eclipse attacks from a single network range.
+    ///
+    /// Default: 2 (MainNet), 4 (TestNet Beta)
+    pub max_peers_per_ipv4_prefix24: u16,
+
+    /// Maximum peers per IPv4 /16 prefix (T206).
+    ///
+    /// Secondary cap limiting connections from the same /16 network.
+    /// Provides broader protection against larger network allocations.
+    ///
+    /// Default: 8 (MainNet), 16 (TestNet Beta)
+    pub max_peers_per_ipv4_prefix16: u16,
+
+    /// Minimum number of distinct outbound diversity buckets (T206).
+    ///
+    /// Ensures outbound connections span multiple network ranges.
+    /// Used for periodic health checks and dial blocking.
+    ///
+    /// Default: 4 (MainNet), 2 (TestNet Beta)
+    pub min_outbound_diversity_buckets: u16,
+
+    /// Maximum fraction of outbound peers in a single bucket (basis points) (T206).
+    ///
+    /// Prevents any single network range from dominating outbound connections.
+    /// 2500 = 25%, 5000 = 50%, 10000 = 100%.
+    ///
+    /// Default: 2500 (25%, MainNet), 5000 (50%, TestNet Beta)
+    pub max_single_bucket_fraction_bps: u16,
 }
 
 impl Default for NetworkTransportConfig {
@@ -287,6 +332,12 @@ impl Default for NetworkTransportConfig {
             liveness_probe_interval_secs: 30,
             liveness_failure_threshold: 3,
             liveness_min_score: 30,
+            // T206: Diversity defaults (Off for DevNet/TestNet Alpha)
+            diversity_mode: crate::p2p_diversity::DiversityEnforcementMode::Off,
+            max_peers_per_ipv4_prefix24: 2,
+            max_peers_per_ipv4_prefix16: 8,
+            min_outbound_diversity_buckets: 4,
+            max_single_bucket_fraction_bps: 2500,
         }
     }
 }
@@ -320,6 +371,12 @@ impl NetworkTransportConfig {
             liveness_probe_interval_secs: 30,
             liveness_failure_threshold: 3,
             liveness_min_score: 30,
+            // T206: Diversity in Warn mode with loose thresholds for TestNet Beta
+            diversity_mode: crate::p2p_diversity::DiversityEnforcementMode::Warn,
+            max_peers_per_ipv4_prefix24: 4,
+            max_peers_per_ipv4_prefix16: 16,
+            min_outbound_diversity_buckets: 2,
+            max_single_bucket_fraction_bps: 5000, // 50%
         }
     }
 
@@ -344,6 +401,12 @@ impl NetworkTransportConfig {
             liveness_probe_interval_secs: 30,
             liveness_failure_threshold: 3,
             liveness_min_score: 30,
+            // T206: Diversity in Enforce mode with strict thresholds for MainNet
+            diversity_mode: crate::p2p_diversity::DiversityEnforcementMode::Enforce,
+            max_peers_per_ipv4_prefix24: 2,
+            max_peers_per_ipv4_prefix16: 8,
+            min_outbound_diversity_buckets: 4,
+            max_single_bucket_fraction_bps: 2500, // 25%
         }
     }
 
@@ -1686,8 +1749,17 @@ impl NodeConfig {
             format!("{}", self.fee_distribution_policy)
         };
 
+        // T206: Diversity mode and caps
+        let diversity_str = format!(
+            "diversity={}(prefix24={},prefix16={},buckets>={})",
+            self.network.diversity_mode,
+            self.network.max_peers_per_ipv4_prefix24,
+            self.network.max_peers_per_ipv4_prefix16,
+            self.network.min_outbound_diversity_buckets
+        );
+
         format!(
-            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} fee_distribution={} mempool={} dag_availability={} dag_coupling={} stage_b={}",
+            "qbind-node[validator={}]: starting in environment={} chain_id={} scope={} profile={} network={} {} gas={} fee-priority={} fee_distribution={} mempool={} dag_availability={} dag_coupling={} stage_b={} {}",
             validator_str,
             self.environment,
             chain_id_hex,
@@ -1701,7 +1773,8 @@ impl NodeConfig {
             self.mempool_mode,
             dag_availability_str,
             self.dag_coupling_mode,
-            stage_b_str
+            stage_b_str,
+            diversity_str
         )
     }
 
@@ -1895,12 +1968,29 @@ impl NodeConfig {
             });
         }
 
-        // 11. Data directory must be set (no in-memory validators)
+        // 11. Diversity mode must be Enforce (T206)
+        if self.network.diversity_mode != crate::p2p_diversity::DiversityEnforcementMode::Enforce {
+            return Err(MainnetConfigError::DiversityNotEnforced {
+                actual: self.network.diversity_mode,
+            });
+        }
+
+        // 12. Diversity parameters must be sensible (T206)
+        if self.network.max_peers_per_ipv4_prefix24 == 0
+            || self.network.max_peers_per_ipv4_prefix16 == 0
+            || self.network.min_outbound_diversity_buckets < 2
+            || self.network.max_single_bucket_fraction_bps == 0
+            || self.network.max_single_bucket_fraction_bps > 10000
+        {
+            return Err(MainnetConfigError::InvalidDiversityParameters);
+        }
+
+        // 13. Data directory must be set (no in-memory validators)
         if self.data_dir.is_none() {
             return Err(MainnetConfigError::MissingDataDir);
         }
 
-        // 12. Fee distribution must be MainNet default (T193)
+        // 14. Fee distribution must be MainNet default (T193)
         let mainnet_policy = FeeDistributionPolicy::mainnet_default();
         if self.fee_distribution_policy != mainnet_policy {
             return Err(MainnetConfigError::WrongFeeDistributionPolicy {
@@ -1919,13 +2009,13 @@ impl NodeConfig {
             );
         }
 
-        // 13. Monetary mode must not be Off (T197)
+        // 15. Monetary mode must not be Off (T197)
         // MainNet must at least compute + expose decisions.
         if self.monetary_mode == MonetaryMode::Off {
             return Err(MainnetConfigError::MonetaryModeOff);
         }
 
-        // 14. If monetary mode is Active, accounts and split must be valid (T197)
+        // 16. If monetary mode is Active, accounts and split must be valid (T197)
         if self.monetary_mode == MonetaryMode::Active {
             if self.monetary_accounts.is_none() {
                 return Err(MainnetConfigError::MonetaryAccountsMissing);
@@ -2029,6 +2119,23 @@ pub enum MainnetConfigError {
     /// MainNet validators must have at least 8 target outbound peers
     /// for network resilience and consensus liveness.
     InsufficientTargetOutboundPeers { minimum: u32, actual: u32 },
+
+    /// Diversity mode is not Enforce (T206).
+    ///
+    /// MainNet validators must have diversity_mode=Enforce to prevent
+    /// eclipse attacks from dominating peer connections.
+    DiversityNotEnforced {
+        actual: crate::p2p_diversity::DiversityEnforcementMode,
+    },
+
+    /// Diversity parameters are invalid (T206).
+    ///
+    /// MainNet requires sensible diversity parameters:
+    /// - max_peers_per_ipv4_prefix24 > 0
+    /// - max_peers_per_ipv4_prefix16 > 0
+    /// - min_outbound_diversity_buckets >= 2
+    /// - max_single_bucket_fraction_bps in (0, 10000]
+    InvalidDiversityParameters,
 
     /// Data directory is not configured.
     ///
@@ -2136,6 +2243,19 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: target_outbound_peers must be at least {} but is {} (--target-outbound-peers={})",
                     minimum, actual, minimum
+                )
+            }
+            MainnetConfigError::DiversityNotEnforced { actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: diversity_mode must be Enforce but is {} (--p2p-diversity-mode=enforce)",
+                    actual
+                )
+            }
+            MainnetConfigError::InvalidDiversityParameters => {
+                write!(
+                    f,
+                    "MainNet invariant violated: diversity parameters must be sensible (non-zero caps, min_buckets>=2, fraction_bps in (0,10000])"
                 )
             }
             MainnetConfigError::MissingDataDir => {
@@ -3285,10 +3405,7 @@ mod tests {
         );
         match result {
             Err(MainnetConfigError::MonetaryAccountsInvalid) => (),
-            _ => panic!(
-                "Expected MonetaryAccountsInvalid error, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected MonetaryAccountsInvalid error, got: {:?}", result),
         }
     }
 
@@ -3315,10 +3432,7 @@ mod tests {
         );
         match result {
             Err(MainnetConfigError::MonetaryAccountsInvalid) => (),
-            _ => panic!(
-                "Expected MonetaryAccountsInvalid error, got: {:?}",
-                result
-            ),
+            _ => panic!("Expected MonetaryAccountsInvalid error, got: {:?}", result),
         }
     }
 
@@ -3348,30 +3462,15 @@ mod tests {
     #[test]
     fn test_monetary_accounts_is_valid_for_mainnet() {
         // Test the is_valid_for_mainnet method directly
-        let valid_accounts = MonetaryAccounts::new(
-            [1u8; 32],
-            [2u8; 32],
-            [3u8; 32],
-            [4u8; 32],
-        );
+        let valid_accounts = MonetaryAccounts::new([1u8; 32], [2u8; 32], [3u8; 32], [4u8; 32]);
         assert!(valid_accounts.is_valid_for_mainnet());
 
         // Zero address should fail
-        let accounts_with_zero = MonetaryAccounts::new(
-            [0u8; 32],
-            [2u8; 32],
-            [3u8; 32],
-            [4u8; 32],
-        );
+        let accounts_with_zero = MonetaryAccounts::new([0u8; 32], [2u8; 32], [3u8; 32], [4u8; 32]);
         assert!(!accounts_with_zero.is_valid_for_mainnet());
 
         // Duplicates should fail
-        let accounts_with_dup = MonetaryAccounts::new(
-            [1u8; 32],
-            [1u8; 32],
-            [3u8; 32],
-            [4u8; 32],
-        );
+        let accounts_with_dup = MonetaryAccounts::new([1u8; 32], [1u8; 32], [3u8; 32], [4u8; 32]);
         assert!(!accounts_with_dup.is_valid_for_mainnet());
     }
 
@@ -3383,5 +3482,198 @@ mod tests {
         assert!(error_str.contains("distinct"));
         assert!(error_str.contains("non-zero"));
         assert!(error_str.contains("T201"));
+    }
+
+    // ========================================================================
+    // T206: Diversity Mode Tests
+    // ========================================================================
+
+    #[test]
+    fn test_diversity_mode_devnet_default() {
+        let config = NetworkTransportConfig::default();
+        assert_eq!(
+            config.diversity_mode,
+            crate::p2p_diversity::DiversityEnforcementMode::Off,
+            "DevNet default should have diversity_mode = Off"
+        );
+    }
+
+    #[test]
+    fn test_diversity_mode_testnet_beta() {
+        let config = NetworkTransportConfig::testnet_beta();
+        assert_eq!(
+            config.diversity_mode,
+            crate::p2p_diversity::DiversityEnforcementMode::Warn,
+            "TestNet Beta should have diversity_mode = Warn"
+        );
+        assert_eq!(config.max_peers_per_ipv4_prefix24, 4);
+        assert_eq!(config.max_peers_per_ipv4_prefix16, 16);
+        assert_eq!(config.min_outbound_diversity_buckets, 2);
+        assert_eq!(config.max_single_bucket_fraction_bps, 5000);
+    }
+
+    #[test]
+    fn test_diversity_mode_mainnet() {
+        let config = NetworkTransportConfig::mainnet();
+        assert_eq!(
+            config.diversity_mode,
+            crate::p2p_diversity::DiversityEnforcementMode::Enforce,
+            "MainNet should have diversity_mode = Enforce"
+        );
+        assert_eq!(config.max_peers_per_ipv4_prefix24, 2);
+        assert_eq!(config.max_peers_per_ipv4_prefix16, 8);
+        assert_eq!(config.min_outbound_diversity_buckets, 4);
+        assert_eq!(config.max_single_bucket_fraction_bps, 2500);
+    }
+
+    #[test]
+    fn test_mainnet_preset_has_diversity_enforce() {
+        let config = NodeConfig::mainnet_preset();
+        assert_eq!(
+            config.network.diversity_mode,
+            crate::p2p_diversity::DiversityEnforcementMode::Enforce,
+            "MainNet preset should have diversity_mode = Enforce"
+        );
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_diversity_not_enforce() {
+        // Create a MainNet config but with diversity mode set to Off
+        let mut config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+        config.network.diversity_mode = crate::p2p_diversity::DiversityEnforcementMode::Off;
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail when diversity_mode != Enforce"
+        );
+        match result {
+            Err(MainnetConfigError::DiversityNotEnforced { actual }) => {
+                assert_eq!(actual, crate::p2p_diversity::DiversityEnforcementMode::Off);
+            }
+            _ => panic!("Expected DiversityNotEnforced error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_diversity_warn() {
+        // Create a MainNet config but with diversity mode set to Warn
+        let mut config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+        config.network.diversity_mode = crate::p2p_diversity::DiversityEnforcementMode::Warn;
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail when diversity_mode = Warn"
+        );
+        match result {
+            Err(MainnetConfigError::DiversityNotEnforced { actual }) => {
+                assert_eq!(actual, crate::p2p_diversity::DiversityEnforcementMode::Warn);
+            }
+            _ => panic!("Expected DiversityNotEnforced error, got: {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_accepts_diversity_enforce() {
+        let config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_ok(),
+            "MainNet validation should pass when diversity_mode = Enforce: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_invalid_diversity_params() {
+        // Create a MainNet config but with invalid diversity parameters
+        let mut config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+        config.network.max_peers_per_ipv4_prefix24 = 0; // Invalid
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail with invalid diversity parameters"
+        );
+        match result {
+            Err(MainnetConfigError::InvalidDiversityParameters) => (),
+            _ => panic!(
+                "Expected InvalidDiversityParameters error, got: {:?}",
+                result
+            ),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_rejects_invalid_min_buckets() {
+        let mut config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+        config.network.min_outbound_diversity_buckets = 1; // Invalid, must be >= 2
+
+        let result = config.validate_mainnet_invariants();
+        assert!(
+            result.is_err(),
+            "MainNet validation should fail with min_outbound_diversity_buckets < 2"
+        );
+        match result {
+            Err(MainnetConfigError::InvalidDiversityParameters) => (),
+            _ => panic!(
+                "Expected InvalidDiversityParameters error, got: {:?}",
+                result
+            ),
+        }
+    }
+
+    #[test]
+    fn test_diversity_error_display() {
+        let error = MainnetConfigError::DiversityNotEnforced {
+            actual: crate::p2p_diversity::DiversityEnforcementMode::Off,
+        };
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("diversity_mode"));
+        assert!(error_str.contains("Enforce"));
+        assert!(error_str.contains("off"));
+        assert!(error_str.contains("--p2p-diversity-mode=enforce"));
+    }
+
+    #[test]
+    fn test_diversity_in_startup_info() {
+        let config = NodeConfig::mainnet_preset();
+        let info = config.startup_info_string(Some("V1"));
+        assert!(
+            info.contains("diversity=enforce"),
+            "Startup info should show diversity=enforce for MainNet: {}",
+            info
+        );
+
+        let config_off = NodeConfig::devnet_v0_preset();
+        let info_off = config_off.startup_info_string(Some("V1"));
+        assert!(
+            info_off.contains("diversity=off"),
+            "Startup info should show diversity=off for DevNet: {}",
+            info_off
+        );
+    }
+
+    #[test]
+    fn test_devnet_allows_diversity_off() {
+        let config = NodeConfig::devnet_v0_preset();
+        assert_eq!(
+            config.network.diversity_mode,
+            crate::p2p_diversity::DiversityEnforcementMode::Off,
+            "DevNet should allow diversity_mode = Off"
+        );
+        // Note: DevNet doesn't have MainNet invariants so no validation to check
+    }
+
+    #[test]
+    fn test_testnet_alpha_allows_diversity_off() {
+        let config = NodeConfig::testnet_alpha_preset();
+        assert_eq!(
+            config.network.diversity_mode,
+            crate::p2p_diversity::DiversityEnforcementMode::Off,
+            "TestNet Alpha should allow diversity_mode = Off"
+        );
     }
 }

@@ -450,7 +450,11 @@ mod tests {
     #[test]
     fn test_peer_entry_new() {
         let peer_id = make_node_id(1);
-        let entry = PeerEntry::new(peer_id, "127.0.0.1:9000".to_string(), PeerSource::Discovered);
+        let entry = PeerEntry::new(
+            peer_id,
+            "127.0.0.1:9000".to_string(),
+            PeerSource::Discovered,
+        );
 
         assert_eq!(entry.peer_id, peer_id);
         assert_eq!(entry.address, "127.0.0.1:9000");
@@ -465,8 +469,11 @@ mod tests {
         let peer_id = make_node_id(1);
 
         // Discovered peers can be evicted
-        let mut entry =
-            PeerEntry::new(peer_id, "127.0.0.1:9000".to_string(), PeerSource::Discovered);
+        let mut entry = PeerEntry::new(
+            peer_id,
+            "127.0.0.1:9000".to_string(),
+            PeerSource::Discovered,
+        );
         assert!(entry.can_evict());
 
         // Connected peers cannot be evicted
@@ -479,16 +486,22 @@ mod tests {
         assert!(!bootstrap.can_evict());
 
         // Static config peers cannot be evicted
-        let static_peer =
-            PeerEntry::new(peer_id, "127.0.0.1:9000".to_string(), PeerSource::StaticConfig);
+        let static_peer = PeerEntry::new(
+            peer_id,
+            "127.0.0.1:9000".to_string(),
+            PeerSource::StaticConfig,
+        );
         assert!(!static_peer.can_evict());
     }
 
     #[test]
     fn test_peer_entry_connection_tracking() {
         let peer_id = make_node_id(1);
-        let mut entry =
-            PeerEntry::new(peer_id, "127.0.0.1:9000".to_string(), PeerSource::Discovered);
+        let mut entry = PeerEntry::new(
+            peer_id,
+            "127.0.0.1:9000".to_string(),
+            PeerSource::Discovered,
+        );
 
         // Initial state
         assert!(!entry.connected);
@@ -558,8 +571,16 @@ mod tests {
         // Fill with bootstrap peers
         let bootstrap1 = make_node_id(1);
         let bootstrap2 = make_node_id(2);
-        table.insert(bootstrap1, "127.0.0.1:9001".to_string(), PeerSource::Bootstrap);
-        table.insert(bootstrap2, "127.0.0.1:9002".to_string(), PeerSource::Bootstrap);
+        table.insert(
+            bootstrap1,
+            "127.0.0.1:9001".to_string(),
+            PeerSource::Bootstrap,
+        );
+        table.insert(
+            bootstrap2,
+            "127.0.0.1:9002".to_string(),
+            PeerSource::Bootstrap,
+        );
 
         // Cannot insert another peer (bootstrap peers are not evictable)
         let peer3 = make_node_id(3);
@@ -579,7 +600,11 @@ mod tests {
 
         table.insert(peer1, "127.0.0.1:9001".to_string(), PeerSource::Bootstrap);
         table.insert(peer2, "127.0.0.1:9002".to_string(), PeerSource::Discovered);
-        table.insert(peer3, "127.0.0.1:9003".to_string(), PeerSource::StaticConfig);
+        table.insert(
+            peer3,
+            "127.0.0.1:9003".to_string(),
+            PeerSource::StaticConfig,
+        );
 
         let backoff = Duration::from_secs(1);
         let candidates = table.select_candidates(10, backoff);
@@ -625,18 +650,30 @@ mod tests {
         let peer_id = make_node_id(1);
 
         // Insert as discovered
-        table.insert(peer_id, "127.0.0.1:9001".to_string(), PeerSource::Discovered);
+        table.insert(
+            peer_id,
+            "127.0.0.1:9001".to_string(),
+            PeerSource::Discovered,
+        );
         assert_eq!(table.get(&peer_id).unwrap().source, PeerSource::Discovered);
 
         // Upgrade to static config
-        table.insert(peer_id, "127.0.0.1:9001".to_string(), PeerSource::StaticConfig);
+        table.insert(
+            peer_id,
+            "127.0.0.1:9001".to_string(),
+            PeerSource::StaticConfig,
+        );
         assert_eq!(
             table.get(&peer_id).unwrap().source,
             PeerSource::StaticConfig
         );
 
         // Cannot downgrade
-        table.insert(peer_id, "127.0.0.1:9001".to_string(), PeerSource::Discovered);
+        table.insert(
+            peer_id,
+            "127.0.0.1:9001".to_string(),
+            PeerSource::Discovered,
+        );
         assert_eq!(
             table.get(&peer_id).unwrap().source,
             PeerSource::StaticConfig
@@ -674,7 +711,11 @@ mod tests {
         assert!(table.is_empty());
 
         // But existing peer can be updated with non-empty address
-        assert!(table.insert(peer_id, "127.0.0.1:9001".to_string(), PeerSource::Discovered));
+        assert!(table.insert(
+            peer_id,
+            "127.0.0.1:9001".to_string(),
+            PeerSource::Discovered
+        ));
         assert_eq!(table.len(), 1);
 
         // Updating with empty address doesn't change the address

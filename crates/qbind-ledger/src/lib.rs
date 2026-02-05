@@ -92,16 +92,16 @@ pub use monetary_state::clamp_inflation_rate_change;
 // T204: Phase Transition Logic exports
 pub use monetary_state::{
     compute_fee_coverage_ratio_bps, compute_phase_transition, compute_stake_ratio_bps,
-    PhaseTransitionOutcome, PhaseTransitionReason, EPOCHS_PER_YEAR_10_MIN,
-    EPOCH_MATURE_START, EPOCH_TRANSITION_START, FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS,
+    PhaseTransitionOutcome, PhaseTransitionReason, EPOCHS_PER_YEAR_10_MIN, EPOCH_MATURE_START,
+    EPOCH_TRANSITION_START, FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS,
     FEE_COVERAGE_TRANSITION_TO_MATURE_BPS, STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS,
     STAKE_RATIO_TRANSITION_TO_MATURE_BPS,
 };
 
 // T200: Epoch Issuance & Validator Reward Distribution exports
 pub use monetary_state::{
-    compute_epoch_issuance, compute_validator_rewards, ValidatorReward, ValidatorRewardDistribution,
-    ValidatorStake, MAINNET_EPOCHS_PER_YEAR,
+    compute_epoch_issuance, compute_validator_rewards, ValidatorReward,
+    ValidatorRewardDistribution, ValidatorStake, MAINNET_EPOCHS_PER_YEAR,
 };
 
 // T201: Seigniorage Application & Routing exports

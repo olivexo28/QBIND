@@ -657,7 +657,10 @@ fn validate_mainnet_invariants_rejects_low_outbound_peers() {
             assert_eq!(minimum, 8);
             assert_eq!(actual, 4);
         }
-        Err(e) => panic!("Expected InsufficientTargetOutboundPeers error, got: {:?}", e),
+        Err(e) => panic!(
+            "Expected InsufficientTargetOutboundPeers error, got: {:?}",
+            e
+        ),
         Ok(()) => panic!("Expected error for low target_outbound_peers"),
     }
 }
