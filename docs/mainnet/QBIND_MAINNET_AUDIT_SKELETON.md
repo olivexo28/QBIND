@@ -146,6 +146,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Treasury/insurance/community routing (T201) — **Ready** (seigniorage split and application logic)
 - [x] EMA-based fee smoothing (T202) — **Ready** (per-epoch EMA with phase-dependent λ)
 - [x] Rate-of-change limiters (T203) — **Ready** (per-epoch Δ-limit with phase-specific max_delta_r_inf_per_epoch_bps)
+- [x] Phase transition logic (T204) — **Ready** (time + economic gates wired into consensus; automatic phase transitions)
 - [ ] Fee market analysis under adversarial conditions
 - [ ] Mempool eviction rate limiting
 - [ ] External audit of fee accounting code
