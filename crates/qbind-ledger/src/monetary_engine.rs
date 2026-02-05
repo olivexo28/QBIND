@@ -54,6 +54,19 @@ pub struct PhaseParameters {
 
     /// Phase-specific maximum annual inflation cap (safety guardrail).
     pub max_annual_inflation_cap: f64,
+
+    /// EMA smoothing factor for per-epoch fee smoothing (T202), in basis points (0–10,000).
+    ///
+    /// The EMA formula is: `EMA_fees_t = λ × fees_t + (1 - λ) × EMA_fees_{t-1}`
+    /// where λ = ema_lambda_bps / 10_000.
+    ///
+    /// Typical values (from design doc §3.3.3):
+    /// - Bootstrap: 700 bps (λ = 0.07) — faster response to establish fee baseline
+    /// - Transition: 300 bps (λ = 0.03) — balanced response during growth
+    /// - Mature: 150 bps (λ = 0.015) — maximum smoothing for stability
+    ///
+    /// Constraint: 0 < ema_lambda_bps < 10_000
+    pub ema_lambda_bps: u16,
 }
 
 /// Configuration for the monetary engine.
@@ -96,6 +109,33 @@ impl MonetaryEngineConfig {
             MonetaryPhase::Transition => &self.transition,
             MonetaryPhase::Mature => &self.mature,
         }
+    }
+
+    /// Validates the configuration, returning an error if any constraints are violated.
+    ///
+    /// # Constraints
+    ///
+    /// - For all phases: `0 < ema_lambda_bps < 10_000`
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if valid, or `Err(String)` with a description of the violation.
+    pub fn validate(&self) -> Result<(), String> {
+        // Validate EMA lambda for all phases
+        Self::validate_ema_lambda(&self.bootstrap, "Bootstrap")?;
+        Self::validate_ema_lambda(&self.transition, "Transition")?;
+        Self::validate_ema_lambda(&self.mature, "Mature")?;
+        Ok(())
+    }
+
+    fn validate_ema_lambda(params: &PhaseParameters, phase_name: &str) -> Result<(), String> {
+        if params.ema_lambda_bps == 0 || params.ema_lambda_bps >= 10_000 {
+            return Err(format!(
+                "{} phase: ema_lambda_bps must be in range (0, 10000), got {}",
+                phase_name, params.ema_lambda_bps
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -755,18 +795,21 @@ mod tests {
                 inflation_floor_annual: 0.0, // no floor
                 fee_smoothing_half_life_days: 30.0,
                 max_annual_inflation_cap: 0.12, // 12% cap
+                ema_lambda_bps: 700,             // T202: 7% EMA factor for Bootstrap
             },
             transition: PhaseParameters {
                 r_target_annual: 0.04,       // 4% base
                 inflation_floor_annual: 0.0, // no floor
                 fee_smoothing_half_life_days: 60.0,
                 max_annual_inflation_cap: 0.10, // 10% cap
+                ema_lambda_bps: 300,             // T202: 3% EMA factor for Transition
             },
             mature: PhaseParameters {
                 r_target_annual: 0.03,        // 3% base
                 inflation_floor_annual: 0.01, // 1% floor
                 fee_smoothing_half_life_days: 90.0,
                 max_annual_inflation_cap: 0.08, // 8% cap
+                ema_lambda_bps: 150,             // T202: 1.5% EMA factor for Mature
             },
             alpha_fee_offset: 1.0,
         }

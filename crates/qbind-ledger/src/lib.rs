@@ -77,10 +77,14 @@ pub use monetary_engine::{
 };
 
 // T199: Monetary Epoch State exports
+#[allow(deprecated)]
 pub use monetary_state::{
     compute_epoch_state, compute_smoothed_annual_fee_revenue, epoch_for_height, is_epoch_boundary,
     MonetaryEpochInputs, MonetaryEpochState, DEFAULT_BLOCKS_PER_EPOCH, DEFAULT_EPOCHS_PER_YEAR,
 };
+
+// T202: EMA Fee Smoothing exports
+pub use monetary_state::{compute_ema_fee_revenue, ema_step};
 
 // T200: Epoch Issuance & Validator Reward Distribution exports
 pub use monetary_state::{

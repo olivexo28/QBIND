@@ -27,18 +27,21 @@ fn test_config() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0, // no floor in Bootstrap
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12, // 12% cap
+            ema_lambda_bps: 700,             // T202: 7% EMA factor
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,       // 4% base
             inflation_floor_annual: 0.0, // no floor in Transition
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10, // 10% cap
+            ema_lambda_bps: 300,             // T202: 3% EMA factor
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,        // 3% base
             inflation_floor_annual: 0.01, // 1% floor in Mature
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08, // 8% cap
+            ema_lambda_bps: 150,             // T202: 1.5% EMA factor
         },
         alpha_fee_offset: 1.0,
     }
@@ -195,6 +198,7 @@ fn floor_applied_when_raw_above_zero_but_below_floor() {
             inflation_floor_annual: 0.01, // 1% floor
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
+            ema_lambda_bps: 700,
         },
         ..test_config()
     };
@@ -233,6 +237,7 @@ fn cap_applied_when_raw_above_cap() {
             inflation_floor_annual: 0.0,
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12, // 12% cap
+            ema_lambda_bps: 700,
         },
         ..test_config()
     };

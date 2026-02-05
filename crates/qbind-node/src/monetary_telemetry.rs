@@ -295,6 +295,7 @@ pub fn default_monetary_engine_config_for_testnet() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0,        // No floor
             fee_smoothing_half_life_days: 30.0, // Fast response
             max_annual_inflation_cap: 0.12,     // 12% cap
+            ema_lambda_bps: 700,                // λ = 0.07 — faster response for fee baseline
         },
 
         // Transition phase (years 3-7)
@@ -303,6 +304,7 @@ pub fn default_monetary_engine_config_for_testnet() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0,        // No floor
             fee_smoothing_half_life_days: 60.0, // Medium smoothing
             max_annual_inflation_cap: 0.10,     // 10% cap
+            ema_lambda_bps: 300,                // λ = 0.03 — balanced response during growth
         },
 
         // Mature phase (year 7+)
@@ -311,6 +313,7 @@ pub fn default_monetary_engine_config_for_testnet() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.01,       // 1% floor
             fee_smoothing_half_life_days: 90.0, // Long smoothing
             max_annual_inflation_cap: 0.08,     // 8% cap
+            ema_lambda_bps: 150,                // λ = 0.015 — maximum smoothing for stability
         },
 
         // Fee offset coefficient (α)

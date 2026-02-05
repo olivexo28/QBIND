@@ -777,25 +777,42 @@ pub struct MonetaryState {
 
 ### 7.6 Implementation Status
 
-**Current Status** (as of T196):
+**Current Status** (as of T202):
 
 | Task | Component | Status | Notes |
 | :--- | :--- | :--- | :--- |
 | **T194** | Design Specification | ✅ Complete | This document |
 | **T195** | Monetary Engine Core | ✅ Complete | `qbind-ledger::monetary_engine` |
 | **T196** | Telemetry & Shadow Mode | ✅ Complete | `qbind-node::monetary_telemetry` |
-| **T197+** | Seigniorage Wiring | ⏳ Pending | Actual mint/burn logic |
+| **T197** | Seigniorage Accounting | ✅ Complete | `qbind-ledger::monetary_engine` |
+| **T199** | Epoch Monetary State | ✅ Complete | `qbind-ledger::monetary_state` |
+| **T200** | Validator Seigniorage | ✅ Complete | `qbind-ledger::monetary_state` |
+| **T201** | Seigniorage Application | ✅ Complete | `qbind-ledger::monetary_state` |
+| **T202** | EMA Fee Smoothing | ✅ Complete | `qbind-ledger::monetary_state` |
+| **T203+** | Rate Limiters | ⏳ Pending | Inflation change caps |
 
-**What's Implemented** (T195–T196):
+**What's Implemented** (T195–T202):
 
 - `MonetaryPhase` enum (Bootstrap, Transition, Mature)
-- `PhaseParameters` with target rates, floors, caps, EMA half-life
-- `MonetaryEngineConfig` with PQC premium factors
+- `PhaseParameters` with target rates, floors, caps, EMA lambda (T202)
+- `MonetaryEngineConfig` with PQC premium factors and validation
 - `compute_monetary_decision()` pure function
 - `PhaseTransitionRecommendation` heuristics
 - `MonetaryTelemetry` node-level service for shadow mode
 - `MonetaryMetrics` Prometheus gauges for observability
-- EMA-based fee smoothing with configurable half-life
+- **T202**: `ema_step()` helper for per-epoch fee smoothing
+- **T202**: `ema_lambda_bps` in PhaseParameters (Bootstrap: 700, Transition: 300, Mature: 150)
+- **T202**: `ema_fees_per_epoch` field in MonetaryEpochState
+- **T202**: `compute_ema_fee_revenue()` for EMA-based annual fee computation
+- **T202**: `smoothed_annual_fee_revenue` now uses EMA-smoothed fees
+
+**EMA Fee Smoothing** (T202):
+
+The consensus-level monetary pipeline now uses EMA-based fee smoothing:
+- Epoch 0 initializes EMA to raw fees
+- Subsequent epochs apply: `EMA_t = λ × fees_t + (1 - λ) × EMA_{t-1}`
+- Phase-dependent λ values provide faster response in Bootstrap, maximum stability in Mature
+- This prevents inflation rate spikes from short-term fee volatility
 
 **Shadow Mode** (T196):
 
@@ -808,9 +825,10 @@ This allows operators to observe the computed inflation rate and phase recommend
 
 **Code Locations**:
 - Engine: `crates/qbind-ledger/src/monetary_engine.rs`
+- State: `crates/qbind-ledger/src/monetary_state.rs`
 - Telemetry: `crates/qbind-node/src/monetary_telemetry.rs`
 - Metrics: `crates/qbind-node/src/metrics.rs` (MonetaryMetrics)
-- Tests: `crates/qbind-node/tests/t196_monetary_telemetry_tests.rs`
+- Tests: `crates/qbind-ledger/tests/t202_ema_fee_smoothing_tests.rs`
 
 ---
 

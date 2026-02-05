@@ -55,9 +55,13 @@ pub struct MonetaryEpochInputs {
     /// Raw fees collected during this epoch, in base token units.
     pub raw_epoch_fees: u128,
 
-    /// Previous epoch's smoothed annual fee revenue (for EMA continuation).
+    /// Previous epoch's smoothed annual fee revenue (for backward compatibility).
     /// Set to 0 for the first epoch.
     pub previous_smoothed_annual_fee_revenue: u128,
+
+    /// Previous epoch's EMA fees per epoch (for T202 EMA continuation).
+    /// Set to 0 for the first epoch.
+    pub previous_ema_fees_per_epoch: u128,
 
     /// Total staked supply at the time of the epoch boundary.
     pub staked_supply: u128,
@@ -87,6 +91,7 @@ impl Default for MonetaryEpochInputs {
             epoch_index: 0,
             raw_epoch_fees: 0,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 0,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.0,
@@ -113,8 +118,19 @@ pub struct MonetaryEpochState {
     /// The monetary phase at the time of this decision.
     pub phase: MonetaryPhase,
 
-    /// Annualized, smoothed fee revenue used for this epoch's decision.
-    /// Stored as u128 to match token precision.
+    /// EMA-smoothed fees per epoch (T202).
+    ///
+    /// Computed using: `EMA_fees_t = λ × fees_t + (1 - λ) × EMA_fees_{t-1}`
+    /// where λ is phase-dependent (ema_lambda_bps / 10_000).
+    ///
+    /// For epoch 0 with no previous state, this equals raw_epoch_fees.
+    pub ema_fees_per_epoch: u128,
+
+    /// Annualized, EMA-smoothed fee revenue used for this epoch's decision.
+    /// Computed as: `ema_fees_per_epoch * epochs_per_year`
+    ///
+    /// **T202 semantic change**: Previously computed from raw epoch fees.
+    /// Now uses EMA-smoothed fees for stability.
     pub smoothed_annual_fee_revenue: u128,
 
     /// Snapshot of total staked supply at the time of decision.
@@ -133,6 +149,7 @@ impl Default for MonetaryEpochState {
         Self {
             epoch_index: 0,
             phase: MonetaryPhase::Bootstrap,
+            ema_fees_per_epoch: 0,
             smoothed_annual_fee_revenue: 0,
             staked_supply: 0,
             decision: MonetaryDecision {
@@ -163,27 +180,115 @@ impl MonetaryEpochState {
 }
 
 // ============================================================================
-// Fee Smoothing Logic
+// Fee Smoothing Logic (T202)
 // ============================================================================
+
+/// Compute a single EMA (Exponential Moving Average) step for fee smoothing.
+///
+/// Implements the formula from design doc §3.3.2:
+/// ```text
+/// EMA_fees_t = λ × fees_t + (1 - λ) × EMA_fees_{t-1}
+/// ```
+///
+/// # Arguments
+///
+/// * `prev_ema` - Previous epoch's EMA value (EMA_fees_{t-1})
+/// * `fees_t` - Current epoch's raw fees (fees_t)
+/// * `lambda_bps` - Smoothing factor λ in basis points (0–10,000), where 10,000 = 100%
+///
+/// # Returns
+///
+/// The new EMA value for this epoch.
+///
+/// # Arithmetic
+///
+/// - Uses u128 with saturating arithmetic to prevent overflow
+/// - Floor division (no rounding up)
+/// - Computation: `(λ * fees_t + (10000 - λ) * prev_ema) / 10000`
+///
+/// # Example
+///
+/// ```
+/// use qbind_ledger::ema_step;
+///
+/// // λ = 50% (5000 bps): new EMA is average of fees_t and prev_ema
+/// let ema = ema_step(100, 200, 5000);
+/// assert_eq!(ema, 150);
+///
+/// // λ = 10% (1000 bps): new EMA weights heavily toward prev_ema
+/// let ema = ema_step(100, 200, 1000);
+/// assert_eq!(ema, 110);  // 0.1 * 200 + 0.9 * 100 = 110
+/// ```
+pub fn ema_step(prev_ema: u128, fees_t: u128, lambda_bps: u16) -> u128 {
+    // Ensure lambda_bps is within valid range for the formula to work correctly
+    // (caller should validate config, but we guard here defensively)
+    let lambda = lambda_bps.min(10_000) as u128;
+    let one_minus_lambda = 10_000_u128.saturating_sub(lambda);
+
+    // Compute: λ * fees_t + (1 - λ) * prev_ema
+    // Using saturating arithmetic to prevent overflow
+    let weighted_fees = fees_t.saturating_mul(lambda);
+    let weighted_prev = prev_ema.saturating_mul(one_minus_lambda);
+    let num = weighted_fees.saturating_add(weighted_prev);
+
+    // Floor division by 10_000
+    num / 10_000
+}
 
 /// Compute the smoothed annual fee revenue for this epoch.
 ///
-/// This implements "Option A" (no real smoothing) from the T199 spec:
-/// `smoothed_annual_fee_revenue = fees_this_epoch * epochs_per_year`
-///
-/// Later tasks (T202–T205) will refine this to use proper EMA smoothing
-/// with phase-dependent λ values.
+/// **T202 Update**: This function now uses EMA-based smoothing with phase-dependent λ.
 ///
 /// # Arguments
 ///
 /// * `raw_epoch_fees` - Fees collected during this epoch
-/// * `previous_smoothed` - Previous epoch's smoothed annual fee revenue
+/// * `previous_ema_fees` - Previous epoch's EMA fees per epoch
 /// * `epochs_per_year` - Number of epochs per year (for annualization)
-/// * `_phase_params` - Phase parameters (unused in Option A, reserved for Option B EMA)
+/// * `phase_params` - Phase parameters (contains ema_lambda_bps)
+/// * `epoch_index` - Current epoch index (for initialization handling)
+///
+/// # Returns
+///
+/// A tuple of (ema_fees_per_epoch, smoothed_annual_fee_revenue).
+pub fn compute_ema_fee_revenue(
+    raw_epoch_fees: u128,
+    previous_ema_fees: u128,
+    epochs_per_year: u64,
+    phase_params: &PhaseParameters,
+    epoch_index: u64,
+) -> (u128, u128) {
+    // Handle epoch 0 initialization: use raw fees directly
+    let ema_fees_per_epoch = if epoch_index == 0 && previous_ema_fees == 0 {
+        raw_epoch_fees
+    } else {
+        ema_step(previous_ema_fees, raw_epoch_fees, phase_params.ema_lambda_bps)
+    };
+
+    // Annualize the EMA fees
+    let smoothed_annual_fee_revenue =
+        ema_fees_per_epoch.saturating_mul(epochs_per_year as u128);
+
+    (ema_fees_per_epoch, smoothed_annual_fee_revenue)
+}
+
+/// Legacy function for backward compatibility.
+///
+/// **Deprecated**: Use `compute_ema_fee_revenue` for T202+ behavior.
+///
+/// This implements "Option A" (simple annualization without EMA smoothing):
+/// `smoothed_annual_fee_revenue = fees_this_epoch * epochs_per_year`
+///
+/// # Arguments
+///
+/// * `raw_epoch_fees` - Fees collected during this epoch
+/// * `_previous_smoothed` - Previous epoch's smoothed annual fee revenue (ignored)
+/// * `epochs_per_year` - Number of epochs per year (for annualization)
+/// * `_phase_params` - Phase parameters (unused in Option A)
 ///
 /// # Returns
 ///
 /// The smoothed annual fee revenue for this epoch.
+#[deprecated(since = "0.1.0", note = "Use compute_ema_fee_revenue for T202 EMA behavior")]
 pub fn compute_smoothed_annual_fee_revenue(
     raw_epoch_fees: u128,
     _previous_smoothed: u128,
@@ -191,12 +296,6 @@ pub fn compute_smoothed_annual_fee_revenue(
     _phase_params: &PhaseParameters,
 ) -> u128 {
     // Option A: Simple annualization without smoothing
-    // smoothed_annual_fee_revenue = fees_this_epoch * epochs_per_year
-    //
-    // Note: The `_previous_smoothed` and `_phase_params` parameters are included
-    // for forward compatibility with Option B EMA smoothing (T202–T205).
-    // When EMA is implemented, this function will use phase_params.fee_smoothing_half_life_days
-    // to compute λ and apply: new_smoothed = λ * annualized_fees + (1 - λ) * previous_smoothed
     raw_epoch_fees.saturating_mul(epochs_per_year as u128)
 }
 
@@ -208,17 +307,18 @@ pub fn compute_smoothed_annual_fee_revenue(
 ///
 /// This is the core function that bridges epoch inputs to the T195 monetary engine.
 ///
-/// # Algorithm
+/// # Algorithm (T202 Updated)
 ///
-/// 1. Update smoothed_annual_fee_revenue (Option A: simple annualization)
-/// 2. Build MonetaryInputs for T195
-/// 3. Call compute_monetary_decision()
-/// 4. Package into MonetaryEpochState
+/// 1. Compute EMA-smoothed fees per epoch using phase-dependent λ
+/// 2. Annualize the EMA fees to get smoothed_annual_fee_revenue
+/// 3. Compute fee coverage ratio
+/// 4. Build MonetaryInputs for T195 engine
+/// 5. Call compute_monetary_decision()
+/// 6. Package into MonetaryEpochState
 ///
 /// # Arguments
 ///
 /// * `config` - The monetary engine configuration
-/// * `params` - Phase-specific parameters (derived from config and inputs.phase)
 /// * `inputs` - The epoch inputs (fees, stake, phase, etc.)
 ///
 /// # Returns
@@ -230,12 +330,13 @@ pub fn compute_epoch_state(
 ) -> MonetaryEpochState {
     let params = config.params_for_phase(inputs.phase);
 
-    // Step 1: Compute smoothed annual fee revenue
-    let smoothed_annual_fee_revenue = compute_smoothed_annual_fee_revenue(
+    // Step 1: Compute EMA-smoothed fees per epoch (T202)
+    let (ema_fees_per_epoch, smoothed_annual_fee_revenue) = compute_ema_fee_revenue(
         inputs.raw_epoch_fees,
-        inputs.previous_smoothed_annual_fee_revenue,
+        inputs.previous_ema_fees_per_epoch,
         inputs.epochs_per_year,
         params,
+        inputs.epoch_index,
     );
 
     // Step 2: Compute fee coverage ratio
@@ -269,6 +370,7 @@ pub fn compute_epoch_state(
     MonetaryEpochState {
         epoch_index: inputs.epoch_index,
         phase: inputs.phase,
+        ema_fees_per_epoch,
         smoothed_annual_fee_revenue,
         staked_supply: inputs.staked_supply,
         decision,
@@ -970,18 +1072,21 @@ mod tests {
                 inflation_floor_annual: 0.0,
                 fee_smoothing_half_life_days: 30.0,
                 max_annual_inflation_cap: 0.12,
+                ema_lambda_bps: 700, // T202: 7% EMA factor
             },
             transition: PhaseParameters {
                 r_target_annual: 0.04,
                 inflation_floor_annual: 0.0,
                 fee_smoothing_half_life_days: 60.0,
                 max_annual_inflation_cap: 0.10,
+                ema_lambda_bps: 300, // T202: 3% EMA factor
             },
             mature: PhaseParameters {
                 r_target_annual: 0.03,
                 inflation_floor_annual: 0.01,
                 fee_smoothing_half_life_days: 90.0,
                 max_annual_inflation_cap: 0.08,
+                ema_lambda_bps: 150, // T202: 1.5% EMA factor
             },
             alpha_fee_offset: 1.0,
         }
@@ -1015,19 +1120,21 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_compute_smoothed_annual_fee_revenue_option_a() {
         let params = PhaseParameters {
             r_target_annual: 0.05,
             inflation_floor_annual: 0.0,
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
+            ema_lambda_bps: 700,
         };
 
         // 1000 fees per epoch, 100 epochs per year = 100,000 annualized
         let result = compute_smoothed_annual_fee_revenue(1000, 0, 100, &params);
         assert_eq!(result, 100_000);
 
-        // Previous smoothed is ignored in Option A
+        // Previous smoothed is ignored in Option A (legacy behavior)
         let result2 = compute_smoothed_annual_fee_revenue(1000, 50_000, 100, &params);
         assert_eq!(result2, 100_000);
     }
@@ -1039,6 +1146,7 @@ mod tests {
             epoch_index: 1,
             raw_epoch_fees: 0,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
@@ -1053,6 +1161,7 @@ mod tests {
         assert_eq!(state.phase, MonetaryPhase::Bootstrap);
         assert_eq!(state.staked_supply, 10_000_000);
         assert_eq!(state.smoothed_annual_fee_revenue, 0);
+        assert_eq!(state.ema_fees_per_epoch, 0);
 
         // With zero fees, r_inf should be the effective target
         // PQC multiplier = 1.55, base = 0.05, effective = 0.0775
@@ -1069,10 +1178,12 @@ mod tests {
     #[test]
     fn test_compute_epoch_state_with_fees() {
         let config = test_config();
+        // Epoch 0: EMA initializes to raw fees
         let inputs = MonetaryEpochInputs {
-            epoch_index: 5,
+            epoch_index: 0,
             raw_epoch_fees: 10_000, // 10k fees this epoch
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0, // First epoch, no previous EMA
             staked_supply: 10_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
@@ -1083,6 +1194,8 @@ mod tests {
 
         let state = compute_epoch_state(&config, &inputs);
 
+        // Epoch 0 with no previous EMA: ema_fees = raw_fees = 10,000
+        assert_eq!(state.ema_fees_per_epoch, 10_000);
         // Smoothed = 10_000 * 100 = 1_000_000
         assert_eq!(state.smoothed_annual_fee_revenue, 1_000_000);
 
@@ -1110,6 +1223,7 @@ mod tests {
             epoch_index: 0,
             raw_epoch_fees: 1000,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 0, // Edge case: zero stake
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.0,
@@ -1138,6 +1252,7 @@ mod tests {
             epoch_index: 0,
             raw_epoch_fees: 0,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 1_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
@@ -1162,6 +1277,7 @@ mod tests {
             epoch_index: 0,
             raw_epoch_fees: 0,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 1_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
@@ -1184,6 +1300,7 @@ mod tests {
         let state = MonetaryEpochState::default();
         assert_eq!(state.epoch_index, 0);
         assert_eq!(state.phase, MonetaryPhase::Bootstrap);
+        assert_eq!(state.ema_fees_per_epoch, 0);
         assert_eq!(state.smoothed_annual_fee_revenue, 0);
         assert_eq!(state.staked_supply, 0);
         assert_eq!(state.fee_coverage_ratio, 0.0);

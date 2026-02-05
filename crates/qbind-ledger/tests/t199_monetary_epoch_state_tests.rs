@@ -30,18 +30,21 @@ fn test_config() -> MonetaryEngineConfig {
             inflation_floor_annual: 0.0, // no floor in Bootstrap
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12, // 12% cap
+            ema_lambda_bps: 700,             // T202: 7% EMA factor
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,       // 4% base
             inflation_floor_annual: 0.0, // no floor in Transition
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10, // 10% cap
+            ema_lambda_bps: 300,             // T202: 3% EMA factor
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,        // 3% base
             inflation_floor_annual: 0.01, // 1% floor in Mature
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08, // 8% cap
+            ema_lambda_bps: 150,             // T202: 1.5% EMA factor
         },
         alpha_fee_offset: 1.0,
     }
@@ -53,6 +56,7 @@ fn default_inputs() -> MonetaryEpochInputs {
         epoch_index: 0,
         raw_epoch_fees: 0,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -71,16 +75,17 @@ fn default_inputs() -> MonetaryEpochInputs {
 /// Requirements:
 /// - epoch_index increments as expected
 /// - decision.r_inf_annual_bps matches the design doc formula (within integer rounding)
-/// - smoothed_annual_fee_revenue evolves deterministically (per Option A)
+/// - ema_fees_per_epoch and smoothed_annual_fee_revenue evolve deterministically with EMA (T202)
 #[test]
 fn test_basic_epoch_decision() {
     let config = test_config();
 
-    // Epoch 0
+    // Epoch 0 - EMA initializes to raw fees
     let inputs_0 = MonetaryEpochInputs {
         epoch_index: 0,
         raw_epoch_fees: 1000,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -91,14 +96,17 @@ fn test_basic_epoch_decision() {
 
     let state_0 = compute_epoch_state(&config, &inputs_0);
     assert_eq!(state_0.epoch_index, 0);
-    // smoothed = 1000 * 100 = 100,000
+    // T202: Epoch 0 with no previous EMA initializes to raw fees
+    assert_eq!(state_0.ema_fees_per_epoch, 1000);
+    // smoothed = ema * epochs_per_year = 1000 * 100 = 100,000
     assert_eq!(state_0.smoothed_annual_fee_revenue, 100_000);
 
-    // Epoch 1 (same fee input)
+    // Epoch 1 (same fee input) - EMA applies smoothing
     let inputs_1 = MonetaryEpochInputs {
         epoch_index: 1,
         raw_epoch_fees: 1000,
         previous_smoothed_annual_fee_revenue: state_0.smoothed_annual_fee_revenue,
+        previous_ema_fees_per_epoch: state_0.ema_fees_per_epoch,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -109,7 +117,9 @@ fn test_basic_epoch_decision() {
 
     let state_1 = compute_epoch_state(&config, &inputs_1);
     assert_eq!(state_1.epoch_index, 1);
-    // Option A: smoothed = 1000 * 100 = 100,000 (ignores previous)
+    // T202 EMA: λ=700 bps = 7%, so ema = 0.07 * 1000 + 0.93 * 1000 = 1000
+    // (constant fees means EMA stays at same value)
+    assert_eq!(state_1.ema_fees_per_epoch, 1000);
     assert_eq!(state_1.smoothed_annual_fee_revenue, 100_000);
 
     // Epoch 2 (same fee input)
@@ -117,6 +127,7 @@ fn test_basic_epoch_decision() {
         epoch_index: 2,
         raw_epoch_fees: 1000,
         previous_smoothed_annual_fee_revenue: state_1.smoothed_annual_fee_revenue,
+        previous_ema_fees_per_epoch: state_1.ema_fees_per_epoch,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -127,9 +138,10 @@ fn test_basic_epoch_decision() {
 
     let state_2 = compute_epoch_state(&config, &inputs_2);
     assert_eq!(state_2.epoch_index, 2);
+    assert_eq!(state_2.ema_fees_per_epoch, 1000);
     assert_eq!(state_2.smoothed_annual_fee_revenue, 100_000);
 
-    // With consistent fees, inflation should be stable across epochs
+    // With constant fees, EMA stabilizes and inflation should be stable across epochs
     let r_inf_0 = state_0.decision.recommended_r_inf_annual;
     let r_inf_1 = state_1.decision.recommended_r_inf_annual;
     let r_inf_2 = state_2.decision.recommended_r_inf_annual;
@@ -172,6 +184,7 @@ fn test_zero_fees_positive_stake() {
         epoch_index: 0,
         raw_epoch_fees: 0,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -201,6 +214,7 @@ fn test_zero_stake_edge_case() {
         epoch_index: 0,
         raw_epoch_fees: 10_000,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 0, // Edge case: zero stake
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.0,
@@ -231,6 +245,7 @@ fn test_zero_fees_zero_stake() {
         epoch_index: 0,
         raw_epoch_fees: 0,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 0,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.0,
@@ -264,6 +279,7 @@ fn test_r_inf_bounds() {
             epoch_index: 0,
             raw_epoch_fees: fee_multiplier * 100_000, // 0 to 2M fees
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
@@ -303,6 +319,7 @@ fn test_r_inf_monotonic_decreasing_with_fees() {
             epoch_index: 0,
             raw_epoch_fees: fee,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
             phase: MonetaryPhase::Bootstrap,
             bonded_ratio: 0.5,
@@ -339,6 +356,7 @@ fn test_phase_consistency_bootstrap() {
             epoch_index: epoch,
             raw_epoch_fees: 1000,
             previous_smoothed_annual_fee_revenue: 0,
+            previous_ema_fees_per_epoch: 0,
             staked_supply: 10_000_000,
             phase: MonetaryPhase::Bootstrap, // Fixed phase
             bonded_ratio: 0.5,
@@ -469,6 +487,7 @@ fn test_fee_coverage_ratio() {
         epoch_index: 0,
         raw_epoch_fees: 500,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.5,
@@ -615,6 +634,7 @@ fn test_mature_phase_floor() {
         epoch_index: 0,
         raw_epoch_fees: 4150,
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 10_000_000,
         phase: MonetaryPhase::Mature,
         bonded_ratio: 0.6,
@@ -648,6 +668,7 @@ fn test_default_inputs() {
     assert_eq!(inputs.epoch_index, 0);
     assert_eq!(inputs.raw_epoch_fees, 0);
     assert_eq!(inputs.previous_smoothed_annual_fee_revenue, 0);
+    assert_eq!(inputs.previous_ema_fees_per_epoch, 0);
     assert_eq!(inputs.staked_supply, 0);
     assert_eq!(inputs.phase, MonetaryPhase::Bootstrap);
     assert_eq!(inputs.bonded_ratio, 0.0);
@@ -662,6 +683,7 @@ fn test_default_state() {
     let state = MonetaryEpochState::default();
     assert_eq!(state.epoch_index, 0);
     assert_eq!(state.phase, MonetaryPhase::Bootstrap);
+    assert_eq!(state.ema_fees_per_epoch, 0);
     assert_eq!(state.smoothed_annual_fee_revenue, 0);
     assert_eq!(state.staked_supply, 0);
     assert_eq!(state.fee_coverage_ratio, 0.0);
@@ -685,6 +707,7 @@ fn test_large_values() {
         epoch_index: 100,
         raw_epoch_fees: 1_000_000_000, // 1B fees per epoch
         previous_smoothed_annual_fee_revenue: 0,
+        previous_ema_fees_per_epoch: 0,
         staked_supply: 100_000_000_000, // 100B staked
         phase: MonetaryPhase::Bootstrap,
         bonded_ratio: 0.6,
@@ -697,12 +720,20 @@ fn test_large_values() {
 
     // Should complete without panic
     assert_eq!(state.epoch_index, 100);
-    // smoothed = 1B * 100 = 100B
-    assert_eq!(state.smoothed_annual_fee_revenue, 100_000_000_000);
+    // T202: Epoch 100 with ema=0 → ema = 0.07 * 1B + 0.93 * 0 = 70M
+    // But epoch_index=100 and prev_ema=0 means EMA applies, not initialization
+    // ema = λ * fees + (1-λ) * prev = 0.07 * 1B + 0.93 * 0 = 70_000_000
+    assert_eq!(state.ema_fees_per_epoch, 70_000_000);
+    // smoothed = 70M * 100 = 7B
+    assert_eq!(state.smoothed_annual_fee_revenue, 7_000_000_000);
 
-    // Fee offset = 1.0 * (100B / 100B) = 1.0
-    // r_raw = 0.0775 - 1.0 = -0.9225 → clamped to 0
-    assert_eq!(state.decision.recommended_r_inf_annual, 0.0);
+    // Fee offset = 1.0 * (7B / 100B) = 0.07
+    // r_raw = 0.0775 - 0.07 = 0.0075
+    assert!(
+        (state.decision.recommended_r_inf_annual - 0.0075).abs() < 1e-6,
+        "Expected r_inf ≈ 0.0075, got {}",
+        state.decision.recommended_r_inf_annual
+    );
 }
 
 // ============================================================================
@@ -717,6 +748,7 @@ fn test_determinism() {
         epoch_index: 42,
         raw_epoch_fees: 12345,
         previous_smoothed_annual_fee_revenue: 100_000,
+        previous_ema_fees_per_epoch: 12345, // Use matching prev EMA for determinism
         staked_supply: 50_000_000,
         phase: MonetaryPhase::Transition,
         bonded_ratio: 0.55,
