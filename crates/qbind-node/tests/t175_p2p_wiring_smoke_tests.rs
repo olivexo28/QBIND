@@ -11,6 +11,7 @@
 use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     DagCouplingMode, ExecutionProfile, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+    StateRetentionConfig,
 };
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
@@ -59,6 +60,8 @@ fn make_test_p2p_config() -> NodeConfig {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        // T208: State retention defaults
+        state_retention: StateRetentionConfig::disabled(),
     }
 }
 
@@ -80,6 +83,8 @@ fn make_test_local_mesh_config() -> NodeConfig {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        // T208: State retention defaults
+        state_retention: StateRetentionConfig::disabled(),
     }
 }
 
