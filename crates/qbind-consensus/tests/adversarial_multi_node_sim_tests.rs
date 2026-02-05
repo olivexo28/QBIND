@@ -139,7 +139,7 @@ fn convert_test_action(test_action: &TestAction) -> ConsensusEngineAction<u64> {
     match test_action {
         TestAction::BroadcastVote(vote) => ConsensusEngineAction::BroadcastVote(vote.clone()),
         TestAction::BroadcastProposal(proposal) => {
-            ConsensusEngineAction::BroadcastProposal(proposal.clone())
+            ConsensusEngineAction::BroadcastProposal(Box::new(proposal.clone()))
         }
         TestAction::SendVoteTo { to, vote } => ConsensusEngineAction::SendVoteTo {
             to: *to,
@@ -173,7 +173,7 @@ fn adversarial_sim_respects_partitions() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers: node 1 broadcasts a vote when it sees a proposal
@@ -246,7 +246,7 @@ fn adversarial_sim_drops_messages_with_probability_one() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers: node 1 broadcasts a vote when it sees a proposal
@@ -303,7 +303,7 @@ fn adversarial_sim_duplicates_messages_with_probability_one() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers: node 1 broadcasts a vote when it sees a proposal
@@ -386,7 +386,7 @@ fn adversarial_sim_no_faults_behaves_like_normal() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers: node 1 broadcasts a vote when it sees a proposal

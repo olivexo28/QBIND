@@ -498,7 +498,7 @@ fn driver_handles_proposal_suite_mismatch_gracefully() {
 
     let event = ConsensusNetworkEvent::IncomingProposal {
         from: ValidatorId::new(validator_id),
-        proposal,
+        proposal: Box::new(proposal),
     };
 
     // Driver should handle this without panicking

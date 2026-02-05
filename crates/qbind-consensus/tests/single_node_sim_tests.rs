@@ -123,7 +123,7 @@ fn single_node_sim_routes_proposal_via_driver() {
     net.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 42,
-            proposal: dummy_proposal.clone(),
+            proposal: Box::new(dummy_proposal.clone()),
         });
 
     // 3. Create a HotStuffDriver over a HotStuffState engine
@@ -193,7 +193,7 @@ fn single_node_sim_processes_multiple_events_in_sequence() {
     net.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 2,
-            proposal: make_dummy_proposal(1, 0),
+            proposal: Box::new(make_dummy_proposal(1, 0)),
         });
     net.inbound.push_back(ConsensusNetworkEvent::IncomingVote {
         from: 3,

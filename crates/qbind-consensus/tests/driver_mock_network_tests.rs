@@ -102,7 +102,7 @@ fn driver_receives_proposal_event_via_mock_network() {
     let proposal = make_dummy_proposal(5, 2);
     net.enqueue_event(ConsensusNetworkEvent::IncomingProposal {
         from: 42,
-        proposal: proposal.clone(),
+        proposal: Box::new(proposal.clone()),
     });
 
     // 3. Construct a HotStuffDriver wrapping a HotStuffState (permissive mode for test)
@@ -158,7 +158,7 @@ fn driver_processes_multiple_events_in_order() {
     });
     net.enqueue_event(ConsensusNetworkEvent::IncomingProposal {
         from: 2,
-        proposal: make_dummy_proposal(1, 0),
+        proposal: Box::new(make_dummy_proposal(1, 0)),
     });
     net.enqueue_event(ConsensusNetworkEvent::IncomingVote {
         from: 3,
@@ -195,7 +195,7 @@ fn driver_follows_documented_usage_pattern() {
     });
     net.enqueue_event(ConsensusNetworkEvent::IncomingProposal {
         from: 2,
-        proposal: make_dummy_proposal(2, 0),
+        proposal: Box::new(make_dummy_proposal(2, 0)),
     });
 
     let engine = HotStuffState::new_at_height(1);

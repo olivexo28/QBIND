@@ -138,7 +138,7 @@ fn convert_test_action(test_action: &TestAction) -> ConsensusEngineAction<u64> {
     match test_action {
         TestAction::BroadcastVote(vote) => ConsensusEngineAction::BroadcastVote(vote.clone()),
         TestAction::BroadcastProposal(proposal) => {
-            ConsensusEngineAction::BroadcastProposal(proposal.clone())
+            ConsensusEngineAction::BroadcastProposal(Box::new(proposal.clone()))
         }
         TestAction::SendVoteTo { to, vote } => ConsensusEngineAction::SendVoteTo {
             to: *to,
@@ -169,7 +169,7 @@ fn multi_node_sim_broadcast_propagates_to_all_others() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers: node 1 will broadcast a vote when it sees a proposal
@@ -235,7 +235,7 @@ fn multi_node_sim_send_vote_to_delivers_to_single_target() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers: node 1 will send a vote to node 2 when it sees a proposal
@@ -408,7 +408,7 @@ fn multi_node_sim_multi_step_propagation() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: 1,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers:
@@ -482,7 +482,7 @@ fn multi_node_sim_validator_ids_match_network_ids() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: val2, // Proposal from validator 2
-            proposal: dummy_proposal.clone(),
+            proposal: Box::new(dummy_proposal.clone()),
         });
 
     // Create a driver for ValidatorId
@@ -557,7 +557,7 @@ fn multi_node_sim_broadcast_vote_validator_index_matches_sender_id() {
     net1.inbound
         .push_back(ConsensusNetworkEvent::IncomingProposal {
             from: val2,
-            proposal: dummy_proposal,
+            proposal: Box::new(dummy_proposal),
         });
 
     // Create drivers that emit votes with validator_index matching their own ValidatorId

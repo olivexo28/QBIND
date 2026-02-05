@@ -467,7 +467,7 @@ async fn worker_forwards_network_events_to_channel() {
         },
         ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(200),
-            proposal: proposal.clone(),
+            proposal: Box::new(proposal.clone()),
         },
     ];
 

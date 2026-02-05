@@ -222,7 +222,7 @@ fn t117_strict_mode_rejects_proposal_from_unknown_validator() {
     let proposal = make_dummy_proposal(1, 0);
     let event = ConsensusNetworkEvent::IncomingProposal {
         from: ValidatorId::new(999),
-        proposal,
+        proposal: Box::new(proposal),
     };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();
@@ -249,7 +249,7 @@ fn t117_strict_mode_accepts_proposal_from_known_validator() {
     let proposal = make_dummy_proposal(1, 0);
     let event = ConsensusNetworkEvent::IncomingProposal {
         from: ValidatorId::new(1),
-        proposal,
+        proposal: Box::new(proposal),
     };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();
@@ -336,7 +336,7 @@ fn t117_permissive_mode_accepts_proposal_from_any_validator() {
     let proposal = make_dummy_proposal(1, 0);
     let event = ConsensusNetworkEvent::IncomingProposal {
         from: ValidatorId::new(888888),
-        proposal,
+        proposal: Box::new(proposal),
     };
 
     let actions = driver.step(&mut net, Some(event)).unwrap();

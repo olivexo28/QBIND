@@ -108,7 +108,7 @@ async fn async_adapter_receives_multiple_events() {
     inbound_tx
         .send(ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(300),
-            proposal: proposal.clone(),
+            proposal: Box::new(proposal.clone()),
         })
         .await
         .unwrap();
@@ -311,7 +311,7 @@ async fn worker_with_async_adapter_full_path() {
     inbound_tx
         .send(ConsensusNetworkEvent::IncomingProposal {
             from: PeerId(200),
-            proposal: proposal.clone(),
+            proposal: Box::new(proposal.clone()),
         })
         .await
         .unwrap();

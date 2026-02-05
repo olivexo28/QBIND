@@ -521,7 +521,7 @@ fn adapter_implements_consensus_network_trait_for_block_proposal_broadcast() {
 
     // Join server thread and verify proposal
     let received_proposal = server_handle.join().expect("server thread panicked");
-    assert_eq!(received_proposal, expected_proposal);
+    assert_eq!(*received_proposal, expected_proposal);
 }
 
 /// Test that ConsensusNetAdapter implements send_vote_to via the trait interface.
