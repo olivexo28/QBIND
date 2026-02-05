@@ -372,9 +372,108 @@ impl WireDecode for ServerCookie {
 pub const MSG_TYPE_PING: u8 = 0x30;
 pub const MSG_TYPE_PONG: u8 = 0x31;
 
+// T205: Peer discovery message type tags
+pub const MSG_TYPE_PEER_LIST: u8 = 0x32;
+
 // New message type tags for consensus messages
 pub const MSG_TYPE_CONSENSUS_VOTE: u8 = 0x40;
 pub const MSG_TYPE_NET_BLOCK_PROPOSAL: u8 = 0x41;
+
+// ============================================================================
+// T205: Peer Discovery Wire Types
+// ============================================================================
+
+/// Information about a single peer for discovery (T205).
+///
+/// This struct is used in `PeerList` messages exchanged during peer discovery.
+/// It contains the minimum information needed to connect to a peer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeerInfo {
+    /// The peer's node identifier (32 bytes).
+    pub peer_id: [u8; 32],
+    /// The peer's network address as a string (e.g., "192.168.1.1:9000").
+    pub address: String,
+}
+
+impl WireEncode for PeerInfo {
+    fn encode(&self, out: &mut Vec<u8>) {
+        put_bytes(out, &self.peer_id);
+        let addr_bytes = self.address.as_bytes();
+        let addr_len = len_to_u16(addr_bytes.len());
+        put_u16(out, addr_len);
+        put_bytes(out, addr_bytes);
+    }
+}
+
+impl WireDecode for PeerInfo {
+    fn decode(input: &mut &[u8]) -> Result<Self, WireError> {
+        let mut peer_id = [0u8; 32];
+        let peer_id_slice = get_bytes(input, 32)?;
+        peer_id.copy_from_slice(&peer_id_slice);
+
+        let addr_len = get_u16(input)? as usize;
+        if addr_len > 256 {
+            return Err(WireError::TooLarge {
+                actual: addr_len,
+                max: 256,
+            });
+        }
+        let addr_bytes = get_bytes(input, addr_len)?;
+        let address = String::from_utf8(addr_bytes.to_vec())
+            .map_err(|_| WireError::InvalidValue("invalid UTF-8 in peer address"))?;
+
+        Ok(PeerInfo { peer_id, address })
+    }
+}
+
+/// A list of peers for discovery (T205).
+///
+/// This message is exchanged between peers during peer discovery to share
+/// knowledge about other nodes in the network.
+///
+/// # Wire Format
+///
+/// ```text
+/// peer_count: u16       // Number of peers in the list (max 16)
+/// peers: [PeerInfo]     // Array of peer information
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeerList {
+    /// List of known peers to share (max 16 per message).
+    pub peers: Vec<PeerInfo>,
+}
+
+/// Maximum number of peers in a single PeerList message (T205).
+pub const MAX_PEER_LIST_SIZE: usize = 16;
+
+impl WireEncode for PeerList {
+    fn encode(&self, out: &mut Vec<u8>) {
+        let count = self.peers.len().min(MAX_PEER_LIST_SIZE) as u16;
+        put_u16(out, count);
+        for peer in self.peers.iter().take(MAX_PEER_LIST_SIZE) {
+            peer.encode(out);
+        }
+    }
+}
+
+impl WireDecode for PeerList {
+    fn decode(input: &mut &[u8]) -> Result<Self, WireError> {
+        let count = get_u16(input)? as usize;
+        if count > MAX_PEER_LIST_SIZE {
+            return Err(WireError::TooLarge {
+                actual: count,
+                max: MAX_PEER_LIST_SIZE,
+            });
+        }
+
+        let mut peers = Vec::with_capacity(count);
+        for _ in 0..count {
+            peers.push(PeerInfo::decode(input)?);
+        }
+
+        Ok(PeerList { peers })
+    }
+}
 
 /// A general-purpose network message enum for peer-to-peer communication.
 ///
@@ -386,6 +485,10 @@ pub enum NetMessage {
     Ping(u64),
     /// Pong message echoing back the nonce from a Ping.
     Pong(u64),
+
+    // T205: Peer discovery messages
+    /// A list of known peers for discovery exchange (T205).
+    PeerListMsg(PeerList),
 
     // New: consensus-plane messages
     /// A consensus vote message.
@@ -404,6 +507,10 @@ impl WireEncode for NetMessage {
             NetMessage::Pong(nonce) => {
                 put_u8(out, MSG_TYPE_PONG);
                 put_u64(out, *nonce);
+            }
+            NetMessage::PeerListMsg(list) => {
+                put_u8(out, MSG_TYPE_PEER_LIST);
+                list.encode(out);
             }
             NetMessage::ConsensusVote(v) => {
                 put_u8(out, MSG_TYPE_CONSENSUS_VOTE);
@@ -428,6 +535,10 @@ impl WireDecode for NetMessage {
             MSG_TYPE_PONG => {
                 let nonce = get_u64(input)?;
                 Ok(NetMessage::Pong(nonce))
+            }
+            MSG_TYPE_PEER_LIST => {
+                let list = PeerList::decode(input)?;
+                Ok(NetMessage::PeerListMsg(list))
             }
             MSG_TYPE_CONSENSUS_VOTE => {
                 let v = Vote::decode(input)?;

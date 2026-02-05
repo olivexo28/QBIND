@@ -200,6 +200,72 @@ pub struct NetworkTransportConfig {
     /// List of static peers to dial at startup (T172).
     /// Format: "host:port"
     pub static_peers: Vec<String>,
+
+    // ========================================================================
+    // T205: Dynamic Discovery Configuration
+    // ========================================================================
+    /// Whether dynamic peer discovery is enabled (T205).
+    ///
+    /// When `true`, the node will exchange peer lists with connected peers
+    /// and attempt to maintain a healthy peer set beyond static bootstrap peers.
+    ///
+    /// - DevNet: `false` (discovery disabled, uses static config only)
+    /// - TestNet Alpha/Beta: `true` (enabled by default but not enforced)
+    /// - MainNet: `true` (required; `validate_mainnet_invariants()` rejects `false`)
+    pub discovery_enabled: bool,
+
+    /// Interval in seconds between peer discovery exchanges (T205).
+    ///
+    /// Controls how often the node exchanges peer lists with connected peers
+    /// and attempts new outbound connections to fill the peer set.
+    ///
+    /// Default: 30 seconds
+    pub discovery_interval_secs: u64,
+
+    /// Maximum number of known peers to track in the peer table (T205).
+    ///
+    /// Enforces a cap on memory usage from peer discovery. Excess peers
+    /// are evicted based on age and liveness score.
+    ///
+    /// Default: 200
+    pub max_known_peers: u32,
+
+    /// Target number of outbound peer connections (T205).
+    ///
+    /// The discovery manager attempts to maintain at least this many
+    /// outbound connections. When below target, it dials candidates from
+    /// the peer table.
+    ///
+    /// - MainNet: 16 (default)
+    /// - TestNet: 8 (default)
+    pub target_outbound_peers: u32,
+
+    // ========================================================================
+    // T205: Liveness Configuration
+    // ========================================================================
+    /// Interval in seconds between liveness probes (T205).
+    ///
+    /// Controls how often the node sends Ping messages to connected peers
+    /// to verify they are responsive.
+    ///
+    /// Default: 30 seconds
+    pub liveness_probe_interval_secs: u64,
+
+    /// Number of consecutive missed probes before marking peer unhealthy (T205).
+    ///
+    /// When a peer fails to respond to this many consecutive Pings,
+    /// its liveness score is significantly decreased.
+    ///
+    /// Default: 3
+    pub liveness_failure_threshold: u8,
+
+    /// Minimum liveness score (0-100) before peer is disconnected (T205).
+    ///
+    /// Peers with scores below this threshold are evicted and marked
+    /// as unhealthy for a cooling period.
+    ///
+    /// Default: 30
+    pub liveness_min_score: u8,
 }
 
 impl Default for NetworkTransportConfig {
@@ -212,6 +278,15 @@ impl Default for NetworkTransportConfig {
             listen_addr: None,
             advertised_addr: None,
             static_peers: Vec::new(),
+            // T205: Discovery defaults (disabled for DevNet/TestNet Alpha)
+            discovery_enabled: false,
+            discovery_interval_secs: 30,
+            max_known_peers: 200,
+            target_outbound_peers: 8, // TestNet default
+            // T205: Liveness defaults
+            liveness_probe_interval_secs: 30,
+            liveness_failure_threshold: 3,
+            liveness_min_score: 30,
         }
     }
 }
@@ -236,6 +311,15 @@ impl NetworkTransportConfig {
             listen_addr: Some("0.0.0.0:9000".to_string()),
             advertised_addr: None,
             static_peers: Vec::new(),
+            // T205: Discovery enabled for TestNet Beta
+            discovery_enabled: true,
+            discovery_interval_secs: 30,
+            max_known_peers: 200,
+            target_outbound_peers: 8, // TestNet default
+            // T205: Liveness defaults
+            liveness_probe_interval_secs: 30,
+            liveness_failure_threshold: 3,
+            liveness_min_score: 30,
         }
     }
 
@@ -251,12 +335,26 @@ impl NetworkTransportConfig {
             listen_addr: Some("0.0.0.0:9000".to_string()),
             advertised_addr: None,
             static_peers: Vec::new(),
+            // T205: Discovery enabled and required for MainNet
+            discovery_enabled: true,
+            discovery_interval_secs: 30,
+            max_known_peers: 200,
+            target_outbound_peers: 16, // MainNet default
+            // T205: Liveness defaults
+            liveness_probe_interval_secs: 30,
+            liveness_failure_threshold: 3,
+            liveness_min_score: 30,
         }
     }
 
     /// Check if the P2P overlay is enabled.
     pub fn is_p2p_enabled(&self) -> bool {
         self.enable_p2p
+    }
+
+    /// Check if dynamic peer discovery is enabled (T205).
+    pub fn is_discovery_enabled(&self) -> bool {
+        self.discovery_enabled
     }
 }
 
@@ -1784,12 +1882,25 @@ impl NodeConfig {
             return Err(MainnetConfigError::P2pDisabled);
         }
 
-        // 9. Data directory must be set (no in-memory validators)
+        // 9. Discovery must be enabled (T205)
+        if !self.network.discovery_enabled {
+            return Err(MainnetConfigError::DiscoveryDisabled);
+        }
+
+        // 10. Target outbound peers must be at least 8 (T205)
+        if self.network.target_outbound_peers < 8 {
+            return Err(MainnetConfigError::InsufficientTargetOutboundPeers {
+                minimum: 8,
+                actual: self.network.target_outbound_peers,
+            });
+        }
+
+        // 11. Data directory must be set (no in-memory validators)
         if self.data_dir.is_none() {
             return Err(MainnetConfigError::MissingDataDir);
         }
 
-        // 10. Fee distribution must be MainNet default (T193)
+        // 12. Fee distribution must be MainNet default (T193)
         let mainnet_policy = FeeDistributionPolicy::mainnet_default();
         if self.fee_distribution_policy != mainnet_policy {
             return Err(MainnetConfigError::WrongFeeDistributionPolicy {
@@ -1808,13 +1919,13 @@ impl NodeConfig {
             );
         }
 
-        // 11. Monetary mode must not be Off (T197)
+        // 13. Monetary mode must not be Off (T197)
         // MainNet must at least compute + expose decisions.
         if self.monetary_mode == MonetaryMode::Off {
             return Err(MainnetConfigError::MonetaryModeOff);
         }
 
-        // 12. If monetary mode is Active, accounts and split must be valid (T197)
+        // 14. If monetary mode is Active, accounts and split must be valid (T197)
         if self.monetary_mode == MonetaryMode::Active {
             if self.monetary_accounts.is_none() {
                 return Err(MainnetConfigError::MonetaryAccountsMissing);
@@ -1906,6 +2017,18 @@ pub enum MainnetConfigError {
     ///
     /// MainNet validators must have P2P enabled for production networking.
     P2pDisabled,
+
+    /// Dynamic peer discovery is disabled (T205).
+    ///
+    /// MainNet validators must have dynamic discovery enabled to maintain
+    /// a healthy peer set beyond static bootstrap peers.
+    DiscoveryDisabled,
+
+    /// Target outbound peers is below minimum (T205).
+    ///
+    /// MainNet validators must have at least 8 target outbound peers
+    /// for network resilience and consensus liveness.
+    InsufficientTargetOutboundPeers { minimum: u32, actual: u32 },
 
     /// Data directory is not configured.
     ///
@@ -2000,6 +2123,19 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: P2P transport must be enabled (--enable-p2p=true)"
+                )
+            }
+            MainnetConfigError::DiscoveryDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: dynamic peer discovery must be enabled (--discovery-enabled=true)"
+                )
+            }
+            MainnetConfigError::InsufficientTargetOutboundPeers { minimum, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: target_outbound_peers must be at least {} but is {} (--target-outbound-peers={})",
+                    minimum, actual, minimum
                 )
             }
             MainnetConfigError::MissingDataDir => {

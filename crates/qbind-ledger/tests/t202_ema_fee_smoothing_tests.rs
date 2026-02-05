@@ -11,7 +11,7 @@
 
 use qbind_ledger::{
     compute_ema_fee_revenue, compute_epoch_state, ema_step, MonetaryEngineConfig,
-    MonetaryEpochInputs, MonetaryEpochState, MonetaryPhase, PhaseParameters,
+    MonetaryEpochInputs, MonetaryPhase, PhaseParameters,
 };
 
 // ============================================================================

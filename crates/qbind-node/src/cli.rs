@@ -409,6 +409,15 @@ impl CliArgs {
                 listen_addr,
                 advertised_addr,
                 static_peers,
+                // T205: Discovery defaults (disabled for legacy path)
+                discovery_enabled: false,
+                discovery_interval_secs: 30,
+                max_known_peers: 200,
+                target_outbound_peers: 8,
+                // T205: Liveness defaults
+                liveness_probe_interval_secs: 30,
+                liveness_failure_threshold: 3,
+                liveness_min_score: 30,
             };
 
             NodeConfig {

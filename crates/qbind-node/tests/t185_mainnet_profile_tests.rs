@@ -609,3 +609,91 @@ fn cli_invalid_profile_error_includes_mainnet() {
         err_msg
     );
 }
+
+// ============================================================================
+// T205: Discovery / Liveness Config Tests
+// ============================================================================
+
+/// Test: MainNet preset has discovery enabled.
+#[test]
+fn mainnet_preset_has_discovery_enabled() {
+    let config = NodeConfig::mainnet_preset();
+
+    assert!(
+        config.network.discovery_enabled,
+        "MainNet preset should have discovery_enabled = true"
+    );
+    assert_eq!(
+        config.network.target_outbound_peers, 16,
+        "MainNet preset should have target_outbound_peers = 16"
+    );
+}
+
+/// Test: Discovery disabled → error (T205)
+#[test]
+fn validate_mainnet_invariants_rejects_discovery_disabled() {
+    let mut config = NodeConfig::mainnet_preset().with_data_dir("/data/qbind");
+    config.network.discovery_enabled = false;
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::DiscoveryDisabled) => (),
+        Err(e) => panic!("Expected DiscoveryDisabled error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for discovery disabled"),
+    }
+}
+
+/// Test: Insufficient target_outbound_peers → error (T205)
+#[test]
+fn validate_mainnet_invariants_rejects_low_outbound_peers() {
+    let mut config = NodeConfig::mainnet_preset().with_data_dir("/data/qbind");
+    config.network.target_outbound_peers = 4; // Below minimum of 8
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::InsufficientTargetOutboundPeers { minimum, actual }) => {
+            assert_eq!(minimum, 8);
+            assert_eq!(actual, 4);
+        }
+        Err(e) => panic!("Expected InsufficientTargetOutboundPeers error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for low target_outbound_peers"),
+    }
+}
+
+/// Test: DevNet allows discovery disabled.
+#[test]
+fn devnet_allows_discovery_disabled() {
+    let config = NodeConfig::devnet_v0_preset();
+
+    // DevNet should NOT have discovery enabled by default
+    assert!(
+        !config.network.discovery_enabled,
+        "DevNet preset should have discovery_enabled = false"
+    );
+
+    // DevNet doesn't need to pass mainnet invariants, so no validation error
+}
+
+/// Test: TestNet Alpha/Beta defaults have discovery enabled.
+#[test]
+fn testnet_presets_have_appropriate_discovery_settings() {
+    // TestNet Alpha: discovery disabled by default
+    let alpha = NodeConfig::testnet_alpha_preset();
+    assert!(
+        !alpha.network.discovery_enabled,
+        "TestNet Alpha should have discovery_enabled = false"
+    );
+
+    // TestNet Beta: discovery enabled
+    let beta = NodeConfig::testnet_beta_preset();
+    assert!(
+        beta.network.discovery_enabled,
+        "TestNet Beta should have discovery_enabled = true"
+    );
+    assert_eq!(
+        beta.network.target_outbound_peers, 8,
+        "TestNet Beta should have target_outbound_peers = 8"
+    );
+}

@@ -14,7 +14,7 @@
 use qbind_ledger::{
     compute_epoch_state, compute_fee_coverage_ratio_bps, compute_phase_transition,
     compute_stake_ratio_bps, MonetaryEngineConfig, MonetaryEpochInputs, MonetaryPhase,
-    PhaseParameters, PhaseTransitionOutcome, PhaseTransitionReason, EPOCHS_PER_YEAR_10_MIN,
+    PhaseParameters, PhaseTransitionReason, EPOCHS_PER_YEAR_10_MIN,
     EPOCH_MATURE_START, EPOCH_TRANSITION_START, FEE_COVERAGE_BOOTSTRAP_TO_TRANSITION_BPS,
     FEE_COVERAGE_TRANSITION_TO_MATURE_BPS, STAKE_RATIO_BOOTSTRAP_TO_TRANSITION_BPS,
     STAKE_RATIO_TRANSITION_TO_MATURE_BPS,
@@ -59,6 +59,7 @@ fn test_config() -> MonetaryEngineConfig {
 }
 
 /// Returns default inputs for Bootstrap phase.
+#[allow(dead_code)]
 fn default_bootstrap_inputs() -> MonetaryEpochInputs {
     MonetaryEpochInputs {
         epoch_index: 0,

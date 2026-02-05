@@ -91,6 +91,7 @@ fn fast_delta_config() -> MonetaryEngineConfig {
 }
 
 /// Returns default inputs for Bootstrap phase.
+#[allow(dead_code)]
 fn default_inputs() -> MonetaryEpochInputs {
     MonetaryEpochInputs {
         epoch_index: 0,

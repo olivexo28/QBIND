@@ -109,6 +109,10 @@ pub mod p2p_tcp;
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;
 
+// T205 P2P Dynamic Discovery + Liveness modules
+pub mod p2p_discovery;
+pub mod p2p_liveness;
+
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
