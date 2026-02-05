@@ -4471,6 +4471,21 @@ pub struct MonetaryMetrics {
     /// Total epoch-level monetary decisions computed (T199)
     /// Increments once per epoch when MonetaryMode != Off
     epoch_decisions_total: AtomicU64,
+
+    // ========================================================================
+    // T204: Phase Transition Metrics
+    // ========================================================================
+    /// Stake ratio in basis points (0–10,000)
+    stake_ratio_bps: AtomicU64,
+
+    /// Total phase transitions from Bootstrap to Transition
+    phase_transitions_bootstrap_to_transition: AtomicU64,
+
+    /// Total phase transitions from Transition to Mature
+    phase_transitions_transition_to_mature: AtomicU64,
+
+    /// Fee coverage ratio in basis points (T204)
+    fee_coverage_ratio_bps: AtomicU64,
 }
 
 impl MonetaryMetrics {
@@ -4717,6 +4732,124 @@ impl MonetaryMetrics {
         self.epoch_decisions_total.fetch_add(1, Ordering::Relaxed);
     }
 
+    // ========================================================================
+    // T204: Phase Transition Metrics
+    // ========================================================================
+
+    /// Get stake ratio in basis points.
+    pub fn stake_ratio_bps(&self) -> u64 {
+        self.stake_ratio_bps.load(Ordering::Relaxed)
+    }
+
+    /// Set stake ratio in basis points.
+    pub fn set_stake_ratio_bps(&self, bps: u64) {
+        self.stake_ratio_bps.store(bps, Ordering::Relaxed);
+    }
+
+    /// Get fee coverage ratio in basis points (T204).
+    pub fn fee_coverage_ratio_bps(&self) -> u64 {
+        self.fee_coverage_ratio_bps.load(Ordering::Relaxed)
+    }
+
+    /// Set fee coverage ratio in basis points (T204).
+    pub fn set_fee_coverage_ratio_bps(&self, bps: u64) {
+        self.fee_coverage_ratio_bps.store(bps, Ordering::Relaxed);
+    }
+
+    /// Get total Bootstrap → Transition phase transitions.
+    pub fn phase_transitions_bootstrap_to_transition(&self) -> u64 {
+        self.phase_transitions_bootstrap_to_transition
+            .load(Ordering::Relaxed)
+    }
+
+    /// Increment Bootstrap → Transition phase transition counter.
+    pub fn inc_phase_transitions_bootstrap_to_transition(&self) {
+        self.phase_transitions_bootstrap_to_transition
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total Transition → Mature phase transitions.
+    pub fn phase_transitions_transition_to_mature(&self) -> u64 {
+        self.phase_transitions_transition_to_mature
+            .load(Ordering::Relaxed)
+    }
+
+    /// Increment Transition → Mature phase transition counter.
+    pub fn inc_phase_transitions_transition_to_mature(&self) {
+        self.phase_transitions_transition_to_mature
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a phase transition (T204).
+    ///
+    /// Call this when a phase transition is applied. Updates the transition counters.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_phase` - The phase before transition (0=Bootstrap, 1=Transition, 2=Mature)
+    /// * `to_phase` - The phase after transition
+    pub fn record_phase_transition(&self, from_phase: u64, to_phase: u64) {
+        match (from_phase, to_phase) {
+            (0, 1) => self.inc_phase_transitions_bootstrap_to_transition(),
+            (1, 2) => self.inc_phase_transitions_transition_to_mature(),
+            _ => {} // Invalid or no-op transition
+        }
+    }
+
+    /// Record an epoch-level monetary decision (T199, T204 updated).
+    ///
+    /// Call this when updating MonetaryEpochState at an epoch boundary.
+    /// Updates the last epoch index, relevant gauges, and increments the
+    /// appropriate mode-specific counter (shadow or active).
+    ///
+    /// # Arguments
+    ///
+    /// * `epoch_index` - The epoch index being updated
+    /// * `r_target_bps` - Target annual inflation rate in basis points
+    /// * `r_inf_bps` - Recommended annual inflation rate in basis points
+    /// * `phase` - Current monetary phase (0=Bootstrap, 1=Transition, 2=Mature)
+    /// * `fee_coverage_ratio` - Fee coverage ratio (f64)
+    /// * `mode` - Current monetary mode (1=Shadow, 2=Active)
+    /// * `stake_ratio_bps` - Stake ratio in basis points (T204)
+    /// * `fee_coverage_ratio_bps` - Fee coverage ratio in basis points (T204)
+    /// * `phase_prev` - Previous phase (T204, for transition tracking)
+    /// * `phase_transition_applied` - Whether a phase transition occurred (T204)
+    #[allow(clippy::too_many_arguments)]
+    pub fn record_epoch_decision_t204(
+        &self,
+        epoch_index: u64,
+        r_target_bps: u64,
+        r_inf_bps: u64,
+        phase: u64,
+        fee_coverage_ratio: f64,
+        mode: u64,
+        stake_ratio_bps_val: u64,
+        fee_coverage_ratio_bps_val: u64,
+        phase_prev: u64,
+        phase_transition_applied: bool,
+    ) {
+        self.set_last_epoch_index(epoch_index);
+        self.set_r_target_annual_bps(r_target_bps);
+        self.set_r_inf_annual_bps(r_inf_bps);
+        self.set_phase(phase);
+        self.set_fee_coverage_ratio(fee_coverage_ratio);
+        self.set_stake_ratio_bps(stake_ratio_bps_val);
+        self.set_fee_coverage_ratio_bps(fee_coverage_ratio_bps_val);
+        self.inc_epoch_decisions();
+
+        // Increment mode-specific counter
+        match mode {
+            1 => self.inc_decisions_applied_shadow(),
+            2 => self.inc_decisions_applied_active(),
+            _ => {} // Off mode (0) doesn't record
+        }
+
+        // Record phase transition if one occurred (T204)
+        if phase_transition_applied {
+            self.record_phase_transition(phase_prev, phase);
+        }
+    }
+
     /// Record an epoch-level monetary decision (T199).
     ///
     /// Call this when updating MonetaryEpochState at an epoch boundary.
@@ -4823,6 +4956,25 @@ impl MonetaryMetrics {
         output.push_str(&format!(
             "qbind_monetary_epoch_decisions_total {}\n",
             self.epoch_decisions_total()
+        ));
+
+        // T204: Phase transition metrics
+        output.push_str("\n# T204: Phase transition metrics\n");
+        output.push_str(&format!(
+            "qbind_monetary_stake_ratio_bps {}\n",
+            self.stake_ratio_bps()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_fee_coverage_ratio_bps {}\n",
+            self.fee_coverage_ratio_bps()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_phase_transitions_total{{from=\"Bootstrap\",to=\"Transition\"}} {}\n",
+            self.phase_transitions_bootstrap_to_transition()
+        ));
+        output.push_str(&format!(
+            "qbind_monetary_phase_transitions_total{{from=\"Transition\",to=\"Mature\"}} {}\n",
+            self.phase_transitions_transition_to_mature()
         ));
 
         output
