@@ -1459,6 +1459,111 @@ impl PersistentAccountState for RocksDbAccountState {
 }
 
 // ============================================================================
+// T208: StatePruner Implementation for RocksDbAccountState
+// ============================================================================
+
+use crate::state_pruning::{PruneStats, StatePruner};
+
+impl StatePruner for RocksDbAccountState {
+    type Error = StorageError;
+
+    /// Prune state data below the specified block height.
+    ///
+    /// For the current account state model, we don't have height-indexed data,
+    /// so this implementation provides a basic no-op that returns stats about
+    /// the current state. Height-based pruning will be meaningful when we add
+    /// historical state snapshots or versioned account data.
+    ///
+    /// # Arguments
+    ///
+    /// * `_prune_below_height` - Block height threshold (currently unused)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(PruneStats)` with statistics about the operation.
+    fn prune_below(&mut self, _prune_below_height: u64) -> Result<PruneStats, StorageError> {
+        use std::time::Instant;
+        let start = Instant::now();
+
+        // Count keys in the database
+        let mut keys_scanned: u64 = 0;
+        let keys_pruned: u64 = 0;
+
+        // Iterate over all account entries
+        // Note: In the current data model, account state is not versioned by height.
+        // This implementation scans and reports stats, but does not actually prune
+        // because current account state must be retained.
+        //
+        // When historical state snapshots are added, this will prune old snapshots
+        // below the specified height threshold.
+        let mut iter_errors: u64 = 0;
+        let iter = self.db.prefix_iterator(ACCOUNT_PREFIX);
+        for result in iter {
+            match result {
+                Ok((key, _)) => {
+                    // Only count keys with our prefix
+                    if key.starts_with(ACCOUNT_PREFIX) {
+                        keys_scanned += 1;
+                    } else {
+                        // Prefix iterator may overshoot, stop when prefix no longer matches
+                        break;
+                    }
+                }
+                Err(e) => {
+                    // Log iterator errors but continue scanning.
+                    // In production, these would be reported to metrics.
+                    iter_errors += 1;
+                    eprintln!(
+                        "[T208] StatePruner: iterator error during scan (error {}): {}",
+                        iter_errors, e
+                    );
+                    continue;
+                }
+            }
+        }
+
+        // Currently no actual pruning happens (current state is always retained)
+        // keys_pruned will be > 0 when historical snapshots are implemented
+
+        let duration = start.elapsed();
+        Ok(PruneStats::from_duration(keys_scanned, keys_pruned, duration))
+    }
+
+    /// Get the estimated state size in bytes.
+    ///
+    /// Uses RocksDB's property API to estimate the on-disk size.
+    fn estimated_size_bytes(&self) -> Result<u64, StorageError> {
+        // Use RocksDB's estimated live data size
+        let size_str = self
+            .db
+            .property_value("rocksdb.estimate-live-data-size")
+            .map_err(|e| StorageError::Io(e.to_string()))?;
+
+        match size_str {
+            Some(s) => s.parse().map_err(|_| {
+                StorageError::Corrupt("cannot parse rocksdb.estimate-live-data-size".to_string())
+            }),
+            None => {
+                // Fall back to total-sst-files-size if estimate-live-data-size is unavailable
+                let sst_size = self
+                    .db
+                    .property_value("rocksdb.total-sst-files-size")
+                    .map_err(|e| StorageError::Io(e.to_string()))?;
+
+                match sst_size {
+                    Some(s) => s.parse().map_err(|_| {
+                        StorageError::Corrupt(
+                            "cannot parse rocksdb.total-sst-files-size".to_string(),
+                        )
+                    }),
+                    None => Ok(0), // Unknown size
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
 // T164: Cached Persistent Account State
 // ============================================================================
 

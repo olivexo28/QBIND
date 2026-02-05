@@ -37,8 +37,9 @@ use clap::Parser;
 
 use crate::node_config::{
     parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
-    parse_mempool_mode, parse_network_mode, DagCouplingMode, MempoolMode, NetworkMode,
-    NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
+    parse_mempool_mode, parse_network_mode, parse_state_retention_mode, DagCouplingMode,
+    MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
+    StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -259,6 +260,37 @@ pub struct CliArgs {
     /// MainNet profile requires `enforce` mode.
     #[arg(long = "p2p-diversity-mode")]
     pub p2p_diversity_mode: Option<String>,
+
+    // ========================================================================
+    // T208: State Retention Configuration
+    // ========================================================================
+    /// State retention mode: disabled or height (T208).
+    ///
+    /// Controls how the node manages historical state data:
+    /// - disabled: Retain all historical state (DevNet, TestNet Alpha default)
+    /// - height: Prune state below `current_height - retain_height` (TestNet Beta, MainNet default)
+    ///
+    /// MainNet profile requires `height` mode for disk space management.
+    #[arg(long = "state-retention-mode")]
+    pub state_retention_mode: Option<String>,
+
+    /// Number of blocks of history to retain when state-retention-mode is 'height' (T208).
+    ///
+    /// State data below `current_height - retain_height` may be pruned.
+    ///
+    /// Recommended values:
+    /// - TestNet Beta: 100_000 (~6 days at 5s blocks)
+    /// - MainNet: 500_000 (~30 days at 5s blocks)
+    #[arg(long = "state-retain-height")]
+    pub state_retain_height: Option<u64>,
+
+    /// Interval (in committed blocks) between state pruning runs (T208).
+    ///
+    /// Pruning is triggered every N blocks to amortize the cost.
+    ///
+    /// Default: 1_000 blocks (~83 minutes at 5s blocks)
+    #[arg(long = "state-prune-interval")]
+    pub state_prune_interval: Option<u64>,
 }
 
 // ============================================================================
@@ -288,6 +320,8 @@ pub enum CliError {
     InvalidMonetaryMode(String),
     /// Invalid diversity mode string (T206).
     InvalidDiversityMode(String),
+    /// Invalid state retention mode string (T208).
+    InvalidStateRetentionMode(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -330,6 +364,13 @@ impl std::fmt::Display for CliError {
                 write!(
                     f,
                     "invalid p2p-diversity-mode '{}': expected 'off', 'warn', or 'enforce'",
+                    s
+                )
+            }
+            CliError::InvalidStateRetentionMode(s) => {
+                write!(
+                    f,
+                    "invalid state-retention-mode '{}': expected 'disabled' or 'height'",
                     s
                 )
             }
@@ -467,6 +508,8 @@ impl CliArgs {
                 monetary_mode: MonetaryMode::Off,
                 monetary_accounts: None,
                 seigniorage_split: SeigniorageSplit::default(),
+                // T208: State retention disabled by default for legacy path
+                state_retention: StateRetentionConfig::disabled(),
             }
         };
 
@@ -558,6 +601,45 @@ impl CliArgs {
                     return Err(CliError::InvalidDiversityMode(diversity_mode_str.clone()));
                 }
             }
+        }
+
+        // T208: Apply state retention mode override
+        if let Some(ref retention_mode_str) = self.state_retention_mode {
+            match parse_state_retention_mode(retention_mode_str) {
+                Some(mode) => {
+                    if self.profile.is_some() {
+                        eprintln!("[T208] CLI override: state_retention.mode = {}", mode);
+                    }
+                    config.state_retention.mode = mode;
+                }
+                None => {
+                    return Err(CliError::InvalidStateRetentionMode(
+                        retention_mode_str.clone(),
+                    ));
+                }
+            }
+        }
+
+        // T208: Apply state retain height override
+        if let Some(retain_height) = self.state_retain_height {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T208] CLI override: state_retention.retain_height = {}",
+                    retain_height
+                );
+            }
+            config.state_retention.retain_height = Some(retain_height);
+        }
+
+        // T208: Apply state prune interval override
+        if let Some(prune_interval) = self.state_prune_interval {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T208] CLI override: state_retention.prune_interval_blocks = {}",
+                    prune_interval
+                );
+            }
+            config.state_retention.prune_interval_blocks = prune_interval;
         }
 
         // Apply data_dir if specified

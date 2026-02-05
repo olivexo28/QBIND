@@ -9,8 +9,8 @@
 use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, MempoolMode,
-    NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, DEFAULT_NETWORK_MODE,
-    DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
+    NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, StateRetentionConfig,
+    DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -111,6 +111,7 @@ fn test_p2p_config_local_mesh_disabled() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -145,6 +146,7 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -176,6 +178,7 @@ fn test_p2p_config_p2p_mode_enabled() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -202,6 +205,7 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -241,6 +245,7 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -332,6 +337,7 @@ fn test_startup_info_includes_network_mode() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -360,6 +366,7 @@ fn test_startup_info_p2p_disabled() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -393,6 +400,7 @@ fn test_startup_info_p2p_enabled() {
         monetary_mode: MonetaryMode::Off,
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
+        state_retention: StateRetentionConfig::disabled(),
     };
 
     let info = config.startup_info_string(Some("V0"));

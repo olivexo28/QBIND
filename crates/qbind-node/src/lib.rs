@@ -238,6 +238,12 @@ pub use p2p_diversity::{
     VALID_DIVERSITY_MODES,
 };
 
+// T208 State Retention exports
+pub use node_config::{
+    parse_state_retention_mode, StateRetentionConfig, StateRetentionMode,
+    VALID_STATE_RETENTION_MODES,
+};
+
 // T197 Monetary Mode exports (re-exported from qbind-ledger)
 pub use qbind_ledger::{
     parse_monetary_mode, MonetaryAccounts, MonetaryMode, SeigniorageSplit,

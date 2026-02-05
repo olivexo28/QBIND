@@ -40,6 +40,208 @@ use qbind_types::{ChainId, NetworkEnvironment};
 use std::path::PathBuf;
 
 // ============================================================================
+// T208: State Retention Configuration
+// ============================================================================
+
+/// Mode for state retention and pruning (T208).
+///
+/// Determines how historical state data is managed by the node.
+/// Pruning is purely local node behavior and does not affect consensus.
+///
+/// # Environments
+///
+/// - **DevNet v0**: `Disabled` (full history retained)
+/// - **TestNet Alpha**: `Disabled` (full history retained)
+/// - **TestNet Beta**: `Height` with retain_height ~100_000
+/// - **MainNet v0**: `Height` with retain_height ~500_000 (~30 days of history)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum StateRetentionMode {
+    /// State pruning is disabled. All historical state is retained.
+    ///
+    /// This is the default for DevNet and TestNet Alpha to preserve
+    /// full history for debugging and testing.
+    #[default]
+    Disabled,
+
+    /// Prune state based on block height.
+    ///
+    /// State data below `current_height - retain_height` may be pruned.
+    /// This is the recommended mode for production validators to manage
+    /// disk space while maintaining sufficient history for reorganizations.
+    Height,
+    // Epochs mode can be added in the future:
+    // Epochs,
+}
+
+impl std::fmt::Display for StateRetentionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StateRetentionMode::Disabled => write!(f, "disabled"),
+            StateRetentionMode::Height => write!(f, "height"),
+        }
+    }
+}
+
+/// Parse a state retention mode from a string.
+///
+/// Valid values: "disabled", "height"
+///
+/// Returns `None` for unrecognized values.
+pub fn parse_state_retention_mode(s: &str) -> Option<StateRetentionMode> {
+    match s.to_lowercase().as_str() {
+        "disabled" | "off" => Some(StateRetentionMode::Disabled),
+        "height" | "blocks" => Some(StateRetentionMode::Height),
+        _ => None,
+    }
+}
+
+/// Valid state retention mode strings for documentation and error messages.
+pub const VALID_STATE_RETENTION_MODES: &[&str] = &["disabled", "height"];
+
+/// Configuration for state retention and pruning (T208).
+///
+/// Controls how the node manages historical state data to balance disk usage
+/// against the ability to verify historical blocks and handle reorganizations.
+///
+/// # Pruning Behavior
+///
+/// When `mode = Height` and `retain_height = Some(N)`:
+/// - State below `current_height - N` may be pruned
+/// - Pruning runs every `prune_interval_blocks` committed blocks
+/// - Current account state is never pruned (only historical snapshots)
+///
+/// # Thread Safety
+///
+/// Pruning runs in a background task and does not block consensus or execution.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::{StateRetentionConfig, StateRetentionMode};
+///
+/// // MainNet configuration: keep ~30 days of history
+/// let config = StateRetentionConfig {
+///     mode: StateRetentionMode::Height,
+///     retain_height: Some(500_000),  // ~30 days at 5s blocks
+///     retain_epochs: None,
+///     prune_interval_blocks: 1_000,
+/// };
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateRetentionConfig {
+    /// The retention mode.
+    pub mode: StateRetentionMode,
+
+    /// Number of blocks of history to retain when `mode = Height`.
+    ///
+    /// State below `current_height - retain_height` may be pruned.
+    /// Set to `None` to retain all history (equivalent to `mode = Disabled`).
+    ///
+    /// Recommended values:
+    /// - TestNet Beta: 100_000 (~6 days at 5s blocks)
+    /// - MainNet: 500_000 (~30 days at 5s blocks)
+    pub retain_height: Option<u64>,
+
+    /// Number of epochs of history to retain when `mode = Epochs`.
+    ///
+    /// Reserved for future use when epoch-based pruning is implemented.
+    /// Currently ignored.
+    pub retain_epochs: Option<u64>,
+
+    /// Interval (in committed blocks) between pruning runs.
+    ///
+    /// Pruning is triggered every N blocks to amortize the cost.
+    /// Recommended: 1_000 blocks (~83 minutes at 5s blocks).
+    pub prune_interval_blocks: u64,
+}
+
+impl Default for StateRetentionConfig {
+    fn default() -> Self {
+        Self {
+            mode: StateRetentionMode::Disabled,
+            retain_height: None,
+            retain_epochs: None,
+            prune_interval_blocks: 1_000,
+        }
+    }
+}
+
+impl StateRetentionConfig {
+    /// Create a disabled state retention configuration.
+    ///
+    /// All historical state is retained. This is the default for DevNet.
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Create a height-based state retention configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `retain_height` - Number of blocks of history to retain
+    /// * `prune_interval_blocks` - Blocks between pruning runs
+    pub fn height_based(retain_height: u64, prune_interval_blocks: u64) -> Self {
+        Self {
+            mode: StateRetentionMode::Height,
+            retain_height: Some(retain_height),
+            retain_epochs: None,
+            prune_interval_blocks,
+        }
+    }
+
+    /// Create the TestNet Beta default configuration.
+    ///
+    /// - Mode: Height
+    /// - Retain height: 100_000 blocks (~6 days at 5s blocks)
+    /// - Prune interval: 1_000 blocks
+    pub fn testnet_beta_default() -> Self {
+        Self::height_based(100_000, 1_000)
+    }
+
+    /// Create the MainNet default configuration.
+    ///
+    /// - Mode: Height
+    /// - Retain height: 500_000 blocks (~30 days at 5s blocks)
+    /// - Prune interval: 1_000 blocks
+    pub fn mainnet_default() -> Self {
+        Self::height_based(500_000, 1_000)
+    }
+
+    /// Check if pruning is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.mode != StateRetentionMode::Disabled
+    }
+
+    /// Compute the prune-below height for a given current height.
+    ///
+    /// Returns `None` if:
+    /// - Pruning is disabled (mode != Height)
+    /// - retain_height is not set
+    /// - current_height <= retain_height (nothing to prune yet)
+    pub fn prune_below_height(&self, current_height: u64) -> Option<u64> {
+        if self.mode != StateRetentionMode::Height {
+            return None;
+        }
+        let retain = self.retain_height?;
+        if current_height > retain {
+            Some(current_height - retain)
+        } else {
+            None // Nothing to prune yet
+        }
+    }
+
+    /// Check if pruning should run at the given height.
+    ///
+    /// Returns `true` if pruning is enabled and the height is a multiple
+    /// of `prune_interval_blocks`.
+    pub fn should_prune_at_height(&self, height: u64) -> bool {
+        self.is_enabled()
+            && self.prune_interval_blocks > 0
+            && height.is_multiple_of(self.prune_interval_blocks)
+    }
+}
+
+// ============================================================================
 // T165: DAG Availability Configuration
 // ============================================================================
 
@@ -1001,6 +1203,20 @@ pub struct NodeConfig {
     /// validators, treasury, insurance, and community.
     /// Only meaningful when `monetary_mode == Active`.
     pub seigniorage_split: SeigniorageSplit,
+
+    // ========================================================================
+    // T208: State Retention Configuration
+    // ========================================================================
+    /// State retention and pruning configuration (T208).
+    ///
+    /// Controls how the node manages historical state data to balance
+    /// disk usage against history availability.
+    ///
+    /// - DevNet v0: `Disabled` (full history retained)
+    /// - TestNet Alpha: `Disabled` (full history retained)
+    /// - TestNet Beta: `Height` (retain_height=100_000, interval=1_000)
+    /// - MainNet v0: `Height` (retain_height=500_000, interval=1_000)
+    pub state_retention: StateRetentionConfig,
 }
 
 impl Default for NodeConfig {
@@ -1030,6 +1246,8 @@ impl Default for NodeConfig {
             monetary_mode: MonetaryMode::Off,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention disabled for DevNet
+            state_retention: StateRetentionConfig::disabled(),
         }
     }
 }
@@ -1056,6 +1274,8 @@ impl NodeConfig {
             monetary_mode: MonetaryMode::Off,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention disabled by default
+            state_retention: StateRetentionConfig::disabled(),
         }
     }
 
@@ -1081,6 +1301,8 @@ impl NodeConfig {
             monetary_mode: MonetaryMode::Off,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention disabled by default
+            state_retention: StateRetentionConfig::disabled(),
         }
     }
 
@@ -1124,6 +1346,7 @@ impl NodeConfig {
     /// - Stage B: Disabled (T186)
     /// - Fee Distribution: Burn-only (T193)
     /// - Monetary Mode: Off (T197)
+    /// - State Retention: Disabled (T208)
     ///
     /// # Example
     ///
@@ -1152,6 +1375,8 @@ impl NodeConfig {
             monetary_mode: MonetaryMode::Off,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention disabled for DevNet
+            state_retention: StateRetentionConfig::disabled(),
         }
     }
 
@@ -1169,6 +1394,7 @@ impl NodeConfig {
     /// - Stage B: Disabled (T186)
     /// - Fee Distribution: Burn-only (T193)
     /// - Monetary Mode: Shadow (T197)
+    /// - State Retention: Disabled (T208)
     ///
     /// # Example
     ///
@@ -1198,6 +1424,8 @@ impl NodeConfig {
             monetary_mode: MonetaryMode::Shadow,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention disabled for TestNet Alpha
+            state_retention: StateRetentionConfig::disabled(),
         }
     }
 
@@ -1218,6 +1446,7 @@ impl NodeConfig {
     /// - Stage B: **Disabled by default** (T186: opt-in available for testing)
     /// - Fee Distribution: **Burn-only** (T193: testing uses burn-only for simplicity)
     /// - Monetary Mode: **Shadow** (T197: decisions + metrics only)
+    /// - State Retention: **Height** (T208: retain_height=100_000, ~6 days at 5s blocks)
     ///
     /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
     /// starting nodes, as Beta requires persistent state.
@@ -1257,6 +1486,8 @@ impl NodeConfig {
             monetary_mode: MonetaryMode::Shadow,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention enabled for TestNet Beta (~6 days history)
+            state_retention: StateRetentionConfig::testnet_beta_default(),
         }
     }
 
@@ -1277,6 +1508,7 @@ impl NodeConfig {
     /// - Stage B: **Enabled by default** (T186: parallel execution available)
     /// - Fee Distribution: **50% burn / 50% proposer** (T193: MainNet default)
     /// - Monetary Mode: **Shadow** (T197: governance can flip to Active later)
+    /// - State Retention: **Height** (T208: retain_height=500_000, ~30 days at 5s blocks)
     ///
     /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
     /// starting nodes. MainNet validators cannot use in-memory-only storage.
@@ -1328,6 +1560,8 @@ impl NodeConfig {
             monetary_mode: MonetaryMode::Shadow,
             monetary_accounts: None,
             seigniorage_split: SeigniorageSplit::default(),
+            // T208: State retention enabled for MainNet (~30 days history)
+            state_retention: StateRetentionConfig::mainnet_default(),
         }
     }
 
@@ -1553,6 +1787,29 @@ impl NodeConfig {
     /// ```
     pub fn with_seigniorage_split(mut self, split: SeigniorageSplit) -> Self {
         self.seigniorage_split = split;
+        self
+    }
+
+    /// Set the state retention configuration (T208).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The state retention configuration to use
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, StateRetentionConfig, StateRetentionMode};
+    ///
+    /// // Custom state retention for testing
+    /// let retention = StateRetentionConfig::height_based(50_000, 500);
+    /// let config = NodeConfig::testnet_alpha_preset()
+    ///     .with_state_retention(retention);
+    ///
+    /// assert_eq!(config.state_retention.mode, StateRetentionMode::Height);
+    /// ```
+    pub fn with_state_retention(mut self, config: StateRetentionConfig) -> Self {
+        self.state_retention = config;
         self
     }
 
@@ -2032,6 +2289,31 @@ impl NodeConfig {
             }
         }
 
+        // 17. State retention must be enabled for MainNet (T208)
+        // MainNet validators should prune state to manage disk usage.
+        if !self.state_retention.is_enabled() {
+            return Err(MainnetConfigError::StateRetentionDisabled);
+        }
+
+        // 18. State retention must have a reasonable retain_height (T208)
+        // For MainNet, we require at least some minimum history for reorg safety.
+        if self.state_retention.mode == StateRetentionMode::Height {
+            match self.state_retention.retain_height {
+                None => {
+                    return Err(MainnetConfigError::StateRetentionInvalid(
+                        "retain_height must be set when mode is Height".to_string(),
+                    ));
+                }
+                Some(h) if h < 10_000 => {
+                    // Require at least ~14 hours of history at 5s blocks
+                    return Err(MainnetConfigError::StateRetentionInvalid(
+                        format!("retain_height {} is too low for MainNet (minimum 10,000)", h),
+                    ));
+                }
+                _ => {}
+            }
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -2175,6 +2457,18 @@ pub enum MainnetConfigError {
     /// - Be distinct (no duplicates)
     /// - Be non-zero addresses
     MonetaryAccountsInvalid,
+
+    /// State retention is disabled for MainNet (T208).
+    ///
+    /// MainNet validators must enable state pruning to manage disk usage.
+    /// Disabled state retention would lead to unbounded state growth.
+    StateRetentionDisabled,
+
+    /// State retention configuration is invalid for MainNet (T208).
+    ///
+    /// When state retention is enabled with Height mode, retain_height must
+    /// be set and must be at least 10,000 blocks for reorg safety.
+    StateRetentionInvalid(String),
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -2294,6 +2588,19 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: monetary accounts must be distinct non-zero addresses when monetary mode is 'active' (T201)"
+                )
+            }
+            MainnetConfigError::StateRetentionDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: state retention must be enabled (--state-retention-mode=height)"
+                )
+            }
+            MainnetConfigError::StateRetentionInvalid(msg) => {
+                write!(
+                    f,
+                    "MainNet invariant violated: state retention configuration invalid: {}",
+                    msg
                 )
             }
         }
