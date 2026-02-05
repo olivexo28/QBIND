@@ -134,6 +134,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ Hybrid fee distribution implemented (T193)
 - ✅ **Monetary policy design complete (T194)** — see [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md)
 - ✅ **EMA-based fee smoothing (T202)** — consensus-level EMA with phase-dependent λ
+- ✅ **Rate-of-change limiters (T203)** — consensus-side per-epoch Δ-limit on annual inflation, per phase, applied after floor/cap with deterministic clamping
 
 **Additional MainNet Requirements**:
 - [x] Hybrid fee distribution (burn + proposer) implementation (T193)
@@ -144,7 +145,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Seigniorage distribution to validators (T200) — **Ready** (stake-proportional reward distribution)
 - [x] Treasury/insurance/community routing (T201) — **Ready** (seigniorage split and application logic)
 - [x] EMA-based fee smoothing (T202) — **Ready** (per-epoch EMA with phase-dependent λ)
-- [ ] Rate-of-change limiters (T203) — Pending
+- [x] Rate-of-change limiters (T203) — **Ready** (per-epoch Δ-limit with phase-specific max_delta_r_inf_per_epoch_bps)
 - [ ] Fee market analysis under adversarial conditions
 - [ ] Mempool eviction rate limiting
 - [ ] External audit of fee accounting code
