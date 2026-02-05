@@ -9,6 +9,7 @@ pub mod monetary_engine;
 pub mod monetary_state;
 pub mod parallel_exec;
 pub mod program;
+pub mod state_pruning;
 pub mod store;
 
 pub use account::{Account, AccountHeader};
@@ -109,3 +110,6 @@ pub use monetary_state::{
     apply_seigniorage_balances, compute_epoch_seigniorage, process_epoch_seigniorage,
     SeigniorageApplicationResult, SeigniorageStateMutator, SEIGNIORAGE_SPLIT_MAINNET_T201,
 };
+
+// T208: State Pruning exports
+pub use state_pruning::{PruneStats, StatePruner};

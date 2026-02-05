@@ -6284,6 +6284,176 @@ impl NodeMetrics {
 }
 
 // ============================================================================
+// T208: State Pruning Metrics
+// ============================================================================
+
+/// Metrics for state pruning operations (T208).
+///
+/// Tracks pruning activity and state size for monitoring state growth.
+///
+/// # Prometheus Metrics
+///
+/// - `qbind_state_prune_runs_total` - Total number of pruning runs
+/// - `qbind_state_prune_keys_scanned_total` - Total keys scanned during pruning
+/// - `qbind_state_prune_keys_pruned_total` - Total keys actually pruned
+/// - `qbind_state_prune_last_height` - Height at which last pruning occurred
+/// - `qbind_state_prune_duration_ms_total` - Total time spent pruning (ms)
+/// - `qbind_state_size_bytes` - Estimated state size (gauge)
+#[derive(Debug, Default)]
+pub struct StatePruneMetrics {
+    /// Total number of pruning runs.
+    prune_runs_total: AtomicU64,
+
+    /// Total keys scanned during all pruning operations.
+    keys_scanned_total: AtomicU64,
+
+    /// Total keys actually pruned (deleted).
+    keys_pruned_total: AtomicU64,
+
+    /// Height at which the last pruning run was triggered.
+    last_prune_height: AtomicU64,
+
+    /// Total time spent pruning in milliseconds.
+    prune_duration_ms_total: AtomicU64,
+
+    /// Estimated state size in bytes (gauge, updated periodically).
+    state_size_bytes: AtomicU64,
+}
+
+impl StatePruneMetrics {
+    /// Create a new metrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    // ========================================================================
+    // Getters
+    // ========================================================================
+
+    /// Get total number of pruning runs.
+    pub fn prune_runs_total(&self) -> u64 {
+        self.prune_runs_total.load(Ordering::Relaxed)
+    }
+
+    /// Get total keys scanned during pruning.
+    pub fn keys_scanned_total(&self) -> u64 {
+        self.keys_scanned_total.load(Ordering::Relaxed)
+    }
+
+    /// Get total keys pruned.
+    pub fn keys_pruned_total(&self) -> u64 {
+        self.keys_pruned_total.load(Ordering::Relaxed)
+    }
+
+    /// Get height of last pruning run.
+    pub fn last_prune_height(&self) -> u64 {
+        self.last_prune_height.load(Ordering::Relaxed)
+    }
+
+    /// Get total pruning duration in milliseconds.
+    pub fn prune_duration_ms_total(&self) -> u64 {
+        self.prune_duration_ms_total.load(Ordering::Relaxed)
+    }
+
+    /// Get estimated state size in bytes.
+    pub fn state_size_bytes(&self) -> u64 {
+        self.state_size_bytes.load(Ordering::Relaxed)
+    }
+
+    // ========================================================================
+    // Recording Methods
+    // ========================================================================
+
+    /// Record a completed pruning operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `height` - Block height at which pruning was triggered
+    /// * `stats` - Statistics from the pruning operation
+    pub fn record_prune_operation(
+        &self,
+        height: u64,
+        stats: &qbind_ledger::PruneStats,
+    ) {
+        self.prune_runs_total.fetch_add(1, Ordering::Relaxed);
+        self.keys_scanned_total
+            .fetch_add(stats.keys_scanned, Ordering::Relaxed);
+        self.keys_pruned_total
+            .fetch_add(stats.keys_pruned, Ordering::Relaxed);
+        self.last_prune_height.store(height, Ordering::Relaxed);
+        self.prune_duration_ms_total
+            .fetch_add(stats.duration_ms, Ordering::Relaxed);
+    }
+
+    /// Update the estimated state size gauge.
+    ///
+    /// # Arguments
+    ///
+    /// * `size_bytes` - Current estimated state size in bytes
+    pub fn set_state_size_bytes(&self, size_bytes: u64) {
+        self.state_size_bytes.store(size_bytes, Ordering::Relaxed);
+    }
+
+    // ========================================================================
+    // Prometheus Formatting
+    // ========================================================================
+
+    /// Format metrics in Prometheus text exposition format.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("# HELP qbind_state_prune_runs_total Total number of state pruning runs\n");
+        output.push_str("# TYPE qbind_state_prune_runs_total counter\n");
+        output.push_str(&format!(
+            "qbind_state_prune_runs_total {}\n",
+            self.prune_runs_total()
+        ));
+
+        output.push_str(
+            "# HELP qbind_state_prune_keys_scanned_total Total keys scanned during pruning\n",
+        );
+        output.push_str("# TYPE qbind_state_prune_keys_scanned_total counter\n");
+        output.push_str(&format!(
+            "qbind_state_prune_keys_scanned_total {}\n",
+            self.keys_scanned_total()
+        ));
+
+        output.push_str("# HELP qbind_state_prune_keys_pruned_total Total keys pruned\n");
+        output.push_str("# TYPE qbind_state_prune_keys_pruned_total counter\n");
+        output.push_str(&format!(
+            "qbind_state_prune_keys_pruned_total {}\n",
+            self.keys_pruned_total()
+        ));
+
+        output.push_str(
+            "# HELP qbind_state_prune_last_height Height at which last pruning occurred\n",
+        );
+        output.push_str("# TYPE qbind_state_prune_last_height gauge\n");
+        output.push_str(&format!(
+            "qbind_state_prune_last_height {}\n",
+            self.last_prune_height()
+        ));
+
+        output.push_str(
+            "# HELP qbind_state_prune_duration_ms_total Total time spent pruning in milliseconds\n",
+        );
+        output.push_str("# TYPE qbind_state_prune_duration_ms_total counter\n");
+        output.push_str(&format!(
+            "qbind_state_prune_duration_ms_total {}\n",
+            self.prune_duration_ms_total()
+        ));
+
+        output.push_str("# HELP qbind_state_size_bytes Estimated state size in bytes\n");
+        output.push_str("# TYPE qbind_state_size_bytes gauge\n");
+        output.push_str(&format!(
+            "qbind_state_size_bytes {}\n",
+            self.state_size_bytes()
+        ));
+
+        output
+    }
+}
+
+// ============================================================================
 // Unit Tests
 // ============================================================================
 
