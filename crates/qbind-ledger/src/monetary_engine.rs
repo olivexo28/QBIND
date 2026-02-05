@@ -67,6 +67,23 @@ pub struct PhaseParameters {
     ///
     /// Constraint: 0 < ema_lambda_bps < 10_000
     pub ema_lambda_bps: u16,
+
+    /// Maximum allowed change in annual inflation rate per epoch (T203), in basis points.
+    ///
+    /// This rate-of-change limiter ensures smooth transitions in the inflation rate,
+    /// preventing sudden jumps that could destabilize validator economics or cause
+    /// market shocks during phase transitions or fee volatility.
+    ///
+    /// The Δ-limit is applied after floor/cap clamping, using the previous epoch's
+    /// final inflation rate as the reference. For epoch 0, no clamping is applied.
+    ///
+    /// Typical values:
+    /// - Bootstrap: 25 bps (0.25%) — faster response during network establishment
+    /// - Transition: 10 bps (0.10%) — balanced response during growth
+    /// - Mature: 5 bps (0.05%) — maximum stability for long-term operation
+    ///
+    /// Constraint: max_delta_r_inf_per_epoch_bps > 0
+    pub max_delta_r_inf_per_epoch_bps: u32,
 }
 
 /// Configuration for the monetary engine.
@@ -116,6 +133,7 @@ impl MonetaryEngineConfig {
     /// # Constraints
     ///
     /// - For all phases: `0 < ema_lambda_bps < 10_000`
+    /// - For all phases: `max_delta_r_inf_per_epoch_bps > 0` (T203)
     ///
     /// # Returns
     ///
@@ -125,6 +143,12 @@ impl MonetaryEngineConfig {
         Self::validate_ema_lambda(&self.bootstrap, "Bootstrap")?;
         Self::validate_ema_lambda(&self.transition, "Transition")?;
         Self::validate_ema_lambda(&self.mature, "Mature")?;
+
+        // Validate rate-of-change limits (T203)
+        Self::validate_delta_limit(&self.bootstrap, "Bootstrap")?;
+        Self::validate_delta_limit(&self.transition, "Transition")?;
+        Self::validate_delta_limit(&self.mature, "Mature")?;
+
         Ok(())
     }
 
@@ -133,6 +157,21 @@ impl MonetaryEngineConfig {
             return Err(format!(
                 "{} phase: ema_lambda_bps must be in range (0, 10000), got {}",
                 phase_name, params.ema_lambda_bps
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validates the rate-of-change limit (T203).
+    ///
+    /// # Constraints
+    ///
+    /// - max_delta_r_inf_per_epoch_bps must be > 0
+    fn validate_delta_limit(params: &PhaseParameters, phase_name: &str) -> Result<(), String> {
+        if params.max_delta_r_inf_per_epoch_bps == 0 {
+            return Err(format!(
+                "{} phase: max_delta_r_inf_per_epoch_bps must be > 0, got {}",
+                phase_name, params.max_delta_r_inf_per_epoch_bps
             ));
         }
         Ok(())
@@ -796,6 +835,7 @@ mod tests {
                 fee_smoothing_half_life_days: 30.0,
                 max_annual_inflation_cap: 0.12, // 12% cap
                 ema_lambda_bps: 700,             // T202: 7% EMA factor for Bootstrap
+                max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
             },
             transition: PhaseParameters {
                 r_target_annual: 0.04,       // 4% base
@@ -803,6 +843,7 @@ mod tests {
                 fee_smoothing_half_life_days: 60.0,
                 max_annual_inflation_cap: 0.10, // 10% cap
                 ema_lambda_bps: 300,             // T202: 3% EMA factor for Transition
+                max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
             },
             mature: PhaseParameters {
                 r_target_annual: 0.03,        // 3% base
@@ -810,6 +851,7 @@ mod tests {
                 fee_smoothing_half_life_days: 90.0,
                 max_annual_inflation_cap: 0.08, // 8% cap
                 ema_lambda_bps: 150,             // T202: 1.5% EMA factor for Mature
+                max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
             },
             alpha_fee_offset: 1.0,
         }

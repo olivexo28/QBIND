@@ -35,6 +35,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 30.0,
             max_annual_inflation_cap: 0.12,
             ema_lambda_bps: 700,
+            max_delta_r_inf_per_epoch_bps: 25, // T203: 0.25% max change per epoch
         },
         transition: PhaseParameters {
             r_target_annual: 0.04,
@@ -42,6 +43,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 60.0,
             max_annual_inflation_cap: 0.10,
             ema_lambda_bps: 300,
+            max_delta_r_inf_per_epoch_bps: 10, // T203: 0.10% max change per epoch
         },
         mature: PhaseParameters {
             r_target_annual: 0.03,
@@ -49,6 +51,7 @@ fn test_config() -> MonetaryEngineConfig {
             fee_smoothing_half_life_days: 90.0,
             max_annual_inflation_cap: 0.08,
             ema_lambda_bps: 150,
+            max_delta_r_inf_per_epoch_bps: 5, // T203: 0.05% max change per epoch
         },
         alpha_fee_offset: 1.0,
     }
@@ -660,6 +663,7 @@ fn test_full_pipeline_integration() {
         days_since_launch: 365,
         fee_volatility: 1.0,
         epochs_per_year: 100,
+        prev_r_inf_annual_bps: None, // T203: No previous rate
     };
 
     let epoch_state = compute_epoch_state(&config, &inputs);

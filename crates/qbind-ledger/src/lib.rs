@@ -86,6 +86,9 @@ pub use monetary_state::{
 // T202: EMA Fee Smoothing exports
 pub use monetary_state::{compute_ema_fee_revenue, ema_step};
 
+// T203: Rate-of-Change Limiting exports
+pub use monetary_state::clamp_inflation_rate_change;
+
 // T200: Epoch Issuance & Validator Reward Distribution exports
 pub use monetary_state::{
     compute_epoch_issuance, compute_validator_rewards, ValidatorReward, ValidatorRewardDistribution,
