@@ -321,6 +321,8 @@ impl LivenessManager {
     }
 
     /// Record that a Ping was sent to a peer.
+    ///
+    /// If the peer is not being tracked, this is a no-op.
     pub fn record_ping_sent(&mut self, peer_id: &PeerId) {
         if let Some(state) = self.peers.get_mut(peer_id) {
             state.record_ping_sent();
@@ -328,13 +330,26 @@ impl LivenessManager {
     }
 
     /// Record that a Pong was received from a peer.
+    ///
+    /// If the peer is not being tracked, this is logged at trace level
+    /// and otherwise ignored. This can happen during peer connection
+    /// state transitions.
     pub fn record_pong_received(&mut self, peer_id: &PeerId) {
         if let Some(state) = self.peers.get_mut(peer_id) {
             state.record_pong_received();
+        } else {
+            // Log at trace level - this can happen during state transitions
+            // when a peer is removed before their pong arrives.
+            eprintln!(
+                "[T205] Liveness: received pong from untracked peer {:?} (ignored)",
+                peer_id
+            );
         }
     }
 
     /// Record that a peer missed a heartbeat.
+    ///
+    /// If the peer is not being tracked, this is a no-op.
     pub fn record_missed_heartbeat(&mut self, peer_id: &PeerId) {
         if let Some(state) = self.peers.get_mut(peer_id) {
             state.record_missed_heartbeat();

@@ -221,19 +221,25 @@ impl PeerTable {
     /// If the table is at capacity and the peer is new, attempts to
     /// evict the lowest-priority peer to make room.
     ///
-    /// Returns `true` if the peer was added (new peer), `false` if updated.
+    /// Returns `true` if the peer was added (new peer), `false` if updated
+    /// or if insertion failed (e.g., empty address for new peer).
     pub fn insert(&mut self, peer_id: NodeId, address: String, source: PeerSource) -> bool {
         if let Some(existing) = self.peers.get_mut(&peer_id) {
             // Update existing peer
             existing.touch();
-            if !existing.address.is_empty() && existing.address != address {
-                // Update address if different and non-empty
+            // Update address if the new address is non-empty and different
+            if !address.is_empty() && existing.address != address {
                 existing.address = address;
             }
             // Upgrade source if the new source is more authoritative
             if source_priority(source) > source_priority(existing.source) {
                 existing.source = source;
             }
+            return false;
+        }
+
+        // Reject new peers with empty addresses
+        if address.is_empty() {
             return false;
         }
 
@@ -326,8 +332,8 @@ impl PeerTable {
             if a.connected != b.connected {
                 return b.connected.cmp(&a.connected);
             }
-            // More recent first
-            a.last_seen.cmp(&b.last_seen)
+            // More recent first (larger Instant = more recent)
+            b.last_seen.cmp(&a.last_seen)
         });
 
         candidates.into_iter().take(count).collect()
@@ -655,5 +661,24 @@ mod tests {
         assert_eq!(config.interval_secs, 60);
         assert_eq!(config.max_known_peers, 300);
         assert_eq!(config.target_outbound_peers, 16);
+    }
+
+    #[test]
+    fn test_peer_table_rejects_empty_address() {
+        let mut table = PeerTable::new(10);
+
+        let peer_id = make_node_id(1);
+
+        // Empty address for new peer should be rejected
+        assert!(!table.insert(peer_id, "".to_string(), PeerSource::Discovered));
+        assert!(table.is_empty());
+
+        // But existing peer can be updated with non-empty address
+        assert!(table.insert(peer_id, "127.0.0.1:9001".to_string(), PeerSource::Discovered));
+        assert_eq!(table.len(), 1);
+
+        // Updating with empty address doesn't change the address
+        assert!(!table.insert(peer_id, "".to_string(), PeerSource::Discovered));
+        assert_eq!(table.get(&peer_id).unwrap().address, "127.0.0.1:9001");
     }
 }
