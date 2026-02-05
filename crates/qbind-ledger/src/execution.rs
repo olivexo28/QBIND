@@ -1496,6 +1496,7 @@ impl StatePruner for RocksDbAccountState {
         //
         // When historical state snapshots are added, this will prune old snapshots
         // below the specified height threshold.
+        let mut iter_errors: u64 = 0;
         let iter = self.db.prefix_iterator(ACCOUNT_PREFIX);
         for result in iter {
             match result {
@@ -1508,8 +1509,14 @@ impl StatePruner for RocksDbAccountState {
                         break;
                     }
                 }
-                Err(_) => {
-                    // Skip errored entries, continue scanning
+                Err(e) => {
+                    // Log iterator errors but continue scanning.
+                    // In production, these would be reported to metrics.
+                    iter_errors += 1;
+                    eprintln!(
+                        "[T208] StatePruner: iterator error during scan (error {}): {}",
+                        iter_errors, e
+                    );
                     continue;
                 }
             }

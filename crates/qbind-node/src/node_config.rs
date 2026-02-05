@@ -214,7 +214,10 @@ impl StateRetentionConfig {
 
     /// Compute the prune-below height for a given current height.
     ///
-    /// Returns `None` if pruning is disabled or retain_height is not set.
+    /// Returns `None` if:
+    /// - Pruning is disabled (mode != Height)
+    /// - retain_height is not set
+    /// - current_height <= retain_height (nothing to prune yet)
     pub fn prune_below_height(&self, current_height: u64) -> Option<u64> {
         if self.mode != StateRetentionMode::Height {
             return None;
@@ -223,7 +226,7 @@ impl StateRetentionConfig {
         if current_height > retain {
             Some(current_height - retain)
         } else {
-            Some(0) // Nothing to prune yet
+            None // Nothing to prune yet
         }
     }
 
