@@ -848,7 +848,7 @@ This allows operators to observe the computed inflation rate and phase recommend
 - State: `crates/qbind-ledger/src/monetary_state.rs`
 - Telemetry: `crates/qbind-node/src/monetary_telemetry.rs`
 - Metrics: `crates/qbind-node/src/metrics.rs` (MonetaryMetrics)
-- Tests: `crates/qbind-ledger/tests/t203_rate_of_change_limiters_tests.rs`
+- Tests: `crates/qbind-ledger/tests/` (T195–T203 test files)
 
 ---
 
