@@ -3868,6 +3868,7 @@ mod tests {
         // Create a MainNet config but with Stage B disabled via override
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
+            .with_signer_keystore_path("/tmp/test/keystore.json")
             .with_stage_b_enabled(false);
 
         // MainNet validation should still pass (Stage B is allowed but not required)
@@ -3880,7 +3881,9 @@ mod tests {
 
     #[test]
     fn test_mainnet_validates_with_stage_b_enabled() {
-        let config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_signer_keystore_path("/tmp/test/keystore.json");
 
         // MainNet validation should pass
         let result = config.validate_mainnet_invariants();
@@ -4060,6 +4063,7 @@ mod tests {
     fn test_mainnet_validation_accepts_coupling_enforce() {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
+            .with_signer_keystore_path("/tmp/test/keystore.json")
             .with_dag_coupling_mode(DagCouplingMode::Enforce);
 
         let result = config.validate_mainnet_invariants();
@@ -4146,6 +4150,7 @@ mod tests {
 
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
+            .with_signer_keystore_path("/tmp/test/keystore.json")
             .with_monetary_mode(MonetaryMode::Active)
             .with_monetary_accounts(accounts);
 
@@ -4274,7 +4279,9 @@ mod tests {
 
     #[test]
     fn test_mainnet_validation_accepts_diversity_enforce() {
-        let config = NodeConfig::mainnet_preset().with_data_dir("/tmp/test");
+        let config = NodeConfig::mainnet_preset()
+            .with_data_dir("/tmp/test")
+            .with_signer_keystore_path("/tmp/test/keystore.json");
 
         let result = config.validate_mainnet_invariants();
         assert!(
