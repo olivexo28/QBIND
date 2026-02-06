@@ -2256,6 +2256,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "qbind-remote-signer"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "qbind-consensus",
+ "qbind-crypto",
+ "qbind-net",
+ "qbind-node",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "qbind-runtime"
 version = "0.1.0"
 dependencies = [

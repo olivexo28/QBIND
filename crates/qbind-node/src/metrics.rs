@@ -5688,6 +5688,8 @@ pub struct NodeMetrics {
     monetary: MonetaryMetrics,
     /// HSM/PKCS#11 signer metrics (T211).
     hsm: crate::hsm_pkcs11::HsmMetrics,
+    /// Remote signer client metrics (T212).
+    remote_signer: crate::remote_signer::RemoteSignerMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -5724,6 +5726,7 @@ impl NodeMetrics {
             dag_coupling: DagCouplingMetrics::new(),
             monetary: MonetaryMetrics::new(),
             hsm: crate::hsm_pkcs11::HsmMetrics::new(),
+            remote_signer: crate::remote_signer::RemoteSignerMetrics::new(),
         }
     }
 
@@ -5835,6 +5838,11 @@ impl NodeMetrics {
     /// Get HSM/PKCS#11 signer metrics (T211).
     pub fn hsm(&self) -> &crate::hsm_pkcs11::HsmMetrics {
         &self.hsm
+    }
+
+    /// Get remote signer client metrics (T212).
+    pub fn remote_signer(&self) -> &crate::remote_signer::RemoteSignerMetrics {
+        &self.remote_signer
     }
 
     /// Record a DAG coupling validation result (T191).
@@ -6216,6 +6224,9 @@ impl NodeMetrics {
 
         // HSM/PKCS#11 signer metrics (T211)
         output.push_str(&self.hsm.format_metrics());
+
+        // Remote signer client metrics (T212)
+        output.push_str(&self.remote_signer.format_metrics());
 
         output
     }

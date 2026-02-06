@@ -2826,6 +2826,13 @@ pub enum MainnetConfigError {
     /// to the URL of the remote signing service.
     RemoteSignerUrlMissing,
 
+    /// Remote signer is unreachable at startup (T212).
+    ///
+    /// When signer_mode is RemoteSigner, the node performs a reachability
+    /// check at startup. This error indicates the remote signer could not
+    /// be reached after the configured number of attempts.
+    RemoteSignerUnreachable,
+
     /// HSM configuration path is missing when HsmPkcs11 mode is selected (T210).
     ///
     /// When signer_mode is HsmPkcs11, hsm_config_path must be set
@@ -2984,7 +2991,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: remote_signer_url must be set when signer_mode is 'remote-signer' \
-                     (--remote-signer-url=grpc://localhost:50051)"
+                     (--remote-signer-url=kemtls://localhost:9443)"
+                )
+            }
+            MainnetConfigError::RemoteSignerUnreachable => {
+                write!(
+                    f,
+                    "MainNet invariant violated: remote signer is unreachable at startup. \
+                     Verify the remote signer is running and accessible at the configured URL."
                 )
             }
             MainnetConfigError::HsmConfigPathMissing => {

@@ -331,10 +331,11 @@ pub use validator_signer::{
     make_local_validator_signer, LocalKeySigner, SignError, ValidatorSigner,
 };
 
-// Remote signer exports (T149)
+// Remote signer exports (T149, T212)
 pub use remote_signer::{
     LoopbackSignerTransport, RemoteSignError, RemoteSignRequest, RemoteSignRequestKind,
-    RemoteSignResponse, RemoteSignerClient, RemoteSignerTransport,
+    RemoteSignResponse, RemoteSignerClient, RemoteSignerMetrics, RemoteSignerTransport,
+    TcpKemTlsSignerTransport, DEFAULT_REMOTE_SIGNER_TIMEOUT_MS, MAX_PREIMAGE_SIZE,
 };
 
 // Verification pool exports (T147)
