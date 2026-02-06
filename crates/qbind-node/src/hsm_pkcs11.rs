@@ -109,13 +109,13 @@ impl HsmPkcs11Config {
         }
 
         let library_path =
-            library_path.ok_or_else(|| HsmPkcs11Error::MissingConfigField("library_path"))?;
+            library_path.ok_or(HsmPkcs11Error::MissingConfigField("library_path"))?;
         let token_label =
-            token_label.ok_or_else(|| HsmPkcs11Error::MissingConfigField("token_label"))?;
+            token_label.ok_or(HsmPkcs11Error::MissingConfigField("token_label"))?;
         let key_label =
-            key_label.ok_or_else(|| HsmPkcs11Error::MissingConfigField("key_label"))?;
+            key_label.ok_or(HsmPkcs11Error::MissingConfigField("key_label"))?;
         let pin_env_var =
-            pin_env_var.ok_or_else(|| HsmPkcs11Error::MissingConfigField("pin_env_var"))?;
+            pin_env_var.ok_or(HsmPkcs11Error::MissingConfigField("pin_env_var"))?;
 
         Ok(HsmPkcs11Config {
             library_path,
