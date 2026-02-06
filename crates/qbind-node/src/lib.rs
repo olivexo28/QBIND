@@ -116,6 +116,9 @@ pub mod p2p_liveness;
 // T206 P2P Anti-Eclipse Diversity module
 pub mod p2p_diversity;
 
+// T211 HSM/PKCS#11 signer adapter
+pub mod hsm_pkcs11;
+
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;

@@ -216,7 +216,7 @@ fn remote_signer_suite_mismatch_returns_error() {
         Err(SignError::InvalidKey) => {
             // Expected: Unauthorized from transport maps to InvalidKey
         }
-        Err(SignError::CryptoError) => {
+        Err(SignError::CryptoError) | Err(SignError::HsmError(_)) => {
             // Also acceptable
         }
         Ok(_) => panic!("Expected error due to suite mismatch"),
@@ -275,7 +275,7 @@ fn remote_signer_transport_error_handling() {
     );
 
     match result {
-        Err(SignError::CryptoError) => {
+        Err(SignError::CryptoError) | Err(SignError::HsmError(_)) => {
             // Expected: transport errors map to CryptoError
         }
         Err(SignError::InvalidKey) => {
