@@ -257,8 +257,8 @@ impl std::error::Error for HsmPkcs11Error {}
 
 /// Convert HSM errors to SignError for the ValidatorSigner trait.
 impl From<HsmPkcs11Error> for SignError {
-    fn from(_: HsmPkcs11Error) -> SignError {
-        SignError::CryptoError
+    fn from(err: HsmPkcs11Error) -> SignError {
+        SignError::HsmError(err.to_string())
     }
 }
 
@@ -782,6 +782,6 @@ mod tests {
     fn hsm_error_to_sign_error() {
         let hsm_err = HsmPkcs11Error::SigningError("test".to_string());
         let sign_err: SignError = hsm_err.into();
-        assert!(matches!(sign_err, SignError::CryptoError));
+        assert!(matches!(sign_err, SignError::HsmError(_)));
     }
 }
