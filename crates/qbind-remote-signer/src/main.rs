@@ -564,20 +564,25 @@ fn main() {
     };
 
     eprintln!("[INFO] Listening on {}", config.listen_addr);
-    eprintln!("[INFO] Note: KEMTLS server keys must be configured for production use.");
+    eprintln!("[INFO] Note: Full KEMTLS server requires proper key configuration.");
+    eprintln!("[INFO]       See docs/keys/QBIND_KEY_MANAGEMENT_DESIGN.md for details.");
 
     for stream in listener.incoming() {
         match stream {
             Ok(_tcp_stream) => {
+                // Note: Full implementation would spawn a thread with handle_connection()
+                // after performing KEMTLS handshake. This placeholder demonstrates the
+                // architecture; production use requires KEMTLS server key setup.
                 let _signer = Arc::clone(&signer);
                 let _config = config.clone();
                 let m = Arc::clone(&metrics);
                 m.inc_connections();
-                eprintln!("[DEBUG] Connection (KEMTLS handshake placeholder)");
+                eprintln!("[DEBUG] Connection received (KEMTLS handshake not yet implemented)");
             }
             Err(e) => eprintln!("[WARN] Accept: {}", e),
         }
-        if metrics.connections_total().is_multiple_of(100) && metrics.connections_total() > 0 {
+        let conn_count = metrics.connections_total();
+        if conn_count > 0 && conn_count.is_multiple_of(100) {
             eprintln!("[INFO] Metrics: {}", metrics.format());
         }
     }

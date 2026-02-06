@@ -791,7 +791,13 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
 
         // Encode and send request
         let request_bytes = Self::encode_request(&request);
-        if let Err(_) = channel.send_app(&request_bytes) {
+        if let Err(e) = channel.send_app(&request_bytes) {
+            // Log error details without exposing sensitive data
+            eprintln!(
+                "[WARN] Remote signer send failed: {:?} ({})",
+                e,
+                kind_str
+            );
             let latency = start.elapsed().as_millis() as u64;
             if let Some(ref m) = self.metrics {
                 m.record_result(kind_str, false, latency, Some("transport"));
@@ -842,8 +848,8 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
             m.record_result(kind_str, ok, latency, reason);
         }
 
-        if response.error.is_some() {
-            return Err(response.error.clone().unwrap());
+        if let Some(err) = response.error {
+            return Err(err);
         }
 
         Ok(response)
