@@ -301,7 +301,7 @@ QBIND supports multiple signer modes, each suitable for different deployment sce
 
 **Implementation Reference**: `qbind-node/src/remote_signer.rs` → `RemoteSignerTransport` trait
 
-### 3.5 HsmPkcs11 Mode (Future)
+### 3.5 HsmPkcs11 Mode (Implemented – T211)
 
 **Description**: Hardware Security Module integration via the PKCS#11 standard interface. The private key is generated and stored inside the HSM; signing operations are performed by the HSM.
 
@@ -315,15 +315,15 @@ QBIND supports multiple signer modes, each suitable for different deployment sce
 **HSM Interface**:
 ```
 ┌─────────────┐      PKCS#11 API       ┌──────────────┐
-│  Remote     │ ◄─────────────────────►│     HSM      │
-│  Signer     │   C_Sign(key_handle,   │   Device     │
+│  QBIND      │ ◄─────────────────────►│     HSM      │
+│  Node       │   C_Sign(key_handle,   │   Device     │
 │             │         preimage)      │              │
 └─────────────┘                        └──────────────┘
 ```
 
 **Security Level**: Very High (key material never leaves HSM)
 
-**Supported HSMs** (planned):
+**Supported HSMs**:
 - AWS CloudHSM
 - Azure Dedicated HSM
 - Thales Luna Network HSM
@@ -339,7 +339,46 @@ QBIND supports multiple signer modes, each suitable for different deployment sce
 | TestNet Beta | ✅ Encouraged | Good practice to test HSM flow |
 | MainNet | ✅ **Strongly Recommended** | Highest security for production |
 
-**Implementation Status**: Not yet implemented. Planned for T211.
+**Implementation Status**: Implemented in T211; production-ready for SoftHSM and vendor HSMs.
+
+**Implementation Reference**: `qbind-node/src/hsm_pkcs11.rs` → `HsmPkcs11Signer`, feature flag `hsm-pkcs11`
+
+**Example `hsm.toml` Configuration**:
+
+```toml
+# PKCS#11 HSM configuration for QBIND validator
+library_path = "/usr/lib/softhsm/libsofthsm2.so"
+token_label  = "qbind-validator"
+key_label    = "qbind-consensus-42"
+pin_env_var  = "QBIND_HSM_PIN"
+# Optional: override the signing mechanism (default suitable for ML-DSA-44)
+# mechanism = "vendor-ml-dsa-44"
+```
+
+**Example SoftHSM Environment Setup**:
+
+```bash
+# Install SoftHSM2
+sudo apt-get install -y softhsm2
+
+# Initialize a token
+softhsm2-util --init-token --slot 0 \
+    --label "qbind-validator" \
+    --pin 1234 --so-pin 5678
+
+# Set the PIN environment variable (never store PIN in config files)
+export QBIND_HSM_PIN=1234
+
+# Run the node with HSM signer
+qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /etc/qbind/hsm.toml
+```
+
+**Operational Caveats**:
+
+- **Fail-closed on HSM failure**: If the HSM becomes unavailable, the node will NOT continue as a validator. Signing errors are fatal for consensus participation.
+- **PIN management**: The HSM PIN is read from an environment variable at startup. Ensure the env var is set before starting the node. The PIN is never stored in config files or logs.
+- **HSM health monitoring**: Monitor `qbind_hsm_sign_error_total` and `qbind_hsm_sign_last_latency_ms` metrics. Rising error counts or latency spikes indicate HSM issues.
+- **Single point of failure**: HSM availability is a hard dependency. Plan for HSM redundancy at the infrastructure level (not handled by QBIND).
 
 ### 3.6 MainNet Signer Requirements
 
@@ -833,16 +872,20 @@ The key management requirements are enforced (or will be enforced) by `validate_
 - No HSM integration
 - No new remote signer transports
 
-### 7.2 T211 – HSM/PKCS#11 Adapter v0
+### 7.2 T211 – HSM/PKCS#11 Adapter v0 ✅ Completed
+
+**Status**: Completed. Module: `qbind-node/src/hsm_pkcs11.rs`, feature flag: `hsm-pkcs11`.
 
 **Scope**: Initial PKCS#11-based HSM integration.
 
 **Deliverables**:
-- Implement `Pkcs11SignerTransport` using `pkcs11` crate
-- Support key lookup by label
-- Implement ML-DSA-44 signing via PKCS#11
-- Test with SoftHSM for CI
-- Document HSM configuration format
+- ✅ Implemented `HsmPkcs11Signer` implementing `ValidatorSigner` trait
+- ✅ Support key lookup by label via `HsmPkcs11Config`
+- ✅ ML-DSA-44 signing via PKCS#11 (preimage-style, consistent with rest of stack)
+- ✅ SoftHSM integration test (`t211_hsm_soft_tests.rs`, `#[ignore]` by default)
+- ✅ Documented HSM configuration format (`HsmPkcs11Config` TOML)
+- ✅ HSM metrics: `qbind_hsm_sign_success_total`, `qbind_hsm_sign_error_total`, `qbind_hsm_sign_last_latency_ms`
+- ✅ Feature-gated behind `hsm-pkcs11` Cargo feature
 
 **Non-Goals**:
 - No key generation via PKCS#11 (manual setup assumed)

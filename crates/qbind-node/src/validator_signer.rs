@@ -53,9 +53,12 @@ pub enum SignError {
 
     /// The key material is invalid or corrupted.
     InvalidKey,
-    // Future variants for HSM/remote signer:
-    // HsmError(String),
-    // RemoteSignerError(String),
+
+    /// HSM/PKCS#11 signer error (T211).
+    ///
+    /// This indicates an error from the HSM backend.
+    /// The message never contains PIN or key material.
+    HsmError(String),
 }
 
 impl std::fmt::Display for SignError {
@@ -63,6 +66,7 @@ impl std::fmt::Display for SignError {
         match self {
             SignError::CryptoError => write!(f, "cryptographic signing error"),
             SignError::InvalidKey => write!(f, "invalid key material"),
+            SignError::HsmError(msg) => write!(f, "HSM signer error: {}", msg),
         }
     }
 }
@@ -551,6 +555,9 @@ mod tests {
             }
             Err(SignError::InvalidKey) => {
                 // Also acceptable error type
+            }
+            Err(SignError::HsmError(_)) => {
+                // HSM error type (T211) – acceptable in this context
             }
         }
     }

@@ -5686,6 +5686,8 @@ pub struct NodeMetrics {
     dag_coupling: DagCouplingMetrics,
     /// Monetary engine telemetry metrics (T196).
     monetary: MonetaryMetrics,
+    /// HSM/PKCS#11 signer metrics (T211).
+    hsm: crate::hsm_pkcs11::HsmMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -5721,6 +5723,7 @@ impl NodeMetrics {
             p2p: P2pMetrics::new(),
             dag_coupling: DagCouplingMetrics::new(),
             monetary: MonetaryMetrics::new(),
+            hsm: crate::hsm_pkcs11::HsmMetrics::new(),
         }
     }
 
@@ -5827,6 +5830,11 @@ impl NodeMetrics {
     /// Get monetary engine telemetry metrics (T196).
     pub fn monetary(&self) -> &MonetaryMetrics {
         &self.monetary
+    }
+
+    /// Get HSM/PKCS#11 signer metrics (T211).
+    pub fn hsm(&self) -> &crate::hsm_pkcs11::HsmMetrics {
+        &self.hsm
     }
 
     /// Record a DAG coupling validation result (T191).
@@ -6205,6 +6213,9 @@ impl NodeMetrics {
         output.push_str(&self.mempool.format_metrics());
         output.push_str(&self.execution.format_metrics());
         output.push_str(&self.signer_keystore.format_metrics());
+
+        // HSM/PKCS#11 signer metrics (T211)
+        output.push_str(&self.hsm.format_metrics());
 
         output
     }

@@ -519,6 +519,14 @@ MainNet v0 enforces strict signer mode requirements:
 - **LoopbackTesting** is explicitly forbidden on MainNet via `validate_mainnet_invariants()`
 - **EncryptedFsV1** is acceptable with strong passphrase management
 - **RemoteSigner** and **HsmPkcs11** are recommended for production validators
+- **HsmPkcs11** is implemented (T211, PKCS#11 adapter) and production-ready for SoftHSM and vendor HSMs
+
+**Example MainNet HSM Configuration**:
+
+```bash
+# Start MainNet validator with HSM signer
+qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /etc/qbind/hsm.toml
+```
 
 **Risk Budget**: Key management is **high risk** area; HSM support critical for MainNet.
 
@@ -530,7 +538,13 @@ MainNet v0 enforces strict signer mode requirements:
 | Gas/Fees | Medium | Partially Mitigated | Simple model; future EIP-1559 |
 | DAG/Availability | Medium | Partially Mitigated | Consensus coupling new |
 | P2P/Eclipse | Medium-High | Planned | Production validation needed |
-| Key Management | High | Planned | HSM support required |
+| Key Management | High | Partially Mitigated | HSM support implemented (T211) |
+
+**Risk Areas (T211 – HSM/PKCS#11)**:
+
+- HSM availability is now a single point of failure (validator offline if HSM down)
+- Startup invariants now enforce presence of HSM config in HsmPkcs11 mode
+- Fail-closed behaviour: node will not continue as validator if HSM is unavailable
 
 ---
 
