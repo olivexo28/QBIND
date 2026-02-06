@@ -467,7 +467,8 @@ impl RemoteSignerMetrics {
             if let Some(r) = reason {
                 match r {
                     "transport" => {
-                        self.failures_transport_total.fetch_add(1, Ordering::Relaxed);
+                        self.failures_transport_total
+                            .fetch_add(1, Ordering::Relaxed);
                     }
                     "timeout" => {
                         self.failures_timeout_total.fetch_add(1, Ordering::Relaxed);
@@ -837,11 +838,7 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
         // Record metrics
         if let Some(ref m) = self.metrics {
             let ok = response.signature.is_some();
-            let reason = if ok {
-                None
-            } else {
-                Some("server_reject")
-            };
+            let reason = if ok { None } else { Some("server_reject") };
             m.record_result(kind_str, ok, latency, reason);
         }
 

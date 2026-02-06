@@ -358,7 +358,12 @@ pub fn parse_signer_mode(s: &str) -> Option<SignerMode> {
 }
 
 /// Valid signer mode values for CLI help text.
-pub const VALID_SIGNER_MODES: &[&str] = &["loopback-testing", "encrypted-fs", "remote-signer", "hsm-pkcs11"];
+pub const VALID_SIGNER_MODES: &[&str] = &[
+    "loopback-testing",
+    "encrypted-fs",
+    "remote-signer",
+    "hsm-pkcs11",
+];
 
 /// Check if a signer mode is allowed for production (MainNet) use.
 ///
@@ -2609,9 +2614,10 @@ impl NodeConfig {
                 }
                 Some(h) if h < 10_000 => {
                     // Require at least ~14 hours of history at 5s blocks
-                    return Err(MainnetConfigError::StateRetentionInvalid(
-                        format!("retain_height {} is too low for MainNet (minimum 10,000)", h),
-                    ));
+                    return Err(MainnetConfigError::StateRetentionInvalid(format!(
+                        "retain_height {} is too low for MainNet (minimum 10,000)",
+                        h
+                    )));
                 }
                 _ => {}
             }

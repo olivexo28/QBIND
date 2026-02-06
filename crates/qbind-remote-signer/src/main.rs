@@ -76,7 +76,11 @@ impl RemoteSignerConfig {
                     "keystore_path" => keystore_path = Some(PathBuf::from(value)),
                     "keystore_entry_id" => keystore_entry_id = Some(value.to_string()),
                     "hsm_config_path" => hsm_config_path = Some(PathBuf::from(value)),
-                    "rate_limit_rps" => { if let Ok(v) = value.parse() { rate_limit_rps = v; } }
+                    "rate_limit_rps" => {
+                        if let Ok(v) = value.parse() {
+                            rate_limit_rps = v;
+                        }
+                    }
                     "passphrase_env_var" => passphrase_env_var = value.to_string(),
                     _ => {}
                 }
@@ -110,16 +114,23 @@ impl RemoteSignerConfig {
                     return Err(ConfigError::InvalidConfig("keystore_path required".into()));
                 }
                 if self.keystore_entry_id.is_none() {
-                    return Err(ConfigError::InvalidConfig("keystore_entry_id required".into()));
+                    return Err(ConfigError::InvalidConfig(
+                        "keystore_entry_id required".into(),
+                    ));
                 }
             }
             "hsm-pkcs11" => {
                 if self.hsm_config_path.is_none() {
-                    return Err(ConfigError::InvalidConfig("hsm_config_path required".into()));
+                    return Err(ConfigError::InvalidConfig(
+                        "hsm_config_path required".into(),
+                    ));
                 }
             }
             other => {
-                return Err(ConfigError::InvalidConfig(format!("unknown backend: {}", other)));
+                return Err(ConfigError::InvalidConfig(format!(
+                    "unknown backend: {}",
+                    other
+                )));
             }
         }
         Ok(())
@@ -158,7 +169,11 @@ struct RateLimiter {
 
 impl RateLimiter {
     fn new(max_rps: u32) -> Self {
-        RateLimiter { max_rps, window_start: Instant::now(), request_count: 0 }
+        RateLimiter {
+            max_rps,
+            window_start: Instant::now(),
+            request_count: 0,
+        }
     }
 
     fn check(&mut self) -> bool {
@@ -167,7 +182,9 @@ impl RateLimiter {
             self.window_start = now;
             self.request_count = 0;
         }
-        if self.request_count >= self.max_rps { return false; }
+        if self.request_count >= self.max_rps {
+            return false;
+        }
         self.request_count += 1;
         true
     }
@@ -187,21 +204,48 @@ pub struct DaemonMetrics {
 }
 
 impl DaemonMetrics {
-    fn new() -> Self { Self::default() }
-    fn inc_connections(&self) { self.connections_total.fetch_add(1, Ordering::Relaxed); }
-    fn inc_requests(&self) { self.requests_total.fetch_add(1, Ordering::Relaxed); }
-    fn inc_signatures(&self) { self.signatures_total.fetch_add(1, Ordering::Relaxed); }
-    fn inc_rejected(&self) { self.rejected_total.fetch_add(1, Ordering::Relaxed); }
-    fn inc_rate_limited(&self) { self.rate_limited_total.fetch_add(1, Ordering::Relaxed); }
-    fn connections_total(&self) -> u64 { self.connections_total.load(Ordering::Relaxed) }
-    fn requests_total(&self) -> u64 { self.requests_total.load(Ordering::Relaxed) }
-    fn signatures_total(&self) -> u64 { self.signatures_total.load(Ordering::Relaxed) }
-    fn rejected_total(&self) -> u64 { self.rejected_total.load(Ordering::Relaxed) }
-    fn rate_limited_total(&self) -> u64 { self.rate_limited_total.load(Ordering::Relaxed) }
+    fn new() -> Self {
+        Self::default()
+    }
+    fn inc_connections(&self) {
+        self.connections_total.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_requests(&self) {
+        self.requests_total.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_signatures(&self) {
+        self.signatures_total.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_rejected(&self) {
+        self.rejected_total.fetch_add(1, Ordering::Relaxed);
+    }
+    fn inc_rate_limited(&self) {
+        self.rate_limited_total.fetch_add(1, Ordering::Relaxed);
+    }
+    fn connections_total(&self) -> u64 {
+        self.connections_total.load(Ordering::Relaxed)
+    }
+    fn requests_total(&self) -> u64 {
+        self.requests_total.load(Ordering::Relaxed)
+    }
+    fn signatures_total(&self) -> u64 {
+        self.signatures_total.load(Ordering::Relaxed)
+    }
+    fn rejected_total(&self) -> u64 {
+        self.rejected_total.load(Ordering::Relaxed)
+    }
+    fn rate_limited_total(&self) -> u64 {
+        self.rate_limited_total.load(Ordering::Relaxed)
+    }
     fn format(&self) -> String {
-        format!("conn={} req={} sig={} rej={} rl={}",
-            self.connections_total(), self.requests_total(),
-            self.signatures_total(), self.rejected_total(), self.rate_limited_total())
+        format!(
+            "conn={} req={} sig={} rej={} rl={}",
+            self.connections_total(),
+            self.requests_total(),
+            self.signatures_total(),
+            self.rejected_total(),
+            self.rate_limited_total()
+        )
     }
 }
 
@@ -210,8 +254,12 @@ impl DaemonMetrics {
 // ============================================================================
 
 fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
-    if data.len() < 24 { return Err(RemoteSignError::TransportError); }
-    let validator_id = u64::from_le_bytes([data[0],data[1],data[2],data[3],data[4],data[5],data[6],data[7]]);
+    if data.len() < 24 {
+        return Err(RemoteSignError::TransportError);
+    }
+    let validator_id = u64::from_le_bytes([
+        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+    ]);
     let suite_id = u16::from_le_bytes([data[8], data[9]]);
     let kind = match data[10] {
         0 => RemoteSignRequestKind::Proposal,
@@ -220,14 +268,22 @@ fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
         _ => return Err(RemoteSignError::TransportError),
     };
     let view = if data[11] != 0 {
-        Some(u64::from_le_bytes([data[12],data[13],data[14],data[15],data[16],data[17],data[18],data[19]]))
-    } else { None };
-    let preimage_len = u32::from_le_bytes([data[20],data[21],data[22],data[23]]) as usize;
-    if data.len() < 24 + preimage_len { return Err(RemoteSignError::TransportError); }
+        Some(u64::from_le_bytes([
+            data[12], data[13], data[14], data[15], data[16], data[17], data[18], data[19],
+        ]))
+    } else {
+        None
+    };
+    let preimage_len = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
+    if data.len() < 24 + preimage_len {
+        return Err(RemoteSignError::TransportError);
+    }
     Ok(RemoteSignRequest {
         validator_id: ValidatorId::new(validator_id),
-        suite_id, kind, view,
-        preimage: data[24..24+preimage_len].to_vec(),
+        suite_id,
+        kind,
+        view,
+        preimage: data[24..24 + preimage_len].to_vec(),
     })
 }
 
@@ -262,27 +318,46 @@ fn create_backend_signer(config: &RemoteSignerConfig) -> Result<Arc<dyn Validato
     let validator_id = ValidatorId::new(config.validator_id);
     match config.backend_mode.as_str() {
         "encrypted-fs" => {
-            let keystore_path = config.keystore_path.as_ref().ok_or("keystore_path required")?;
-            let entry_id = config.keystore_entry_id.as_ref().ok_or("keystore_entry_id required")?;
-            use qbind_node::keystore::{EncryptedFsValidatorKeystore, EncryptedKeystoreConfig, LocalKeystoreEntryId, ValidatorKeystore};
+            let keystore_path = config
+                .keystore_path
+                .as_ref()
+                .ok_or("keystore_path required")?;
+            let entry_id = config
+                .keystore_entry_id
+                .as_ref()
+                .ok_or("keystore_entry_id required")?;
+            use qbind_node::keystore::{
+                EncryptedFsValidatorKeystore, EncryptedKeystoreConfig, LocalKeystoreEntryId,
+                ValidatorKeystore,
+            };
             let enc_config = EncryptedKeystoreConfig {
                 passphrase_env_var: config.passphrase_env_var.clone(),
                 kdf_iterations: 100_000,
             };
             let keystore = EncryptedFsValidatorKeystore::new(keystore_path.clone(), enc_config);
-            let signing_key = keystore.load_signing_key(&LocalKeystoreEntryId(entry_id.clone()))
+            let signing_key = keystore
+                .load_signing_key(&LocalKeystoreEntryId(entry_id.clone()))
                 .map_err(|e| format!("load key failed: {}", e))?;
-            let signer = qbind_node::validator_signer::LocalKeySigner::new(validator_id, 100, Arc::new(signing_key));
+            let signer = qbind_node::validator_signer::LocalKeySigner::new(
+                validator_id,
+                100,
+                Arc::new(signing_key),
+            );
             Ok(Arc::new(signer))
         }
         "hsm-pkcs11" => {
             #[cfg(feature = "hsm-pkcs11")]
             {
-                let hsm_config_path = config.hsm_config_path.as_ref().ok_or("hsm_config_path required")?;
+                let hsm_config_path = config
+                    .hsm_config_path
+                    .as_ref()
+                    .ok_or("hsm_config_path required")?;
                 use qbind_node::hsm_pkcs11::{HsmMetrics, HsmPkcs11Config, HsmPkcs11Signer};
-                let hsm_config = HsmPkcs11Config::from_file(hsm_config_path).map_err(|e| format!("HSM config: {}", e))?;
+                let hsm_config = HsmPkcs11Config::from_file(hsm_config_path)
+                    .map_err(|e| format!("HSM config: {}", e))?;
                 let metrics = Arc::new(HsmMetrics::new());
-                let signer = HsmPkcs11Signer::new(validator_id, 100, hsm_config, metrics).map_err(|e| format!("HSM signer: {}", e))?;
+                let signer = HsmPkcs11Signer::new(validator_id, 100, hsm_config, metrics)
+                    .map_err(|e| format!("HSM signer: {}", e))?;
                 Ok(Arc::new(signer))
             }
             #[cfg(not(feature = "hsm-pkcs11"))]
@@ -304,16 +379,28 @@ fn handle_connection(
 ) {
     metrics.inc_connections();
     let mut rate_limiter = RateLimiter::new(config.rate_limit_rps);
-    let _ = channel.stream().set_read_timeout(Some(Duration::from_secs(30)));
-    let _ = channel.stream().set_write_timeout(Some(Duration::from_secs(10)));
+    let _ = channel
+        .stream()
+        .set_read_timeout(Some(Duration::from_secs(30)));
+    let _ = channel
+        .stream()
+        .set_write_timeout(Some(Duration::from_secs(10)));
 
     loop {
         let request_data = match channel.recv_app() {
             Ok(data) => data,
             Err(qbind_node::secure_channel::ChannelError::Io(ref e))
-                if e.kind() == std::io::ErrorKind::TimedOut || e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                if e.kind() == std::io::ErrorKind::TimedOut
+                    || e.kind() == std::io::ErrorKind::WouldBlock =>
+            {
+                continue
+            }
             Err(qbind_node::secure_channel::ChannelError::Io(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof || e.kind() == std::io::ErrorKind::ConnectionReset => break,
+                if e.kind() == std::io::ErrorKind::UnexpectedEof
+                    || e.kind() == std::io::ErrorKind::ConnectionReset =>
+            {
+                break
+            }
             Err(_) => break,
         };
 
@@ -321,8 +408,13 @@ fn handle_connection(
 
         if !rate_limiter.check() {
             metrics.inc_rate_limited();
-            let resp = RemoteSignResponse { signature: None, error: Some(RemoteSignError::RateLimited) };
-            if channel.send_app(&encode_response(&resp)).is_err() { break; }
+            let resp = RemoteSignResponse {
+                signature: None,
+                error: Some(RemoteSignError::RateLimited),
+            };
+            if channel.send_app(&encode_response(&resp)).is_err() {
+                break;
+            }
             continue;
         }
 
@@ -330,49 +422,81 @@ fn handle_connection(
             Ok(r) => r,
             Err(_) => {
                 metrics.inc_rejected();
-                let resp = RemoteSignResponse { signature: None, error: Some(RemoteSignError::TransportError) };
-                if channel.send_app(&encode_response(&resp)).is_err() { break; }
+                let resp = RemoteSignResponse {
+                    signature: None,
+                    error: Some(RemoteSignError::TransportError),
+                };
+                if channel.send_app(&encode_response(&resp)).is_err() {
+                    break;
+                }
                 continue;
             }
         };
 
         let response = validate_and_sign(&request, signer.as_ref(), &metrics);
-        if channel.send_app(&encode_response(&response)).is_err() { break; }
+        if channel.send_app(&encode_response(&response)).is_err() {
+            break;
+        }
     }
 }
 
-fn validate_and_sign(request: &RemoteSignRequest, signer: &dyn ValidatorSigner, metrics: &DaemonMetrics) -> RemoteSignResponse {
+fn validate_and_sign(
+    request: &RemoteSignRequest,
+    signer: &dyn ValidatorSigner,
+    metrics: &DaemonMetrics,
+) -> RemoteSignResponse {
     if request.validator_id != *signer.validator_id() {
         metrics.inc_rejected();
-        return RemoteSignResponse { signature: None, error: Some(RemoteSignError::Unauthorized) };
+        return RemoteSignResponse {
+            signature: None,
+            error: Some(RemoteSignError::Unauthorized),
+        };
     }
     if request.suite_id != 100 {
         metrics.inc_rejected();
-        return RemoteSignResponse { signature: None, error: Some(RemoteSignError::Unauthorized) };
+        return RemoteSignResponse {
+            signature: None,
+            error: Some(RemoteSignError::Unauthorized),
+        };
     }
     if request.preimage.len() > MAX_PREIMAGE_SIZE {
         metrics.inc_rejected();
-        return RemoteSignResponse { signature: None, error: Some(RemoteSignError::TransportError) };
+        return RemoteSignResponse {
+            signature: None,
+            error: Some(RemoteSignError::TransportError),
+        };
     }
 
     let result = match request.kind {
         RemoteSignRequestKind::Proposal => signer.sign_proposal(&request.preimage),
-        RemoteSignRequestKind::Vote | RemoteSignRequestKind::Timeout => signer.sign_vote(&request.preimage),
+        RemoteSignRequestKind::Vote | RemoteSignRequestKind::Timeout => {
+            signer.sign_vote(&request.preimage)
+        }
     };
 
     match result {
         Ok(signature) => {
             metrics.inc_signatures();
-            RemoteSignResponse { signature: Some(signature), error: None }
+            RemoteSignResponse {
+                signature: Some(signature),
+                error: None,
+            }
         }
         Err(e) => {
             metrics.inc_rejected();
             let error = match e {
                 qbind_node::validator_signer::SignError::InvalidKey => RemoteSignError::InvalidKey,
-                qbind_node::validator_signer::SignError::CryptoError => RemoteSignError::CryptoError,
-                qbind_node::validator_signer::SignError::HsmError(_) => RemoteSignError::ServerError,
+                qbind_node::validator_signer::SignError::CryptoError => {
+                    RemoteSignError::CryptoError
+                }
+                qbind_node::validator_signer::SignError::HsmError(_) => {
+                    RemoteSignError::ServerError
+                }
             };
-            RemoteSignResponse { signature: None, error: Some(error) }
+            RemoteSignResponse {
+                signature: None,
+                error: Some(error),
+            }
         }
     }
 }
@@ -382,7 +506,10 @@ fn validate_and_sign(request: &RemoteSignRequest, signer: &dyn ValidatorSigner, 
 // ============================================================================
 
 #[derive(Parser, Debug)]
-#[command(name = "qbind-remote-signer", about = "Remote signer daemon for QBIND validator nodes (T212)")]
+#[command(
+    name = "qbind-remote-signer",
+    about = "Remote signer daemon for QBIND validator nodes (T212)"
+)]
 struct CliArgs {
     #[arg(short, long, default_value = "/etc/qbind/remote_signer.toml")]
     config: PathBuf,
@@ -401,10 +528,18 @@ fn main() {
 
     let mut config = match RemoteSignerConfig::from_file(&args.config) {
         Ok(c) => c,
-        Err(e) => { eprintln!("[ERROR] Config: {}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("[ERROR] Config: {}", e);
+            std::process::exit(1);
+        }
     };
-    if let Some(addr) = args.listen_addr { config.listen_addr = addr; }
-    if let Err(e) = config.validate() { eprintln!("[ERROR] {}", e); std::process::exit(1); }
+    if let Some(addr) = args.listen_addr {
+        config.listen_addr = addr;
+    }
+    if let Err(e) = config.validate() {
+        eprintln!("[ERROR] {}", e);
+        std::process::exit(1);
+    }
 
     eprintln!("[INFO] Validator ID: {}", config.validator_id);
     eprintln!("[INFO] Backend: {}", config.backend_mode);
@@ -412,14 +547,20 @@ fn main() {
 
     let signer = match create_backend_signer(&config) {
         Ok(s) => s,
-        Err(e) => { eprintln!("[ERROR] Signer: {}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("[ERROR] Signer: {}", e);
+            std::process::exit(1);
+        }
     };
     eprintln!("[INFO] Backend signer initialized");
 
     let metrics = Arc::new(DaemonMetrics::new());
     let listener = match TcpListener::bind(&config.listen_addr) {
         Ok(l) => l,
-        Err(e) => { eprintln!("[ERROR] Bind: {}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("[ERROR] Bind: {}", e);
+            std::process::exit(1);
+        }
     };
 
     eprintln!("[INFO] Listening on {}", config.listen_addr);
@@ -436,7 +577,7 @@ fn main() {
             }
             Err(e) => eprintln!("[WARN] Accept: {}", e),
         }
-        if metrics.connections_total() % 100 == 0 && metrics.connections_total() > 0 {
+        if metrics.connections_total().is_multiple_of(100) && metrics.connections_total() > 0 {
             eprintln!("[INFO] Metrics: {}", metrics.format());
         }
     }
@@ -477,15 +618,18 @@ keystore_entry_id = "validator42"
         data.push(0);
         data.extend_from_slice(&0u64.to_le_bytes());
         data.extend_from_slice(&4u32.to_le_bytes());
-        data.extend_from_slice(&[1,2,3,4]);
+        data.extend_from_slice(&[1, 2, 3, 4]);
         let req = decode_request(&data).unwrap();
         assert_eq!(req.validator_id, ValidatorId::new(42));
-        assert_eq!(req.preimage, vec![1,2,3,4]);
+        assert_eq!(req.preimage, vec![1, 2, 3, 4]);
     }
 
     #[test]
     fn test_encode_response_success() {
-        let resp = RemoteSignResponse { signature: Some(vec![1,2,3]), error: None };
+        let resp = RemoteSignResponse {
+            signature: Some(vec![1, 2, 3]),
+            error: None,
+        };
         let enc = encode_response(&resp);
         assert_eq!(enc[0], 0);
     }

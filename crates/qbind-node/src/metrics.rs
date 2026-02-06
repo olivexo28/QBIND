@@ -6439,11 +6439,7 @@ impl StatePruneMetrics {
     ///
     /// * `height` - Block height at which pruning was triggered
     /// * `stats` - Statistics from the pruning operation
-    pub fn record_prune_operation(
-        &self,
-        height: u64,
-        stats: &qbind_ledger::PruneStats,
-    ) {
+    pub fn record_prune_operation(&self, height: u64, stats: &qbind_ledger::PruneStats) {
         self.prune_runs_total.fetch_add(1, Ordering::Relaxed);
         self.keys_scanned_total
             .fetch_add(stats.keys_scanned, Ordering::Relaxed);
