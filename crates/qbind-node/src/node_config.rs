@@ -350,9 +350,7 @@ impl std::fmt::Display for SignerMode {
 pub fn parse_signer_mode(s: &str) -> Option<SignerMode> {
     match s.to_lowercase().as_str() {
         "loopback-testing" | "loopback" | "testing" => Some(SignerMode::LoopbackTesting),
-        "encrypted-fs" | "encrypted-fs-v1" | "encrypted" | "encryptedfsv1" => {
-            Some(SignerMode::EncryptedFsV1)
-        }
+        "encrypted-fs" | "encrypted-fs-v1" | "encrypted" => Some(SignerMode::EncryptedFsV1),
         "remote-signer" | "remote" => Some(SignerMode::RemoteSigner),
         "hsm-pkcs11" | "hsm" | "pkcs11" => Some(SignerMode::HsmPkcs11),
         _ => None,
@@ -2627,10 +2625,8 @@ impl NodeConfig {
         }
 
         // 20. Signer mode requires appropriate configuration (T210)
+        // Note: LoopbackTesting is already rejected above, so we only check production modes.
         match self.signer_mode {
-            SignerMode::LoopbackTesting => {
-                // Already rejected above for MainNet
-            }
             SignerMode::EncryptedFsV1 => {
                 if self.signer_keystore_path.is_none() {
                     return Err(MainnetConfigError::SignerKeystorePathMissing);
@@ -2645,6 +2641,10 @@ impl NodeConfig {
                 if self.hsm_config_path.is_none() {
                     return Err(MainnetConfigError::HsmConfigPathMissing);
                 }
+            }
+            SignerMode::LoopbackTesting => {
+                // Unreachable: already rejected above at line 2623
+                unreachable!("LoopbackTesting should have been rejected above")
             }
         }
 

@@ -645,7 +645,9 @@ impl SimpleValidatorNodeMapping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node_config::{DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig};
+    use crate::node_config::{
+        DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig, SignerMode,
+    };
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_types::NetworkEnvironment;
 
@@ -695,6 +697,11 @@ mod tests {
             seigniorage_split: SeigniorageSplit::default(),
             // T208 field
             state_retention: crate::node_config::StateRetentionConfig::disabled(),
+            // T210 fields
+            signer_mode: SignerMode::LoopbackTesting,
+            signer_keystore_path: None,
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
