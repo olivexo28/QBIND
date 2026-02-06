@@ -253,7 +253,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [ ] Compromised key handling procedures
 - [ ] External audit of key management code
 
-**Readiness**: Partially mitigated by T211–T214; external audit pending.
+**Status Summary**: Partially mitigated by T211–T214; external audit of key management code is pending.
 
 **Target Phase**: MainNet v0 (blocking)
 

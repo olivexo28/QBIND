@@ -285,7 +285,8 @@ pub struct HsmMetrics {
     sign_error_runtime_total: AtomicU64,
     /// Last observed signing latency in milliseconds.
     sign_last_latency_ms: AtomicU64,
-    /// Startup health check result (T214): 1 = ok, 0 = failed.
+    /// Startup health check result (T214): 1 = ok, 0 = failed or not yet checked.
+    /// Defaults to 0 (not yet checked) via `#[derive(Default)]`.
     startup_ok: AtomicU64,
 }
 
