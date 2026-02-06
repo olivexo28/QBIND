@@ -37,9 +37,9 @@ use clap::Parser;
 
 use crate::node_config::{
     parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
-    parse_mempool_mode, parse_network_mode, parse_state_retention_mode, DagCouplingMode,
-    MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig, ParseEnvironmentError,
-    StateRetentionConfig,
+    parse_mempool_mode, parse_network_mode, parse_signer_mode, parse_state_retention_mode,
+    DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+    ParseEnvironmentError, SignerMode, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -291,6 +291,50 @@ pub struct CliArgs {
     /// Default: 1_000 blocks (~83 minutes at 5s blocks)
     #[arg(long = "state-prune-interval")]
     pub state_prune_interval: Option<u64>,
+
+    // ========================================================================
+    // T210: Signer Mode Configuration
+    // ========================================================================
+    /// Signer mode for validator key management (T210).
+    ///
+    /// Controls how the validator signing key is stored and accessed:
+    /// - loopback-testing: In-memory keys for testing (DevNet only, forbidden on MainNet)
+    /// - encrypted-fs: Encrypted filesystem keystore (recommended for TestNet/MainNet)
+    /// - remote-signer: External signer service via gRPC/Unix socket
+    /// - hsm-pkcs11: Hardware Security Module via PKCS#11 interface
+    ///
+    /// MainNet profile forbids 'loopback-testing' mode.
+    #[arg(long = "signer-mode")]
+    pub signer_mode: Option<String>,
+
+    /// Path to the encrypted keystore directory (T210).
+    ///
+    /// Required when signer-mode is 'encrypted-fs'.
+    /// The keystore stores validator signing keys encrypted at rest.
+    ///
+    /// Example: /data/qbind/keystore
+    #[arg(long = "signer-keystore-path")]
+    pub signer_keystore_path: Option<PathBuf>,
+
+    /// URL for the remote signer service (T210).
+    ///
+    /// Required when signer-mode is 'remote-signer'.
+    /// Supports grpc://, http://, or unix:// schemes.
+    ///
+    /// Examples:
+    /// - grpc://localhost:50051
+    /// - unix:///var/run/qbind-signer.sock
+    #[arg(long = "remote-signer-url")]
+    pub remote_signer_url: Option<String>,
+
+    /// Path to the HSM/PKCS#11 configuration file (T210).
+    ///
+    /// Required when signer-mode is 'hsm-pkcs11'.
+    /// Contains PKCS#11 library path, slot ID, and key label.
+    ///
+    /// Example: /etc/qbind/hsm.toml
+    #[arg(long = "hsm-config-path")]
+    pub hsm_config_path: Option<PathBuf>,
 }
 
 // ============================================================================
@@ -322,6 +366,8 @@ pub enum CliError {
     InvalidDiversityMode(String),
     /// Invalid state retention mode string (T208).
     InvalidStateRetentionMode(String),
+    /// Invalid signer mode string (T210).
+    InvalidSignerMode(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -371,6 +417,13 @@ impl std::fmt::Display for CliError {
                 write!(
                     f,
                     "invalid state-retention-mode '{}': expected 'disabled' or 'height'",
+                    s
+                )
+            }
+            CliError::InvalidSignerMode(s) => {
+                write!(
+                    f,
+                    "invalid signer-mode '{}': expected 'loopback-testing', 'encrypted-fs', 'remote-signer', or 'hsm-pkcs11'",
                     s
                 )
             }
@@ -510,6 +563,11 @@ impl CliArgs {
                 seigniorage_split: SeigniorageSplit::default(),
                 // T208: State retention disabled by default for legacy path
                 state_retention: StateRetentionConfig::disabled(),
+                // T210: Loopback signer for legacy path (testing default)
+                signer_mode: SignerMode::LoopbackTesting,
+                signer_keystore_path: None,
+                remote_signer_url: None,
+                hsm_config_path: None,
             }
         };
 
@@ -640,6 +698,48 @@ impl CliArgs {
                 );
             }
             config.state_retention.prune_interval_blocks = prune_interval;
+        }
+
+        // T210: Apply signer mode override
+        if let Some(ref signer_mode_str) = self.signer_mode {
+            match parse_signer_mode(signer_mode_str) {
+                Some(mode) => {
+                    if self.profile.is_some() {
+                        eprintln!("[T210] CLI override: signer_mode = {}", mode);
+                    }
+                    config.signer_mode = mode;
+                }
+                None => {
+                    return Err(CliError::InvalidSignerMode(signer_mode_str.clone()));
+                }
+            }
+        }
+
+        // T210: Apply signer keystore path override
+        if let Some(ref path) = self.signer_keystore_path {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T210] CLI override: signer_keystore_path = {}",
+                    path.display()
+                );
+            }
+            config.signer_keystore_path = Some(path.clone());
+        }
+
+        // T210: Apply remote signer URL override
+        if let Some(ref url) = self.remote_signer_url {
+            if self.profile.is_some() {
+                eprintln!("[T210] CLI override: remote_signer_url = {}", url);
+            }
+            config.remote_signer_url = Some(url.clone());
+        }
+
+        // T210: Apply HSM config path override
+        if let Some(ref path) = self.hsm_config_path {
+            if self.profile.is_some() {
+                eprintln!("[T210] CLI override: hsm_config_path = {}", path.display());
+            }
+            config.hsm_config_path = Some(path.clone());
         }
 
         // Apply data_dir if specified
