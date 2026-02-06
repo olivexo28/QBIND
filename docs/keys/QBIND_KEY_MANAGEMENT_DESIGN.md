@@ -609,11 +609,30 @@ For MainNet, the recommended architecture separates the consensus node from the 
 | Signer Configuration | MainNet v0 Status | Notes |
 | :--- | :--- | :--- |
 | **HSM via RemoteSigner** | **Strongly Recommended** | Best security |
-| **HSM via HsmPkcs11** | **Strongly Recommended** | Best security (when implemented) |
+| **HSM via HsmPkcs11** | **Strongly Recommended** | Best security |
 | **RemoteSigner (no HSM)** | Recommended | Good isolation |
 | **EncryptedFsV1 (hardened host)** | Acceptable | Minimum for MainNet |
 | **EncryptedFsV1 (unhardened host)** | **Not Recommended** | Security risk |
 | **LoopbackTesting** | **FORBIDDEN** | `validate_mainnet_invariants()` rejects |
+
+### 4.8 Implementation Status (T211, T212)
+
+| Component | Location | Status |
+| :--- | :--- | :--- |
+| **ValidatorSigner trait** | `qbind-node/src/validator_signer.rs` | ✅ Implemented |
+| **LocalKeySigner** | `qbind-node/src/validator_signer.rs` | ✅ Implemented |
+| **RemoteSignerClient** | `qbind-node/src/remote_signer.rs` | ✅ Implemented |
+| **LoopbackSignerTransport** | `qbind-node/src/remote_signer.rs` | ✅ Implemented |
+| **TcpKemTlsSignerTransport** | `qbind-node/src/remote_signer.rs` | ✅ Implemented (T212) |
+| **HsmPkcs11Signer** | `qbind-node/src/hsm_pkcs11.rs` | ✅ Implemented (T211) |
+| **qbind-remote-signer daemon** | `crates/qbind-remote-signer` | ✅ Implemented (T212) |
+| **RemoteSignerMetrics** | `qbind-node/src/remote_signer.rs` | ✅ Implemented (T212) |
+
+**Configuration Examples**:
+
+- HSM (direct): `qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /etc/qbind/hsm.toml`
+- Remote signer: `qbind-node --signer-mode remote-signer --remote-signer-url kemtls://signer.local:9443`
+- Encrypted keystore: `qbind-node --signer-mode encrypted-fs --signer-keystore-path /etc/qbind/keystore`
 
 ---
 
@@ -892,16 +911,51 @@ The key management requirements are enforced (or will be enforced) by `validate_
 - No hot-plugging HSM support
 - No HSM redundancy/failover
 
-### 7.3 T212 – Remote Signer Protocol v0
+### 7.3 T212 – Remote Signer Protocol v0 ✅ Completed
+
+**Status**: Completed. Module: `qbind-node/src/remote_signer.rs` (client), `qbind-remote-signer` crate (daemon).
 
 **Scope**: Production-ready remote signer service and transport.
 
 **Deliverables**:
-- Implement `TcpKemTlsSignerTransport` for KEMTLS over TCP
-- Implement `qbind-remote-signer` binary/service
-- Define remote signer configuration format
-- Implement request validation and rate limiting
-- Test multi-process signer deployment
+- ✅ Implemented `TcpKemTlsSignerTransport` for KEMTLS over TCP (client-side)
+- ✅ Implemented `qbind-remote-signer` daemon binary/service
+- ✅ Defined remote signer configuration format (TOML)
+- ✅ Implemented request validation and per-connection rate limiting
+- ✅ Added `RemoteSignerMetrics` for observability (client and server)
+- ✅ Integration tests in `t212_remote_signer_integration_tests.rs`
+
+**Implementation Summary**:
+
+1. **Client Transport** (`TcpKemTlsSignerTransport`):
+   - Establishes KEMTLS session to remote signer URL
+   - Serializes `RemoteSignRequest` using length-prefixed binary format
+   - Configurable timeout (default 2s)
+   - Metrics integration via `RemoteSignerMetrics`
+
+2. **Daemon** (`qbind-remote-signer`):
+   - TOML configuration with `listen_addr`, `validator_id`, `backend_mode`
+   - Backend support: `EncryptedFsV1` or `HsmPkcs11`
+   - Per-connection rate limiting (configurable `rate_limit_rps`)
+   - Request validation (validator_id, suite_id, preimage size)
+   - Operational logging (startup, connections, errors)
+
+3. **Protocol Wire Format**:
+   ```
+   Request: validator_id(8) + suite_id(2) + kind(1) + view_present(1) + view(8) + preimage_len(4) + preimage
+   Response: status(1) + [signature_len(4) + signature] OR [error_code(1)]
+   ```
+
+4. **Configuration Example** (`/etc/qbind/remote_signer.toml`):
+   ```toml
+   listen_addr = "0.0.0.0:9443"
+   validator_id = 42
+   backend_mode = "encrypted-fs"
+   keystore_path = "/etc/qbind/keystore"
+   keystore_entry_id = "validator42"
+   rate_limit_rps = 100
+   passphrase_env_var = "QBIND_KEYSTORE_PASSPHRASE"
+   ```
 
 **Non-Goals**:
 - No load balancing multiple signers

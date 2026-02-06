@@ -110,12 +110,9 @@ impl HsmPkcs11Config {
 
         let library_path =
             library_path.ok_or(HsmPkcs11Error::MissingConfigField("library_path"))?;
-        let token_label =
-            token_label.ok_or(HsmPkcs11Error::MissingConfigField("token_label"))?;
-        let key_label =
-            key_label.ok_or(HsmPkcs11Error::MissingConfigField("key_label"))?;
-        let pin_env_var =
-            pin_env_var.ok_or(HsmPkcs11Error::MissingConfigField("pin_env_var"))?;
+        let token_label = token_label.ok_or(HsmPkcs11Error::MissingConfigField("token_label"))?;
+        let key_label = key_label.ok_or(HsmPkcs11Error::MissingConfigField("key_label"))?;
+        let pin_env_var = pin_env_var.ok_or(HsmPkcs11Error::MissingConfigField("pin_env_var"))?;
 
         Ok(HsmPkcs11Config {
             library_path,
@@ -309,7 +306,8 @@ impl HsmMetrics {
 
     /// Record a sign error (runtime kind).
     pub fn record_sign_error_runtime(&self) {
-        self.sign_error_runtime_total.fetch_add(1, Ordering::Relaxed);
+        self.sign_error_runtime_total
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get the total successful sign operations.
@@ -501,7 +499,10 @@ impl HsmPkcs11Signer {
         // Include a hash of the preimage for determinism
         let mut hash = 0u64;
         for (i, &b) in preimage.iter().enumerate() {
-            hash = hash.wrapping_mul(31).wrapping_add(b as u64).wrapping_add(i as u64);
+            hash = hash
+                .wrapping_mul(31)
+                .wrapping_add(b as u64)
+                .wrapping_add(i as u64);
         }
         signature.extend_from_slice(&hash.to_le_bytes());
         signature.extend_from_slice(&self.validator_id.as_u64().to_le_bytes());
@@ -617,7 +618,10 @@ mod tests {
             pin_env_var  = "PIN"
         "#;
         let err = HsmPkcs11Config::from_toml(toml).unwrap_err();
-        assert!(matches!(err, HsmPkcs11Error::MissingConfigField("token_label")));
+        assert!(matches!(
+            err,
+            HsmPkcs11Error::MissingConfigField("token_label")
+        ));
     }
 
     /// Test that missing key_label produces error.
@@ -629,7 +633,10 @@ mod tests {
             pin_env_var  = "PIN"
         "#;
         let err = HsmPkcs11Config::from_toml(toml).unwrap_err();
-        assert!(matches!(err, HsmPkcs11Error::MissingConfigField("key_label")));
+        assert!(matches!(
+            err,
+            HsmPkcs11Error::MissingConfigField("key_label")
+        ));
     }
 
     /// Test that missing pin_env_var produces error.
@@ -641,7 +648,10 @@ mod tests {
             key_label    = "test"
         "#;
         let err = HsmPkcs11Config::from_toml(toml).unwrap_err();
-        assert!(matches!(err, HsmPkcs11Error::MissingConfigField("pin_env_var")));
+        assert!(matches!(
+            err,
+            HsmPkcs11Error::MissingConfigField("pin_env_var")
+        ));
     }
 
     /// Test that mechanism is optional.

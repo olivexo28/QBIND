@@ -520,6 +520,7 @@ MainNet v0 enforces strict signer mode requirements:
 - **EncryptedFsV1** is acceptable with strong passphrase management
 - **RemoteSigner** and **HsmPkcs11** are recommended for production validators
 - **HsmPkcs11** is implemented (T211, PKCS#11 adapter) and production-ready for SoftHSM and vendor HSMs
+- **RemoteSigner** is implemented (T212) with TcpKemTlsSignerTransport and qbind-remote-signer daemon
 
 **Example MainNet HSM Configuration**:
 
@@ -528,7 +529,37 @@ MainNet v0 enforces strict signer mode requirements:
 qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /etc/qbind/hsm.toml
 ```
 
-**Risk Budget**: Key management is **high risk** area; HSM support critical for MainNet.
+**Example MainNet Remote Signer Configuration** (T212):
+
+The recommended architecture for production validators uses a remote signer to isolate key material:
+
+```bash
+# On the signer host (runs the remote signer daemon with HSM backend)
+export QBIND_HSM_PIN=<pin>
+qbind-remote-signer --config /etc/qbind/remote_signer.toml
+
+# On the consensus node (connects to the remote signer)
+qbind-node --profile mainnet \
+    --signer-mode remote-signer \
+    --remote-signer-url kemtls://signer.internal:9443 \
+    --data-dir /data/qbind
+```
+
+This topology separates consensus logic from key material:
+- Consensus node: Runs HotStuff BFT, DAG mempool, P2P networking (no private keys)
+- Remote signer: Holds key material, can use HSM backend, rate-limits requests
+
+**Remote Signer Configuration** (`/etc/qbind/remote_signer.toml`):
+
+```toml
+listen_addr = "0.0.0.0:9443"
+validator_id = 42
+backend_mode = "hsm-pkcs11"  # or "encrypted-fs"
+hsm_config_path = "/etc/qbind/hsm.toml"
+rate_limit_rps = 100
+```
+
+**Risk Budget**: Key management is **high risk** area; HSM + remote signer recommended for MainNet.
 
 ### 6.6 Risk Summary Table
 
@@ -538,13 +569,14 @@ qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /etc/qbind/hsm.toml
 | Gas/Fees | Medium | Partially Mitigated | Simple model; future EIP-1559 |
 | DAG/Availability | Medium | Partially Mitigated | Consensus coupling new |
 | P2P/Eclipse | Medium-High | Planned | Production validation needed |
-| Key Management | High | Partially Mitigated | HSM support implemented (T211) |
+| Key Management | High | Mitigated | HSM (T211) + Remote Signer (T212) implemented |
 
-**Risk Areas (T211 – HSM/PKCS#11)**:
+**Risk Areas (T211 – HSM/PKCS#11, T212 – Remote Signer)**:
 
 - HSM availability is now a single point of failure (validator offline if HSM down)
 - Startup invariants now enforce presence of HSM config in HsmPkcs11 mode
-- Fail-closed behaviour: node will not continue as validator if HSM is unavailable
+- Remote signer startup checks verify connectivity before consensus participation
+- Fail-closed behaviour: node will not continue as validator if signer is unavailable
 
 ---
 
@@ -604,11 +636,11 @@ let config = NodeConfig::mainnet_preset()
     .with_signer_mode(SignerMode::HsmPkcs11)
     .with_hsm_config_path("/etc/qbind/hsm.toml");
 
-// Option 3: Use remote signer for distributed signing infrastructure
+// Option 3: Use remote signer for distributed signing infrastructure (T212)
 let config = NodeConfig::mainnet_preset()
     .with_data_dir("/data/qbind")
     .with_signer_mode(SignerMode::RemoteSigner)
-    .with_remote_signer_url("grpc://signer.internal:50051");
+    .with_remote_signer_url("kemtls://signer.internal:9443");
 
 // Verify MainNet defaults
 assert!(config.gas_enabled);

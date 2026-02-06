@@ -1526,7 +1526,11 @@ impl StatePruner for RocksDbAccountState {
         // keys_pruned will be > 0 when historical snapshots are implemented
 
         let duration = start.elapsed();
-        Ok(PruneStats::from_duration(keys_scanned, keys_pruned, duration))
+        Ok(PruneStats::from_duration(
+            keys_scanned,
+            keys_pruned,
+            duration,
+        ))
     }
 
     /// Get the estimated state size in bytes.

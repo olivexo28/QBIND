@@ -358,7 +358,12 @@ pub fn parse_signer_mode(s: &str) -> Option<SignerMode> {
 }
 
 /// Valid signer mode values for CLI help text.
-pub const VALID_SIGNER_MODES: &[&str] = &["loopback-testing", "encrypted-fs", "remote-signer", "hsm-pkcs11"];
+pub const VALID_SIGNER_MODES: &[&str] = &[
+    "loopback-testing",
+    "encrypted-fs",
+    "remote-signer",
+    "hsm-pkcs11",
+];
 
 /// Check if a signer mode is allowed for production (MainNet) use.
 ///
@@ -2609,9 +2614,10 @@ impl NodeConfig {
                 }
                 Some(h) if h < 10_000 => {
                     // Require at least ~14 hours of history at 5s blocks
-                    return Err(MainnetConfigError::StateRetentionInvalid(
-                        format!("retain_height {} is too low for MainNet (minimum 10,000)", h),
-                    ));
+                    return Err(MainnetConfigError::StateRetentionInvalid(format!(
+                        "retain_height {} is too low for MainNet (minimum 10,000)",
+                        h
+                    )));
                 }
                 _ => {}
             }
@@ -2826,6 +2832,13 @@ pub enum MainnetConfigError {
     /// to the URL of the remote signing service.
     RemoteSignerUrlMissing,
 
+    /// Remote signer is unreachable at startup (T212).
+    ///
+    /// When signer_mode is RemoteSigner, the node performs a reachability
+    /// check at startup. This error indicates the remote signer could not
+    /// be reached after the configured number of attempts.
+    RemoteSignerUnreachable,
+
     /// HSM configuration path is missing when HsmPkcs11 mode is selected (T210).
     ///
     /// When signer_mode is HsmPkcs11, hsm_config_path must be set
@@ -2984,7 +2997,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: remote_signer_url must be set when signer_mode is 'remote-signer' \
-                     (--remote-signer-url=grpc://localhost:50051)"
+                     (--remote-signer-url=kemtls://localhost:9443)"
+                )
+            }
+            MainnetConfigError::RemoteSignerUnreachable => {
+                write!(
+                    f,
+                    "MainNet invariant violated: remote signer is unreachable at startup. \
+                     Verify the remote signer is running and accessible at the configured URL."
                 )
             }
             MainnetConfigError::HsmConfigPathMissing => {
