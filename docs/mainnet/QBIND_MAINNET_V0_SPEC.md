@@ -505,6 +505,21 @@ This section summarizes key security areas and the "risk budget" for MainNet v0.
 | **Key rotation** | Rotation hooks implemented |
 | **Remote signing** | Production signer required (no loopback) |
 
+**Signer Mode Configuration (T210)**:
+
+MainNet v0 enforces strict signer mode requirements:
+
+| Signer Mode | Allowed on MainNet | Required Configuration |
+| :--- | :--- | :--- |
+| `loopback-testing` | ❌ **Forbidden** | - |
+| `encrypted-fs` | ✅ Allowed | `--signer-keystore-path` |
+| `remote-signer` | ✅ Allowed | `--remote-signer-url` |
+| `hsm-pkcs11` | ✅ Recommended | `--hsm-config-path` |
+
+- **LoopbackTesting** is explicitly forbidden on MainNet via `validate_mainnet_invariants()`
+- **EncryptedFsV1** is acceptable with strong passphrase management
+- **RemoteSigner** and **HsmPkcs11** are recommended for production validators
+
 **Risk Budget**: Key management is **high risk** area; HSM support critical for MainNet.
 
 ### 6.6 Risk Summary Table
@@ -554,21 +569,32 @@ qbind-node -P mainnet -d /data/qbind
 | Stage B Parallel | `--enable-stage-b` | `true` | **Enabled by default** |
 | Discovery | `--enable-discovery` | `true` | **Required** |
 | Data Directory | `--data-dir` / `-d` | Required | **Mandatory** |
-| Signer Mode | `--signer-mode` | `hsm` or `encrypted-fs` | **No loopback** |
+| Signer Mode | `--signer-mode` | `encrypted-fs` | **No loopback** (T210) |
+| Signer Keystore | `--signer-keystore-path` | Required for `encrypted-fs` | Path to keystore |
+| Remote Signer URL | `--remote-signer-url` | Required for `remote-signer` | gRPC/Unix socket |
+| HSM Config | `--hsm-config-path` | Required for `hsm-pkcs11` | PKCS#11 config |
 
 ### 7.3 NodeConfig Example (MainNet)
 
 ```rust
-use qbind_node::{NodeConfig, ConfigProfile, MempoolMode, NetworkMode};
+use qbind_node::{NodeConfig, ConfigProfile, MempoolMode, NetworkMode, SignerMode};
 
-// Option 1: Use the canonical preset (recommended)
+// Option 1: Use the canonical preset with EncryptedFs (recommended for most)
 let config = NodeConfig::mainnet_preset()
     .with_data_dir("/data/qbind")
-    .with_signer_mode(SignerMode::Hsm);
+    .with_signer_keystore_path("/data/qbind/keystore");
 
-// Option 2: Use from_profile for CLI integration
-let config = NodeConfig::from_profile(ConfigProfile::MainNet)
-    .with_data_dir("/data/qbind");
+// Option 2: Use HSM for maximum security (recommended for production validators)
+let config = NodeConfig::mainnet_preset()
+    .with_data_dir("/data/qbind")
+    .with_signer_mode(SignerMode::HsmPkcs11)
+    .with_hsm_config_path("/etc/qbind/hsm.toml");
+
+// Option 3: Use remote signer for distributed signing infrastructure
+let config = NodeConfig::mainnet_preset()
+    .with_data_dir("/data/qbind")
+    .with_signer_mode(SignerMode::RemoteSigner)
+    .with_remote_signer_url("grpc://signer.internal:50051");
 
 // Verify MainNet defaults
 assert!(config.gas_enabled);
@@ -576,21 +602,35 @@ assert!(config.enable_fee_priority);
 assert_eq!(config.mempool_mode, MempoolMode::Dag);
 assert_eq!(config.network_mode, NetworkMode::P2p);
 assert!(config.dag_availability_enabled);
-assert!(config.consensus_coupling_enabled); // MainNet-only
 assert!(config.stage_b_enabled);
-assert!(config.discovery_enabled);
+assert!(config.network.discovery_enabled);  // T205: Discovery required
+assert_eq!(config.signer_mode, SignerMode::RemoteSigner);  // T210: Matches Option 3
 ```
 
 ### 7.4 Standard MainNet Validator Node
 
-A "standard MainNet validator node" should be started with:
+A "standard MainNet validator node" with encrypted keystore:
 
 ```bash
 qbind-node \
   --profile mainnet \
   --data-dir /data/qbind \
-  --signer-mode hsm \
-  --hsm-config /etc/qbind/hsm.toml \
+  --signer-mode encrypted-fs \
+  --signer-keystore-path /data/qbind/keystore \
+  --validator-id 42 \
+  --p2p-listen-addr 0.0.0.0:9000 \
+  --p2p-advertised-addr validator42.qbind.network:9000 \
+  --bootstrap-peers mainnet-bootstrap-1.qbind.network:9000,mainnet-bootstrap-2.qbind.network:9000
+```
+
+A "production MainNet validator node" with HSM (recommended):
+
+```bash
+qbind-node \
+  --profile mainnet \
+  --data-dir /data/qbind \
+  --signer-mode hsm-pkcs11 \
+  --hsm-config-path /etc/qbind/hsm.toml \
   --validator-id 42 \
   --p2p-listen-addr 0.0.0.0:9000 \
   --p2p-advertised-addr validator42.qbind.network:9000 \

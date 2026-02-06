@@ -219,19 +219,27 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Key compromise** | Compromised signing key allows forgery | Critical | Open |
+| **Key compromise** | Compromised signing key allows forgery | Critical | Partially Mitigated |
 | **No HSM support** | Keys stored on disk vulnerable to theft | High | Open |
-| **Loopback signer in prod** | Test signer used in production | High | Open |
+| **Loopback signer in prod** | Test signer used in production | High | Partially Mitigated |
 | **Key rotation failures** | Unable to rotate compromised key | Medium | Partially Mitigated |
 
 **Current Mitigations**:
 - ✅ EncryptedFsV1 keystore (encrypted at rest)
 - ✅ Key separation (consensus vs network keys)
 - ✅ RemoteSigner interface (loopback for testing)
-- ⏳ HSM production integration pending
+- ✅ **Key management design complete (T209)** — see [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md)
+- ⏳ HSM production integration pending (T211)
+- ⏳ Signer mode config and validation pending (T210)
+- ⏳ Remote signer protocol pending (T212)
+- ⏳ Key rotation hooks pending (T213)
 
 **Additional MainNet Requirements**:
-- [ ] HSM production integration (PKCS#11 or similar)
+- [x] **Key management design** — T209 complete
+- [ ] Signer mode config + `validate_mainnet_invariants()` enforcement (T210)
+- [ ] HSM production integration (PKCS#11 adapter) (T211)
+- [ ] Remote signer protocol v0 (T212)
+- [ ] Key rotation hooks v0 (T213)
 - [ ] Key rotation procedures documented
 - [ ] Compromised key handling procedures
 - [ ] External audit of key management code
@@ -325,19 +333,21 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 26 | HSM production integration available | ⏳ Pending | Future task |
-| 27 | Loopback signer rejected for MainNet profile | ⏳ Pending | Future task |
-| 28 | Key rotation procedures documented | ⏳ Pending | Future task |
+| 26 | Key management design specification | ✅ Ready | T209 [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) |
+| 27 | HSM production integration available | ⏳ Pending | T211 |
+| 28 | Loopback signer rejected for MainNet profile | ⏳ Pending | T210 |
+| 29 | Key rotation procedures documented | ⏳ Pending | T213 |
+| 30 | Remote signer protocol implemented | ⏳ Pending | T212 |
 
 ### 4.7 Operations & Security
 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
-| 29 | MainNet configuration profile implemented | ✅ Ready | T185 |
-| 30 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
-| 31 | MainNet operational runbook complete | ⏳ Pending | Future task |
-| 32 | External security audit completed | ⏳ Pending | External |
-| 33 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
+| 31 | MainNet configuration profile implemented | ✅ Ready | T185 |
+| 32 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
+| 33 | MainNet operational runbook complete | ⏳ Pending | Future task |
+| 34 | External security audit completed | ⏳ Pending | External |
+| 35 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
 
 ### 4.8 Readiness Summary
 
@@ -348,9 +358,9 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | Gas/Fees | 2 | 2 | 4 |
 | Mempool & DAG | 6 | 1 | 7 |
 | Networking / P2P | 0 | 5 | 5 |
-| Keys & HSM | 0 | 3 | 3 |
+| Keys & HSM | 1 | 4 | 5 |
 | Operations | 2 | 3 | 5 |
-| **Total** | **17** | **16** | **33** |
+| **Total** | **18** | **17** | **35** |
 
 ---
 
@@ -411,6 +421,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T191** | **Consensus** | **Validator-side enforcement (verify certs before vote)** | **MN-R1** |
 | **T192** | **Observability** | **Block-level invariant probes & metrics** | **MN-R1** |
 | **T194** | **Design** | **Monetary policy & monetary engine design** | **MN-R2** |
+| **T209** | **Design** | **Key management & signer architecture design** | **MN-R5** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 
@@ -421,7 +432,10 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T19x | P2P | Anti-eclipse enforcement | MN-R4 |
 | T19x | State | State pruning | MN-R3 |
 | T19x | State | State snapshots | MN-R3 |
-| T19x | Keys | HSM production integration | MN-R5 |
+| **T210** | **Keys** | **Signer mode config + `validate_mainnet_invariants()`** | **MN-R5** |
+| **T211** | **Keys** | **HSM/PKCS#11 adapter v0** | **MN-R5** |
+| **T212** | **Keys** | **Remote signer protocol v0** | **MN-R5** |
+| **T213** | **Keys** | **Key rotation hooks v0** | **MN-R5** |
 | ~~T193~~ | ~~Gas/Fees~~ | ~~Hybrid fee distribution~~ | ~~MN-R2~~ |
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
@@ -447,6 +461,16 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Implementation roadmap for T195+ tasks
 >
 > See [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) for the design specification.
+>
+> **Note**: Key management and signer architecture design completed in T209. This provides:
+> - Key roles (consensus, P2P identity, batch signing) with PQC requirements
+> - Signer modes (LoopbackTesting, EncryptedFsV1, RemoteSigner, HsmPkcs11)
+> - HSM and remote signer architecture with PKCS#11 integration plan
+> - Key rotation and compromise handling procedures
+> - Network-specific requirements matrix (DevNet through MainNet)
+> - Implementation roadmap for T210–T213 tasks
+>
+> See [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) for the design specification.
 
 ---
 
@@ -462,6 +486,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 - [QBIND DevNet v0 Freeze](../devnet/QBIND_DEVNET_V0_FREEZE.md) — DevNet baseline
 - [QBIND DevNet Audit](../devnet/QBIND_DEVNET_AUDIT.md) — DevNet risks
 - [QBIND Monetary Policy Design](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — Monetary policy specification (T194)
+- [QBIND Key Management Design](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) — Key management and signer architecture (T209)
 
 ### 6.2 References To This Document
 
@@ -470,6 +495,7 @@ The following documents should reference this MainNet audit:
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1
 - [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — References audit for MN-R2
+- [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) — References audit for MN-R5
 - [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) — "Path to MainNet" section
 - [QBIND_DEVNET_V0_FREEZE.md](../devnet/QBIND_DEVNET_V0_FREEZE.md) — Roadmap summary
 - [QBIND_TESTNET_ALPHA_AUDIT.md](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md) — Roadmap section

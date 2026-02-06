@@ -244,6 +244,11 @@ pub use node_config::{
     VALID_STATE_RETENTION_MODES,
 };
 
+// T210 Signer Mode exports
+pub use node_config::{
+    is_production_signer_mode, parse_signer_mode, SignerMode, VALID_SIGNER_MODES,
+};
+
 // T197 Monetary Mode exports (re-exported from qbind-ledger)
 pub use qbind_ledger::{
     parse_monetary_mode, MonetaryAccounts, MonetaryMode, SeigniorageSplit,
@@ -283,9 +288,9 @@ pub use metrics::{
     DisconnectReason, EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
     KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, MonetaryMetrics, NetworkMetrics,
     NodeMetrics, OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics,
-    SignRequestKind, SignerKeystoreMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp,
-    ValidatorEquivocationMetrics, ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics,
-    MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
+    SignRequestKind, SignerKeystoreMetrics, SignerModeKind, SpawnBlockingMetrics, StorageMetrics,
+    StorageOp, ValidatorEquivocationMetrics, ValidatorVoteCounters, ValidatorVoteMetrics,
+    ViewLagMetrics, MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
 };
 
 // Metrics HTTP server exports (T126)
