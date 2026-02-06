@@ -119,6 +119,9 @@ pub mod p2p_diversity;
 // T211 HSM/PKCS#11 signer adapter
 pub mod hsm_pkcs11;
 
+// T213 Key Rotation CLI helper
+pub mod key_rotation_cli;
+
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -250,6 +253,13 @@ pub use node_config::{
 // T210 Signer Mode exports
 pub use node_config::{
     is_production_signer_mode, parse_signer_mode, SignerMode, VALID_SIGNER_MODES,
+};
+
+// T213 Key Rotation CLI exports
+pub use key_rotation_cli::{
+    init_key_rotation, log_dual_key_validation, log_rotation_committed, log_rotation_event_applied,
+    parse_key_role, read_public_key_file, KeyRotationInitArgs, KeyRotationInitError,
+    KeyRotationInitResult, KeyRotationMetrics,
 };
 
 // T197 Monetary Mode exports (re-exported from qbind-ledger)

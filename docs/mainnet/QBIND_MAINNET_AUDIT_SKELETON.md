@@ -222,7 +222,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Key compromise** | Compromised signing key allows forgery | Critical | Partially Mitigated |
 | **No HSM support** | Keys stored on disk vulnerable to theft | High | Mitigated (T211) |
 | **Loopback signer in prod** | Test signer used in production | High | Partially Mitigated |
-| **Key rotation failures** | Unable to rotate compromised key | Medium | Partially Mitigated |
+| **Key rotation failures** | Unable to rotate compromised key | Medium | Mitigated |
 
 **Current Mitigations**:
 - ✅ EncryptedFsV1 keystore (encrypted at rest)
@@ -230,17 +230,17 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ RemoteSigner interface (loopback for testing)
 - ✅ **Key management design complete (T209)** — see [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md)
 - ✅ **HSM/PKCS#11 adapter implemented (T211)** — MainNet supports PKCS#11 HSM signer via HsmPkcs11 mode (SoftHSM + hardware HSMs)
+- ✅ **Remote signer protocol implemented (T212)** — TcpKemTlsSignerTransport + qbind-remote-signer daemon
+- ✅ **Key rotation hooks implemented (T213)** — KeyRotationEvent, dual-key grace period, CLI helper
 - ⏳ Signer mode config and validation pending (T210)
-- ⏳ Remote signer protocol pending (T212)
-- ⏳ Key rotation hooks pending (T213)
 
 **Additional MainNet Requirements**:
 - [x] **Key management design** — T209 complete
 - [ ] Signer mode config + `validate_mainnet_invariants()` enforcement (T210)
 - [x] **HSM production integration (PKCS#11 adapter) (T211)** — Ready
-- [ ] Remote signer protocol v0 (T212)
-- [ ] Key rotation hooks v0 (T213)
-- [ ] Key rotation procedures documented
+- [x] **Remote signer protocol v0 (T212)** — Ready
+- [x] **Key rotation hooks v0 (T213)** — Ready (KeyRotationRegistry with dual-key support, CLI helper)
+- [x] Key rotation procedures documented — T213 implementation docs
 - [ ] Compromised key handling procedures
 - [ ] External audit of key management code
 
@@ -336,7 +336,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | 26 | Key management design specification | ✅ Ready | T209 [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) |
 | 27 | HSM production integration available | ✅ Ready | T211 – PKCS#11 adapter implemented, SoftHSM + hardware HSMs |
 | 28 | Loopback signer rejected for MainNet profile | ⏳ Pending | T210 |
-| 29 | Key rotation procedures documented | ⏳ Pending | T213 |
+| 29 | Key rotation procedures documented | ✅ Ready | T213 – `KeyRotationRegistry`, dual-key grace period, CLI helper |
 | 30 | Remote signer protocol implemented | ✅ Ready | T212 – TcpKemTlsSignerTransport + qbind-remote-signer daemon |
 
 **T212 Audit Scope (Remote Signer Protocol)**:
@@ -348,6 +348,15 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 - [ ] Verify error handling does not leak sensitive information
 - [ ] Verify startup reachability check in `validate_mainnet_invariants()`
 - [ ] Review protocol wire format for correctness and security
+
+**T213 Audit Scope (Key Rotation Hooks)**:
+
+- [ ] Verify dual-key validation accepts both keys during grace period
+- [ ] Verify rotation commits correctly after grace period ends
+- [ ] Verify overlapping rotations are rejected
+- [ ] Verify saturating arithmetic for epoch overflow
+- [ ] Verify CLI helper produces valid JSON event descriptors
+- [ ] Review grace period boundary conditions (grace_epochs=0)
 
 ### 4.7 Operations & Security
 
@@ -368,9 +377,9 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | Gas/Fees | 2 | 2 | 4 |
 | Mempool & DAG | 6 | 1 | 7 |
 | Networking / P2P | 0 | 5 | 5 |
-| Keys & HSM | 3 | 2 | 5 |
+| Keys & HSM | 4 | 1 | 5 |
 | Operations | 2 | 3 | 5 |
-| **Total** | **20** | **15** | **35** |
+| **Total** | **21** | **14** | **35** |
 
 ---
 
@@ -443,9 +452,9 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T19x | State | State pruning | MN-R3 |
 | T19x | State | State snapshots | MN-R3 |
 | **T210** | **Keys** | **Signer mode config + `validate_mainnet_invariants()`** | **MN-R5** |
-| **T211** | **Keys** | **HSM/PKCS#11 adapter v0** | **MN-R5** |
-| **T212** | **Keys** | **Remote signer protocol v0** | **MN-R5** |
-| **T213** | **Keys** | **Key rotation hooks v0** | **MN-R5** |
+| ~~**T211**~~ | ~~**Keys**~~ | ~~**HSM/PKCS#11 adapter v0**~~ | ~~**MN-R5**~~ |
+| ~~**T212**~~ | ~~**Keys**~~ | ~~**Remote signer protocol v0**~~ | ~~**MN-R5**~~ |
+| ~~**T213**~~ | ~~**Keys**~~ | ~~**Key rotation hooks v0**~~ | ~~**MN-R5**~~ |
 | ~~T193~~ | ~~Gas/Fees~~ | ~~Hybrid fee distribution~~ | ~~MN-R2~~ |
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
@@ -481,6 +490,20 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Implementation roadmap for T210–T213 tasks
 >
 > See [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) for the design specification.
+>
+> **Note**: T211 (HSM/PKCS#11 adapter) completed. See `qbind-node/src/hsm_pkcs11.rs`.
+>
+> **Note**: T212 (Remote signer protocol) completed. See `qbind-node/src/remote_signer.rs` and `qbind-remote-signer` crate.
+>
+> **Note**: T213 (Key rotation hooks) completed. This provides:
+> - `KeyRotationEvent` and `KeyRotationKind` types for representing rotations
+> - `KeyRotationRegistry` with dual-key grace period support
+> - `ValidatorKeyState` and `PendingKey` for tracking rotation state
+> - `apply_key_rotation_event()` and `advance_epoch_for_rotation()` functions
+> - CLI helper (`init_key_rotation()`) for generating rotation event descriptors
+> - Logging helpers and `KeyRotationMetrics` for observability
+>
+> See `qbind-consensus/src/key_rotation.rs` and `qbind-node/src/key_rotation_cli.rs`.
 
 ---
 
