@@ -220,7 +220,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
 | **Key compromise** | Compromised signing key allows forgery | Critical | Partially Mitigated |
-| **No HSM support** | Keys stored on disk vulnerable to theft | High | Open |
+| **No HSM support** | Keys stored on disk vulnerable to theft | High | Mitigated (T211) |
 | **Loopback signer in prod** | Test signer used in production | High | Partially Mitigated |
 | **Key rotation failures** | Unable to rotate compromised key | Medium | Partially Mitigated |
 
@@ -229,7 +229,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ Key separation (consensus vs network keys)
 - ✅ RemoteSigner interface (loopback for testing)
 - ✅ **Key management design complete (T209)** — see [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md)
-- ⏳ HSM production integration pending (T211)
+- ✅ **HSM/PKCS#11 adapter implemented (T211)** — MainNet supports PKCS#11 HSM signer via HsmPkcs11 mode (SoftHSM + hardware HSMs)
 - ⏳ Signer mode config and validation pending (T210)
 - ⏳ Remote signer protocol pending (T212)
 - ⏳ Key rotation hooks pending (T213)
@@ -237,7 +237,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 **Additional MainNet Requirements**:
 - [x] **Key management design** — T209 complete
 - [ ] Signer mode config + `validate_mainnet_invariants()` enforcement (T210)
-- [ ] HSM production integration (PKCS#11 adapter) (T211)
+- [x] **HSM production integration (PKCS#11 adapter) (T211)** — Ready
 - [ ] Remote signer protocol v0 (T212)
 - [ ] Key rotation hooks v0 (T213)
 - [ ] Key rotation procedures documented
@@ -334,7 +334,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
 | 26 | Key management design specification | ✅ Ready | T209 [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) |
-| 27 | HSM production integration available | ⏳ Pending | T211 |
+| 27 | HSM production integration available | ✅ Ready | T211 – PKCS#11 adapter implemented, SoftHSM + hardware HSMs |
 | 28 | Loopback signer rejected for MainNet profile | ⏳ Pending | T210 |
 | 29 | Key rotation procedures documented | ⏳ Pending | T213 |
 | 30 | Remote signer protocol implemented | ⏳ Pending | T212 |

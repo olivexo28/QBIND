@@ -361,7 +361,7 @@ TestNet Beta validators should follow improved key management practices in prepa
 | **Loopback signer** | ⚠️ Discouraged | Medium |
 | **EncryptedFsV1** | ✅ Recommended | Low |
 | **RemoteSigner** | ✅ Recommended | Low |
-| **HSM usage** | ✅ Encouraged (not required) | Low |
+| **HsmPkcs11** | ✅ Available and strongly encouraged (T211) | Low |
 
 **Beta Signer Recommendations**:
 
@@ -369,11 +369,37 @@ TestNet Beta validators should follow improved key management practices in prepa
 
 2. **Use EncryptedFsV1 or RemoteSigner** for all Beta validators that will persist beyond testing. This practices production-grade key handling.
 
-3. **HSM usage is encouraged** for operators who plan to run MainNet validators. Beta provides an opportunity to test HSM integration flows before MainNet.
+3. **HsmPkcs11 is available on Beta and strongly encouraged** for operators planning to run MainNet validators. Beta provides an opportunity to test HSM integration flows before MainNet. The PKCS#11 adapter (T211) supports SoftHSM for testing and hardware HSMs for production.
 
 4. **Test key rotation procedures** during Beta. While not enforced, validators should practice the rotation workflow documented in the key management design.
 
 > **📋 Design Reference**: For the complete key management architecture and MainNet requirements, see [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) (T209).
+
+**Example Beta Node with SoftHSM (non-production)**:
+
+```bash
+# Install SoftHSM2 (for testing only)
+sudo apt-get install -y softhsm2
+
+# Initialize a token
+softhsm2-util --init-token --slot 0 \
+    --label "qbind-validator" \
+    --pin 1234 --so-pin 5678
+
+# Create HSM config file
+cat > /tmp/hsm-beta.toml <<EOF
+library_path = "/usr/lib/softhsm/libsofthsm2.so"
+token_label  = "qbind-validator"
+key_label    = "qbind-consensus-42"
+pin_env_var  = "QBIND_HSM_PIN"
+EOF
+
+# Set PIN and start the node
+export QBIND_HSM_PIN=1234
+qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /tmp/hsm-beta.toml
+```
+
+> **⚠️ Note**: SoftHSM is suitable for testing only. For production MainNet validators, use a hardware HSM (AWS CloudHSM, Thales Luna, YubiHSM 2, etc.).
 
 **Key Risk**: Beta validators using loopback signers may carry insecure habits to MainNet, where loopback is forbidden.
 

@@ -374,7 +374,7 @@ impl RemoteSignerTransport for LoopbackSignerTransport {
                 signature: None,
                 error: Some(RemoteSignError::InvalidKey),
             }),
-            Err(SignError::CryptoError) => Ok(RemoteSignResponse {
+            Err(SignError::CryptoError) | Err(SignError::HsmError(_)) => Ok(RemoteSignResponse {
                 signature: None,
                 error: Some(RemoteSignError::CryptoError),
             }),

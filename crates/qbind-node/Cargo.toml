@@ -9,6 +9,10 @@ default = []
 # When enabled: uses AsyncPeerManagerImpl for fully async networking.
 # When disabled (legacy): uses blocking PeerManager + spawn_blocking path.
 async-peer-manager = []
+# Enable HSM/PKCS#11 signer backend (T211).
+# When enabled: HsmPkcs11Signer is available for hardware security module signing.
+# When disabled: SignerMode::HsmPkcs11 produces a clear startup error.
+hsm-pkcs11 = []
 
 [[bin]]
 name = "qbind-node"
