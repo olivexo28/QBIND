@@ -4129,6 +4129,53 @@ pub enum KeystoreBackendKind {
     EncryptedFsV1,
 }
 
+/// Signer mode kind for metrics (T210).
+///
+/// Represents the configured signer mode for telemetry and observability.
+/// This enum mirrors `SignerMode` in `node_config` but is designed for
+/// metrics contexts where we need display strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignerModeKind {
+    /// Loopback testing mode (development only).
+    LoopbackTesting,
+    /// Encrypted filesystem keystore.
+    EncryptedFsV1,
+    /// Remote signer service.
+    RemoteSigner,
+    /// Hardware Security Module via PKCS#11.
+    HsmPkcs11,
+}
+
+impl SignerModeKind {
+    /// Get the display string for this signer mode.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SignerModeKind::LoopbackTesting => "loopback-testing",
+            SignerModeKind::EncryptedFsV1 => "encrypted-fs",
+            SignerModeKind::RemoteSigner => "remote-signer",
+            SignerModeKind::HsmPkcs11 => "hsm-pkcs11",
+        }
+    }
+
+    /// Check if this is a production-safe signer mode.
+    ///
+    /// Returns `true` for modes allowed on MainNet, `false` for development-only modes.
+    pub fn is_production_safe(&self) -> bool {
+        match self {
+            SignerModeKind::LoopbackTesting => false,
+            SignerModeKind::EncryptedFsV1 => true,
+            SignerModeKind::RemoteSigner => true,
+            SignerModeKind::HsmPkcs11 => true,
+        }
+    }
+}
+
+impl std::fmt::Display for SignerModeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 // ============================================================================
 // EnvironmentMetrics (T162) - Network environment info metric
 // ============================================================================

@@ -9,8 +9,8 @@
 use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, MempoolMode,
-    NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, StateRetentionConfig,
-    DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
+    NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, SignerMode,
+    StateRetentionConfig, DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -112,6 +112,10 @@ fn test_p2p_config_local_mesh_disabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -147,6 +151,10 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -179,6 +187,10 @@ fn test_p2p_config_p2p_mode_enabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -206,6 +218,10 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -246,6 +262,10 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -338,6 +358,10 @@ fn test_startup_info_includes_network_mode() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -367,6 +391,10 @@ fn test_startup_info_p2p_disabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -401,6 +429,10 @@ fn test_startup_info_p2p_enabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        signer_mode: SignerMode::LoopbackTesting,
+        signer_keystore_path: None,
+        remote_signer_url: None,
+        hsm_config_path: None,
     };
 
     let info = config.startup_info_string(Some("V0"));

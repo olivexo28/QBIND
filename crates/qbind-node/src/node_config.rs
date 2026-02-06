@@ -242,6 +242,143 @@ impl StateRetentionConfig {
 }
 
 // ============================================================================
+// T210: Signer Mode Configuration
+// ============================================================================
+
+/// Signer mode for validator key management (T210).
+///
+/// Determines how the validator signing key is stored and accessed.
+/// This configuration affects security posture and operational requirements.
+///
+/// # Environments
+///
+/// - **DevNet v0**: `LoopbackTesting` (default for development)
+/// - **TestNet Alpha**: `EncryptedFsV1` (recommended, must provide keystore path)
+/// - **TestNet Beta**: `EncryptedFsV1` (recommended, must provide keystore path)
+/// - **MainNet v0**: `EncryptedFsV1` or `HsmPkcs11` (**LoopbackTesting forbidden**)
+///
+/// # Security Notes
+///
+/// - `LoopbackTesting` is **FORBIDDEN** on MainNet (enforced by `validate_mainnet_invariants`)
+/// - `EncryptedFsV1` stores keys encrypted at rest (ChaCha20-Poly1305 + PBKDF2)
+/// - `RemoteSigner` communicates with external signer service (future HSM support)
+/// - `HsmPkcs11` uses Hardware Security Module via PKCS#11 interface
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SignerMode {
+    /// Loopback testing mode (DevNet only).
+    ///
+    /// Uses in-memory keys with loopback transport for testing remote signer flows.
+    /// **NOT allowed for MainNet** – `validate_mainnet_invariants()` will reject this.
+    ///
+    /// Use only for:
+    /// - Development and debugging
+    /// - CI/CD testing pipelines
+    /// - Single-machine harness tests
+    #[default]
+    LoopbackTesting,
+
+    /// Encrypted filesystem keystore (TestNet/MainNet).
+    ///
+    /// Keys are stored on disk encrypted using ChaCha20-Poly1305 AEAD with
+    /// PBKDF2-derived encryption keys. Requires `signer_keystore_path` to be set.
+    ///
+    /// Recommended for:
+    /// - TestNet Alpha/Beta validators
+    /// - MainNet validators without HSM access (acceptable with strong passphrase)
+    EncryptedFsV1,
+
+    /// Remote signer service (future HSM support).
+    ///
+    /// Communicates with an external signer service over gRPC or Unix socket.
+    /// The signer service manages keys and performs signing operations.
+    /// Requires `remote_signer_url` to be set.
+    ///
+    /// Use for:
+    /// - Production validators with dedicated signing infrastructure
+    /// - Multi-node signing architectures
+    /// - Future HSM integration via signer proxy
+    RemoteSigner,
+
+    /// Hardware Security Module via PKCS#11 interface.
+    ///
+    /// Keys are stored in and never leave the HSM. Signing operations are
+    /// performed by the HSM hardware. Requires `hsm_config_path` to be set.
+    ///
+    /// **Recommended for MainNet validators** for maximum key security.
+    ///
+    /// Supported HSMs (planned):
+    /// - YubiHSM 2
+    /// - AWS CloudHSM
+    /// - Azure Key Vault Managed HSM
+    HsmPkcs11,
+}
+
+impl std::fmt::Display for SignerMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SignerMode::LoopbackTesting => write!(f, "loopback-testing"),
+            SignerMode::EncryptedFsV1 => write!(f, "encrypted-fs"),
+            SignerMode::RemoteSigner => write!(f, "remote-signer"),
+            SignerMode::HsmPkcs11 => write!(f, "hsm-pkcs11"),
+        }
+    }
+}
+
+/// Parse a signer mode from a CLI argument string (T210).
+///
+/// Valid values (case-insensitive):
+/// - "loopback-testing" | "loopback" | "testing" → `SignerMode::LoopbackTesting`
+/// - "encrypted-fs" | "encrypted-fs-v1" | "encrypted" → `SignerMode::EncryptedFsV1`
+/// - "remote-signer" | "remote" → `SignerMode::RemoteSigner`
+/// - "hsm-pkcs11" | "hsm" | "pkcs11" → `SignerMode::HsmPkcs11`
+///
+/// # Returns
+///
+/// `Some(SignerMode)` if valid, `None` for unrecognized values.
+/// Unlike some other parsers, this does NOT fall back to a default because
+/// signer mode is a critical security configuration that must be explicit.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_signer_mode;
+///
+/// assert_eq!(parse_signer_mode("encrypted-fs"), Some(SignerMode::EncryptedFsV1));
+/// assert_eq!(parse_signer_mode("hsm"), Some(SignerMode::HsmPkcs11));
+/// assert_eq!(parse_signer_mode("invalid"), None);
+/// ```
+pub fn parse_signer_mode(s: &str) -> Option<SignerMode> {
+    match s.to_lowercase().as_str() {
+        "loopback-testing" | "loopback" | "testing" => Some(SignerMode::LoopbackTesting),
+        "encrypted-fs" | "encrypted-fs-v1" | "encrypted" => Some(SignerMode::EncryptedFsV1),
+        "remote-signer" | "remote" => Some(SignerMode::RemoteSigner),
+        "hsm-pkcs11" | "hsm" | "pkcs11" => Some(SignerMode::HsmPkcs11),
+        _ => None,
+    }
+}
+
+/// Valid signer mode values for CLI help text.
+pub const VALID_SIGNER_MODES: &[&str] = &["loopback-testing", "encrypted-fs", "remote-signer", "hsm-pkcs11"];
+
+/// Check if a signer mode is allowed for production (MainNet) use.
+///
+/// Returns `true` for production-ready signer modes:
+/// - `EncryptedFsV1`
+/// - `RemoteSigner`
+/// - `HsmPkcs11`
+///
+/// Returns `false` for development-only modes:
+/// - `LoopbackTesting`
+pub fn is_production_signer_mode(mode: SignerMode) -> bool {
+    match mode {
+        SignerMode::LoopbackTesting => false,
+        SignerMode::EncryptedFsV1 => true,
+        SignerMode::RemoteSigner => true,
+        SignerMode::HsmPkcs11 => true,
+    }
+}
+
+// ============================================================================
 // T165: DAG Availability Configuration
 // ============================================================================
 
@@ -1217,6 +1354,44 @@ pub struct NodeConfig {
     /// - TestNet Beta: `Height` (retain_height=100_000, interval=1_000)
     /// - MainNet v0: `Height` (retain_height=500_000, interval=1_000)
     pub state_retention: StateRetentionConfig,
+
+    // ========================================================================
+    // T210: Signer Mode Configuration
+    // ========================================================================
+    /// Signer mode for validator key management (T210).
+    ///
+    /// Determines how the validator signing key is stored and accessed.
+    ///
+    /// - DevNet v0: `LoopbackTesting` (default for development)
+    /// - TestNet Alpha/Beta: `EncryptedFsV1` (recommended)
+    /// - MainNet v0: `EncryptedFsV1` or `HsmPkcs11` (**LoopbackTesting forbidden**)
+    pub signer_mode: SignerMode,
+
+    /// Path to the encrypted keystore directory (T210).
+    ///
+    /// Required when `signer_mode == SignerMode::EncryptedFsV1`.
+    /// The keystore stores validator signing keys encrypted at rest.
+    ///
+    /// Example: `/data/qbind/keystore`
+    pub signer_keystore_path: Option<PathBuf>,
+
+    /// URL for the remote signer service (T210).
+    ///
+    /// Required when `signer_mode == SignerMode::RemoteSigner`.
+    /// Supports `grpc://`, `http://`, or `unix://` schemes.
+    ///
+    /// Examples:
+    /// - `grpc://localhost:50051`
+    /// - `unix:///var/run/qbind-signer.sock`
+    pub remote_signer_url: Option<String>,
+
+    /// Path to the HSM/PKCS#11 configuration file (T210).
+    ///
+    /// Required when `signer_mode == SignerMode::HsmPkcs11`.
+    /// Contains PKCS#11 library path, slot ID, and key label.
+    ///
+    /// Example: `/etc/qbind/hsm.toml`
+    pub hsm_config_path: Option<PathBuf>,
 }
 
 impl Default for NodeConfig {
@@ -1248,6 +1423,11 @@ impl Default for NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled for DevNet
             state_retention: StateRetentionConfig::disabled(),
+            // T210: Loopback signer for DevNet (testing only)
+            signer_mode: SignerMode::LoopbackTesting,
+            signer_keystore_path: None,
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 }
@@ -1276,6 +1456,11 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled by default
             state_retention: StateRetentionConfig::disabled(),
+            // T210: Loopback signer for testing (default)
+            signer_mode: SignerMode::LoopbackTesting,
+            signer_keystore_path: None,
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
@@ -1303,6 +1488,11 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled by default
             state_retention: StateRetentionConfig::disabled(),
+            // T210: Loopback signer for testing (default)
+            signer_mode: SignerMode::LoopbackTesting,
+            signer_keystore_path: None,
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
@@ -1347,6 +1537,7 @@ impl NodeConfig {
     /// - Fee Distribution: Burn-only (T193)
     /// - Monetary Mode: Off (T197)
     /// - State Retention: Disabled (T208)
+    /// - Signer Mode: LoopbackTesting (T210)
     ///
     /// # Example
     ///
@@ -1377,6 +1568,11 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled for DevNet
             state_retention: StateRetentionConfig::disabled(),
+            // T210: Loopback signer for DevNet (testing only)
+            signer_mode: SignerMode::LoopbackTesting,
+            signer_keystore_path: None,
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
@@ -1395,6 +1591,7 @@ impl NodeConfig {
     /// - Fee Distribution: Burn-only (T193)
     /// - Monetary Mode: Shadow (T197)
     /// - State Retention: Disabled (T208)
+    /// - Signer Mode: EncryptedFsV1 (T210, recommended)
     ///
     /// # Example
     ///
@@ -1426,6 +1623,11 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled for TestNet Alpha
             state_retention: StateRetentionConfig::disabled(),
+            // T210: EncryptedFsV1 recommended for TestNet (keystore path must be provided)
+            signer_mode: SignerMode::EncryptedFsV1,
+            signer_keystore_path: None, // Operator must provide
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
@@ -1447,6 +1649,7 @@ impl NodeConfig {
     /// - Fee Distribution: **Burn-only** (T193: testing uses burn-only for simplicity)
     /// - Monetary Mode: **Shadow** (T197: decisions + metrics only)
     /// - State Retention: **Height** (T208: retain_height=100_000, ~6 days at 5s blocks)
+    /// - Signer Mode: **EncryptedFsV1** (T210, keystore path must be provided)
     ///
     /// **Note**: Callers should supply `data_dir` via `with_data_dir()` before
     /// starting nodes, as Beta requires persistent state.
@@ -1488,6 +1691,11 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention enabled for TestNet Beta (~6 days history)
             state_retention: StateRetentionConfig::testnet_beta_default(),
+            // T210: EncryptedFsV1 recommended for TestNet (keystore path must be provided)
+            signer_mode: SignerMode::EncryptedFsV1,
+            signer_keystore_path: None, // Operator must provide
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
@@ -1509,6 +1717,7 @@ impl NodeConfig {
     /// - Fee Distribution: **50% burn / 50% proposer** (T193: MainNet default)
     /// - Monetary Mode: **Shadow** (T197: governance can flip to Active later)
     /// - State Retention: **Height** (T208: retain_height=500_000, ~30 days at 5s blocks)
+    /// - Signer Mode: **EncryptedFsV1** (T210, LoopbackTesting forbidden)
     ///
     /// **Note**: Callers MUST supply `data_dir` via `with_data_dir()` before
     /// starting nodes. MainNet validators cannot use in-memory-only storage.
@@ -1562,6 +1771,11 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention enabled for MainNet (~30 days history)
             state_retention: StateRetentionConfig::mainnet_default(),
+            // T210: EncryptedFsV1 default for MainNet (LoopbackTesting forbidden by invariants)
+            signer_mode: SignerMode::EncryptedFsV1,
+            signer_keystore_path: None, // Operator must provide
+            remote_signer_url: None,
+            hsm_config_path: None,
         }
     }
 
@@ -1810,6 +2024,95 @@ impl NodeConfig {
     /// ```
     pub fn with_state_retention(mut self, config: StateRetentionConfig) -> Self {
         self.state_retention = config;
+        self
+    }
+
+    // ========================================================================
+    // T210: Signer Mode Builder Methods
+    // ========================================================================
+
+    /// Set the signer mode (T210).
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The signer mode to use
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, SignerMode};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_signer_mode(SignerMode::HsmPkcs11)
+    ///     .with_hsm_config_path("/etc/qbind/hsm.toml");
+    /// ```
+    pub fn with_signer_mode(mut self, mode: SignerMode) -> Self {
+        self.signer_mode = mode;
+        self
+    }
+
+    /// Set the signer keystore path (T210).
+    ///
+    /// Required when `signer_mode == SignerMode::EncryptedFsV1`.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the encrypted keystore directory
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, SignerMode};
+    ///
+    /// let config = NodeConfig::testnet_alpha_preset()
+    ///     .with_signer_keystore_path("/data/qbind/keystore");
+    /// ```
+    pub fn with_signer_keystore_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.signer_keystore_path = Some(path.into());
+        self
+    }
+
+    /// Set the remote signer URL (T210).
+    ///
+    /// Required when `signer_mode == SignerMode::RemoteSigner`.
+    ///
+    /// # Arguments
+    ///
+    /// * `url` - URL for the remote signer service (grpc://, http://, or unix://)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, SignerMode};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_signer_mode(SignerMode::RemoteSigner)
+    ///     .with_remote_signer_url("grpc://localhost:50051");
+    /// ```
+    pub fn with_remote_signer_url<S: Into<String>>(mut self, url: S) -> Self {
+        self.remote_signer_url = Some(url.into());
+        self
+    }
+
+    /// Set the HSM/PKCS#11 configuration path (T210).
+    ///
+    /// Required when `signer_mode == SignerMode::HsmPkcs11`.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the HSM configuration file (TOML format)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, SignerMode};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_signer_mode(SignerMode::HsmPkcs11)
+    ///     .with_hsm_config_path("/etc/qbind/hsm.toml");
+    /// ```
+    pub fn with_hsm_config_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.hsm_config_path = Some(path.into());
         self
     }
 
@@ -2314,12 +2617,40 @@ impl NodeConfig {
             }
         }
 
+        // 19. Signer mode must not be LoopbackTesting (T210)
+        // MainNet requires a production signer (EncryptedFsV1, RemoteSigner, or HsmPkcs11).
+        // Loopback mode is only allowed for development/testing.
+        if self.signer_mode == SignerMode::LoopbackTesting {
+            return Err(MainnetConfigError::SignerModeLoopbackForbidden);
+        }
+
+        // 20. Signer mode requires appropriate configuration (T210)
+        // Note: LoopbackTesting is already rejected above, so we only check production modes.
+        match self.signer_mode {
+            SignerMode::EncryptedFsV1 => {
+                if self.signer_keystore_path.is_none() {
+                    return Err(MainnetConfigError::SignerKeystorePathMissing);
+                }
+            }
+            SignerMode::RemoteSigner => {
+                if self.remote_signer_url.is_none() {
+                    return Err(MainnetConfigError::RemoteSignerUrlMissing);
+                }
+            }
+            SignerMode::HsmPkcs11 => {
+                if self.hsm_config_path.is_none() {
+                    return Err(MainnetConfigError::HsmConfigPathMissing);
+                }
+            }
+            SignerMode::LoopbackTesting => {
+                // Unreachable: already rejected above at line 2623
+                unreachable!("LoopbackTesting should have been rejected above")
+            }
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
-
-        // TODO(future): Enforce HSM signer mode for validators.
-        // Currently deferred to a dedicated HSM task.
 
         Ok(())
     }
@@ -2469,6 +2800,37 @@ pub enum MainnetConfigError {
     /// When state retention is enabled with Height mode, retain_height must
     /// be set and must be at least 10,000 blocks for reorg safety.
     StateRetentionInvalid(String),
+
+    // ========================================================================
+    // T210: Signer Mode Errors
+    // ========================================================================
+    /// Signer mode is LoopbackTesting on MainNet (T210).
+    ///
+    /// MainNet validators must use a production signer mode:
+    /// - EncryptedFsV1: Encrypted filesystem keystore
+    /// - RemoteSigner: External signer service
+    /// - HsmPkcs11: Hardware Security Module
+    ///
+    /// LoopbackTesting is only allowed for development and testing.
+    SignerModeLoopbackForbidden,
+
+    /// Signer keystore path is missing when EncryptedFsV1 mode is selected (T210).
+    ///
+    /// When signer_mode is EncryptedFsV1, signer_keystore_path must be set
+    /// to the path of the encrypted keystore directory.
+    SignerKeystorePathMissing,
+
+    /// Remote signer URL is missing when RemoteSigner mode is selected (T210).
+    ///
+    /// When signer_mode is RemoteSigner, remote_signer_url must be set
+    /// to the URL of the remote signing service.
+    RemoteSignerUrlMissing,
+
+    /// HSM configuration path is missing when HsmPkcs11 mode is selected (T210).
+    ///
+    /// When signer_mode is HsmPkcs11, hsm_config_path must be set
+    /// to the path of the HSM configuration file.
+    HsmConfigPathMissing,
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -2601,6 +2963,35 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: state retention configuration invalid: {}",
                     msg
+                )
+            }
+            // T210: Signer mode errors
+            MainnetConfigError::SignerModeLoopbackForbidden => {
+                write!(
+                    f,
+                    "MainNet invariant violated: signer mode 'loopback-testing' is forbidden on MainNet. \
+                     Use 'encrypted-fs', 'remote-signer', or 'hsm-pkcs11' (--signer-mode=encrypted-fs)"
+                )
+            }
+            MainnetConfigError::SignerKeystorePathMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated: signer_keystore_path must be set when signer_mode is 'encrypted-fs' \
+                     (--signer-keystore-path=/path/to/keystore)"
+                )
+            }
+            MainnetConfigError::RemoteSignerUrlMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated: remote_signer_url must be set when signer_mode is 'remote-signer' \
+                     (--remote-signer-url=grpc://localhost:50051)"
+                )
+            }
+            MainnetConfigError::HsmConfigPathMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated: hsm_config_path must be set when signer_mode is 'hsm-pkcs11' \
+                     (--hsm-config-path=/etc/qbind/hsm.toml)"
                 )
             }
         }

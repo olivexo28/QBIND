@@ -9,10 +9,11 @@
 //! 3. Validation success tests
 //! 4. Validation failure tests (one per invariant)
 //! 5. CLI integration tests
+//! 6. T210 Signer mode validation tests
 
 use qbind_node::node_config::{
     parse_config_profile, ConfigProfile, ExecutionProfile, MainnetConfigError, MempoolMode,
-    NetworkMode, NodeConfig,
+    NetworkMode, NodeConfig, SignerMode,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -177,7 +178,9 @@ fn config_profile_mainnet_display() {
 /// Test that a valid MainNet config passes validation.
 #[test]
 fn validate_mainnet_invariants_accepts_canonical_config() {
-    let config = NodeConfig::mainnet_preset().with_data_dir("/data/qbind");
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_keystore_path("/data/qbind/keystore"); // T210: Must provide keystore path
 
     let result = config.validate_mainnet_invariants();
     assert!(
@@ -196,6 +199,7 @@ fn validate_mainnet_invariants_accepts_canonical_config() {
 fn validate_mainnet_invariants_rejects_gas_disabled() {
     let config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
+        .with_signer_keystore_path("/data/qbind/keystore") // T210
         .with_gas_enabled(false);
 
     let result = config.validate_mainnet_invariants();
@@ -699,4 +703,159 @@ fn testnet_presets_have_appropriate_discovery_settings() {
         beta.network.target_outbound_peers, 8,
         "TestNet Beta should have target_outbound_peers = 8"
     );
+}
+
+// ============================================================================
+// Part 7: T210 Signer Mode Validation Tests
+// ============================================================================
+
+/// Test: MainNet preset has EncryptedFsV1 as default signer mode.
+#[test]
+fn mainnet_preset_has_encrypted_fs_signer_mode() {
+    let config = NodeConfig::mainnet_preset();
+    assert_eq!(
+        config.signer_mode,
+        SignerMode::EncryptedFsV1,
+        "MainNet preset should default to EncryptedFsV1 signer mode"
+    );
+}
+
+/// Test: DevNet preset has LoopbackTesting as default signer mode.
+#[test]
+fn devnet_preset_has_loopback_signer_mode() {
+    let config = NodeConfig::devnet_v0_preset();
+    assert_eq!(
+        config.signer_mode,
+        SignerMode::LoopbackTesting,
+        "DevNet preset should default to LoopbackTesting signer mode"
+    );
+}
+
+/// Test: TestNet Alpha/Beta presets have EncryptedFsV1 as default signer mode.
+#[test]
+fn testnet_presets_have_encrypted_fs_signer_mode() {
+    let alpha = NodeConfig::testnet_alpha_preset();
+    assert_eq!(
+        alpha.signer_mode,
+        SignerMode::EncryptedFsV1,
+        "TestNet Alpha preset should default to EncryptedFsV1 signer mode"
+    );
+
+    let beta = NodeConfig::testnet_beta_preset();
+    assert_eq!(
+        beta.signer_mode,
+        SignerMode::EncryptedFsV1,
+        "TestNet Beta preset should default to EncryptedFsV1 signer mode"
+    );
+}
+
+/// Test: LoopbackTesting signer mode is rejected on MainNet.
+#[test]
+fn validate_mainnet_invariants_rejects_loopback_signer_mode() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_mode(SignerMode::LoopbackTesting);
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::SignerModeLoopbackForbidden) => (),
+        Err(e) => panic!("Expected SignerModeLoopbackForbidden error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for LoopbackTesting signer mode on MainNet"),
+    }
+}
+
+/// Test: EncryptedFsV1 signer mode without keystore path is rejected on MainNet.
+#[test]
+fn validate_mainnet_invariants_rejects_missing_keystore_path() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_mode(SignerMode::EncryptedFsV1);
+    // Note: signer_keystore_path is None
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::SignerKeystorePathMissing) => (),
+        Err(e) => panic!("Expected SignerKeystorePathMissing error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for missing keystore path"),
+    }
+}
+
+/// Test: RemoteSigner mode without URL is rejected on MainNet.
+#[test]
+fn validate_mainnet_invariants_rejects_missing_remote_signer_url() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_mode(SignerMode::RemoteSigner);
+    // Note: remote_signer_url is None
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::RemoteSignerUrlMissing) => (),
+        Err(e) => panic!("Expected RemoteSignerUrlMissing error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for missing remote signer URL"),
+    }
+}
+
+/// Test: HsmPkcs11 signer mode without config path is rejected on MainNet.
+#[test]
+fn validate_mainnet_invariants_rejects_missing_hsm_config_path() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_mode(SignerMode::HsmPkcs11);
+    // Note: hsm_config_path is None
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::HsmConfigPathMissing) => (),
+        Err(e) => panic!("Expected HsmConfigPathMissing error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for missing HSM config path"),
+    }
+}
+
+/// Test: Valid MainNet config with RemoteSigner passes validation.
+#[test]
+fn validate_mainnet_invariants_accepts_remote_signer_with_url() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_mode(SignerMode::RemoteSigner)
+        .with_remote_signer_url("grpc://localhost:50051");
+
+    let result = config.validate_mainnet_invariants();
+    assert!(
+        result.is_ok(),
+        "Valid MainNet config with RemoteSigner should pass validation: {:?}",
+        result
+    );
+}
+
+/// Test: Valid MainNet config with HsmPkcs11 passes validation.
+#[test]
+fn validate_mainnet_invariants_accepts_hsm_with_config_path() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_mode(SignerMode::HsmPkcs11)
+        .with_hsm_config_path("/etc/qbind/hsm.toml");
+
+    let result = config.validate_mainnet_invariants();
+    assert!(
+        result.is_ok(),
+        "Valid MainNet config with HsmPkcs11 should pass validation: {:?}",
+        result
+    );
+}
+
+/// Test: DevNet allows LoopbackTesting signer mode.
+#[test]
+fn devnet_allows_loopback_signer_mode() {
+    let config = NodeConfig::devnet_v0_preset();
+    assert_eq!(
+        config.signer_mode,
+        SignerMode::LoopbackTesting,
+        "DevNet should allow LoopbackTesting signer mode"
+    );
+    // DevNet doesn't enforce MainNet invariants, so no validation error
 }
