@@ -86,11 +86,17 @@ The key management system must defend against the following threat categories:
 | **HSM hardware failure** | Signing operations fail; validator goes offline | High |
 | **HSM misconfiguration** | Wrong key slot or PIN causes signing failures | High |
 | **HSM vendor lock-in** | Migration to new HSM vendor is difficult | Medium |
+| **HSM/remote signer unavailability** | Validator cannot sign during network partition | High |
 
 **Mitigations**:
-- HSM redundancy recommendations for MainNet operators
+- **Infra-level redundancy patterns (T214)**:
+  - **Pattern A: Active/Passive Signer Hosts** – One consensus node with two signer boxes; only one signer active, second kept warm and can be promoted via external orchestration.
+  - **Pattern B: HSM Cluster / Cloud HSM** – Multiple validator nodes backed by vendor-provided HSM clustering for high availability.
+- **Fail-closed behavior (T214)**: Node exits on HSM/remote signer failure (`SignerFailureMode::ExitOnFailure`); redundancy is achieved by orchestrating multiple nodes/signers, not by automatic in-node failover.
 - Standardized PKCS#11 interface (vendor-agnostic)
 - Key backup procedures via HSM escrow mechanisms
+- Startup reachability checks for HSM/remote signer (T214)
+- `qbind_hsm_startup_ok` metric for observability
 
 ### 1.3 Security Principles
 
@@ -401,6 +407,142 @@ if config.environment == NetworkEnvironment::Mainnet {
     }
 }
 ```
+
+### 3.7 Signer Failure Modes & Redundancy Patterns (T214)
+
+#### 3.7.1 SignerFailureMode Configuration
+
+QBIND provides a `SignerFailureMode` configuration that controls how the node reacts to HSM/remote signer failures:
+
+| Mode | Behavior | Allowed Networks |
+| :--- | :--- | :--- |
+| **ExitOnFailure** | Node exits on signer error (fail-closed) | **All networks** (MainNet **required**) |
+| **LogAndContinue** | Log error and propagate without exit | DevNet, TestNet only |
+
+**MainNet Requirement**: MainNet validators **MUST** use `SignerFailureMode::ExitOnFailure`. This is enforced by `validate_mainnet_invariants()`.
+
+**Configuration**:
+
+```rust
+// NodeConfig builder
+let config = NodeConfig::mainnet_preset()
+    .with_signer_failure_mode(SignerFailureMode::ExitOnFailure); // Default, required
+
+// For chaos testing on TestNet (NOT for MainNet)
+let chaos_config = NodeConfig::testnet_beta_preset()
+    .with_signer_failure_mode(SignerFailureMode::LogAndContinue);
+```
+
+**CLI**:
+
+```bash
+# MainNet (default, can be omitted)
+qbind-node --profile mainnet --signer-failure-mode exit-on-failure
+
+# TestNet chaos testing (NOT for MainNet)
+qbind-node --profile testnet-beta --signer-failure-mode log-and-continue
+```
+
+#### 3.7.2 Redundancy Patterns
+
+Redundancy is achieved through **infrastructure-level patterns**, not automatic in-node failover. The node provides health signaling to enable external orchestration.
+
+**Pattern A: Active/Passive Signer Hosts**
+
+```
+                           ┌──────────────────┐
+                           │  Consensus Node  │
+                           │  (No private key)│
+                           └────────┬─────────┘
+                                    │ KEMTLS
+                    ┌───────────────┴───────────────┐
+                    │                               │
+              ┌─────▼─────┐                   ┌─────▼─────┐
+              │  Signer A │ ◀─── ACTIVE       │  Signer B │ ◀─── STANDBY
+              │   (HSM)   │                   │   (HSM)   │
+              └───────────┘                   └───────────┘
+                                                   │
+                                          ▲────────┘
+                                          │
+                              External Orchestration
+                              (systemd, k8s, etc.)
+                              promotes B on A failure
+```
+
+- One consensus node with two signer hosts
+- Only signer A is active; signer B kept warm
+- On signer A failure, external orchestration promotes signer B
+- Node restart connects to new active signer
+
+**Pattern B: HSM Cluster / Cloud HSM**
+
+```
+              ┌──────────────────┐
+              │  Consensus Node  │
+              │  (No private key)│
+              └────────┬─────────┘
+                       │ KEMTLS
+                       ▼
+              ┌─────────────────┐
+              │  Remote Signer  │
+              │     Daemon      │
+              └────────┬────────┘
+                       │ PKCS#11
+                       ▼
+         ┌─────────────────────────────┐
+         │      HSM Cluster / Pool     │
+         │  (Vendor-managed failover)  │
+         │   HSM1 ◀──▶ HSM2 ◀──▶ HSM3  │
+         └─────────────────────────────┘
+```
+
+- Redundancy provided by HSM vendor's clustering
+- Single signer daemon connects to HSM cluster
+- HSM cluster handles failover internally
+
+#### 3.7.3 Health Signaling
+
+The node exposes metrics for external monitoring and orchestration:
+
+| Metric | Description |
+| :--- | :--- |
+| `qbind_hsm_sign_success_total` | Total successful HSM sign operations |
+| `qbind_hsm_sign_error_total{kind}` | Sign errors by kind (config, runtime) |
+| `qbind_hsm_startup_ok` | Startup health check (1=ok, 0=failed) |
+| `qbind_remote_sign_failures_total{reason}` | Remote signer failures by reason |
+
+**SignerHealth Classification**:
+
+```rust
+// Derived health status from metrics
+pub enum SignerHealth {
+    Healthy,   // No errors, all operations succeeding
+    Degraded,  // Some errors but <50% error rate
+    Failed,    // High error rate (>=50%) or repeated failures
+}
+```
+
+#### 3.7.4 Operator Runbook
+
+**Startup**:
+
+1. Configure signer (HSM or remote signer) before starting node
+2. Verify `qbind_hsm_startup_ok=1` after startup
+3. If startup fails, check logs for `hsm_startup_ok=false`
+
+**Monitoring**:
+
+1. Alert on `qbind_hsm_sign_error_total` increase
+2. Alert on `qbind_remote_sign_failures_total` increase
+3. Monitor `signer_health` in metrics endpoint
+
+**Failover** (Pattern A):
+
+1. Detect signer A failure (metrics, health check)
+2. Stop consensus node (if not already exited)
+3. Update signer URL to point to signer B
+4. Start consensus node
+5. Verify `qbind_hsm_startup_ok=1`
 
 ---
 
@@ -1013,11 +1155,32 @@ The key management requirements are enforced (or will be enforced) by `validate_
 - No slashing integration
 - No HSM redundancy/failover
 
-### 7.5 Future Tasks (T214+)
+### 7.5 T214 – HSM Redundancy & Failover v0 ✅ Completed
+
+**Status**: Completed. Redundancy is ops + health signaling, not automatic multi-HSM failover.
+
+**Scope**: Reduce "HSM as single point of failure" risk by documenting redundancy patterns and adding fail-closed behavior.
+
+**Deliverables**:
+- ✅ Added `SignerFailureMode` enum (`ExitOnFailure`, `LogAndContinue`)
+- ✅ Added `signer_failure_mode` field to `NodeConfig`
+- ✅ Added `SignerHealth` enum and `signer_health()` method to `NodeMetrics`
+- ✅ Added `qbind_hsm_startup_ok` metric to `HsmMetrics`
+- ✅ Added validation in `validate_mainnet_invariants()` (MainNet requires `ExitOnFailure`)
+- ✅ Documented redundancy patterns (active/passive, HSM cluster)
+- ✅ Updated QBIND_MAINNET_V0_SPEC.md with failure semantics
+- ✅ Updated QBIND_MAINNET_AUDIT_SKELETON.md MN-R5 section
+- ✅ Added tests for SignerFailureMode validation
+
+**Non-Goals** (out of scope for T214):
+- No multi-HSM load-balancing inside qbind-node
+- No automatic failover between HSMs
+- No protocol changes
+
+### 7.6 Future Tasks (T215+)
 
 | Task | Scope | Target Phase |
 | :--- | :--- | :--- |
-| T214 | HSM redundancy and failover | MainNet v0.x |
 | T215 | Governance-integrated key rotation | MainNet v0.x |
 | T216 | Key rotation via on-chain transactions | MainNet v1+ |
 | T217 | Withdrawal key cold storage integration | MainNet v1+ |

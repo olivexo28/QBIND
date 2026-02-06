@@ -263,12 +263,13 @@ impl From<HsmPkcs11Error> for SignError {
 // HSM Metrics (T211)
 // ============================================================================
 
-/// Metrics for HSM/PKCS#11 signer operations (T211).
+/// Metrics for HSM/PKCS#11 signer operations (T211, T214).
 ///
 /// Tracks:
 /// - Successful sign operations
 /// - Failed sign operations (by error kind)
 /// - Last observed signing latency
+/// - Startup health check status (T214)
 ///
 /// # Security Notes
 ///
@@ -284,6 +285,9 @@ pub struct HsmMetrics {
     sign_error_runtime_total: AtomicU64,
     /// Last observed signing latency in milliseconds.
     sign_last_latency_ms: AtomicU64,
+    /// Startup health check result (T214): 1 = ok, 0 = failed or not yet checked.
+    /// Defaults to 0 (not yet checked) via `#[derive(Default)]`.
+    startup_ok: AtomicU64,
 }
 
 impl HsmMetrics {
@@ -310,6 +314,14 @@ impl HsmMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record the startup health check result (T214).
+    ///
+    /// Call this after the HSM startup "sign ping" to indicate whether
+    /// the HSM is reachable and functional.
+    pub fn record_startup_ok(&self, ok: bool) {
+        self.startup_ok.store(if ok { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
     /// Get the total successful sign operations.
     pub fn sign_success_total(&self) -> u64 {
         self.sign_success_total.load(Ordering::Relaxed)
@@ -330,10 +342,15 @@ impl HsmMetrics {
         self.sign_last_latency_ms.load(Ordering::Relaxed)
     }
 
+    /// Get the startup health check result (T214): 1 = ok, 0 = failed/not checked.
+    pub fn startup_ok(&self) -> u64 {
+        self.startup_ok.load(Ordering::Relaxed)
+    }
+
     /// Format HSM metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
-        output.push_str("\n# HSM/PKCS#11 signer metrics (T211)\n");
+        output.push_str("\n# HSM/PKCS#11 signer metrics (T211, T214)\n");
         output.push_str(&format!(
             "qbind_hsm_sign_success_total {}\n",
             self.sign_success_total()
@@ -349,6 +366,11 @@ impl HsmMetrics {
         output.push_str(&format!(
             "qbind_hsm_sign_last_latency_ms {}\n",
             self.sign_last_latency_ms()
+        ));
+        // T214: Startup health check metric
+        output.push_str(&format!(
+            "qbind_hsm_startup_ok {}\n",
+            self.startup_ok()
         ));
         output
     }
