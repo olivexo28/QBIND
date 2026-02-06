@@ -122,19 +122,45 @@ pub fn parse_key_role(s: &str) -> Result<KeyRole, KeyRotationInitError> {
 /// Initialize a key rotation event and return the JSON descriptor.
 ///
 /// This function:
-/// 1. Validates the inputs
+/// 1. Validates the inputs (public key must not be empty)
 /// 2. Creates a `KeyRotationEvent` struct
 /// 3. Serializes it to JSON
-/// 4. Optionally writes to an output file
+/// 4. Optionally writes to an output file (if `output_path` is `Some`)
 ///
 /// # Arguments
 ///
 /// * `args` - The rotation init arguments
 ///
+/// # Output Behavior
+///
+/// If `args.output_path` is `Some`, the JSON is written to that file path and
+/// a log message is printed to stderr. If `None`, the JSON is only returned
+/// in the result struct without file I/O.
+///
 /// # Returns
 ///
 /// * `Ok(KeyRotationInitResult)` with the event and JSON on success
 /// * `Err(KeyRotationInitError)` on failure
+///
+/// # Example
+///
+/// ```ignore
+/// use qbind_node::key_rotation_cli::{init_key_rotation, KeyRotationInitArgs, parse_key_role};
+///
+/// let args = KeyRotationInitArgs {
+///     validator_id: 42,
+///     key_role: parse_key_role("consensus").unwrap(),
+///     new_public_key: vec![1, 2, 3, 4, 5],
+///     effective_epoch: 100,
+///     grace_epochs: 2,
+///     emergency: false,
+///     output_path: None,
+/// };
+///
+/// let result = init_key_rotation(&args).unwrap();
+/// println!("Generated rotation event:\n{}", result.json);
+/// // The JSON can then be submitted via governance/ops tooling
+/// ```
 pub fn init_key_rotation(args: &KeyRotationInitArgs) -> Result<KeyRotationInitResult, KeyRotationInitError> {
     // Validate public key
     if args.new_public_key.is_empty() {
@@ -177,11 +203,23 @@ pub fn init_key_rotation(args: &KeyRotationInitArgs) -> Result<KeyRotationInitRe
 }
 
 /// Read a public key from a file.
+///
+/// Reads the raw bytes from the specified file path.
 pub fn read_public_key_file(path: &PathBuf) -> Result<Vec<u8>, KeyRotationInitError> {
     fs::read(path).map_err(KeyRotationInitError::PublicKeyReadError)
 }
 
-/// Compute a short fingerprint for logging (first 8 hex bytes).
+/// Compute a short fingerprint for logging purposes.
+///
+/// Returns a hex string of the first 4 bytes followed by "..." for keys longer
+/// than 4 bytes. For shorter keys, returns the full hex encoding.
+///
+/// # Example
+///
+/// ```ignore
+/// let key = vec![0xAB, 0xCD, 0xEF, 0x12, 0x34];
+/// assert_eq!(key_fingerprint(&key), "abcdef12...");
+/// ```
 pub fn key_fingerprint(key: &[u8]) -> String {
     if key.len() < 4 {
         return hex::encode(key);

@@ -962,21 +962,56 @@ The key management requirements are enforced (or will be enforced) by `validate_
 - No automatic failover
 - No request queueing
 
-### 7.4 T213 – Key Rotation Hooks v0
+### 7.4 T213 – Key Rotation Hooks v0 ✅ Completed
+
+**Status**: Completed. Module: `qbind-consensus/src/key_rotation.rs`, CLI: `qbind-node/src/key_rotation_cli.rs`.
 
 **Scope**: Primitives for key rotation without full governance integration.
 
 **Deliverables**:
-- Define `KeyRotationEvent` type for validator set updates
-- Implement grace period handling for dual-key validity
-- Add key rotation initiation CLI command
-- Document rotation procedures
-- Add rotation event logging/metrics
+- ✅ Defined `KeyRotationEvent` type for validator set updates
+- ✅ Defined `KeyRotationKind` enum (Scheduled vs Emergency)
+- ✅ Defined `KeyRole` enum (Consensus, BatchSigning, P2pIdentity)
+- ✅ Implemented `KeyRotationRegistry` with grace period handling for dual-key validity
+- ✅ Implemented `ValidatorKeyState` and `PendingKey` types
+- ✅ Implemented `apply_key_rotation_event()` and `advance_epoch_for_rotation()` functions
+- ✅ Added key rotation CLI helper (`init_key_rotation()`)
+- ✅ Added rotation event logging (`log_rotation_event_applied()`, `log_rotation_committed()`)
+- ✅ Added `KeyRotationMetrics` for tracking rotation lifecycle
+- ✅ Integration tests in `t213_key_rotation_hooks_tests.rs`
 
-**Non-Goals**:
+**Implementation Summary**:
+
+1. **Key Rotation Types** (`qbind-consensus/src/key_rotation.rs`):
+   - `KeyRotationEvent`: Represents a rotation request with validator_id, key_role, new_public_key, effective_epoch, grace_epochs, and kind
+   - `KeyRotationKind`: `Scheduled` or `Emergency`
+   - `KeyRole`: `Consensus`, `BatchSigning`, `P2pIdentity`
+   - `ValidatorKeyState`: Tracks current_key and optional next_key (pending rotation)
+   - `PendingKey`: Holds new key bytes and grace period boundaries
+
+2. **Key Rotation Registry**:
+   - `KeyRotationRegistry`: Maps (validator_id, key_role) to `ValidatorKeyState`
+   - `apply_rotation_event()`: Validates and applies a rotation event
+   - `advance_epoch()`: Commits rotations whose grace period has ended
+   - `is_key_valid()`: Checks if a key is valid at a given epoch (dual-key support)
+
+3. **Grace Period Semantics**:
+   - Grace period is [effective_epoch, effective_epoch + grace_epochs] inclusive
+   - During grace: both old and new keys are valid for verification
+   - After grace: new key becomes current, old key invalidated
+   - No overlapping rotations allowed for same (validator_id, key_role)
+
+4. **CLI Helper** (`qbind-node/src/key_rotation_cli.rs`):
+   - `init_key_rotation()`: Generates a JSON rotation event descriptor
+   - `parse_key_role()`: Parses "consensus", "batch-signing", "p2p-identity"
+   - Logging helpers for rotation lifecycle events
+   - `KeyRotationMetrics` for tracking rotations
+
+**Non-Goals** (out of scope for T213):
 - No on-chain governance for key rotation (separate task)
 - No automatic rotation scheduling
 - No slashing integration
+- No HSM redundancy/failover
 
 ### 7.5 Future Tasks (T214+)
 
@@ -1009,6 +1044,8 @@ The key management requirements are enforced (or will be enforced) by `validate_
 | RemoteSigner | `qbind-node/src/remote_signer.rs` | Remote signer protocol and transport |
 | Keystore | `qbind-node/src/keystore.rs` | Encrypted keystore implementation |
 | NodeConfig | `qbind-node/src/node_config.rs` | Node configuration and validation |
+| **KeyRotation** | `qbind-consensus/src/key_rotation.rs` | Key rotation primitives (T213) |
+| **KeyRotationCLI** | `qbind-node/src/key_rotation_cli.rs` | Key rotation CLI helper (T213) |
 
 ---
 

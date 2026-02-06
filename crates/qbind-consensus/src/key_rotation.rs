@@ -132,6 +132,12 @@ pub struct KeyRotationEvent {
 
 impl KeyRotationEvent {
     /// Create a new scheduled key rotation event.
+    ///
+    /// Scheduled rotations are planned key updates that follow the normal
+    /// operational schedule. Use this for routine key rotation per policy.
+    ///
+    /// The rotation will take effect at `effective_epoch` with a grace period
+    /// of `grace_epochs` where both old and new keys are valid.
     pub fn scheduled(
         validator_id: u64,
         key_role: KeyRole,
@@ -150,6 +156,16 @@ impl KeyRotationEvent {
     }
 
     /// Create a new emergency key rotation event.
+    ///
+    /// Emergency rotations are used when key compromise is suspected or
+    /// confirmed. The rotation mechanics are identical to scheduled rotation,
+    /// but the `kind` field is set to `Emergency` for logging, metrics, and
+    /// future governance integration.
+    ///
+    /// Use this when:
+    /// - Unauthorized signatures are detected
+    /// - The validator host is compromised
+    /// - HSM tamper detection triggers
     pub fn emergency(
         validator_id: u64,
         key_role: KeyRole,
@@ -424,12 +440,18 @@ impl KeyRotationRegistry {
     }
 
     /// Get the key state for a validator and role.
+    ///
+    /// Returns `None` if no key has been registered for the given
+    /// (validator_id, key_role) combination via `register_key()`.
     pub fn get_key_state(&self, validator_id: u64, key_role: KeyRole) -> Option<&ValidatorKeyState> {
         let key_id = ValidatorKeyId::new(validator_id, key_role);
         self.keys.get(&key_id)
     }
 
     /// Get the key state for a validator and role (mutable).
+    ///
+    /// Returns `None` if no key has been registered for the given
+    /// (validator_id, key_role) combination via `register_key()`.
     pub fn get_key_state_mut(
         &mut self,
         validator_id: u64,
