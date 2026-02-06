@@ -498,14 +498,53 @@ This section summarizes key security areas and the "risk budget" for MainNet v0.
 
 ### 6.5 Key Management and Remote Signer / HSM
 
+> **📋 Design Reference**: The complete key management and signer architecture specification is provided in [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) (T209). This includes:
+> - Key roles (consensus, P2P identity, batch signing)
+> - Signer modes (LoopbackTesting, EncryptedFsV1, RemoteSigner, HsmPkcs11)
+> - HSM and remote signer architecture
+> - Key rotation and compromise handling procedures
+> - Network-specific requirements matrix
+> - Implementation roadmap (T210–T213)
+
+#### 6.5.1 Key Roles
+
+MainNet validators manage multiple cryptographic keys:
+
+| Key Role | Purpose | PQC Suite | MainNet Requirement |
+| :--- | :--- | :--- | :--- |
+| **Consensus Key** | Sign proposals, votes, timeouts | ML-DSA-44 | HSM strongly recommended |
+| **P2P Identity Key** | KEMTLS handshake authentication | ML-KEM-768 | Recommended |
+| **Batch Signing Key** | Sign DAG batches and acks | ML-DSA-44 | HSM strongly recommended |
+
+#### 6.5.2 Allowed Signer Modes
+
+MainNet enforces strict signer mode requirements:
+
+| Signer Mode | MainNet Status | Notes |
+| :--- | :--- | :--- |
+| **LoopbackTesting** | ❌ **Forbidden** | `validate_mainnet_invariants()` rejects |
+| **EncryptedFsV1** | ✅ Acceptable | Requires hardened host |
+| **RemoteSigner** | ✅ Recommended | Good key isolation |
+| **HsmPkcs11** | ✅ Strongly Recommended | Highest security |
+
+#### 6.5.3 Risk Areas
+
 | Risk Area | MainNet v0 Mitigation |
 | :--- | :--- |
-| **Key compromise** | HSM support required for validators |
+| **Key compromise** | HSM strongly recommended; EncryptedFsV1 with hardened host acceptable |
 | **Key separation** | Consensus keys separate from network keys |
-| **Key rotation** | Rotation hooks implemented |
+| **Key rotation** | Rotation hooks planned (T213); annual rotation required |
 | **Remote signing** | Production signer required (no loopback) |
+| **Misconfiguration** | `validate_mainnet_invariants()` rejects loopback signer |
 
 **Risk Budget**: Key management is **high risk** area; HSM support critical for MainNet.
+
+**Implementation Status**:
+- T209: Key management design ✅ Complete (this document)
+- T210: Signer mode config + validation ⏳ Pending
+- T211: HSM/PKCS#11 adapter ⏳ Pending
+- T212: Remote signer protocol ⏳ Pending
+- T213: Key rotation hooks ⏳ Pending
 
 ### 6.6 Risk Summary Table
 
@@ -689,6 +728,7 @@ qbind-node \
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
+| **Key Management Design** | [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) | Key management and signer architecture (T209) |
 | TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture |
 | TestNet Beta Audit | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
