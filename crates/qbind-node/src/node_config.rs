@@ -384,6 +384,97 @@ pub fn is_production_signer_mode(mode: SignerMode) -> bool {
 }
 
 // ============================================================================
+// T214: Signer Failure Mode Configuration
+// ============================================================================
+
+/// Signer failure mode for HSM/remote signer errors (T214).
+///
+/// Controls how the node reacts to signer/HSM failures during consensus operations.
+/// This is critical for "fail-closed" behavior on MainNet to prevent signing with
+/// degraded or unavailable signers.
+///
+/// # MainNet Requirement
+///
+/// MainNet validators **MUST** use `ExitOnFailure` to ensure fail-closed behavior.
+/// This is enforced by `validate_mainnet_invariants()`.
+///
+/// # TestNet/DevNet Flexibility
+///
+/// Non-MainNet environments may use `LogAndContinue` for chaos testing, debugging,
+/// or development scenarios where immediate node exit is undesirable.
+///
+/// # Security Notes
+///
+/// - `ExitOnFailure` ensures signing failures are immediately visible and addressed
+/// - `LogAndContinue` should **NEVER** be used on MainNet (enforced by config validation)
+/// - Redundancy is achieved via external orchestration, not automatic failover
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SignerFailureMode {
+    /// Exit the node on signer failure (default, MainNet required).
+    ///
+    /// When an HSM or remote signer error occurs, the node logs the error
+    /// at `error!` level, increments failure metrics, and terminates the process.
+    /// This "fail-closed" behavior ensures that validators do not continue
+    /// operating with potentially degraded or unavailable signing capability.
+    ///
+    /// Operators should use external orchestration (systemd, k8s, etc.) to
+    /// restart the node or failover to a backup signer host.
+    ///
+    /// **This is the only mode allowed on MainNet.**
+    #[default]
+    ExitOnFailure,
+
+    /// Log the error and continue (allowed only in dev/test profiles).
+    ///
+    /// When an HSM or remote signer error occurs, the node logs the error
+    /// and propagates it to the caller without terminating. This allows
+    /// testing failure scenarios and observing degraded behavior.
+    ///
+    /// **WARNING**: This mode must NOT be used on MainNet. It is intended
+    /// for chaos testing, debugging, and development only.
+    LogAndContinue,
+}
+
+impl std::fmt::Display for SignerFailureMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SignerFailureMode::ExitOnFailure => write!(f, "exit-on-failure"),
+            SignerFailureMode::LogAndContinue => write!(f, "log-and-continue"),
+        }
+    }
+}
+
+/// Parse a signer failure mode from a CLI argument string (T214).
+///
+/// Valid values (case-insensitive):
+/// - "exit-on-failure" | "exit" | "fail" → `SignerFailureMode::ExitOnFailure`
+/// - "log-and-continue" | "log" | "continue" → `SignerFailureMode::LogAndContinue`
+///
+/// # Returns
+///
+/// `Some(SignerFailureMode)` if valid, `None` for unrecognized values.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::parse_signer_failure_mode;
+///
+/// assert_eq!(parse_signer_failure_mode("exit-on-failure"), Some(SignerFailureMode::ExitOnFailure));
+/// assert_eq!(parse_signer_failure_mode("log-and-continue"), Some(SignerFailureMode::LogAndContinue));
+/// assert_eq!(parse_signer_failure_mode("invalid"), None);
+/// ```
+pub fn parse_signer_failure_mode(s: &str) -> Option<SignerFailureMode> {
+    match s.to_lowercase().as_str() {
+        "exit-on-failure" | "exit" | "fail" => Some(SignerFailureMode::ExitOnFailure),
+        "log-and-continue" | "log" | "continue" => Some(SignerFailureMode::LogAndContinue),
+        _ => None,
+    }
+}
+
+/// Valid signer failure mode values for CLI help text.
+pub const VALID_SIGNER_FAILURE_MODES: &[&str] = &["exit-on-failure", "log-and-continue"];
+
+// ============================================================================
 // T165: DAG Availability Configuration
 // ============================================================================
 
@@ -1397,6 +1488,18 @@ pub struct NodeConfig {
     ///
     /// Example: `/etc/qbind/hsm.toml`
     pub hsm_config_path: Option<PathBuf>,
+
+    // ========================================================================
+    // T214: Signer Failure Mode Configuration
+    // ========================================================================
+    /// Signer failure mode for HSM/remote signer errors (T214).
+    ///
+    /// Controls how the node reacts to signer/HSM failures during consensus operations.
+    ///
+    /// - DevNet v0: `ExitOnFailure` (default, can be overridden)
+    /// - TestNet Alpha/Beta: `ExitOnFailure` (default, can be overridden to `LogAndContinue`)
+    /// - MainNet v0: `ExitOnFailure` (**required**, cannot be changed)
+    pub signer_failure_mode: SignerFailureMode,
 }
 
 impl Default for NodeConfig {
@@ -1433,6 +1536,8 @@ impl Default for NodeConfig {
             signer_keystore_path: None,
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is the default
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 }
@@ -1466,6 +1571,8 @@ impl NodeConfig {
             signer_keystore_path: None,
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is the default
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 
@@ -1498,6 +1605,8 @@ impl NodeConfig {
             signer_keystore_path: None,
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is the default
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 
@@ -1578,6 +1687,8 @@ impl NodeConfig {
             signer_keystore_path: None,
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is the default
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 
@@ -1633,6 +1744,8 @@ impl NodeConfig {
             signer_keystore_path: None, // Operator must provide
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is the default
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 
@@ -1701,6 +1814,8 @@ impl NodeConfig {
             signer_keystore_path: None, // Operator must provide
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is the default
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 
@@ -1781,6 +1896,8 @@ impl NodeConfig {
             signer_keystore_path: None, // Operator must provide
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214: Exit on failure is required for MainNet
+            signer_failure_mode: SignerFailureMode::ExitOnFailure,
         }
     }
 
@@ -2118,6 +2235,34 @@ impl NodeConfig {
     /// ```
     pub fn with_hsm_config_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
         self.hsm_config_path = Some(path.into());
+        self
+    }
+
+    /// Set the signer failure mode (T214).
+    ///
+    /// Controls how the node reacts to HSM/remote signer failures.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The failure mode to use (`ExitOnFailure` or `LogAndContinue`)
+    ///
+    /// # MainNet Requirement
+    ///
+    /// MainNet validators **must** use `ExitOnFailure`. This is enforced by
+    /// `validate_mainnet_invariants()`. Using `LogAndContinue` on MainNet
+    /// will cause config validation to fail.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, SignerFailureMode};
+    ///
+    /// // For chaos testing on testnet:
+    /// let config = NodeConfig::testnet_beta_preset()
+    ///     .with_signer_failure_mode(SignerFailureMode::LogAndContinue);
+    /// ```
+    pub fn with_signer_failure_mode(mut self, mode: SignerFailureMode) -> Self {
+        self.signer_failure_mode = mode;
         self
     }
 
@@ -2654,6 +2799,15 @@ impl NodeConfig {
             }
         }
 
+        // 21. Signer failure mode must be ExitOnFailure for MainNet (T214)
+        // MainNet validators must fail-closed on signer errors.
+        // LogAndContinue is only allowed for dev/test chaos testing.
+        if self.signer_failure_mode != SignerFailureMode::ExitOnFailure {
+            return Err(MainnetConfigError::SignerFailureModeInvalid {
+                actual: self.signer_failure_mode,
+            });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -2844,6 +2998,15 @@ pub enum MainnetConfigError {
     /// When signer_mode is HsmPkcs11, hsm_config_path must be set
     /// to the path of the HSM configuration file.
     HsmConfigPathMissing,
+
+    // ========================================================================
+    // T214: Signer Failure Mode Errors
+    // ========================================================================
+    /// Signer failure mode is not ExitOnFailure on MainNet (T214).
+    ///
+    /// MainNet validators must use signer_failure_mode = ExitOnFailure to ensure
+    /// fail-closed behavior. LogAndContinue is only allowed for dev/test chaos testing.
+    SignerFailureModeInvalid { actual: SignerFailureMode },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -3012,6 +3175,16 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: hsm_config_path must be set when signer_mode is 'hsm-pkcs11' \
                      (--hsm-config-path=/etc/qbind/hsm.toml)"
+                )
+            }
+            // T214: Signer failure mode errors
+            MainnetConfigError::SignerFailureModeInvalid { actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: signer_failure_mode must be 'exit-on-failure' but is '{}'. \
+                     LogAndContinue is only allowed for dev/test chaos testing. \
+                     (--signer-failure-mode=exit-on-failure)",
+                    actual
                 )
             }
         }

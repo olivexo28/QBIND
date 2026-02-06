@@ -255,6 +255,11 @@ pub use node_config::{
     is_production_signer_mode, parse_signer_mode, SignerMode, VALID_SIGNER_MODES,
 };
 
+// T214 Signer Failure Mode exports
+pub use node_config::{
+    parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER_FAILURE_MODES,
+};
+
 // T213 Key Rotation CLI exports
 pub use key_rotation_cli::{
     init_key_rotation, log_dual_key_validation, log_rotation_committed, log_rotation_event_applied,
@@ -301,9 +306,9 @@ pub use metrics::{
     DisconnectReason, EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
     KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, MonetaryMetrics, NetworkMetrics,
     NodeMetrics, OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics,
-    SignRequestKind, SignerKeystoreMetrics, SignerModeKind, SpawnBlockingMetrics, StorageMetrics,
-    StorageOp, ValidatorEquivocationMetrics, ValidatorVoteCounters, ValidatorVoteMetrics,
-    ViewLagMetrics, MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
+    SignRequestKind, SignerHealth, SignerKeystoreMetrics, SignerModeKind, SpawnBlockingMetrics,
+    StorageMetrics, StorageOp, ValidatorEquivocationMetrics, ValidatorVoteCounters,
+    ValidatorVoteMetrics, ViewLagMetrics, MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
 };
 
 // Metrics HTTP server exports (T126)

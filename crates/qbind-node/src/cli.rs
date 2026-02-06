@@ -39,7 +39,7 @@ use crate::node_config::{
     parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
     parse_mempool_mode, parse_network_mode, parse_signer_mode, parse_state_retention_mode,
     DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
-    ParseEnvironmentError, SignerMode, StateRetentionConfig,
+    ParseEnvironmentError, SignerFailureMode, SignerMode, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -568,6 +568,8 @@ impl CliArgs {
                 signer_keystore_path: None,
                 remote_signer_url: None,
                 hsm_config_path: None,
+                // T214: Exit on failure is the default
+                signer_failure_mode: SignerFailureMode::ExitOnFailure,
             }
         };
 

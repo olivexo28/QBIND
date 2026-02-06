@@ -210,15 +210,19 @@ impl DaemonMetrics {
     fn inc_connections(&self) {
         self.connections_total.fetch_add(1, Ordering::Relaxed);
     }
+    #[allow(dead_code)]
     fn inc_requests(&self) {
         self.requests_total.fetch_add(1, Ordering::Relaxed);
     }
+    #[allow(dead_code)]
     fn inc_signatures(&self) {
         self.signatures_total.fetch_add(1, Ordering::Relaxed);
     }
+    #[allow(dead_code)]
     fn inc_rejected(&self) {
         self.rejected_total.fetch_add(1, Ordering::Relaxed);
     }
+    #[allow(dead_code)]
     fn inc_rate_limited(&self) {
         self.rate_limited_total.fetch_add(1, Ordering::Relaxed);
     }
@@ -371,6 +375,7 @@ fn create_backend_signer(config: &RemoteSignerConfig) -> Result<Arc<dyn Validato
 // Connection Handler
 // ============================================================================
 
+#[allow(dead_code)]
 fn handle_connection(
     mut channel: qbind_node::secure_channel::SecureChannel,
     signer: Arc<dyn ValidatorSigner>,
@@ -440,6 +445,7 @@ fn handle_connection(
     }
 }
 
+#[allow(dead_code)]
 fn validate_and_sign(
     request: &RemoteSignRequest,
     signer: &dyn ValidatorSigner,

@@ -71,7 +71,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R2** | Economic Integrity (gas/fees) | High | Partially Mitigated | [Spec §3](./QBIND_MAINNET_V0_SPEC.md#3-gas--fees) |
 | **MN-R3** | State Growth & Data Availability | Medium | Open | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
 | **MN-R4** | P2P & Eclipse Resistance | High | Partially Mitigated | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
-| **MN-R5** | Key Management & Remote Signing | Critical | Open | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
+| **MN-R5** | Key Management & Remote Signing | Critical | Partially Mitigated (T211–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | Partially Mitigated | [Spec §7](./QBIND_MAINNET_V0_SPEC.md#7-operational-profiles--cli-defaults) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 
@@ -221,8 +221,9 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | :--- | :--- | :--- | :--- |
 | **Key compromise** | Compromised signing key allows forgery | Critical | Partially Mitigated |
 | **No HSM support** | Keys stored on disk vulnerable to theft | High | Mitigated (T211) |
-| **Loopback signer in prod** | Test signer used in production | High | Partially Mitigated |
-| **Key rotation failures** | Unable to rotate compromised key | Medium | Mitigated |
+| **Loopback signer in prod** | Test signer used in production | High | Mitigated (T210) |
+| **Key rotation failures** | Unable to rotate compromised key | Medium | Mitigated (T213) |
+| **HSM failures / signer unavailability** | Validator offline if signer down | High | Partially Mitigated (T214) |
 
 **Current Mitigations**:
 - ✅ EncryptedFsV1 keystore (encrypted at rest)
@@ -232,17 +233,27 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ **HSM/PKCS#11 adapter implemented (T211)** — MainNet supports PKCS#11 HSM signer via HsmPkcs11 mode (SoftHSM + hardware HSMs)
 - ✅ **Remote signer protocol implemented (T212)** — TcpKemTlsSignerTransport + qbind-remote-signer daemon
 - ✅ **Key rotation hooks implemented (T213)** — KeyRotationEvent, dual-key grace period, CLI helper
-- ⏳ Signer mode config and validation pending (T210)
+- ✅ **HSM redundancy & failover v0 (T214)** — see mitigations below
+
+**T214 Mitigations (HSM Failures / Signer Unavailability)**:
+- ✅ `SignerFailureMode::ExitOnFailure` enforced on MainNet — node exits on signer error (fail-closed)
+- ✅ Startup reachability checks for HSM/remote signer — `qbind_hsm_startup_ok` metric
+- ✅ Health signaling via `SignerHealth` enum and metrics
+- ✅ Operator runbook for HSM redundancy and signer failover — see [Key Management Design §3.7](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#37-signer-failure-modes--redundancy-patterns-t214)
+- ✅ Documented redundancy patterns (active/passive, HSM cluster)
 
 **Additional MainNet Requirements**:
 - [x] **Key management design** — T209 complete
-- [ ] Signer mode config + `validate_mainnet_invariants()` enforcement (T210)
+- [x] Signer mode config + `validate_mainnet_invariants()` enforcement (T210) — Complete
 - [x] **HSM production integration (PKCS#11 adapter) (T211)** — Ready
 - [x] **Remote signer protocol v0 (T212)** — Ready
 - [x] **Key rotation hooks v0 (T213)** — Ready (KeyRotationRegistry with dual-key support, CLI helper)
 - [x] Key rotation procedures documented — T213 implementation docs
+- [x] **HSM redundancy v0 (T214)** — Fail-closed behavior, health signaling, redundancy patterns documented
 - [ ] Compromised key handling procedures
 - [ ] External audit of key management code
+
+**Status Summary**: Partially mitigated by T211–T214; external audit of key management code is pending.
 
 **Target Phase**: MainNet v0 (blocking)
 

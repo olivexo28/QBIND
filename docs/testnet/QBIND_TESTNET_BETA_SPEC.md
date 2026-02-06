@@ -441,6 +441,36 @@ qbind-node --profile testnet-beta \
 
 **Key Risk**: Beta validators using loopback signers may carry insecure habits to MainNet, where loopback is forbidden.
 
+### 6.7 HSM Redundancy Experimentation (T214)
+
+Beta operators are encouraged to experiment with HSM/remote signer redundancy following the MainNet runbook patterns:
+
+| Pattern | Description | Beta Recommendation |
+| :--- | :--- | :--- |
+| **Active/Passive** | Two signer hosts, one active | ✅ Recommended for ops practice |
+| **HSM Cluster** | Vendor-provided HA | ✅ Available if using cloud HSM |
+
+**Chaos Testing with LogAndContinue**:
+
+TestNet Beta may allow `SignerFailureMode::LogAndContinue` for chaos testing scenarios. This mode allows the node to continue running (and log errors) when the signer fails, which is useful for observing degraded behavior without immediate process termination.
+
+```bash
+# Chaos testing mode (TestNet Beta only, NOT for MainNet)
+qbind-node --profile testnet-beta \
+    --signer-failure-mode log-and-continue \
+    --data-dir /data/qbind
+```
+
+**⚠️ WARNING**: `LogAndContinue` must **NOT** be used on MainNet. MainNet enforces `ExitOnFailure` via `validate_mainnet_invariants()` and will reject any configuration with `LogAndContinue`.
+
+**Health Monitoring**:
+
+Beta operators should monitor signer health metrics to practice MainNet operations:
+
+- `qbind_hsm_startup_ok` – Startup health check (1=ok, 0=failed)
+- `qbind_hsm_sign_error_total{kind}` – HSM errors by type
+- `qbind_remote_sign_failures_total{reason}` – Remote signer failures
+
 ---
 
 ## 7. Operational Profiles & CLI Defaults

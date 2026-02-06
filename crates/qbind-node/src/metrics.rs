@@ -5641,6 +5641,55 @@ impl DagCouplingMetrics {
     }
 }
 
+// ============================================================================
+// T214: Signer Health Classification
+// ============================================================================
+
+/// Health classification for signer subsystems (T214).
+///
+/// This enum represents the aggregate health of HSM and remote signer backends
+/// based on metrics counters. It is used for observability and health checks,
+/// not for automatic failover decisions.
+///
+/// # Health States
+///
+/// - **Healthy**: No errors observed, all operations succeeding
+/// - **Degraded**: Some errors but majority of operations succeeding (error rate < 50%)
+/// - **Failed**: High error rate (>= 50%) or repeated failures
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use qbind_node::metrics::{NodeMetrics, SignerHealth};
+///
+/// let metrics = NodeMetrics::new();
+/// // ... operations occur ...
+/// match metrics.signer_health() {
+///     SignerHealth::Healthy => println!("Signer healthy"),
+///     SignerHealth::Degraded => eprintln!("Signer degraded - check logs"),
+///     SignerHealth::Failed => eprintln!("Signer failed - investigate immediately"),
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignerHealth {
+    /// Signer is healthy - no errors observed.
+    Healthy,
+    /// Signer is degraded - some errors but still signing (error rate < 50%).
+    Degraded,
+    /// Signer has failed - repeated failures or high error rate (>= 50%).
+    Failed,
+}
+
+impl std::fmt::Display for SignerHealth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SignerHealth::Healthy => write!(f, "healthy"),
+            SignerHealth::Degraded => write!(f, "degraded"),
+            SignerHealth::Failed => write!(f, "failed"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct NodeMetrics {
     network: NetworkMetrics,
@@ -5843,6 +5892,59 @@ impl NodeMetrics {
     /// Get remote signer client metrics (T212).
     pub fn remote_signer(&self) -> &crate::remote_signer::RemoteSignerMetrics {
         &self.remote_signer
+    }
+
+    /// Compute the overall signer health based on HSM and remote signer metrics (T214).
+    ///
+    /// This is a pure helper that derives a health classification from the underlying
+    /// counters. The heuristic is:
+    ///
+    /// - **Healthy**: No errors in the last observation window
+    /// - **Degraded**: Some errors but still signing (error rate < 50%)
+    /// - **Failed**: Repeated failures (error rate >= 50% or all recent ops failed)
+    ///
+    /// # Returns
+    ///
+    /// A `SignerHealth` variant indicating the current health status.
+    ///
+    /// # Note
+    ///
+    /// This is a point-in-time snapshot. For production monitoring, use the
+    /// underlying metrics counters with a time-series database.
+    pub fn signer_health(&self) -> SignerHealth {
+        // Get HSM metrics
+        let hsm_success = self.hsm.sign_success_total();
+        let hsm_errors = self.hsm.sign_error_config_total() + self.hsm.sign_error_runtime_total();
+
+        // Get remote signer metrics
+        let rs_requests = self.remote_signer.requests_proposal_total()
+            + self.remote_signer.requests_vote_total()
+            + self.remote_signer.requests_timeout_total();
+        let rs_failures = self.remote_signer.failures_transport_total()
+            + self.remote_signer.failures_timeout_total()
+            + self.remote_signer.failures_server_reject_total()
+            + self.remote_signer.failures_protocol_total();
+
+        // Combine totals
+        let total_success = hsm_success + rs_requests.saturating_sub(rs_failures);
+        let total_errors = hsm_errors + rs_failures;
+        let total_ops = total_success + total_errors;
+
+        if total_ops == 0 {
+            // No operations yet - consider healthy (startup state)
+            return SignerHealth::Healthy;
+        }
+
+        // Calculate error rate
+        let error_rate_percent = (total_errors * 100) / total_ops;
+
+        if total_errors == 0 {
+            SignerHealth::Healthy
+        } else if error_rate_percent < 50 {
+            SignerHealth::Degraded
+        } else {
+            SignerHealth::Failed
+        }
     }
 
     /// Record a DAG coupling validation result (T191).
@@ -7425,5 +7527,91 @@ mod tests {
         let metrics: ConsensusProgressMetrics = Default::default();
         assert_eq!(metrics.qcs_formed_total(), 0);
         assert_eq!(metrics.votes_observed_total(), 0);
+    }
+
+    // ========================================================================
+    // SignerHealth tests (T214)
+    // ========================================================================
+
+    #[test]
+    fn signer_health_healthy_when_no_operations() {
+        let metrics = NodeMetrics::new();
+        // No operations recorded yet
+        assert_eq!(
+            metrics.signer_health(),
+            SignerHealth::Healthy,
+            "Signer health should be Healthy when no operations have occurred"
+        );
+    }
+
+    #[test]
+    fn signer_health_healthy_with_only_successes() {
+        let metrics = NodeMetrics::new();
+        // Record only successful HSM operations
+        metrics.hsm().record_sign_success(10);
+        metrics.hsm().record_sign_success(12);
+        metrics.hsm().record_sign_success(8);
+
+        assert_eq!(
+            metrics.signer_health(),
+            SignerHealth::Healthy,
+            "Signer health should be Healthy with only successful operations"
+        );
+    }
+
+    #[test]
+    fn signer_health_degraded_with_some_errors() {
+        let metrics = NodeMetrics::new();
+        // Record mostly successes but some errors (< 50% error rate)
+        metrics.hsm().record_sign_success(10);
+        metrics.hsm().record_sign_success(10);
+        metrics.hsm().record_sign_success(10);
+        metrics.hsm().record_sign_error_runtime(); // 1 error out of 4 = 25%
+
+        assert_eq!(
+            metrics.signer_health(),
+            SignerHealth::Degraded,
+            "Signer health should be Degraded with error rate < 50%"
+        );
+    }
+
+    #[test]
+    fn signer_health_failed_with_high_error_rate() {
+        let metrics = NodeMetrics::new();
+        // Record more errors than successes (>= 50% error rate)
+        metrics.hsm().record_sign_success(10);
+        metrics.hsm().record_sign_error_runtime();
+        metrics.hsm().record_sign_error_runtime();
+
+        assert_eq!(
+            metrics.signer_health(),
+            SignerHealth::Failed,
+            "Signer health should be Failed with error rate >= 50%"
+        );
+    }
+
+    #[test]
+    fn signer_health_considers_remote_signer_metrics() {
+        let metrics = NodeMetrics::new();
+        // Record remote signer requests with some failures
+        metrics.remote_signer().record_result("proposal", true, 10, None);
+        metrics.remote_signer().record_result("vote", true, 8, None);
+        metrics
+            .remote_signer()
+            .record_result("timeout", false, 500, Some("timeout"));
+
+        // 2 successes + 1 failure = 33% error rate -> Degraded
+        assert_eq!(
+            metrics.signer_health(),
+            SignerHealth::Degraded,
+            "Signer health should consider remote signer metrics"
+        );
+    }
+
+    #[test]
+    fn signer_health_display_format() {
+        assert_eq!(format!("{}", SignerHealth::Healthy), "healthy");
+        assert_eq!(format!("{}", SignerHealth::Degraded), "degraded");
+        assert_eq!(format!("{}", SignerHealth::Failed), "failed");
     }
 }

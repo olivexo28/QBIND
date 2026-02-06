@@ -10,10 +10,11 @@
 //! 4. Validation failure tests (one per invariant)
 //! 5. CLI integration tests
 //! 6. T210 Signer mode validation tests
+//! 7. T214 Signer failure mode validation tests
 
 use qbind_node::node_config::{
     parse_config_profile, ConfigProfile, ExecutionProfile, MainnetConfigError, MempoolMode,
-    NetworkMode, NodeConfig, SignerMode,
+    NetworkMode, NodeConfig, SignerFailureMode, SignerMode,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -858,4 +859,108 @@ fn devnet_allows_loopback_signer_mode() {
         "DevNet should allow LoopbackTesting signer mode"
     );
     // DevNet doesn't enforce MainNet invariants, so no validation error
+}
+// ============================================================================
+// Part 8: T214 Signer Failure Mode Validation Tests
+// ============================================================================
+
+/// Test: MainNet preset has ExitOnFailure as default signer failure mode.
+#[test]
+fn mainnet_preset_has_exit_on_failure_mode() {
+    let config = NodeConfig::mainnet_preset();
+    assert_eq!(
+        config.signer_failure_mode,
+        SignerFailureMode::ExitOnFailure,
+        "MainNet preset should default to ExitOnFailure signer failure mode"
+    );
+}
+
+/// Test: MainNet rejects LogAndContinue signer failure mode.
+#[test]
+fn test_mainnet_rejects_signer_failure_mode_log_and_continue() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_keystore_path("/data/qbind/keystore")
+        .with_signer_failure_mode(SignerFailureMode::LogAndContinue);
+
+    let result = config.validate_mainnet_invariants();
+    assert!(result.is_err());
+    match result {
+        Err(MainnetConfigError::SignerFailureModeInvalid { actual }) => {
+            assert_eq!(actual, SignerFailureMode::LogAndContinue);
+        }
+        Err(e) => panic!("Expected SignerFailureModeInvalid error, got: {:?}", e),
+        Ok(()) => panic!("Expected error for LogAndContinue signer failure mode on MainNet"),
+    }
+}
+
+/// Test: TestNet allows LogAndContinue signer failure mode (chaos testing).
+#[test]
+fn test_non_mainnet_allows_signer_failure_mode_log_and_continue() {
+    // TestNet can use LogAndContinue for chaos testing
+    let testnet_config = NodeConfig::testnet_beta_preset()
+        .with_signer_failure_mode(SignerFailureMode::LogAndContinue);
+    assert_eq!(
+        testnet_config.signer_failure_mode,
+        SignerFailureMode::LogAndContinue,
+        "TestNet should allow LogAndContinue for chaos testing"
+    );
+    // Note: TestNet doesn't run validate_mainnet_invariants(), so this is valid
+
+    // DevNet can also use LogAndContinue
+    let devnet_config = NodeConfig::devnet_v0_preset()
+        .with_signer_failure_mode(SignerFailureMode::LogAndContinue);
+    assert_eq!(
+        devnet_config.signer_failure_mode,
+        SignerFailureMode::LogAndContinue,
+        "DevNet should allow LogAndContinue for testing"
+    );
+}
+
+/// Test: Valid MainNet config with ExitOnFailure passes validation.
+#[test]
+fn validate_mainnet_invariants_accepts_exit_on_failure() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_keystore_path("/data/qbind/keystore")
+        .with_signer_failure_mode(SignerFailureMode::ExitOnFailure);
+
+    let result = config.validate_mainnet_invariants();
+    assert!(
+        result.is_ok(),
+        "Valid MainNet config with ExitOnFailure should pass validation: {:?}",
+        result
+    );
+}
+
+/// Test: All presets default to ExitOnFailure.
+#[test]
+fn all_presets_default_to_exit_on_failure() {
+    let devnet = NodeConfig::devnet_v0_preset();
+    assert_eq!(
+        devnet.signer_failure_mode,
+        SignerFailureMode::ExitOnFailure,
+        "DevNet preset should default to ExitOnFailure"
+    );
+
+    let alpha = NodeConfig::testnet_alpha_preset();
+    assert_eq!(
+        alpha.signer_failure_mode,
+        SignerFailureMode::ExitOnFailure,
+        "TestNet Alpha preset should default to ExitOnFailure"
+    );
+
+    let beta = NodeConfig::testnet_beta_preset();
+    assert_eq!(
+        beta.signer_failure_mode,
+        SignerFailureMode::ExitOnFailure,
+        "TestNet Beta preset should default to ExitOnFailure"
+    );
+
+    let mainnet = NodeConfig::mainnet_preset();
+    assert_eq!(
+        mainnet.signer_failure_mode,
+        SignerFailureMode::ExitOnFailure,
+        "MainNet preset should default to ExitOnFailure"
+    );
 }

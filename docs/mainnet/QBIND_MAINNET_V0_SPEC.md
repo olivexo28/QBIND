@@ -561,6 +561,28 @@ rate_limit_rps = 100
 
 **Risk Budget**: Key management is **high risk** area; HSM + remote signer recommended for MainNet.
 
+#### 6.5.1 HSM / Remote Signer Availability and Failure Semantics (T214)
+
+MainNet validators must treat signer/HSM availability as a **hard dependency**:
+
+1. **Fail-Closed Behavior**: On signer failure (HSM error, remote signer unreachable), the node exits immediately rather than continuing without signing capability.
+
+2. **Failure Mode Configuration**:
+   - `SignerFailureMode::ExitOnFailure` – **Required for MainNet**
+   - `SignerFailureMode::LogAndContinue` – Forbidden on MainNet (only for dev/test chaos testing)
+
+3. **Expected Behavior on Signer Failure**:
+   - Node logs error at `error!` level
+   - Node increments failure metrics (`qbind_hsm_sign_error_total`, `qbind_remote_sign_failures_total`)
+   - Node terminates process
+   - External orchestration (systemd, k8s, etc.) may restart on same or replacement signer
+
+4. **Health Signaling**:
+   - `qbind_hsm_startup_ok` metric indicates startup health check result
+   - `NodeMetrics::signer_health()` derives aggregate health (Healthy/Degraded/Failed)
+
+5. **Redundancy Pattern**: Redundancy is achieved via external orchestration, not automatic in-node failover. See [QBIND_KEY_MANAGEMENT_DESIGN.md §3.7](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#37-signer-failure-modes--redundancy-patterns-t214) for recommended patterns.
+
 ### 6.6 Risk Summary Table
 
 | Area | Severity | MainNet v0 Status | Notes |
@@ -569,14 +591,15 @@ rate_limit_rps = 100
 | Gas/Fees | Medium | Partially Mitigated | Simple model; future EIP-1559 |
 | DAG/Availability | Medium | Partially Mitigated | Consensus coupling new |
 | P2P/Eclipse | Medium-High | Planned | Production validation needed |
-| Key Management | High | Mitigated | HSM (T211) + Remote Signer (T212) implemented |
+| Key Management | High | Mitigated | HSM (T211) + Remote Signer (T212) + T214 fail-closed |
 
-**Risk Areas (T211 – HSM/PKCS#11, T212 – Remote Signer)**:
+**Risk Areas (T211 – HSM/PKCS#11, T212 – Remote Signer, T214 – Redundancy)**:
 
-- HSM availability is now a single point of failure (validator offline if HSM down)
-- Startup invariants now enforce presence of HSM config in HsmPkcs11 mode
+- HSM availability is a hard dependency (validator offline if HSM down)
+- Startup invariants enforce presence of HSM/signer config
 - Remote signer startup checks verify connectivity before consensus participation
-- Fail-closed behaviour: node will not continue as validator if signer is unavailable
+- **T214**: Fail-closed behavior enforced (`SignerFailureMode::ExitOnFailure` required on MainNet)
+- **T214**: Redundancy achieved via external orchestration, documented patterns available
 
 ---
 
