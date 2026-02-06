@@ -1,0 +1,23 @@
+[package]
+name = "qbind-remote-signer"
+version = "0.1.0"
+edition = "2021"
+description = "Remote signer daemon for QBIND validator nodes (T212)"
+
+[features]
+default = []
+# Enable HSM/PKCS#11 backend support.
+hsm-pkcs11 = ["qbind-node/hsm-pkcs11"]
+
+[[bin]]
+name = "qbind-remote-signer"
+path = "src/main.rs"
+
+[dependencies]
+qbind-node      = { path = "../qbind-node" }
+qbind-net       = { path = "../qbind-net" }
+qbind-crypto    = { path = "../qbind-crypto" }
+qbind-consensus = { path = "../qbind-consensus" }
+tokio          = { version = "1.44", features = ["rt-multi-thread", "time", "sync", "macros", "net", "signal"] }
+serde          = { version = "1.0", features = ["derive"] }
+clap           = { version = "4.5", features = ["derive"] }

@@ -401,6 +401,44 @@ qbind-node --signer-mode hsm-pkcs11 --hsm-config-path /tmp/hsm-beta.toml
 
 > **⚠️ Note**: SoftHSM is suitable for testing only. For production MainNet validators, use a hardware HSM (AWS CloudHSM, Thales Luna, YubiHSM 2, etc.).
 
+### 6.6 Remote Signer for Beta (T212)
+
+Advanced Beta operators can experiment with `SignerMode::RemoteSigner` and the `qbind-remote-signer` daemon. This setup is recommended for operators planning to run MainNet validators, as it allows testing the production key isolation architecture.
+
+**Remote Signer Setup for Beta**:
+
+1. **Configure the remote signer daemon** (`/tmp/remote_signer.toml`):
+
+```toml
+listen_addr = "127.0.0.1:9443"
+validator_id = 42
+backend_mode = "encrypted-fs"
+keystore_path = "/tmp/beta-keystore"
+keystore_entry_id = "beta-validator-42"
+rate_limit_rps = 100
+passphrase_env_var = "QBIND_KEYSTORE_PASSPHRASE"
+```
+
+2. **Start the remote signer daemon**:
+
+```bash
+export QBIND_KEYSTORE_PASSPHRASE=<your-passphrase>
+qbind-remote-signer --config /tmp/remote_signer.toml
+```
+
+3. **Start the Beta node with remote signer**:
+
+```bash
+qbind-node --profile testnet-beta \
+    --signer-mode remote-signer \
+    --remote-signer-url kemtls://127.0.0.1:9443 \
+    --data-dir /data/qbind
+```
+
+> **Note**: For Beta testing, the remote signer and node can run on the same host. For MainNet, they should be on separate hosts for proper key isolation.
+
+> **HSM Backend**: For production-grade testing, configure `backend_mode = "hsm-pkcs11"` in the remote signer to use a hardware HSM.
+
 **Key Risk**: Beta validators using loopback signers may carry insecure habits to MainNet, where loopback is forbidden.
 
 ---

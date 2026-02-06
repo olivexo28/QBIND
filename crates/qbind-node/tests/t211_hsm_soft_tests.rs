@@ -88,7 +88,10 @@ fn config_missing_fields_errors() {
         pin_env_var  = "PIN"
     "#;
     let err = HsmPkcs11Config::from_toml(toml).unwrap_err();
-    assert!(matches!(err, HsmPkcs11Error::MissingConfigField("key_label")));
+    assert!(matches!(
+        err,
+        HsmPkcs11Error::MissingConfigField("key_label")
+    ));
 }
 
 /// Verify feature-not-enabled error message.

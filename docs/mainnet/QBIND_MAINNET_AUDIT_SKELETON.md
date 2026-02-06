@@ -337,7 +337,17 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | 27 | HSM production integration available | ✅ Ready | T211 – PKCS#11 adapter implemented, SoftHSM + hardware HSMs |
 | 28 | Loopback signer rejected for MainNet profile | ⏳ Pending | T210 |
 | 29 | Key rotation procedures documented | ⏳ Pending | T213 |
-| 30 | Remote signer protocol implemented | ⏳ Pending | T212 |
+| 30 | Remote signer protocol implemented | ✅ Ready | T212 – TcpKemTlsSignerTransport + qbind-remote-signer daemon |
+
+**T212 Audit Scope (Remote Signer Protocol)**:
+
+- [ ] Verify KEMTLS implementation for remote signer transport
+- [ ] Verify request validation (validator_id, suite_id, preimage bounds)
+- [ ] Verify per-connection rate limiting implementation
+- [ ] Verify that no private key material crosses the wire
+- [ ] Verify error handling does not leak sensitive information
+- [ ] Verify startup reachability check in `validate_mainnet_invariants()`
+- [ ] Review protocol wire format for correctness and security
 
 ### 4.7 Operations & Security
 
@@ -358,9 +368,9 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | Gas/Fees | 2 | 2 | 4 |
 | Mempool & DAG | 6 | 1 | 7 |
 | Networking / P2P | 0 | 5 | 5 |
-| Keys & HSM | 1 | 4 | 5 |
+| Keys & HSM | 3 | 2 | 5 |
 | Operations | 2 | 3 | 5 |
-| **Total** | **18** | **17** | **35** |
+| **Total** | **20** | **15** | **35** |
 
 ---
 

@@ -13,4 +13,5 @@ members = [
     "crates/qbind-consensus",
     "crates/qbind-node",
     "crates/qbind-net",
+    "crates/qbind-remote-signer",
 ]
