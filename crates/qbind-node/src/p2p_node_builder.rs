@@ -702,6 +702,8 @@ mod tests {
             signer_keystore_path: None,
             remote_signer_url: None,
             hsm_config_path: None,
+            // T214 field
+            signer_failure_mode: crate::node_config::SignerFailureMode::ExitOnFailure,
         }
     }
 
