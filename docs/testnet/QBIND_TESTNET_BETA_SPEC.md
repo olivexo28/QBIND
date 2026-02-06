@@ -352,6 +352,31 @@ This section provides a Beta-specific view of key security areas. For the comple
 
 **Key Risk**: Static peer configuration creates eclipse attack surface; mis-configured peers could isolate validators.
 
+### 6.5 Key Management & Signers (T209)
+
+TestNet Beta validators should follow improved key management practices in preparation for MainNet:
+
+| Aspect | Beta Guidance | Risk Level |
+| :--- | :--- | :--- |
+| **Loopback signer** | ⚠️ Discouraged | Medium |
+| **EncryptedFsV1** | ✅ Recommended | Low |
+| **RemoteSigner** | ✅ Recommended | Low |
+| **HSM usage** | ✅ Encouraged (not required) | Low |
+
+**Beta Signer Recommendations**:
+
+1. **Do NOT use loopback signers** for persistent Beta validators. While technically allowed, loopback signers expose key material in the same process as consensus and should only be used for development/testing.
+
+2. **Use EncryptedFsV1 or RemoteSigner** for all Beta validators that will persist beyond testing. This practices production-grade key handling.
+
+3. **HSM usage is encouraged** for operators who plan to run MainNet validators. Beta provides an opportunity to test HSM integration flows before MainNet.
+
+4. **Test key rotation procedures** during Beta. While not enforced, validators should practice the rotation workflow documented in the key management design.
+
+> **📋 Design Reference**: For the complete key management architecture and MainNet requirements, see [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) (T209).
+
+**Key Risk**: Beta validators using loopback signers may carry insecure habits to MainNet, where loopback is forbidden.
+
 ---
 
 ## 7. Operational Profiles & CLI Defaults
@@ -564,6 +589,7 @@ The canonical specification for MainNet monetary behavior is [QBIND_MONETARY_POL
 | **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet v0 architecture |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk tracker |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
+| **Key Management Design** | [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) | Key management and signer architecture (T209) |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](./QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |
 | TestNet Alpha Audit | [QBIND_TESTNET_ALPHA_AUDIT.md](./QBIND_TESTNET_ALPHA_AUDIT.md) | Alpha risk and readiness |
 | TestNet Beta Audit Skeleton | [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md) | Beta risk tracker |
