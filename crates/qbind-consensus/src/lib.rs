@@ -42,6 +42,7 @@ pub mod governed_key_registry;
 pub mod hotstuff_state_engine;
 pub mod ids;
 pub mod key_registry;
+pub mod key_rotation;
 pub mod multi_sim;
 pub mod network;
 pub mod pacemaker;
@@ -74,6 +75,11 @@ pub use hotstuff_state_engine::{CommittedEntry, HotStuffStateEngine};
 pub use ids::{ConsensusNodeId, ValidatorId, ValidatorPublicKey};
 pub use key_registry::{
     SuiteAwareValidatorKeyProvider, ValidatorKeyProvider, ValidatorKeyRegistry,
+};
+pub use key_rotation::{
+    advance_epoch_for_rotation, apply_key_rotation_event, KeyRole, KeyRotationError,
+    KeyRotationEvent, KeyRotationKind, KeyRotationRegistry, PendingKey, PublicKeyBytes,
+    ValidatorKeyId, ValidatorKeyState,
 };
 pub use multi_sim::MultiNodeSim;
 pub use network::{ConsensusNetwork, ConsensusNetworkEvent, MockConsensusNetwork, NetworkError};
