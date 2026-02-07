@@ -699,6 +699,29 @@ The canonical specification for MainNet monetary behavior is [QBIND_MONETARY_POL
 
 **Implementation Status**: Design complete (T194). Implementation pending in T195+ tasks.
 
+### 10.3 Path to MainNet Operations (T216)
+
+TestNet Beta operators should begin practicing MainNet operational procedures:
+
+1. **Use the MainNet runbook patterns** where applicable:
+   - The full MainNet operational runbook is at [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md)
+   - Runbook covers: node roles, topology, bootstrap, snapshots, key rotation, P2P, monetary telemetry
+
+2. **Set up monitoring using the provided skeletons**:
+   - Prometheus alerts: [prometheus/qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml)
+   - Grafana dashboard: [grafana/qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json)
+
+3. **Practice key management procedures**:
+   - Test HSM integration using SoftHSM (see [§6.5 Key Management](#65-key-management--signers-t209))
+   - Run key rotation drills (see runbook §6)
+   - Verify signer failover procedures
+
+4. **Validate snapshot/fast-sync workflows**:
+   - Test snapshot creation and restoration
+   - Verify fast-sync from snapshots works correctly
+
+**Note**: TestNet Beta allows `SignerFailureMode::LogAndContinue` for chaos testing. MainNet requires `ExitOnFailure`.
+
 ---
 
 ## 11. Related Documents
@@ -706,6 +729,7 @@ The canonical specification for MainNet monetary behavior is [QBIND_MONETARY_POL
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet v0 architecture |
+| **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk tracker |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
 | **Key Management Design** | [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) | Key management and signer architecture (T209) |

@@ -72,7 +72,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R3** | State Growth & Data Availability | Medium | ✅ Mitigated (T208, T215) | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
 | **MN-R4** | P2P & Eclipse Resistance | High | Partially Mitigated | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
 | **MN-R5** | Key Management & Remote Signing | Critical | Partially Mitigated (T211–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
-| **MN-R6** | Operational & Monitoring Gaps | Medium | Partially Mitigated | [Spec §7](./QBIND_MAINNET_V0_SPEC.md#7-operational-profiles--cli-defaults) |
+| **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 
 ---
@@ -266,24 +266,25 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Insufficient metrics** | Missing metrics for MainNet operations | Medium | Partially Mitigated |
-| **No alerting** | No automated alerting for issues | Medium | Open |
-| **Missing runbooks** | No documented procedures for incidents | Medium | Open |
-| **No dashboards** | No operational dashboards | Low | Open |
+| **Insufficient metrics** | Missing metrics for MainNet operations | Medium | ✅ Mitigated |
+| **No alerting** | No automated alerting for issues | Medium | ✅ Mitigated (T216) |
+| **Missing runbooks** | No documented procedures for incidents | Medium | ✅ Mitigated (T216) |
+| **No dashboards** | No operational dashboards | Low | ✅ Mitigated (T216) |
 
 **Current Mitigations**:
 - ✅ Metrics for consensus, mempool, execution, DAG, P2P
 - ✅ P2P multi-process runbook (T175)
-- ⏳ MainNet operational runbook pending
-- ⏳ Alerting integration pending
+- ✅ **MainNet operational runbook (T216)** — see [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md)
+- ✅ **Prometheus alert rules skeleton (T216)** — see [prometheus/qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml)
+- ✅ **Grafana dashboard skeleton (T216)** — see [grafana/qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json)
 
-**Additional MainNet Requirements**:
-- [ ] MainNet operational runbook
-- [ ] Prometheus/Grafana alerting integration
-- [ ] Operational dashboards
-- [ ] Incident response procedures
+**T216 Deliverables**:
+- [x] MainNet operational runbook (node roles, topology, config, bootstrap, snapshots, key rotation, P2P, monetary telemetry)
+- [x] Prometheus/Grafana alerting skeleton (consensus, P2P, signer, state, monetary alerts)
+- [x] Operational dashboard (JSON template with panels for all major domains)
+- [x] Incident response procedures (key compromise, signer failure, state issues)
 
-**Target Phase**: MainNet v0 (blocking for runbook; dashboards can be v0.x)
+**Target Phase**: ✅ MainNet v0 (runbook and skeletons complete)
 
 ---
 
@@ -376,9 +377,11 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | :--- | :--- | :--- | :--- |
 | 31 | MainNet configuration profile implemented | ✅ Ready | T185 |
 | 32 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
-| 33 | MainNet operational runbook complete | ⏳ Pending | Future task |
-| 34 | External security audit completed | ⏳ Pending | External |
-| 35 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
+| 33 | MainNet operational runbook complete | ✅ Ready | T216 [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) |
+| 34 | Prometheus alerting skeleton | ✅ Ready | T216 [qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml) |
+| 35 | Grafana dashboard skeleton | ✅ Ready | T216 [qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json) |
+| 36 | External security audit completed | ⏳ Pending | External |
+| 37 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
 
 ### 4.8 Readiness Summary
 
@@ -390,8 +393,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | Mempool & DAG | 6 | 1 | 7 |
 | Networking / P2P | 0 | 5 | 5 |
 | Keys & HSM | 4 | 1 | 5 |
-| Operations | 2 | 3 | 5 |
-| **Total** | **21** | **14** | **35** |
+| Operations | 5 | 2 | 7 |
+| **Total** | **24** | **13** | **37** |
 
 ---
 
@@ -533,6 +536,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 ### 6.1 References From This Document
 
 - [QBIND MainNet v0 Specification](./QBIND_MAINNET_V0_SPEC.md) — MainNet architecture
+- [QBIND MainNet Operational Runbook](../ops/QBIND_MAINNET_RUNBOOK.md) — MainNet operations (T216)
 - [QBIND DAG Consensus Coupling Design](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — DAG–HotStuff coupling (T188)
 - [QBIND TestNet Beta Specification](../testnet/QBIND_TESTNET_BETA_SPEC.md) — Beta predecessor
 - [QBIND TestNet Beta Audit Skeleton](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) — Beta risks
@@ -547,6 +551,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 The following documents should reference this MainNet audit:
 
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
+- [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — References audit for operational context (T216)
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1
 - [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — References audit for MN-R2
 - [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) — References audit for MN-R5

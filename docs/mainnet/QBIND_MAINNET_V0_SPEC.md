@@ -840,10 +840,63 @@ qbind-node \
 
 ---
 
-## 10. Related Documents
+## 10. Operational Runbook & Observability
+
+### 10.1 MainNet Operational Runbook
+
+The canonical **MainNet v0 Operational Runbook** is available at:
+
+- **[QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md)**
+
+This runbook provides detailed guidance for:
+
+- **Node roles and topology**: Validator, sentry, and RPC node configurations
+- **Configuration profiles**: Required settings and invariants for MainNet
+- **Bootstrapping**: Step-by-step procedure for new validator setup
+- **Signer modes**: EncryptedFsV1, RemoteSigner, and HsmPkcs11 configuration
+- **Snapshots and fast sync**: State snapshot management and fast sync procedures
+- **Key rotation**: Procedures for rotating consensus, batch signing, and P2P keys
+- **P2P operations**: Diversity enforcement, anti-eclipse, and liveness monitoring
+- **Monetary telemetry**: Phase tracking, inflation rates, and fee coverage monitoring
+- **Incident playbooks**: Handling compromised keys, signer failures, and state issues
+
+### 10.2 Prometheus Alerting
+
+Example Prometheus alert rules are provided at:
+
+- **[prometheus/qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml)**
+
+Alert categories include:
+
+| Category | Examples |
+| :--- | :--- |
+| **Consensus Health** | View lag, QC formation stalls |
+| **P2P Health** | Outbound peer count, diversity violations |
+| **Signer/HSM** | Error rates, startup failures |
+| **State/Storage** | State size, snapshot failures |
+| **Monetary** | Phase anomalies, fee coverage drops |
+
+### 10.3 Grafana Dashboard
+
+An importable Grafana dashboard is available at:
+
+- **[grafana/qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json)**
+
+Dashboard panels by domain:
+
+1. **Consensus & DAG**: View progress, QC latency, DAG coupling validation
+2. **P2P & Diversity**: Peer counts, diversity buckets, heartbeats
+3. **State & Storage**: State size, pruning rate, snapshot status
+4. **Monetary**: Phase, inflation rates, fee coverage
+5. **Signer/HSM**: Health status, error rates, latency
+
+---
+
+## 11. Related Documents
 
 | Document | Path | Description |
 | :--- | :--- | :--- |
+| **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
