@@ -38,8 +38,8 @@ use clap::Parser;
 use crate::node_config::{
     parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
     parse_mempool_mode, parse_network_mode, parse_signer_mode, parse_state_retention_mode,
-    DagCouplingMode, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
-    ParseEnvironmentError, SignerFailureMode, SignerMode, StateRetentionConfig,
+    DagCouplingMode, FastSyncConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+    ParseEnvironmentError, SignerFailureMode, SignerMode, SnapshotConfig, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -563,6 +563,9 @@ impl CliArgs {
                 seigniorage_split: SeigniorageSplit::default(),
                 // T208: State retention disabled by default for legacy path
                 state_retention: StateRetentionConfig::disabled(),
+                // T215: Snapshots disabled for legacy path
+                snapshot_config: SnapshotConfig::disabled(),
+                fast_sync_config: FastSyncConfig::disabled(),
                 // T210: Loopback signer for legacy path (testing default)
                 signer_mode: SignerMode::LoopbackTesting,
                 signer_keystore_path: None,

@@ -697,6 +697,9 @@ mod tests {
             seigniorage_split: SeigniorageSplit::default(),
             // T208 field
             state_retention: crate::node_config::StateRetentionConfig::disabled(),
+            // T215 fields
+            snapshot_config: crate::node_config::SnapshotConfig::disabled(),
+            fast_sync_config: crate::node_config::FastSyncConfig::disabled(),
             // T210 fields
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,

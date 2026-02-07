@@ -119,7 +119,7 @@ MainNet v0 introduces state growth management expectations:
 | :--- | :--- | :--- |
 | **State Pruning** | **Required** | Configurable retention period |
 | **Archival Nodes** | Supported | Full history retention (no pruning) |
-| **Snapshots** | **Required** | Periodic state snapshots for fast sync |
+| **Snapshots** | **Required (T215)** | Periodic state snapshots for fast sync |
 | **State Size Monitoring** | Required | Metrics + alerting |
 
 **Node Types by Pruning Policy**:
@@ -130,7 +130,55 @@ MainNet v0 introduces state growth management expectations:
 | **Full Node (Pruned)** | Enabled | Recent N blocks |
 | **Archival Node** | Disabled | Full history |
 
-### 2.5 MainNet-Only Invariants
+### 2.5 State Snapshots (T215)
+
+MainNet v0 requires periodic state snapshots for fast node synchronization and recovery:
+
+| Parameter | MainNet v0 Default | Notes |
+| :--- | :--- | :--- |
+| `snapshot_config.enabled` | `true` | **Required** for MainNet |
+| `snapshot_interval_blocks` | 50,000 | ~3.5 days at 5s blocks |
+| `max_snapshots` | 5 | Keep last 5 snapshots |
+| `snapshot_dir` | Must be configured | Operator-provided path |
+
+**Snapshot Features**:
+
+- **Deterministic snapshots**: Uses RocksDB checkpoint API for consistent point-in-time snapshots
+- **Background creation**: Snapshots are created without blocking consensus
+- **Metadata validation**: Each snapshot includes height, block hash, chain ID for validation
+- **Fast sync restore**: Nodes can boot from local snapshots instead of replaying from genesis
+
+**Snapshot Directory Layout**:
+
+```text
+snapshot_dir/
+├── 50000/              # Snapshot at height 50,000
+│   ├── meta.json       # Metadata (height, block_hash, chain_id, timestamp)
+│   └── state/          # RocksDB checkpoint files
+├── 100000/             # Snapshot at height 100,000
+│   ├── meta.json
+│   └── state/
+└── ...
+```
+
+**CLI Flags**:
+
+```bash
+qbind-node --profile mainnet \
+  --snapshot-dir /data/qbind/snapshots \
+  --snapshot-interval 50000 \
+  --max-snapshots 5
+```
+
+**Fast Sync from Snapshot** (optional):
+
+```bash
+qbind-node --profile mainnet \
+  --fast-sync-snapshot-dir /data/qbind/snapshots/100000 \
+  --data-dir /data/qbind
+```
+
+### 2.6 MainNet-Only Invariants
 
 The following invariants are **enforced** for MainNet v0:
 
@@ -139,6 +187,7 @@ The following invariants are **enforced** for MainNet v0:
 3. **No gas-disabled mode**: Gas enforcement cannot be turned off
 4. **No v0 payloads**: Only `TransferPayloadV1` accepted
 5. **No loopback signer**: Production signing required (HSM or EncryptedFs)
+6. **Snapshots enabled**: Periodic snapshots must be enabled (T215)
 
 ---
 
@@ -770,8 +819,8 @@ qbind-node \
 | **Dynamic peer discovery** | ⏳ Pending | Future task |
 | **Peer liveness scoring** | ⏳ Pending | Future task |
 | **Anti-eclipse enforcement** | ⏳ Pending | Future task |
-| **State pruning** | ⏳ Pending | Future task |
-| **State snapshots** | ⏳ Pending | Future task |
+| **State pruning** | ✅ Implemented | T208 |
+| **State snapshots** | ✅ Implemented | T215 |
 | **HSM production integration** | ⏳ Pending | Future task |
 | **Hybrid fee distribution** | ✅ Implemented | T193 |
 | **Stage B production wiring** | ⏳ Pending | Future task |

@@ -51,12 +51,12 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | Area | Related Tasks | Risk Status | Notes |
 | :--- | :--- | :--- | :--- |
 | **Execution & VM** | T163, T164, T171, T177, T179, T186, T187 | Partially Mitigated | Stage B wired and tested (T186, T187) |
-| **State Persistence & Growth** | T164 | Partially Mitigated | Pruning & snapshots pending |
+| **State Persistence & Growth** | T164, T208, T215 | ✅ Mitigated | Pruning (T208) & snapshots (T215) implemented |
 | **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181, T193 | Partially Mitigated | Hybrid fee distribution implemented (T193) |
 | **Mempool & DAG** | T158, T165, T182, T183 | Partially Mitigated | Consensus coupling pending |
 | **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
-| **Observability & Ops** | T154, T155, T157, T158, T187 | Partially Mitigated | Stage B metrics added (T187); MainNet runbooks pending |
+| **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
 | **Governance / Upgrades** | — | Open | Not implemented |
 
 ---
@@ -69,7 +69,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | :--- | :--- | :--- | :--- | :--- |
 | **MN-R1** | Consensus Safety & Fork Risk | Critical | Open | [Spec §6.3](./QBIND_MAINNET_V0_SPEC.md#63-dag-availability-and-consensus-coupling) |
 | **MN-R2** | Economic Integrity (gas/fees) | High | Partially Mitigated | [Spec §3](./QBIND_MAINNET_V0_SPEC.md#3-gas--fees) |
-| **MN-R3** | State Growth & Data Availability | Medium | Open | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
+| **MN-R3** | State Growth & Data Availability | Medium | ✅ Mitigated (T208, T215) | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
 | **MN-R4** | P2P & Eclipse Resistance | High | Partially Mitigated | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
 | **MN-R5** | Key Management & Remote Signing | Critical | Partially Mitigated (T211–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | Partially Mitigated | [Spec §7](./QBIND_MAINNET_V0_SPEC.md#7-operational-profiles--cli-defaults) |
@@ -161,24 +161,25 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **State bloat** | Unbounded state growth exhausts disk | Medium | Open |
-| **No pruning** | Old state retained indefinitely | Medium | Open |
-| **No snapshots** | No fast sync for new nodes | Medium | Open |
+| **State bloat** | Unbounded state growth exhausts disk | Medium | ✅ Mitigated (T208) |
+| **No pruning** | Old state retained indefinitely | Medium | ✅ Mitigated (T208) |
+| **No snapshots** | No fast sync for new nodes | Medium | ✅ Mitigated (T215) |
 | **DAG availability holes** | Missing batches despite fetch-on-miss | Medium | Partially Mitigated |
 
 **Current Mitigations**:
 - ✅ RocksDB crash-safe persistence (T164)
 - ✅ Fetch-on-miss v0 (T182, T183)
-- ⏳ State pruning pending
-- ⏳ State snapshots pending
+- ✅ State pruning implemented (T208) — configurable retention period
+- ✅ State snapshots implemented (T215) — periodic RocksDB checkpoints
+- ✅ Snapshot metrics: `qbind_snapshot_*` counters and gauges
 
 **Additional MainNet Requirements**:
-- [ ] State pruning implementation
-- [ ] Snapshot/checkpoint mechanism
-- [ ] State size monitoring and alerting
-- [ ] Archival node support
+- [x] State pruning implementation (T208)
+- [x] Snapshot/checkpoint mechanism (T215)
+- [x] State size monitoring and alerting (T208, T215)
+- [ ] Archival node support (uses pruning disabled mode)
 
-**Target Phase**: MainNet v0 (blocking for pruning; snapshots can be v0.x)
+**Target Phase**: ✅ MainNet v0 (pruning and snapshots implemented)
 
 ---
 
@@ -460,8 +461,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | T19x | P2P | Dynamic peer discovery | MN-R4 |
 | T19x | P2P | Peer liveness scoring | MN-R4 |
 | T19x | P2P | Anti-eclipse enforcement | MN-R4 |
-| T19x | State | State pruning | MN-R3 |
-| T19x | State | State snapshots | MN-R3 |
+| ~~T208~~ | ~~State~~ | ~~State pruning~~ | ~~MN-R3~~ |
+| ~~**T215**~~ | ~~**State**~~ | ~~**State snapshots**~~ | ~~**MN-R3**~~ |
 | **T210** | **Keys** | **Signer mode config + `validate_mainnet_invariants()`** | **MN-R5** |
 | ~~**T211**~~ | ~~**Keys**~~ | ~~**HSM/PKCS#11 adapter v0**~~ | ~~**MN-R5**~~ |
 | ~~**T212**~~ | ~~**Keys**~~ | ~~**Remote signer protocol v0**~~ | ~~**MN-R5**~~ |
@@ -474,6 +475,15 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > **Note**: Stage B production wiring completed in T186 + T187 (strikethrough above).
 >
 > **Note**: Hybrid fee distribution completed in T193 (strikethrough above). Implements 50% burn / 50% proposer split per MainNet v0 spec.
+>
+> **Note**: State pruning completed in T208 (strikethrough above). Provides height-based pruning with configurable retention.
+>
+> **Note**: State snapshots completed in T215 (strikethrough above). Provides:
+> - `StateSnapshotter` trait with RocksDB checkpoint implementation
+> - `SnapshotConfig` for periodic snapshot creation
+> - `FastSyncConfig` for local snapshot restore
+> - MainNet validation: snapshots must be enabled with interval 10,000–500,000 blocks
+> - Prometheus metrics: `qbind_snapshot_*`
 >
 > **Note**: DAG–HotStuff consensus coupling design completed in T188. Implementation tasks T189–T192 complete:
 > - T189: `DagCouplingMode` enum, `batch_commitment` in `BlockHeader`
