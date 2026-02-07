@@ -1568,6 +1568,132 @@ impl StatePruner for RocksDbAccountState {
 }
 
 // ============================================================================
+// T215: StateSnapshotter Implementation for RocksDbAccountState
+// ============================================================================
+
+use crate::state_snapshot::{SnapshotStats, StateSnapshotError, StateSnapshotMeta, StateSnapshotter};
+
+impl StateSnapshotter for RocksDbAccountState {
+    /// Create a point-in-time snapshot of the RocksDB account state.
+    ///
+    /// Uses RocksDB's checkpoint API for efficient, consistent snapshots.
+    /// The checkpoint creates hard links to SST files when possible,
+    /// making it fast and space-efficient.
+    ///
+    /// # Directory Layout
+    ///
+    /// Creates the following structure:
+    /// ```text
+    /// target_dir/
+    /// ├── meta.json   # Snapshot metadata
+    /// └── state/      # RocksDB checkpoint files
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `meta` - Snapshot metadata (height, block hash, chain ID)
+    /// * `target_dir` - Directory to write snapshot (must not exist)
+    ///
+    /// # Errors
+    ///
+    /// - `Config`: Invalid target directory
+    /// - `AlreadyExists`: Target directory already exists
+    /// - `Io`: File system errors
+    /// - `Backend`: RocksDB checkpoint errors
+    fn create_snapshot(
+        &self,
+        meta: &StateSnapshotMeta,
+        target_dir: &Path,
+    ) -> Result<SnapshotStats, StateSnapshotError> {
+        use std::time::Instant;
+        let start = Instant::now();
+
+        // Validate target directory
+        if target_dir.as_os_str().is_empty() {
+            return Err(StateSnapshotError::Config(
+                "target directory path is empty".to_string(),
+            ));
+        }
+
+        // Check if target directory already exists
+        if target_dir.exists() {
+            return Err(StateSnapshotError::AlreadyExists(
+                target_dir.display().to_string(),
+            ));
+        }
+
+        // Create parent directories if needed
+        if let Some(parent) = target_dir.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                StateSnapshotError::Io(format!("cannot create parent directory: {}", e))
+            })?;
+        }
+
+        // Create target directory
+        std::fs::create_dir(target_dir).map_err(|e| {
+            StateSnapshotError::Io(format!("cannot create snapshot directory: {}", e))
+        })?;
+
+        // Write metadata file
+        let meta_path = target_dir.join("meta.json");
+        std::fs::write(&meta_path, meta.to_json()).map_err(|e| {
+            StateSnapshotError::Io(format!("cannot write meta.json: {}", e))
+        })?;
+
+        // Create state subdirectory for RocksDB checkpoint
+        let state_dir = target_dir.join("state");
+
+        // Flush WAL and memtable before checkpoint to ensure consistency
+        self.db
+            .flush()
+            .map_err(|e| StateSnapshotError::Backend(format!("cannot flush before checkpoint: {}", e)))?;
+
+        // Create RocksDB checkpoint
+        let checkpoint = rocksdb::checkpoint::Checkpoint::new(&self.db)
+            .map_err(|e| StateSnapshotError::Backend(format!("cannot create checkpoint object: {}", e)))?;
+
+        checkpoint
+            .create_checkpoint(&state_dir)
+            .map_err(|e| StateSnapshotError::Backend(format!("checkpoint creation failed: {}", e)))?;
+
+        let duration = start.elapsed();
+
+        // Estimate snapshot size by summing checkpoint directory files
+        let size_bytes = Self::estimate_dir_size(&state_dir).unwrap_or(0);
+
+        Ok(SnapshotStats::new(meta.height, size_bytes, duration))
+    }
+
+    /// Estimate the current state size in bytes.
+    ///
+    /// Returns the estimated live data size from RocksDB.
+    fn estimate_snapshot_size_bytes(&self) -> Option<u64> {
+        self.estimated_size_bytes().ok()
+    }
+}
+
+impl RocksDbAccountState {
+    /// Estimate the total size of files in a directory (recursive).
+    fn estimate_dir_size(dir: &Path) -> Option<u64> {
+        let mut total: u64 = 0;
+        let entries = std::fs::read_dir(dir).ok()?;
+        
+        for entry in entries.flatten() {
+            let metadata = entry.metadata().ok()?;
+            if metadata.is_file() {
+                total += metadata.len();
+            } else if metadata.is_dir() {
+                if let Some(subdir_size) = Self::estimate_dir_size(&entry.path()) {
+                    total += subdir_size;
+                }
+            }
+        }
+        
+        Some(total)
+    }
+}
+
+// ============================================================================
 // T164: Cached Persistent Account State
 // ============================================================================
 

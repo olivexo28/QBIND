@@ -93,6 +93,31 @@ qbind-node --profile testnet-beta --enable-stage-b true --data-dir /data/qbind
 
 **Reference**: [QBIND_PARALLEL_EXECUTION_DESIGN.md §4.2](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md) for Stage B design and [Appendix D](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md#appendix-d-implementation-status--stage-b-wiring-t186-t187) for implementation status.
 
+### 2.4 State Snapshots (T215)
+
+TestNet Beta enables periodic state snapshots for fast sync and recovery:
+
+| Parameter | Beta Default | Notes |
+| :--- | :--- | :--- |
+| `snapshot_config.enabled` | `true` | Snapshots are enabled |
+| `snapshot_interval_blocks` | 100,000 | ~6 days at 5s blocks |
+| `max_snapshots` | 3 | Keep last 3 snapshots |
+| `snapshot_dir` | Must be configured | Operator-provided path |
+
+**Configuration**:
+```bash
+# Enable snapshots for TestNet Beta
+qbind-node --profile testnet-beta \
+  --snapshot-dir /data/qbind/snapshots \
+  --data-dir /data/qbind
+```
+
+**Implementation Status (T215)**:
+- ✅ `StateSnapshotter` trait implemented in qbind-ledger
+- ✅ RocksDB checkpoint-based snapshots
+- ✅ Snapshot metrics available: `qbind_snapshot_*`
+- ✅ Fast-sync skeleton for local snapshot restore
+
 ---
 
 ## 3. Gas & Fees (Beta Defaults)

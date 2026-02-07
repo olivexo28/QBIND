@@ -8,10 +8,10 @@
 
 use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
-    parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, MempoolMode,
-    NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError, SignerFailureMode,
-    SignerMode, StateRetentionConfig, DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR,
-    VALID_NETWORK_MODES,
+    parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, FastSyncConfig,
+    MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig, ParseAddrError,
+    SignerFailureMode, SignerMode, SnapshotConfig, StateRetentionConfig, DEFAULT_NETWORK_MODE,
+    DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -113,6 +113,9 @@ fn test_p2p_config_local_mesh_disabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -153,6 +156,9 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -190,6 +196,9 @@ fn test_p2p_config_p2p_mode_enabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -222,6 +231,9 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -267,6 +279,9 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -364,6 +379,9 @@ fn test_startup_info_includes_network_mode() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -398,6 +416,9 @@ fn test_startup_info_p2p_disabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
@@ -437,6 +458,9 @@ fn test_startup_info_p2p_enabled() {
         monetary_accounts: None,
         seigniorage_split: SeigniorageSplit::default(),
         state_retention: StateRetentionConfig::disabled(),
+        // T215: State snapshot defaults
+        snapshot_config: SnapshotConfig::disabled(),
+        fast_sync_config: FastSyncConfig::disabled(),
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,

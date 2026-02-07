@@ -242,6 +242,232 @@ impl StateRetentionConfig {
 }
 
 // ============================================================================
+// T215: State Snapshot Configuration
+// ============================================================================
+
+/// Configuration for state snapshots (T215).
+///
+/// Controls periodic snapshot creation for fast sync and recovery.
+/// Snapshots are local-only and do not affect consensus.
+///
+/// # Behavior
+///
+/// When enabled, snapshots are created at configured intervals:
+/// - `snapshot_interval_blocks`: Create snapshot every N committed blocks
+/// - `snapshot_dir`: Directory to store snapshots
+/// - `max_snapshots`: Maximum number of snapshots to retain (oldest pruned)
+///
+/// # Thread Safety
+///
+/// Snapshot creation runs in a background task and does not block consensus.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::SnapshotConfig;
+/// use std::path::PathBuf;
+///
+/// // MainNet configuration: snapshot every 50k blocks
+/// let config = SnapshotConfig::enabled(
+///     PathBuf::from("/data/qbind/snapshots"),
+///     50_000,  // Every ~3.5 days at 5s blocks
+///     3,       // Keep last 3 snapshots
+/// );
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotConfig {
+    /// Whether snapshot creation is enabled.
+    ///
+    /// When false, no periodic snapshots are created.
+    /// Fast-sync restore is still possible from operator-provided snapshots.
+    pub enabled: bool,
+
+    /// Directory to store snapshots.
+    ///
+    /// Each snapshot is stored in a subdirectory named by height:
+    /// `{snapshot_dir}/{height}/`
+    ///
+    /// Must be set when `enabled = true`.
+    pub snapshot_dir: Option<PathBuf>,
+
+    /// Interval (in committed blocks) between snapshot creation.
+    ///
+    /// A snapshot is created when `current_height % snapshot_interval_blocks == 0`.
+    ///
+    /// Recommended values:
+    /// - TestNet Beta: 100_000 blocks (~6 days at 5s blocks)
+    /// - MainNet v0: 50_000 blocks (~3.5 days at 5s blocks)
+    pub snapshot_interval_blocks: u64,
+
+    /// Maximum number of snapshots to retain.
+    ///
+    /// When a new snapshot is created and this limit is exceeded,
+    /// the oldest snapshot is deleted to free space.
+    ///
+    /// Recommended: 3-5 snapshots for recovery flexibility.
+    pub max_snapshots: u32,
+}
+
+impl Default for SnapshotConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            snapshot_dir: None,
+            snapshot_interval_blocks: 50_000,
+            max_snapshots: 3,
+        }
+    }
+}
+
+impl SnapshotConfig {
+    /// Create a disabled snapshot configuration.
+    ///
+    /// No periodic snapshots are created. This is the default for DevNet.
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Create an enabled snapshot configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot_dir` - Directory to store snapshots
+    /// * `interval_blocks` - Blocks between snapshots
+    /// * `max_snapshots` - Maximum snapshots to retain
+    pub fn enabled(snapshot_dir: PathBuf, interval_blocks: u64, max_snapshots: u32) -> Self {
+        Self {
+            enabled: true,
+            snapshot_dir: Some(snapshot_dir),
+            snapshot_interval_blocks: interval_blocks,
+            max_snapshots,
+        }
+    }
+
+    /// Create the TestNet Beta default configuration.
+    ///
+    /// - Enabled with 100,000 block interval (~6 days at 5s blocks)
+    /// - Retains 3 snapshots
+    /// - Snapshot directory must be set by operator
+    pub fn testnet_beta_default() -> Self {
+        Self {
+            enabled: true,
+            snapshot_dir: None, // Must be configured by operator
+            snapshot_interval_blocks: 100_000,
+            max_snapshots: 3,
+        }
+    }
+
+    /// Create the MainNet default configuration.
+    ///
+    /// - Enabled with 50,000 block interval (~3.5 days at 5s blocks)
+    /// - Retains 5 snapshots for better recovery options
+    /// - Snapshot directory must be set by operator
+    pub fn mainnet_default() -> Self {
+        Self {
+            enabled: true,
+            snapshot_dir: None, // Must be configured by operator
+            snapshot_interval_blocks: 50_000,
+            max_snapshots: 5,
+        }
+    }
+
+    /// Check if snapshots are enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled && self.snapshot_dir.is_some()
+    }
+
+    /// Check if a snapshot should be created at the given height.
+    ///
+    /// Returns `true` if snapshots are enabled and the height is a multiple
+    /// of `snapshot_interval_blocks`.
+    pub fn should_snapshot_at_height(&self, height: u64) -> bool {
+        self.enabled
+            && self.snapshot_dir.is_some()
+            && self.snapshot_interval_blocks > 0
+            && height > 0
+            && height.is_multiple_of(self.snapshot_interval_blocks)
+    }
+
+    /// Get the snapshot path for a given height.
+    ///
+    /// Returns `None` if snapshots are disabled or no directory is configured.
+    pub fn snapshot_path_for_height(&self, height: u64) -> Option<PathBuf> {
+        self.snapshot_dir.as_ref().map(|dir| dir.join(height.to_string()))
+    }
+}
+
+// ============================================================================
+// T215: Fast Sync Configuration
+// ============================================================================
+
+/// Configuration for fast-sync from local snapshots (T215).
+///
+/// Controls startup behavior when a local snapshot is available.
+/// Fast-sync allows a node to boot from a snapshot instead of replaying
+/// all blocks from genesis.
+///
+/// # Workflow
+///
+/// 1. Node checks `fast_sync_snapshot_dir` for valid snapshot
+/// 2. Validates snapshot metadata (height, chain ID)
+/// 3. Restores state from snapshot
+/// 4. Replays blocks from snapshot height → current tip
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::FastSyncConfig;
+/// use std::path::PathBuf;
+///
+/// let config = FastSyncConfig::from_snapshot(
+///     PathBuf::from("/data/qbind/snapshots/100000"),
+/// );
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct FastSyncConfig {
+    /// Whether fast-sync from snapshot is enabled.
+    ///
+    /// When true and a valid snapshot exists at `fast_sync_snapshot_dir`,
+    /// the node will boot from the snapshot instead of replaying from genesis.
+    pub enabled: bool,
+
+    /// Path to snapshot directory to restore from.
+    ///
+    /// Must contain a valid snapshot with:
+    /// - `meta.json`: Snapshot metadata
+    /// - `state/`: RocksDB checkpoint files
+    ///
+    /// If `None` or the path doesn't exist, normal sync from genesis is used.
+    pub fast_sync_snapshot_dir: Option<PathBuf>,
+}
+
+impl FastSyncConfig {
+    /// Create a disabled fast-sync configuration (default).
+    ///
+    /// Node will sync normally from genesis or existing state.
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
+    /// Create a fast-sync configuration to restore from a snapshot.
+    ///
+    /// # Arguments
+    ///
+    /// * `snapshot_dir` - Path to the snapshot directory to restore from
+    pub fn from_snapshot(snapshot_dir: PathBuf) -> Self {
+        Self {
+            enabled: true,
+            fast_sync_snapshot_dir: Some(snapshot_dir),
+        }
+    }
+
+    /// Check if fast-sync is configured and should be attempted.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled && self.fast_sync_snapshot_dir.is_some()
+    }
+}
+
+// ============================================================================
 // T210: Signer Mode Configuration
 // ============================================================================
 
@@ -1452,6 +1678,27 @@ pub struct NodeConfig {
     pub state_retention: StateRetentionConfig,
 
     // ========================================================================
+    // T215: State Snapshot Configuration
+    // ========================================================================
+    /// State snapshot configuration (T215).
+    ///
+    /// Controls periodic snapshot creation for fast sync and recovery.
+    ///
+    /// - DevNet v0: `Disabled` (no periodic snapshots)
+    /// - TestNet Alpha: `Disabled` (no periodic snapshots)
+    /// - TestNet Beta: `Enabled` (interval=100_000, max_snapshots=3)
+    /// - MainNet v0: `Enabled` (interval=50_000, max_snapshots=5)
+    pub snapshot_config: SnapshotConfig,
+
+    /// Fast-sync configuration (T215).
+    ///
+    /// Controls startup behavior when a local snapshot is available.
+    ///
+    /// - All environments: `Disabled` by default
+    /// - Operators can enable with `--fast-sync-snapshot-dir=<path>`
+    pub fast_sync_config: FastSyncConfig,
+
+    // ========================================================================
     // T210: Signer Mode Configuration
     // ========================================================================
     /// Signer mode for validator key management (T210).
@@ -1531,6 +1778,9 @@ impl Default for NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled for DevNet
             state_retention: StateRetentionConfig::disabled(),
+            // T215: Snapshots disabled for DevNet
+            snapshot_config: SnapshotConfig::disabled(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: Loopback signer for DevNet (testing only)
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
@@ -1566,6 +1816,9 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled by default
             state_retention: StateRetentionConfig::disabled(),
+            // T215: Snapshots disabled by default
+            snapshot_config: SnapshotConfig::disabled(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: Loopback signer for testing (default)
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
@@ -1600,6 +1853,9 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled by default
             state_retention: StateRetentionConfig::disabled(),
+            // T215: Snapshots disabled by default
+            snapshot_config: SnapshotConfig::disabled(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: Loopback signer for testing (default)
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
@@ -1682,6 +1938,9 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled for DevNet
             state_retention: StateRetentionConfig::disabled(),
+            // T215: Snapshots disabled for DevNet
+            snapshot_config: SnapshotConfig::disabled(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: Loopback signer for DevNet (testing only)
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
@@ -1739,6 +1998,9 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention disabled for TestNet Alpha
             state_retention: StateRetentionConfig::disabled(),
+            // T215: Snapshots disabled for TestNet Alpha
+            snapshot_config: SnapshotConfig::disabled(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: EncryptedFsV1 recommended for TestNet (keystore path must be provided)
             signer_mode: SignerMode::EncryptedFsV1,
             signer_keystore_path: None, // Operator must provide
@@ -1809,6 +2071,9 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention enabled for TestNet Beta (~6 days history)
             state_retention: StateRetentionConfig::testnet_beta_default(),
+            // T215: Snapshots enabled for TestNet Beta (~6 days interval)
+            snapshot_config: SnapshotConfig::testnet_beta_default(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: EncryptedFsV1 recommended for TestNet (keystore path must be provided)
             signer_mode: SignerMode::EncryptedFsV1,
             signer_keystore_path: None, // Operator must provide
@@ -1891,6 +2156,9 @@ impl NodeConfig {
             seigniorage_split: SeigniorageSplit::default(),
             // T208: State retention enabled for MainNet (~30 days history)
             state_retention: StateRetentionConfig::mainnet_default(),
+            // T215: Snapshots enabled for MainNet (~3.5 days interval)
+            snapshot_config: SnapshotConfig::mainnet_default(),
+            fast_sync_config: FastSyncConfig::disabled(),
             // T210: EncryptedFsV1 default for MainNet (LoopbackTesting forbidden by invariants)
             signer_mode: SignerMode::EncryptedFsV1,
             signer_keystore_path: None, // Operator must provide
@@ -2146,6 +2414,101 @@ impl NodeConfig {
     /// ```
     pub fn with_state_retention(mut self, config: StateRetentionConfig) -> Self {
         self.state_retention = config;
+        self
+    }
+
+    // ========================================================================
+    // T215: Snapshot Configuration Builder Methods
+    // ========================================================================
+
+    /// Set the snapshot configuration (T215).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The snapshot configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, SnapshotConfig};
+    /// use std::path::PathBuf;
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_snapshot_config(SnapshotConfig::enabled(
+    ///         PathBuf::from("/data/qbind/snapshots"),
+    ///         50_000,
+    ///         5,
+    ///     ));
+    /// ```
+    pub fn with_snapshot_config(mut self, config: SnapshotConfig) -> Self {
+        self.snapshot_config = config;
+        self
+    }
+
+    /// Set the snapshot directory (T215).
+    ///
+    /// Enables snapshots with the specified directory. Uses default interval
+    /// and max_snapshots from the existing snapshot_config.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the snapshot directory
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::NodeConfig;
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_snapshot_dir("/data/qbind/snapshots");
+    /// ```
+    pub fn with_snapshot_dir<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.snapshot_config.enabled = true;
+        self.snapshot_config.snapshot_dir = Some(path.into());
+        self
+    }
+
+    /// Set the fast-sync configuration (T215).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The fast-sync configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, FastSyncConfig};
+    /// use std::path::PathBuf;
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_fast_sync_config(FastSyncConfig::from_snapshot(
+    ///         PathBuf::from("/data/qbind/snapshots/100000"),
+    ///     ));
+    /// ```
+    pub fn with_fast_sync_config(mut self, config: FastSyncConfig) -> Self {
+        self.fast_sync_config = config;
+        self
+    }
+
+    /// Set the fast-sync snapshot directory (T215).
+    ///
+    /// Enables fast-sync restore from the specified snapshot directory.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the snapshot directory to restore from
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::NodeConfig;
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_fast_sync_snapshot_dir("/data/qbind/snapshots/100000");
+    /// ```
+    pub fn with_fast_sync_snapshot_dir<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.fast_sync_config.enabled = true;
+        self.fast_sync_config.fast_sync_snapshot_dir = Some(path.into());
         self
     }
 
@@ -2808,6 +3171,29 @@ impl NodeConfig {
             });
         }
 
+        // 22. Snapshots must be enabled for MainNet (T215)
+        // MainNet validators should create periodic snapshots for fast sync and recovery.
+        // Note: Snapshot directory must be configured by operator via --snapshot-dir flag.
+        if !self.snapshot_config.enabled {
+            return Err(MainnetConfigError::SnapshotsDisabled);
+        }
+
+        // 23. Snapshot interval must be reasonable for MainNet (T215)
+        // Too frequent snapshots waste disk space; too infrequent snapshots make recovery slow.
+        // We require at least 10,000 block interval and at most 500,000 block interval.
+        if self.snapshot_config.snapshot_interval_blocks < 10_000 {
+            return Err(MainnetConfigError::SnapshotIntervalTooLow {
+                minimum: 10_000,
+                actual: self.snapshot_config.snapshot_interval_blocks,
+            });
+        }
+        if self.snapshot_config.snapshot_interval_blocks > 500_000 {
+            return Err(MainnetConfigError::SnapshotIntervalTooHigh {
+                maximum: 500_000,
+                actual: self.snapshot_config.snapshot_interval_blocks,
+            });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -3007,6 +3393,27 @@ pub enum MainnetConfigError {
     /// MainNet validators must use signer_failure_mode = ExitOnFailure to ensure
     /// fail-closed behavior. LogAndContinue is only allowed for dev/test chaos testing.
     SignerFailureModeInvalid { actual: SignerFailureMode },
+
+    // ========================================================================
+    // T215: Snapshot Configuration Errors
+    // ========================================================================
+    /// Snapshots are disabled for MainNet (T215).
+    ///
+    /// MainNet validators must enable periodic snapshots for fast sync and recovery.
+    /// Enable snapshots with `--enable-snapshots=true`.
+    SnapshotsDisabled,
+
+    /// Snapshot interval is too low for MainNet (T215).
+    ///
+    /// MainNet requires at least 10,000 block interval between snapshots
+    /// to avoid excessive disk usage.
+    SnapshotIntervalTooLow { minimum: u64, actual: u64 },
+
+    /// Snapshot interval is too high for MainNet (T215).
+    ///
+    /// MainNet requires at most 500,000 block interval between snapshots
+    /// to ensure timely recovery capability.
+    SnapshotIntervalTooHigh { maximum: u64, actual: u64 },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -3185,6 +3592,30 @@ impl std::fmt::Display for MainnetConfigError {
                      LogAndContinue is only allowed for dev/test chaos testing. \
                      (--signer-failure-mode=exit-on-failure)",
                     actual
+                )
+            }
+            // T215: Snapshot configuration errors
+            MainnetConfigError::SnapshotsDisabled => {
+                write!(
+                    f,
+                    "MainNet invariant violated: snapshots must be enabled for fast sync and recovery \
+                     (--enable-snapshots=true --snapshot-dir=/path/to/snapshots)"
+                )
+            }
+            MainnetConfigError::SnapshotIntervalTooLow { minimum, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: snapshot_interval_blocks must be at least {} but is {} \
+                     (--snapshot-interval={})",
+                    minimum, actual, minimum
+                )
+            }
+            MainnetConfigError::SnapshotIntervalTooHigh { maximum, actual } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: snapshot_interval_blocks must be at most {} but is {} \
+                     (--snapshot-interval={})",
+                    maximum, actual, maximum
                 )
             }
         }

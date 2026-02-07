@@ -10,6 +10,7 @@ pub mod monetary_state;
 pub mod parallel_exec;
 pub mod program;
 pub mod state_pruning;
+pub mod state_snapshot;
 pub mod store;
 
 pub use account::{Account, AccountHeader};
@@ -113,3 +114,9 @@ pub use monetary_state::{
 
 // T208: State Pruning exports
 pub use state_pruning::{PruneStats, StatePruner};
+
+// T215: State Snapshot exports
+pub use state_snapshot::{
+    validate_snapshot_dir, SnapshotStats, SnapshotValidationResult, StateSnapshotError,
+    StateSnapshotMeta, StateSnapshotter,
+};

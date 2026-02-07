@@ -5387,6 +5387,159 @@ impl MonetaryMetrics {
 }
 
 // ============================================================================
+// T215: SnapshotMetrics - State snapshot metrics
+// ============================================================================
+
+/// Metrics for state snapshot operations (T215).
+///
+/// Tracks snapshot creation success/failure, timing, and current state.
+/// Used for monitoring snapshot service health and performance.
+///
+/// # Prometheus-style naming
+///
+/// - `qbind_snapshot_last_height` → `last_height()` (gauge, last successful snapshot height)
+/// - `qbind_snapshot_last_duration_ms` → `last_duration_ms()` (gauge, last snapshot duration)
+/// - `qbind_snapshot_last_size_bytes` → `last_size_bytes()` (gauge, last snapshot size)
+/// - `qbind_snapshot_success_total` → `success_total()` (counter, total successful snapshots)
+/// - `qbind_snapshot_failure_total` → `failure_total()` (counter, total failed snapshots)
+/// - `qbind_snapshot_in_progress` → `in_progress()` (gauge, 1 if snapshot is currently being created)
+#[derive(Debug, Default)]
+pub struct SnapshotMetrics {
+    /// Height of the last successfully created snapshot.
+    last_height: AtomicU64,
+
+    /// Duration of the last snapshot operation in milliseconds.
+    last_duration_ms: AtomicU64,
+
+    /// Size of the last snapshot in bytes.
+    last_size_bytes: AtomicU64,
+
+    /// Unix timestamp (ms) of when the last snapshot was created.
+    last_created_at_ms: AtomicU64,
+
+    /// Total number of successful snapshot operations.
+    success_total: AtomicU64,
+
+    /// Total number of failed snapshot operations.
+    failure_total: AtomicU64,
+
+    /// Whether a snapshot operation is currently in progress (1 = yes, 0 = no).
+    in_progress: AtomicU64,
+}
+
+impl SnapshotMetrics {
+    /// Create a new SnapshotMetrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get the height of the last successful snapshot.
+    pub fn last_height(&self) -> u64 {
+        self.last_height.load(Ordering::Relaxed)
+    }
+
+    /// Get the duration of the last snapshot operation in milliseconds.
+    pub fn last_duration_ms(&self) -> u64 {
+        self.last_duration_ms.load(Ordering::Relaxed)
+    }
+
+    /// Get the size of the last snapshot in bytes.
+    pub fn last_size_bytes(&self) -> u64 {
+        self.last_size_bytes.load(Ordering::Relaxed)
+    }
+
+    /// Get the Unix timestamp (ms) of when the last snapshot was created.
+    pub fn last_created_at_ms(&self) -> u64 {
+        self.last_created_at_ms.load(Ordering::Relaxed)
+    }
+
+    /// Get the total number of successful snapshot operations.
+    pub fn success_total(&self) -> u64 {
+        self.success_total.load(Ordering::Relaxed)
+    }
+
+    /// Get the total number of failed snapshot operations.
+    pub fn failure_total(&self) -> u64 {
+        self.failure_total.load(Ordering::Relaxed)
+    }
+
+    /// Check if a snapshot operation is currently in progress.
+    pub fn in_progress(&self) -> bool {
+        self.in_progress.load(Ordering::Relaxed) != 0
+    }
+
+    /// Set the in_progress flag.
+    pub fn set_in_progress(&self, in_progress: bool) {
+        self.in_progress.store(if in_progress { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
+    /// Record a successful snapshot operation.
+    ///
+    /// # Arguments
+    ///
+    /// * `height` - Block height of the snapshot
+    /// * `duration_ms` - Duration of the snapshot operation in milliseconds
+    /// * `size_bytes` - Size of the snapshot in bytes
+    pub fn record_success(&self, height: u64, duration_ms: u64, size_bytes: u64) {
+        self.last_height.store(height, Ordering::Relaxed);
+        self.last_duration_ms.store(duration_ms, Ordering::Relaxed);
+        self.last_size_bytes.store(size_bytes, Ordering::Relaxed);
+        self.last_created_at_ms.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            Ordering::Relaxed,
+        );
+        self.success_total.fetch_add(1, Ordering::Relaxed);
+        self.set_in_progress(false);
+    }
+
+    /// Record a failed snapshot operation.
+    pub fn record_failure(&self) {
+        self.failure_total.fetch_add(1, Ordering::Relaxed);
+        self.set_in_progress(false);
+    }
+
+    /// Format metrics as Prometheus exposition format.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# T215: State snapshot metrics\n");
+
+        output.push_str(&format!(
+            "qbind_snapshot_last_height {}\n",
+            self.last_height()
+        ));
+        output.push_str(&format!(
+            "qbind_snapshot_last_duration_ms {}\n",
+            self.last_duration_ms()
+        ));
+        output.push_str(&format!(
+            "qbind_snapshot_last_size_bytes {}\n",
+            self.last_size_bytes()
+        ));
+        output.push_str(&format!(
+            "qbind_snapshot_last_created_at_ms {}\n",
+            self.last_created_at_ms()
+        ));
+        output.push_str(&format!(
+            "qbind_snapshot_success_total {}\n",
+            self.success_total()
+        ));
+        output.push_str(&format!(
+            "qbind_snapshot_failure_total {}\n",
+            self.failure_total()
+        ));
+        output.push_str(&format!(
+            "qbind_snapshot_in_progress {}\n",
+            if self.in_progress() { 1 } else { 0 }
+        ));
+
+        output
+    }
+}
+
+// ============================================================================
 // DagCouplingMetrics - DAG coupling validation metrics (T191)
 // ============================================================================
 
@@ -5739,6 +5892,8 @@ pub struct NodeMetrics {
     hsm: crate::hsm_pkcs11::HsmMetrics,
     /// Remote signer client metrics (T212).
     remote_signer: crate::remote_signer::RemoteSignerMetrics,
+    /// State snapshot metrics (T215).
+    snapshot: SnapshotMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -5776,6 +5931,7 @@ impl NodeMetrics {
             monetary: MonetaryMetrics::new(),
             hsm: crate::hsm_pkcs11::HsmMetrics::new(),
             remote_signer: crate::remote_signer::RemoteSignerMetrics::new(),
+            snapshot: SnapshotMetrics::new(),
         }
     }
 
@@ -5892,6 +6048,11 @@ impl NodeMetrics {
     /// Get remote signer client metrics (T212).
     pub fn remote_signer(&self) -> &crate::remote_signer::RemoteSignerMetrics {
         &self.remote_signer
+    }
+
+    /// Get state snapshot metrics (T215).
+    pub fn snapshot(&self) -> &SnapshotMetrics {
+        &self.snapshot
     }
 
     /// Compute the overall signer health based on HSM and remote signer metrics (T214).
@@ -6329,6 +6490,9 @@ impl NodeMetrics {
 
         // Remote signer client metrics (T212)
         output.push_str(&self.remote_signer.format_metrics());
+
+        // State snapshot metrics (T215)
+        output.push_str(&self.snapshot.format_metrics());
 
         output
     }
