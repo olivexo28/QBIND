@@ -899,6 +899,147 @@ HSM backup procedures are vendor-specific:
 
 **Critical**: HSM private key material should NEVER be exported in plaintext. All backup mechanisms must use HSM-native secure backup.
 
+### 5.4 Compromised Key Handling (T217)
+
+This section provides comprehensive guidance for detecting, responding to, and recovering from key compromise scenarios. These procedures are **normative for MainNet validators**.
+
+> **Related**: For step-by-step operational playbooks, see [QBIND_MAINNET_RUNBOOK.md §10.5](../ops/QBIND_MAINNET_RUNBOOK.md#105-compromised-key-incident-procedures).
+
+#### 5.4.1 Compromise Scenarios by Key Role
+
+Each key role has different compromise semantics, blast radius, and urgency:
+
+| Key Role | What "Compromised" Means | Blast Radius | Response Urgency |
+| :--- | :--- | :--- | :--- |
+| **Consensus Key** | Attacker can sign proposals, votes, timeouts as the validator | **Critical** — can cause equivocation, double-voting, slashing | **Immediate** — stop signing within minutes |
+| **Batch Signing Key** | Attacker can sign DAG batches/acks as the validator | **High** — can forge availability certificates | **Immediate** — same as consensus key |
+| **P2P Identity Key** | Attacker can impersonate validator in KEMTLS handshakes | **Medium** — can perform MITM on P2P channels | **High** — rotate within hours |
+
+#### 5.4.2 Compromise Detection Signals
+
+Operators should monitor for these signals that may indicate key compromise:
+
+**Consensus Key Compromise Indicators**:
+- Equivocation evidence detected on-chain (conflicting signatures from same validator)
+- Unexpected signatures in block explorer / consensus logs
+- Security breach detected on validator host or HSM
+- Insider threat alert or personnel security incident
+- HSM tamper detection triggered
+- Anomalous signing patterns (`qbind_signer_sign_requests_total` spikes)
+
+**P2P Identity Key Compromise Indicators**:
+- Unexpected peer connections from unknown sources claiming validator identity
+- KEMTLS handshake failures with legitimate peers
+- Multiple simultaneous connections claiming same validator ID
+- P2P diversity metrics showing unexpected topology changes
+
+**Batch Signing Key Compromise Indicators**:
+- Forged availability certificates observed
+- Batch equivocation evidence (same batch index, different content)
+- DAG consistency violations attributed to validator
+
+**Host/Infrastructure Compromise Indicators**:
+- Unauthorized SSH/console access detected
+- Root access escalation alerts
+- Memory dump or process inspection attempts
+- Suspicious network traffic from validator host
+
+#### 5.4.3 Planned vs Emergency Rotation Using T213 Machinery
+
+QBIND's key rotation system (T213) supports both planned and emergency rotations using the same underlying primitives.
+
+**Planned Rotation** (scheduled maintenance):
+
+1. **Generate new key** in HSM/keystore
+2. **Create rotation event** using `qbind-key-rotation init`:
+   ```bash
+   qbind-key-rotation init \
+     --validator-id 42 \
+     --key-role consensus \
+     --new-public-key-file /path/to/new_pk.bin \
+     --effective-epoch $(current_epoch + 10) \
+     --grace-epochs 100 \
+     --output rotation-event.json
+   ```
+3. **Submit** rotation event to validator registry
+4. **Wait** for grace period (both keys valid)
+5. **Transition** to new key, destroy old key
+
+**Emergency Rotation** (compromise response):
+
+1. **Stop validator immediately** — prevent further signing with compromised key
+2. **Generate emergency key** on fresh, verified infrastructure
+3. **Create emergency rotation event**:
+   ```bash
+   qbind-key-rotation init \
+     --validator-id 42 \
+     --key-role consensus \
+     --new-public-key-file /path/to/emergency_pk.bin \
+     --effective-epoch $(current_epoch + 1) \
+     --grace-epochs 1 \
+     --emergency \
+     --output emergency-rotation.json
+   ```
+4. **Submit** with expedited governance approval
+5. **Resume** operations on new infrastructure with new key
+
+**Key Difference**: Emergency rotations use `--emergency` flag, shorter `effective_epoch` delay, and minimal `grace_epochs`.
+
+#### 5.4.4 Epoch-Level Semantics for Key Rotation
+
+The T213 `KeyRotationEvent` uses epoch-based timing to ensure consensus-safe transitions:
+
+| Field | Meaning | Typical Values |
+| :--- | :--- | :--- |
+| `effective_epoch` | Epoch when the new key becomes valid | Planned: current + 10; Emergency: current + 1 |
+| `grace_epochs` | Duration (in epochs) when both old and new keys are valid | Planned: 50–100; Emergency: 1–2 |
+
+**Timeline Semantics**:
+
+```
+current_epoch    effective_epoch    effective_epoch + grace_epochs
+     │                 │                        │
+     ▼                 ▼                        ▼
+─────┼─────────────────┼────────────────────────┼─────────────────►
+     │   Preparation   │     Grace Period       │   New Key Only
+     │  (old key only) │  (both keys valid)     │
+```
+
+- **Before `effective_epoch`**: Only the old key is valid for consensus signing
+- **During grace period**: Both old AND new keys are valid; validator should transition signing to new key
+- **After grace period ends**: Only new key is valid; old key is rejected by consensus
+
+**Why Grace Periods Matter**:
+- Allow validators time to update configuration without service interruption
+- Ensure no consensus fork if some nodes are slow to receive rotation event
+- Provide window for verification that new key works correctly
+
+**Emergency Grace Period Semantics**:
+- Minimum grace period (1–2 epochs) prevents immediate lockout
+- Compromised key remains valid briefly, but validator stops using it
+- Trade-off: brief exposure window vs. allowing recovery
+
+#### 5.4.5 Response Procedures Summary
+
+| Scenario | Stop Signing? | Grace Period | Governance Path |
+| :--- | :--- | :--- | :--- |
+| **Suspected consensus key compromise** | Yes, immediately | Emergency (1–2 epochs) | Expedited approval |
+| **Confirmed consensus key compromise** | Yes, immediately | Emergency (1 epoch) | Emergency governance |
+| **HSM compromise (but host secure)** | Yes, until HSM replaced | Emergency (2 epochs) | Expedited |
+| **Host compromise (HSM may be safe)** | Yes, immediately | Emergency (1 epoch) | Treat as full compromise |
+| **P2P identity key compromise** | No (validator can keep signing) | Planned (24h) | Normal process |
+| **Batch signing key compromise** | Yes, immediately | Same as consensus | Same as consensus |
+
+#### 5.4.6 Post-Incident Requirements
+
+After any key compromise incident:
+
+1. **Root Cause Analysis**: Document how compromise occurred
+2. **Evidence Preservation**: Retain logs, forensics data for analysis
+3. **Security Posture Review**: Update procedures to prevent recurrence
+4. **Incident Report**: File report with network governance (if required)
+5. **Slashing Assessment**: If equivocation occurred, prepare for potential slashing evidence
+
 ---
 
 ## 6. Network Profiles & Requirements

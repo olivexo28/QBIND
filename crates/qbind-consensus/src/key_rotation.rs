@@ -443,7 +443,11 @@ impl KeyRotationRegistry {
     ///
     /// Returns `None` if no key has been registered for the given
     /// (validator_id, key_role) combination via `register_key()`.
-    pub fn get_key_state(&self, validator_id: u64, key_role: KeyRole) -> Option<&ValidatorKeyState> {
+    pub fn get_key_state(
+        &self,
+        validator_id: u64,
+        key_role: KeyRole,
+    ) -> Option<&ValidatorKeyState> {
         let key_id = ValidatorKeyId::new(validator_id, key_role);
         self.keys.get(&key_id)
     }
@@ -617,9 +621,7 @@ where
     I: IntoIterator<Item = u64>,
 {
     // Check if validator exists in the set
-    let validator_exists = validator_ids
-        .into_iter()
-        .any(|id| id == event.validator_id);
+    let validator_exists = validator_ids.into_iter().any(|id| id == event.validator_id);
 
     if !validator_exists {
         return Err(KeyRotationError::ValidatorNotFound(event.validator_id));
@@ -633,7 +635,10 @@ where
 ///
 /// This is a thin wrapper around `KeyRotationRegistry::advance_epoch` that
 /// provides consistent semantics with the design spec.
-pub fn advance_epoch_for_rotation(registry: &mut KeyRotationRegistry, new_epoch: u64) -> Vec<(u64, KeyRole)> {
+pub fn advance_epoch_for_rotation(
+    registry: &mut KeyRotationRegistry,
+    new_epoch: u64,
+) -> Vec<(u64, KeyRole)> {
     registry.advance_epoch(new_epoch)
 }
 
@@ -662,7 +667,8 @@ mod tests {
 
     #[test]
     fn test_grace_end_epoch_saturating() {
-        let event = KeyRotationEvent::scheduled(1, KeyRole::Consensus, test_pk(1), u64::MAX - 1, 10);
+        let event =
+            KeyRotationEvent::scheduled(1, KeyRole::Consensus, test_pk(1), u64::MAX - 1, 10);
         // Should saturate to u64::MAX instead of overflowing
         assert_eq!(event.grace_end_epoch(), u64::MAX);
     }
@@ -715,10 +721,10 @@ mod tests {
         assert!(state.is_key_valid(&test_pk(1), 100));
 
         // Pending key valid during grace period
-        assert!(!state.is_key_valid(&test_pk(2), 99));  // Before grace
-        assert!(state.is_key_valid(&test_pk(2), 100));  // At start
-        assert!(state.is_key_valid(&test_pk(2), 101));  // During
-        assert!(state.is_key_valid(&test_pk(2), 102));  // At end
+        assert!(!state.is_key_valid(&test_pk(2), 99)); // Before grace
+        assert!(state.is_key_valid(&test_pk(2), 100)); // At start
+        assert!(state.is_key_valid(&test_pk(2), 101)); // During
+        assert!(state.is_key_valid(&test_pk(2), 102)); // At end
         assert!(!state.is_key_valid(&test_pk(2), 103)); // After grace
     }
 
@@ -931,7 +937,7 @@ mod tests {
 
         // Grace period is [100, 100] (effective + 0 = 100)
         let state = registry.get_key_state(1, KeyRole::Consensus).unwrap();
-        assert!(state.is_key_valid(&test_pk(2), 100));  // At effective epoch
+        assert!(state.is_key_valid(&test_pk(2), 100)); // At effective epoch
         assert!(!state.is_key_valid(&test_pk(2), 101)); // After effective epoch
 
         // Commit at epoch 101
@@ -973,11 +979,18 @@ mod tests {
 
         // Validator exists in set
         let event = KeyRotationEvent::scheduled(1, KeyRole::Consensus, test_pk(11), 100, 2);
-        assert!(apply_key_rotation_event(&mut registry, validator_ids.iter().copied(), &event, 99).is_ok());
+        assert!(
+            apply_key_rotation_event(&mut registry, validator_ids.iter().copied(), &event, 99)
+                .is_ok()
+        );
 
         // Validator not in set
         let event2 = KeyRotationEvent::scheduled(99, KeyRole::Consensus, test_pk(99), 100, 2);
-        let result = apply_key_rotation_event(&mut registry, validator_ids.iter().copied(), &event2, 99);
-        assert!(matches!(result, Err(KeyRotationError::ValidatorNotFound(99))));
+        let result =
+            apply_key_rotation_event(&mut registry, validator_ids.iter().copied(), &event2, 99);
+        assert!(matches!(
+            result,
+            Err(KeyRotationError::ValidatorNotFound(99))
+        ));
     }
 }

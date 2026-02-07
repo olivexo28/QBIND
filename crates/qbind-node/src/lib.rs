@@ -256,9 +256,7 @@ pub use node_config::{
 };
 
 // T214 Signer Failure Mode exports
-pub use node_config::{
-    parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER_FAILURE_MODES,
-};
+pub use node_config::{parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER_FAILURE_MODES};
 
 // T213 Key Rotation CLI exports
 pub use key_rotation_cli::{

@@ -319,7 +319,8 @@ impl HsmMetrics {
     /// Call this after the HSM startup "sign ping" to indicate whether
     /// the HSM is reachable and functional.
     pub fn record_startup_ok(&self, ok: bool) {
-        self.startup_ok.store(if ok { 1 } else { 0 }, Ordering::Relaxed);
+        self.startup_ok
+            .store(if ok { 1 } else { 0 }, Ordering::Relaxed);
     }
 
     /// Get the total successful sign operations.
@@ -368,10 +369,7 @@ impl HsmMetrics {
             self.sign_last_latency_ms()
         ));
         // T214: Startup health check metric
-        output.push_str(&format!(
-            "qbind_hsm_startup_ok {}\n",
-            self.startup_ok()
-        ));
+        output.push_str(&format!("qbind_hsm_startup_ok {}\n", self.startup_ok()));
         output
     }
 }

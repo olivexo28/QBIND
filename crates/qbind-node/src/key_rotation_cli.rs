@@ -161,7 +161,9 @@ pub fn parse_key_role(s: &str) -> Result<KeyRole, KeyRotationInitError> {
 /// println!("Generated rotation event:\n{}", result.json);
 /// // The JSON can then be submitted via governance/ops tooling
 /// ```
-pub fn init_key_rotation(args: &KeyRotationInitArgs) -> Result<KeyRotationInitResult, KeyRotationInitError> {
+pub fn init_key_rotation(
+    args: &KeyRotationInitArgs,
+) -> Result<KeyRotationInitResult, KeyRotationInitError> {
     // Validate public key
     if args.new_public_key.is_empty() {
         return Err(KeyRotationInitError::EmptyPublicKey);
@@ -187,8 +189,8 @@ pub fn init_key_rotation(args: &KeyRotationInitArgs) -> Result<KeyRotationInitRe
     };
 
     // Serialize to JSON
-    let json = serde_json::to_string_pretty(&event)
-        .map_err(KeyRotationInitError::JsonSerializeError)?;
+    let json =
+        serde_json::to_string_pretty(&event).map_err(KeyRotationInitError::JsonSerializeError)?;
 
     // Optionally write to file
     if let Some(ref output_path) = args.output_path {
@@ -345,9 +347,18 @@ mod tests {
     fn test_parse_key_role() {
         assert_eq!(parse_key_role("consensus").unwrap(), KeyRole::Consensus);
         assert_eq!(parse_key_role("CONSENSUS").unwrap(), KeyRole::Consensus);
-        assert_eq!(parse_key_role("batch-signing").unwrap(), KeyRole::BatchSigning);
-        assert_eq!(parse_key_role("batch_signing").unwrap(), KeyRole::BatchSigning);
-        assert_eq!(parse_key_role("p2p-identity").unwrap(), KeyRole::P2pIdentity);
+        assert_eq!(
+            parse_key_role("batch-signing").unwrap(),
+            KeyRole::BatchSigning
+        );
+        assert_eq!(
+            parse_key_role("batch_signing").unwrap(),
+            KeyRole::BatchSigning
+        );
+        assert_eq!(
+            parse_key_role("p2p-identity").unwrap(),
+            KeyRole::P2pIdentity
+        );
         assert_eq!(parse_key_role("p2p").unwrap(), KeyRole::P2pIdentity);
 
         assert!(parse_key_role("invalid").is_err());
@@ -355,7 +366,10 @@ mod tests {
 
     #[test]
     fn test_key_fingerprint() {
-        assert_eq!(key_fingerprint(&[0x01, 0x02, 0x03, 0x04, 0x05]), "01020304...");
+        assert_eq!(
+            key_fingerprint(&[0x01, 0x02, 0x03, 0x04, 0x05]),
+            "01020304..."
+        );
         assert_eq!(key_fingerprint(&[0xAB, 0xCD]), "abcd");
         assert_eq!(key_fingerprint(&[]), "");
     }
