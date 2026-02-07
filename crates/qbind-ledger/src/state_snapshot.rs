@@ -187,7 +187,7 @@ impl StateSnapshotMeta {
 
         // Find the end of the number (comma, newline, or closing brace)
         let end = rest
-            .find(|c: char| c == ',' || c == '\n' || c == '}')
+            .find([',', '\n', '}'])
             .unwrap_or(rest.len());
         let num_str = rest[..end].trim();
         num_str.parse().ok()
