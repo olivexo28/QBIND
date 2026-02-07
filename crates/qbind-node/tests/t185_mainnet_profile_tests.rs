@@ -908,8 +908,8 @@ fn test_non_mainnet_allows_signer_failure_mode_log_and_continue() {
     // Note: TestNet doesn't run validate_mainnet_invariants(), so this is valid
 
     // DevNet can also use LogAndContinue
-    let devnet_config = NodeConfig::devnet_v0_preset()
-        .with_signer_failure_mode(SignerFailureMode::LogAndContinue);
+    let devnet_config =
+        NodeConfig::devnet_v0_preset().with_signer_failure_mode(SignerFailureMode::LogAndContinue);
     assert_eq!(
         devnet_config.signer_failure_mode,
         SignerFailureMode::LogAndContinue,

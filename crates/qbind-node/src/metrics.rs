@@ -5470,7 +5470,8 @@ impl SnapshotMetrics {
 
     /// Set the in_progress flag.
     pub fn set_in_progress(&self, in_progress: bool) {
-        self.in_progress.store(if in_progress { 1 } else { 0 }, Ordering::Relaxed);
+        self.in_progress
+            .store(if in_progress { 1 } else { 0 }, Ordering::Relaxed);
     }
 
     /// Record a successful snapshot operation.
@@ -7758,7 +7759,9 @@ mod tests {
     fn signer_health_considers_remote_signer_metrics() {
         let metrics = NodeMetrics::new();
         // Record remote signer requests with some failures
-        metrics.remote_signer().record_result("proposal", true, 10, None);
+        metrics
+            .remote_signer()
+            .record_result("proposal", true, 10, None);
         metrics.remote_signer().record_result("vote", true, 8, None);
         metrics
             .remote_signer()

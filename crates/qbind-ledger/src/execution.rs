@@ -1571,7 +1571,9 @@ impl StatePruner for RocksDbAccountState {
 // T215: StateSnapshotter Implementation for RocksDbAccountState
 // ============================================================================
 
-use crate::state_snapshot::{SnapshotStats, StateSnapshotError, StateSnapshotMeta, StateSnapshotter};
+use crate::state_snapshot::{
+    SnapshotStats, StateSnapshotError, StateSnapshotMeta, StateSnapshotter,
+};
 
 impl StateSnapshotter for RocksDbAccountState {
     /// Create a point-in-time snapshot of the RocksDB account state.
@@ -1636,25 +1638,25 @@ impl StateSnapshotter for RocksDbAccountState {
 
         // Write metadata file
         let meta_path = target_dir.join("meta.json");
-        std::fs::write(&meta_path, meta.to_json()).map_err(|e| {
-            StateSnapshotError::Io(format!("cannot write meta.json: {}", e))
-        })?;
+        std::fs::write(&meta_path, meta.to_json())
+            .map_err(|e| StateSnapshotError::Io(format!("cannot write meta.json: {}", e)))?;
 
         // Create state subdirectory for RocksDB checkpoint
         let state_dir = target_dir.join("state");
 
         // Flush WAL and memtable before checkpoint to ensure consistency
-        self.db
-            .flush()
-            .map_err(|e| StateSnapshotError::Backend(format!("cannot flush before checkpoint: {}", e)))?;
+        self.db.flush().map_err(|e| {
+            StateSnapshotError::Backend(format!("cannot flush before checkpoint: {}", e))
+        })?;
 
         // Create RocksDB checkpoint
-        let checkpoint = rocksdb::checkpoint::Checkpoint::new(&self.db)
-            .map_err(|e| StateSnapshotError::Backend(format!("cannot create checkpoint object: {}", e)))?;
+        let checkpoint = rocksdb::checkpoint::Checkpoint::new(&self.db).map_err(|e| {
+            StateSnapshotError::Backend(format!("cannot create checkpoint object: {}", e))
+        })?;
 
-        checkpoint
-            .create_checkpoint(&state_dir)
-            .map_err(|e| StateSnapshotError::Backend(format!("checkpoint creation failed: {}", e)))?;
+        checkpoint.create_checkpoint(&state_dir).map_err(|e| {
+            StateSnapshotError::Backend(format!("checkpoint creation failed: {}", e))
+        })?;
 
         let duration = start.elapsed();
 
@@ -1677,7 +1679,7 @@ impl RocksDbAccountState {
     fn estimate_dir_size(dir: &Path) -> Option<u64> {
         let mut total: u64 = 0;
         let entries = std::fs::read_dir(dir).ok()?;
-        
+
         for entry in entries.flatten() {
             let metadata = entry.metadata().ok()?;
             if metadata.is_file() {
@@ -1688,7 +1690,7 @@ impl RocksDbAccountState {
                 }
             }
         }
-        
+
         Some(total)
     }
 }
