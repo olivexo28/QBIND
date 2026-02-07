@@ -171,6 +171,11 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 >
 > **Note (T184)**: For MainNet specifications, see:
 > - **MainNet v0**: [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) + [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md)
+>
+> **Note (T216)**: The **MainNet Operational Runbook** (T216) is now available:
+> - **Runbook**: [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — the reference for production operations
+> - **Prometheus Alerts**: [prometheus/qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml)
+> - **Grafana Dashboard**: [grafana/qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json)
 
 | Phase | Network | Key Changes from DevNet v0 |
 | :--- | :--- | :--- |
