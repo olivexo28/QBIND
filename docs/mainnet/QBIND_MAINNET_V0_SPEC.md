@@ -400,6 +400,16 @@ For detailed protocol steps, object definitions, and invariant specifications, s
 
 Any non-zero violation counters should be investigated. See [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md §7.4](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md#74-t192-block-level-invariant-probes--safety-checks) for details.
 
+#### T221 – DAG–Consensus Coupling Cluster Tests
+
+**MainNet v0** has an automated cluster test harness (`crates/qbind-node/tests/t221_dag_coupling_cluster_tests.rs`) that validates DAG–HotStuff coupling under several scenarios:
+
+1. **Warn mode cluster progress** — Validates that with DAG coupling in Warn mode, the cluster can process transactions and no `block_mismatch` violations occur.
+2. **Enforce mode behavior** — Validates that Enforce mode correctly prevents blocks from committing without proper DAG certification.
+3. **Off mode baseline** — Validates that Off mode allows normal operation without coupling enforcement.
+
+The tests assert on the same metrics documented above (`qbind_dag_coupling_*`) to verify invariant compliance. This test harness is the normative test artifact for MN-R1 readiness regarding DAG–consensus coupling.
+
 ### 4.4 DoS Protections and Fee-Aware Eviction
 
 MainNet v0 requires stronger DoS protections in the DAG mempool (T218):

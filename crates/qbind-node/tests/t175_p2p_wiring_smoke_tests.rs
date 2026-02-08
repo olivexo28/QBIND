@@ -11,8 +11,8 @@
 use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     DagCouplingMode, ExecutionProfile, FastSyncConfig, MempoolDosConfig, MempoolEvictionConfig,
-    MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig, SignerFailureMode,
-    SignerMode, SnapshotConfig, StateRetentionConfig,
+    MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig, SignerFailureMode, SignerMode,
+    SnapshotConfig, StateRetentionConfig,
 };
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
