@@ -431,25 +431,32 @@ MainNet v0 requires stronger DoS protections in the DAG mempool (T218):
 
 **Validation**: `validate_mainnet_invariants()` checks that all DoS config values are sensible for MainNet (all > 0, `max_pending_per_sender < 100,000`).
 
-### 4.4.1 Eviction Rate Limiting (T219)
+### 4.4.1 Eviction Rate Limiting (T219/T220)
 
 MainNet v0 requires eviction rate limiting to prevent excessive mempool churn under adversarial conditions:
 
 | Protection | MainNet v0 Status | Config Field |
 | :--- | :--- | :--- |
-| **Eviction mode** | Enforce (T219) | `mempool_eviction.mode=enforce` |
-| **Max evictions/interval** | Required (T219) | `mempool_eviction.max_evictions_per_interval=1,000` |
-| **Interval seconds** | Required (T219) | `mempool_eviction.interval_secs=10` |
+| **Eviction mode** | Enforce (T219/T220) | `mempool_eviction.mode=enforce` |
+| **Max evictions/interval** | Required (T219/T220) | `mempool_eviction.max_evictions_per_interval=1,000` |
+| **Interval seconds** | Required (T219/T220) | `mempool_eviction.interval_secs=10` |
 
-**Implementation**: `MempoolEvictionConfig` struct in `qbind-node/src/node_config.rs`.
+**Implementation**:
+- Config: `MempoolEvictionConfig` struct in `qbind-node/src/node_config.rs` (T219)
+- Enforcement: `InMemoryDagMempool::insert_local_txs()` in `qbind-node/src/dag_mempool.rs` (T220)
 
-**Eviction Mode Behavior**:
+**Eviction Mode Behavior** (T220 enforcement):
 
 | Mode | Behavior |
 | :--- | :--- |
-| **Off** | No rate limiting; metrics recorded only |
-| **Warn** | Log warnings when limit exceeded; still evict |
-| **Enforce** | Reject new txs instead of exceeding rate |
+| **Off** | No rate limiting; metrics recorded only. Eviction proceeds as normal. |
+| **Warn** | Log warnings when limit exceeded; still allow eviction. Increment `qbind_mempool_eviction_rate_limit_total{mode="warn"}`. |
+| **Enforce** | When eviction limit is reached, block further evictions. Incoming transactions that would require eviction are rejected with `EvictionRateLimited` error. Increment `qbind_mempool_eviction_rate_limit_total{mode="enforce"}`. |
+
+**Important**: In Enforce mode, when the eviction rate limit is reached:
+- No additional evictions are performed
+- New transactions requiring eviction are rejected (not the existing low-priority tx)
+- The mempool degrades gracefully by rejecting further incoming txs instead of thrashing
 
 **Defaults by Environment**:
 
@@ -459,7 +466,7 @@ MainNet v0 requires eviction rate limiting to prevent excessive mempool churn un
 | `max_evictions_per_interval` | 10,000 | 5,000 | 2,000 | 1,000 |
 | `interval_secs` | 10 | 10 | 10 | 10 |
 
-**Metrics** (T219):
+**Metrics** (T219/T220):
 - `qbind_mempool_eviction_mode`: Config gauge (0=off, 1=warn, 2=enforce)
 - `qbind_mempool_max_evictions_per_interval`: Config gauge
 - `qbind_mempool_eviction_interval_secs`: Config gauge
