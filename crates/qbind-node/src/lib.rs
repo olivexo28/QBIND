@@ -263,8 +263,7 @@ pub use node_config::MempoolDosConfig;
 
 // T219 Mempool Eviction Rate Limiting exports
 pub use node_config::{
-    parse_eviction_rate_mode, EvictionRateMode, MempoolEvictionConfig,
-    VALID_EVICTION_RATE_MODES,
+    parse_eviction_rate_mode, EvictionRateMode, MempoolEvictionConfig, VALID_EVICTION_RATE_MODES,
 };
 
 // T213 Key Rotation CLI exports

@@ -2513,21 +2513,23 @@ impl DagMempool for InMemoryDagMempool {
                             let now_ms = current_time_ms();
 
                             // Maybe reset the eviction window
-                            if inner.eviction_window.maybe_reset(now_ms, eviction_interval_secs) {
+                            if inner
+                                .eviction_window
+                                .maybe_reset(now_ms, eviction_interval_secs)
+                            {
                                 if let Some(ref m) = self.metrics {
                                     m.inc_eviction_window_reset();
                                 }
                             }
 
                             // Check if eviction is allowed based on mode
-                            let eviction_allowed =
-                                Self::check_eviction_rate_limit(
-                                    &mut inner.eviction_window,
-                                    eviction_mode,
-                                    max_evictions_per_interval,
-                                    eviction_interval_secs,
-                                    self.metrics.as_ref(),
-                                );
+                            let eviction_allowed = Self::check_eviction_rate_limit(
+                                &mut inner.eviction_window,
+                                eviction_mode,
+                                max_evictions_per_interval,
+                                eviction_interval_secs,
+                                self.metrics.as_ref(),
+                            );
 
                             if !eviction_allowed {
                                 // T220: Eviction rate limit reached in Enforce mode
@@ -2581,7 +2583,9 @@ impl DagMempool for InMemoryDagMempool {
                         arrival_id,
                     };
                     inner.priority_index.insert(score, (tx.sender, tx.nonce));
-                    inner.tx_priority_scores.insert((tx.sender, tx.nonce), score);
+                    inner
+                        .tx_priority_scores
+                        .insert((tx.sender, tx.nonce), score);
                 }
             }
 
@@ -4086,7 +4090,10 @@ mod tests {
 
     #[test]
     fn test_sender_load_limits() {
-        let load = SenderLoad { pending_txs: 5, pending_bytes: 1000 };
+        let load = SenderLoad {
+            pending_txs: 5,
+            pending_bytes: 1000,
+        };
 
         // Within limits
         assert!(load.is_within_limits(10, 2000));
@@ -4144,10 +4151,7 @@ mod tests {
         let mempool = mempool.with_metrics(metrics.clone());
 
         // Add 2 txs from sender 1 - should succeed
-        let result = mempool.insert_local_txs(vec![
-            make_test_tx(0x01, 0),
-            make_test_tx(0x01, 1),
-        ]);
+        let result = mempool.insert_local_txs(vec![make_test_tx(0x01, 0), make_test_tx(0x01, 1)]);
         assert!(result.is_ok());
 
         // Add a 3rd tx from sender 1 - should be rate limited
@@ -4239,7 +4243,10 @@ mod tests {
         let config = DagMempoolConfig::default();
 
         // DevNet defaults
-        assert_eq!(config.eviction_mode, crate::node_config::EvictionRateMode::Off);
+        assert_eq!(
+            config.eviction_mode,
+            crate::node_config::EvictionRateMode::Off
+        );
         assert_eq!(config.max_evictions_per_interval, 10_000);
         assert_eq!(config.eviction_interval_secs, 10);
     }
@@ -4249,7 +4256,10 @@ mod tests {
         let eviction_cfg = crate::node_config::MempoolEvictionConfig::mainnet_default();
         let config = DagMempoolConfig::default().with_eviction_config(&eviction_cfg);
 
-        assert_eq!(config.eviction_mode, crate::node_config::EvictionRateMode::Enforce);
+        assert_eq!(
+            config.eviction_mode,
+            crate::node_config::EvictionRateMode::Enforce
+        );
         assert_eq!(config.max_evictions_per_interval, 1_000);
         assert_eq!(config.eviction_interval_secs, 10);
     }
@@ -4339,7 +4349,7 @@ mod tests {
         let config = DagMempoolConfig {
             max_batches: 100,
             max_pending_txs: 3, // Very small capacity to force eviction
-            batch_size: 100, // Large batch size so txs stay pending
+            batch_size: 100,    // Large batch size so txs stay pending
             local_validator_id: ValidatorId::new(1),
             enable_fee_priority: true,
             max_pending_per_sender: 10_000,
@@ -4390,7 +4400,7 @@ mod tests {
         let config = DagMempoolConfig {
             max_batches: 100,
             max_pending_txs: 3, // Very small capacity
-            batch_size: 100, // Large batch size so txs stay pending
+            batch_size: 100,    // Large batch size so txs stay pending
             local_validator_id: ValidatorId::new(1),
             enable_fee_priority: true,
             max_pending_per_sender: 10_000,
@@ -4400,7 +4410,7 @@ mod tests {
             // T220: Warn mode
             eviction_mode: crate::node_config::EvictionRateMode::Warn,
             max_evictions_per_interval: 2, // Allow 2 evictions before warning
-            eviction_interval_secs: 3600, // Long interval to avoid reset during test
+            eviction_interval_secs: 3600,  // Long interval to avoid reset during test
         };
 
         let metrics = Arc::new(DagMempoolMetrics::new());
@@ -4441,7 +4451,7 @@ mod tests {
         let config = DagMempoolConfig {
             max_batches: 100,
             max_pending_txs: 3, // Very small capacity
-            batch_size: 100, // Large batch size so txs stay pending
+            batch_size: 100,    // Large batch size so txs stay pending
             local_validator_id: ValidatorId::new(1),
             enable_fee_priority: true,
             max_pending_per_sender: 10_000,
@@ -4451,7 +4461,7 @@ mod tests {
             // T220: Enforce mode
             eviction_mode: crate::node_config::EvictionRateMode::Enforce,
             max_evictions_per_interval: 2, // Allow only 2 evictions
-            eviction_interval_secs: 3600, // Long interval to avoid reset
+            eviction_interval_secs: 3600,  // Long interval to avoid reset
         };
 
         let metrics = Arc::new(DagMempoolMetrics::new());
@@ -4527,7 +4537,10 @@ mod tests {
         // Simulate time passing: 500ms later, still in same window
         let reset = window.maybe_reset(500, interval_secs);
         assert!(!reset, "Window should not reset at 500ms");
-        assert!(window.would_exceed_limit(1, max_evictions), "Still at limit");
+        assert!(
+            window.would_exceed_limit(1, max_evictions),
+            "Still at limit"
+        );
 
         // Simulate time passing: 1500ms later, window should reset
         let reset = window.maybe_reset(1500, interval_secs);
