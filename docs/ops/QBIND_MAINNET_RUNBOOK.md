@@ -1575,29 +1575,55 @@ journalctl -u qbind-node -f
    - Apply rollback binary when instructed
    - Activate at specified rollback height
 
-### 11.6 Upgrade Envelope Verification Commands
+### 11.6 Upgrade Envelope Verification Commands (T225)
 
-**Verify envelope signature count**:
+**Inspect envelope contents** (human-readable summary):
 ```bash
+qbind-envelope inspect /etc/qbind/upgrade-envelope-vX.Y.Z.json
+```
+
+**Verify envelope signatures** (checks threshold is met):
+```bash
+qbind-envelope verify \
+  --envelope /etc/qbind/upgrade-envelope-vX.Y.Z.json \
+  --council-keys /etc/qbind/council-pubkeys.json
+```
+
+**Verify envelope signatures AND binary hash**:
+```bash
+qbind-envelope verify \
+  --envelope /etc/qbind/upgrade-envelope-vX.Y.Z.json \
+  --council-keys /etc/qbind/council-pubkeys.json \
+  --binary /path/to/new/qbind-node \
+  --platform linux-x86_64
+```
+
+**Exit Codes**:
+- `0`: Verification passed (threshold met, all signatures valid, binary hash matches)
+- `1`: Verification failed (threshold not met, invalid signatures, or binary hash mismatch)
+- `2`: Invalid arguments or I/O error
+
+**JSON Output** (for automation):
+```bash
+qbind-envelope verify \
+  --envelope /etc/qbind/upgrade-envelope-vX.Y.Z.json \
+  --council-keys /etc/qbind/council-pubkeys.json \
+  --output json
+```
+
+**Compute envelope digest** (for manual verification):
+```bash
+qbind-envelope digest /etc/qbind/upgrade-envelope-vX.Y.Z.json
+```
+
+**Alternative: Manual verification with jq**:
+```bash
+# Verify envelope signature count
 cat /etc/qbind/upgrade-envelope-vX.Y.Z.json | jq '.council_approvals | length'
 # Should return >= 5
-```
 
-**Verify individual signature** (example with hypothetical CLI):
-```bash
-qbind-envelope verify-signature \
-  --envelope /etc/qbind/upgrade-envelope-vX.Y.Z.json \
-  --member-id council-1 \
-  --public-key /etc/qbind/council-pubkeys/council-1.pub
-```
-
-**Verify binary hash**:
-```bash
-# Compute hash of new binary
-sha3-256 /path/to/new/qbind-node
-
-# Compare with envelope
-cat /etc/qbind/upgrade-envelope-vX.Y.Z.json | jq '.binary_hashes["linux-x86_64"]'
+# Get binary hash from envelope
+cat /etc/qbind/upgrade-envelope-vX.Y.Z.json | jq -r '.binary_hashes["linux-x86_64"]'
 ```
 
 ### 11.7 Post-Upgrade Monitoring

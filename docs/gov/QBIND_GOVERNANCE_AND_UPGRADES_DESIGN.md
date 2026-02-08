@@ -303,58 +303,61 @@ All QBIND upgrades are classified into three classes based on their impact on th
 
 An **Upgrade Envelope** is a signed document that represents Council approval for a specific protocol version. It serves as the authoritative record for upgrade decisions.
 
-**Envelope Structure** (JSON format):
+**Envelope Structure** (JSON format, T225 implementation):
 
 ```json
 {
   "envelope_version": "1.0",
-  "envelope_id": "T224-2026-02-08-001",
-  "upgrade_class": "C",
-  "protocol_version": {
-    "major": 0,
-    "minor": 1,
-    "patch": 0
-  },
+  "envelope_id": "T225-2026-02-08-001",
+  "protocol_version": "0.1.0",
+  "network_environment": "mainnet",
+  "class": "c_hard_fork",
+  "version": "0.1.0",
+  "activation_height": 1000000,
   "binary_hashes": {
-    "linux-x86_64": "sha3-256:<hash>",
-    "linux-aarch64": "sha3-256:<hash>",
-    "darwin-aarch64": "sha3-256:<hash>"
+    "linux-x86_64": "a1b2c3...",
+    "linux-aarch64": "d4e5f6...",
+    "darwin-aarch64": "789abc..."
   },
-  "activation": {
-    "type": "height",
-    "value": 1000000,
-    "estimated_time": "2026-03-15T12:00:00Z"
-  },
-  "features": {
-    "stage_b_enabled": true,
-    "dag_coupling_mode": "enforce",
-    "monetary_version": 1
-  },
-  "backward_compatibility": {
-    "min_compatible_version": "0.0.9",
-    "requires_data_migration": false
-  },
-  "references": {
-    "rfc": "https://github.com/qbind/rfcs/blob/main/RFC-001-example.md",
-    "testnet_report": "https://github.com/qbind/testnet-reports/blob/main/2026-02-beta-soak.md",
-    "changelog": "https://github.com/qbind/qbind/releases/tag/v0.1.0"
-  },
+  "notes": "MainNet v0.1.0 introduces Stage B parallel execution.",
   "council_approvals": [
     {
       "member_id": "council-1",
-      "public_key": "<ml-dsa-44-public-key>",
-      "signature": "<ml-dsa-44-signature>",
+      "public_key": "<ml-dsa-44-public-key-hex>",
+      "signature": "<ml-dsa-44-signature-hex>",
       "timestamp": "2026-02-08T10:00:00Z"
     },
     {
       "member_id": "council-2",
-      "public_key": "<ml-dsa-44-public-key>",
-      "signature": "<ml-dsa-44-signature>",
+      "public_key": "<ml-dsa-44-public-key-hex>",
+      "signature": "<ml-dsa-44-signature-hex>",
       "timestamp": "2026-02-08T11:30:00Z"
     }
-  ],
-  "created_at": "2026-02-08T09:00:00Z",
-  "notes": "MainNet v0.1.0 introduces Stage B parallel execution and DAG coupling enforcement."
+  ]
+}
+```
+
+**Upgrade Class Values** (`class` field):
+- `a_non_consensus`: Class A (non-consensus changes)
+- `b_consensus_compatible`: Class B (consensus-compatible)
+- `c_hard_fork`: Class C (hard-fork/protocol changes)
+
+**Council Keyset Structure** (JSON format):
+
+```json
+{
+  "keyset_version": "1.0",
+  "network_environment": "mainnet",
+  "threshold": 5,
+  "emergency_threshold": 4,
+  "keys": [
+    {
+      "member_id": "council-1",
+      "name": "Organization A",
+      "public_key": "<ml-dsa-44-public-key-hex>",
+      "algorithm": "ML-DSA-44"
+    }
+  ]
 }
 ```
 
@@ -387,17 +390,31 @@ MainNet v0 operators MUST:
 2. **Use `--profile mainnet`** to enforce MainNet invariants
 3. **Verify binary hash** against the signed Upgrade Envelope before deployment
 
-**Version Verification Command** (example):
+**Version Verification Command** (T225 CLI):
 ```bash
-# Verify binary hash
-sha3-256 /usr/local/bin/qbind-node
-# Compare against envelope binary_hashes.linux-x86_64
+# Inspect envelope contents (human-readable summary)
+qbind-envelope inspect /etc/qbind/upgrade-envelope-v0.1.0.json
 
-# Verify envelope signatures (hypothetical CLI)
+# Verify envelope signatures meet threshold
 qbind-envelope verify \
   --envelope /etc/qbind/upgrade-envelope-v0.1.0.json \
   --council-keys /etc/qbind/council-pubkeys.json
+
+# Verify envelope signatures AND binary hash
+qbind-envelope verify \
+  --envelope /etc/qbind/upgrade-envelope-v0.1.0.json \
+  --council-keys /etc/qbind/council-pubkeys.json \
+  --binary /usr/local/bin/qbind-node \
+  --platform linux-x86_64
+
+# Compute envelope digest (for manual signature verification)
+qbind-envelope digest /etc/qbind/upgrade-envelope-v0.1.0.json
 ```
+
+**Exit Codes**:
+- `0`: Verification passed
+- `1`: Verification failed (threshold not met, invalid signatures, binary hash mismatch)
+- `2`: Invalid arguments or I/O error
 
 **Upgrade Authorization**:
 

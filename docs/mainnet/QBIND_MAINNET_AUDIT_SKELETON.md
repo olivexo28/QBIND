@@ -57,7 +57,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
-| **Governance / Upgrades** | T224 | Partially Mitigated | Design & process documented (T224), off-chain council governance; on-chain governance pending for v0.x |
+| **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
 
 ---
 
@@ -302,15 +302,16 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
 | **Governance key compromise** | Attacker gains control of council signing keys | Critical | Partially Mitigated (T224) |
-| **Rogue upgrade** | Malicious insider pushes unauthorized code change | Critical | Partially Mitigated (T224) |
-| **Upgrade coordination failure** | Operators fail to upgrade, causing chain split | High | Partially Mitigated (T224) |
-| **Configuration drift** | Operators misconfigure upgrade parameters | High | Partially Mitigated (T224) |
-| **No governance process** | Ad-hoc changes without audit trail | High | ✅ Mitigated (T224) |
+| **Rogue upgrade** | Malicious insider pushes unauthorized code change | Critical | Partially Mitigated (T224, T225) |
+| **Upgrade coordination failure** | Operators fail to upgrade, causing chain split | High | Partially Mitigated (T224, T225) |
+| **Configuration drift** | Operators misconfigure upgrade parameters | High | Partially Mitigated (T224, T225) |
+| **No governance process** | Ad-hoc changes without audit trail | High | ✅ Mitigated (T224, T225) |
 
 **Current Mitigations**:
 - ✅ **Governance & Upgrades design complete (T224)** — see [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md)
 - ✅ Protocol Council model with M-of-N (5-of-7) PQC multi-signature approval
 - ✅ Upgrade Envelope specification for cryptographic audit trail
+- ✅ **Upgrade envelope library and CLI (T225)** — `qbind-gov` crate with `qbind-envelope` tool
 - ✅ Three upgrade classes (A, B, C) with appropriate processes for each
 - ✅ Emergency patch process for critical security fixes
 - ✅ Operator runbook procedures for upgrade verification
@@ -323,13 +324,21 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] TestNet Beta Spec updated with governance path note
 - [x] Threat model for governance key compromise, rogue upgrades, and coordination failures
 
+**T225 Deliverables**:
+- [x] `qbind-gov` crate: envelope parsing, council keyset validation, multi-sig verification
+- [x] `qbind-envelope` CLI: `inspect`, `verify`, `digest` subcommands
+- [x] ML-DSA-44 signature verification against council keyset
+- [x] Binary hash verification (SHA3-256)
+- [x] Threshold enforcement (5-of-7 normal, 4-of-7 emergency)
+- [x] Documentation updates (governance design, MainNet spec, runbook)
+
 **Additional MainNet Requirements**:
 - [ ] External audit of governance process
 - [ ] Council member selection and key ceremony
 - [ ] On-chain upgrade signaling (v0.x)
 - [ ] On-chain parameter governance (v1.0)
 
-**Target Phase**: Partially Mitigated (T224); on-chain governance planned for v0.x+
+**Target Phase**: Partially Mitigated (T224, T225); on-chain governance planned for v0.x+
 
 ---
 
@@ -507,6 +516,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T219** | **Mempool** | **Mempool eviction rate limiting config/metrics v1** | **MN-R2** |
 | **T220** | **Mempool** | **Mempool eviction rate limiting enforcement v1** | **MN-R2** |
 | **T224** | **Governance** | **Governance & upgrade envelope design** | **MN-R8** |
+| **T225** | **Governance** | **Upgrade envelope library & qbind-envelope CLI** | **MN-R8** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 

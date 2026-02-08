@@ -1,0 +1,23 @@
+[package]
+name = "qbind-gov"
+version = "0.1.0"
+edition = "2021"
+description = "QBIND governance library: upgrade envelope parsing, verification, and council signature validation (T225)"
+
+[[bin]]
+name = "qbind-envelope"
+path = "src/bin/qbind_envelope.rs"
+
+[dependencies]
+qbind-crypto = { path = "../qbind-crypto" }
+qbind-hash   = { path = "../qbind-hash" }
+qbind-types  = { path = "../qbind-types" }
+serde        = { version = "1.0", features = ["derive"] }
+serde_json   = "1.0"
+sha3         = "0.10"
+clap         = { version = "4.5", features = ["derive"] }
+hex          = "0.4"
+thiserror    = "1.0"
+
+[dev-dependencies]
+tempfile = "3.10"

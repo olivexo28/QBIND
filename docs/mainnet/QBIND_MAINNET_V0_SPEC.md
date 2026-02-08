@@ -1014,7 +1014,7 @@ Dashboard panels by domain:
 
 ---
 
-## 11. Governance & Upgrades (T224)
+## 11. Governance & Upgrades (T224, T225)
 
 ### 11.1 Governance Model Overview
 
@@ -1047,13 +1047,28 @@ All upgrades are classified into three classes:
 Each Council-approved upgrade is documented in a signed **Upgrade Envelope** containing:
 
 - Protocol version (major.minor.patch)
-- Binary hashes for all platforms
-- Activation height/epoch (for Class C upgrades)
-- Feature flags (e.g., `stage_b_enabled`, `dag_coupling_mode`)
+- Binary hashes for all platforms (SHA3-256)
+- Activation height (for Class C upgrades)
+- Network environment (mainnet/testnet/devnet)
+- Upgrade class (a_non_consensus, b_consensus_compatible, c_hard_fork)
 - Council member signatures (ML-DSA-44)
 
+**T225 Implementation**: The `qbind-gov` crate and `qbind-envelope` CLI tool provide:
+
+```bash
+# Inspect envelope contents
+qbind-envelope inspect envelope.json
+
+# Verify envelope signatures and binary hash
+qbind-envelope verify \
+  --envelope envelope.json \
+  --council-keys council-pubkeys.json \
+  --binary /usr/local/bin/qbind-node \
+  --platform linux-x86_64
+```
+
 Operators MUST verify the Upgrade Envelope before deploying any upgrade:
-1. Verify ≥M council signatures are valid
+1. Verify ≥M council signatures are valid (5-of-7 for normal, 4-of-7 for emergency)
 2. Verify binary hash matches envelope
 3. Verify activation parameters match expected values
 
@@ -1097,7 +1112,7 @@ The v0 off-chain model is designed to be compatible with future on-chain migrati
 | :--- | :--- | :--- |
 | **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
-| **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance and upgrade envelope design (T224) |
+| **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance and upgrade envelope design (T224, T225) |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
 | TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture |
