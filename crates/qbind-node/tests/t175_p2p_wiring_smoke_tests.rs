@@ -10,9 +10,9 @@
 
 use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
-    DagCouplingMode, ExecutionProfile, FastSyncConfig, MempoolMode, NetworkMode,
-    NetworkTransportConfig, NodeConfig, SignerFailureMode, SignerMode, SnapshotConfig,
-    StateRetentionConfig,
+    DagCouplingMode, ExecutionProfile, FastSyncConfig, MempoolDosConfig, MempoolMode,
+    NetworkMode, NetworkTransportConfig, NodeConfig, SignerFailureMode, SignerMode,
+    SnapshotConfig, StateRetentionConfig,
 };
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
@@ -73,6 +73,8 @@ fn make_test_p2p_config() -> NodeConfig {
         hsm_config_path: None,
         // T214: Signer failure mode defaults
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
+        // T218: DoS protection defaults
+        mempool_dos: MempoolDosConfig::devnet_default(),
     }
 }
 
@@ -106,6 +108,8 @@ fn make_test_local_mesh_config() -> NodeConfig {
         hsm_config_path: None,
         // T214: Signer failure mode defaults
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
+        // T218: DoS protection defaults
+        mempool_dos: MempoolDosConfig::devnet_default(),
     }
 }
 

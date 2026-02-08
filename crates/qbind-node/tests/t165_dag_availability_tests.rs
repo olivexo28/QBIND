@@ -351,6 +351,10 @@ fn test_dag_mempool_with_availability() {
         max_batches: 100,
         max_pending_txs: 1000,
         enable_fee_priority: false,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -366,6 +370,10 @@ fn test_dag_mempool_handle_batch_ack() {
         max_batches: 100,
         max_pending_txs: 1000,
         enable_fee_priority: false,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
     mempool.set_current_view(10);
@@ -433,6 +441,10 @@ fn test_dag_mempool_duplicate_ack_rejected() {
         max_batches: 100,
         max_pending_txs: 1000,
         enable_fee_priority: false,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -463,6 +475,10 @@ fn test_dag_mempool_unknown_batch_ack_rejected() {
         max_batches: 100,
         max_pending_txs: 1000,
         enable_fee_priority: false,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -546,6 +562,10 @@ fn test_dag_mempool_metrics_ack_tracking() {
         max_batches: 100,
         max_pending_txs: 1000,
         enable_fee_priority: false,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 2).with_metrics(metrics.clone());
 

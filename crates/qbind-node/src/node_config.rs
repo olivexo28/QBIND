@@ -703,6 +703,217 @@ pub fn parse_signer_failure_mode(s: &str) -> Option<SignerFailureMode> {
 pub const VALID_SIGNER_FAILURE_MODES: &[&str] = &["exit-on-failure", "log-and-continue"];
 
 // ============================================================================
+// T218: Mempool DoS Configuration
+// ============================================================================
+
+/// Configuration for DAG mempool DoS protections (T218).
+///
+/// Controls per-sender rate limits and batch size limits to prevent
+/// malicious senders from overwhelming the mempool.
+///
+/// # Environments
+///
+/// - **DevNet v0**: Very loose limits (debugging-friendly)
+/// - **TestNet Alpha**: Disabled / neutral (FIFO or DAG in proto mode)
+/// - **TestNet Beta**: Moderate protection (testable limits)
+/// - **MainNet v0**: Tighter defaults (conservative; can refine post-benchmark)
+///
+/// # Per-Sender Quotas
+///
+/// Each sender can only have a bounded number of pending (unbatched + batched-not-committed)
+/// transactions in the mempool at any time. This prevents a single sender from
+/// monopolizing mempool resources.
+///
+/// # Batch Size Limits
+///
+/// Each DAG batch is capped at a maximum number of transactions and a maximum
+/// byte size. This ensures batches can be efficiently verified and propagated.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::MempoolDosConfig;
+///
+/// // MainNet configuration
+/// let config = MempoolDosConfig::mainnet_default();
+/// assert_eq!(config.max_pending_per_sender, 1_000);
+/// assert_eq!(config.max_txs_per_batch, 4_000);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MempoolDosConfig {
+    /// Maximum number of *pending* txs per sender allowed in mempool.
+    ///
+    /// A sender exceeding this limit will have their new transactions rejected
+    /// until existing transactions are committed or evicted.
+    ///
+    /// Set to 0 to disable this limit (not recommended for production).
+    ///
+    /// Recommended values:
+    /// - DevNet: 10,000 (very loose)
+    /// - TestNet Beta: 2,000 (moderate)
+    /// - MainNet: 1,000 (conservative)
+    pub max_pending_per_sender: u32,
+
+    /// Maximum total pending bytes per sender.
+    ///
+    /// A sender exceeding this limit will have their new transactions rejected
+    /// until existing transactions are committed or evicted.
+    ///
+    /// Set to 0 to disable this limit (not recommended for production).
+    ///
+    /// Recommended values:
+    /// - DevNet: 64 MiB
+    /// - TestNet Beta: 16 MiB
+    /// - MainNet: 8 MiB
+    pub max_pending_bytes_per_sender: u64,
+
+    /// Maximum transactions per DAG batch.
+    ///
+    /// Batches with more transactions than this limit will be rejected
+    /// or truncated at batch construction time.
+    ///
+    /// Set to 0 to disable this limit (not recommended for production).
+    ///
+    /// Recommended values:
+    /// - DevNet: 10,000
+    /// - TestNet Beta: 5,000
+    /// - MainNet: 4,000
+    pub max_txs_per_batch: u32,
+
+    /// Maximum total serialized bytes per DAG batch.
+    ///
+    /// Batches exceeding this byte limit will be rejected or truncated
+    /// at batch construction time.
+    ///
+    /// Set to 0 to disable this limit (not recommended for production).
+    ///
+    /// Recommended values:
+    /// - DevNet: 4 MiB
+    /// - TestNet Beta: 2 MiB
+    /// - MainNet: 2 MiB
+    pub max_batch_bytes: u64,
+}
+
+impl Default for MempoolDosConfig {
+    fn default() -> Self {
+        // Default to DevNet-style loose limits
+        Self::devnet_default()
+    }
+}
+
+impl MempoolDosConfig {
+    /// Create a disabled configuration (all limits at maximum).
+    ///
+    /// Use only for development/debugging. Not recommended for production.
+    pub fn disabled() -> Self {
+        Self {
+            max_pending_per_sender: u32::MAX,
+            max_pending_bytes_per_sender: u64::MAX,
+            max_txs_per_batch: u32::MAX,
+            max_batch_bytes: u64::MAX,
+        }
+    }
+
+    /// Create a DevNet default configuration.
+    ///
+    /// Very loose limits to avoid interfering with debugging:
+    /// - max_pending_per_sender: 10,000
+    /// - max_pending_bytes_per_sender: 64 MiB
+    /// - max_txs_per_batch: 10,000
+    /// - max_batch_bytes: 4 MiB
+    pub fn devnet_default() -> Self {
+        Self {
+            max_pending_per_sender: 10_000,
+            max_pending_bytes_per_sender: 64 * 1024 * 1024, // 64 MiB
+            max_txs_per_batch: 10_000,
+            max_batch_bytes: 4 * 1024 * 1024, // 4 MiB
+        }
+    }
+
+    /// Create a TestNet Beta default configuration.
+    ///
+    /// Moderate protection for exercising limits in tests:
+    /// - max_pending_per_sender: 2,000
+    /// - max_pending_bytes_per_sender: 16 MiB
+    /// - max_txs_per_batch: 5,000
+    /// - max_batch_bytes: 2 MiB
+    pub fn testnet_beta_default() -> Self {
+        Self {
+            max_pending_per_sender: 2_000,
+            max_pending_bytes_per_sender: 16 * 1024 * 1024, // 16 MiB
+            max_txs_per_batch: 5_000,
+            max_batch_bytes: 2 * 1024 * 1024, // 2 MiB
+        }
+    }
+
+    /// Create a MainNet v0 default configuration.
+    ///
+    /// Tighter defaults for production (conservative; can refine post-benchmark):
+    /// - max_pending_per_sender: 1,000
+    /// - max_pending_bytes_per_sender: 8 MiB
+    /// - max_txs_per_batch: 4,000
+    /// - max_batch_bytes: 2 MiB
+    pub fn mainnet_default() -> Self {
+        Self {
+            max_pending_per_sender: 1_000,
+            max_pending_bytes_per_sender: 8 * 1024 * 1024, // 8 MiB
+            max_txs_per_batch: 4_000,
+            max_batch_bytes: 2 * 1024 * 1024, // 2 MiB
+        }
+    }
+
+    /// Check if any limits are enabled.
+    ///
+    /// Returns `true` if at least one limit is not set to MAX.
+    pub fn is_enabled(&self) -> bool {
+        self.max_pending_per_sender < u32::MAX
+            || self.max_pending_bytes_per_sender < u64::MAX
+            || self.max_txs_per_batch < u32::MAX
+            || self.max_batch_bytes < u64::MAX
+    }
+
+    /// Check if per-sender limits are enabled.
+    pub fn sender_limits_enabled(&self) -> bool {
+        self.max_pending_per_sender < u32::MAX || self.max_pending_bytes_per_sender < u64::MAX
+    }
+
+    /// Check if batch limits are enabled.
+    pub fn batch_limits_enabled(&self) -> bool {
+        self.max_txs_per_batch < u32::MAX || self.max_batch_bytes < u64::MAX
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - All limits must be > 0
+    /// - max_pending_per_sender must be reasonable (< 100,000)
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if self.max_pending_per_sender == 0 {
+            return Err("max_pending_per_sender must be > 0".to_string());
+        }
+        if self.max_pending_bytes_per_sender == 0 {
+            return Err("max_pending_bytes_per_sender must be > 0".to_string());
+        }
+        if self.max_txs_per_batch == 0 {
+            return Err("max_txs_per_batch must be > 0".to_string());
+        }
+        if self.max_batch_bytes == 0 {
+            return Err("max_batch_bytes must be > 0".to_string());
+        }
+        // Sanity checks to prevent effectively disabled limits on MainNet
+        if self.max_pending_per_sender > 100_000 {
+            return Err(format!(
+                "max_pending_per_sender {} is too high for MainNet (max 100,000)",
+                self.max_pending_per_sender
+            ));
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T165: DAG Availability Configuration
 // ============================================================================
 
@@ -1749,6 +1960,20 @@ pub struct NodeConfig {
     /// - TestNet Alpha/Beta: `ExitOnFailure` (default, can be overridden to `LogAndContinue`)
     /// - MainNet v0: `ExitOnFailure` (**required**, cannot be changed)
     pub signer_failure_mode: SignerFailureMode,
+
+    // ========================================================================
+    // T218: Mempool DoS Configuration
+    // ========================================================================
+    /// Mempool DoS protection configuration (T218).
+    ///
+    /// Controls per-sender rate limits and batch size limits to prevent
+    /// malicious senders from overwhelming the mempool.
+    ///
+    /// - DevNet v0: Very loose limits (debugging-friendly)
+    /// - TestNet Alpha: Disabled / neutral (FIFO mode)
+    /// - TestNet Beta: Moderate protection (testable limits)
+    /// - MainNet v0: Tighter defaults (conservative; validated by invariants)
+    pub mempool_dos: MempoolDosConfig,
 }
 
 impl Default for NodeConfig {
@@ -1790,6 +2015,8 @@ impl Default for NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: DevNet-style loose limits for backward compatibility
+            mempool_dos: MempoolDosConfig::devnet_default(),
         }
     }
 }
@@ -1828,6 +2055,8 @@ impl NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: DevNet-style loose limits for backward compatibility
+            mempool_dos: MempoolDosConfig::devnet_default(),
         }
     }
 
@@ -1865,6 +2094,8 @@ impl NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: DevNet-style loose limits for backward compatibility
+            mempool_dos: MempoolDosConfig::devnet_default(),
         }
     }
 
@@ -1950,6 +2181,8 @@ impl NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: DevNet-style loose limits
+            mempool_dos: MempoolDosConfig::devnet_default(),
         }
     }
 
@@ -2010,6 +2243,8 @@ impl NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: Disabled (neutral) for TestNet Alpha
+            mempool_dos: MempoolDosConfig::disabled(),
         }
     }
 
@@ -2083,6 +2318,8 @@ impl NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: Moderate DoS limits for TestNet Beta
+            mempool_dos: MempoolDosConfig::testnet_beta_default(),
         }
     }
 
@@ -2168,6 +2405,8 @@ impl NodeConfig {
             hsm_config_path: None,
             // T214: Exit on failure is required for MainNet
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
+            // T218: Conservative DoS limits for MainNet
+            mempool_dos: MempoolDosConfig::mainnet_default(),
         }
     }
 
@@ -2628,6 +2867,25 @@ impl NodeConfig {
     /// ```
     pub fn with_signer_failure_mode(mut self, mode: SignerFailureMode) -> Self {
         self.signer_failure_mode = mode;
+        self
+    }
+
+    /// Set the mempool DoS protection configuration (T218).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The mempool DoS configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, MempoolDosConfig};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_mempool_dos_config(MempoolDosConfig::mainnet_default());
+    /// ```
+    pub fn with_mempool_dos_config(mut self, config: MempoolDosConfig) -> Self {
+        self.mempool_dos = config;
         self
     }
 
@@ -3196,6 +3454,12 @@ impl NodeConfig {
             });
         }
 
+        // 24. Mempool DoS config must be valid for MainNet (T218)
+        // MainNet requires reasonable DoS protection limits.
+        if let Err(reason) = self.mempool_dos.validate_for_mainnet() {
+            return Err(MainnetConfigError::MempoolDosMisconfigured { reason });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -3416,6 +3680,16 @@ pub enum MainnetConfigError {
     /// MainNet requires at most 500,000 block interval between snapshots
     /// to ensure timely recovery capability.
     SnapshotIntervalTooHigh { maximum: u64, actual: u64 },
+
+    // ========================================================================
+    // T218: Mempool DoS Configuration Errors
+    // ========================================================================
+    /// Mempool DoS configuration is invalid for MainNet (T218).
+    ///
+    /// MainNet requires valid DoS protection limits:
+    /// - All limits must be > 0
+    /// - max_pending_per_sender must be reasonable (< 100,000)
+    MempoolDosMisconfigured { reason: String },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -3618,6 +3892,14 @@ impl std::fmt::Display for MainnetConfigError {
                     "MainNet invariant violated: snapshot_interval_blocks must be at most {} but is {} \
                      (--snapshot-interval={})",
                     maximum, actual, maximum
+                )
+            }
+            // T218: Mempool DoS configuration errors
+            MainnetConfigError::MempoolDosMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: mempool DoS configuration is invalid: {}",
+                    reason
                 )
             }
         }

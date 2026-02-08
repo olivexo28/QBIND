@@ -969,6 +969,10 @@ impl TestnetAlphaClusterHandle {
                     max_batches: 500,
                     max_pending_txs: config.mempool_size,
                     enable_fee_priority: false,
+                    max_pending_per_sender: 10_000,
+                    max_pending_bytes_per_sender: 64 * 1024 * 1024,
+                    max_txs_per_batch: 10_000,
+                    max_batch_bytes: 4 * 1024 * 1024,
                 };
 
                 let dag_mempool = if config.enable_dag_availability {

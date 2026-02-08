@@ -190,7 +190,7 @@ pub use mempool::{
 pub use dag_mempool::{
     batch_signing_preimage, compute_batch_id, compute_tx_id, BatchError, BatchId, BatchRef,
     BatchSignature, DagMempool, DagMempoolConfig, DagMempoolError, DagMempoolMetrics,
-    DagMempoolStats, InMemoryDagMempool, QbindBatch, TxId, BATCH_DOMAIN_TAG,
+    DagMempoolStats, InMemoryDagMempool, QbindBatch, SenderLoad, TxId, BATCH_DOMAIN_TAG,
 };
 
 // T165 DAG Availability exports
@@ -257,6 +257,9 @@ pub use node_config::{
 
 // T214 Signer Failure Mode exports
 pub use node_config::{parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER_FAILURE_MODES};
+
+// T218 Mempool DoS Config exports
+pub use node_config::MempoolDosConfig;
 
 // T213 Key Rotation CLI exports
 pub use key_rotation_cli::{

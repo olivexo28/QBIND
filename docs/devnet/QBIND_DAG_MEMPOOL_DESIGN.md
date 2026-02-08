@@ -596,4 +596,40 @@ These questions will be addressed in future design tasks (T157+).
 
 ---
 
+## Appendix D: DoS Protections (T218)
+
+**Added**: 2026-02-08
+
+The DAG mempool includes DoS protections to prevent malicious senders from overwhelming the mempool. These are implemented in T218 and documented in [QBIND_MAINNET_V0_SPEC.md §4.4](../mainnet/QBIND_MAINNET_V0_SPEC.md#44-dos-protections-and-fee-aware-eviction).
+
+### Per-Sender Quotas
+
+| Parameter | Description | MainNet Default |
+| :--- | :--- | :--- |
+| `max_pending_per_sender` | Maximum pending txs per sender | 1,000 |
+| `max_pending_bytes_per_sender` | Maximum pending bytes per sender | 8 MiB |
+
+**Enforcement**: At admission time, if a sender already has `max_pending_per_sender` pending transactions or `max_pending_bytes_per_sender` bytes, new transactions from that sender are rejected.
+
+### Batch Size Limits
+
+| Parameter | Description | MainNet Default |
+| :--- | :--- | :--- |
+| `max_txs_per_batch` | Maximum transactions per batch | 4,000 |
+| `max_batch_bytes` | Maximum bytes per batch | 2 MiB |
+
+**Enforcement**: At batch creation time, transactions are included up to these limits. Excess transactions remain pending for future batches.
+
+### Metrics
+
+- `qbind_dag_sender_rate_limited_total`: Count of txs rejected due to sender limits
+- `qbind_dag_batch_size_limited_total`: Count of batches affected by size limits
+
+### Future Work
+
+- **Stake-weighted quotas** (MainNet v0.x): Allow higher limits for staked validators
+- **Dynamic tuning**: Adjust limits based on network conditions
+
+---
+
 *End of Document*

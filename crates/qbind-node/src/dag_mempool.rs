@@ -1216,6 +1216,63 @@ pub enum DagMempoolError {
     /// Internal error.
     #[error("internal error: {0}")]
     Internal(String),
+    /// Sender rate limit exceeded (T218).
+    #[error("sender rate limit exceeded: {0}")]
+    SenderRateLimited(String),
+    /// Batch size limit exceeded (T218).
+    #[error("batch size limit exceeded: {0}")]
+    BatchSizeLimitExceeded(String),
+}
+
+// ============================================================================
+// T218: Per-Sender Load Tracking
+// ============================================================================
+
+/// Per-sender load tracking for DoS protection (T218).
+///
+/// Tracks the number of pending transactions and bytes per sender
+/// to enforce rate limits and prevent a single sender from overwhelming
+/// the mempool.
+#[derive(Clone, Debug, Default)]
+pub struct SenderLoad {
+    /// Number of pending transactions from this sender.
+    pub pending_txs: u32,
+    /// Total bytes of pending transactions from this sender.
+    pub pending_bytes: u64,
+}
+
+impl SenderLoad {
+    /// Create a new empty sender load.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a transaction to the sender's load.
+    pub fn add_tx(&mut self, tx_bytes: u64) {
+        self.pending_txs = self.pending_txs.saturating_add(1);
+        self.pending_bytes = self.pending_bytes.saturating_add(tx_bytes);
+    }
+
+    /// Remove a transaction from the sender's load.
+    pub fn remove_tx(&mut self, tx_bytes: u64) {
+        self.pending_txs = self.pending_txs.saturating_sub(1);
+        self.pending_bytes = self.pending_bytes.saturating_sub(tx_bytes);
+    }
+
+    /// Check if the sender is within the given limits.
+    ///
+    /// Returns true if the sender has room for at least one more transaction.
+    pub fn is_within_limits(&self, max_txs: u32, max_bytes: u64) -> bool {
+        self.pending_txs < max_txs && self.pending_bytes < max_bytes
+    }
+
+    /// Check if adding a transaction would exceed the limits.
+    ///
+    /// Returns true if adding `tx_bytes` would exceed the tx count or byte limits.
+    /// A sender at exactly the limit is considered to exceed it for new additions.
+    pub fn would_exceed_limits(&self, tx_bytes: u64, max_txs: u32, max_bytes: u64) -> bool {
+        self.pending_txs >= max_txs || self.pending_bytes.saturating_add(tx_bytes) > max_bytes
+    }
 }
 
 /// Statistics about the DAG mempool state.
@@ -1339,6 +1396,26 @@ pub struct DagMempoolConfig {
     pub local_validator_id: ValidatorId,
     /// T169: Whether to enable fee-based priority and eviction.
     pub enable_fee_priority: bool,
+
+    // ========================================================================
+    // T218: DoS Protection Configuration
+    // ========================================================================
+    /// Maximum number of pending txs per sender (T218).
+    ///
+    /// Set to `u32::MAX` to disable this limit.
+    pub max_pending_per_sender: u32,
+    /// Maximum total pending bytes per sender (T218).
+    ///
+    /// Set to `u64::MAX` to disable this limit.
+    pub max_pending_bytes_per_sender: u64,
+    /// Maximum transactions per DAG batch (T218).
+    ///
+    /// Set to `u32::MAX` to disable this limit.
+    pub max_txs_per_batch: u32,
+    /// Maximum total serialized bytes per DAG batch (T218).
+    ///
+    /// Set to `u64::MAX` to disable this limit.
+    pub max_batch_bytes: u64,
 }
 
 impl Default for DagMempoolConfig {
@@ -1349,6 +1426,11 @@ impl Default for DagMempoolConfig {
             batch_size: 100,
             local_validator_id: ValidatorId::new(0),
             enable_fee_priority: false,
+            // T218: DevNet-style loose limits by default
+            max_pending_per_sender: 10_000,
+            max_pending_bytes_per_sender: 64 * 1024 * 1024, // 64 MiB
+            max_txs_per_batch: 10_000,
+            max_batch_bytes: 4 * 1024 * 1024, // 4 MiB
         }
     }
 }
@@ -1364,6 +1446,25 @@ impl DagMempoolConfig {
     pub fn with_fee_priority(mut self, enabled: bool) -> Self {
         self.enable_fee_priority = enabled;
         self
+    }
+
+    /// Apply DoS protection configuration from node config (T218).
+    pub fn with_dos_config(mut self, dos_config: &crate::node_config::MempoolDosConfig) -> Self {
+        self.max_pending_per_sender = dos_config.max_pending_per_sender;
+        self.max_pending_bytes_per_sender = dos_config.max_pending_bytes_per_sender;
+        self.max_txs_per_batch = dos_config.max_txs_per_batch;
+        self.max_batch_bytes = dos_config.max_batch_bytes;
+        self
+    }
+
+    /// Check if per-sender limits are enabled (T218).
+    pub fn sender_limits_enabled(&self) -> bool {
+        self.max_pending_per_sender < u32::MAX || self.max_pending_bytes_per_sender < u64::MAX
+    }
+
+    /// Check if batch limits are enabled (T218).
+    pub fn batch_limits_enabled(&self) -> bool {
+        self.max_txs_per_batch < u32::MAX || self.max_batch_bytes < u64::MAX
     }
 }
 
@@ -1392,6 +1493,14 @@ struct DagInner {
     latest_batch_per_validator: HashMap<ValidatorId, BatchId>,
     /// Current view hint (incremented for each local batch).
     current_view_hint: u64,
+
+    // ========================================================================
+    // T218: Per-Sender Load Tracking
+    // ========================================================================
+    /// Per-sender load for DoS protection (T218).
+    sender_load: HashMap<qbind_types::AccountId, SenderLoad>,
+    /// Map of tx_id -> (sender, tx_bytes) for tracking batched txs (T218).
+    tx_sender_info: HashMap<TxId, (qbind_types::AccountId, u64)>,
 }
 
 /// A batch stored in the DAG with metadata.
@@ -1477,6 +1586,9 @@ impl InMemoryDagMempool {
                 config,
                 latest_batch_per_validator: HashMap::new(),
                 current_view_hint: 0,
+                // T218: Per-sender load tracking
+                sender_load: HashMap::new(),
+                tx_sender_info: HashMap::new(),
             }),
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(1)),
@@ -1505,6 +1617,9 @@ impl InMemoryDagMempool {
                 config,
                 latest_batch_per_validator: HashMap::new(),
                 current_view_hint: 0,
+                // T218: Per-sender load tracking
+                sender_load: HashMap::new(),
+                tx_sender_info: HashMap::new(),
             }),
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(quorum_size)),
@@ -1868,6 +1983,7 @@ impl InMemoryDagMempool {
     ///
     /// This is called when we have enough pending txs to form a batch.
     /// T169: If fee_priority is enabled, selects highest-priority txs.
+    /// T218: Enforces batch size limits (max_txs_per_batch, max_batch_bytes).
     fn create_local_batch(inner: &mut DagInner) -> Option<QbindBatch> {
         if inner.pending_txs.is_empty() {
             return None;
@@ -1908,13 +2024,53 @@ impl InMemoryDagMempool {
             });
         }
 
-        // Take up to batch_size transactions (from the front, which are now highest priority)
-        let batch_size = inner.config.batch_size.min(inner.pending_txs.len());
-        let txs: Vec<_> = inner.pending_txs.drain(..batch_size).collect();
+        // T218: Compute batch limits (respecting both config.batch_size and DoS limits)
+        // Use saturating conversion to handle the case where batch_size > u32::MAX on 64-bit systems
+        let batch_size_u32 = u32::try_from(inner.config.batch_size).unwrap_or(u32::MAX);
+        let max_txs = batch_size_u32.min(inner.config.max_txs_per_batch);
+        let max_bytes = inner.config.max_batch_bytes;
+
+        // Count how many transactions we can include
+        let mut batch_bytes: u64 = 0;
+        let mut drain_count = 0;
+
+        for tx in &inner.pending_txs {
+            if drain_count >= max_txs as usize {
+                break;
+            }
+            // Estimate tx size
+            let tx_bytes = Self::estimate_tx_bytes(tx);
+            if batch_bytes.saturating_add(tx_bytes) > max_bytes {
+                // T218: Batch bytes limit would be exceeded, stop adding
+                break;
+            }
+            batch_bytes = batch_bytes.saturating_add(tx_bytes);
+            drain_count += 1;
+        }
+
+        // Drain the txs we're including in the batch
+        let txs: Vec<_> = inner.pending_txs.drain(..drain_count).collect();
+
+        if txs.is_empty() {
+            // No txs could fit in the batch (shouldn't happen normally)
+            return None;
+        }
 
         // Clean up arrival tracking for batched txs
+        // T218: Also clean up sender load tracking
+        let sender_limits_enabled = inner.config.sender_limits_enabled();
         for tx in &txs {
             inner.tx_arrivals.remove(&(tx.sender, tx.nonce));
+
+            // T218: Update sender load (tx is now batched)
+            if sender_limits_enabled {
+                let tx_id = compute_tx_id(tx);
+                if let Some((sender, tx_bytes)) = inner.tx_sender_info.remove(&tx_id) {
+                    if let Some(load) = inner.sender_load.get_mut(&sender) {
+                        load.remove_tx(tx_bytes);
+                    }
+                }
+            }
         }
 
         // Collect parent references (latest batch from each known validator)
@@ -1981,6 +2137,24 @@ impl InMemoryDagMempool {
 
         Ok(())
     }
+
+    /// Estimate the serialized size of a transaction for DoS accounting (T218).
+    ///
+    /// This is a rough estimate based on the transaction fields:
+    /// - sender: 32 bytes (AccountId)
+    /// - nonce: 8 bytes (u64)
+    /// - payload_len: 4 bytes (u32 length prefix)
+    /// - payload: payload.len() bytes (variable)
+    /// - signature: signature.as_bytes().len() bytes (variable)
+    /// - suite_id: 2 bytes (u16)
+    ///
+    /// Base overhead = 32 + 8 + 4 + 2 = 46 bytes
+    fn estimate_tx_bytes(tx: &QbindTransaction) -> u64 {
+        let base: u64 = 32 + 8 + 4 + 2; // sender + nonce + payload_len + suite_id = 46 bytes
+        let payload = tx.payload.len() as u64;
+        let sig = tx.signature.as_bytes().len() as u64;
+        base + payload + sig
+    }
 }
 
 impl DagMempool for InMemoryDagMempool {
@@ -1992,23 +2166,64 @@ impl DagMempool for InMemoryDagMempool {
             return Err(DagMempoolError::Full);
         }
 
+        // T218: Cache config values for sender limits to avoid borrow issues
+        let sender_limits_enabled = inner.config.sender_limits_enabled();
+        let max_pending_per_sender = inner.config.max_pending_per_sender;
+        let max_pending_bytes_per_sender = inner.config.max_pending_bytes_per_sender;
+        let enable_fee_priority = inner.config.enable_fee_priority;
+
         // Filter duplicates and add to pending
         let mut added = 0;
+        let mut rate_limited_count = 0;
         for tx in txs {
             let tx_id = compute_tx_id(&tx);
-            if !inner.tx_seen.contains(&tx_id) && !inner.tx_committed.contains(&tx_id) {
-                inner.tx_seen.insert(tx_id);
+            if inner.tx_seen.contains(&tx_id) || inner.tx_committed.contains(&tx_id) {
+                continue; // Skip duplicate
+            }
 
-                // T169: Track arrival for priority
-                if inner.config.enable_fee_priority {
-                    let arrival_id = inner.arrival_counter;
-                    inner.arrival_counter += 1;
-                    inner.tx_arrivals.insert((tx.sender, tx.nonce), arrival_id);
+            // T218: Check per-sender limits before adding
+            if sender_limits_enabled {
+                let tx_bytes = Self::estimate_tx_bytes(&tx);
+                let sender_load = inner.sender_load.entry(tx.sender).or_default();
+
+                if sender_load.would_exceed_limits(
+                    tx_bytes,
+                    max_pending_per_sender,
+                    max_pending_bytes_per_sender,
+                ) {
+                    // Rate limited - skip this tx but continue with others
+                    rate_limited_count += 1;
+                    // Update metrics for rate limiting
+                    if let Some(ref m) = self.metrics {
+                        m.inc_sender_rate_limited();
+                    }
+                    continue;
                 }
 
-                inner.pending_txs.push(tx);
-                added += 1;
+                // Track sender load
+                sender_load.add_tx(tx_bytes);
+                inner.tx_sender_info.insert(tx_id, (tx.sender, tx_bytes));
             }
+
+            inner.tx_seen.insert(tx_id);
+
+            // T169: Track arrival for priority
+            if enable_fee_priority {
+                let arrival_id = inner.arrival_counter;
+                inner.arrival_counter += 1;
+                inner.tx_arrivals.insert((tx.sender, tx.nonce), arrival_id);
+            }
+
+            inner.pending_txs.push(tx);
+            added += 1;
+        }
+
+        // If all txs were rate limited, return an error
+        if added == 0 && rate_limited_count > 0 {
+            return Err(DagMempoolError::SenderRateLimited(format!(
+                "{} transaction(s) exceeded sender rate limits",
+                rate_limited_count
+            )));
         }
 
         // Update metrics
@@ -2357,6 +2572,12 @@ pub struct DagMempoolMetrics {
     // T190: Certified frontier selection metrics
     /// Number of certified frontier selection operations.
     certified_frontier_select_total: AtomicU64,
+
+    // T218: DoS protection metrics
+    /// Total number of txs rejected due to sender rate limiting.
+    sender_rate_limited_total: AtomicU64,
+    /// Total number of batches truncated due to batch size limits.
+    batch_size_limited_total: AtomicU64,
 }
 
 impl DagMempoolMetrics {
@@ -2532,6 +2753,32 @@ impl DagMempoolMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    // ========================================================================
+    // T218: DoS Protection Metrics
+    // ========================================================================
+
+    /// Get the total sender rate limited count.
+    pub fn sender_rate_limited_total(&self) -> u64 {
+        self.sender_rate_limited_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the sender rate limited counter.
+    pub fn inc_sender_rate_limited(&self) {
+        self.sender_rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total batch size limited count.
+    pub fn batch_size_limited_total(&self) -> u64 {
+        self.batch_size_limited_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the batch size limited counter.
+    pub fn inc_batch_size_limited(&self) {
+        self.batch_size_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Format metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -2594,6 +2841,17 @@ impl DagMempoolMetrics {
         output.push_str(&format!(
             "qbind_dag_certified_frontier_select_total {}\n",
             self.certified_frontier_select_total()
+        ));
+
+        // T218: DoS protection metrics
+        output.push_str("\n# DAG DoS Protection Metrics (T218)\n");
+        output.push_str(&format!(
+            "qbind_dag_sender_rate_limited_total {}\n",
+            self.sender_rate_limited_total()
+        ));
+        output.push_str(&format!(
+            "qbind_dag_batch_size_limited_total {}\n",
+            self.batch_size_limited_total()
         ));
         output
     }
@@ -3272,5 +3530,116 @@ mod tests {
 
         assert!(output.contains("qbind_dag_missing_batches_recorded 2"));
         assert!(output.contains("qbind_dag_missing_batches_fetched 1"));
+    }
+
+    // ========================================================================
+    // T218: DoS Protection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_sender_load_basic() {
+        let mut load = SenderLoad::new();
+        assert_eq!(load.pending_txs, 0);
+        assert_eq!(load.pending_bytes, 0);
+
+        load.add_tx(100);
+        assert_eq!(load.pending_txs, 1);
+        assert_eq!(load.pending_bytes, 100);
+
+        load.add_tx(200);
+        assert_eq!(load.pending_txs, 2);
+        assert_eq!(load.pending_bytes, 300);
+
+        load.remove_tx(100);
+        assert_eq!(load.pending_txs, 1);
+        assert_eq!(load.pending_bytes, 200);
+    }
+
+    #[test]
+    fn test_sender_load_limits() {
+        let load = SenderLoad { pending_txs: 5, pending_bytes: 1000 };
+
+        // Within limits
+        assert!(load.is_within_limits(10, 2000));
+        assert!(!load.would_exceed_limits(100, 10, 2000));
+
+        // At tx limit
+        assert!(!load.is_within_limits(5, 2000));
+        assert!(load.would_exceed_limits(100, 5, 2000));
+
+        // At byte limit
+        assert!(!load.is_within_limits(10, 1000));
+        assert!(load.would_exceed_limits(1, 10, 1000));
+    }
+
+    #[test]
+    fn test_dag_mempool_config_dos_limits() {
+        let config = DagMempoolConfig::default();
+
+        // Default has sender limits enabled (not u32::MAX)
+        assert!(config.sender_limits_enabled());
+        assert!(config.batch_limits_enabled());
+
+        // Test with_dos_config
+        let dos_config = crate::node_config::MempoolDosConfig::mainnet_default();
+        let config = DagMempoolConfig::default().with_dos_config(&dos_config);
+
+        assert_eq!(config.max_pending_per_sender, 1_000);
+        assert_eq!(config.max_pending_bytes_per_sender, 8 * 1024 * 1024);
+        assert_eq!(config.max_txs_per_batch, 4_000);
+        assert_eq!(config.max_batch_bytes, 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_dag_mempool_sender_rate_limiting() {
+        // Create a config with very low sender limits
+        let config = DagMempoolConfig {
+            local_validator_id: ValidatorId::new(1),
+            max_batches: 100,
+            max_pending_txs: 1000,
+            batch_size: 10,
+            enable_fee_priority: false,
+            // T218: Very low limits for testing
+            max_pending_per_sender: 2,
+            max_pending_bytes_per_sender: u64::MAX, // Only limit by count
+            max_txs_per_batch: 100,
+            max_batch_bytes: u64::MAX,
+        };
+
+        let mempool = InMemoryDagMempool::with_config(config);
+        let metrics = Arc::new(DagMempoolMetrics::new());
+        let mempool = mempool.with_metrics(metrics.clone());
+
+        // Add 2 txs from sender 1 - should succeed
+        let result = mempool.insert_local_txs(vec![
+            make_test_tx(0x01, 0),
+            make_test_tx(0x01, 1),
+        ]);
+        assert!(result.is_ok());
+
+        // Add a 3rd tx from sender 1 - should be rate limited
+        let result = mempool.insert_local_txs(vec![make_test_tx(0x01, 2)]);
+        assert!(matches!(result, Err(DagMempoolError::SenderRateLimited(_))));
+
+        // Add a tx from sender 2 - should succeed (different sender)
+        let result = mempool.insert_local_txs(vec![make_test_tx(0x02, 0)]);
+        assert!(result.is_ok());
+
+        // Check that rate limit metric was incremented
+        assert_eq!(metrics.sender_rate_limited_total(), 1);
+    }
+
+    #[test]
+    fn test_dag_mempool_metrics_format_includes_t218() {
+        let metrics = DagMempoolMetrics::new();
+
+        metrics.inc_sender_rate_limited();
+        metrics.inc_sender_rate_limited();
+        metrics.inc_batch_size_limited();
+
+        let output = metrics.format_metrics();
+
+        assert!(output.contains("qbind_dag_sender_rate_limited_total 2"));
+        assert!(output.contains("qbind_dag_batch_size_limited_total 1"));
     }
 }

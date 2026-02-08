@@ -53,6 +53,10 @@ fn create_test_mempool_with_availability(
         max_batches: 100,
         max_pending_txs: 1000,
         enable_fee_priority: false,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
     InMemoryDagMempool::with_availability(config, quorum_size)
 }

@@ -38,6 +38,10 @@ fn test_dag_batch_builder_prefers_high_fee_txs() {
         batch_size: 5,
         local_validator_id: ValidatorId::new(1),
         enable_fee_priority: true,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
 
     let mempool = InMemoryDagMempool::with_config(config);
@@ -77,6 +81,10 @@ fn test_dag_frontier_selection_with_priority() {
         batch_size: 3,
         local_validator_id: ValidatorId::new(1),
         enable_fee_priority: true,
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
 
     let mempool = InMemoryDagMempool::with_config(config);
@@ -121,6 +129,10 @@ fn test_dag_priority_disabled_fifo_behavior() {
         batch_size: 5,
         local_validator_id: ValidatorId::new(1),
         enable_fee_priority: false, // Disabled
+        max_pending_per_sender: 10_000,
+        max_pending_bytes_per_sender: 64 * 1024 * 1024,
+        max_txs_per_batch: 10_000,
+        max_batch_bytes: 4 * 1024 * 1024,
     };
 
     let mempool = InMemoryDagMempool::with_config(config);
