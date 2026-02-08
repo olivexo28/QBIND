@@ -956,7 +956,7 @@ impl std::fmt::Display for EvictionRateMode {
 
 /// Parse an eviction rate mode from a string.
 ///
-/// Valid values: "off", "warn", "enforce"
+/// Valid values: "off" (or "disabled"), "warn" (or "warning"), "enforce" (or "enforced")
 ///
 /// Returns `None` for unrecognized values.
 pub fn parse_eviction_rate_mode(s: &str) -> Option<EvictionRateMode> {

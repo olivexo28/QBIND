@@ -1558,6 +1558,9 @@ impl EvictionWindow {
     }
 
     /// Check if adding `count` evictions would exceed the limit.
+    ///
+    /// Returns `true` if `evictions_in_window + count > max_evictions`.
+    /// This means exactly `max_evictions` evictions are allowed per window.
     fn would_exceed_limit(&self, count: u32, max_evictions: u32) -> bool {
         self.evictions_in_window.saturating_add(count) > max_evictions
     }
