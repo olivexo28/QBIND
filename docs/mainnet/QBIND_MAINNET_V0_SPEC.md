@@ -426,7 +426,7 @@ MainNet v0 requires stronger DoS protections in the DAG mempool (T218):
 
 **Metrics** (T218):
 - `qbind_dag_sender_rate_limited_total`: Total txs rejected due to sender limits
-- `qbind_dag_batch_size_limited_total`: Total batches truncated due to size limits
+- `qbind_dag_batch_size_limited_total`: Reserved for future batch truncation tracking
 
 **Validation**: `validate_mainnet_invariants()` checks that all DoS config values are sensible for MainNet (all > 0, `max_pending_per_sender < 100,000`).
 

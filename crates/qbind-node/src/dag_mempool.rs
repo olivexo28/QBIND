@@ -1260,11 +1260,16 @@ impl SenderLoad {
     }
 
     /// Check if the sender is within the given limits.
+    ///
+    /// Returns true if the sender has room for at least one more transaction.
     pub fn is_within_limits(&self, max_txs: u32, max_bytes: u64) -> bool {
         self.pending_txs < max_txs && self.pending_bytes < max_bytes
     }
 
     /// Check if adding a transaction would exceed the limits.
+    ///
+    /// Returns true if adding `tx_bytes` would exceed the tx count or byte limits.
+    /// A sender at exactly the limit is considered to exceed it for new additions.
     pub fn would_exceed_limits(&self, tx_bytes: u64, max_txs: u32, max_bytes: u64) -> bool {
         self.pending_txs >= max_txs || self.pending_bytes.saturating_add(tx_bytes) > max_bytes
     }
@@ -2020,7 +2025,9 @@ impl InMemoryDagMempool {
         }
 
         // T218: Compute batch limits (respecting both config.batch_size and DoS limits)
-        let max_txs = (inner.config.batch_size as u32).min(inner.config.max_txs_per_batch);
+        // Use saturating conversion to handle the case where batch_size > u32::MAX on 64-bit systems
+        let batch_size_u32 = u32::try_from(inner.config.batch_size).unwrap_or(u32::MAX);
+        let max_txs = batch_size_u32.min(inner.config.max_txs_per_batch);
         let max_bytes = inner.config.max_batch_bytes;
 
         // Count how many transactions we can include
@@ -2133,15 +2140,17 @@ impl InMemoryDagMempool {
 
     /// Estimate the serialized size of a transaction for DoS accounting (T218).
     ///
-    /// This is a rough estimate based on the transaction fields.
-    /// For simplicity, we approximate:
-    /// - sender: 32 bytes
-    /// - nonce: 8 bytes
-    /// - payload: payload.len() bytes
-    /// - signature: signature.as_bytes().len() bytes
-    /// - suite_id: 2 bytes
+    /// This is a rough estimate based on the transaction fields:
+    /// - sender: 32 bytes (AccountId)
+    /// - nonce: 8 bytes (u64)
+    /// - payload_len: 4 bytes (u32 length prefix)
+    /// - payload: payload.len() bytes (variable)
+    /// - signature: signature.as_bytes().len() bytes (variable)
+    /// - suite_id: 2 bytes (u16)
+    ///
+    /// Base overhead = 32 + 8 + 4 + 2 = 46 bytes
     fn estimate_tx_bytes(tx: &QbindTransaction) -> u64 {
-        let base = 32 + 8 + 4 + 2; // sender + nonce + payload_len + suite_id
+        let base: u64 = 32 + 8 + 4 + 2; // sender + nonce + payload_len + suite_id = 46 bytes
         let payload = tx.payload.len() as u64;
         let sig = tx.signature.as_bytes().len() as u64;
         base + payload + sig
