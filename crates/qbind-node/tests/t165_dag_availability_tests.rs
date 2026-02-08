@@ -487,9 +487,11 @@ fn test_dag_mempool_unknown_batch_ack_rejected() {
         max_pending_per_sender: 10_000,
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
-        max_batch_bytes: 4 * 1024 * 1024,        eviction_mode: EvictionRateMode::Off,
+        max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
         max_evictions_per_interval: 10_000,
-        eviction_interval_secs: 10,    };
+        eviction_interval_secs: 10,
+    };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
     // Create ack for a batch that doesn't exist in mempool
