@@ -123,7 +123,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Balance draining** | Bugs in fee deduction could drain accounts | High | Partially Mitigated |
 | **Proposer reward manipulation** | Proposer could game fee distribution | Medium | Partially Mitigated |
 | **Gas limit manipulation** | Attackers craft txs to maximize gas | Medium | Partially Mitigated |
-| **Eviction attacks** | Flood mempool to evict legitimate txs | Medium | ✅ Mitigated (T218) |
+| **Eviction attacks** | Flood mempool to evict legitimate txs | Medium | ✅ Mitigated (T218+T220) |
 
 **Current Mitigations**:
 - ✅ Gas model designed (T167)
@@ -136,7 +136,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ **EMA-based fee smoothing (T202)** — consensus-level EMA with phase-dependent λ
 - ✅ **Rate-of-change limiters (T203)** — consensus-side per-epoch Δ-limit on annual inflation, per phase, applied after floor/cap with deterministic clamping
 - ✅ **DAG mempool DoS protections (T218)** — per-sender quotas + batch size limits
-- ✅ **Mempool eviction rate limiting (T219)** — time-bucketed eviction throttling to prevent excessive churn
+- ✅ **Mempool eviction rate limiting (T219+T220)** — config/metrics (T219), enforcement in DAG mempool eviction path (T220)
 
 **Additional MainNet Requirements**:
 - [x] Hybrid fee distribution (burn + proposer) implementation (T193)
@@ -150,7 +150,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Rate-of-change limiters (T203) — **Ready** (per-epoch Δ-limit with phase-specific max_delta_r_inf_per_epoch_bps)
 - [x] Phase transition logic (T204) — **Ready** (time + economic gates wired into consensus; automatic phase transitions)
 - [ ] Fee market analysis under adversarial conditions
-- [ ] Mempool eviction rate limiting
+- [x] Mempool eviction rate limiting — **Ready** (T219 config/metrics + T220 enforcement)
 - [ ] External audit of fee accounting code
 
 **Target Phase**: MainNet v0 (blocking)
@@ -460,7 +460,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T209** | **Design** | **Key management & signer architecture design** | **MN-R5** |
 | **T217** | **Docs** | **Compromised key handling procedures** | **MN-R5** |
 | **T218** | **Mempool** | **DAG mempool DoS protections v1** | **MN-R2** |
-| **T219** | **Mempool** | **Mempool eviction rate limiting v1** | **MN-R2** |
+| **T219** | **Mempool** | **Mempool eviction rate limiting config/metrics v1** | **MN-R2** |
+| **T220** | **Mempool** | **Mempool eviction rate limiting enforcement v1** | **MN-R2** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 

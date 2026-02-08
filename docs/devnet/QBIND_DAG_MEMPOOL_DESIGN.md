@@ -632,4 +632,67 @@ The DAG mempool includes DoS protections to prevent malicious senders from overw
 
 ---
 
+## Appendix E: Eviction Rate Limiting (T219/T220)
+
+**Added**: 2026-02-08
+
+The DAG mempool includes eviction rate limiting to prevent excessive mempool churn under adversarial conditions. This complements the DoS protections from T218 by limiting the rate at which transactions can be evicted (replaced) from the mempool.
+
+### Configuration
+
+| Parameter | Description | MainNet Default |
+| :--- | :--- | :--- |
+| `eviction_mode` | Rate limiting mode (Off/Warn/Enforce) | Enforce |
+| `max_evictions_per_interval` | Max evictions allowed per window | 1,000 |
+| `eviction_interval_secs` | Window length in seconds | 10 |
+
+### Mode Semantics
+
+| Mode | Behavior |
+| :--- | :--- |
+| **Off** | No rate limiting. Eviction proceeds as normal. Metrics still recorded. |
+| **Warn** | Log warnings when limit exceeded. Still allow eviction. Track via `mode="warn"` metric. |
+| **Enforce** | Block evictions when limit reached. Reject incoming tx instead. Track via `mode="enforce"` metric. |
+
+### Interaction with Fee-Priority Eviction (T169)
+
+When `enable_fee_priority` is true and the mempool is at capacity:
+
+1. **Fee-priority check**: Incoming tx must have higher priority than the lowest-priority tx in mempool
+2. **Eviction rate check** (T220): Before evicting, consult the `EvictionWindow`:
+   - If within limit: Allow eviction, increment window counter
+   - If at limit + Warn mode: Allow eviction, log warning, increment warn metric
+   - If at limit + Enforce mode: Block eviction, reject incoming tx with `EvictionRateLimited` error
+
+### Interaction with Per-Sender Quotas (T218)
+
+These protections work in parallel:
+
+- **T218 quotas**: Prevent a single sender from filling 100% of mempool capacity
+- **T219/T220 rate limiting**: Limit the total eviction rate regardless of sender
+
+When all protections are enabled (MainNet default):
+1. A single abusive sender cannot fill the mempool (T218)
+2. Even under churn, total eviction rate is bounded (T219/T220)
+3. When eviction limit is reached, the node degrades gracefully by rejecting further incoming txs
+
+### Metrics
+
+- `qbind_mempool_eviction_mode`: Config gauge (0=off, 1=warn, 2=enforce)
+- `qbind_mempool_max_evictions_per_interval`: Config gauge
+- `qbind_mempool_eviction_interval_secs`: Config gauge
+- `qbind_mempool_evictions_total{reason="capacity"}`: Evictions due to mempool full
+- `qbind_mempool_evictions_total{reason="lifetime"}`: Evictions due to TTL
+- `qbind_mempool_eviction_rate_limit_total{mode="warn"}`: Warn mode limit hits
+- `qbind_mempool_eviction_rate_limit_total{mode="enforce"}`: Enforce mode rejections
+- `qbind_mempool_evictions_window_reset_total`: Window reset count
+
+### Implementation
+
+- **Config**: `MempoolEvictionConfig` in `node_config.rs` (T219)
+- **Tracking**: `EvictionWindow` struct in `dag_mempool.rs` (T219)
+- **Enforcement**: `InMemoryDagMempool::insert_local_txs()` (T220)
+
+---
+
 *End of Document*

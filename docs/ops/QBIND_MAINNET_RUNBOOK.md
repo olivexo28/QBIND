@@ -251,6 +251,60 @@ qbind-node \
   --snapshot-interval 100000
 ```
 
+### 3.5 Mempool Configuration (T218/T219/T220)
+
+The DAG mempool includes several DoS protections and eviction rate limiting that can be tuned for operational needs.
+
+#### Eviction Rate Limiting Options
+
+| Parameter | CLI Flag | MainNet Default | Notes |
+| :--- | :--- | :--- | :--- |
+| **Eviction mode** | `--mempool-eviction-mode` | `enforce` | Required for MainNet |
+| **Max per interval** | `--mempool-eviction-max-per-interval` | `1000` | Per 10-second window |
+| **Interval seconds** | `--mempool-eviction-interval-secs` | `10` | Window length |
+
+#### When to Adjust Eviction Settings
+
+**Symptoms of too-strict settings**:
+- Frequent `EvictionRateLimited` rejections in logs
+- `qbind_mempool_eviction_rate_limit_total{mode="enforce"}` metric increasing rapidly
+- High-priority transactions being rejected during network congestion
+
+**Symptoms of too-loose settings**:
+- Mempool churning excessively under load
+- High rate of `qbind_mempool_evictions_total{reason="capacity"}` evictions
+- Memory pressure on node due to rapid mempool turnover
+
+#### Recommended Initial Values (MainNet v0)
+
+```bash
+# MainNet default - conservative, suitable for most validators
+--mempool-eviction-mode=enforce \
+--mempool-eviction-max-per-interval=1000 \
+--mempool-eviction-interval-secs=10
+```
+
+#### Post-Launch Tuning
+
+If observing high eviction rate limit hits:
+
+1. **Monitor metrics**:
+   ```bash
+   curl http://localhost:9090/metrics | grep -E 'eviction_rate_limit|evictions_total'
+   ```
+
+2. **Consider increasing limit** (only after observing sustained issues):
+   ```bash
+   --mempool-eviction-max-per-interval=2000
+   ```
+
+3. **Alternative: Increase mempool capacity** (if disk/memory allows):
+   ```bash
+   --mempool-max-pending-txs=20000
+   ```
+
+> **⚠️ Warning**: Do not switch to `--mempool-eviction-mode=off` on MainNet. This is enforced by `validate_mainnet_invariants()` and will cause the node to fail startup.
+
 ---
 
 ## 4. Bootstrapping a Fresh MainNet Validator
