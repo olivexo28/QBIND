@@ -1222,6 +1222,12 @@ pub enum DagMempoolError {
     /// Batch size limit exceeded (T218).
     #[error("batch size limit exceeded: {0}")]
     BatchSizeLimitExceeded(String),
+    /// Eviction rate limit exceeded (T219).
+    ///
+    /// Returned when admission would require exceeding the configured
+    /// eviction rate limit and the mode is set to Enforce.
+    #[error("eviction rate limit exceeded: {0}")]
+    EvictionRateLimited(String),
 }
 
 // ============================================================================
@@ -1416,6 +1422,25 @@ pub struct DagMempoolConfig {
     ///
     /// Set to `u64::MAX` to disable this limit.
     pub max_batch_bytes: u64,
+
+    // ========================================================================
+    // T219: Eviction Rate Limiting Configuration
+    // ========================================================================
+    /// Eviction rate limiting mode (T219).
+    ///
+    /// Controls how the mempool handles eviction rate limiting:
+    /// - Off: No rate limiting (metrics only)
+    /// - Warn: Log warnings but still evict
+    /// - Enforce: Reject incoming txs instead of exceeding eviction rate
+    pub eviction_mode: crate::node_config::EvictionRateMode,
+
+    /// Maximum evictions allowed per interval (T219).
+    ///
+    /// Set to `u32::MAX` to disable this limit.
+    pub max_evictions_per_interval: u32,
+
+    /// Eviction rate measurement interval in seconds (T219).
+    pub eviction_interval_secs: u32,
 }
 
 impl Default for DagMempoolConfig {
@@ -1431,6 +1456,10 @@ impl Default for DagMempoolConfig {
             max_pending_bytes_per_sender: 64 * 1024 * 1024, // 64 MiB
             max_txs_per_batch: 10_000,
             max_batch_bytes: 4 * 1024 * 1024, // 4 MiB
+            // T219: DevNet-style loose limits by default
+            eviction_mode: crate::node_config::EvictionRateMode::Off,
+            max_evictions_per_interval: 10_000,
+            eviction_interval_secs: 10,
         }
     }
 }
@@ -1457,6 +1486,17 @@ impl DagMempoolConfig {
         self
     }
 
+    /// Apply eviction rate limiting configuration from node config (T219).
+    pub fn with_eviction_config(
+        mut self,
+        eviction_config: &crate::node_config::MempoolEvictionConfig,
+    ) -> Self {
+        self.eviction_mode = eviction_config.mode;
+        self.max_evictions_per_interval = eviction_config.max_evictions_per_interval;
+        self.eviction_interval_secs = eviction_config.interval_secs;
+        self
+    }
+
     /// Check if per-sender limits are enabled (T218).
     pub fn sender_limits_enabled(&self) -> bool {
         self.max_pending_per_sender < u32::MAX || self.max_pending_bytes_per_sender < u64::MAX
@@ -1465,6 +1505,66 @@ impl DagMempoolConfig {
     /// Check if batch limits are enabled (T218).
     pub fn batch_limits_enabled(&self) -> bool {
         self.max_txs_per_batch < u32::MAX || self.max_batch_bytes < u64::MAX
+    }
+
+    /// Check if eviction rate limiting is enabled (T219).
+    pub fn eviction_rate_limiting_enabled(&self) -> bool {
+        self.eviction_mode != crate::node_config::EvictionRateMode::Off
+    }
+
+    /// Check if eviction rate limiting is enforced (T219).
+    pub fn eviction_rate_limiting_enforced(&self) -> bool {
+        self.eviction_mode == crate::node_config::EvictionRateMode::Enforce
+    }
+}
+
+// ============================================================================
+// T219: Eviction Window Tracking
+// ============================================================================
+
+/// Time-bucketed eviction tracking for rate limiting (T219).
+///
+/// Tracks the number of evictions within a sliding time window to
+/// enforce rate limits on mempool eviction churn.
+#[derive(Clone, Debug, Default)]
+struct EvictionWindow {
+    /// Start timestamp of the current measurement window (milliseconds).
+    window_start_ms: u64,
+    /// Number of evictions in the current window.
+    evictions_in_window: u32,
+}
+
+impl EvictionWindow {
+    /// Create a new eviction window starting at the given timestamp.
+    fn new(start_ms: u64) -> Self {
+        Self {
+            window_start_ms: start_ms,
+            evictions_in_window: 0,
+        }
+    }
+
+    /// Check if the window needs to be reset based on current time.
+    ///
+    /// Returns `true` if the window was reset.
+    fn maybe_reset(&mut self, now_ms: u64, interval_secs: u32) -> bool {
+        let interval_ms = (interval_secs as u64) * 1000;
+        if now_ms.saturating_sub(self.window_start_ms) >= interval_ms {
+            self.window_start_ms = now_ms;
+            self.evictions_in_window = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if adding `count` evictions would exceed the limit.
+    fn would_exceed_limit(&self, count: u32, max_evictions: u32) -> bool {
+        self.evictions_in_window.saturating_add(count) > max_evictions
+    }
+
+    /// Record evictions in the current window.
+    fn record_evictions(&mut self, count: u32) {
+        self.evictions_in_window = self.evictions_in_window.saturating_add(count);
     }
 }
 
@@ -1501,6 +1601,12 @@ struct DagInner {
     sender_load: HashMap<qbind_types::AccountId, SenderLoad>,
     /// Map of tx_id -> (sender, tx_bytes) for tracking batched txs (T218).
     tx_sender_info: HashMap<TxId, (qbind_types::AccountId, u64)>,
+
+    // ========================================================================
+    // T219: Eviction Rate Limiting
+    // ========================================================================
+    /// Eviction window for rate limiting (T219).
+    eviction_window: EvictionWindow,
 }
 
 /// A batch stored in the DAG with metadata.
@@ -1589,6 +1695,8 @@ impl InMemoryDagMempool {
                 // T218: Per-sender load tracking
                 sender_load: HashMap::new(),
                 tx_sender_info: HashMap::new(),
+                // T219: Eviction rate limiting
+                eviction_window: EvictionWindow::default(),
             }),
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(1)),
@@ -1620,6 +1728,8 @@ impl InMemoryDagMempool {
                 // T218: Per-sender load tracking
                 sender_load: HashMap::new(),
                 tx_sender_info: HashMap::new(),
+                // T219: Eviction rate limiting
+                eviction_window: EvictionWindow::default(),
             }),
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(quorum_size)),
@@ -2578,6 +2688,24 @@ pub struct DagMempoolMetrics {
     sender_rate_limited_total: AtomicU64,
     /// Total number of batches truncated due to batch size limits.
     batch_size_limited_total: AtomicU64,
+
+    // T219: Eviction rate limiting metrics
+    /// Eviction rate mode (0=off, 1=warn, 2=enforce).
+    eviction_mode: AtomicU64,
+    /// Max evictions per interval config value.
+    max_evictions_per_interval: AtomicU64,
+    /// Eviction interval in seconds config value.
+    eviction_interval_secs: AtomicU64,
+    /// Total evictions due to capacity/fee priority.
+    evictions_capacity_total: AtomicU64,
+    /// Total evictions due to TTL (lifetime).
+    evictions_lifetime_total: AtomicU64,
+    /// Number of times rate limit was hit in Warn mode.
+    eviction_rate_limit_warn_total: AtomicU64,
+    /// Number of times rate limit caused rejection in Enforce mode.
+    eviction_rate_limit_enforce_total: AtomicU64,
+    /// Number of times the eviction window was reset.
+    eviction_window_reset_total: AtomicU64,
 }
 
 impl DagMempoolMetrics {
@@ -2779,6 +2907,103 @@ impl DagMempoolMetrics {
             .fetch_add(1, Ordering::Relaxed);
     }
 
+    // ========================================================================
+    // T219: Eviction Rate Limiting Metrics
+    // ========================================================================
+
+    /// Set the eviction mode config gauge (T219).
+    pub fn set_eviction_mode(&self, mode: crate::node_config::EvictionRateMode) {
+        let value = match mode {
+            crate::node_config::EvictionRateMode::Off => 0,
+            crate::node_config::EvictionRateMode::Warn => 1,
+            crate::node_config::EvictionRateMode::Enforce => 2,
+        };
+        self.eviction_mode.store(value, Ordering::Relaxed);
+    }
+
+    /// Get the eviction mode config gauge.
+    pub fn eviction_mode(&self) -> u64 {
+        self.eviction_mode.load(Ordering::Relaxed)
+    }
+
+    /// Set the max evictions per interval config gauge (T219).
+    pub fn set_max_evictions_per_interval(&self, max: u32) {
+        self.max_evictions_per_interval
+            .store(max as u64, Ordering::Relaxed);
+    }
+
+    /// Get the max evictions per interval config gauge.
+    pub fn max_evictions_per_interval(&self) -> u64 {
+        self.max_evictions_per_interval.load(Ordering::Relaxed)
+    }
+
+    /// Set the eviction interval in seconds config gauge (T219).
+    pub fn set_eviction_interval_secs(&self, secs: u32) {
+        self.eviction_interval_secs
+            .store(secs as u64, Ordering::Relaxed);
+    }
+
+    /// Get the eviction interval in seconds config gauge.
+    pub fn eviction_interval_secs(&self) -> u64 {
+        self.eviction_interval_secs.load(Ordering::Relaxed)
+    }
+
+    /// Get the total capacity evictions.
+    pub fn evictions_capacity_total(&self) -> u64 {
+        self.evictions_capacity_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the capacity evictions counter.
+    pub fn inc_evictions_capacity(&self, count: u64) {
+        self.evictions_capacity_total
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Get the total lifetime evictions.
+    pub fn evictions_lifetime_total(&self) -> u64 {
+        self.evictions_lifetime_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the lifetime evictions counter.
+    pub fn inc_evictions_lifetime(&self, count: u64) {
+        self.evictions_lifetime_total
+            .fetch_add(count, Ordering::Relaxed);
+    }
+
+    /// Get the total warn mode rate limit hits.
+    pub fn eviction_rate_limit_warn_total(&self) -> u64 {
+        self.eviction_rate_limit_warn_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the warn mode rate limit counter.
+    pub fn inc_eviction_rate_limit_warn(&self) {
+        self.eviction_rate_limit_warn_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total enforce mode rate limit rejections.
+    pub fn eviction_rate_limit_enforce_total(&self) -> u64 {
+        self.eviction_rate_limit_enforce_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Increment the enforce mode rate limit counter.
+    pub fn inc_eviction_rate_limit_enforce(&self) {
+        self.eviction_rate_limit_enforce_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the total eviction window resets.
+    pub fn eviction_window_reset_total(&self) -> u64 {
+        self.eviction_window_reset_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment the window reset counter.
+    pub fn inc_eviction_window_reset(&self) {
+        self.eviction_window_reset_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Format metrics as Prometheus-style output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -2852,6 +3077,41 @@ impl DagMempoolMetrics {
         output.push_str(&format!(
             "qbind_dag_batch_size_limited_total {}\n",
             self.batch_size_limited_total()
+        ));
+
+        // T219: Eviction rate limiting metrics
+        output.push_str("\n# DAG Eviction Rate Limiting Metrics (T219)\n");
+        output.push_str(&format!(
+            "qbind_mempool_eviction_mode {}\n",
+            self.eviction_mode()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_max_evictions_per_interval {}\n",
+            self.max_evictions_per_interval()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_eviction_interval_secs {}\n",
+            self.eviction_interval_secs()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_evictions_total{{reason=\"capacity\"}} {}\n",
+            self.evictions_capacity_total()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_evictions_total{{reason=\"lifetime\"}} {}\n",
+            self.evictions_lifetime_total()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_eviction_rate_limit_total{{mode=\"warn\"}} {}\n",
+            self.eviction_rate_limit_warn_total()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_eviction_rate_limit_total{{mode=\"enforce\"}} {}\n",
+            self.eviction_rate_limit_enforce_total()
+        ));
+        output.push_str(&format!(
+            "qbind_mempool_evictions_window_reset_total {}\n",
+            self.eviction_window_reset_total()
         ));
         output
     }
@@ -3604,6 +3864,10 @@ mod tests {
             max_pending_bytes_per_sender: u64::MAX, // Only limit by count
             max_txs_per_batch: 100,
             max_batch_bytes: u64::MAX,
+            // T219: DevNet defaults
+            eviction_mode: crate::node_config::EvictionRateMode::Off,
+            max_evictions_per_interval: 10_000,
+            eviction_interval_secs: 10,
         };
 
         let mempool = InMemoryDagMempool::with_config(config);
