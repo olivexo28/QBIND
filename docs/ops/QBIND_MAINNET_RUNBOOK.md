@@ -641,7 +641,14 @@ Use only for:
 
 ### 6.4 Compromise Handling Incident Playbook
 
-See [§10.1 Consensus Key Suspected Compromised](#101-consensus-key-suspected-compromised).
+See [§10.5 Compromised Key Incident Procedures](#105-compromised-key-incident-procedures-t217) for comprehensive step-by-step playbooks covering:
+
+- Suspected vs confirmed consensus key compromise
+- HSM/remote signer compromise vs host compromise
+- P2P identity key compromise and replacement
+- Batch signing / DAG key compromise
+
+For design rationale and epoch-level semantics, see [QBIND_KEY_MANAGEMENT_DESIGN.md §5.4](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#54-compromised-key-handling-t217).
 
 ---
 
@@ -966,6 +973,346 @@ curl http://localhost:9090/metrics | grep qbind_state_prune
 3. **Increase disk space** if pruning is working but growth is legitimate
 
 4. **Investigate unusual state growth** (e.g., spam attacks)
+
+### 10.5 Compromised Key Incident Procedures (T217)
+
+This section provides step-by-step playbooks for handling key compromise incidents. These procedures are **normative for MainNet validators**.
+
+> **Related**: For design rationale and epoch-level semantics, see [QBIND_KEY_MANAGEMENT_DESIGN.md §5.4](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#54-compromised-key-handling-t217).
+
+#### 10.5.1 Suspected Consensus Key Compromise
+
+**Severity**: Critical  
+**When to Invoke**: Unusual signatures observed, security alert triggered, or insider threat suspected.
+
+**Immediate Actions** (within 15 minutes):
+
+1. **Stop the validator immediately**:
+   ```bash
+   systemctl stop qbind-node
+   ```
+   **Rationale**: Prevent further signing that could be used for equivocation.
+
+2. **Verify the suspicion** — check for equivocation evidence:
+   ```bash
+   # Check if equivocation has been detected
+   curl -s http://localhost:9090/metrics | grep qbind_consensus_equivocation
+   
+   # Review recent signatures in logs
+   journalctl -u qbind-node --since "1 hour ago" | grep "signed\|signature"
+   ```
+
+3. **Assess current epoch**:
+   ```bash
+   curl -s http://localhost:9090/metrics | grep qbind_consensus_epoch
+   ```
+
+4. **Notify network operators** via established communication channels.
+
+**Recovery Actions** (within 4 hours):
+
+5. **Generate emergency replacement key** on fresh infrastructure:
+   ```bash
+   qbind-keygen generate \
+     --output /data/qbind/keystore/emergency \
+     --validator-id 42 \
+     --key-role consensus \
+     --encrypt \
+     --passphrase-env QBIND_KEYSTORE_PASSPHRASE
+   ```
+
+6. **Create emergency rotation event**:
+   ```bash
+   qbind-key-rotation init \
+     --validator-id 42 \
+     --key-role consensus \
+     --new-public-key-file /data/qbind/keystore/emergency/consensus.pub \
+     --effective-epoch $(($(curl -s http://localhost:9090/metrics | grep qbind_consensus_epoch | awk '{print $2}') + 1)) \
+     --grace-epochs 1 \
+     --emergency \
+     --output emergency-rotation.json
+   ```
+
+7. **Submit rotation event** via expedited governance process:
+   ```bash
+   qbind-validator-registry submit-rotation \
+     --event emergency-rotation.json \
+     --sign-with /data/qbind/keystore/emergency/consensus.key \
+     --expedited
+   ```
+
+8. **Preserve evidence** for forensics:
+   ```bash
+   tar -czf /tmp/qbind-forensics-$(date +%s).tar.gz \
+     /var/log/qbind/ \
+     /data/qbind/keystore/ \
+     /var/log/auth.log
+   chmod 600 /tmp/qbind-forensics-*.tar.gz
+   ```
+
+**Post-Incident** (within 24 hours):
+- Conduct root cause analysis
+- File incident report with network governance
+- Update key management procedures if needed
+
+**Metrics to Monitor**:
+- `qbind_signer_sign_failures_total` — should be 0 after restart
+- `qbind_consensus_key_rotation_pending{validator="<id>"}` — should be 1 during grace period
+- `qbind_consensus_equivocation_detected_total` — monitor for evidence
+
+---
+
+#### 10.5.2 Confirmed Consensus Key Compromise
+
+**Severity**: Critical  
+**When to Invoke**: Equivocation evidence on-chain, attacker activity confirmed.
+
+**Immediate Actions** (within 5 minutes):
+
+1. **Stop the validator immediately**:
+   ```bash
+   systemctl stop qbind-node
+   # Kill any background processes
+   pkill -9 -f qbind-node || true
+   ```
+
+2. **Isolate the compromised host** from the network:
+   ```bash
+   # Block outbound network (preserve forensics)
+   iptables -A OUTPUT -j DROP
+   ```
+
+3. **Alert network operators** with equivocation evidence:
+   ```bash
+   # Broadcast emergency alert (implementation-specific)
+   qbind-admin broadcast-alert \
+     --severity critical \
+     --message "Validator 42 consensus key confirmed compromised"
+   ```
+
+**Recovery Actions** (within 2 hours):
+
+4. **Provision new infrastructure** (do NOT reuse compromised host)
+
+5. **Generate new key on new infrastructure** (same as §10.5.1 step 5)
+
+6. **Create emergency rotation with minimal grace period**:
+   ```bash
+   qbind-key-rotation init \
+     --validator-id 42 \
+     --key-role consensus \
+     --new-public-key-file /data/qbind/keystore/new/consensus.pub \
+     --effective-epoch $((current_epoch + 1)) \
+     --grace-epochs 1 \
+     --emergency \
+     --reason "confirmed_compromise" \
+     --output emergency-rotation.json
+   ```
+
+7. **Submit via emergency governance** (may require quorum vote)
+
+**Slashing Preparation**:
+- If equivocation occurred, prepare for potential slashing
+- Document all evidence for dispute resolution
+- Slashing amount depends on governance rules (out of scope for T217)
+
+**Metrics to Monitor**:
+- `qbind_consensus_equivocation_detected_total` — track all instances
+- `qbind_validator_slashed_total` — monitor for slashing events
+
+---
+
+#### 10.5.3 HSM/Remote Signer Compromise vs Host Compromise
+
+Different compromise scenarios require different response strategies:
+
+**Scenario A: HSM Compromise (Host Secure)**
+
+Indicators:
+- HSM tamper detection triggered
+- Vendor-reported vulnerability
+- HSM firmware compromise suspected
+
+Response:
+1. **Stop validator** (HSM may still be accessible to attacker)
+2. **Isolate HSM** from network if possible
+3. **Do NOT attempt to use HSM** for emergency key generation
+4. **Use backup HSM or EncryptedFsV1** for emergency key:
+   ```bash
+   # Generate on backup infrastructure
+   qbind-keygen generate \
+     --output /data/qbind/keystore/emergency \
+     --validator-id 42 \
+     --key-role consensus \
+     --encrypt \
+     --passphrase-env QBIND_KEYSTORE_PASSPHRASE
+   ```
+5. **Contact HSM vendor** for incident response
+6. **Replace HSM hardware** before resuming production
+
+**Scenario B: Host Compromise (HSM May Be Safe)**
+
+Indicators:
+- Root access detected on validator host
+- Malware found
+- Container escape detected
+
+Response:
+1. **Stop validator immediately** — host is untrusted
+2. **Assume HSM is compromised** (conservative approach):
+   - Attacker with host access may have extracted HSM PIN
+   - Attacker may have sent signing requests via HSM API
+3. **Treat as full key compromise** (follow §10.5.2)
+4. **Provision entirely new infrastructure**:
+   - New host
+   - New HSM (or existing backup HSM if physically isolated)
+   - New keys
+
+**Decision Matrix**:
+
+| Scenario | Assume Key Compromised? | Reuse HSM? | Reuse Host? |
+| :--- | :--- | :--- | :--- |
+| HSM compromise, host secure | Yes | ❌ No | Evaluate |
+| Host compromise, HSM unknown | Yes | ❌ No (conservative) | ❌ No |
+| Remote signer compromise | Yes | N/A | ❌ No |
+| Network partition (not compromise) | No | ✅ Yes | ✅ Yes |
+
+---
+
+#### 10.5.4 P2P Identity Key Compromise and Replacement
+
+**Severity**: High (but not critical — validator can continue consensus participation)  
+**When to Invoke**: Suspected MITM, peer impersonation, or P2P key exposure.
+
+**Assessment**:
+
+P2P identity key compromise is **less severe** than consensus key compromise because:
+- Cannot cause equivocation or slashing
+- Cannot forge consensus votes
+- Impact limited to network topology/peer trust
+
+**Symptoms**:
+- `qbind_p2p_handshake_failures_total` increasing unexpectedly
+- Peers reporting conflicting validator identity claims
+- Suspicious peer connections from unknown sources
+
+**Response** (can be performed during normal operation):
+
+1. **Continue consensus participation** — validator CAN keep signing
+   ```bash
+   # No need to stop the node
+   ```
+
+2. **Generate new P2P identity key**:
+   ```bash
+   qbind-keygen generate \
+     --output /data/qbind/keystore/new-p2p \
+     --validator-id 42 \
+     --key-role p2p-identity \
+     --encrypt \
+     --passphrase-env QBIND_KEYSTORE_PASSPHRASE
+   ```
+
+3. **Create planned rotation event** (longer grace period):
+   ```bash
+   qbind-key-rotation init \
+     --validator-id 42 \
+     --key-role p2p-identity \
+     --new-public-key-file /data/qbind/keystore/new-p2p/p2p_identity.pub \
+     --effective-epoch $((current_epoch + 10)) \
+     --grace-epochs 50 \
+     --output p2p-rotation.json
+   ```
+
+4. **Submit rotation event** via normal governance:
+   ```bash
+   qbind-validator-registry submit-rotation \
+     --event p2p-rotation.json \
+     --sign-with /data/qbind/keystore/current/consensus.key
+   ```
+
+5. **Coordinate with peers** — notify other validators of upcoming P2P key change
+
+6. **After grace period**, update node configuration:
+   ```bash
+   mv /data/qbind/keystore/current/p2p_identity.key \
+      /data/qbind/keystore/old/p2p_identity.key.bak
+   mv /data/qbind/keystore/new-p2p/p2p_identity.key \
+      /data/qbind/keystore/current/p2p_identity.key
+   systemctl restart qbind-node
+   ```
+
+**Metrics to Monitor**:
+- `qbind_p2p_handshake_failures_total` — should decrease after rotation
+- `qbind_p2p_connections_total` — verify peer connectivity restored
+- `qbind_consensus_key_rotation_pending{validator="<id>",key_role="p2p-identity"}` — track rotation progress
+
+---
+
+#### 10.5.5 Batch Signing / DAG Key Compromise
+
+**Severity**: Critical (same as consensus key)  
+**When to Invoke**: Forged batches or availability certificates detected.
+
+**Important**: In current implementation, batch signing key is the **same as consensus key**. Therefore:
+
+1. **Treat as consensus key compromise** (follow §10.5.1 or §10.5.2)
+2. **Stop signing immediately**
+3. **Execute emergency key rotation**
+
+**Symptoms Specific to Batch Signing Compromise**:
+- `qbind_dag_batch_equivocation_detected` metric increasing
+- Forged availability certificates in DAG
+- Invalid batch signatures attributed to validator
+
+**Additional DAG-Specific Actions**:
+
+1. **Check DAG consistency**:
+   ```bash
+   curl -s http://localhost:9090/metrics | grep qbind_dag
+   ```
+
+2. **Verify batch signature status**:
+   ```bash
+   qbind-admin dag-status --validator-id 42
+   ```
+
+3. **Report forged certificates** to network operators for investigation
+
+**Future Consideration**: If batch signing key becomes separate from consensus key, this playbook will be updated with independent rotation procedures.
+
+**Metrics to Monitor**:
+- `qbind_dag_batch_equivocation_detected` — should be 0
+- `qbind_dag_certs_invalid_total` — track invalid certificate attempts
+- `qbind_dag_batches_signed_total` — verify signing resumes after recovery
+
+---
+
+#### 10.5.6 Metrics Reference for Compromise Detection
+
+The following metrics are useful for detecting and responding to key compromise:
+
+| Metric | Description | Alert Threshold |
+| :--- | :--- | :--- |
+| `qbind_signer_sign_requests_total` | Total signing requests by type | Sudden spikes |
+| `qbind_signer_sign_failures_total` | Total signing failures | Any increase |
+| `qbind_consensus_equivocation_detected_total` | Equivocation events detected | > 0 |
+| `qbind_consensus_key_rotation_pending` | Key rotation in progress | 1 during rotation |
+| `qbind_consensus_key_rotation_grace_epochs_remaining` | Epochs until rotation completes | Decreasing |
+| `qbind_p2p_handshake_failures_total` | P2P handshake failures | Sudden increase |
+| `qbind_dag_batch_equivocation_detected` | DAG batch equivocation | > 0 |
+| `qbind_hsm_sign_error_total` | HSM signing errors | Any increase |
+| `qbind_remote_sign_failures_total` | Remote signer failures | Any increase |
+
+**CLI Tools Reference**:
+
+| Tool | Purpose | Example |
+| :--- | :--- | :--- |
+| `qbind-keygen generate` | Generate new keypair | See examples above |
+| `qbind-key-rotation init` | Create rotation event | See examples above |
+| `qbind-validator-registry submit-rotation` | Submit rotation to governance | See examples above |
+| `qbind-admin dag-status` | Check DAG consistency | `qbind-admin dag-status --validator-id 42` |
+| `qbind-admin broadcast-alert` | Emergency network alert | `qbind-admin broadcast-alert --severity critical` |
 
 ---
 

@@ -251,10 +251,10 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] **Key rotation hooks v0 (T213)** — Ready (KeyRotationRegistry with dual-key support, CLI helper)
 - [x] Key rotation procedures documented — T213 implementation docs
 - [x] **HSM redundancy v0 (T214)** — Fail-closed behavior, health signaling, redundancy patterns documented
-- [ ] Compromised key handling procedures
+- [x] **Compromised key handling procedures (T217)** — Ready; see [QBIND_KEY_MANAGEMENT_DESIGN.md §5.4](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#54-compromised-key-handling-t217) and [QBIND_MAINNET_RUNBOOK.md §10.5](../ops/QBIND_MAINNET_RUNBOOK.md#105-compromised-key-incident-procedures-t217)
 - [ ] External audit of key management code
 
-**Status Summary**: Partially mitigated by T211–T214; external audit of key management code is pending.
+**Status Summary**: Partially mitigated by T211–T214 and T217 (compromised key handling procedures); only remaining blocker is external audit of key management code.
 
 **Target Phase**: MainNet v0 (blocking)
 
@@ -456,6 +456,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T192** | **Observability** | **Block-level invariant probes & metrics** | **MN-R1** |
 | **T194** | **Design** | **Monetary policy & monetary engine design** | **MN-R2** |
 | **T209** | **Design** | **Key management & signer architecture design** | **MN-R5** |
+| **T217** | **Docs** | **Compromised key handling procedures** | **MN-R5** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 

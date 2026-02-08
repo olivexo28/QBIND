@@ -720,6 +720,13 @@ TestNet Beta operators should begin practicing MainNet operational procedures:
    - Test snapshot creation and restoration
    - Verify fast-sync from snapshots works correctly
 
+5. **Dry-run compromised key handling procedures (T217)**:
+   - TestNet Beta is the ideal environment to practice compromise response procedures
+   - Run through the playbooks in [QBIND_MAINNET_RUNBOOK.md §10.5](../ops/QBIND_MAINNET_RUNBOOK.md#105-compromised-key-incident-procedures-t217) with simulated compromise scenarios
+   - Practice emergency key rotation using `qbind-key-rotation init --emergency`
+   - Verify your team can execute a full key rotation within the target SLA (< 4 hours)
+   - The canonical reference for compromise handling design is [QBIND_KEY_MANAGEMENT_DESIGN.md §5.4](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#54-compromised-key-handling-t217)
+
 **Note**: TestNet Beta allows `SignerFailureMode::LogAndContinue` for chaos testing. MainNet requires `ExitOnFailure`.
 
 ---

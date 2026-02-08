@@ -65,12 +65,18 @@ fn test_snapshot_creation_basic() {
 
     // Verify stats
     assert_eq!(stats.height, 100, "snapshot height should match");
-    assert!(stats.duration_ms < 10_000, "snapshot should complete quickly");
+    assert!(
+        stats.duration_ms < 10_000,
+        "snapshot should complete quickly"
+    );
 
     // Verify snapshot directory structure
     assert!(target.exists(), "snapshot directory should exist");
     assert!(target.join("meta.json").exists(), "meta.json should exist");
-    assert!(target.join("state").exists(), "state directory should exist");
+    assert!(
+        target.join("state").exists(),
+        "state directory should exist"
+    );
 }
 
 /// Test that snapshot creation fails if target already exists.
@@ -146,7 +152,10 @@ fn test_snapshot_metadata_written() {
     let parsed = StateSnapshotMeta::from_json(&meta_json).expect("Failed to parse meta.json");
 
     assert_eq!(parsed.height, meta.height, "height should match");
-    assert_eq!(parsed.block_hash, meta.block_hash, "block_hash should match");
+    assert_eq!(
+        parsed.block_hash, meta.block_hash,
+        "block_hash should match"
+    );
     assert_eq!(
         parsed.created_at_unix_ms, meta.created_at_unix_ms,
         "created_at_unix_ms should match"
@@ -207,7 +216,10 @@ fn test_snapshot_validation_chain_id_mismatch() {
     assert!(
         matches!(
             result,
-            SnapshotValidationResult::ChainIdMismatch { expected: _, actual: _ }
+            SnapshotValidationResult::ChainIdMismatch {
+                expected: _,
+                actual: _
+            }
         ),
         "mismatched chain ID should fail validation"
     );

@@ -632,6 +632,21 @@ MainNet validators must treat signer/HSM availability as a **hard dependency**:
 
 5. **Redundancy Pattern**: Redundancy is achieved via external orchestration, not automatic in-node failover. See [QBIND_KEY_MANAGEMENT_DESIGN.md §3.7](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#37-signer-failure-modes--redundancy-patterns-t214) for recommended patterns.
 
+#### 6.5.2 Compromised Key Handling (T217)
+
+MainNet validators must have documented procedures for responding to key compromise:
+
+1. **Normative Design Guidance**: Compromise scenarios, blast radius, detection signals, and epoch-level rotation semantics are defined in [QBIND_KEY_MANAGEMENT_DESIGN.md §5.4](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#54-compromised-key-handling-t217).
+
+2. **Operational Playbooks**: Step-by-step incident procedures for suspected/confirmed compromise, HSM vs host compromise, P2P key compromise, and batch signing key compromise are documented in [QBIND_MAINNET_RUNBOOK.md §10.5](../ops/QBIND_MAINNET_RUNBOOK.md#105-compromised-key-incident-procedures-t217).
+
+3. **Key Rotation Machinery**: All compromise response uses the T213 `KeyRotationEvent` and CLI helper (`qbind-key-rotation`) with appropriate `effective_epoch` and `grace_epochs` parameters for emergency vs planned rotations.
+
+**MainNet Validator Requirements**:
+- Operators must be familiar with compromise detection signals
+- Emergency key rotation procedures must be tested during onboarding
+- Incident response contacts must be established before MainNet participation
+
 ### 6.6 Risk Summary Table
 
 | Area | Severity | MainNet v0 Status | Notes |

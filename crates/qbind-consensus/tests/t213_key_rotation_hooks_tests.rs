@@ -39,7 +39,10 @@ fn test_apply_rotation_event_basic() {
 
     let current_epoch = 99;
     let result = registry.apply_rotation_event(&event, current_epoch);
-    assert!(result.is_ok(), "rotation event should be applied successfully");
+    assert!(
+        result.is_ok(),
+        "rotation event should be applied successfully"
+    );
 
     // Verify the state after applying
     let state = registry
@@ -284,9 +287,7 @@ fn test_large_epoch_numbers_overflow() {
 
     // Application should succeed
     assert!(
-        registry
-            .apply_rotation_event(&event, u64::MAX - 1)
-            .is_ok(),
+        registry.apply_rotation_event(&event, u64::MAX - 1).is_ok(),
         "rotation with large epochs should succeed"
     );
 
@@ -406,13 +407,9 @@ fn test_apply_rotation_with_validator_set_validation() {
 
     // Valid rotation for validator in set
     let event1 = KeyRotationEvent::scheduled(1, KeyRole::Consensus, test_pk(11), 100, 2);
-    assert!(apply_key_rotation_event(
-        &mut registry,
-        validator_ids.iter().copied(),
-        &event1,
-        99
-    )
-    .is_ok());
+    assert!(
+        apply_key_rotation_event(&mut registry, validator_ids.iter().copied(), &event1, 99).is_ok()
+    );
 
     // Invalid rotation for validator NOT in set
     let event2 = KeyRotationEvent::scheduled(99, KeyRole::Consensus, test_pk(99), 100, 2);
@@ -436,34 +433,58 @@ fn test_rotation_for_different_key_roles() {
     registry.register_key(1, KeyRole::P2pIdentity, test_pk(3));
 
     // Rotate each role independently
-    let event_consensus =
-        KeyRotationEvent::scheduled(1, KeyRole::Consensus, test_pk(11), 100, 2);
-    let event_batch =
-        KeyRotationEvent::scheduled(1, KeyRole::BatchSigning, test_pk(12), 100, 3);
-    let event_p2p =
-        KeyRotationEvent::scheduled(1, KeyRole::P2pIdentity, test_pk(13), 100, 4);
+    let event_consensus = KeyRotationEvent::scheduled(1, KeyRole::Consensus, test_pk(11), 100, 2);
+    let event_batch = KeyRotationEvent::scheduled(1, KeyRole::BatchSigning, test_pk(12), 100, 3);
+    let event_p2p = KeyRotationEvent::scheduled(1, KeyRole::P2pIdentity, test_pk(13), 100, 4);
 
     registry.apply_rotation_event(&event_consensus, 99).unwrap();
     registry.apply_rotation_event(&event_batch, 99).unwrap();
     registry.apply_rotation_event(&event_p2p, 99).unwrap();
 
     // All three rotating independently
-    assert!(registry.get_key_state(1, KeyRole::Consensus).unwrap().is_rotating());
-    assert!(registry.get_key_state(1, KeyRole::BatchSigning).unwrap().is_rotating());
-    assert!(registry.get_key_state(1, KeyRole::P2pIdentity).unwrap().is_rotating());
+    assert!(registry
+        .get_key_state(1, KeyRole::Consensus)
+        .unwrap()
+        .is_rotating());
+    assert!(registry
+        .get_key_state(1, KeyRole::BatchSigning)
+        .unwrap()
+        .is_rotating());
+    assert!(registry
+        .get_key_state(1, KeyRole::P2pIdentity)
+        .unwrap()
+        .is_rotating());
 
     // Commit consensus first (ends at 102)
     advance_epoch_for_rotation(&mut registry, 103);
-    assert!(!registry.get_key_state(1, KeyRole::Consensus).unwrap().is_rotating());
-    assert!(registry.get_key_state(1, KeyRole::BatchSigning).unwrap().is_rotating());
-    assert!(registry.get_key_state(1, KeyRole::P2pIdentity).unwrap().is_rotating());
+    assert!(!registry
+        .get_key_state(1, KeyRole::Consensus)
+        .unwrap()
+        .is_rotating());
+    assert!(registry
+        .get_key_state(1, KeyRole::BatchSigning)
+        .unwrap()
+        .is_rotating());
+    assert!(registry
+        .get_key_state(1, KeyRole::P2pIdentity)
+        .unwrap()
+        .is_rotating());
 
     // Commit batch (ends at 103)
     advance_epoch_for_rotation(&mut registry, 104);
-    assert!(!registry.get_key_state(1, KeyRole::BatchSigning).unwrap().is_rotating());
-    assert!(registry.get_key_state(1, KeyRole::P2pIdentity).unwrap().is_rotating());
+    assert!(!registry
+        .get_key_state(1, KeyRole::BatchSigning)
+        .unwrap()
+        .is_rotating());
+    assert!(registry
+        .get_key_state(1, KeyRole::P2pIdentity)
+        .unwrap()
+        .is_rotating());
 
     // Commit p2p (ends at 104)
     advance_epoch_for_rotation(&mut registry, 105);
-    assert!(!registry.get_key_state(1, KeyRole::P2pIdentity).unwrap().is_rotating());
+    assert!(!registry
+        .get_key_state(1, KeyRole::P2pIdentity)
+        .unwrap()
+        .is_rotating());
 }

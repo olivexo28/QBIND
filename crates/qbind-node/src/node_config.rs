@@ -392,7 +392,9 @@ impl SnapshotConfig {
     ///
     /// Returns `None` if snapshots are disabled or no directory is configured.
     pub fn snapshot_path_for_height(&self, height: u64) -> Option<PathBuf> {
-        self.snapshot_dir.as_ref().map(|dir| dir.join(height.to_string()))
+        self.snapshot_dir
+            .as_ref()
+            .map(|dir| dir.join(height.to_string()))
     }
 }
 

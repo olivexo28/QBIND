@@ -139,7 +139,11 @@ impl StateSnapshotMeta {
     /// }
     /// ```
     pub fn to_json(&self) -> Vec<u8> {
-        let block_hash_hex: String = self.block_hash.iter().map(|b| format!("{:02x}", b)).collect();
+        let block_hash_hex: String = self
+            .block_hash
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
         format!(
             "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}\n}}",
             self.height, block_hash_hex, self.created_at_unix_ms, self.chain_id
@@ -186,9 +190,7 @@ impl StateSnapshotMeta {
         let rest = rest.trim_start();
 
         // Find the end of the number (comma, newline, or closing brace)
-        let end = rest
-            .find([',', '\n', '}'])
-            .unwrap_or(rest.len());
+        let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
         let num_str = rest[..end].trim();
         num_str.parse().ok()
     }
@@ -539,9 +541,7 @@ pub fn validate_snapshot_dir(
     let meta = match StateSnapshotMeta::from_json(&meta_data) {
         Some(m) => m,
         None => {
-            return SnapshotValidationResult::MissingMetadata(
-                "cannot parse meta.json".to_string(),
-            );
+            return SnapshotValidationResult::MissingMetadata("cannot parse meta.json".to_string());
         }
     };
 
