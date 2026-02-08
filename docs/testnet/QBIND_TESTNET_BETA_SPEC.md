@@ -667,13 +667,29 @@ MainNet v0 extends Beta with:
 - **Hybrid fee distribution** — Burn + proposer reward (vs burn-only in Beta)
 - **Formal monetary policy** — Three-phase inflation model with PQC cost adjustments and EMA-smoothed fee offsets; see [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) (T194)
 - **Consensus-coupled DAG** — Proposals must only commit certified batches
-- **Stage B parallelism** — Conflict-graph-based parallel execution available
+- **Stage B parallelism** — Conflict-graph-based parallel execution available (verified by T223 soak harness)
 - **Dynamic P2P discovery** — Validators can find new peers automatically
 - **Anti-eclipse measures** — Peer diversity requirements enforced
 - **HSM production mode** — Hardware security module support for validators
 - **External security audit** — Required before MainNet launch
 
-### 10.1 MainNet Configuration Profile (T185)
+### 10.1 Stage B Soak Testing on Beta (T223)
+
+TestNet Beta clusters are the recommended environment for running the **T223 Stage B soak harness** before MainNet activation. The soak harness validates Stage B determinism under long-run randomized workloads:
+
+```bash
+# Run the Stage B soak harness in a Beta environment
+cargo test -p qbind-node --test t223_stage_b_soak_harness -- --test-threads=1
+```
+
+**What T223 verifies**:
+- Stage B parallel execution produces identical results to sequential execution
+- No mismatches in state, receipts, or gas accounting over 100+ randomized blocks
+- Stage B metrics show non-zero parallel blocks and zero mismatches
+
+This harness is the normative test artifact for MN-R7 (Stage B determinism risk) and should be run as part of any MainNet readiness validation.
+
+### 10.2 MainNet Configuration Profile (T185)
 
 The **MainNet profile** (`--profile mainnet`) is the canonical entry point for MainNet v0 nodes
 and is implemented via T185. It provides:
@@ -687,7 +703,7 @@ superset of Beta with additional mandatory constraints.
 
 For MainNet risk tracking and readiness checklist, see [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md).
 
-### 10.2 MainNet Monetary Policy (T194)
+### 10.3 MainNet Monetary Policy (T194)
 
 The canonical specification for MainNet monetary behavior is [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md). Key elements include:
 
@@ -699,7 +715,7 @@ The canonical specification for MainNet monetary behavior is [QBIND_MONETARY_POL
 
 **Implementation Status**: Design complete (T194). Implementation pending in T195+ tasks.
 
-### 10.3 Path to MainNet Operations (T216)
+### 10.4 Path to MainNet Operations (T216)
 
 TestNet Beta operators should begin practicing MainNet operational procedures:
 

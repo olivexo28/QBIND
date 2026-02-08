@@ -50,7 +50,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Area | Related Tasks | Risk Status | Notes |
 | :--- | :--- | :--- | :--- |
-| **Execution & VM** | T163, T164, T171, T177, T179, T186, T187 | Partially Mitigated | Stage B wired and tested (T186, T187) |
+| **Execution & VM** | T163, T164, T171, T177, T179, T186, T187, T193, T223 | ✅ Mitigated | Stage B wired, tested, and soak-verified (T186, T187, T223) |
 | **State Persistence & Growth** | T164, T208, T215 | ✅ Mitigated | Pruning (T208) & snapshots (T215) implemented |
 | **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181, T193 | Partially Mitigated | Hybrid fee distribution implemented (T193) |
 | **Mempool & DAG** | T158, T165, T182, T183, T218, T219 | ✅ Mitigated | DoS protections (T218), eviction rate limiting (T219), consensus coupling |
@@ -308,6 +308,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | 4 | Stage B parallel execution skeleton tested | ✅ Ready | T171 tests |
 | 5 | Stage B production wiring complete | ✅ Ready | T186, T187 - wired into VM v0 pipeline |
 | 6 | Stage B vs sequential determinism verified | ✅ Ready | T187 `test_stage_b_pipeline_determinism_against_sequential` |
+| 7 | Stage B soak harness (long-run determinism) | ✅ Ready | T223 `test_stage_b_soak_determinism_over_100_blocks` |
 
 ### 4.2 State Persistence & Growth
 
@@ -482,6 +483,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~**T213**~~ | ~~**Keys**~~ | ~~**Key rotation hooks v0**~~ | ~~**MN-R5**~~ |
 | ~~T193~~ | ~~Gas/Fees~~ | ~~Hybrid fee distribution~~ | ~~MN-R2~~ |
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
+| **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 

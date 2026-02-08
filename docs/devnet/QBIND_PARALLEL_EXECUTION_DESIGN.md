@@ -592,4 +592,78 @@ T186 and T187 complete the Stage B wiring into the VM v0 pipeline:
 
 ---
 
+## Appendix E: Stage B Soak & Determinism Harness (T223)
+
+**Task**: T223  
+**Status**: Design + Implementation + Soak Harness Ready  
+**Date**: 2026-02-08
+
+### Overview
+
+T223 provides a comprehensive soak and determinism harness for Stage B parallel execution, proving correctness under long-run randomized workloads. This harness is the normative test artifact for MN-R7 (Stage B conflict-graph parallel execution risk).
+
+### What T223 Does
+
+1. **Long-Run Determinism Testing**:
+   - Executes 100+ blocks with randomized transaction mixes
+   - For each block: runs sequential execution AND Stage B parallel execution
+   - Compares final state, receipts, and gas accounting
+   - Any divergence surfaces as a hard test failure
+
+2. **Randomized Workloads**:
+   - Multiple senders (64+ by default)
+   - Randomized transfer amounts and fee priorities
+   - Exercises DAG mempool patterns and fee-priority ordering
+   - Controllable random seed for reproducibility
+
+3. **Metrics Verification**:
+   - Confirms Stage B metrics show non-zero parallel blocks
+   - Asserts `stage_b_mismatch_total == 0` after each run
+   - Validates `stage_b_enabled == 1` gauge
+
+### Test Harness
+
+File: `crates/qbind-node/tests/t223_stage_b_soak_harness.rs`
+
+Key tests:
+- `test_stage_b_soak_determinism_over_100_blocks`: Main soak test (100 blocks, 64 senders)
+- `test_stage_b_soak_short_sanity`: Fast smoke test (20 blocks)
+- `test_stage_b_metrics_surface`: Metrics format verification
+- `test_stage_b_soak_high_contention`: Sequential fallback verification
+- `test_stage_b_soak_independent_txs`: Maximum parallelism verification
+- `test_stage_b_soak_reproducibility`: Determinism with fixed seed
+
+### Running the Harness
+
+```bash
+# Full soak test suite
+cargo test -p qbind-node --test t223_stage_b_soak_harness -- --test-threads=1
+
+# Quick sanity check only
+cargo test -p qbind-node --test t223_stage_b_soak_harness test_stage_b_soak_short_sanity
+```
+
+### Invariants Checked
+
+| Invariant | Description | Assertion |
+| :--- | :--- | :--- |
+| **State Equality** | Sequential and Stage B produce identical state | Per-block comparison |
+| **Receipt Equality** | All tx results match (success, gas, fees) | Per-tx comparison |
+| **No Mismatches** | `stage_b_mismatch_total == 0` | Post-run assertion |
+| **Parallel Use** | Stage B parallel path exercised | `stage_b_blocks_parallel > 0` |
+
+### Implementation Status Summary
+
+Stage B parallel execution is now fully verified through multiple layers:
+
+| Level | Task(s) | Coverage |
+| :--- | :--- | :--- |
+| **Unit tests** | T171 | Conflict graph, schedule construction |
+| **Executor tests** | T186 | `execute_block_stage_b()` API correctness |
+| **Pipeline wiring** | T187 | Production integration, basic determinism |
+| **Hybrid fees** | T193 | Fee distribution with Stage B |
+| **Soak harness** | **T223** | Long-run randomized determinism |
+
+---
+
 *End of Document*

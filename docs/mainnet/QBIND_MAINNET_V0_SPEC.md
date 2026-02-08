@@ -81,6 +81,7 @@ Stage B conflict-graph-based parallel execution is **available and enabled by de
 | **Production Wiring** | ✅ Complete (T187) | Wired into VM v0 pipeline |
 | **Default Behavior** | `stage_b_enabled = true` | Operators can disable via CLI |
 | **Determinism** | ✅ Verified | CI tests confirm identical results |
+| **Soak Harness** | ✅ Ready (T223) | Long-run randomized determinism testing |
 | **Metrics** | ✅ Available | `stage_b_enabled`, `stage_b_blocks_total`, etc. |
 
 **Stage B Algorithm Summary** (from [QBIND_PARALLEL_EXECUTION_DESIGN.md](../devnet/QBIND_PARALLEL_EXECUTION_DESIGN.md)):
@@ -91,7 +92,10 @@ Stage B conflict-graph-based parallel execution is **available and enabled by de
 4. Execute layers in parallel with Rayon
 5. Merge results deterministically
 
-**Critical Invariant**: All validators MUST produce identical state regardless of parallel vs sequential execution. This is verified by T187 CI tests.
+**Critical Invariant**: All validators MUST produce identical state regardless of parallel vs sequential execution. This is verified by:
+- T187 CI tests (unit-level determinism)
+- T193 hybrid fee distribution tests
+- **T223 soak harness (100+ blocks, randomized workloads)**
 
 **Disabling Stage B** (if needed):
 ```bash

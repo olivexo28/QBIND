@@ -455,7 +455,38 @@ qbind-node \
   --validator-id 42
 ```
 
-### 4.4 Pre-Flight Verification
+### 4.4 Pre-Release Testing
+
+Before MainNet launch or after significant upgrades, run the following test harnesses to verify node correctness:
+
+#### Stage B Determinism Verification (T223)
+
+The T223 soak harness validates Stage B parallel execution produces identical results to sequential execution over long-run randomized workloads:
+
+```bash
+# Run the Stage B soak harness (recommended before MainNet activation)
+cargo test -p qbind-node --test t223_stage_b_soak_harness -- --test-threads=1
+
+# Quick sanity check only
+cargo test -p qbind-node --test t223_stage_b_soak_harness test_stage_b_soak_short_sanity
+```
+
+**Expected Output**:
+- All tests should pass
+- `mismatches: 0` — No divergence between sequential and parallel execution
+- `stage_b_blocks_parallel > 0` — Stage B parallel path exercised
+
+#### Consensus Chaos Testing (T222)
+
+The T222 chaos harness validates consensus safety under adversarial conditions:
+
+```bash
+cargo test -p qbind-node --test t222_consensus_chaos_harness -- --test-threads=1
+```
+
+**Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) for the full MainNet readiness checklist.
+
+### 4.5 Pre-Flight Verification
 
 Before the node joins consensus, verify:
 
