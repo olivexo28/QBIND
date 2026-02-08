@@ -2328,8 +2328,8 @@ impl InMemoryDagMempool {
         eviction_window: &mut EvictionWindow,
         eviction_mode: crate::node_config::EvictionRateMode,
         max_evictions_per_interval: u32,
+        interval_secs: u32,
         metrics: Option<&Arc<DagMempoolMetrics>>,
-        _incoming_tx: &QbindTransaction,
     ) -> bool {
         use crate::node_config::EvictionRateMode;
 
@@ -2344,9 +2344,10 @@ impl InMemoryDagMempool {
                     // Log warning
                     eprintln!(
                         "[T220] Eviction rate limit exceeded (warn mode): \
-                         mode=warn, max_per_interval={}, interval_secs=N/A, \
+                         mode=warn, max_per_interval={}, interval_secs={}, \
                          current_count={}",
                         max_evictions_per_interval,
+                        interval_secs,
                         eviction_window.current_count()
                     );
                     // Increment warn metric
@@ -2364,9 +2365,10 @@ impl InMemoryDagMempool {
                     // Log warning about blocked eviction
                     eprintln!(
                         "[T220] Eviction rate limit reached (enforce mode): \
-                         mode=enforce, max_per_interval={}, current_count={}, \
-                         incoming tx rejected",
+                         mode=enforce, max_per_interval={}, interval_secs={}, \
+                         current_count={}, incoming tx rejected",
                         max_evictions_per_interval,
+                        interval_secs,
                         eviction_window.current_count()
                     );
                     // Increment enforce metric
@@ -2486,8 +2488,12 @@ impl DagMempool for InMemoryDagMempool {
                     // Compute priority for incoming tx
                     let incoming_cost = match compute_tx_mempool_cost(&tx) {
                         Ok(cost) => cost,
-                        Err(_) => {
-                            // Can't compute priority; treat as low priority and skip
+                        Err(e) => {
+                            // Can't compute priority; log and skip this tx
+                            eprintln!(
+                                "[T220] Cannot compute mempool cost for tx (sender={:?}, nonce={}): {}",
+                                &tx.sender[..4], tx.nonce, e
+                            );
                             continue;
                         }
                     };
@@ -2519,8 +2525,8 @@ impl DagMempool for InMemoryDagMempool {
                                     &mut inner.eviction_window,
                                     eviction_mode,
                                     max_evictions_per_interval,
+                                    eviction_interval_secs,
                                     self.metrics.as_ref(),
-                                    &tx,
                                 );
 
                             if !eviction_allowed {
