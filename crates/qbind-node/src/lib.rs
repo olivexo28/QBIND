@@ -190,7 +190,7 @@ pub use mempool::{
 pub use dag_mempool::{
     batch_signing_preimage, compute_batch_id, compute_tx_id, BatchError, BatchId, BatchRef,
     BatchSignature, DagMempool, DagMempoolConfig, DagMempoolError, DagMempoolMetrics,
-    DagMempoolStats, InMemoryDagMempool, QbindBatch, TxId, BATCH_DOMAIN_TAG,
+    DagMempoolStats, InMemoryDagMempool, QbindBatch, SenderLoad, TxId, BATCH_DOMAIN_TAG,
 };
 
 // T165 DAG Availability exports
