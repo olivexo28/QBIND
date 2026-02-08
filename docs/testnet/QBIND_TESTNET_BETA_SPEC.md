@@ -671,6 +671,7 @@ MainNet v0 extends Beta with:
 - **Dynamic P2P discovery** — Validators can find new peers automatically
 - **Anti-eclipse measures** — Peer diversity requirements enforced
 - **HSM production mode** — Hardware security module support for validators
+- **Off-chain governance model** — Protocol Council with M-of-N multi-sig approval for upgrades (T224)
 - **External security audit** — Required before MainNet launch
 
 ### 10.1 Stage B Soak Testing on Beta (T223)
@@ -745,6 +746,40 @@ TestNet Beta operators should begin practicing MainNet operational procedures:
 
 **Note**: TestNet Beta allows `SignerFailureMode::LogAndContinue` for chaos testing. MainNet requires `ExitOnFailure`.
 
+### 10.5 Path to MainNet Governance (T224)
+
+TestNet Beta serves as the **staging ground for all Class C (hard-fork) protocol upgrades** before they are deployed to MainNet. This follows the governance model defined in [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md).
+
+**How Governance Works on TestNet Beta**:
+
+1. **Class C upgrades are tested on Beta first** — All hard-fork changes must pass Beta soak testing (minimum 4 weeks) before MainNet deployment.
+
+2. **Governance decisions are reflected in Beta releases** — Protocol Council decisions are first implemented and tested on Beta, giving operators experience with the upgrade process.
+
+3. **Upgrade Envelope verification practice** — Operators should practice verifying signed Upgrade Envelopes on Beta before MainNet launches.
+
+**TestNet Beta Upgrade Process** (simplified from MainNet):
+
+| Step | Beta | MainNet |
+| :--- | :--- | :--- |
+| Design RFC review | 1 week | 2+ weeks |
+| Beta soak period | Required | N/A |
+| MainNet soak period | N/A | 4+ weeks |
+| Council approval | Maintainers only | 5-of-7 multi-sig |
+| Activation window | 3-7 days | 2+ weeks |
+
+**Key Differences from MainNet**:
+
+- Beta upgrades are approved by maintainers (not Protocol Council)
+- Beta has shorter activation windows for faster iteration
+- Beta may run experimental features before they're council-approved for MainNet
+
+**References**:
+
+- [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — Full governance design (T224)
+- [QBIND_MAINNET_V0_SPEC.md §11](../mainnet/QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) — MainNet governance summary
+- [QBIND_MAINNET_RUNBOOK.md §11](../ops/QBIND_MAINNET_RUNBOOK.md#11-upgrade-procedures--governance-hooks-t224) — Upgrade procedures
+
 ---
 
 ## 11. Related Documents
@@ -754,6 +789,7 @@ TestNet Beta operators should begin practicing MainNet operational procedures:
 | **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet v0 architecture |
 | **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk tracker |
+| **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance and upgrade model (T224) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
 | **Key Management Design** | [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) | Key management and signer architecture (T209) |
 | TestNet Alpha Spec | [QBIND_TESTNET_ALPHA_SPEC.md](./QBIND_TESTNET_ALPHA_SPEC.md) | TestNet Alpha architecture |

@@ -57,7 +57,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
-| **Governance / Upgrades** | — | Open | Not implemented |
+| **Governance / Upgrades** | T224 | Partially Mitigated | Design & process documented (T224), off-chain council governance; on-chain governance pending for v0.x |
 
 ---
 
@@ -74,6 +74,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R5** | Key Management & Remote Signing | Critical | Partially Mitigated (T211–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
+| **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
 
 ---
 
@@ -294,6 +295,44 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 ---
 
+### 3.8 MN-R8: Governance & Upgrade Risk
+
+**Category**: Protocol governance, upgrade coordination, and change management
+
+| Risk | Description | Severity | Status |
+| :--- | :--- | :--- | :--- |
+| **Governance key compromise** | Attacker gains control of council signing keys | Critical | Partially Mitigated (T224) |
+| **Rogue upgrade** | Malicious insider pushes unauthorized code change | Critical | Partially Mitigated (T224) |
+| **Upgrade coordination failure** | Operators fail to upgrade, causing chain split | High | Partially Mitigated (T224) |
+| **Configuration drift** | Operators misconfigure upgrade parameters | High | Partially Mitigated (T224) |
+| **No governance process** | Ad-hoc changes without audit trail | High | ✅ Mitigated (T224) |
+
+**Current Mitigations**:
+- ✅ **Governance & Upgrades design complete (T224)** — see [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md)
+- ✅ Protocol Council model with M-of-N (5-of-7) PQC multi-signature approval
+- ✅ Upgrade Envelope specification for cryptographic audit trail
+- ✅ Three upgrade classes (A, B, C) with appropriate processes for each
+- ✅ Emergency patch process for critical security fixes
+- ✅ Operator runbook procedures for upgrade verification
+- ✅ Failure modes and mitigations documented
+
+**T224 Deliverables**:
+- [x] Governance & Upgrades design document ([QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md))
+- [x] MainNet v0 Spec updated with §11 Governance & Upgrades
+- [x] MainNet Runbook updated with upgrade procedures (§11)
+- [x] TestNet Beta Spec updated with governance path note
+- [x] Threat model for governance key compromise, rogue upgrades, and coordination failures
+
+**Additional MainNet Requirements**:
+- [ ] External audit of governance process
+- [ ] Council member selection and key ceremony
+- [ ] On-chain upgrade signaling (v0.x)
+- [ ] On-chain parameter governance (v1.0)
+
+**Target Phase**: Partially Mitigated (T224); on-chain governance planned for v0.x+
+
+---
+
 ## 4. Readiness Checklist
 
 This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item must be testable/verifiable.
@@ -467,6 +506,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T218** | **Mempool** | **DAG mempool DoS protections v1** | **MN-R2** |
 | **T219** | **Mempool** | **Mempool eviction rate limiting config/metrics v1** | **MN-R2** |
 | **T220** | **Mempool** | **Mempool eviction rate limiting enforcement v1** | **MN-R2** |
+| **T224** | **Governance** | **Governance & upgrade envelope design** | **MN-R8** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 
@@ -549,6 +589,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 - [QBIND MainNet v0 Specification](./QBIND_MAINNET_V0_SPEC.md) — MainNet architecture
 - [QBIND MainNet Operational Runbook](../ops/QBIND_MAINNET_RUNBOOK.md) — MainNet operations (T216)
+- [QBIND Governance & Upgrades Design](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — Governance and upgrade model (T224)
 - [QBIND DAG Consensus Coupling Design](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — DAG–HotStuff coupling (T188)
 - [QBIND TestNet Beta Specification](../testnet/QBIND_TESTNET_BETA_SPEC.md) — Beta predecessor
 - [QBIND TestNet Beta Audit Skeleton](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) — Beta risks
@@ -564,6 +605,7 @@ The following documents should reference this MainNet audit:
 
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
 - [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — References audit for operational context (T216)
+- [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — References audit for MN-R8
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1
 - [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — References audit for MN-R2
 - [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) — References audit for MN-R5

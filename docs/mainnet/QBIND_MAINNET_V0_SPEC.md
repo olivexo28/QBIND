@@ -1014,12 +1014,90 @@ Dashboard panels by domain:
 
 ---
 
-## 11. Related Documents
+## 11. Governance & Upgrades (T224)
+
+### 11.1 Governance Model Overview
+
+MainNet v0 uses **off-chain governance** with a **Protocol Council** model:
+
+| Aspect | MainNet v0 Approach |
+| :--- | :--- |
+| **Decision Making** | Off-chain deliberation via governance forum and async discussion |
+| **Approval Mechanism** | M-of-N (5-of-7) PQC multi-signature by Protocol Council |
+| **Enforcement** | Social consensus + operator compliance |
+| **Audit Trail** | Signed Upgrade Envelopes published to governance repository |
+
+**Key Principle**: No single individual or key can unilaterally change the protocol. All protocol upgrades require cryptographic approval from a supermajority of the Protocol Council.
+
+For the complete governance design, threat model, and detailed procedures, see:
+- **[QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md)**
+
+### 11.2 Upgrade Classes
+
+All upgrades are classified into three classes:
+
+| Class | Description | Examples | Coordination |
+| :--- | :--- | :--- | :--- |
+| **Class A** | Non-consensus changes | CLI, docs, observability | None (maintainer approval) |
+| **Class B** | Consensus-compatible | Performance, internal refactoring | Rolling (council envelope) |
+| **Class C** | Hard-fork / protocol changes | Consensus rules, block format, monetary policy | Coordinated activation |
+
+### 11.3 Upgrade Envelope
+
+Each Council-approved upgrade is documented in a signed **Upgrade Envelope** containing:
+
+- Protocol version (major.minor.patch)
+- Binary hashes for all platforms
+- Activation height/epoch (for Class C upgrades)
+- Feature flags (e.g., `stage_b_enabled`, `dag_coupling_mode`)
+- Council member signatures (ML-DSA-44)
+
+Operators MUST verify the Upgrade Envelope before deploying any upgrade:
+1. Verify ≥M council signatures are valid
+2. Verify binary hash matches envelope
+3. Verify activation parameters match expected values
+
+### 11.4 Upgrade Process Summary
+
+**Class C (Hard-Fork) Process**:
+
+1. **Design**: RFC published and reviewed (2+ weeks)
+2. **Implement**: Code merged, deployed to DevNet
+3. **Test**: Chaos harness (T222) + Stage B soak (T223) on TestNet Beta
+4. **Approve**: Council signs Upgrade Envelope (5-of-7)
+5. **Deploy**: Operators upgrade before activation height
+6. **Activate**: Protocol change active at specified height
+
+**Emergency Patches**: Abbreviated process with 4-of-7 threshold for critical security fixes.
+
+### 11.5 Operational References
+
+For operator-facing procedures:
+- **Upgrade Checklists**: [QBIND_MAINNET_RUNBOOK.md §11](../ops/QBIND_MAINNET_RUNBOOK.md#11-upgrade-procedures--governance-hooks-t224)
+- **Emergency Downgrade**: See runbook emergency procedures
+
+### 11.6 On-Chain Governance Roadmap
+
+On-chain governance is explicitly **out of scope for v0**, but planned for future versions:
+
+| Phase | Scope | Timeline |
+| :--- | :--- | :--- |
+| **v0** | Off-chain council + multi-sig | Current |
+| **v0.x** | On-chain upgrade signaling | 6-12 months |
+| **v1.0** | On-chain parameter governance | 12-18 months |
+| **v1.x** | Full on-chain voting | 18-24 months |
+
+The v0 off-chain model is designed to be compatible with future on-chain migration without breaking the mental model.
+
+---
+
+## 12. Related Documents
 
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
+| **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance and upgrade envelope design (T224) |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
 | TestNet Beta Spec | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta architecture |

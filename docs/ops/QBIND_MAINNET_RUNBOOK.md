@@ -18,7 +18,8 @@
 8. [Monetary Telemetry and Monetary Mode](#8-monetary-telemetry-and-monetary-mode)
 9. [Alerting & Dashboard Reference](#9-alerting--dashboard-reference)
 10. [Incident Playbooks](#10-incident-playbooks)
-11. [Related Documents](#11-related-documents)
+11. [Upgrade Procedures & Governance Hooks (T224)](#11-upgrade-procedures--governance-hooks-t224)
+12. [Related Documents](#12-related-documents)
 
 ---
 
@@ -1416,12 +1417,232 @@ The following metrics are useful for detecting and responding to key compromise:
 
 ---
 
-## 11. Related Documents
+## 11. Upgrade Procedures & Governance Hooks (T224)
+
+This section provides operator-facing procedures for applying protocol upgrades. For the full governance design and threat model, see [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md).
+
+### 11.1 Upgrade Classes Overview
+
+| Class | Description | Coordination | Operator Action |
+| :--- | :--- | :--- | :--- |
+| **Class A** | Non-consensus (CLI, docs) | None | Upgrade at convenience |
+| **Class B** | Consensus-compatible | Rolling | Upgrade within window |
+| **Class C** | Hard-fork / protocol changes | Coordinated | Must upgrade before activation |
+
+### 11.2 Pre-Upgrade Verification Checklist
+
+Before applying any Council-approved upgrade:
+
+- [ ] **Verify Upgrade Envelope exists** and is published in governance repository
+- [ ] **Verify ≥5 council signatures** on the Upgrade Envelope are valid:
+  ```bash
+  qbind-envelope verify \
+    --envelope /etc/qbind/upgrade-envelope-vX.Y.Z.json \
+    --council-keys /etc/qbind/council-pubkeys.json
+  ```
+- [ ] **Verify binary hash** matches envelope `binary_hashes`:
+  ```bash
+  sha3-256 /path/to/new/qbind-node
+  # Compare against envelope binary_hashes.linux-x86_64
+  ```
+- [ ] **Review changelog** and release notes for breaking changes
+- [ ] **Review runbook updates** (if any) for new operational procedures
+- [ ] **Backup current state** before upgrade:
+  ```bash
+  # Trigger snapshot
+  qbind-admin snapshot create --output /data/qbind/pre-upgrade-snapshot
+  ```
+- [ ] **Run pre-release tests** on staging/test validator (non-MainNet):
+  - [ ] Chaos harness passes (T222):
+    ```bash
+    cargo test -p qbind-node --test t222_consensus_chaos_harness -- --test-threads=1
+    ```
+  - [ ] Stage B soak passes (T223):
+    ```bash
+    cargo test -p qbind-node --test t223_stage_b_soak_harness -- --test-threads=1
+    ```
+- [ ] **Verify configuration** matches expected profile:
+  ```bash
+  qbind-node --profile mainnet --validate-only --data-dir /data/qbind
+  ```
+- [ ] **Verify activation height** (for Class C) matches envelope:
+  ```bash
+  cat /etc/qbind/upgrade-envelope-vX.Y.Z.json | jq '.activation'
+  ```
+- [ ] **Notify team** of planned upgrade window
+
+### 11.3 Upgrade Execution (Class A/B)
+
+For Class A (non-consensus) or Class B (consensus-compatible) upgrades:
+
+```bash
+# 1. Stop the node gracefully
+systemctl stop qbind-node
+
+# 2. Backup current binary
+cp /usr/local/bin/qbind-node /usr/local/bin/qbind-node.backup
+
+# 3. Install new binary
+cp /path/to/new/qbind-node /usr/local/bin/qbind-node
+chmod +x /usr/local/bin/qbind-node
+
+# 4. Verify binary hash
+sha3-256 /usr/local/bin/qbind-node
+
+# 5. Start the node
+systemctl start qbind-node
+
+# 6. Monitor startup and consensus participation
+journalctl -u qbind-node -f
+curl -s http://localhost:9090/metrics | grep qbind_consensus_view
+```
+
+### 11.4 Upgrade Execution (Class C — Coordinated Activation)
+
+For Class C (hard-fork) upgrades with activation height:
+
+**Phase 1: Pre-Activation (upgrade binary, wait for activation)**
+
+```bash
+# 1. Verify activation height is in the future
+curl -s http://localhost:9090/metrics | grep qbind_consensus_committed_height
+# Current height should be significantly below activation height
+
+# 2. Stop the node gracefully
+systemctl stop qbind-node
+
+# 3. Backup current binary
+cp /usr/local/bin/qbind-node /usr/local/bin/qbind-node.backup
+
+# 4. Install new binary
+cp /path/to/new/qbind-node /usr/local/bin/qbind-node
+chmod +x /usr/local/bin/qbind-node
+
+# 5. Verify binary hash matches envelope
+sha3-256 /usr/local/bin/qbind-node
+
+# 6. Update configuration if required by upgrade
+# (e.g., new flags or config file changes)
+
+# 7. Start the node
+systemctl start qbind-node
+
+# 8. Verify node is running and participating
+curl -s http://localhost:9090/metrics | grep qbind_consensus_view
+```
+
+**Phase 2: Activation Monitoring**
+
+```bash
+# Monitor height approaching activation
+watch -n 10 'curl -s http://localhost:9090/metrics | grep qbind_consensus_committed_height'
+
+# At activation height, verify:
+# - No consensus forks
+# - All validators on new version
+# - New features active (if applicable)
+```
+
+### 11.5 Emergency Downgrade Procedure
+
+**For Class A/B (consensus-compatible)**:
+
+```bash
+# 1. Stop node
+systemctl stop qbind-node
+
+# 2. Restore previous binary
+mv /usr/local/bin/qbind-node.backup /usr/local/bin/qbind-node
+
+# 3. Start node
+systemctl start qbind-node
+
+# 4. Monitor for normal operation
+journalctl -u qbind-node -f
+```
+
+**For Class C (post-activation)**:
+
+⚠️ **WARNING**: Do NOT unilaterally downgrade after a Class C activation. This will fork you off the network.
+
+1. **Report issue** to engineering team and Protocol Council immediately
+2. **Wait for coordinated response**:
+   - Emergency hotfix (forward), OR
+   - Coordinated rollback (requires new Upgrade Envelope from Council)
+3. If Council approves rollback:
+   - Download rollback binary
+   - Verify rollback Upgrade Envelope
+   - Apply rollback binary when instructed
+   - Activate at specified rollback height
+
+### 11.6 Upgrade Envelope Verification Commands
+
+**Verify envelope signature count**:
+```bash
+cat /etc/qbind/upgrade-envelope-vX.Y.Z.json | jq '.council_approvals | length'
+# Should return >= 5
+```
+
+**Verify individual signature** (example with hypothetical CLI):
+```bash
+qbind-envelope verify-signature \
+  --envelope /etc/qbind/upgrade-envelope-vX.Y.Z.json \
+  --member-id council-1 \
+  --public-key /etc/qbind/council-pubkeys/council-1.pub
+```
+
+**Verify binary hash**:
+```bash
+# Compute hash of new binary
+sha3-256 /path/to/new/qbind-node
+
+# Compare with envelope
+cat /etc/qbind/upgrade-envelope-vX.Y.Z.json | jq '.binary_hashes["linux-x86_64"]'
+```
+
+### 11.7 Post-Upgrade Monitoring
+
+After any upgrade, monitor the following for at least 48 hours:
+
+| Metric | Expected Behavior | Alert Threshold |
+| :--- | :--- | :--- |
+| `qbind_consensus_view` | Increasing | Stalled for > 1 minute |
+| `qbind_consensus_qc_latency_ms` | Stable | > 2x baseline |
+| `qbind_p2p_connections_total` | Stable | < 50% of pre-upgrade |
+| `qbind_dag_batches_committed_total` | Increasing | Stalled |
+| `qbind_signer_sign_failures_total` | Zero or stable | Any increase |
+
+**Dashboard Reference**: See [Grafana Dashboard](./grafana/qbind_mainnet_dashboard.example.json) for pre-built panels.
+
+### 11.8 Emergency Security Patch Process
+
+For critical security vulnerabilities:
+
+1. **Receive notification** via secure channel from Protocol Council
+2. **Verify emergency envelope** has ≥4 council signatures (emergency threshold)
+3. **Upgrade within 48 hours** (or as specified by Council)
+4. **Skip some non-critical pre-release tests** (per Council guidance)
+5. **Monitor closely** post-upgrade
+
+**Note**: Emergency patches may use a lower council threshold (4-of-7 instead of 5-of-7).
+
+### 11.9 Governance Links
+
+| Resource | Description |
+| :--- | :--- |
+| **Governance Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) |
+| **MainNet Spec §11** | [Governance & Upgrades](../mainnet/QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
+| **Audit Skeleton MN-R8** | [Governance & Upgrade Risk](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md#38-mn-r8-governance--upgrade-risk) |
+
+---
+
+## 12. Related Documents
 
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet architecture |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | Risk tracking |
+| **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance model (T224) |
 | **Key Management Design** | [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) | Key architecture (T209) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy (T194) |
 | **TestNet Beta Spec** | [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) | TestNet Beta reference |
