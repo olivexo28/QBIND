@@ -53,7 +53,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Execution & VM** | T163, T164, T171, T177, T179, T186, T187 | Partially Mitigated | Stage B wired and tested (T186, T187) |
 | **State Persistence & Growth** | T164, T208, T215 | ✅ Mitigated | Pruning (T208) & snapshots (T215) implemented |
 | **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181, T193 | Partially Mitigated | Hybrid fee distribution implemented (T193) |
-| **Mempool & DAG** | T158, T165, T182, T183, T218 | ✅ Mitigated | DoS protections (T218), consensus coupling |
+| **Mempool & DAG** | T158, T165, T182, T183, T218, T219 | ✅ Mitigated | DoS protections (T218), eviction rate limiting (T219), consensus coupling |
 | **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
@@ -136,6 +136,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ **EMA-based fee smoothing (T202)** — consensus-level EMA with phase-dependent λ
 - ✅ **Rate-of-change limiters (T203)** — consensus-side per-epoch Δ-limit on annual inflation, per phase, applied after floor/cap with deterministic clamping
 - ✅ **DAG mempool DoS protections (T218)** — per-sender quotas + batch size limits
+- ✅ **Mempool eviction rate limiting (T219)** — time-bucketed eviction throttling to prevent excessive churn
 
 **Additional MainNet Requirements**:
 - [x] Hybrid fee distribution (burn + proposer) implementation (T193)
@@ -459,6 +460,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T209** | **Design** | **Key management & signer architecture design** | **MN-R5** |
 | **T217** | **Docs** | **Compromised key handling procedures** | **MN-R5** |
 | **T218** | **Mempool** | **DAG mempool DoS protections v1** | **MN-R2** |
+| **T219** | **Mempool** | **Mempool eviction rate limiting v1** | **MN-R2** |
 
 ### 5.4 Future MainNet Tasks (T193+)
 

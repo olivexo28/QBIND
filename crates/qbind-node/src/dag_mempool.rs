@@ -3906,4 +3906,134 @@ mod tests {
         assert!(output.contains("qbind_dag_sender_rate_limited_total 2"));
         assert!(output.contains("qbind_dag_batch_size_limited_total 1"));
     }
+
+    // ========================================================================
+    // T219: Eviction Rate Limiting Tests
+    // ========================================================================
+
+    #[test]
+    fn test_eviction_window_creation() {
+        let window = EvictionWindow::new(1000);
+        assert_eq!(window.window_start_ms, 1000);
+        assert_eq!(window.evictions_in_window, 0);
+    }
+
+    #[test]
+    fn test_eviction_window_reset() {
+        let mut window = EvictionWindow::new(0);
+        window.evictions_in_window = 100;
+
+        // Should not reset if interval hasn't elapsed
+        let reset = window.maybe_reset(5000, 10); // 10 sec interval = 10000ms
+        assert!(!reset);
+        assert_eq!(window.evictions_in_window, 100);
+
+        // Should reset after interval elapses
+        let reset = window.maybe_reset(15000, 10);
+        assert!(reset);
+        assert_eq!(window.evictions_in_window, 0);
+        assert_eq!(window.window_start_ms, 15000);
+    }
+
+    #[test]
+    fn test_eviction_window_would_exceed_limit() {
+        let mut window = EvictionWindow::new(0);
+        window.evictions_in_window = 90;
+
+        // 90 + 10 = 100, exactly at limit
+        assert!(!window.would_exceed_limit(10, 100));
+
+        // 90 + 11 = 101, would exceed
+        assert!(window.would_exceed_limit(11, 100));
+
+        // 90 + 9 = 99, below limit
+        assert!(!window.would_exceed_limit(9, 100));
+    }
+
+    #[test]
+    fn test_eviction_window_record_evictions() {
+        let mut window = EvictionWindow::new(0);
+        window.record_evictions(50);
+        assert_eq!(window.evictions_in_window, 50);
+
+        window.record_evictions(30);
+        assert_eq!(window.evictions_in_window, 80);
+
+        // Test saturation (no overflow)
+        window.evictions_in_window = u32::MAX - 10;
+        window.record_evictions(100);
+        assert_eq!(window.evictions_in_window, u32::MAX);
+    }
+
+    #[test]
+    fn test_dag_mempool_config_eviction_defaults() {
+        let config = DagMempoolConfig::default();
+
+        // DevNet defaults
+        assert_eq!(config.eviction_mode, crate::node_config::EvictionRateMode::Off);
+        assert_eq!(config.max_evictions_per_interval, 10_000);
+        assert_eq!(config.eviction_interval_secs, 10);
+    }
+
+    #[test]
+    fn test_dag_mempool_config_with_eviction_config() {
+        let eviction_cfg = crate::node_config::MempoolEvictionConfig::mainnet_default();
+        let config = DagMempoolConfig::default().with_eviction_config(&eviction_cfg);
+
+        assert_eq!(config.eviction_mode, crate::node_config::EvictionRateMode::Enforce);
+        assert_eq!(config.max_evictions_per_interval, 1_000);
+        assert_eq!(config.eviction_interval_secs, 10);
+    }
+
+    #[test]
+    fn test_dag_mempool_config_eviction_rate_limiting_enabled() {
+        let mut config = DagMempoolConfig::default();
+
+        // Off mode - not enabled
+        config.eviction_mode = crate::node_config::EvictionRateMode::Off;
+        assert!(!config.eviction_rate_limiting_enabled());
+        assert!(!config.eviction_rate_limiting_enforced());
+
+        // Warn mode - enabled but not enforced
+        config.eviction_mode = crate::node_config::EvictionRateMode::Warn;
+        assert!(config.eviction_rate_limiting_enabled());
+        assert!(!config.eviction_rate_limiting_enforced());
+
+        // Enforce mode - enabled and enforced
+        config.eviction_mode = crate::node_config::EvictionRateMode::Enforce;
+        assert!(config.eviction_rate_limiting_enabled());
+        assert!(config.eviction_rate_limiting_enforced());
+    }
+
+    #[test]
+    fn test_dag_mempool_metrics_eviction_format() {
+        let metrics = DagMempoolMetrics::new();
+
+        // Set config gauges
+        metrics.set_eviction_mode(crate::node_config::EvictionRateMode::Enforce);
+        metrics.set_max_evictions_per_interval(1000);
+        metrics.set_eviction_interval_secs(10);
+
+        // Increment counters
+        metrics.inc_evictions_capacity(5);
+        metrics.inc_evictions_lifetime(2);
+        metrics.inc_eviction_rate_limit_warn();
+        metrics.inc_eviction_rate_limit_enforce();
+        metrics.inc_eviction_rate_limit_enforce();
+        metrics.inc_eviction_window_reset();
+
+        let output = metrics.format_metrics();
+
+        // Check config gauges
+        assert!(output.contains("qbind_mempool_eviction_mode 2")); // Enforce = 2
+        assert!(output.contains("qbind_mempool_max_evictions_per_interval 1000"));
+        assert!(output.contains("qbind_mempool_eviction_interval_secs 10"));
+
+        // Check counters
+        assert!(output.contains("qbind_mempool_evictions_total{reason=\"capacity\"} 5"));
+        assert!(output.contains("qbind_mempool_evictions_total{reason=\"lifetime\"} 2"));
+        assert!(output.contains("qbind_mempool_eviction_rate_limit_total{mode=\"warn\"} 1"));
+        assert!(output.contains("qbind_mempool_eviction_rate_limit_total{mode=\"enforce\"} 2"));
+        assert!(output.contains("qbind_mempool_evictions_window_reset_total 1"));
+    }
 }
