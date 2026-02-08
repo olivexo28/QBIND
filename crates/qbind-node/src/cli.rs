@@ -36,11 +36,12 @@ use std::path::PathBuf;
 use clap::Parser;
 
 use crate::node_config::{
-    parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
-    parse_mempool_mode, parse_network_mode, parse_signer_mode, parse_state_retention_mode,
-    DagCouplingMode, FastSyncConfig, MempoolDosConfig, MempoolMode, NetworkMode,
-    NetworkTransportConfig, NodeConfig, ParseEnvironmentError, SignerFailureMode, SignerMode,
-    SnapshotConfig, StateRetentionConfig,
+    parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_eviction_rate_mode,
+    parse_execution_profile, parse_mempool_mode, parse_network_mode, parse_signer_mode,
+    parse_state_retention_mode, DagCouplingMode, FastSyncConfig,
+    MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig,
+    NodeConfig, ParseEnvironmentError, SignerFailureMode, SignerMode, SnapshotConfig,
+    StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -336,6 +337,41 @@ pub struct CliArgs {
     /// Example: /etc/qbind/hsm.toml
     #[arg(long = "hsm-config-path")]
     pub hsm_config_path: Option<PathBuf>,
+
+    // ========================================================================
+    // T219: Mempool Eviction Rate Limiting Configuration
+    // ========================================================================
+    /// Mempool eviction rate limiting mode: off, warn, or enforce (T219).
+    ///
+    /// Controls how the mempool handles eviction rate limiting:
+    /// - off: No rate limiting (DevNet default)
+    /// - warn: Log warnings but still evict (TestNet Alpha)
+    /// - enforce: Reject incoming txs instead of exceeding limit (MainNet required)
+    ///
+    /// MainNet profile requires `enforce` mode.
+    #[arg(long = "mempool-eviction-mode")]
+    pub mempool_eviction_mode: Option<String>,
+
+    /// Maximum evictions allowed per interval (T219).
+    ///
+    /// When the eviction count reaches this limit within the interval,
+    /// behavior depends on the eviction mode.
+    ///
+    /// Recommended values:
+    /// - DevNet: 10,000 (very loose)
+    /// - TestNet Alpha: 5,000 (moderate)
+    /// - TestNet Beta: 2,000 (tighter)
+    /// - MainNet: 1,000 (conservative)
+    #[arg(long = "mempool-eviction-max-per-interval")]
+    pub mempool_eviction_max_per_interval: Option<u32>,
+
+    /// Eviction rate measurement interval in seconds (T219).
+    ///
+    /// The eviction counter is reset when this interval elapses.
+    ///
+    /// Default: 10 seconds
+    #[arg(long = "mempool-eviction-interval-secs")]
+    pub mempool_eviction_interval_secs: Option<u32>,
 }
 
 // ============================================================================
@@ -369,6 +405,8 @@ pub enum CliError {
     InvalidStateRetentionMode(String),
     /// Invalid signer mode string (T210).
     InvalidSignerMode(String),
+    /// Invalid eviction rate mode string (T219).
+    InvalidEvictionRateMode(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -425,6 +463,13 @@ impl std::fmt::Display for CliError {
                 write!(
                     f,
                     "invalid signer-mode '{}': expected 'loopback-testing', 'encrypted-fs', 'remote-signer', or 'hsm-pkcs11'",
+                    s
+                )
+            }
+            CliError::InvalidEvictionRateMode(s) => {
+                write!(
+                    f,
+                    "invalid mempool-eviction-mode '{}': expected 'off', 'warn', or 'enforce'",
                     s
                 )
             }
@@ -576,6 +621,8 @@ impl CliArgs {
                 signer_failure_mode: SignerFailureMode::ExitOnFailure,
                 // T218: DevNet-style loose limits for legacy path
                 mempool_dos: MempoolDosConfig::devnet_default(),
+                // T219: DevNet-style loose limits for legacy path
+                mempool_eviction: MempoolEvictionConfig::devnet_default(),
             }
         };
 
@@ -748,6 +795,43 @@ impl CliArgs {
                 eprintln!("[T210] CLI override: hsm_config_path = {}", path.display());
             }
             config.hsm_config_path = Some(path.clone());
+        }
+
+        // T219: Apply mempool eviction mode override
+        if let Some(ref eviction_mode_str) = self.mempool_eviction_mode {
+            match parse_eviction_rate_mode(eviction_mode_str) {
+                Some(mode) => {
+                    if self.profile.is_some() {
+                        eprintln!("[T219] CLI override: mempool_eviction.mode = {}", mode);
+                    }
+                    config.mempool_eviction.mode = mode;
+                }
+                None => {
+                    return Err(CliError::InvalidEvictionRateMode(eviction_mode_str.clone()));
+                }
+            }
+        }
+
+        // T219: Apply mempool eviction max per interval override
+        if let Some(max_evictions) = self.mempool_eviction_max_per_interval {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T219] CLI override: mempool_eviction.max_evictions_per_interval = {}",
+                    max_evictions
+                );
+            }
+            config.mempool_eviction.max_evictions_per_interval = max_evictions;
+        }
+
+        // T219: Apply mempool eviction interval secs override
+        if let Some(interval_secs) = self.mempool_eviction_interval_secs {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T219] CLI override: mempool_eviction.interval_secs = {}",
+                    interval_secs
+                );
+            }
+            config.mempool_eviction.interval_secs = interval_secs;
         }
 
         // Apply data_dir if specified

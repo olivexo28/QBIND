@@ -13,7 +13,7 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_ledger::QbindTransaction;
 use qbind_node::{
     BatchAck, BatchRef, DagCouplingMode, DagMempool, DagMempoolConfig, DagMempoolMetrics,
-    InMemoryDagMempool, QbindBatch,
+    EvictionRateMode, InMemoryDagMempool, QbindBatch,
 };
 use qbind_wire::consensus::{compute_batch_commitment, CertifiedBatchRef, NULL_BATCH_COMMITMENT};
 
@@ -54,6 +54,9 @@ fn create_test_mempool_with_availability(
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     InMemoryDagMempool::with_availability(config, quorum_size)
 }
@@ -558,6 +561,9 @@ fn test_certified_frontier_select_metric() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     let mempool = InMemoryDagMempool::with_availability(config, 2).with_metrics(metrics.clone());

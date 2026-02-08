@@ -914,6 +914,244 @@ impl MempoolDosConfig {
 }
 
 // ============================================================================
+// T219: Mempool Eviction Rate Limiting Configuration
+// ============================================================================
+
+/// Mode for mempool eviction rate limiting (T219).
+///
+/// Controls how the mempool handles eviction rate limiting:
+/// - **Off**: No limit; record metrics but still evict normally
+/// - **Warn**: Log warnings when limit would be exceeded but still evict
+/// - **Enforce**: Reject new transactions instead of exceeding eviction rate
+///
+/// # Environments
+///
+/// - **DevNet v0**: `Off` (no rate limiting, debugging-friendly)
+/// - **TestNet Alpha**: `Warn` (observe limits but don't enforce)
+/// - **TestNet Beta**: `Enforce` (test enforcement behavior)
+/// - **MainNet v0**: `Enforce` (required for production)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum EvictionRateMode {
+    /// No rate limiting. Evictions proceed normally.
+    /// Metrics are still recorded for observability.
+    #[default]
+    Off,
+    /// Log warnings when eviction rate exceeds limit.
+    /// Evictions still proceed. Useful for observability.
+    Warn,
+    /// Enforce eviction rate limit.
+    /// New transactions are rejected instead of exceeding the limit.
+    Enforce,
+}
+
+impl std::fmt::Display for EvictionRateMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvictionRateMode::Off => write!(f, "off"),
+            EvictionRateMode::Warn => write!(f, "warn"),
+            EvictionRateMode::Enforce => write!(f, "enforce"),
+        }
+    }
+}
+
+/// Parse an eviction rate mode from a string.
+///
+/// Valid values: "off" (or "disabled"), "warn" (or "warning"), "enforce" (or "enforced")
+///
+/// Returns `None` for unrecognized values.
+pub fn parse_eviction_rate_mode(s: &str) -> Option<EvictionRateMode> {
+    match s.to_lowercase().as_str() {
+        "off" | "disabled" => Some(EvictionRateMode::Off),
+        "warn" | "warning" => Some(EvictionRateMode::Warn),
+        "enforce" | "enforced" => Some(EvictionRateMode::Enforce),
+        _ => None,
+    }
+}
+
+/// Valid eviction rate mode strings for documentation and error messages.
+pub const VALID_EVICTION_RATE_MODES: &[&str] = &["off", "warn", "enforce"];
+
+/// Configuration for DAG mempool eviction rate limiting (T219).
+///
+/// Controls the rate at which transactions can be evicted from the mempool
+/// to prevent excessive churn under adversarial conditions.
+///
+/// This sits on top of existing protections:
+/// - Fee-priority mempool (T169)
+/// - Per-sender quotas and batch caps (T218)
+///
+/// # Environments
+///
+/// - **DevNet v0**: `mode = Off`, loose limits (debugging-friendly)
+/// - **TestNet Alpha**: `mode = Warn`, moderate limits (observability)
+/// - **TestNet Beta**: `mode = Enforce`, tighter limits (testing enforcement)
+/// - **MainNet v0**: `mode = Enforce`, conservative limits (production)
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::MempoolEvictionConfig;
+///
+/// // MainNet configuration
+/// let config = MempoolEvictionConfig::mainnet_default();
+/// assert_eq!(config.max_evictions_per_interval, 1_000);
+/// assert_eq!(config.interval_secs, 10);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MempoolEvictionConfig {
+    /// Eviction rate mode (Off/Warn/Enforce).
+    ///
+    /// - Off: No rate limiting (DevNet default)
+    /// - Warn: Log warnings but still evict (TestNet Alpha)
+    /// - Enforce: Reject new txs instead of exceeding limit (MainNet required)
+    pub mode: EvictionRateMode,
+
+    /// Maximum evictions allowed per interval (across all senders).
+    ///
+    /// When the eviction count reaches this limit within the interval,
+    /// behavior depends on `mode`:
+    /// - Off: Continue evicting, record metric
+    /// - Warn: Continue evicting, log warning
+    /// - Enforce: Reject incoming tx instead of evicting
+    ///
+    /// Recommended values:
+    /// - DevNet: 10,000 (very loose)
+    /// - TestNet Alpha: 5,000 (moderate)
+    /// - TestNet Beta: 2,000 (tighter)
+    /// - MainNet: 1,000 (conservative)
+    pub max_evictions_per_interval: u32,
+
+    /// Length of the measurement interval in seconds.
+    ///
+    /// The eviction counter is reset when the interval elapses.
+    ///
+    /// Recommended value: 10 seconds for all environments.
+    pub interval_secs: u32,
+}
+
+impl Default for MempoolEvictionConfig {
+    fn default() -> Self {
+        // Default to DevNet-style loose limits
+        Self::devnet_default()
+    }
+}
+
+impl MempoolEvictionConfig {
+    /// Create a disabled configuration (no rate limiting).
+    ///
+    /// Use only for development/debugging. Not recommended for production.
+    pub fn disabled() -> Self {
+        Self {
+            mode: EvictionRateMode::Off,
+            max_evictions_per_interval: u32::MAX,
+            interval_secs: 10,
+        }
+    }
+
+    /// Create a DevNet default configuration.
+    ///
+    /// Very loose limits to avoid interfering with debugging:
+    /// - mode: Off
+    /// - max_evictions_per_interval: 10,000
+    /// - interval_secs: 10
+    pub fn devnet_default() -> Self {
+        Self {
+            mode: EvictionRateMode::Off,
+            max_evictions_per_interval: 10_000,
+            interval_secs: 10,
+        }
+    }
+
+    /// Create a TestNet Alpha default configuration.
+    ///
+    /// Warn mode for observability without enforcement:
+    /// - mode: Warn
+    /// - max_evictions_per_interval: 5,000
+    /// - interval_secs: 10
+    pub fn testnet_alpha_default() -> Self {
+        Self {
+            mode: EvictionRateMode::Warn,
+            max_evictions_per_interval: 5_000,
+            interval_secs: 10,
+        }
+    }
+
+    /// Create a TestNet Beta default configuration.
+    ///
+    /// Enforce mode for testing enforcement behavior:
+    /// - mode: Enforce
+    /// - max_evictions_per_interval: 2,000
+    /// - interval_secs: 10
+    pub fn testnet_beta_default() -> Self {
+        Self {
+            mode: EvictionRateMode::Enforce,
+            max_evictions_per_interval: 2_000,
+            interval_secs: 10,
+        }
+    }
+
+    /// Create a MainNet v0 default configuration.
+    ///
+    /// Conservative limits for production:
+    /// - mode: Enforce (required)
+    /// - max_evictions_per_interval: 1,000
+    /// - interval_secs: 10
+    pub fn mainnet_default() -> Self {
+        Self {
+            mode: EvictionRateMode::Enforce,
+            max_evictions_per_interval: 1_000,
+            interval_secs: 10,
+        }
+    }
+
+    /// Check if rate limiting is enabled.
+    ///
+    /// Returns `true` if mode is not Off.
+    pub fn is_enabled(&self) -> bool {
+        self.mode != EvictionRateMode::Off
+    }
+
+    /// Check if enforcement is enabled.
+    ///
+    /// Returns `true` if mode is Enforce.
+    pub fn is_enforcing(&self) -> bool {
+        self.mode == EvictionRateMode::Enforce
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - mode must be Enforce
+    /// - max_evictions_per_interval must be > 0
+    /// - interval_secs must be >= 1
+    /// - max_evictions_per_interval must be reasonable (< 1,000,000)
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if self.mode != EvictionRateMode::Enforce {
+            return Err(format!(
+                "eviction mode must be 'enforce' for MainNet but is '{}'",
+                self.mode
+            ));
+        }
+        if self.max_evictions_per_interval == 0 {
+            return Err("max_evictions_per_interval must be > 0".to_string());
+        }
+        if self.interval_secs < 1 {
+            return Err("interval_secs must be >= 1".to_string());
+        }
+        // Sanity check to prevent effectively disabled limits
+        if self.max_evictions_per_interval > 1_000_000 {
+            return Err(format!(
+                "max_evictions_per_interval {} is too high for MainNet (max 1,000,000)",
+                self.max_evictions_per_interval
+            ));
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T165: DAG Availability Configuration
 // ============================================================================
 
@@ -1974,6 +2212,22 @@ pub struct NodeConfig {
     /// - TestNet Beta: Moderate protection (testable limits)
     /// - MainNet v0: Tighter defaults (conservative; validated by invariants)
     pub mempool_dos: MempoolDosConfig,
+
+    // ========================================================================
+    // T219: Mempool Eviction Rate Limiting Configuration
+    // ========================================================================
+    /// Mempool eviction rate limiting configuration (T219).
+    ///
+    /// Controls the rate at which transactions can be evicted from the mempool
+    /// to prevent excessive churn under adversarial conditions. Works alongside:
+    /// - Fee-priority mempool (T169)
+    /// - Per-sender quotas and batch caps (T218)
+    ///
+    /// - DevNet v0: Off (no rate limiting, debugging-friendly)
+    /// - TestNet Alpha: Warn (observe limits but don't enforce)
+    /// - TestNet Beta: Enforce (test enforcement behavior)
+    /// - MainNet v0: Enforce (required; validated by invariants)
+    pub mempool_eviction: MempoolEvictionConfig,
 }
 
 impl Default for NodeConfig {
@@ -2017,6 +2271,8 @@ impl Default for NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: DevNet-style loose limits for backward compatibility
             mempool_dos: MempoolDosConfig::devnet_default(),
+            // T219: DevNet-style loose limits for backward compatibility
+            mempool_eviction: MempoolEvictionConfig::devnet_default(),
         }
     }
 }
@@ -2057,6 +2313,8 @@ impl NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: DevNet-style loose limits for backward compatibility
             mempool_dos: MempoolDosConfig::devnet_default(),
+            // T219: DevNet-style loose limits for backward compatibility
+            mempool_eviction: MempoolEvictionConfig::devnet_default(),
         }
     }
 
@@ -2096,6 +2354,8 @@ impl NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: DevNet-style loose limits for backward compatibility
             mempool_dos: MempoolDosConfig::devnet_default(),
+            // T219: DevNet-style loose limits for backward compatibility
+            mempool_eviction: MempoolEvictionConfig::devnet_default(),
         }
     }
 
@@ -2183,6 +2443,8 @@ impl NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: DevNet-style loose limits
             mempool_dos: MempoolDosConfig::devnet_default(),
+            // T219: DevNet-style loose limits (no rate limiting)
+            mempool_eviction: MempoolEvictionConfig::devnet_default(),
         }
     }
 
@@ -2245,6 +2507,8 @@ impl NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: Disabled (neutral) for TestNet Alpha
             mempool_dos: MempoolDosConfig::disabled(),
+            // T219: Warn mode for TestNet Alpha (observability)
+            mempool_eviction: MempoolEvictionConfig::testnet_alpha_default(),
         }
     }
 
@@ -2320,6 +2584,8 @@ impl NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: Moderate DoS limits for TestNet Beta
             mempool_dos: MempoolDosConfig::testnet_beta_default(),
+            // T219: Enforce mode for TestNet Beta (test enforcement behavior)
+            mempool_eviction: MempoolEvictionConfig::testnet_beta_default(),
         }
     }
 
@@ -2407,6 +2673,8 @@ impl NodeConfig {
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
             // T218: Conservative DoS limits for MainNet
             mempool_dos: MempoolDosConfig::mainnet_default(),
+            // T219: Conservative eviction rate limits for MainNet (required)
+            mempool_eviction: MempoolEvictionConfig::mainnet_default(),
         }
     }
 
@@ -2886,6 +3154,25 @@ impl NodeConfig {
     /// ```
     pub fn with_mempool_dos_config(mut self, config: MempoolDosConfig) -> Self {
         self.mempool_dos = config;
+        self
+    }
+
+    /// Set the mempool eviction rate limiting configuration (T219).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The mempool eviction rate limiting configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_node::node_config::{NodeConfig, MempoolEvictionConfig};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_mempool_eviction_config(MempoolEvictionConfig::mainnet_default());
+    /// ```
+    pub fn with_mempool_eviction_config(mut self, config: MempoolEvictionConfig) -> Self {
+        self.mempool_eviction = config;
         self
     }
 
@@ -3460,6 +3747,12 @@ impl NodeConfig {
             return Err(MainnetConfigError::MempoolDosMisconfigured { reason });
         }
 
+        // 25. Mempool eviction rate limiting must be valid for MainNet (T219)
+        // MainNet requires eviction rate limiting to be enforced.
+        if let Err(reason) = self.mempool_eviction.validate_for_mainnet() {
+            return Err(MainnetConfigError::MempoolEvictionMisconfigured { reason });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -3690,6 +3983,18 @@ pub enum MainnetConfigError {
     /// - All limits must be > 0
     /// - max_pending_per_sender must be reasonable (< 100,000)
     MempoolDosMisconfigured { reason: String },
+
+    // ========================================================================
+    // T219: Mempool Eviction Rate Limiting Errors
+    // ========================================================================
+    /// Mempool eviction rate limiting configuration is invalid for MainNet (T219).
+    ///
+    /// MainNet requires eviction rate limiting to be enforced:
+    /// - mode must be Enforce
+    /// - max_evictions_per_interval must be > 0
+    /// - interval_secs must be >= 1
+    /// - max_evictions_per_interval must be reasonable (< 1,000,000)
+    MempoolEvictionMisconfigured { reason: String },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -3899,6 +4204,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: mempool DoS configuration is invalid: {}",
+                    reason
+                )
+            }
+            // T219: Mempool eviction rate limiting errors
+            MainnetConfigError::MempoolEvictionMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: mempool eviction rate limiting configuration is invalid: {}",
                     reason
                 )
             }

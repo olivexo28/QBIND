@@ -14,8 +14,8 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_ledger::QbindTransaction;
 use qbind_node::{
     BatchAck, BatchAckResult, BatchAckTracker, BatchCertificate, BatchId, BatchRef,
-    DagAvailabilityConfig, DagMempool, DagMempoolConfig, DagMempoolMetrics, InMemoryDagMempool,
-    QbindBatch,
+    DagAvailabilityConfig, DagMempool, DagMempoolConfig, DagMempoolMetrics, EvictionRateMode,
+    InMemoryDagMempool, QbindBatch,
 };
 use qbind_types::{QBIND_DEVNET_CHAIN_ID, QBIND_TESTNET_CHAIN_ID};
 
@@ -355,6 +355,9 @@ fn test_dag_mempool_with_availability() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -374,6 +377,9 @@ fn test_dag_mempool_handle_batch_ack() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
     mempool.set_current_view(10);
@@ -445,6 +451,9 @@ fn test_dag_mempool_duplicate_ack_rejected() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
@@ -478,8 +487,9 @@ fn test_dag_mempool_unknown_batch_ack_rejected() {
         max_pending_per_sender: 10_000,
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
-        max_batch_bytes: 4 * 1024 * 1024,
-    };
+        max_batch_bytes: 4 * 1024 * 1024,        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,    };
     let mempool = InMemoryDagMempool::with_availability(config, 3);
 
     // Create ack for a batch that doesn't exist in mempool
@@ -566,6 +576,9 @@ fn test_dag_mempool_metrics_ack_tracking() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_availability(config, 2).with_metrics(metrics.clone());
 

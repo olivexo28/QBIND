@@ -63,8 +63,8 @@ use qbind_node::mempool::{InMemoryMempool, Mempool, MempoolConfig};
 use qbind_node::metrics::ExecutionMetrics;
 use qbind_node::validator_config::{make_test_local_validator_config, NodeValidatorConfig};
 use qbind_node::{
-    BatchId, DagAvailabilityConfig, DagMempoolConfig, DagMempoolMetrics, InMemoryDagMempool,
-    NodeHotstuffHarness, NodeMetrics, ProposerSource,
+    BatchId, DagAvailabilityConfig, DagMempoolConfig, DagMempoolMetrics, EvictionRateMode,
+    InMemoryDagMempool, NodeHotstuffHarness, NodeMetrics, ProposerSource,
 };
 use qbind_types::AccountId;
 use qbind_wire::io::WireEncode;
@@ -973,6 +973,9 @@ impl TestnetAlphaClusterHandle {
                     max_pending_bytes_per_sender: 64 * 1024 * 1024,
                     max_txs_per_batch: 10_000,
                     max_batch_bytes: 4 * 1024 * 1024,
+                    eviction_mode: EvictionRateMode::Off,
+                    max_evictions_per_interval: 10_000,
+                    eviction_interval_secs: 10,
                 };
 
                 let dag_mempool = if config.enable_dag_availability {

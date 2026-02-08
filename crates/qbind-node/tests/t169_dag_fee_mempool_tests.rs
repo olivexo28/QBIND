@@ -4,6 +4,7 @@ use qbind_consensus::ValidatorId;
 use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_ledger::{QbindTransaction, TransferPayloadV1};
 use qbind_node::dag_mempool::{DagMempool, DagMempoolConfig, InMemoryDagMempool};
+use qbind_node::EvictionRateMode;
 use qbind_types::AccountId;
 
 fn test_account_id(byte: u8) -> AccountId {
@@ -42,6 +43,9 @@ fn test_dag_batch_builder_prefers_high_fee_txs() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     let mempool = InMemoryDagMempool::with_config(config);
@@ -85,6 +89,9 @@ fn test_dag_frontier_selection_with_priority() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     let mempool = InMemoryDagMempool::with_config(config);
@@ -133,6 +140,9 @@ fn test_dag_priority_disabled_fifo_behavior() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     let mempool = InMemoryDagMempool::with_config(config);

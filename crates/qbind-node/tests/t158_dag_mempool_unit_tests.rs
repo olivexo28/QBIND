@@ -13,7 +13,7 @@ use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_ledger::QbindTransaction;
 use qbind_node::{
     compute_batch_id, compute_tx_id, BatchRef, DagMempool, DagMempoolConfig, DagMempoolMetrics,
-    InMemoryDagMempool, QbindBatch,
+    EvictionRateMode, InMemoryDagMempool, QbindBatch,
 };
 
 // ============================================================================
@@ -47,6 +47,9 @@ fn test_batch_creation_with_unique_ids() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -98,6 +101,9 @@ fn test_batch_parent_references() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -253,6 +259,9 @@ fn test_frontier_selection_deterministic() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -287,6 +296,9 @@ fn test_frontier_excludes_committed_txs() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -324,6 +336,9 @@ fn test_frontier_respects_max_txs() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -362,6 +377,9 @@ fn test_mark_committed_updates_state() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -397,6 +415,9 @@ fn test_commit_cleans_pending_txs() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -436,6 +457,9 @@ fn test_dag_mempool_metrics_tracking() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
 
@@ -464,6 +488,9 @@ fn test_frontier_selection_metrics() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
 
@@ -588,6 +615,9 @@ fn test_transaction_deduplication() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 
@@ -633,6 +663,9 @@ fn test_mempool_capacity_limit() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
     let mempool = InMemoryDagMempool::with_config(config);
 

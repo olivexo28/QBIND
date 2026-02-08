@@ -14,7 +14,7 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_ledger::QbindTransaction;
 use qbind_node::{
     BatchAck, BatchAckResult, BatchId, BatchRef, DagAvailabilityConfig, DagMempool,
-    DagMempoolConfig, DagMempoolMetrics, InMemoryDagMempool, QbindBatch,
+    DagMempoolConfig, DagMempoolMetrics, EvictionRateMode, InMemoryDagMempool, QbindBatch,
 };
 use qbind_types::QBIND_TESTNET_CHAIN_ID;
 
@@ -67,6 +67,9 @@ fn create_testnet_dag_mempool(
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     let dag_config = DagAvailabilityConfig::enabled();
@@ -328,6 +331,9 @@ fn test_dag_availability_config_integration() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     let mempool = InMemoryDagMempool::with_availability(config, quorum);
@@ -391,6 +397,9 @@ fn test_enable_availability_after_construction() {
         max_pending_bytes_per_sender: 64 * 1024 * 1024,
         max_txs_per_batch: 10_000,
         max_batch_bytes: 4 * 1024 * 1024,
+        eviction_mode: EvictionRateMode::Off,
+        max_evictions_per_interval: 10_000,
+        eviction_interval_secs: 10,
     };
 
     // Start with availability disabled
