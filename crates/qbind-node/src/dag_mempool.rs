@@ -39,7 +39,7 @@
 //! replay attacks. Use `signing_preimage_with_chain_id()` with the appropriate
 //! `ChainId` for the network environment (DevNet, TestNet, MainNet).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -49,6 +49,8 @@ use qbind_hash::sha3_256;
 use qbind_ledger::QbindTransaction;
 use qbind_types::domain::{domain_prefix, DomainKind};
 use qbind_types::{ChainId, QBIND_DEVNET_CHAIN_ID};
+
+use crate::mempool::{compute_tx_mempool_cost, TxPriorityScore};
 
 // ============================================================================
 // Domain Tags
@@ -1519,15 +1521,14 @@ impl DagMempoolConfig {
 }
 
 // ============================================================================
-// T219: Eviction Window Tracking
+// T219/T220: Eviction Window Tracking
 // ============================================================================
 
-/// Time-bucketed eviction tracking for rate limiting (T219).
+/// Time-bucketed eviction tracking for rate limiting (T219/T220).
 ///
 /// Tracks the number of evictions within a sliding time window to
 /// enforce rate limits on mempool eviction churn.
 #[derive(Clone, Debug, Default)]
-#[allow(dead_code)]
 struct EvictionWindow {
     /// Start timestamp of the current measurement window (milliseconds).
     window_start_ms: u64,
@@ -1535,7 +1536,6 @@ struct EvictionWindow {
     evictions_in_window: u32,
 }
 
-#[allow(dead_code)]
 impl EvictionWindow {
     /// Create a new eviction window starting at the given timestamp.
     fn new(start_ms: u64) -> Self {
@@ -1571,6 +1571,21 @@ impl EvictionWindow {
     fn record_evictions(&mut self, count: u32) {
         self.evictions_in_window = self.evictions_in_window.saturating_add(count);
     }
+
+    /// Get the current count of evictions in the window.
+    fn current_count(&self) -> u32 {
+        self.evictions_in_window
+    }
+}
+
+/// Get current time in milliseconds since UNIX epoch.
+///
+/// This is a utility function for eviction window time tracking.
+fn current_time_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// Internal state for the DAG mempool.
@@ -1608,11 +1623,21 @@ struct DagInner {
     tx_sender_info: HashMap<TxId, (qbind_types::AccountId, u64)>,
 
     // ========================================================================
-    // T219: Eviction Rate Limiting
+    // T219/T220: Eviction Rate Limiting
     // ========================================================================
-    /// Eviction window for rate limiting (T219).
-    #[allow(dead_code)]
+    /// Eviction window for rate limiting (T219/T220).
     eviction_window: EvictionWindow,
+
+    // ========================================================================
+    // T220: Fee-Priority Eviction Tracking
+    // ========================================================================
+    /// Priority index for fee-based eviction (T220).
+    /// Maps priority score to (sender, nonce) key for quick eviction.
+    /// Only used when `enable_fee_priority` is true.
+    priority_index: BTreeMap<TxPriorityScore, (qbind_types::AccountId, u64)>,
+    /// Reverse mapping from (sender, nonce) -> priority score (T220).
+    /// Used for O(1) lookup when removing or replacing a tx.
+    tx_priority_scores: HashMap<(qbind_types::AccountId, u64), TxPriorityScore>,
 }
 
 /// A batch stored in the DAG with metadata.
@@ -1701,8 +1726,11 @@ impl InMemoryDagMempool {
                 // T218: Per-sender load tracking
                 sender_load: HashMap::new(),
                 tx_sender_info: HashMap::new(),
-                // T219: Eviction rate limiting
+                // T219/T220: Eviction rate limiting
                 eviction_window: EvictionWindow::default(),
+                // T220: Fee-priority eviction tracking
+                priority_index: BTreeMap::new(),
+                tx_priority_scores: HashMap::new(),
             }),
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(1)),
@@ -1734,8 +1762,11 @@ impl InMemoryDagMempool {
                 // T218: Per-sender load tracking
                 sender_load: HashMap::new(),
                 tx_sender_info: HashMap::new(),
-                // T219: Eviction rate limiting
+                // T219/T220: Eviction rate limiting
                 eviction_window: EvictionWindow::default(),
+                // T220: Fee-priority eviction tracking
+                priority_index: BTreeMap::new(),
+                tx_priority_scores: HashMap::new(),
             }),
             metrics: None,
             ack_tracker: RwLock::new(BatchAckTracker::new(quorum_size)),
@@ -2174,9 +2205,18 @@ impl InMemoryDagMempool {
 
         // Clean up arrival tracking for batched txs
         // T218: Also clean up sender load tracking
+        // T220: Also clean up priority tracking
         let sender_limits_enabled = inner.config.sender_limits_enabled();
+        let enable_fee_priority = inner.config.enable_fee_priority;
         for tx in &txs {
             inner.tx_arrivals.remove(&(tx.sender, tx.nonce));
+
+            // T220: Clean up priority index when tx is batched
+            if enable_fee_priority {
+                if let Some(score) = inner.tx_priority_scores.remove(&(tx.sender, tx.nonce)) {
+                    inner.priority_index.remove(&score);
+                }
+            }
 
             // T218: Update sender load (tx is now batched)
             if sender_limits_enabled {
@@ -2271,26 +2311,151 @@ impl InMemoryDagMempool {
         let sig = tx.signature.as_bytes().len() as u64;
         base + payload + sig
     }
+
+    // ========================================================================
+    // T220: Eviction Rate Limiting Helpers
+    // ========================================================================
+
+    /// Check eviction rate limit and update state accordingly (T220).
+    ///
+    /// Returns `true` if eviction is allowed, `false` if blocked.
+    ///
+    /// Behavior depends on `eviction_mode`:
+    /// - **Off**: Always returns `true`, no tracking
+    /// - **Warn**: Always returns `true`, but logs warning when limit exceeded
+    /// - **Enforce**: Returns `false` when limit would be exceeded
+    fn check_eviction_rate_limit(
+        eviction_window: &mut EvictionWindow,
+        eviction_mode: crate::node_config::EvictionRateMode,
+        max_evictions_per_interval: u32,
+        interval_secs: u32,
+        metrics: Option<&Arc<DagMempoolMetrics>>,
+    ) -> bool {
+        use crate::node_config::EvictionRateMode;
+
+        match eviction_mode {
+            EvictionRateMode::Off => {
+                // No rate limiting; always allow eviction
+                true
+            }
+            EvictionRateMode::Warn => {
+                // Check if we would exceed the limit
+                if eviction_window.would_exceed_limit(1, max_evictions_per_interval) {
+                    // Log warning
+                    eprintln!(
+                        "[T220] Eviction rate limit exceeded (warn mode): \
+                         mode=warn, max_per_interval={}, interval_secs={}, \
+                         current_count={}",
+                        max_evictions_per_interval,
+                        interval_secs,
+                        eviction_window.current_count()
+                    );
+                    // Increment warn metric
+                    if let Some(m) = metrics {
+                        m.inc_eviction_rate_limit_warn();
+                    }
+                }
+                // In Warn mode, always allow the eviction
+                eviction_window.record_evictions(1);
+                true
+            }
+            EvictionRateMode::Enforce => {
+                // Check if we would exceed the limit
+                if eviction_window.would_exceed_limit(1, max_evictions_per_interval) {
+                    // Log warning about blocked eviction
+                    eprintln!(
+                        "[T220] Eviction rate limit reached (enforce mode): \
+                         mode=enforce, max_per_interval={}, interval_secs={}, \
+                         current_count={}, incoming tx rejected",
+                        max_evictions_per_interval,
+                        interval_secs,
+                        eviction_window.current_count()
+                    );
+                    // Increment enforce metric
+                    if let Some(m) = metrics {
+                        m.inc_eviction_rate_limit_enforce();
+                    }
+                    // Block the eviction
+                    false
+                } else {
+                    // Allow the eviction and record it
+                    eviction_window.record_evictions(1);
+                    true
+                }
+            }
+        }
+    }
+
+    /// Evict a transaction from the mempool by its (sender, nonce) key (T220).
+    ///
+    /// This removes the transaction from:
+    /// - `pending_txs` vector
+    /// - `priority_index` BTreeMap
+    /// - `tx_priority_scores` HashMap
+    /// - `tx_arrivals` HashMap
+    /// - `sender_load` tracking (if enabled)
+    /// - `tx_sender_info` HashMap
+    ///
+    /// Does NOT remove from `tx_seen` (keeps deduplication).
+    fn evict_tx_by_key(
+        inner: &mut DagInner,
+        score: TxPriorityScore,
+        sender: qbind_types::AccountId,
+        nonce: u64,
+        metrics: Option<&Arc<DagMempoolMetrics>>,
+    ) {
+        // Remove from priority index
+        inner.priority_index.remove(&score);
+        inner.tx_priority_scores.remove(&(sender, nonce));
+
+        // Remove from arrival tracking
+        inner.tx_arrivals.remove(&(sender, nonce));
+
+        // Find and remove from pending_txs
+        if let Some(pos) = inner
+            .pending_txs
+            .iter()
+            .position(|tx| tx.sender == sender && tx.nonce == nonce)
+        {
+            let evicted_tx = inner.pending_txs.remove(pos);
+
+            // Update sender load tracking
+            let tx_id = compute_tx_id(&evicted_tx);
+            if let Some((evicted_sender, tx_bytes)) = inner.tx_sender_info.remove(&tx_id) {
+                if let Some(load) = inner.sender_load.get_mut(&evicted_sender) {
+                    load.remove_tx(tx_bytes);
+                }
+            }
+
+            // Increment eviction metric (capacity eviction)
+            if let Some(m) = metrics {
+                m.inc_evictions_capacity(1);
+            }
+        }
+    }
 }
 
 impl DagMempool for InMemoryDagMempool {
     fn insert_local_txs(&self, txs: Vec<QbindTransaction>) -> Result<(), DagMempoolError> {
         let mut inner = self.inner.write();
 
-        // Check pending capacity
-        if inner.pending_txs.len() + txs.len() > inner.config.max_pending_txs {
-            return Err(DagMempoolError::Full);
-        }
-
         // T218: Cache config values for sender limits to avoid borrow issues
         let sender_limits_enabled = inner.config.sender_limits_enabled();
         let max_pending_per_sender = inner.config.max_pending_per_sender;
         let max_pending_bytes_per_sender = inner.config.max_pending_bytes_per_sender;
         let enable_fee_priority = inner.config.enable_fee_priority;
+        let max_pending_txs = inner.config.max_pending_txs;
+
+        // T220: Cache eviction rate limiting config
+        let eviction_mode = inner.config.eviction_mode;
+        let max_evictions_per_interval = inner.config.max_evictions_per_interval;
+        let eviction_interval_secs = inner.config.eviction_interval_secs;
 
         // Filter duplicates and add to pending
         let mut added = 0;
         let mut rate_limited_count = 0;
+        let mut eviction_rate_limited_count = 0;
+
         for tx in txs {
             let tx_id = compute_tx_id(&tx);
             if inner.tx_seen.contains(&tx_id) || inner.tx_committed.contains(&tx_id) {
@@ -2315,26 +2480,124 @@ impl DagMempool for InMemoryDagMempool {
                     }
                     continue;
                 }
+            }
 
-                // Track sender load
+            // T220: Check pending capacity & handle fee-priority eviction
+            if inner.pending_txs.len() >= max_pending_txs {
+                if enable_fee_priority {
+                    // Compute priority for incoming tx
+                    let incoming_cost = match compute_tx_mempool_cost(&tx) {
+                        Ok(cost) => cost,
+                        Err(e) => {
+                            // Can't compute priority; log and skip this tx
+                            eprintln!(
+                                "[T220] Cannot compute mempool cost for tx (sender={:?}, nonce={}): {}",
+                                &tx.sender[..4], tx.nonce, e
+                            );
+                            continue;
+                        }
+                    };
+                    let incoming_arrival = inner.arrival_counter;
+                    let incoming_score = TxPriorityScore {
+                        fee_per_gas: incoming_cost.fee_per_gas,
+                        effective_fee: incoming_cost.effective_fee,
+                        arrival_id: incoming_arrival,
+                    };
+
+                    // Find lowest priority tx in the mempool
+                    if let Some((&lowest_score, &(evict_sender, evict_nonce))) =
+                        inner.priority_index.iter().next()
+                    {
+                        if incoming_score > lowest_score {
+                            // T220: Check eviction rate limiting before evicting
+                            let now_ms = current_time_ms();
+
+                            // Maybe reset the eviction window
+                            if inner.eviction_window.maybe_reset(now_ms, eviction_interval_secs) {
+                                if let Some(ref m) = self.metrics {
+                                    m.inc_eviction_window_reset();
+                                }
+                            }
+
+                            // Check if eviction is allowed based on mode
+                            let eviction_allowed =
+                                Self::check_eviction_rate_limit(
+                                    &mut inner.eviction_window,
+                                    eviction_mode,
+                                    max_evictions_per_interval,
+                                    eviction_interval_secs,
+                                    self.metrics.as_ref(),
+                                );
+
+                            if !eviction_allowed {
+                                // T220: Eviction rate limit reached in Enforce mode
+                                eviction_rate_limited_count += 1;
+                                continue;
+                            }
+
+                            // Perform the eviction
+                            Self::evict_tx_by_key(
+                                &mut inner,
+                                lowest_score,
+                                evict_sender,
+                                evict_nonce,
+                                self.metrics.as_ref(),
+                            );
+                        } else {
+                            // Incoming tx has lower or equal priority; reject it
+                            continue;
+                        }
+                    } else {
+                        // No txs to evict (shouldn't happen if pending_txs >= max)
+                        return Err(DagMempoolError::Full);
+                    }
+                } else {
+                    // No fee priority - just reject when full
+                    return Err(DagMempoolError::Full);
+                }
+            }
+
+            // T218: Track sender load (after capacity check passed)
+            if sender_limits_enabled {
+                let tx_bytes = Self::estimate_tx_bytes(&tx);
+                let sender_load = inner.sender_load.entry(tx.sender).or_default();
                 sender_load.add_tx(tx_bytes);
                 inner.tx_sender_info.insert(tx_id, (tx.sender, tx_bytes));
             }
 
             inner.tx_seen.insert(tx_id);
 
-            // T169: Track arrival for priority
+            // T169/T220: Track arrival and priority for fee-based ordering
             if enable_fee_priority {
                 let arrival_id = inner.arrival_counter;
                 inner.arrival_counter += 1;
                 inner.tx_arrivals.insert((tx.sender, tx.nonce), arrival_id);
+
+                // T220: Add to priority index
+                if let Ok(cost) = compute_tx_mempool_cost(&tx) {
+                    let score = TxPriorityScore {
+                        fee_per_gas: cost.fee_per_gas,
+                        effective_fee: cost.effective_fee,
+                        arrival_id,
+                    };
+                    inner.priority_index.insert(score, (tx.sender, tx.nonce));
+                    inner.tx_priority_scores.insert((tx.sender, tx.nonce), score);
+                }
             }
 
             inner.pending_txs.push(tx);
             added += 1;
         }
 
-        // If all txs were rate limited, return an error
+        // If all txs were eviction rate limited, return an error
+        if added == 0 && eviction_rate_limited_count > 0 {
+            return Err(DagMempoolError::EvictionRateLimited(format!(
+                "{} transaction(s) rejected due to eviction rate limiting",
+                eviction_rate_limited_count
+            )));
+        }
+
+        // If all txs were sender rate limited, return an error
         if added == 0 && rate_limited_count > 0 {
             return Err(DagMempoolError::SenderRateLimited(format!(
                 "{} transaction(s) exceeded sender rate limits",
@@ -4041,5 +4304,265 @@ mod tests {
         assert!(output.contains("qbind_mempool_eviction_rate_limit_total{mode=\"warn\"} 1"));
         assert!(output.contains("qbind_mempool_eviction_rate_limit_total{mode=\"enforce\"} 2"));
         assert!(output.contains("qbind_mempool_evictions_window_reset_total 1"));
+    }
+
+    // ========================================================================
+    // T220: Eviction Rate Limiting Enforcement Tests
+    // ========================================================================
+
+    /// Helper: Create a V1 transfer payload for testing (T220).
+    fn make_v1_transfer_payload(amount: u128, gas_limit: u64, max_fee_per_gas: u128) -> Vec<u8> {
+        use qbind_ledger::TransferPayloadV1;
+        let recipient = test_account_id(0xFF);
+        TransferPayloadV1::new(recipient, amount, gas_limit, max_fee_per_gas).encode()
+    }
+
+    /// Helper: Create a signed test transaction with gas parameters (T220).
+    fn make_test_tx_with_fee(
+        sender: qbind_types::AccountId,
+        nonce: u64,
+        max_fee_per_gas: u128,
+    ) -> QbindTransaction {
+        use qbind_crypto::ml_dsa44::MlDsa44Backend;
+        let payload = make_v1_transfer_payload(100, 50_000, max_fee_per_gas);
+        let mut tx = QbindTransaction::new(sender, nonce, payload);
+        let (_pk, sk) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        tx.sign(&sk).expect("signing should succeed");
+        tx
+    }
+
+    #[test]
+    fn test_eviction_rate_limit_off_mode_no_effect() {
+        // T220: In Off mode, eviction rate limiting has no effect
+        let sender = test_account_id(0xAA);
+
+        let config = DagMempoolConfig {
+            max_batches: 100,
+            max_pending_txs: 3, // Very small capacity to force eviction
+            batch_size: 100, // Large batch size so txs stay pending
+            local_validator_id: ValidatorId::new(1),
+            enable_fee_priority: true,
+            max_pending_per_sender: 10_000,
+            max_pending_bytes_per_sender: 64 * 1024 * 1024,
+            max_txs_per_batch: 10_000,
+            max_batch_bytes: 4 * 1024 * 1024,
+            // T220: Off mode
+            eviction_mode: crate::node_config::EvictionRateMode::Off,
+            max_evictions_per_interval: 2, // Small limit (but Off mode ignores it)
+            eviction_interval_secs: 10,
+        };
+
+        let metrics = Arc::new(DagMempoolMetrics::new());
+        let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
+
+        // Fill mempool with low-fee txs
+        let txs: Vec<_> = (0..3)
+            .map(|i| make_test_tx_with_fee(sender, i, 10))
+            .collect();
+        mempool.insert_local_txs(txs).unwrap();
+
+        // Now insert higher-fee txs that should trigger evictions
+        // In Off mode, all evictions should succeed regardless of limit
+        for i in 3..7 {
+            let tx = make_test_tx_with_fee(sender, i, 100);
+            let result = mempool.insert_local_txs(vec![tx]);
+            assert!(result.is_ok(), "Tx {} should be accepted in Off mode", i);
+        }
+
+        // Verify no rate limit metrics were incremented
+        assert_eq!(
+            metrics.eviction_rate_limit_warn_total(),
+            0,
+            "No warn metrics in Off mode"
+        );
+        assert_eq!(
+            metrics.eviction_rate_limit_enforce_total(),
+            0,
+            "No enforce metrics in Off mode"
+        );
+    }
+
+    #[test]
+    fn test_eviction_rate_limit_warn_mode_allows_but_counts() {
+        // T220: In Warn mode, evictions proceed but metrics are incremented
+        let sender = test_account_id(0xBB);
+
+        let config = DagMempoolConfig {
+            max_batches: 100,
+            max_pending_txs: 3, // Very small capacity
+            batch_size: 100, // Large batch size so txs stay pending
+            local_validator_id: ValidatorId::new(1),
+            enable_fee_priority: true,
+            max_pending_per_sender: 10_000,
+            max_pending_bytes_per_sender: 64 * 1024 * 1024,
+            max_txs_per_batch: 10_000,
+            max_batch_bytes: 4 * 1024 * 1024,
+            // T220: Warn mode
+            eviction_mode: crate::node_config::EvictionRateMode::Warn,
+            max_evictions_per_interval: 2, // Allow 2 evictions before warning
+            eviction_interval_secs: 3600, // Long interval to avoid reset during test
+        };
+
+        let metrics = Arc::new(DagMempoolMetrics::new());
+        let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
+
+        // Fill mempool with low-fee txs
+        let txs: Vec<_> = (0..3)
+            .map(|i| make_test_tx_with_fee(sender, i, 10))
+            .collect();
+        mempool.insert_local_txs(txs).unwrap();
+
+        // Insert higher-fee txs that trigger evictions
+        // First 2 evictions are within limit, 3rd+ exceed limit but still proceed
+        for i in 3..6 {
+            let tx = make_test_tx_with_fee(sender, i, 100);
+            let result = mempool.insert_local_txs(vec![tx]);
+            assert!(result.is_ok(), "Tx {} should be accepted in Warn mode", i);
+        }
+
+        // Verify warn metrics were incremented (for evictions beyond limit)
+        // First 2 evictions are within limit (0 warnings), 3rd triggers warning
+        assert!(
+            metrics.eviction_rate_limit_warn_total() >= 1,
+            "Should have at least 1 warn metric for exceeding limit"
+        );
+        assert_eq!(
+            metrics.eviction_rate_limit_enforce_total(),
+            0,
+            "No enforce metrics in Warn mode"
+        );
+    }
+
+    #[test]
+    fn test_eviction_rate_limit_enforce_mode_blocks_excess() {
+        // T220: In Enforce mode, evictions beyond limit are blocked
+        let sender = test_account_id(0xCC);
+
+        let config = DagMempoolConfig {
+            max_batches: 100,
+            max_pending_txs: 3, // Very small capacity
+            batch_size: 100, // Large batch size so txs stay pending
+            local_validator_id: ValidatorId::new(1),
+            enable_fee_priority: true,
+            max_pending_per_sender: 10_000,
+            max_pending_bytes_per_sender: 64 * 1024 * 1024,
+            max_txs_per_batch: 10_000,
+            max_batch_bytes: 4 * 1024 * 1024,
+            // T220: Enforce mode
+            eviction_mode: crate::node_config::EvictionRateMode::Enforce,
+            max_evictions_per_interval: 2, // Allow only 2 evictions
+            eviction_interval_secs: 3600, // Long interval to avoid reset
+        };
+
+        let metrics = Arc::new(DagMempoolMetrics::new());
+        let mempool = InMemoryDagMempool::with_config(config).with_metrics(metrics.clone());
+
+        // Fill mempool with low-fee txs
+        let txs: Vec<_> = (0..3)
+            .map(|i| make_test_tx_with_fee(sender, i, 10))
+            .collect();
+        mempool.insert_local_txs(txs).unwrap();
+
+        // First 2 evictions should succeed
+        for i in 3..5 {
+            let tx = make_test_tx_with_fee(sender, i, 100);
+            let result = mempool.insert_local_txs(vec![tx]);
+            assert!(
+                result.is_ok(),
+                "Tx {} should be accepted (within eviction limit)",
+                i
+            );
+        }
+
+        // 3rd eviction attempt should be blocked
+        let tx = make_test_tx_with_fee(sender, 5, 100);
+        let result = mempool.insert_local_txs(vec![tx]);
+
+        // In Enforce mode, when eviction limit is reached, new tx is rejected
+        // This happens because we can't evict any more txs to make room
+        // The tx is simply not added (returns Ok but with 0 added)
+        // OR it returns EvictionRateLimited error
+
+        // Verify enforce metrics were incremented
+        assert!(
+            metrics.eviction_rate_limit_enforce_total() >= 1,
+            "Should have at least 1 enforce metric for blocked eviction"
+        );
+        assert_eq!(
+            metrics.eviction_rate_limit_warn_total(),
+            0,
+            "No warn metrics in Enforce mode"
+        );
+
+        // The result should either be Ok (tx silently dropped) or EvictionRateLimited error
+        match result {
+            Ok(()) => {
+                // Tx was silently dropped due to rate limit
+            }
+            Err(DagMempoolError::EvictionRateLimited(_)) => {
+                // Explicit error returned
+            }
+            Err(e) => {
+                panic!("Unexpected error: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_eviction_rate_limit_window_resets() {
+        // T220: Test that the eviction window resets after interval_secs
+        // This test uses a very short interval to simulate time passing
+
+        let mut window = EvictionWindow::new(0);
+        let max_evictions = 2;
+        let interval_secs = 1; // 1 second = 1000ms
+
+        // Record 2 evictions (at limit)
+        window.record_evictions(2);
+        assert_eq!(window.current_count(), 2);
+
+        // At time 0, would exceed if we try to add 1 more
+        assert!(window.would_exceed_limit(1, max_evictions));
+
+        // Simulate time passing: 500ms later, still in same window
+        let reset = window.maybe_reset(500, interval_secs);
+        assert!(!reset, "Window should not reset at 500ms");
+        assert!(window.would_exceed_limit(1, max_evictions), "Still at limit");
+
+        // Simulate time passing: 1500ms later, window should reset
+        let reset = window.maybe_reset(1500, interval_secs);
+        assert!(reset, "Window should reset after interval");
+        assert_eq!(window.current_count(), 0, "Count should be reset to 0");
+        assert!(
+            !window.would_exceed_limit(1, max_evictions),
+            "Should allow eviction after reset"
+        );
+
+        // Record 1 eviction in new window
+        window.record_evictions(1);
+        assert_eq!(window.current_count(), 1);
+        assert!(!window.would_exceed_limit(1, max_evictions));
+
+        // Record 1 more, now at limit
+        window.record_evictions(1);
+        assert_eq!(window.current_count(), 2);
+        assert!(window.would_exceed_limit(1, max_evictions));
+    }
+
+    #[test]
+    fn test_eviction_rate_limit_current_count() {
+        // T220: Test the current_count helper
+        let mut window = EvictionWindow::new(0);
+        assert_eq!(window.current_count(), 0);
+
+        window.record_evictions(5);
+        assert_eq!(window.current_count(), 5);
+
+        window.record_evictions(3);
+        assert_eq!(window.current_count(), 8);
+
+        // Reset
+        window.maybe_reset(15000, 10);
+        assert_eq!(window.current_count(), 0);
     }
 }
