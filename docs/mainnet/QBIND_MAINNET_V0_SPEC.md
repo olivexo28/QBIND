@@ -410,6 +410,22 @@ Any non-zero violation counters should be investigated. See [QBIND_DAG_CONSENSUS
 
 The tests assert on the same metrics documented above (`qbind_dag_coupling_*`) to verify invariant compliance. This test harness is the normative test artifact for MN-R1 readiness regarding DAG–consensus coupling.
 
+#### T222 – Consensus Chaos Harness
+
+**MainNet v0** includes an adversarial chaos testing harness (`crates/qbind-node/tests/t222_consensus_chaos_harness.rs`) that validates consensus safety and liveness under fault injection:
+
+1. **LeaderCrashAndRecover** — Periodically crashes the leader node, verifying view-changes occur and the cluster recovers without safety violations.
+2. **RepeatedViewChangesUnderMessageLoss** — Drops a percentage of proposal/vote messages, triggering timeouts and view-changes while ensuring no double-commits or divergent chains.
+3. **ShortPartitionThenHeal** — Temporarily partitions validators into two groups, verifying the majority side maintains quorum and no chain divergence occurs after healing.
+4. **MixedFaultsBurst** — Combines message loss, leader crash, and partition for stress testing under multiple simultaneous faults.
+
+**Safety Invariants Checked**:
+- `has_commit_divergence == false` — No conflicting committed prefixes
+- `block_mismatch_total == 0` — No DAG/Block data mismatches
+- Heights converge after faults stop — Liveness recovery
+
+This harness provides "chaos test coverage" for MN-R1 (Consensus Safety & Fork Risk) in the MainNet audit.
+
 ### 4.4 DoS Protections and Fee-Aware Eviction
 
 MainNet v0 requires stronger DoS protections in the DAG mempool (T218):

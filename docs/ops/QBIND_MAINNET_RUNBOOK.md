@@ -197,7 +197,22 @@ Before starting a MainNet validator, verify:
 - [ ] **Diversity mode** is set to `enforce`
 - [ ] **Monetary mode** is `shadow` (recommended for initial launch) or `active`
 
-### 3.4 CLI Reference
+### 3.4 Pre-Release Testing
+
+Before release, QA and operators should run the consensus chaos harness tests to validate fault tolerance:
+
+```bash
+# Run all chaos harness tests
+cargo test -p qbind-node --test t222_consensus_chaos_harness -- --test-threads=1
+
+# Run specific scenarios
+cargo test -p qbind-node --test t222_consensus_chaos_harness test_t222_leader_crash_and_recover
+cargo test -p qbind-node --test t222_consensus_chaos_harness test_t222_short_partition_then_heal
+```
+
+These tests validate that the consensus layer maintains safety (no commit divergence, no DAG/Block mismatches) under adversarial conditions including leader crashes, message loss, and network partitions. See `crates/qbind-node/tests/t222_consensus_chaos_harness.rs` for details.
+
+### 3.5 CLI Reference
 
 #### Starting a Standard MainNet Validator
 

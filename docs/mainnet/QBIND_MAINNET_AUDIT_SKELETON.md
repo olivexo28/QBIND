@@ -106,11 +106,12 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Block-level invariant probes (T192) — metrics/logging for operator visibility
 - [x] Cluster harness tests for coupling — **T221: DAG–consensus coupling cluster harness v1**
 - [ ] Formal verification of consensus rules (optional but recommended)
-- [ ] Chaos testing for view-change scenarios
+- [x] Chaos testing for view-change scenarios — **T222: Consensus chaos harness v1** (Ready)
 - [ ] External security audit of consensus path
 
 **Current Mitigations (T221 update)**:
 - ✅ **T221: DAG–consensus coupling cluster harness v1** — multi-node tests exercising Warn mode, Enforce mode, and Off mode scenarios with invariants enforced. See `crates/qbind-node/tests/t221_dag_coupling_cluster_tests.rs`.
+- ✅ **T222: Consensus chaos harness v1** — multi-node cluster tests with leader crashes, message loss, and partitions validating no commit divergence and sustained liveness. See `crates/qbind-node/tests/t222_consensus_chaos_harness.rs`.
 
 **Target Phase**: MainNet v0 (blocking)
 
