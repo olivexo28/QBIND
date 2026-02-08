@@ -258,6 +258,9 @@ pub use node_config::{
 // T214 Signer Failure Mode exports
 pub use node_config::{parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER_FAILURE_MODES};
 
+// T218 Mempool DoS Config exports
+pub use node_config::MempoolDosConfig;
+
 // T213 Key Rotation CLI exports
 pub use key_rotation_cli::{
     init_key_rotation, log_dual_key_validation, log_rotation_committed, log_rotation_event_applied,
