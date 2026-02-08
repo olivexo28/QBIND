@@ -261,6 +261,12 @@ pub use node_config::{parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER
 // T218 Mempool DoS Config exports
 pub use node_config::MempoolDosConfig;
 
+// T219 Mempool Eviction Rate Limiting exports
+pub use node_config::{
+    parse_eviction_rate_mode, EvictionRateMode, MempoolEvictionConfig,
+    VALID_EVICTION_RATE_MODES,
+};
+
 // T213 Key Rotation CLI exports
 pub use key_rotation_cli::{
     init_key_rotation, log_dual_key_validation, log_rotation_committed, log_rotation_event_applied,

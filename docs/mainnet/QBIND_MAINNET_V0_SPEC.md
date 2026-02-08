@@ -411,6 +411,7 @@ MainNet v0 requires stronger DoS protections in the DAG mempool (T218):
 | **Per-sender bytes limit** | Required (T218) | `max_pending_bytes_per_sender=8MiB` |
 | **Batch tx limit** | Required (T218) | `max_txs_per_batch=4,000` |
 | **Batch bytes limit** | Required (T218) | `max_batch_bytes=2MiB` |
+| **Eviction rate limiting** | Required (T219) | `eviction_mode=enforce` |
 | **Stake-weighted quotas** | MainNet v0.x (post-launch) | Not implemented |
 
 **Implementation**: `MempoolDosConfig` struct in `qbind-node/src/node_config.rs`.
@@ -429,6 +430,55 @@ MainNet v0 requires stronger DoS protections in the DAG mempool (T218):
 - `qbind_dag_batch_size_limited_total`: Reserved for future batch truncation tracking
 
 **Validation**: `validate_mainnet_invariants()` checks that all DoS config values are sensible for MainNet (all > 0, `max_pending_per_sender < 100,000`).
+
+### 4.4.1 Eviction Rate Limiting (T219)
+
+MainNet v0 requires eviction rate limiting to prevent excessive mempool churn under adversarial conditions:
+
+| Protection | MainNet v0 Status | Config Field |
+| :--- | :--- | :--- |
+| **Eviction mode** | Enforce (T219) | `mempool_eviction.mode=enforce` |
+| **Max evictions/interval** | Required (T219) | `mempool_eviction.max_evictions_per_interval=1,000` |
+| **Interval seconds** | Required (T219) | `mempool_eviction.interval_secs=10` |
+
+**Implementation**: `MempoolEvictionConfig` struct in `qbind-node/src/node_config.rs`.
+
+**Eviction Mode Behavior**:
+
+| Mode | Behavior |
+| :--- | :--- |
+| **Off** | No rate limiting; metrics recorded only |
+| **Warn** | Log warnings when limit exceeded; still evict |
+| **Enforce** | Reject new txs instead of exceeding rate |
+
+**Defaults by Environment**:
+
+| Parameter | DevNet | TestNet Alpha | TestNet Beta | MainNet v0 |
+| :--- | :--- | :--- | :--- | :--- |
+| `eviction_mode` | Off | Warn | Enforce | **Enforce** |
+| `max_evictions_per_interval` | 10,000 | 5,000 | 2,000 | 1,000 |
+| `interval_secs` | 10 | 10 | 10 | 10 |
+
+**Metrics** (T219):
+- `qbind_mempool_eviction_mode`: Config gauge (0=off, 1=warn, 2=enforce)
+- `qbind_mempool_max_evictions_per_interval`: Config gauge
+- `qbind_mempool_eviction_interval_secs`: Config gauge
+- `qbind_mempool_evictions_total{reason="capacity"}`: Evictions due to mempool full
+- `qbind_mempool_evictions_total{reason="lifetime"}`: Evictions due to TTL
+- `qbind_mempool_eviction_rate_limit_total{mode="warn"}`: Warn mode limit hits
+- `qbind_mempool_eviction_rate_limit_total{mode="enforce"}`: Enforce mode rejections
+- `qbind_mempool_evictions_window_reset_total`: Window reset count
+
+**CLI Options** (T219):
+- `--mempool-eviction-mode=off|warn|enforce`
+- `--mempool-eviction-max-per-interval=<uint>`
+- `--mempool-eviction-interval-secs=<uint>`
+
+**Validation**: `validate_mainnet_invariants()` checks:
+- `eviction_mode == Enforce`
+- `max_evictions_per_interval > 0`
+- `interval_secs >= 1`
+- `max_evictions_per_interval < 1,000,000`
 
 ### 4.5 MainNet vs Beta: DAG Requirements
 

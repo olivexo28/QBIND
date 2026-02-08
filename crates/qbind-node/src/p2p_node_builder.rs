@@ -709,6 +709,8 @@ mod tests {
             signer_failure_mode: crate::node_config::SignerFailureMode::ExitOnFailure,
             // T218 field
             mempool_dos: crate::node_config::MempoolDosConfig::devnet_default(),
+            // T219 field
+            mempool_eviction: crate::node_config::MempoolEvictionConfig::devnet_default(),
         }
     }
 
