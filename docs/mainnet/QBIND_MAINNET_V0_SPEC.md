@@ -402,14 +402,33 @@ Any non-zero violation counters should be investigated. See [QBIND_DAG_CONSENSUS
 
 ### 4.4 DoS Protections and Fee-Aware Eviction
 
-MainNet v0 requires stronger DoS protections in the DAG mempool:
+MainNet v0 requires stronger DoS protections in the DAG mempool (T218):
 
-| Protection | MainNet v0 Status |
-| :--- | :--- |
-| **Fee-aware eviction** | Required (T169) |
-| **Rate limiting per sender** | Required |
-| **Stake-weighted quotas** | MainNet v0.x (post-launch) |
-| **Batch size limits** | Required |
+| Protection | MainNet v0 Status | Config Field |
+| :--- | :--- | :--- |
+| **Fee-aware eviction** | Required (T169) | `enable_fee_priority=true` |
+| **Per-sender tx limit** | Required (T218) | `max_pending_per_sender=1,000` |
+| **Per-sender bytes limit** | Required (T218) | `max_pending_bytes_per_sender=8MiB` |
+| **Batch tx limit** | Required (T218) | `max_txs_per_batch=4,000` |
+| **Batch bytes limit** | Required (T218) | `max_batch_bytes=2MiB` |
+| **Stake-weighted quotas** | MainNet v0.x (post-launch) | Not implemented |
+
+**Implementation**: `MempoolDosConfig` struct in `qbind-node/src/node_config.rs`.
+
+**Defaults by Environment**:
+
+| Parameter | DevNet | TestNet Beta | MainNet v0 |
+| :--- | :--- | :--- | :--- |
+| `max_pending_per_sender` | 10,000 | 2,000 | 1,000 |
+| `max_pending_bytes_per_sender` | 64 MiB | 16 MiB | 8 MiB |
+| `max_txs_per_batch` | 10,000 | 5,000 | 4,000 |
+| `max_batch_bytes` | 4 MiB | 2 MiB | 2 MiB |
+
+**Metrics** (T218):
+- `qbind_dag_sender_rate_limited_total`: Total txs rejected due to sender limits
+- `qbind_dag_batch_size_limited_total`: Reserved for future batch truncation tracking
+
+**Validation**: `validate_mainnet_invariants()` checks that all DoS config values are sensible for MainNet (all > 0, `max_pending_per_sender < 100,000`).
 
 ### 4.5 MainNet vs Beta: DAG Requirements
 
@@ -419,6 +438,7 @@ MainNet v0 requires stronger DoS protections in the DAG mempool:
 | Availability certs | v1 (data-plane) | **Consensus-coupled** | Consensus-coupled |
 | Fetch-on-miss | v0 (basic) | **Required** | Enhanced |
 | Fee-aware eviction | Enabled | **Required** | Required |
+| Per-sender quotas | Moderate (T218) | **Required** (T218) | Required |
 | Stake-weighted quotas | Not implemented | Planned | **Required** |
 
 ---

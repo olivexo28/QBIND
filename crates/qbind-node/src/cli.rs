@@ -38,8 +38,9 @@ use clap::Parser;
 use crate::node_config::{
     parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_execution_profile,
     parse_mempool_mode, parse_network_mode, parse_signer_mode, parse_state_retention_mode,
-    DagCouplingMode, FastSyncConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
-    ParseEnvironmentError, SignerFailureMode, SignerMode, SnapshotConfig, StateRetentionConfig,
+    DagCouplingMode, FastSyncConfig, MempoolDosConfig, MempoolMode, NetworkMode,
+    NetworkTransportConfig, NodeConfig, ParseEnvironmentError, SignerFailureMode, SignerMode,
+    SnapshotConfig, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -573,6 +574,8 @@ impl CliArgs {
                 hsm_config_path: None,
                 // T214: Exit on failure is the default
                 signer_failure_mode: SignerFailureMode::ExitOnFailure,
+                // T218: DevNet-style loose limits for legacy path
+                mempool_dos: MempoolDosConfig::devnet_default(),
             }
         };
 
