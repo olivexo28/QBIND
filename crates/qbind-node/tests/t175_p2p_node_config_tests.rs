@@ -10,8 +10,9 @@ use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
 use qbind_node::node_config::{
     parse_network_mode, parse_socket_addr, DagCouplingMode, ExecutionProfile, FastSyncConfig,
     MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig,
-    NodeConfig, ParseAddrError, SignerFailureMode, SignerMode, SnapshotConfig,
-    StateRetentionConfig, DEFAULT_NETWORK_MODE, DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
+    NodeConfig, P2pDiscoveryConfig, P2pLivenessConfig, ParseAddrError, SignerFailureMode,
+    SignerMode, SnapshotConfig, StateRetentionConfig, DEFAULT_NETWORK_MODE,
+    DEFAULT_P2P_LISTEN_ADDR, VALID_NETWORK_MODES,
 };
 use qbind_types::NetworkEnvironment;
 
@@ -123,6 +124,8 @@ fn test_p2p_config_local_mesh_disabled() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -168,6 +171,8 @@ fn test_p2p_config_p2p_mode_but_not_enabled() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -210,6 +215,8 @@ fn test_p2p_config_p2p_mode_enabled() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -247,6 +254,8 @@ fn test_p2p_config_no_listen_addr_sets_default() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -297,6 +306,8 @@ fn test_p2p_config_local_mesh_with_enable_p2p() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let p2p_enabled = config.validate_p2p_config();
@@ -399,6 +410,8 @@ fn test_startup_info_includes_network_mode() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -438,6 +451,8 @@ fn test_startup_info_p2p_disabled() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let info = config.startup_info_string(Some("V0"));
@@ -482,6 +497,8 @@ fn test_startup_info_p2p_enabled() {
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
         mempool_dos: MempoolDosConfig::devnet_default(),
         mempool_eviction: MempoolEvictionConfig::devnet_default(),
+        p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+        p2p_liveness: P2pLivenessConfig::devnet_default(),
     };
 
     let info = config.startup_info_string(Some("V0"));

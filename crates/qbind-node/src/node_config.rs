@@ -1244,6 +1244,364 @@ impl DagAvailabilityConfig {
 }
 
 // ============================================================================
+// T226: P2P Discovery Configuration
+// ============================================================================
+
+/// Configuration for dynamic peer discovery (T226).
+///
+/// Controls how the node discovers and maintains connections to peers
+/// beyond static bootstrap peers. Discovery is essential for MainNet
+/// to ensure a healthy, diverse peer set.
+///
+/// # Environments
+///
+/// - **DevNet v0**: Enabled with fast intervals (10s) for testing
+/// - **TestNet Alpha/Beta**: Enabled with standard intervals (30s)
+/// - **MainNet v0**: **Required** - validation rejects `enabled = false`
+///
+/// # Discovery Behavior
+///
+/// When enabled, the discovery manager:
+/// 1. Periodically asks connected peers for their known peers (gossip-style)
+/// 2. Maintains an in-memory peer store of candidates
+/// 3. Picks random candidates to fill outbound slots up to `outbound_target`
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::P2pDiscoveryConfig;
+///
+/// // MainNet configuration
+/// let config = P2pDiscoveryConfig::mainnet_default();
+/// assert!(config.enabled);
+/// assert_eq!(config.outbound_target, 8);
+/// assert_eq!(config.max_known_peers, 300);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct P2pDiscoveryConfig {
+    /// Whether dynamic peer discovery is enabled.
+    ///
+    /// When `false`, the node only connects to static/bootstrap peers.
+    /// MainNet validators **must** have this set to `true`.
+    pub enabled: bool,
+
+    /// Interval between discovery exchanges (seconds).
+    ///
+    /// Controls how often the node exchanges peer lists with connected peers
+    /// and attempts new outbound connections to fill the peer set.
+    ///
+    /// Recommended values:
+    /// - DevNet: 10 seconds (fast discovery for testing)
+    /// - TestNet Alpha/Beta: 30 seconds
+    /// - MainNet: 30 seconds
+    pub interval_secs: u32,
+
+    /// Maximum number of known peers to track.
+    ///
+    /// Enforces a cap on memory usage from peer discovery. Excess peers
+    /// are evicted based on age and liveness score.
+    ///
+    /// Recommended values:
+    /// - DevNet: 200
+    /// - TestNet Alpha/Beta: 200
+    /// - MainNet: 300
+    pub max_known_peers: u32,
+
+    /// Target number of outbound peer connections.
+    ///
+    /// The discovery manager attempts to maintain at least this many
+    /// outbound connections. When below target, it dials candidates from
+    /// the peer store.
+    ///
+    /// MainNet requires at least 4 outbound peers for network resilience.
+    ///
+    /// Recommended values:
+    /// - DevNet: 4
+    /// - TestNet Alpha/Beta: 8
+    /// - MainNet: 8
+    pub outbound_target: u32,
+}
+
+impl Default for P2pDiscoveryConfig {
+    fn default() -> Self {
+        Self::devnet_default()
+    }
+}
+
+impl P2pDiscoveryConfig {
+    /// Create a disabled discovery configuration.
+    ///
+    /// Only for use in single-node testing. Not allowed on MainNet.
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            interval_secs: 30,
+            max_known_peers: 200,
+            outbound_target: 8,
+        }
+    }
+
+    /// Create a DevNet discovery configuration (T226).
+    ///
+    /// - enabled: true
+    /// - interval_secs: 10 (fast discovery for testing)
+    /// - max_known_peers: 200
+    /// - outbound_target: 4
+    pub fn devnet_default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 10,
+            max_known_peers: 200,
+            outbound_target: 4,
+        }
+    }
+
+    /// Create a TestNet Alpha configuration (T226).
+    ///
+    /// - enabled: true
+    /// - interval_secs: 30
+    /// - max_known_peers: 200
+    /// - outbound_target: 8
+    pub fn testnet_alpha_default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 30,
+            max_known_peers: 200,
+            outbound_target: 8,
+        }
+    }
+
+    /// Create a TestNet Beta configuration (T226).
+    ///
+    /// Same as TestNet Alpha:
+    /// - enabled: true
+    /// - interval_secs: 30
+    /// - max_known_peers: 200
+    /// - outbound_target: 8
+    pub fn testnet_beta_default() -> Self {
+        Self::testnet_alpha_default()
+    }
+
+    /// Create a MainNet discovery configuration (T226).
+    ///
+    /// - enabled: true (required)
+    /// - interval_secs: 30
+    /// - max_known_peers: 300 (higher for MainNet)
+    /// - outbound_target: 8
+    pub fn mainnet_default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 30,
+            max_known_peers: 300,
+            outbound_target: 8,
+        }
+    }
+
+    /// Check if discovery is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - enabled must be true
+    /// - outbound_target must be >= 4
+    /// - max_known_peers must be >= outbound_target
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Err("discovery must be enabled for MainNet".to_string());
+        }
+        if self.outbound_target < 4 {
+            return Err(format!(
+                "outbound_target must be >= 4 for MainNet but is {}",
+                self.outbound_target
+            ));
+        }
+        if self.max_known_peers < self.outbound_target {
+            return Err(format!(
+                "max_known_peers ({}) must be >= outbound_target ({}) for MainNet",
+                self.max_known_peers, self.outbound_target
+            ));
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// T226: P2P Liveness Configuration
+// ============================================================================
+
+/// Configuration for peer liveness scoring (T226).
+///
+/// Controls periodic heartbeat probes to connected peers and scoring
+/// behavior. Peers that fail heartbeats are scored down and eventually
+/// evicted, maintaining a healthy peer set.
+///
+/// # Liveness Scoring
+///
+/// Each peer has a score from 0-100:
+/// - Initial score: 80
+/// - Successful heartbeat response: +5 (capped at 100)
+/// - Missed heartbeat: -15
+/// - Score below minimum threshold: peer is evicted
+///
+/// # Environments
+///
+/// - **DevNet v0**: Fast heartbeats (10s interval, 5s timeout, 5 failures)
+/// - **TestNet Alpha/Beta**: Standard (15s interval, 10s timeout, 4 failures)
+/// - **MainNet v0**: Conservative (15s interval, 10s timeout, 3 failures)
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::P2pLivenessConfig;
+///
+/// // MainNet configuration
+/// let config = P2pLivenessConfig::mainnet_default();
+/// assert_eq!(config.heartbeat_interval_secs, 15);
+/// assert_eq!(config.heartbeat_timeout_secs, 10);
+/// assert_eq!(config.max_heartbeat_failures, 3);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct P2pLivenessConfig {
+    /// Interval between heartbeat probes (seconds).
+    ///
+    /// Controls how often the node sends Ping messages to connected peers.
+    /// Must be > 0 for MainNet.
+    ///
+    /// Recommended values:
+    /// - DevNet: 10 seconds
+    /// - TestNet Alpha/Beta: 15 seconds
+    /// - MainNet: 15 seconds
+    pub heartbeat_interval_secs: u32,
+
+    /// Timeout for heartbeat responses (seconds).
+    ///
+    /// If a peer doesn't respond to a Ping within this time,
+    /// the heartbeat is considered missed.
+    ///
+    /// Should be less than `heartbeat_interval_secs`.
+    ///
+    /// Recommended values:
+    /// - DevNet: 5 seconds
+    /// - TestNet Alpha/Beta: 10 seconds
+    /// - MainNet: 10 seconds
+    pub heartbeat_timeout_secs: u32,
+
+    /// Maximum consecutive heartbeat failures before eviction.
+    ///
+    /// When a peer misses this many consecutive heartbeats,
+    /// it is evicted and marked as unhealthy.
+    /// Must be > 0 for MainNet.
+    ///
+    /// Recommended values:
+    /// - DevNet: 5
+    /// - TestNet Alpha/Beta: 4
+    /// - MainNet: 3 (stricter for production)
+    pub max_heartbeat_failures: u32,
+}
+
+impl Default for P2pLivenessConfig {
+    fn default() -> Self {
+        Self::devnet_default()
+    }
+}
+
+impl P2pLivenessConfig {
+    /// Create a disabled/permissive liveness configuration.
+    ///
+    /// Very long intervals and high failure threshold.
+    /// Only for use in testing. Not recommended for production.
+    pub fn disabled() -> Self {
+        Self {
+            heartbeat_interval_secs: 3600, // 1 hour
+            heartbeat_timeout_secs: 1800,  // 30 minutes
+            max_heartbeat_failures: 100,   // Effectively disabled
+        }
+    }
+
+    /// Create a DevNet liveness configuration (T226).
+    ///
+    /// Fast heartbeats for quick failure detection in dev:
+    /// - heartbeat_interval_secs: 10
+    /// - heartbeat_timeout_secs: 5
+    /// - max_heartbeat_failures: 5
+    pub fn devnet_default() -> Self {
+        Self {
+            heartbeat_interval_secs: 10,
+            heartbeat_timeout_secs: 5,
+            max_heartbeat_failures: 5,
+        }
+    }
+
+    /// Create a TestNet Alpha liveness configuration (T226).
+    ///
+    /// - heartbeat_interval_secs: 15
+    /// - heartbeat_timeout_secs: 10
+    /// - max_heartbeat_failures: 4
+    pub fn testnet_alpha_default() -> Self {
+        Self {
+            heartbeat_interval_secs: 15,
+            heartbeat_timeout_secs: 10,
+            max_heartbeat_failures: 4,
+        }
+    }
+
+    /// Create a TestNet Beta liveness configuration (T226).
+    ///
+    /// Same as TestNet Alpha:
+    /// - heartbeat_interval_secs: 15
+    /// - heartbeat_timeout_secs: 10
+    /// - max_heartbeat_failures: 4
+    pub fn testnet_beta_default() -> Self {
+        Self::testnet_alpha_default()
+    }
+
+    /// Create a MainNet liveness configuration (T226).
+    ///
+    /// Conservative settings for production:
+    /// - heartbeat_interval_secs: 15
+    /// - heartbeat_timeout_secs: 10
+    /// - max_heartbeat_failures: 3 (stricter than testnet)
+    pub fn mainnet_default() -> Self {
+        Self {
+            heartbeat_interval_secs: 15,
+            heartbeat_timeout_secs: 10,
+            max_heartbeat_failures: 3,
+        }
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - heartbeat_interval_secs must be > 0
+    /// - max_heartbeat_failures must be > 0
+    /// - heartbeat_timeout_secs should be < heartbeat_interval_secs (warning only)
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if self.heartbeat_interval_secs == 0 {
+            return Err("heartbeat_interval_secs must be > 0 for MainNet".to_string());
+        }
+        if self.max_heartbeat_failures == 0 {
+            return Err("max_heartbeat_failures must be > 0 for MainNet".to_string());
+        }
+        // Timeout should be less than interval for sensible behavior
+        if self.heartbeat_timeout_secs >= self.heartbeat_interval_secs {
+            eprintln!(
+                "[T226] Warning: heartbeat_timeout_secs ({}) >= heartbeat_interval_secs ({}); \
+                 this may cause unnecessary false positives",
+                self.heartbeat_timeout_secs, self.heartbeat_interval_secs
+            );
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T170: NetworkTransportConfig
 // ============================================================================
 
@@ -2228,6 +2586,28 @@ pub struct NodeConfig {
     /// - TestNet Beta: Enforce (test enforcement behavior)
     /// - MainNet v0: Enforce (required; validated by invariants)
     pub mempool_eviction: MempoolEvictionConfig,
+
+    // ========================================================================
+    // T226: P2P Discovery and Liveness Configuration
+    // ========================================================================
+    /// P2P dynamic peer discovery configuration (T226).
+    ///
+    /// Controls how the node discovers and maintains connections to peers
+    /// beyond static bootstrap peers.
+    ///
+    /// - DevNet v0: Fast intervals (10s) for testing
+    /// - TestNet Alpha/Beta: Standard intervals (30s)
+    /// - MainNet v0: **Required** (enabled must be true)
+    pub p2p_discovery: P2pDiscoveryConfig,
+
+    /// P2P peer liveness scoring configuration (T226).
+    ///
+    /// Controls periodic heartbeat probes and liveness scoring behavior.
+    ///
+    /// - DevNet v0: Fast heartbeats (10s interval, 5s timeout)
+    /// - TestNet Alpha/Beta: Standard (15s interval, 10s timeout)
+    /// - MainNet v0: Conservative (15s interval, 10s timeout, 3 max failures)
+    pub p2p_liveness: P2pLivenessConfig,
 }
 
 impl Default for NodeConfig {
@@ -2273,6 +2653,9 @@ impl Default for NodeConfig {
             mempool_dos: MempoolDosConfig::devnet_default(),
             // T219: DevNet-style loose limits for backward compatibility
             mempool_eviction: MempoolEvictionConfig::devnet_default(),
+            // T226: DevNet discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+            p2p_liveness: P2pLivenessConfig::devnet_default(),
         }
     }
 }
@@ -2315,6 +2698,9 @@ impl NodeConfig {
             mempool_dos: MempoolDosConfig::devnet_default(),
             // T219: DevNet-style loose limits for backward compatibility
             mempool_eviction: MempoolEvictionConfig::devnet_default(),
+            // T226: DevNet discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+            p2p_liveness: P2pLivenessConfig::devnet_default(),
         }
     }
 
@@ -2356,6 +2742,9 @@ impl NodeConfig {
             mempool_dos: MempoolDosConfig::devnet_default(),
             // T219: DevNet-style loose limits for backward compatibility
             mempool_eviction: MempoolEvictionConfig::devnet_default(),
+            // T226: DevNet discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+            p2p_liveness: P2pLivenessConfig::devnet_default(),
         }
     }
 
@@ -2445,6 +2834,9 @@ impl NodeConfig {
             mempool_dos: MempoolDosConfig::devnet_default(),
             // T219: DevNet-style loose limits (no rate limiting)
             mempool_eviction: MempoolEvictionConfig::devnet_default(),
+            // T226: DevNet discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+            p2p_liveness: P2pLivenessConfig::devnet_default(),
         }
     }
 
@@ -2509,6 +2901,9 @@ impl NodeConfig {
             mempool_dos: MempoolDosConfig::disabled(),
             // T219: Warn mode for TestNet Alpha (observability)
             mempool_eviction: MempoolEvictionConfig::testnet_alpha_default(),
+            // T226: TestNet Alpha discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::testnet_alpha_default(),
+            p2p_liveness: P2pLivenessConfig::testnet_alpha_default(),
         }
     }
 
@@ -2586,6 +2981,9 @@ impl NodeConfig {
             mempool_dos: MempoolDosConfig::testnet_beta_default(),
             // T219: Enforce mode for TestNet Beta (test enforcement behavior)
             mempool_eviction: MempoolEvictionConfig::testnet_beta_default(),
+            // T226: TestNet Beta discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::testnet_beta_default(),
+            p2p_liveness: P2pLivenessConfig::testnet_beta_default(),
         }
     }
 
@@ -2675,6 +3073,9 @@ impl NodeConfig {
             mempool_dos: MempoolDosConfig::mainnet_default(),
             // T219: Conservative eviction rate limits for MainNet (required)
             mempool_eviction: MempoolEvictionConfig::mainnet_default(),
+            // T226: MainNet discovery and liveness defaults
+            p2p_discovery: P2pDiscoveryConfig::mainnet_default(),
+            p2p_liveness: P2pLivenessConfig::mainnet_default(),
         }
     }
 
@@ -3173,6 +3574,50 @@ impl NodeConfig {
     /// ```
     pub fn with_mempool_eviction_config(mut self, config: MempoolEvictionConfig) -> Self {
         self.mempool_eviction = config;
+        self
+    }
+
+    // ========================================================================
+    // T226: P2P Discovery and Liveness Builder Methods
+    // ========================================================================
+
+    /// Set the P2P discovery configuration (T226).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The P2P discovery configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, P2pDiscoveryConfig};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_discovery_config(P2pDiscoveryConfig::mainnet_default());
+    /// assert!(config.p2p_discovery.enabled);
+    /// ```
+    pub fn with_discovery_config(mut self, config: P2pDiscoveryConfig) -> Self {
+        self.p2p_discovery = config;
+        self
+    }
+
+    /// Set the P2P liveness configuration (T226).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The P2P liveness configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, P2pLivenessConfig};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_liveness_config(P2pLivenessConfig::mainnet_default());
+    /// assert_eq!(config.p2p_liveness.max_heartbeat_failures, 3);
+    /// ```
+    pub fn with_liveness_config(mut self, config: P2pLivenessConfig) -> Self {
+        self.p2p_liveness = config;
         self
     }
 
@@ -3753,6 +4198,18 @@ impl NodeConfig {
             return Err(MainnetConfigError::MempoolEvictionMisconfigured { reason });
         }
 
+        // 26. P2P discovery must be valid for MainNet (T226)
+        // MainNet requires dynamic peer discovery to maintain a healthy peer set.
+        if let Err(reason) = self.p2p_discovery.validate_for_mainnet() {
+            return Err(MainnetConfigError::P2pDiscoveryMisconfigured { reason });
+        }
+
+        // 27. P2P liveness must be valid for MainNet (T226)
+        // MainNet requires liveness probing to detect and evict unhealthy peers.
+        if let Err(reason) = self.p2p_liveness.validate_for_mainnet() {
+            return Err(MainnetConfigError::P2pLivenessMisconfigured { reason });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -3995,6 +4452,24 @@ pub enum MainnetConfigError {
     /// - interval_secs must be >= 1
     /// - max_evictions_per_interval must be reasonable (< 1,000,000)
     MempoolEvictionMisconfigured { reason: String },
+
+    // ========================================================================
+    // T226: P2P Discovery and Liveness Errors
+    // ========================================================================
+    /// P2P discovery configuration is invalid for MainNet (T226).
+    ///
+    /// MainNet requires dynamic peer discovery:
+    /// - enabled must be true
+    /// - outbound_target must be >= 4
+    /// - max_known_peers must be >= outbound_target
+    P2pDiscoveryMisconfigured { reason: String },
+
+    /// P2P liveness configuration is invalid for MainNet (T226).
+    ///
+    /// MainNet requires peer liveness probing:
+    /// - heartbeat_interval_secs must be > 0
+    /// - max_heartbeat_failures must be > 0
+    P2pLivenessMisconfigured { reason: String },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -4212,6 +4687,21 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: mempool eviction rate limiting configuration is invalid: {}",
+                    reason
+                )
+            }
+            // T226: P2P discovery and liveness errors
+            MainnetConfigError::P2pDiscoveryMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: P2P discovery configuration is invalid: {}",
+                    reason
+                )
+            }
+            MainnetConfigError::P2pLivenessMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: P2P liveness configuration is invalid: {}",
                     reason
                 )
             }
@@ -5601,5 +6091,283 @@ mod tests {
             crate::p2p_diversity::DiversityEnforcementMode::Off,
             "TestNet Alpha should allow diversity_mode = Off"
         );
+    }
+
+    // ========================================================================
+    // T226: P2P Discovery and Liveness Config Tests
+    // ========================================================================
+
+    #[test]
+    fn test_p2p_discovery_config_devnet_default() {
+        let config = P2pDiscoveryConfig::devnet_default();
+        assert!(config.enabled);
+        assert_eq!(config.interval_secs, 10);
+        assert_eq!(config.max_known_peers, 200);
+        assert_eq!(config.outbound_target, 4);
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_testnet_alpha_default() {
+        let config = P2pDiscoveryConfig::testnet_alpha_default();
+        assert!(config.enabled);
+        assert_eq!(config.interval_secs, 30);
+        assert_eq!(config.max_known_peers, 200);
+        assert_eq!(config.outbound_target, 8);
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_testnet_beta_default() {
+        let config = P2pDiscoveryConfig::testnet_beta_default();
+        assert!(config.enabled);
+        assert_eq!(config.interval_secs, 30);
+        assert_eq!(config.max_known_peers, 200);
+        assert_eq!(config.outbound_target, 8);
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_mainnet_default() {
+        let config = P2pDiscoveryConfig::mainnet_default();
+        assert!(config.enabled);
+        assert_eq!(config.interval_secs, 30);
+        assert_eq!(config.max_known_peers, 300);
+        assert_eq!(config.outbound_target, 8);
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_disabled() {
+        let config = P2pDiscoveryConfig::disabled();
+        assert!(!config.enabled);
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_validate_mainnet_success() {
+        let config = P2pDiscoveryConfig::mainnet_default();
+        assert!(config.validate_for_mainnet().is_ok());
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_validate_mainnet_disabled() {
+        let config = P2pDiscoveryConfig::disabled();
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("discovery must be enabled"));
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_validate_mainnet_low_outbound() {
+        let config = P2pDiscoveryConfig {
+            enabled: true,
+            interval_secs: 30,
+            max_known_peers: 200,
+            outbound_target: 2, // Below minimum of 4
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("outbound_target must be >= 4"));
+    }
+
+    #[test]
+    fn test_p2p_discovery_config_validate_mainnet_max_known_too_low() {
+        let config = P2pDiscoveryConfig {
+            enabled: true,
+            interval_secs: 30,
+            max_known_peers: 5, // Less than outbound_target
+            outbound_target: 8,
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("max_known_peers"));
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_devnet_default() {
+        let config = P2pLivenessConfig::devnet_default();
+        assert_eq!(config.heartbeat_interval_secs, 10);
+        assert_eq!(config.heartbeat_timeout_secs, 5);
+        assert_eq!(config.max_heartbeat_failures, 5);
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_testnet_alpha_default() {
+        let config = P2pLivenessConfig::testnet_alpha_default();
+        assert_eq!(config.heartbeat_interval_secs, 15);
+        assert_eq!(config.heartbeat_timeout_secs, 10);
+        assert_eq!(config.max_heartbeat_failures, 4);
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_testnet_beta_default() {
+        let config = P2pLivenessConfig::testnet_beta_default();
+        assert_eq!(config.heartbeat_interval_secs, 15);
+        assert_eq!(config.heartbeat_timeout_secs, 10);
+        assert_eq!(config.max_heartbeat_failures, 4);
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_mainnet_default() {
+        let config = P2pLivenessConfig::mainnet_default();
+        assert_eq!(config.heartbeat_interval_secs, 15);
+        assert_eq!(config.heartbeat_timeout_secs, 10);
+        assert_eq!(config.max_heartbeat_failures, 3);
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_disabled() {
+        let config = P2pLivenessConfig::disabled();
+        assert_eq!(config.heartbeat_interval_secs, 3600);
+        assert_eq!(config.heartbeat_timeout_secs, 1800);
+        assert_eq!(config.max_heartbeat_failures, 100);
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_validate_mainnet_success() {
+        let config = P2pLivenessConfig::mainnet_default();
+        assert!(config.validate_for_mainnet().is_ok());
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_validate_mainnet_zero_interval() {
+        let config = P2pLivenessConfig {
+            heartbeat_interval_secs: 0,
+            heartbeat_timeout_secs: 5,
+            max_heartbeat_failures: 3,
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("heartbeat_interval_secs must be > 0"));
+    }
+
+    #[test]
+    fn test_p2p_liveness_config_validate_mainnet_zero_failures() {
+        let config = P2pLivenessConfig {
+            heartbeat_interval_secs: 15,
+            heartbeat_timeout_secs: 10,
+            max_heartbeat_failures: 0,
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("max_heartbeat_failures must be > 0"));
+    }
+
+    #[test]
+    fn test_node_config_preset_discovery_liveness() {
+        // DevNet preset
+        let devnet = NodeConfig::devnet_v0_preset();
+        assert!(devnet.p2p_discovery.enabled);
+        assert_eq!(devnet.p2p_discovery.interval_secs, 10);
+        assert_eq!(devnet.p2p_liveness.heartbeat_interval_secs, 10);
+        assert_eq!(devnet.p2p_liveness.max_heartbeat_failures, 5);
+
+        // TestNet Alpha preset
+        let alpha = NodeConfig::testnet_alpha_preset();
+        assert!(alpha.p2p_discovery.enabled);
+        assert_eq!(alpha.p2p_discovery.interval_secs, 30);
+        assert_eq!(alpha.p2p_liveness.heartbeat_interval_secs, 15);
+        assert_eq!(alpha.p2p_liveness.max_heartbeat_failures, 4);
+
+        // TestNet Beta preset
+        let beta = NodeConfig::testnet_beta_preset();
+        assert!(beta.p2p_discovery.enabled);
+        assert_eq!(beta.p2p_discovery.interval_secs, 30);
+        assert_eq!(beta.p2p_liveness.heartbeat_interval_secs, 15);
+        assert_eq!(beta.p2p_liveness.max_heartbeat_failures, 4);
+
+        // MainNet preset
+        let mainnet = NodeConfig::mainnet_preset();
+        assert!(mainnet.p2p_discovery.enabled);
+        assert_eq!(mainnet.p2p_discovery.interval_secs, 30);
+        assert_eq!(mainnet.p2p_discovery.max_known_peers, 300);
+        assert_eq!(mainnet.p2p_liveness.heartbeat_interval_secs, 15);
+        assert_eq!(mainnet.p2p_liveness.max_heartbeat_failures, 3);
+    }
+
+    #[test]
+    fn test_node_config_with_discovery_config() {
+        let custom_discovery = P2pDiscoveryConfig {
+            enabled: true,
+            interval_secs: 60,
+            max_known_peers: 500,
+            outbound_target: 16,
+        };
+        let config = NodeConfig::mainnet_preset()
+            .with_discovery_config(custom_discovery.clone());
+        assert_eq!(config.p2p_discovery.interval_secs, 60);
+        assert_eq!(config.p2p_discovery.max_known_peers, 500);
+        assert_eq!(config.p2p_discovery.outbound_target, 16);
+    }
+
+    #[test]
+    fn test_node_config_with_liveness_config() {
+        let custom_liveness = P2pLivenessConfig {
+            heartbeat_interval_secs: 30,
+            heartbeat_timeout_secs: 20,
+            max_heartbeat_failures: 5,
+        };
+        let config = NodeConfig::mainnet_preset()
+            .with_liveness_config(custom_liveness.clone());
+        assert_eq!(config.p2p_liveness.heartbeat_interval_secs, 30);
+        assert_eq!(config.p2p_liveness.heartbeat_timeout_secs, 20);
+        assert_eq!(config.p2p_liveness.max_heartbeat_failures, 5);
+    }
+
+    #[test]
+    fn test_mainnet_validation_discovery_disabled() {
+        let mut config = NodeConfig::mainnet_preset()
+            .with_data_dir("/data/qbind")
+            .with_signer_keystore_path("/data/keystore")
+            .with_snapshot_dir("/data/snapshots");
+        config.p2p_discovery = P2pDiscoveryConfig::disabled();
+
+        let result = config.validate_mainnet_invariants();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MainnetConfigError::P2pDiscoveryMisconfigured { reason } => {
+                assert!(reason.contains("discovery must be enabled"));
+            }
+            e => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_liveness_invalid() {
+        let mut config = NodeConfig::mainnet_preset()
+            .with_data_dir("/data/qbind")
+            .with_signer_keystore_path("/data/keystore")
+            .with_snapshot_dir("/data/snapshots");
+        config.p2p_liveness = P2pLivenessConfig {
+            heartbeat_interval_secs: 0,
+            heartbeat_timeout_secs: 5,
+            max_heartbeat_failures: 3,
+        };
+
+        let result = config.validate_mainnet_invariants();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MainnetConfigError::P2pLivenessMisconfigured { reason } => {
+                assert!(reason.contains("heartbeat_interval_secs must be > 0"));
+            }
+            e => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_config_error_display_discovery() {
+        let error = MainnetConfigError::P2pDiscoveryMisconfigured {
+            reason: "discovery must be enabled for MainNet".to_string(),
+        };
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("P2P discovery configuration is invalid"));
+        assert!(error_str.contains("discovery must be enabled"));
+    }
+
+    #[test]
+    fn test_mainnet_config_error_display_liveness() {
+        let error = MainnetConfigError::P2pLivenessMisconfigured {
+            reason: "heartbeat_interval_secs must be > 0".to_string(),
+        };
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("P2P liveness configuration is invalid"));
+        assert!(error_str.contains("heartbeat_interval_secs"));
     }
 }

@@ -711,6 +711,9 @@ mod tests {
             mempool_dos: crate::node_config::MempoolDosConfig::devnet_default(),
             // T219 field
             mempool_eviction: crate::node_config::MempoolEvictionConfig::devnet_default(),
+            // T226 fields
+            p2p_discovery: crate::node_config::P2pDiscoveryConfig::devnet_default(),
+            p2p_liveness: crate::node_config::P2pLivenessConfig::devnet_default(),
         }
     }
 

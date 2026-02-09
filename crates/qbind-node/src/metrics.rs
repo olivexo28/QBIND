@@ -4407,6 +4407,48 @@ pub struct P2pMetrics {
     diversity_violation_warn_total: AtomicU64,
     /// Total diversity violations in enforce mode.
     diversity_violation_enforce_total: AtomicU64,
+
+    // ========================================================================
+    // T226: Enhanced Discovery and Liveness Metrics
+    // ========================================================================
+    /// Total number of discovery exchanges attempted.
+    discovery_exchange_total: AtomicU64,
+    /// Total number of successful discovery exchanges.
+    discovery_exchange_success: AtomicU64,
+    /// Total number of failed discovery exchanges.
+    discovery_exchange_failure: AtomicU64,
+    /// Total number of outbound connection attempts from discovery.
+    discovery_dial_attempt_total: AtomicU64,
+    /// Total number of successful outbound connections from discovery.
+    discovery_dial_success: AtomicU64,
+    /// Total number of failed outbound connection attempts from discovery.
+    discovery_dial_failure: AtomicU64,
+    /// Total heartbeat Pongs received (successful responses).
+    heartbeat_success_total: AtomicU64,
+    /// Total heartbeat timeouts (no Pong within timeout period).
+    heartbeat_timeout_total: AtomicU64,
+    /// Count of peers with liveness score in [90, 100] (excellent).
+    liveness_score_bucket_excellent: AtomicU64,
+    /// Count of peers with liveness score in [70, 89] (good).
+    liveness_score_bucket_good: AtomicU64,
+    /// Count of peers with liveness score in [50, 69] (fair).
+    liveness_score_bucket_fair: AtomicU64,
+    /// Count of peers with liveness score in [30, 49] (poor).
+    liveness_score_bucket_poor: AtomicU64,
+    /// Count of peers with liveness score in [0, 29] (critical - near eviction).
+    liveness_score_bucket_critical: AtomicU64,
+    /// Configuration: Discovery interval in seconds.
+    discovery_interval_secs: AtomicU64,
+    /// Configuration: Heartbeat interval in seconds.
+    heartbeat_interval_secs: AtomicU64,
+    /// Configuration: Heartbeat timeout in seconds.
+    heartbeat_timeout_secs: AtomicU64,
+    /// Configuration: Maximum heartbeat failures before eviction.
+    max_heartbeat_failures: AtomicU64,
+    /// Configuration: Target outbound peers.
+    target_outbound_peers: AtomicU64,
+    /// Configuration: Maximum known peers.
+    max_known_peers: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -4689,6 +4731,200 @@ impl P2pMetrics {
         }
     }
 
+    // ========================================================================
+    // T226: Enhanced Discovery and Liveness Metrics
+    // ========================================================================
+
+    /// Get total discovery exchanges attempted.
+    pub fn discovery_exchange_total(&self) -> u64 {
+        self.discovery_exchange_total.load(Ordering::Relaxed)
+    }
+
+    /// Record a discovery exchange result.
+    pub fn record_discovery_exchange(&self, success: bool) {
+        self.discovery_exchange_total.fetch_add(1, Ordering::Relaxed);
+        if success {
+            self.discovery_exchange_success.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.discovery_exchange_failure.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get discovery exchange success count.
+    pub fn discovery_exchange_success(&self) -> u64 {
+        self.discovery_exchange_success.load(Ordering::Relaxed)
+    }
+
+    /// Get discovery exchange failure count.
+    pub fn discovery_exchange_failure(&self) -> u64 {
+        self.discovery_exchange_failure.load(Ordering::Relaxed)
+    }
+
+    /// Record a discovery dial attempt result.
+    pub fn record_discovery_dial(&self, success: bool) {
+        self.discovery_dial_attempt_total.fetch_add(1, Ordering::Relaxed);
+        if success {
+            self.discovery_dial_success.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.discovery_dial_failure.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Get total discovery dial attempts.
+    pub fn discovery_dial_attempt_total(&self) -> u64 {
+        self.discovery_dial_attempt_total.load(Ordering::Relaxed)
+    }
+
+    /// Get discovery dial success count.
+    pub fn discovery_dial_success(&self) -> u64 {
+        self.discovery_dial_success.load(Ordering::Relaxed)
+    }
+
+    /// Get discovery dial failure count.
+    pub fn discovery_dial_failure(&self) -> u64 {
+        self.discovery_dial_failure.load(Ordering::Relaxed)
+    }
+
+    /// Record heartbeat success (Pong received).
+    pub fn record_heartbeat_success(&self) {
+        self.heartbeat_success_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total successful heartbeats.
+    pub fn heartbeat_success_total(&self) -> u64 {
+        self.heartbeat_success_total.load(Ordering::Relaxed)
+    }
+
+    /// Record heartbeat timeout.
+    pub fn record_heartbeat_timeout(&self) {
+        self.heartbeat_timeout_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total heartbeat timeouts.
+    pub fn heartbeat_timeout_total(&self) -> u64 {
+        self.heartbeat_timeout_total.load(Ordering::Relaxed)
+    }
+
+    /// Update liveness score bucket counts based on current peer scores.
+    ///
+    /// # Arguments
+    /// * `scores` - Slice of liveness scores (0-100) for all connected peers
+    ///
+    /// # Panics (debug mode only)
+    /// Debug builds will panic if any score exceeds 100, which indicates a bug
+    /// in score calculation logic.
+    pub fn update_liveness_score_buckets(&self, scores: &[u8]) {
+        let mut excellent = 0u64;
+        let mut good = 0u64;
+        let mut fair = 0u64;
+        let mut poor = 0u64;
+        let mut critical = 0u64;
+
+        for &score in scores {
+            // Debug assertion to catch invalid scores during development
+            debug_assert!(
+                score <= 100,
+                "Invalid liveness score {}: scores must be 0-100",
+                score
+            );
+
+            match score {
+                90..=100 => excellent += 1,
+                70..=89 => good += 1,
+                50..=69 => fair += 1,
+                30..=49 => poor += 1,
+                0..=29 => critical += 1,
+                _ => {
+                    // Score > 100: log warning in release mode (debug asserts above)
+                    #[cfg(not(debug_assertions))]
+                    eprintln!(
+                        "[T226] Warning: Invalid liveness score {} ignored (expected 0-100)",
+                        score
+                    );
+                }
+            }
+        }
+
+        self.liveness_score_bucket_excellent.store(excellent, Ordering::Relaxed);
+        self.liveness_score_bucket_good.store(good, Ordering::Relaxed);
+        self.liveness_score_bucket_fair.store(fair, Ordering::Relaxed);
+        self.liveness_score_bucket_poor.store(poor, Ordering::Relaxed);
+        self.liveness_score_bucket_critical.store(critical, Ordering::Relaxed);
+    }
+
+    /// Get count of peers with excellent liveness score (90-100).
+    pub fn liveness_score_bucket_excellent(&self) -> u64 {
+        self.liveness_score_bucket_excellent.load(Ordering::Relaxed)
+    }
+
+    /// Get count of peers with good liveness score (70-89).
+    pub fn liveness_score_bucket_good(&self) -> u64 {
+        self.liveness_score_bucket_good.load(Ordering::Relaxed)
+    }
+
+    /// Get count of peers with fair liveness score (50-69).
+    pub fn liveness_score_bucket_fair(&self) -> u64 {
+        self.liveness_score_bucket_fair.load(Ordering::Relaxed)
+    }
+
+    /// Get count of peers with poor liveness score (30-49).
+    pub fn liveness_score_bucket_poor(&self) -> u64 {
+        self.liveness_score_bucket_poor.load(Ordering::Relaxed)
+    }
+
+    /// Get count of peers with critical liveness score (0-29).
+    pub fn liveness_score_bucket_critical(&self) -> u64 {
+        self.liveness_score_bucket_critical.load(Ordering::Relaxed)
+    }
+
+    /// Set configuration metrics from P2pDiscoveryConfig and P2pLivenessConfig (T226).
+    pub fn set_config_from_t226(
+        &self,
+        discovery_interval: u32,
+        heartbeat_interval: u32,
+        heartbeat_timeout: u32,
+        max_failures: u32,
+        target_outbound: u32,
+        max_known: u32,
+    ) {
+        self.discovery_interval_secs.store(discovery_interval as u64, Ordering::Relaxed);
+        self.heartbeat_interval_secs.store(heartbeat_interval as u64, Ordering::Relaxed);
+        self.heartbeat_timeout_secs.store(heartbeat_timeout as u64, Ordering::Relaxed);
+        self.max_heartbeat_failures.store(max_failures as u64, Ordering::Relaxed);
+        self.target_outbound_peers.store(target_outbound as u64, Ordering::Relaxed);
+        self.max_known_peers.store(max_known as u64, Ordering::Relaxed);
+    }
+
+    /// Get configured discovery interval in seconds.
+    pub fn config_discovery_interval_secs(&self) -> u64 {
+        self.discovery_interval_secs.load(Ordering::Relaxed)
+    }
+
+    /// Get configured heartbeat interval in seconds.
+    pub fn config_heartbeat_interval_secs(&self) -> u64 {
+        self.heartbeat_interval_secs.load(Ordering::Relaxed)
+    }
+
+    /// Get configured heartbeat timeout in seconds.
+    pub fn config_heartbeat_timeout_secs(&self) -> u64 {
+        self.heartbeat_timeout_secs.load(Ordering::Relaxed)
+    }
+
+    /// Get configured max heartbeat failures.
+    pub fn config_max_heartbeat_failures(&self) -> u64 {
+        self.max_heartbeat_failures.load(Ordering::Relaxed)
+    }
+
+    /// Get configured target outbound peers.
+    pub fn config_target_outbound_peers(&self) -> u64 {
+        self.target_outbound_peers.load(Ordering::Relaxed)
+    }
+
+    /// Get configured max known peers.
+    pub fn config_max_known_peers(&self) -> u64 {
+        self.max_known_peers.load(Ordering::Relaxed)
+    }
+
     /// Format P2P metrics as Prometheus-compatible output.
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
@@ -4796,6 +5032,89 @@ impl P2pMetrics {
         output.push_str(&format!(
             "qbind_p2p_diversity_violation_total{{mode=\"enforce\"}} {}\n",
             self.diversity_violation_enforce_total()
+        ));
+
+        // T226: Enhanced discovery and liveness metrics
+        output.push_str("\n# P2P discovery and liveness metrics (T226)\n");
+        output.push_str(&format!(
+            "qbind_p2p_discovery_exchange_total {}\n",
+            self.discovery_exchange_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_discovery_exchange_success_total {}\n",
+            self.discovery_exchange_success()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_discovery_exchange_failure_total {}\n",
+            self.discovery_exchange_failure()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_discovery_dial_attempt_total {}\n",
+            self.discovery_dial_attempt_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_discovery_dial_success_total {}\n",
+            self.discovery_dial_success()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_discovery_dial_failure_total {}\n",
+            self.discovery_dial_failure()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_heartbeat_success_total {}\n",
+            self.heartbeat_success_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_heartbeat_timeout_total {}\n",
+            self.heartbeat_timeout_total()
+        ));
+
+        // T226: Liveness score bucket distribution
+        output.push_str(&format!(
+            "qbind_p2p_liveness_score_bucket{{range=\"excellent\"}} {}\n",
+            self.liveness_score_bucket_excellent()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_liveness_score_bucket{{range=\"good\"}} {}\n",
+            self.liveness_score_bucket_good()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_liveness_score_bucket{{range=\"fair\"}} {}\n",
+            self.liveness_score_bucket_fair()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_liveness_score_bucket{{range=\"poor\"}} {}\n",
+            self.liveness_score_bucket_poor()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_liveness_score_bucket{{range=\"critical\"}} {}\n",
+            self.liveness_score_bucket_critical()
+        ));
+
+        // T226: Configuration gauges
+        output.push_str(&format!(
+            "qbind_p2p_config_discovery_interval_secs {}\n",
+            self.config_discovery_interval_secs()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_config_heartbeat_interval_secs {}\n",
+            self.config_heartbeat_interval_secs()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_config_heartbeat_timeout_secs {}\n",
+            self.config_heartbeat_timeout_secs()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_config_max_heartbeat_failures {}\n",
+            self.config_max_heartbeat_failures()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_config_target_outbound_peers {}\n",
+            self.config_target_outbound_peers()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_config_max_known_peers {}\n",
+            self.config_max_known_peers()
         ));
 
         output

@@ -40,7 +40,8 @@ use crate::node_config::{
     parse_execution_profile, parse_mempool_mode, parse_network_mode, parse_signer_mode,
     parse_state_retention_mode, DagCouplingMode, FastSyncConfig, MempoolDosConfig,
     MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
-    ParseEnvironmentError, SignerFailureMode, SignerMode, SnapshotConfig, StateRetentionConfig,
+    P2pDiscoveryConfig, P2pLivenessConfig, ParseEnvironmentError, SignerFailureMode, SignerMode,
+    SnapshotConfig, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
@@ -622,6 +623,9 @@ impl CliArgs {
                 mempool_dos: MempoolDosConfig::devnet_default(),
                 // T219: DevNet-style loose limits for legacy path
                 mempool_eviction: MempoolEvictionConfig::devnet_default(),
+                // T226: DevNet discovery and liveness defaults for legacy path
+                p2p_discovery: P2pDiscoveryConfig::devnet_default(),
+                p2p_liveness: P2pLivenessConfig::devnet_default(),
             }
         };
 

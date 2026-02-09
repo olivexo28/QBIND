@@ -363,6 +363,7 @@ impl ActiveFaults {
     }
 
     /// Apply a fault event, returns the fault ID.
+    #[allow(dead_code)]
     fn apply(&mut self, event: &FaultEvent, start_time_ms: u64) -> usize {
         let fault_id = self.next_fault_id;
         self.next_fault_id += 1;
@@ -440,6 +441,7 @@ impl ActiveFaults {
     }
 
     /// Check if messages between two nodes are blocked by partition.
+    #[allow(dead_code)]
     fn is_partitioned(&self, from_node: usize, to_node: usize) -> bool {
         if let Some((_, side_a, side_b)) = &self.partition {
             let from_in_a = side_a.contains(&from_node);
@@ -455,6 +457,7 @@ impl ActiveFaults {
     }
 
     /// Get the drop probability for messages from/to a node.
+    #[allow(dead_code)]
     fn drop_probability(&self, _from: usize, _to: usize, _kind: MessageKind) -> u8 {
         // Return max drop probability from active rules
         self.message_drops
@@ -470,6 +473,7 @@ impl ActiveFaults {
     }
 
     /// Check if there are any active faults.
+    #[allow(dead_code)]
     fn has_active_faults(&self) -> bool {
         !self.fault_end_times.is_empty()
     }
@@ -833,7 +837,9 @@ pub struct ChaosClusterHandle {
     node_handles: Vec<ChaosNodeHandle>,
     harnesses: Vec<NodeHotstuffHarness>,
     mempools: Vec<Arc<InMemoryMempool>>,
+    #[allow(dead_code)]
     dag_mempools: Vec<Arc<InMemoryDagMempool>>,
+    #[allow(dead_code)]
     dag_metrics: Vec<Arc<DagMempoolMetrics>>,
     #[allow(dead_code)]
     execution_services: Vec<Arc<SingleThreadExecutionService>>,

@@ -1538,6 +1538,7 @@ struct EvictionWindow {
 
 impl EvictionWindow {
     /// Create a new eviction window starting at the given timestamp.
+    #[allow(dead_code)]
     fn new(start_ms: u64) -> Self {
         Self {
             window_start_ms: start_ms,
