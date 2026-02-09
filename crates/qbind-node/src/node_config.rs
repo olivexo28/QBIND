@@ -4422,6 +4422,31 @@ impl NodeConfig {
         self
     }
 
+    /// Set the genesis file path (T232).
+    ///
+    /// This configures the path to an external genesis file for MainNet.
+    /// For MainNet, this is required - the node must use an externally
+    /// provided genesis file rather than an embedded one.
+    ///
+    /// Note: This method also sets `use_external = true` to ensure the
+    /// configuration is correctly set up for external genesis loading.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Path to the genesis file
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_genesis_path("/etc/qbind/genesis.json");
+    /// ```
+    pub fn with_genesis_path<P: Into<PathBuf>>(mut self, path: P) -> Self {
+        self.genesis_source.use_external = true;
+        self.genesis_source.genesis_path = Some(path.into());
+        self
+    }
+
     /// Create a TestNet Beta preset with LocalMesh for CI-friendly testing (T180).
     ///
     /// This is the same as `testnet_beta_preset()` but forces:
@@ -6467,6 +6492,7 @@ mod tests {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
+            .with_genesis_path("/tmp/test/genesis.json")
             .with_stage_b_enabled(false);
 
         // MainNet validation should still pass (Stage B is allowed but not required)
@@ -6481,7 +6507,8 @@ mod tests {
     fn test_mainnet_validates_with_stage_b_enabled() {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
-            .with_signer_keystore_path("/tmp/test/keystore.json");
+            .with_signer_keystore_path("/tmp/test/keystore.json")
+            .with_genesis_path("/tmp/test/genesis.json");
 
         // MainNet validation should pass
         let result = config.validate_mainnet_invariants();
@@ -6662,6 +6689,7 @@ mod tests {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
+            .with_genesis_path("/tmp/test/genesis.json")
             .with_dag_coupling_mode(DagCouplingMode::Enforce);
 
         let result = config.validate_mainnet_invariants();
@@ -6749,6 +6777,7 @@ mod tests {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
+            .with_genesis_path("/tmp/test/genesis.json")
             .with_monetary_mode(MonetaryMode::Active)
             .with_monetary_accounts(accounts);
 
@@ -6879,7 +6908,8 @@ mod tests {
     fn test_mainnet_validation_accepts_diversity_enforce() {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
-            .with_signer_keystore_path("/tmp/test/keystore.json");
+            .with_signer_keystore_path("/tmp/test/keystore.json")
+            .with_genesis_path("/tmp/test/genesis.json");
 
         let result = config.validate_mainnet_invariants();
         assert!(

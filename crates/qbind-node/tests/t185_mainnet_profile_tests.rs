@@ -181,6 +181,7 @@ fn config_profile_mainnet_display() {
 fn validate_mainnet_invariants_accepts_canonical_config() {
     let config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
+        .with_genesis_path("/data/qbind/genesis.json")
         .with_signer_keystore_path("/data/qbind/keystore"); // T210: Must provide keystore path
 
     let result = config.validate_mainnet_invariants();
@@ -822,6 +823,7 @@ fn validate_mainnet_invariants_rejects_missing_hsm_config_path() {
 fn validate_mainnet_invariants_accepts_remote_signer_with_url() {
     let config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
+        .with_genesis_path("/data/qbind/genesis.json")
         .with_signer_mode(SignerMode::RemoteSigner)
         .with_remote_signer_url("grpc://localhost:50051");
 
@@ -838,6 +840,7 @@ fn validate_mainnet_invariants_accepts_remote_signer_with_url() {
 fn validate_mainnet_invariants_accepts_hsm_with_config_path() {
     let config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
+        .with_genesis_path("/data/qbind/genesis.json")
         .with_signer_mode(SignerMode::HsmPkcs11)
         .with_hsm_config_path("/etc/qbind/hsm.toml");
 
@@ -922,6 +925,7 @@ fn test_non_mainnet_allows_signer_failure_mode_log_and_continue() {
 fn validate_mainnet_invariants_accepts_exit_on_failure() {
     let config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
+        .with_genesis_path("/data/qbind/genesis.json")
         .with_signer_keystore_path("/data/qbind/keystore")
         .with_signer_failure_mode(SignerFailureMode::ExitOnFailure);
 
