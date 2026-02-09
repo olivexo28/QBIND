@@ -763,6 +763,7 @@ MainNet validators must have documented procedures for responding to key comprom
 | DAG/Availability | Medium | Partially Mitigated | Consensus coupling new |
 | P2P/Eclipse | Medium-High | Planned | Production validation needed |
 | Key Management | High | Mitigated | HSM (T211) + Remote Signer (T212) + T214 fail-closed |
+| Slashing/PQC Offenses | High | Design Ready (T227) | Design complete; implementation pending (T228+) |
 
 **Risk Areas (T211 – HSM/PKCS#11, T212 – Remote Signer, T214 – Redundancy)**:
 
@@ -771,6 +772,50 @@ MainNet validators must have documented procedures for responding to key comprom
 - Remote signer startup checks verify connectivity before consensus participation
 - **T214**: Fail-closed behavior enforced (`SignerFailureMode::ExitOnFailure` required on MainNet)
 - **T214**: Redundancy achieved via external orchestration, documented patterns available
+
+---
+
+### 6.7 PQC-Specific Slashing Rules (T227)
+
+MainNet v0 defines a slashing model for PQC-specific consensus offenses. The full design is documented in [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md).
+
+#### 6.7.1 Offense Classes Summary
+
+| ID | Offense | Severity | Slash Range |
+| :--- | :--- | :--- | :--- |
+| **O1** | Classical Double-Signing | Critical | 5–10% |
+| **O2** | Invalid Consensus Signature as Proposer | High | 5% |
+| **O3a** | Single Lazy Vote | Medium | 0–0.5% |
+| **O3b** | Repeated Lazy Votes | High | 1–3% |
+| **O4** | Invalid DAG Certificate Propagation | High | 5–10% |
+| **O5** | DAG/Consensus Coupling Violations | Medium-High | 1–5% |
+
+#### 6.7.2 PQC Verification Incentives
+
+ML-DSA-44 signature verification is ~5× more expensive than classical EdDSA. The slashing model ensures:
+
+1. **Verification is economically dominant**: Expected slash cost exceeds CPU savings from skipping verification
+2. **Lazy validators are detectable**: O3 offenses catch validators voting without verifying
+3. **DAG integrity is protected**: O4/O5 offenses protect availability layer from invalid certificates
+
+#### 6.7.3 Evidence Requirements
+
+All slashing offenses require objective, on-chain-verifiable evidence:
+
+- **O1/O2**: Conflicting signatures or invalid signature proof
+- **O3**: Vote for invalid block + proof of block invalidity
+- **O4**: Invalid DAG certificate with verification failure details
+- **O5**: Block header with invalid batch_commitment + DAG state proof
+
+#### 6.7.4 Implementation Status
+
+| Component | Status | Task |
+| :--- | :--- | :--- |
+| Slashing design | ✅ Design Ready | T227 (this) |
+| Slashing infrastructure | Planned | T228 |
+| On-chain proof verification | Planned | T228+ |
+
+**MainNet v0 Launch**: The slashing design is complete (T227). Implementation (T228+) will be scoped separately and must be included in the external audit.
 
 ---
 

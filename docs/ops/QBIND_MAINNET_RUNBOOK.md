@@ -18,6 +18,7 @@
 8. [Monetary Telemetry and Monetary Mode](#8-monetary-telemetry-and-monetary-mode)
 9. [Alerting & Dashboard Reference](#9-alerting--dashboard-reference)
 10. [Incident Playbooks](#10-incident-playbooks)
+    - [10.6 Slashing & PQC Offenses (T227)](#106-slashing--pqc-offenses-t227)
 11. [Upgrade Procedures & Governance Hooks (T224)](#11-upgrade-procedures--governance-hooks-t224)
 12. [Related Documents](#12-related-documents)
 
@@ -1414,6 +1415,224 @@ The following metrics are useful for detecting and responding to key compromise:
 | `qbind-validator-registry submit-rotation` | Submit rotation to governance | See examples above |
 | `qbind-admin dag-status` | Check DAG consistency | `qbind-admin dag-status --validator-id 42` |
 | `qbind-admin broadcast-alert` | Emergency network alert | `qbind-admin broadcast-alert --severity critical` |
+
+---
+
+### 10.6 Slashing & PQC Offenses (T227)
+
+This section provides operator-facing guidance on the PQC-specific slashing model. For the full design specification, see [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md).
+
+#### 10.6.1 Slashable Offenses Overview
+
+MainNet v0 defines the following slashable offenses related to PQC consensus operations:
+
+| ID | Offense | Slash Range | Severity |
+| :--- | :--- | :--- | :--- |
+| **O1** | Classical Double-Signing | 5–10% | Critical |
+| **O2** | Invalid Consensus Signature as Proposer | 5% | High |
+| **O3a** | Single Lazy Vote | 0–0.5% | Medium |
+| **O3b** | Repeated Lazy Votes (≥3 in 1,000 blocks) | 1–3% | High |
+| **O4** | Invalid DAG Certificate Propagation | 5–10% | High |
+| **O5** | DAG/Consensus Coupling Violations | 1–5% | Medium-High |
+
+**Critical Warning**: Operators must understand that **skipping signature verification is a slashable offense**. Validators that vote for blocks without verifying ML-DSA-44 signatures will be detected and slashed.
+
+#### 10.6.2 Common Causes of Slashable Behavior
+
+| Cause | Resulting Offense | Prevention |
+| :--- | :--- | :--- |
+| Disabling signature verification for performance | O3a/O3b | Never disable verification; use proper hardware |
+| Running unofficial/modified node software | O2, O3, O4, O5 | Only run official releases |
+| Key compromise leading to double-signing | O1 | Use HSM; follow key rotation procedures |
+| Misconfigured DAG coupling mode | O4, O5 | Use `--profile mainnet` defaults |
+| Network issues causing partial block receipt | O3a | Ensure reliable network; proper timeouts |
+
+#### 10.6.3 Dangerous Configuration Patterns
+
+**Never do any of the following on MainNet validators**:
+
+```bash
+# ❌ DANGEROUS: Skipping signature verification (hypothetical flags)
+qbind-node --skip-signature-verification  # WILL RESULT IN SLASHING
+
+# ❌ DANGEROUS: Disabling DAG coupling enforcement
+qbind-node --dag-coupling-mode off  # WILL RESULT IN O5 SLASHING
+
+# ❌ DANGEROUS: Using test/dev builds in production
+qbind-node --profile devnet --data-dir /mainnet/data  # MISCONFIGURATION
+
+# ❌ DANGEROUS: Disabling all verification for "fast sync"
+qbind-node --fast-mode --skip-verification  # WILL RESULT IN SLASHING
+```
+
+**Always use the production profile**:
+
+```bash
+# ✅ CORRECT: Standard MainNet validator configuration
+qbind-node --profile mainnet \
+    --signer-mode hsm-pkcs11 \
+    --hsm-config-path /etc/qbind/hsm.toml \
+    --data-dir /data/qbind
+```
+
+#### 10.6.4 Monitoring for Slashing Risks
+
+Watch these metrics for early warning of potential slashing:
+
+| Metric | Description | Alert Threshold |
+| :--- | :--- | :--- |
+| `qbind_consensus_invalid_sig_detected_total` | Invalid signatures detected (inbound) | > 0 |
+| `qbind_consensus_lazy_vote_warning_total` | Lazy vote warnings issued (O3a) | > 0 |
+| `qbind_dag_invalid_cert_detected_total` | Invalid DAG certificates detected | > 0 |
+| `qbind_dag_coupling_violation_total` | DAG coupling violations detected | > 0 |
+| `qbind_consensus_equivocation_detected_total` | Equivocation (double-sign) detected | > 0 |
+| `qbind_slash_events_total` | Slashing events executed | > 0 |
+| `qbind_validator_jailed` | Validator jailed status | 1 = jailed |
+
+**Example Alerting Rule** (Prometheus):
+
+```yaml
+groups:
+  - name: qbind_slashing_alerts
+    rules:
+      - alert: LazyVoteWarning
+        expr: qbind_consensus_lazy_vote_warning_total > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Validator received lazy vote warning"
+          description: "Validator {{ $labels.validator_id }} has been warned for lazy voting. Investigate immediately."
+      
+      - alert: SlashingEventDetected
+        expr: increase(qbind_slash_events_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Slashing event detected"
+          description: "A slashing event has been executed. Check validator status immediately."
+      
+      - alert: ValidatorJailed
+        expr: qbind_validator_jailed == 1
+        labels:
+          severity: critical
+        annotations:
+          summary: "Validator is jailed"
+          description: "Validator has been jailed due to slashing. Manual intervention required."
+```
+
+#### 10.6.5 Responding to Slashing Warnings (O3a)
+
+**Severity**: Medium
+
+**Symptoms**:
+- `qbind_consensus_lazy_vote_warning_total` increasing
+- Log messages: `[WARN] Lazy vote detected for block <hash>`
+- Single warning received from network
+
+**Immediate Actions**:
+
+1. **Review recent logs** for context:
+   ```bash
+   journalctl -u qbind-node --since "1 hour ago" | grep -i "lazy\|invalid\|warning"
+   ```
+
+2. **Check node configuration**:
+   ```bash
+   qbind-node --profile mainnet --validate-only --data-dir /data/qbind
+   ```
+
+3. **Verify signature verification is enabled**:
+   ```bash
+   curl -s http://localhost:9090/metrics | grep qbind_consensus_sig_verification_enabled
+   # Should show: qbind_consensus_sig_verification_enabled 1
+   ```
+
+4. **Check for network issues** that might cause partial block receipt:
+   ```bash
+   curl -s http://localhost:9090/metrics | grep qbind_p2p
+   ```
+
+5. **If recurring, escalate to O3b prevention**:
+   - Review all configuration
+   - Check for any custom patches or modifications
+   - Consider hardware upgrade if CPU-bound
+
+**Post-Incident**:
+- Document the cause
+- Implement additional monitoring if needed
+- Review software build process
+
+#### 10.6.6 Responding to Slashing Events (Any Offense)
+
+**Severity**: Critical
+
+**Symptoms**:
+- `qbind_slash_events_total` increased
+- Log messages: `[ERROR] Slashing event executed: <offense_type>`
+- Validator jailed notification
+- Stake reduction visible on-chain
+
+**Immediate Actions**:
+
+1. **Stop the validator immediately** (prevent further offenses):
+   ```bash
+   systemctl stop qbind-node
+   ```
+
+2. **Preserve evidence** for root cause analysis:
+   ```bash
+   tar -czf /tmp/qbind-slash-forensics-$(date +%s).tar.gz \
+       /var/log/qbind/ \
+       /data/qbind/config/
+   ```
+
+3. **Check slashing details**:
+   ```bash
+   # Query on-chain slashing record
+   qbind-admin slash-history --validator-id <your_id>
+   ```
+
+4. **Determine offense type** from logs:
+   ```bash
+   journalctl -u qbind-node | grep -i "slash\|offense\|jail"
+   ```
+
+5. **If key compromise suspected (O1)**, follow [§10.5 Compromised Key Procedures](#105-compromised-key-incident-procedures-t217)
+
+6. **If configuration issue (O3–O5)**:
+   - Review and correct configuration
+   - Run on testnet before rejoining mainnet
+   - Wait for jail period to expire
+
+**Recovery**:
+
+After jail period expires:
+```bash
+# 1. Verify configuration is correct
+qbind-node --profile mainnet --validate-only --data-dir /data/qbind
+
+# 2. Rejoin network
+systemctl start qbind-node
+
+# 3. Monitor closely for next 24 hours
+watch -n 60 'curl -s http://localhost:9090/metrics | grep qbind_slash'
+```
+
+#### 10.6.7 Pre-Launch Verification Checklist
+
+Before joining MainNet as a validator, verify:
+
+- [ ] Running official release binary (verify hash against release)
+- [ ] Using `--profile mainnet` or equivalent configuration
+- [ ] HSM or remote signer properly configured
+- [ ] All verification checks enabled (default)
+- [ ] DAG coupling mode is `Enforce` (default for mainnet)
+- [ ] Monitoring and alerting configured for slashing metrics
+- [ ] Incident response procedures documented
+- [ ] Key rotation procedures tested
+- [ ] Network connectivity verified (no partitions)
+- [ ] CPU capacity sufficient for ML-DSA-44 verification (~5μs per signature)
 
 ---
 

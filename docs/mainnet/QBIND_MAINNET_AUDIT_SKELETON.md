@@ -58,6 +58,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
+| **Slashing & PQC Offenses** | T227 | Design Ready | PQC-specific slashing design complete (T227); implementation pending (T228+) |
 
 ---
 
@@ -67,7 +68,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | ID | Category | Severity | Status | Spec Section |
 | :--- | :--- | :--- | :--- | :--- |
-| **MN-R1** | Consensus Safety & Fork Risk | Critical | Open | [Spec §6.3](./QBIND_MAINNET_V0_SPEC.md#63-dag-availability-and-consensus-coupling) |
+| **MN-R1** | Consensus Safety & Fork Risk | Critical | Partially Mitigated | [Spec §6.3](./QBIND_MAINNET_V0_SPEC.md#63-dag-availability-and-consensus-coupling) |
 | **MN-R2** | Economic Integrity (gas/fees) | High | Partially Mitigated | [Spec §3](./QBIND_MAINNET_V0_SPEC.md#3-gas--fees) |
 | **MN-R3** | State Growth & Data Availability | Medium | ✅ Mitigated (T208, T215) | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
 | **MN-R4** | P2P & Eclipse Resistance | High | Partially Mitigated | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
@@ -75,6 +76,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
+| **MN-R9** | Slashing & PQC Misbehavior | High | Design Ready (T227) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
 
 ---
 
@@ -88,6 +90,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Availability certificate bugs** | Invalid/forged certs could cause consensus divergence | High | Partially Mitigated |
 | **HotStuff safety violations** | Bugs in 3-chain commit rule could cause safety failures | Critical | Mitigated (DevNet) |
 | **View-change liveness** | Leader failure could stall consensus | Medium | Mitigated (DevNet) |
+| **Lazy verification / invalid signatures** | Validators skip PQC verification, accepting invalid blocks | High | Design Ready (T227) |
 
 **Current Mitigations**:
 - ✅ HotStuff BFT with 3-chain commit rule (DevNet)
@@ -98,6 +101,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ **Proposer-side DAG coupling (T190)** — certified frontier selection
 - ✅ **Validator-side DAG coupling enforcement (T191)** — pre-vote validation
 - ✅ **Block-level invariant probes (T192)** — post-commit observational checks
+- ✅ **PQC-specific slashing design (T227)** — offense taxonomy, evidence model, and economic rationale for slashing lazy validators and invalid signature propagation. See [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md)
 
 **Additional MainNet Requirements**:
 - [x] **Consensus coupling design** — T188 complete
@@ -108,6 +112,8 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Cluster harness tests for coupling — **T221: DAG–consensus coupling cluster harness v1**
 - [ ] Formal verification of consensus rules (optional but recommended)
 - [x] Chaos testing for view-change scenarios — **T222: Consensus chaos harness v1** (Ready)
+- [x] **PQC slashing design** — **T227: Slashing & PQC Offenses Design** (Design Ready)
+- [ ] PQC slashing implementation — T228+ (planned)
 - [ ] External security audit of consensus path
 
 **Current Mitigations (T221 update)**:
@@ -534,6 +540,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~T193~~ | ~~Gas/Fees~~ | ~~Hybrid fee distribution~~ | ~~MN-R2~~ |
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
+| ~~**T227**~~ | ~~**Consensus**~~ | ~~**Slashing & PQC Offenses Design**~~ | ~~**MN-R1, MN-R9**~~ |
+| T228+ | Consensus | Slashing implementation | MN-R1, MN-R9 |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 
@@ -590,6 +598,15 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Logging helpers and `KeyRotationMetrics` for observability
 >
 > See `qbind-consensus/src/key_rotation.rs` and `qbind-node/src/key_rotation_cli.rs`.
+>
+> **Note**: T227 (Slashing & PQC Offenses Design) completed. This provides:
+> - Offense taxonomy (O1–O5): double-signing, invalid proposal signatures, lazy voting, invalid DAG certificates, coupling violations
+> - Slash magnitudes with economic rationale for PQC overhead
+> - Evidence model for objective, on-chain-verifiable slashing proofs
+> - Governance controls and operational considerations
+> - Implementation pending in T228+ tasks
+>
+> See [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) for the design specification.
 
 ---
 
@@ -601,6 +618,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 - [QBIND MainNet Operational Runbook](../ops/QBIND_MAINNET_RUNBOOK.md) — MainNet operations (T216)
 - [QBIND Governance & Upgrades Design](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — Governance and upgrade model (T224)
 - [QBIND DAG Consensus Coupling Design](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — DAG–HotStuff coupling (T188)
+- [QBIND Slashing & PQC Offenses Design](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) — PQC-specific slashing model (T227)
 - [QBIND TestNet Beta Specification](../testnet/QBIND_TESTNET_BETA_SPEC.md) — Beta predecessor
 - [QBIND TestNet Beta Audit Skeleton](../testnet/QBIND_TESTNET_BETA_AUDIT_SKELETON.md) — Beta risks
 - [QBIND TestNet Alpha Audit](../testnet/QBIND_TESTNET_ALPHA_AUDIT.md) — Alpha risks
@@ -617,6 +635,7 @@ The following documents should reference this MainNet audit:
 - [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — References audit for operational context (T216)
 - [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — References audit for MN-R8
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1
+- [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) — References audit for MN-R1, MN-R9
 - [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) — References audit for MN-R2
 - [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) — References audit for MN-R5
 - [QBIND_TESTNET_BETA_SPEC.md](../testnet/QBIND_TESTNET_BETA_SPEC.md) — "Path to MainNet" section
