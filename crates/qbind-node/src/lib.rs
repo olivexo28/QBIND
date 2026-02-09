@@ -247,6 +247,9 @@ pub use p2p_diversity::{
     VALID_DIVERSITY_MODES,
 };
 
+// T231 P2P Anti-Eclipse Enforcement exports
+pub use p2p_diversity::{AntiEclipseCheckResult, AntiEclipseMetrics, PeerDiversityState};
+
 // T208 State Retention exports
 pub use node_config::{
     parse_state_retention_mode, StateRetentionConfig, StateRetentionMode,

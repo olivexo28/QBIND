@@ -775,6 +775,454 @@ impl DiversityMetrics {
 }
 
 // ============================================================================
+// T231: PeerDiversityState - Anti-Eclipse Runtime Enforcement
+// ============================================================================
+
+/// Result of an anti-eclipse check for a new connection (T231).
+///
+/// This extends `DiversityCheckResult` with additional anti-eclipse violations
+/// based on `P2pAntiEclipseConfig`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AntiEclipseCheckResult {
+    /// Connection is allowed.
+    Allowed,
+    /// Connection rejected due to IP-prefix diversity violation.
+    RejectedDiversity(DiversityCheckResult),
+    /// Connection rejected because max peers from the same IPv4 /24 prefix exceeded.
+    RejectedPrefixLimit {
+        /// The /24 prefix that is at capacity.
+        prefix: PeerBucketId,
+        /// Current count of peers in this prefix.
+        current_count: u32,
+        /// Maximum allowed peers from this prefix.
+        max_allowed: u32,
+    },
+    /// Outbound connection blocked because min_outbound_peers would not be met.
+    WarnMinOutbound {
+        /// Current outbound peer count.
+        current_outbound: u32,
+        /// Required minimum outbound peers.
+        min_required: u32,
+    },
+    /// Outbound connection blocked because ASN diversity would be violated.
+    WarnLowAsnDiversity {
+        /// Current distinct ASN count.
+        current_asn_count: u32,
+        /// Required minimum ASN diversity.
+        min_required: u32,
+    },
+}
+
+impl AntiEclipseCheckResult {
+    /// Returns true if the connection is allowed.
+    pub fn is_allowed(&self) -> bool {
+        matches!(self, AntiEclipseCheckResult::Allowed)
+    }
+
+    /// Returns the rejection reason as a string for metrics.
+    pub fn rejection_reason(&self) -> Option<&'static str> {
+        match self {
+            AntiEclipseCheckResult::Allowed => None,
+            AntiEclipseCheckResult::RejectedDiversity(inner) => inner.rejection_reason(),
+            AntiEclipseCheckResult::RejectedPrefixLimit { .. } => Some("anti_eclipse_prefix"),
+            AntiEclipseCheckResult::WarnMinOutbound { .. } => Some("min_outbound"),
+            AntiEclipseCheckResult::WarnLowAsnDiversity { .. } => Some("low_asn_diversity"),
+        }
+    }
+}
+
+/// State for tracking peer diversity with anti-eclipse enforcement (T231).
+///
+/// This struct combines `DiversityState` with `P2pAntiEclipseConfig` to provide
+/// runtime enforcement of anti-eclipse constraints.
+///
+/// # Thread Safety
+///
+/// This struct is designed to be used with external synchronization (e.g., behind
+/// a `RwLock` or `Mutex`). The internal state is not thread-safe on its own.
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use std::net::{IpAddr, Ipv4Addr};
+/// use qbind_node::p2p_diversity::PeerDiversityState;
+/// use qbind_node::node_config::P2pAntiEclipseConfig;
+///
+/// let config = P2pAntiEclipseConfig::mainnet_default();
+/// let mut state = PeerDiversityState::new(config);
+///
+/// let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
+/// let result = state.check_connection(&ip, true);
+/// if result.is_allowed() {
+///     state.on_peer_connected(&ip, true);
+/// }
+/// ```
+#[derive(Debug)]
+pub struct PeerDiversityState {
+    /// The underlying diversity state for IP-prefix tracking.
+    diversity_state: DiversityState,
+    /// Peer count per /24 prefix bucket for anti-eclipse enforcement.
+    peers_by_prefix: HashMap<PeerBucketId, u32>,
+    /// Track if each peer is outbound.
+    outbound_peers: u32,
+    /// Track the number of distinct ASNs (simplified: count distinct /16 prefixes for now).
+    /// In a real deployment, this would use actual ASN data from IP-to-ASN databases.
+    distinct_asn_count: u32,
+    /// ASN buckets (simplified: /16 prefixes as ASN proxy).
+    asn_buckets: HashMap<PeerBucketId, u32>,
+    /// Configuration for anti-eclipse constraints.
+    max_peers_per_ipv4_prefix: u32,
+    min_outbound_peers: u32,
+    min_asn_diversity: u32,
+    enforce: bool,
+}
+
+impl PeerDiversityState {
+    /// Create a new `PeerDiversityState` with the given anti-eclipse configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_peers_per_ipv4_prefix` - Maximum peers from the same /24 prefix
+    /// * `min_outbound_peers` - Minimum outbound peer requirement
+    /// * `min_asn_diversity` - Minimum distinct ASN count
+    /// * `enforce` - Whether to enforce (reject) or just warn
+    pub fn new(
+        max_peers_per_ipv4_prefix: u32,
+        min_outbound_peers: u32,
+        min_asn_diversity: u32,
+        enforce: bool,
+    ) -> Self {
+        Self {
+            diversity_state: DiversityState::new(),
+            peers_by_prefix: HashMap::new(),
+            outbound_peers: 0,
+            distinct_asn_count: 0,
+            asn_buckets: HashMap::new(),
+            max_peers_per_ipv4_prefix,
+            min_outbound_peers,
+            min_asn_diversity,
+            enforce,
+        }
+    }
+
+    /// Create a disabled (no-op) `PeerDiversityState` for testing.
+    pub fn disabled() -> Self {
+        Self::new(u32::MAX, 0, 0, false)
+    }
+
+    /// Check if a new connection would violate anti-eclipse constraints.
+    ///
+    /// # Arguments
+    ///
+    /// * `ip` - The IP address of the prospective peer
+    /// * `is_outbound` - Whether this is an outbound connection (reserved for
+    ///   future outbound-specific checks like ASN diversity enforcement)
+    ///
+    /// # Returns
+    ///
+    /// `AntiEclipseCheckResult` indicating whether the connection is allowed
+    /// or the specific violation if rejected/warned.
+    ///
+    /// # Note
+    ///
+    /// Currently only enforces the `/24` prefix limit. The `is_outbound` parameter
+    /// is reserved for future use when outbound-specific constraints (e.g., ASN
+    /// diversity requirements) are added.
+    pub fn check_connection(&self, ip: &IpAddr, _is_outbound: bool) -> AntiEclipseCheckResult {
+        let bucket24 = DiversityClassifier::classify(ip);
+
+        // Check /24 prefix limit
+        let current_in_prefix = self.peers_by_prefix.get(&bucket24).copied().unwrap_or(0);
+        if current_in_prefix >= self.max_peers_per_ipv4_prefix {
+            return AntiEclipseCheckResult::RejectedPrefixLimit {
+                prefix: bucket24,
+                current_count: current_in_prefix,
+                max_allowed: self.max_peers_per_ipv4_prefix,
+            };
+        }
+
+        AntiEclipseCheckResult::Allowed
+    }
+
+    /// Record a new peer connection.
+    ///
+    /// # Arguments
+    ///
+    /// * `ip` - The IP address of the connected peer
+    /// * `is_outbound` - Whether this is an outbound connection
+    pub fn on_peer_connected(&mut self, ip: &IpAddr, is_outbound: bool) {
+        let bucket24 = DiversityClassifier::classify(ip);
+
+        // Skip unknown buckets
+        if matches!(bucket24, PeerBucketId::Unknown) {
+            return;
+        }
+
+        // Update /24 prefix count
+        *self.peers_by_prefix.entry(bucket24.clone()).or_insert(0) += 1;
+
+        // Update outbound count
+        if is_outbound {
+            self.outbound_peers += 1;
+        }
+
+        // Update ASN tracking (using /16 as proxy)
+        if let Some(bucket16) = DiversityClassifier::classify_ipv4_prefix16(ip) {
+            let asn_entry = self.asn_buckets.entry(bucket16).or_insert(0);
+            if *asn_entry == 0 {
+                self.distinct_asn_count += 1;
+            }
+            *asn_entry += 1;
+        }
+
+        // Update underlying diversity state
+        self.diversity_state.add_peer(ip, is_outbound);
+    }
+
+    /// Record a peer disconnection.
+    ///
+    /// # Arguments
+    ///
+    /// * `ip` - The IP address of the disconnected peer
+    /// * `is_outbound` - Whether this was an outbound connection
+    pub fn on_peer_disconnected(&mut self, ip: &IpAddr, is_outbound: bool) {
+        let bucket24 = DiversityClassifier::classify(ip);
+
+        // Skip unknown buckets
+        if matches!(bucket24, PeerBucketId::Unknown) {
+            return;
+        }
+
+        // Update /24 prefix count
+        if let Some(count) = self.peers_by_prefix.get_mut(&bucket24) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.peers_by_prefix.remove(&bucket24);
+            }
+        }
+
+        // Update outbound count
+        if is_outbound {
+            self.outbound_peers = self.outbound_peers.saturating_sub(1);
+        }
+
+        // Update ASN tracking
+        if let Some(bucket16) = DiversityClassifier::classify_ipv4_prefix16(ip) {
+            if let Some(count) = self.asn_buckets.get_mut(&bucket16) {
+                *count = count.saturating_sub(1);
+                if *count == 0 {
+                    self.asn_buckets.remove(&bucket16);
+                    self.distinct_asn_count = self.distinct_asn_count.saturating_sub(1);
+                }
+            }
+        }
+
+        // Update underlying diversity state
+        self.diversity_state.remove_peer(ip, is_outbound);
+    }
+
+    /// Check if the minimum outbound peer requirement is met.
+    pub fn is_min_outbound_met(&self) -> bool {
+        self.outbound_peers >= self.min_outbound_peers
+    }
+
+    /// Check if the minimum ASN diversity requirement is met.
+    pub fn is_min_asn_diversity_met(&self) -> bool {
+        self.distinct_asn_count >= self.min_asn_diversity
+    }
+
+    /// Get the current outbound peer count.
+    pub fn outbound_peers(&self) -> u32 {
+        self.outbound_peers
+    }
+
+    /// Get the current distinct ASN count.
+    pub fn distinct_asn_count(&self) -> u32 {
+        self.distinct_asn_count
+    }
+
+    /// Get the number of peers in a specific /24 prefix.
+    pub fn peers_in_prefix(&self, bucket: &PeerBucketId) -> u32 {
+        self.peers_by_prefix.get(bucket).copied().unwrap_or(0)
+    }
+
+    /// Get the total number of tracked peers.
+    pub fn total_peers(&self) -> u32 {
+        self.diversity_state.total_outbound() as u32 + self.diversity_state.total_inbound() as u32
+    }
+
+    /// Get a reference to the underlying diversity state.
+    pub fn diversity_state(&self) -> &DiversityState {
+        &self.diversity_state
+    }
+
+    /// Check if enforcement is enabled.
+    pub fn is_enforcing(&self) -> bool {
+        self.enforce
+    }
+
+    /// Get the configured max peers per IPv4 prefix.
+    pub fn max_peers_per_ipv4_prefix(&self) -> u32 {
+        self.max_peers_per_ipv4_prefix
+    }
+
+    /// Get the configured min outbound peers.
+    pub fn min_outbound_peers(&self) -> u32 {
+        self.min_outbound_peers
+    }
+
+    /// Get the configured min ASN diversity.
+    pub fn min_asn_diversity(&self) -> u32 {
+        self.min_asn_diversity
+    }
+}
+
+// ============================================================================
+// T231: Anti-Eclipse Metrics
+// ============================================================================
+
+/// Metrics for anti-eclipse enforcement (T231).
+///
+/// Extends the existing diversity metrics with anti-eclipse specific counters
+/// for tracking enforcement actions.
+#[derive(Debug, Default)]
+pub struct AntiEclipseMetrics {
+    /// Current outbound peer count gauge.
+    outbound_peers_current: AtomicU64,
+    /// Current distinct ASN count gauge.
+    distinct_asn_current: AtomicU64,
+    /// Total connections rejected due to prefix limit.
+    rejected_prefix_limit_total: AtomicU64,
+    /// Total times min_outbound_peers requirement was violated (warned).
+    min_outbound_violation_total: AtomicU64,
+    /// Total times min_asn_diversity requirement was violated (warned).
+    min_asn_violation_total: AtomicU64,
+    /// Configuration: max_peers_per_ipv4_prefix.
+    config_max_peers_per_prefix: AtomicU64,
+    /// Configuration: min_outbound_peers.
+    config_min_outbound: AtomicU64,
+    /// Configuration: min_asn_diversity.
+    config_min_asn: AtomicU64,
+    /// Configuration: enforce mode (0=off, 1=on).
+    config_enforce: AtomicU64,
+}
+
+impl AntiEclipseMetrics {
+    /// Create new anti-eclipse metrics.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the current outbound peer count.
+    pub fn set_outbound_peers(&self, count: u64) {
+        self.outbound_peers_current.store(count, Ordering::Relaxed);
+    }
+
+    /// Get the current outbound peer count.
+    pub fn outbound_peers(&self) -> u64 {
+        self.outbound_peers_current.load(Ordering::Relaxed)
+    }
+
+    /// Set the current distinct ASN count.
+    pub fn set_distinct_asn(&self, count: u64) {
+        self.distinct_asn_current.store(count, Ordering::Relaxed);
+    }
+
+    /// Get the current distinct ASN count.
+    pub fn distinct_asn(&self) -> u64 {
+        self.distinct_asn_current.load(Ordering::Relaxed)
+    }
+
+    /// Increment rejected prefix limit counter.
+    pub fn inc_rejected_prefix_limit(&self) {
+        self.rejected_prefix_limit_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total rejected due to prefix limit.
+    pub fn rejected_prefix_limit_total(&self) -> u64 {
+        self.rejected_prefix_limit_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment min outbound violation counter.
+    pub fn inc_min_outbound_violation(&self) {
+        self.min_outbound_violation_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total min outbound violations.
+    pub fn min_outbound_violation_total(&self) -> u64 {
+        self.min_outbound_violation_total.load(Ordering::Relaxed)
+    }
+
+    /// Increment min ASN violation counter.
+    pub fn inc_min_asn_violation(&self) {
+        self.min_asn_violation_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total min ASN violations.
+    pub fn min_asn_violation_total(&self) -> u64 {
+        self.min_asn_violation_total.load(Ordering::Relaxed)
+    }
+
+    /// Set configuration values for metrics export.
+    pub fn set_config(&self, max_prefix: u32, min_outbound: u32, min_asn: u32, enforce: bool) {
+        self.config_max_peers_per_prefix
+            .store(max_prefix as u64, Ordering::Relaxed);
+        self.config_min_outbound
+            .store(min_outbound as u64, Ordering::Relaxed);
+        self.config_min_asn.store(min_asn as u64, Ordering::Relaxed);
+        self.config_enforce
+            .store(if enforce { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
+    /// Format metrics as Prometheus-compatible output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+
+        output.push_str("\n# T231: P2P anti-eclipse metrics\n");
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_outbound_peers {}\n",
+            self.outbound_peers()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_distinct_asn {}\n",
+            self.distinct_asn()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_rejected_prefix_limit_total {}\n",
+            self.rejected_prefix_limit_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_min_outbound_violation_total {}\n",
+            self.min_outbound_violation_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_min_asn_violation_total {}\n",
+            self.min_asn_violation_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_config_max_peers_per_prefix {}\n",
+            self.config_max_peers_per_prefix.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_config_min_outbound {}\n",
+            self.config_min_outbound.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_config_min_asn {}\n",
+            self.config_min_asn.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_anti_eclipse_config_enforce {}\n",
+            self.config_enforce.load(Ordering::Relaxed)
+        ));
+
+        output
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1055,5 +1503,220 @@ mod tests {
         let mainnet = DiversityConfig::mainnet();
         assert_eq!(mainnet.mode, DiversityEnforcementMode::Enforce);
         assert_eq!(mainnet.max_peers_per_ipv4_prefix24, 2);
+    }
+
+    // ========================================================================
+    // T231: PeerDiversityState Tests
+    // ========================================================================
+
+    #[test]
+    fn test_peer_diversity_state_new() {
+        let state = PeerDiversityState::new(8, 4, 2, true);
+        assert_eq!(state.max_peers_per_ipv4_prefix(), 8);
+        assert_eq!(state.min_outbound_peers(), 4);
+        assert_eq!(state.min_asn_diversity(), 2);
+        assert!(state.is_enforcing());
+        assert_eq!(state.outbound_peers(), 0);
+        assert_eq!(state.distinct_asn_count(), 0);
+    }
+
+    #[test]
+    fn test_peer_diversity_state_disabled() {
+        let state = PeerDiversityState::disabled();
+        assert!(!state.is_enforcing());
+        assert_eq!(state.max_peers_per_ipv4_prefix(), u32::MAX);
+    }
+
+    #[test]
+    fn test_peer_diversity_state_connect_disconnect() {
+        let mut state = PeerDiversityState::new(8, 4, 2, true);
+        let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100));
+
+        // Connect outbound peer
+        state.on_peer_connected(&ip, true);
+        assert_eq!(state.outbound_peers(), 1);
+        assert_eq!(state.distinct_asn_count(), 1);
+        assert_eq!(state.total_peers(), 1);
+
+        // Connect inbound peer from same prefix
+        let ip2: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 101));
+        state.on_peer_connected(&ip2, false);
+        assert_eq!(state.outbound_peers(), 1);
+        assert_eq!(state.total_peers(), 2);
+
+        // Disconnect first peer
+        state.on_peer_disconnected(&ip, true);
+        assert_eq!(state.outbound_peers(), 0);
+        assert_eq!(state.total_peers(), 1);
+    }
+
+    #[test]
+    fn test_peer_diversity_state_prefix_limit() {
+        let mut state = PeerDiversityState::new(2, 4, 2, true);
+
+        // Connect 2 peers from same /24 prefix
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), true);
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 2)), true);
+
+        // Third connection should be rejected
+        let result =
+            state.check_connection(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 3)), true);
+        assert!(!result.is_allowed());
+        assert_eq!(result.rejection_reason(), Some("anti_eclipse_prefix"));
+    }
+
+    #[test]
+    fn test_peer_diversity_state_asn_tracking() {
+        let mut state = PeerDiversityState::new(64, 4, 2, true);
+
+        // Connect peers from different /16 prefixes (ASN proxy)
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), true);
+        assert_eq!(state.distinct_asn_count(), 1);
+
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 1, 1, 1)), true);
+        assert_eq!(state.distinct_asn_count(), 2);
+
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), true);
+        assert_eq!(state.distinct_asn_count(), 3);
+
+        // Disconnect one, ASN count should decrease if no more peers from that /16
+        state.on_peer_disconnected(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)), true);
+        assert_eq!(state.distinct_asn_count(), 2);
+    }
+
+    #[test]
+    fn test_peer_diversity_state_min_outbound_check() {
+        let state = PeerDiversityState::new(64, 4, 2, true);
+        assert!(!state.is_min_outbound_met());
+
+        let mut state = PeerDiversityState::new(64, 4, 2, true);
+        for i in 0..4 {
+            state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, i, 1, 1)), true);
+        }
+        assert!(state.is_min_outbound_met());
+    }
+
+    #[test]
+    fn test_peer_diversity_state_min_asn_check() {
+        let state = PeerDiversityState::new(64, 4, 2, true);
+        assert!(!state.is_min_asn_diversity_met());
+
+        let mut state = PeerDiversityState::new(64, 4, 2, true);
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), true);
+        state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 1, 1, 1)), true);
+        assert!(state.is_min_asn_diversity_met());
+    }
+
+    #[test]
+    fn test_peer_diversity_state_loopback_ignored() {
+        let mut state = PeerDiversityState::new(8, 4, 2, true);
+        let loopback: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        // Loopback connections should be ignored
+        state.on_peer_connected(&loopback, true);
+        assert_eq!(state.outbound_peers(), 0);
+        assert_eq!(state.distinct_asn_count(), 0);
+    }
+
+    // ========================================================================
+    // T231: AntiEclipseCheckResult Tests
+    // ========================================================================
+
+    #[test]
+    fn test_anti_eclipse_check_result_allowed() {
+        let result = AntiEclipseCheckResult::Allowed;
+        assert!(result.is_allowed());
+        assert_eq!(result.rejection_reason(), None);
+    }
+
+    #[test]
+    fn test_anti_eclipse_check_result_rejected_prefix() {
+        let result = AntiEclipseCheckResult::RejectedPrefixLimit {
+            prefix: PeerBucketId::Ipv4Prefix24 {
+                prefix: [10, 0, 1],
+            },
+            current_count: 8,
+            max_allowed: 8,
+        };
+        assert!(!result.is_allowed());
+        assert_eq!(result.rejection_reason(), Some("anti_eclipse_prefix"));
+    }
+
+    #[test]
+    fn test_anti_eclipse_check_result_warn_min_outbound() {
+        let result = AntiEclipseCheckResult::WarnMinOutbound {
+            current_outbound: 2,
+            min_required: 4,
+        };
+        assert!(!result.is_allowed());
+        assert_eq!(result.rejection_reason(), Some("min_outbound"));
+    }
+
+    #[test]
+    fn test_anti_eclipse_check_result_warn_low_asn() {
+        let result = AntiEclipseCheckResult::WarnLowAsnDiversity {
+            current_asn_count: 1,
+            min_required: 2,
+        };
+        assert!(!result.is_allowed());
+        assert_eq!(result.rejection_reason(), Some("low_asn_diversity"));
+    }
+
+    // ========================================================================
+    // T231: AntiEclipseMetrics Tests
+    // ========================================================================
+
+    #[test]
+    fn test_anti_eclipse_metrics_new() {
+        let metrics = AntiEclipseMetrics::new();
+        assert_eq!(metrics.outbound_peers(), 0);
+        assert_eq!(metrics.distinct_asn(), 0);
+        assert_eq!(metrics.rejected_prefix_limit_total(), 0);
+    }
+
+    #[test]
+    fn test_anti_eclipse_metrics_counters() {
+        let metrics = AntiEclipseMetrics::new();
+
+        metrics.set_outbound_peers(5);
+        assert_eq!(metrics.outbound_peers(), 5);
+
+        metrics.set_distinct_asn(3);
+        assert_eq!(metrics.distinct_asn(), 3);
+
+        metrics.inc_rejected_prefix_limit();
+        metrics.inc_rejected_prefix_limit();
+        assert_eq!(metrics.rejected_prefix_limit_total(), 2);
+
+        metrics.inc_min_outbound_violation();
+        assert_eq!(metrics.min_outbound_violation_total(), 1);
+
+        metrics.inc_min_asn_violation();
+        assert_eq!(metrics.min_asn_violation_total(), 1);
+    }
+
+    #[test]
+    fn test_anti_eclipse_metrics_config() {
+        let metrics = AntiEclipseMetrics::new();
+        metrics.set_config(8, 4, 2, true);
+
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_p2p_anti_eclipse_config_max_peers_per_prefix 8"));
+        assert!(output.contains("qbind_p2p_anti_eclipse_config_min_outbound 4"));
+        assert!(output.contains("qbind_p2p_anti_eclipse_config_min_asn 2"));
+        assert!(output.contains("qbind_p2p_anti_eclipse_config_enforce 1"));
+    }
+
+    #[test]
+    fn test_anti_eclipse_metrics_format() {
+        let metrics = AntiEclipseMetrics::new();
+        metrics.set_outbound_peers(10);
+        metrics.set_distinct_asn(5);
+        metrics.inc_rejected_prefix_limit();
+
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_p2p_anti_eclipse_outbound_peers 10"));
+        assert!(output.contains("qbind_p2p_anti_eclipse_distinct_asn 5"));
+        assert!(output.contains("qbind_p2p_anti_eclipse_rejected_prefix_limit_total 1"));
     }
 }
