@@ -811,11 +811,19 @@ All slashing offenses require objective, on-chain-verifiable evidence:
 
 | Component | Status | Task |
 | :--- | :--- | :--- |
-| Slashing design | ✅ Design Ready | T227 (this) |
-| Slashing infrastructure | Planned | T228 |
-| On-chain proof verification | Planned | T228+ |
+| Slashing design | ✅ Design Ready | T227 |
+| Slashing infrastructure | ✅ Evidence Recording Only | T228 |
+| On-chain penalties | ⏳ Pending | T229+ |
 
-**MainNet v0 Launch**: The slashing design is complete (T227). Implementation (T228+) will be scoped separately and must be included in the external audit.
+**MainNet v0 Launch**: The slashing design is complete (T227). Infrastructure for evidence recording is implemented (T228), but **no economic penalties are applied yet**. Penalty application (stake burning, jailing) will be implemented in T229+.
+
+**T228 Scope**: The slashing infrastructure provides:
+- Evidence types for all offense classes (O1–O5)
+- A `NoopSlashingEngine` that records evidence without penalties
+- Metrics for monitoring potential slashable offenses
+- Storage helpers for persisting slashing records
+
+**Note**: Operators will see evidence warnings in logs and metrics, but actual stake changes are disabled until T229+.
 
 ---
 

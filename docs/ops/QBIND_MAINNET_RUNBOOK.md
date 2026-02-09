@@ -1418,9 +1418,19 @@ The following metrics are useful for detecting and responding to key compromise:
 
 ---
 
-### 10.6 Slashing & PQC Offenses (T227)
+### 10.6 Slashing & PQC Offenses (T227, T228)
 
 This section provides operator-facing guidance on the PQC-specific slashing model. For the full design specification, see [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md).
+
+> **⚠️ T228 Status: Evidence Recording Only**
+>
+> As of T228, the slashing infrastructure records evidence and emits metrics/warnings,
+> but **no actual stake penalties are applied**. Operators will see:
+> - Log messages like `[SLASHING] Evidence accepted (no-op): validator=..., offense=...`
+> - Metrics: `qbind_slashing_evidence_total{offense="..."}`, `qbind_slashing_decisions_total{...}`
+>
+> Actual stake burning and jailing will be enabled in T229+. This phased rollout
+> allows operators to validate evidence detection before economic penalties apply.
 
 #### 10.6.1 Slashable Offenses Overview
 

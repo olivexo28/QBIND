@@ -48,6 +48,7 @@ pub mod network;
 pub mod pacemaker;
 pub mod qc;
 pub mod sim;
+pub mod slashing;
 pub mod timeout;
 pub mod validator_set;
 pub mod verify;
@@ -103,6 +104,15 @@ pub use verify::{
 };
 pub use verify_job::{ConsensusMsgKind, ConsensusVerifyJob, ConsensusVerifyResult};
 pub use vote_accumulator::{ConsensusLimitsConfig, VoteAccumulator};
+
+// T228: Slashing infrastructure exports
+pub use slashing::{
+    process_slashing_evidence, BlockHeader as SlashingBlockHeader, DagCertificate,
+    DagStateProof, DagValidationFailure, EvidencePayloadV1, LazyVoteInvalidReason,
+    NoopSlashingEngine, OffenseKind, SignedBlockHeader, SignedVote, SlashingContext,
+    SlashingDecisionKind, SlashingEngine, SlashingEvidence, SlashingMetrics, SlashingRecord,
+    SlashingStore,
+};
 
 use qbind_crypto::CryptoProvider;
 use qbind_hash::vote_digest;

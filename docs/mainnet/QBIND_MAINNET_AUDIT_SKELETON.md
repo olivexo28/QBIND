@@ -58,7 +58,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
-| **Slashing & PQC Offenses** | T227 | Design Ready | PQC-specific slashing design complete (T227); implementation pending (T228+) |
+| **Slashing & PQC Offenses** | T227, T228 | Partially Mitigated | PQC-specific slashing design (T227) ✅; evidence infrastructure (T228) ✅; penalties pending (T229+) |
 
 ---
 
@@ -76,7 +76,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
-| **MN-R9** | Slashing & PQC Misbehavior | High | Design Ready (T227) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
+| **MN-R9** | Slashing & PQC Misbehavior | High | Partially Mitigated (T228) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
 
 ---
 
@@ -113,7 +113,8 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [ ] Formal verification of consensus rules (optional but recommended)
 - [x] Chaos testing for view-change scenarios — **T222: Consensus chaos harness v1** (Ready)
 - [x] **PQC slashing design** — **T227: Slashing & PQC Offenses Design** (Design Ready)
-- [ ] PQC slashing implementation — T228+ (planned)
+- [x] **PQC slashing infrastructure** — **T228: Slashing Infrastructure & Evidence Skeleton v1** (Evidence recording only, no penalties yet)
+- [ ] PQC slashing penalties — T229+ (planned)
 - [ ] External security audit of consensus path
 
 **Current Mitigations (T221 update)**:
@@ -541,7 +542,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
 | ~~**T227**~~ | ~~**Consensus**~~ | ~~**Slashing & PQC Offenses Design**~~ | ~~**MN-R1, MN-R9**~~ |
-| T228+ | Consensus | Slashing implementation | MN-R1, MN-R9 |
+| ~~**T228**~~ | ~~**Consensus**~~ | ~~**Slashing Infrastructure & Evidence Skeleton v1**~~ | ~~**MN-R1, MN-R9**~~ |
+| T229+ | Consensus | Slashing penalty implementation | MN-R1, MN-R9 |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 
@@ -604,9 +606,18 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Slash magnitudes with economic rationale for PQC overhead
 > - Evidence model for objective, on-chain-verifiable slashing proofs
 > - Governance controls and operational considerations
-> - Implementation pending in T228+ tasks
 >
 > See [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) for the design specification.
+>
+> **Note**: T228 (Slashing Infrastructure & Evidence Skeleton v1) completed. This provides:
+> - Core slashing types: `OffenseKind` (O1–O5), `SlashingEvidence`, `SlashingRecord`
+> - Evidence payloads for all offense classes: `EvidencePayloadV1`
+> - `SlashingEngine` trait with `NoopSlashingEngine` implementation (records only, no penalties)
+> - `SlashingStore` for persisting evidence records
+> - `SlashingMetrics` for observability (`qbind_slashing_evidence_total`, `qbind_slashing_decisions_total`)
+> - **No economic penalties yet** — stake burning and jailing deferred to T229+
+>
+> See `qbind-consensus/src/slashing/mod.rs` and test coverage in `t228_slashing_infra_tests.rs`.
 
 ---
 
