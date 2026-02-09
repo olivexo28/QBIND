@@ -122,6 +122,9 @@ pub mod hsm_pkcs11;
 // T213 Key Rotation CLI helper
 pub mod key_rotation_cli;
 
+// T230 Ledger Slashing Backend
+pub mod ledger_slashing_backend;
+
 pub mod peer;
 pub mod peer_manager;
 pub mod peer_rate_limiter;
@@ -273,10 +276,19 @@ pub use key_rotation_cli::{
     KeyRotationInitResult, KeyRotationMetrics,
 };
 
+// T230 Ledger Slashing Backend exports
+pub use ledger_slashing_backend::LedgerSlashingBackend;
+
 // T197 Monetary Mode exports (re-exported from qbind-ledger)
 pub use qbind_ledger::{
     parse_monetary_mode, MonetaryAccounts, MonetaryMode, SeigniorageSplit,
     SEIGNIORAGE_SPLIT_MAINNET_DEFAULT, VALID_MONETARY_MODES,
+};
+
+// T230 Slashing Ledger exports (re-exported from qbind-ledger)
+pub use qbind_ledger::{
+    EpochNumber, InMemorySlashingLedger, SlashingLedger, SlashingLedgerError, SlashingRecord,
+    StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
 };
 
 // T170 P2P Service exports
@@ -312,9 +324,10 @@ pub use metrics::{
     DisconnectReason, EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
     KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, MonetaryMetrics, NetworkMetrics,
     NodeMetrics, OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics,
-    SignRequestKind, SignerHealth, SignerKeystoreMetrics, SignerModeKind, SpawnBlockingMetrics,
-    StorageMetrics, StorageOp, ValidatorEquivocationMetrics, ValidatorVoteCounters,
-    ValidatorVoteMetrics, ViewLagMetrics, MAX_TRACKED_PEERS, MAX_TRACKED_VALIDATORS,
+    SignRequestKind, SignerHealth, SignerKeystoreMetrics, SignerModeKind, SlashingMetrics,
+    SpawnBlockingMetrics, StorageMetrics, StorageOp, ValidatorEquivocationMetrics,
+    ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics, MAX_TRACKED_PEERS,
+    MAX_TRACKED_VALIDATORS,
 };
 
 // Metrics HTTP server exports (T126)

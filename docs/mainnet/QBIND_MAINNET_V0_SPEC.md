@@ -813,17 +813,33 @@ All slashing offenses require objective, on-chain-verifiable evidence:
 | :--- | :--- | :--- |
 | Slashing design | ✅ Design Ready | T227 |
 | Slashing infrastructure | ✅ Evidence Recording Only | T228 |
-| On-chain penalties | ⏳ Pending | T229+ |
+| Penalty engine | ✅ Implemented | T229 |
+| Ledger backend | ✅ Implemented | T230 |
 
-**MainNet v0 Launch**: The slashing design is complete (T227). Infrastructure for evidence recording is implemented (T228), but **no economic penalties are applied yet**. Penalty application (stake burning, jailing) will be implemented in T229+.
+**MainNet v0 Launch**: The slashing pipeline is fully implemented:
+- **T227**: Offense taxonomy (O1–O5) and slash ranges design
+- **T228**: Evidence envelope and infrastructure (`NoopSlashingEngine`)
+- **T229**: `PenaltySlashingEngine` with `SlashingBackend` trait and `SlashingMode` configuration
+- **T230**: `SlashingLedger` trait and `LedgerSlashingBackend` for persistent stake/jail state
 
-**T228 Scope**: The slashing infrastructure provides:
-- Evidence types for all offense classes (O1–O5)
-- A `NoopSlashingEngine` that records evidence without penalties
-- Metrics for monitoring potential slashable offenses
-- Storage helpers for persisting slashing records
+**Important**: MainNet defaults to `SlashingMode::RecordOnly` — evidence is recorded and metrics are emitted, but **no stake is burned and no validators are jailed**. Governance can later enable `SlashingMode::EnforceCritical` to apply O1/O2 penalties.
 
-**Note**: Operators will see evidence warnings in logs and metrics, but actual stake changes are disabled until T229+.
+**T230 Scope**: The slashing ledger backend provides:
+- `SlashingLedger` trait in `qbind-ledger` for validator stake/jail state management
+- `InMemorySlashingLedger` for testing
+- `LedgerSlashingBackend` implementing `SlashingBackend` using ledger storage
+- `SlashingMetrics` for Prometheus monitoring (evidence counts, penalties, stake burned, jail events)
+- Slashing records persisted for CLI/tooling inspection
+
+**Slashing Mode Summary**:
+| Mode | Evidence | Metrics | Slash Stake | Jail | Use Case |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `Off` | ❌ | ❌ | ❌ | ❌ | Dev tools only |
+| `RecordOnly` | ✅ | ✅ | ❌ | ❌ | **MainNet default** |
+| `EnforceCritical` | ✅ | ✅ | O1/O2 | O1/O2 | DevNet default, future MainNet |
+| `EnforceAll` | ✅ | ✅ | O1–O5 | All | Reserved for future |
+
+**Note**: Operators will see evidence warnings in logs and metrics. When governance enables `EnforceCritical`, O1 (double-sign) and O2 (invalid proposer sig) offenses will trigger stake slashing and jailing.
 
 ---
 

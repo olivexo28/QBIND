@@ -5860,6 +5860,290 @@ impl SnapshotMetrics {
 }
 
 // ============================================================================
+// SlashingMetrics - Slashing penalty metrics (T230)
+// ============================================================================
+
+/// Metrics for slashing/penalty enforcement (T230).
+///
+/// Tracks slashing evidence submissions, penalty applications, and jailing events.
+/// Used by the runbook's slashing metrics table and dashboard alerts.
+///
+/// # Prometheus-style naming
+///
+/// - `qbind_slashing_evidence_total{offense="..."}` → Evidence submitted by type
+/// - `qbind_slashing_penalty_total{offense="..."}` → Penalties applied by type
+/// - `qbind_slashing_stake_burned_total` → Total stake burned (cumulative)
+/// - `qbind_slashing_jail_events_total` → Total jailing events
+/// - `qbind_slashing_mode_info{mode="..."}` → Current slashing mode
+#[derive(Debug, Default)]
+pub struct SlashingMetrics {
+    // Evidence submission counters by offense type
+    evidence_o1_double_sign: AtomicU64,
+    evidence_o2_invalid_proposer_sig: AtomicU64,
+    evidence_o3a_lazy_vote_single: AtomicU64,
+    evidence_o3b_lazy_vote_repeated: AtomicU64,
+    evidence_o4_invalid_dag_cert: AtomicU64,
+    evidence_o5_dag_coupling_violation: AtomicU64,
+
+    // Penalty application counters by offense type
+    penalty_o1_double_sign: AtomicU64,
+    penalty_o2_invalid_proposer_sig: AtomicU64,
+
+    // Rejection counters
+    evidence_rejected_invalid: AtomicU64,
+    evidence_rejected_duplicate: AtomicU64,
+
+    // Cumulative stake slashed (in native units)
+    total_stake_burned: AtomicU64,
+
+    // Total jailing events
+    total_jail_events: AtomicU64,
+
+    // Current slashing mode (0=Off, 1=RecordOnly, 2=EnforceCritical, 3=EnforceAll)
+    current_mode: AtomicU64,
+}
+
+impl SlashingMetrics {
+    /// Create a new SlashingMetrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    // ========================================================================
+    // Evidence Counters
+    // ========================================================================
+
+    /// Increment O1 (double-signing) evidence counter.
+    pub fn inc_evidence_o1(&self) {
+        self.evidence_o1_double_sign.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment O2 (invalid proposer sig) evidence counter.
+    pub fn inc_evidence_o2(&self) {
+        self.evidence_o2_invalid_proposer_sig.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment O3a (single lazy vote) evidence counter.
+    pub fn inc_evidence_o3a(&self) {
+        self.evidence_o3a_lazy_vote_single.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment O3b (repeated lazy votes) evidence counter.
+    pub fn inc_evidence_o3b(&self) {
+        self.evidence_o3b_lazy_vote_repeated.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment O4 (invalid DAG cert) evidence counter.
+    pub fn inc_evidence_o4(&self) {
+        self.evidence_o4_invalid_dag_cert.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment O5 (DAG coupling violation) evidence counter.
+    pub fn inc_evidence_o5(&self) {
+        self.evidence_o5_dag_coupling_violation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total evidence submitted for all offense types.
+    pub fn evidence_total(&self) -> u64 {
+        self.evidence_o1_double_sign.load(Ordering::Relaxed)
+            + self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+            + self.evidence_o3a_lazy_vote_single.load(Ordering::Relaxed)
+            + self.evidence_o3b_lazy_vote_repeated.load(Ordering::Relaxed)
+            + self.evidence_o4_invalid_dag_cert.load(Ordering::Relaxed)
+            + self.evidence_o5_dag_coupling_violation.load(Ordering::Relaxed)
+    }
+
+    /// Get O1 evidence count.
+    pub fn evidence_o1_total(&self) -> u64 {
+        self.evidence_o1_double_sign.load(Ordering::Relaxed)
+    }
+
+    /// Get O2 evidence count.
+    pub fn evidence_o2_total(&self) -> u64 {
+        self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+    }
+
+    // ========================================================================
+    // Penalty Counters
+    // ========================================================================
+
+    /// Increment O1 penalty counter.
+    pub fn inc_penalty_o1(&self) {
+        self.penalty_o1_double_sign.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment O2 penalty counter.
+    pub fn inc_penalty_o2(&self) {
+        self.penalty_o2_invalid_proposer_sig.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total penalties applied.
+    pub fn penalty_total(&self) -> u64 {
+        self.penalty_o1_double_sign.load(Ordering::Relaxed)
+            + self.penalty_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+    }
+
+    /// Get O1 penalty count.
+    pub fn penalty_o1_total(&self) -> u64 {
+        self.penalty_o1_double_sign.load(Ordering::Relaxed)
+    }
+
+    /// Get O2 penalty count.
+    pub fn penalty_o2_total(&self) -> u64 {
+        self.penalty_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+    }
+
+    // ========================================================================
+    // Rejection Counters
+    // ========================================================================
+
+    /// Increment invalid evidence rejection counter.
+    pub fn inc_rejected_invalid(&self) {
+        self.evidence_rejected_invalid.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment duplicate evidence rejection counter.
+    pub fn inc_rejected_duplicate(&self) {
+        self.evidence_rejected_duplicate.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total rejected invalid evidence.
+    pub fn rejected_invalid_total(&self) -> u64 {
+        self.evidence_rejected_invalid.load(Ordering::Relaxed)
+    }
+
+    /// Get total rejected duplicate evidence.
+    pub fn rejected_duplicate_total(&self) -> u64 {
+        self.evidence_rejected_duplicate.load(Ordering::Relaxed)
+    }
+
+    // ========================================================================
+    // Stake and Jail Counters
+    // ========================================================================
+
+    /// Add to total stake burned.
+    pub fn add_stake_burned(&self, amount: u64) {
+        self.total_stake_burned.fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Get total stake burned.
+    pub fn total_stake_burned(&self) -> u64 {
+        self.total_stake_burned.load(Ordering::Relaxed)
+    }
+
+    /// Increment jail events counter.
+    pub fn inc_jail_event(&self) {
+        self.total_jail_events.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total jail events.
+    pub fn total_jail_events(&self) -> u64 {
+        self.total_jail_events.load(Ordering::Relaxed)
+    }
+
+    // ========================================================================
+    // Mode Info
+    // ========================================================================
+
+    /// Set the current slashing mode.
+    ///
+    /// Mode values: 0=Off, 1=RecordOnly, 2=EnforceCritical, 3=EnforceAll
+    pub fn set_mode(&self, mode: u64) {
+        self.current_mode.store(mode, Ordering::Relaxed);
+    }
+
+    /// Get the current slashing mode value.
+    pub fn current_mode(&self) -> u64 {
+        self.current_mode.load(Ordering::Relaxed)
+    }
+
+    /// Get the current slashing mode as a string.
+    pub fn current_mode_str(&self) -> &'static str {
+        match self.current_mode() {
+            0 => "off",
+            1 => "record_only",
+            2 => "enforce_critical",
+            3 => "enforce_all",
+            _ => "unknown",
+        }
+    }
+
+    // ========================================================================
+    // Prometheus Export
+    // ========================================================================
+
+    /// Format metrics as Prometheus exposition format.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# T230: Slashing/penalty metrics\n");
+
+        // Evidence counters
+        output.push_str(&format!(
+            "qbind_slashing_evidence_total{{offense=\"O1_double_sign\"}} {}\n",
+            self.evidence_o1_double_sign.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_evidence_total{{offense=\"O2_invalid_proposer_sig\"}} {}\n",
+            self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_evidence_total{{offense=\"O3a_lazy_vote_single\"}} {}\n",
+            self.evidence_o3a_lazy_vote_single.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_evidence_total{{offense=\"O3b_lazy_vote_repeated\"}} {}\n",
+            self.evidence_o3b_lazy_vote_repeated.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_evidence_total{{offense=\"O4_invalid_dag_cert\"}} {}\n",
+            self.evidence_o4_invalid_dag_cert.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_evidence_total{{offense=\"O5_dag_coupling_violation\"}} {}\n",
+            self.evidence_o5_dag_coupling_violation.load(Ordering::Relaxed)
+        ));
+
+        // Penalty counters
+        output.push_str(&format!(
+            "qbind_slashing_penalty_total{{offense=\"O1_double_sign\"}} {}\n",
+            self.penalty_o1_double_sign.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_penalty_total{{offense=\"O2_invalid_proposer_sig\"}} {}\n",
+            self.penalty_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+        ));
+
+        // Rejection counters
+        output.push_str(&format!(
+            "qbind_slashing_rejected_total{{reason=\"invalid\"}} {}\n",
+            self.evidence_rejected_invalid.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_rejected_total{{reason=\"duplicate\"}} {}\n",
+            self.evidence_rejected_duplicate.load(Ordering::Relaxed)
+        ));
+
+        // Aggregate counters
+        output.push_str(&format!(
+            "qbind_slashing_stake_burned_total {}\n",
+            self.total_stake_burned()
+        ));
+        output.push_str(&format!(
+            "qbind_slashing_jail_events_total {}\n",
+            self.total_jail_events()
+        ));
+
+        // Mode info
+        output.push_str(&format!(
+            "qbind_slashing_mode_info{{mode=\"{}\"}} 1\n",
+            self.current_mode_str()
+        ));
+
+        output
+    }
+}
+
+// ============================================================================
 // DagCouplingMetrics - DAG coupling validation metrics (T191)
 // ============================================================================
 
@@ -6214,6 +6498,8 @@ pub struct NodeMetrics {
     remote_signer: crate::remote_signer::RemoteSignerMetrics,
     /// State snapshot metrics (T215).
     snapshot: SnapshotMetrics,
+    /// Slashing/penalty metrics (T230).
+    slashing: SlashingMetrics,
 }
 
 impl Default for NodeMetrics {
@@ -6252,6 +6538,7 @@ impl NodeMetrics {
             hsm: crate::hsm_pkcs11::HsmMetrics::new(),
             remote_signer: crate::remote_signer::RemoteSignerMetrics::new(),
             snapshot: SnapshotMetrics::new(),
+            slashing: SlashingMetrics::new(),
         }
     }
 
@@ -6373,6 +6660,11 @@ impl NodeMetrics {
     /// Get state snapshot metrics (T215).
     pub fn snapshot(&self) -> &SnapshotMetrics {
         &self.snapshot
+    }
+
+    /// Get slashing/penalty metrics (T230).
+    pub fn slashing(&self) -> &SlashingMetrics {
+        &self.slashing
     }
 
     /// Compute the overall signer health based on HSM and remote signer metrics (T214).

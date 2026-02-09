@@ -58,7 +58,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
-| **Slashing & PQC Offenses** | T227, T228 | Partially Mitigated | PQC-specific slashing design (T227) ✅; evidence infrastructure (T228) ✅; penalties pending (T229+) |
+| **Slashing & PQC Offenses** | T227, T228, T229, T230 | ✅ Mitigated | Design (T227), infrastructure (T228), penalty engine (T229), ledger backend (T230); MainNet defaults to RecordOnly |
 
 ---
 
@@ -76,7 +76,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
-| **MN-R9** | Slashing & PQC Misbehavior | High | Partially Mitigated (T228) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
+| **MN-R9** | Slashing & PQC Misbehavior | High | ✅ Mitigated (T229, T230) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
 
 ---
 
@@ -114,10 +114,13 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] Chaos testing for view-change scenarios — **T222: Consensus chaos harness v1** (Ready)
 - [x] **PQC slashing design** — **T227: Slashing & PQC Offenses Design** (Design Ready)
 - [x] **PQC slashing infrastructure** — **T228: Slashing Infrastructure & Evidence Skeleton v1** (Evidence recording only, no penalties yet)
-- [ ] PQC slashing penalties — T229+ (planned)
+- [x] **PQC slashing penalty engine** — **T229: Penalty Slashing Engine v1** (Full penalty logic, modes, config)
+- [x] **PQC slashing ledger backend** — **T230: Slashing Ledger Backend v1** (Persistent stake/jail state, metrics)
 - [ ] External security audit of consensus path
 
-**Current Mitigations (T221 update)**:
+**Current Mitigations (T229/T230 update)**:
+- ✅ **T229: Penalty Slashing Engine v1** — `PenaltySlashingEngine` with `SlashingBackend` trait, `InMemorySlashingBackend` for tests, `SlashingMode` (Off/RecordOnly/EnforceCritical/EnforceAll), and `PenaltyEngineConfig`. MainNet defaults to RecordOnly.
+- ✅ **T230: Slashing Ledger Backend v1** — `SlashingLedger` trait in `qbind-ledger`, `LedgerSlashingBackend` implementing `SlashingBackend`, `SlashingMetrics` with Prometheus counters for evidence/penalties/stake burned/jail events. Integration tests verify penalty application and record persistence.
 - ✅ **T221: DAG–consensus coupling cluster harness v1** — multi-node tests exercising Warn mode, Enforce mode, and Off mode scenarios with invariants enforced. See `crates/qbind-node/tests/t221_dag_coupling_cluster_tests.rs`.
 - ✅ **T222: Consensus chaos harness v1** — multi-node cluster tests with leader crashes, message loss, and partitions validating no commit divergence and sustained liveness. See `crates/qbind-node/tests/t222_consensus_chaos_harness.rs`.
 
@@ -543,7 +546,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
 | ~~**T227**~~ | ~~**Consensus**~~ | ~~**Slashing & PQC Offenses Design**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T228**~~ | ~~**Consensus**~~ | ~~**Slashing Infrastructure & Evidence Skeleton v1**~~ | ~~**MN-R1, MN-R9**~~ |
-| T229+ | Consensus | Slashing penalty implementation | MN-R1, MN-R9 |
+| ~~**T229**~~ | ~~**Consensus**~~ | ~~**Penalty Slashing Engine v1**~~ | ~~**MN-R1, MN-R9**~~ |
+| ~~**T230**~~ | ~~**Consensus**~~ | ~~**Slashing Ledger Backend v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 
@@ -614,10 +618,33 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Evidence payloads for all offense classes: `EvidencePayloadV1`
 > - `SlashingEngine` trait with `NoopSlashingEngine` implementation (records only, no penalties)
 > - `SlashingStore` for persisting evidence records
-> - `SlashingMetrics` for observability (`qbind_slashing_evidence_total`, `qbind_slashing_decisions_total`)
-> - **No economic penalties yet** — stake burning and jailing deferred to T229+
+> - Basic slashing metrics for observability
 >
 > See `qbind-consensus/src/slashing/mod.rs` and test coverage in `t228_slashing_infra_tests.rs`.
+>
+> **Note**: T229 (Penalty Slashing Engine v1) completed. This provides:
+> - `SlashingBackend` trait abstracting stake/jail operations
+> - `InMemorySlashingBackend` for testing
+> - `PenaltySlashingEngine` with full penalty application logic
+> - `SlashingMode` enum: Off, RecordOnly (MainNet default), EnforceCritical (DevNet default), EnforceAll
+> - `PenaltyEngineConfig` with configurable slash percentages (basis points) and jail durations
+> - `PenaltySlashingMetrics` with counters for penalties, stake slashed, jail events
+>
+> See `qbind-consensus/src/slashing/mod.rs` and test coverage in `t229_slashing_penalty_engine_tests.rs`.
+>
+> **Note**: T230 (Slashing Ledger Backend v1) completed. This provides:
+> - `SlashingLedger` trait in `qbind-ledger` for persistent validator stake/jail state
+> - `InMemorySlashingLedger` for unit and integration testing
+> - `LedgerSlashingBackend` in `qbind-node` implementing `SlashingBackend` using `SlashingLedger`
+> - `SlashingMetrics` in `qbind-node/metrics.rs` with Prometheus-style counters:
+>   - `qbind_slashing_evidence_total{offense="..."}` — Evidence submitted by type
+>   - `qbind_slashing_penalty_total{offense="..."}` — Penalties applied by type
+>   - `qbind_slashing_stake_burned_total` — Total stake burned (cumulative)
+>   - `qbind_slashing_jail_events_total` — Total jailing events
+>   - `qbind_slashing_mode_info{mode="..."}` — Current slashing mode
+> - Slashing records persisted for CLI/tooling inspection
+>
+> See `qbind-ledger/src/slashing_ledger.rs`, `qbind-node/src/ledger_slashing_backend.rs`, and test coverage in `t230_slashing_ledger_backend_tests.rs`.
 
 ---
 

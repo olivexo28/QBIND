@@ -9,6 +9,7 @@ pub mod monetary_engine;
 pub mod monetary_state;
 pub mod parallel_exec;
 pub mod program;
+pub mod slashing_ledger;
 pub mod state_pruning;
 pub mod state_snapshot;
 pub mod store;
@@ -119,4 +120,10 @@ pub use state_pruning::{PruneStats, StatePruner};
 pub use state_snapshot::{
     validate_snapshot_dir, SnapshotStats, SnapshotValidationResult, StateSnapshotError,
     StateSnapshotMeta, StateSnapshotter,
+};
+
+// T230: Slashing Ledger exports
+pub use slashing_ledger::{
+    EpochNumber, InMemorySlashingLedger, SlashingLedger, SlashingLedgerError, SlashingRecord,
+    StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
 };
