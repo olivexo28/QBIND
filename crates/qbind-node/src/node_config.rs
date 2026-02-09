@@ -1602,6 +1602,204 @@ impl P2pLivenessConfig {
 }
 
 // ============================================================================
+// T231: P2P Anti-Eclipse Configuration
+// ============================================================================
+
+/// Configuration for P2P anti-eclipse constraints (T231).
+///
+/// Controls additional diversity and outbound peer requirements beyond the
+/// basic IP-prefix diversity provided by `NetworkTransportConfig`. This config
+/// adds MainNet-grade protection against eclipse attacks by enforcing:
+///
+/// - Maximum peers from the same IPv4 /24 prefix
+/// - Minimum outbound peers to maintain network connectivity
+/// - Minimum ASN diversity for outbound connections
+///
+/// # Environments
+///
+/// - **DevNet v0**: Loose limits (`enforce=false`), for easy local testing
+/// - **TestNet Alpha/Beta**: Moderate limits (`enforce=false`), for observability
+/// - **MainNet v0**: Strict limits (`enforce=true`), required for production
+///
+/// # Integration
+///
+/// The anti-eclipse configuration is checked alongside the existing
+/// `DiversityState` in the P2P layer. When `enforce=true`, connections
+/// that would violate these limits are rejected.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::P2pAntiEclipseConfig;
+///
+/// // MainNet configuration
+/// let config = P2pAntiEclipseConfig::mainnet_default();
+/// assert!(config.enforce);
+/// assert_eq!(config.max_peers_per_ipv4_prefix, 8);
+/// assert_eq!(config.min_outbound_peers, 8);
+/// assert_eq!(config.min_asn_diversity, 2);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct P2pAntiEclipseConfig {
+    /// Maximum number of peers allowed from the same IPv4 /24 prefix.
+    ///
+    /// This limits connections from peers in the same network segment to
+    /// prevent a single ISP or network operator from eclipsing the node.
+    ///
+    /// Recommended values:
+    /// - DevNet: 64 (permissive for local testing)
+    /// - TestNet Alpha/Beta: 16 (moderate)
+    /// - MainNet: 8 (strict for production)
+    pub max_peers_per_ipv4_prefix: u32,
+
+    /// Minimum number of outbound peer connections to maintain.
+    ///
+    /// The node will attempt to establish at least this many outbound
+    /// connections to ensure network connectivity isn't dependent solely
+    /// on inbound connections (which could be controlled by an attacker).
+    ///
+    /// Recommended values:
+    /// - DevNet: 4 (minimum viable)
+    /// - TestNet Alpha/Beta: 6 (moderate)
+    /// - MainNet: 8 (robust connectivity)
+    pub min_outbound_peers: u32,
+
+    /// Minimum number of distinct Autonomous System Numbers (ASNs) for outbound peers.
+    ///
+    /// This ensures outbound connections are spread across different network
+    /// operators, making it harder for a single entity to eclipse the node.
+    ///
+    /// Recommended values:
+    /// - DevNet: 1 (disabled effectively)
+    /// - TestNet Alpha/Beta: 2 (minimal diversity)
+    /// - MainNet: 2 (required diversity)
+    pub min_asn_diversity: u32,
+
+    /// Whether to enforce anti-eclipse constraints.
+    ///
+    /// When `false`, violations are logged/metriced but connections are allowed.
+    /// When `true`, connections that violate limits are rejected.
+    ///
+    /// - DevNet: `false` (warning only)
+    /// - TestNet Alpha/Beta: `false` (warning only)
+    /// - MainNet: `true` (required for validators)
+    pub enforce: bool,
+}
+
+impl Default for P2pAntiEclipseConfig {
+    fn default() -> Self {
+        Self::devnet_default()
+    }
+}
+
+impl P2pAntiEclipseConfig {
+    /// Create a disabled/permissive anti-eclipse configuration.
+    ///
+    /// Only for use in testing where anti-eclipse is not needed.
+    pub fn disabled() -> Self {
+        Self {
+            max_peers_per_ipv4_prefix: 128,
+            min_outbound_peers: 1,
+            min_asn_diversity: 1,
+            enforce: false,
+        }
+    }
+
+    /// Create a DevNet anti-eclipse configuration (T231).
+    ///
+    /// - max_peers_per_ipv4_prefix: 64 (permissive for local testing)
+    /// - min_outbound_peers: 4
+    /// - min_asn_diversity: 1 (effectively disabled)
+    /// - enforce: false
+    pub fn devnet_default() -> Self {
+        Self {
+            max_peers_per_ipv4_prefix: 64,
+            min_outbound_peers: 4,
+            min_asn_diversity: 1,
+            enforce: false,
+        }
+    }
+
+    /// Create a TestNet Alpha anti-eclipse configuration (T231).
+    ///
+    /// - max_peers_per_ipv4_prefix: 16
+    /// - min_outbound_peers: 6
+    /// - min_asn_diversity: 2
+    /// - enforce: false
+    pub fn testnet_alpha_default() -> Self {
+        Self {
+            max_peers_per_ipv4_prefix: 16,
+            min_outbound_peers: 6,
+            min_asn_diversity: 2,
+            enforce: false,
+        }
+    }
+
+    /// Create a TestNet Beta anti-eclipse configuration (T231).
+    ///
+    /// Same as TestNet Alpha:
+    /// - max_peers_per_ipv4_prefix: 16
+    /// - min_outbound_peers: 6
+    /// - min_asn_diversity: 2
+    /// - enforce: false
+    pub fn testnet_beta_default() -> Self {
+        Self::testnet_alpha_default()
+    }
+
+    /// Create a MainNet anti-eclipse configuration (T231).
+    ///
+    /// Strict settings for production:
+    /// - max_peers_per_ipv4_prefix: 8
+    /// - min_outbound_peers: 8
+    /// - min_asn_diversity: 2
+    /// - enforce: true (required for MainNet)
+    pub fn mainnet_default() -> Self {
+        Self {
+            max_peers_per_ipv4_prefix: 8,
+            min_outbound_peers: 8,
+            min_asn_diversity: 2,
+            enforce: true,
+        }
+    }
+
+    /// Check if enforcement is enabled.
+    pub fn is_enforcing(&self) -> bool {
+        self.enforce
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - enforce must be true
+    /// - max_peers_per_ipv4_prefix must be > 0
+    /// - min_outbound_peers must be >= 4
+    /// - min_asn_diversity must be >= 2
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if !self.enforce {
+            return Err("enforce must be true for MainNet".to_string());
+        }
+        if self.max_peers_per_ipv4_prefix == 0 {
+            return Err("max_peers_per_ipv4_prefix must be > 0 for MainNet".to_string());
+        }
+        if self.min_outbound_peers < 4 {
+            return Err(format!(
+                "min_outbound_peers must be >= 4 for MainNet but is {}",
+                self.min_outbound_peers
+            ));
+        }
+        if self.min_asn_diversity < 2 {
+            return Err(format!(
+                "min_asn_diversity must be >= 2 for MainNet but is {}",
+                self.min_asn_diversity
+            ));
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T229: Slashing Configuration
 // ============================================================================
 
@@ -2936,6 +3134,19 @@ pub struct NodeConfig {
     pub p2p_liveness: P2pLivenessConfig,
 
     // ========================================================================
+    // T231: P2P Anti-Eclipse Configuration
+    // ========================================================================
+    /// P2P anti-eclipse constraint configuration (T231).
+    ///
+    /// Controls additional diversity and outbound peer requirements for
+    /// MainNet-grade protection against eclipse attacks.
+    ///
+    /// - DevNet v0: Loose limits (`enforce=false`)
+    /// - TestNet Alpha/Beta: Moderate limits (`enforce=false`)
+    /// - MainNet v0: Strict limits (`enforce=true`, required)
+    pub p2p_anti_eclipse: Option<P2pAntiEclipseConfig>,
+
+    // ========================================================================
     // T229: Slashing Configuration
     // ========================================================================
     /// Slashing penalty engine configuration (T229).
@@ -2994,6 +3205,8 @@ impl Default for NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T231: DevNet anti-eclipse defaults
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults (EnforceCritical mode)
             slashing: SlashingConfig::devnet_default(),
         }
@@ -3041,6 +3254,8 @@ impl NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T231: DevNet anti-eclipse defaults
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults
             slashing: SlashingConfig::devnet_default(),
         }
@@ -3087,6 +3302,8 @@ impl NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T231: DevNet anti-eclipse defaults
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults
             slashing: SlashingConfig::devnet_default(),
         }
@@ -3181,6 +3398,8 @@ impl NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T231: DevNet anti-eclipse defaults
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults (EnforceCritical mode)
             slashing: SlashingConfig::devnet_default(),
         }
@@ -3250,6 +3469,8 @@ impl NodeConfig {
             // T226: TestNet Alpha discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::testnet_alpha_default(),
             p2p_liveness: P2pLivenessConfig::testnet_alpha_default(),
+            // T231: TestNet Alpha anti-eclipse defaults
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::testnet_alpha_default()),
             // T229: TestNet Alpha slashing defaults (RecordOnly mode)
             slashing: SlashingConfig::testnet_alpha_default(),
         }
@@ -3332,6 +3553,8 @@ impl NodeConfig {
             // T226: TestNet Beta discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::testnet_beta_default(),
             p2p_liveness: P2pLivenessConfig::testnet_beta_default(),
+            // T231: TestNet Beta anti-eclipse defaults
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::testnet_beta_default()),
             // T229: TestNet Beta slashing defaults (RecordOnly mode)
             slashing: SlashingConfig::testnet_beta_default(),
         }
@@ -3426,6 +3649,8 @@ impl NodeConfig {
             // T226: MainNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::mainnet_default(),
             p2p_liveness: P2pLivenessConfig::mainnet_default(),
+            // T231: MainNet anti-eclipse defaults (enforce=true)
+            p2p_anti_eclipse: Some(P2pAntiEclipseConfig::mainnet_default()),
             // T229: MainNet slashing defaults (RecordOnly mode, governance can flip)
             slashing: SlashingConfig::mainnet_default(),
         }
@@ -3970,6 +4195,30 @@ impl NodeConfig {
     /// ```
     pub fn with_liveness_config(mut self, config: P2pLivenessConfig) -> Self {
         self.p2p_liveness = config;
+        self
+    }
+
+    // ========================================================================
+    // T231: P2P Anti-Eclipse Configuration Builder Methods
+    // ========================================================================
+
+    /// Set the P2P anti-eclipse configuration (T231).
+    ///
+    /// # Arguments
+    ///
+    /// * `cfg` - The P2P anti-eclipse configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, P2pAntiEclipseConfig};
+    ///
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_p2p_anti_eclipse_config(P2pAntiEclipseConfig::mainnet_default());
+    /// assert!(config.p2p_anti_eclipse.as_ref().unwrap().enforce);
+    /// ```
+    pub fn with_p2p_anti_eclipse_config(mut self, cfg: P2pAntiEclipseConfig) -> Self {
+        self.p2p_anti_eclipse = Some(cfg);
         self
     }
 
@@ -4606,7 +4855,22 @@ impl NodeConfig {
             return Err(MainnetConfigError::P2pLivenessMisconfigured { reason });
         }
 
-        // 28. Slashing configuration must be valid for MainNet (T229)
+        // 28. P2P anti-eclipse configuration must be valid for MainNet (T231)
+        // MainNet requires anti-eclipse constraints to be enforced.
+        match &self.p2p_anti_eclipse {
+            None => {
+                return Err(MainnetConfigError::P2pAntiEclipseMisconfigured {
+                    reason: "p2p_anti_eclipse must be configured for MainNet".to_string(),
+                });
+            }
+            Some(cfg) => {
+                if let Err(reason) = cfg.validate_for_mainnet() {
+                    return Err(MainnetConfigError::P2pAntiEclipseMisconfigured { reason });
+                }
+            }
+        }
+
+        // 29. Slashing configuration must be valid for MainNet (T229)
         // MainNet requires slashing to be at least in RecordOnly mode.
         // If penalties are enabled, parameters must be within T227 ranges.
         if let Err(reason) = self.slashing.validate_for_mainnet() {
@@ -4875,6 +5139,19 @@ pub enum MainnetConfigError {
     P2pLivenessMisconfigured { reason: String },
 
     // ========================================================================
+    // T231: P2P Anti-Eclipse Configuration Errors
+    // ========================================================================
+    /// P2P anti-eclipse configuration is invalid for MainNet (T231).
+    ///
+    /// MainNet requires anti-eclipse constraints:
+    /// - p2p_anti_eclipse must be set
+    /// - enforce must be true
+    /// - max_peers_per_ipv4_prefix must be > 0
+    /// - min_outbound_peers must be >= 4
+    /// - min_asn_diversity must be >= 2
+    P2pAntiEclipseMisconfigured { reason: String },
+
+    // ========================================================================
     // T229: Slashing Configuration Errors
     // ========================================================================
     /// Slashing configuration is invalid for MainNet (T229).
@@ -5116,6 +5393,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: P2P liveness configuration is invalid: {}",
+                    reason
+                )
+            }
+            // T231: P2P anti-eclipse configuration errors
+            MainnetConfigError::P2pAntiEclipseMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: P2P anti-eclipse configuration is invalid: {}",
                     reason
                 )
             }
@@ -6791,5 +7076,195 @@ mod tests {
         let error_str = format!("{}", error);
         assert!(error_str.contains("P2P liveness configuration is invalid"));
         assert!(error_str.contains("heartbeat_interval_secs"));
+    }
+
+    // ========================================================================
+    // T231: P2P Anti-Eclipse Config Tests
+    // ========================================================================
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_devnet_default() {
+        let config = P2pAntiEclipseConfig::devnet_default();
+        assert_eq!(config.max_peers_per_ipv4_prefix, 64);
+        assert_eq!(config.min_outbound_peers, 4);
+        assert_eq!(config.min_asn_diversity, 1);
+        assert!(!config.enforce);
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_testnet_alpha_default() {
+        let config = P2pAntiEclipseConfig::testnet_alpha_default();
+        assert_eq!(config.max_peers_per_ipv4_prefix, 16);
+        assert_eq!(config.min_outbound_peers, 6);
+        assert_eq!(config.min_asn_diversity, 2);
+        assert!(!config.enforce);
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_testnet_beta_default() {
+        let config = P2pAntiEclipseConfig::testnet_beta_default();
+        assert_eq!(config.max_peers_per_ipv4_prefix, 16);
+        assert_eq!(config.min_outbound_peers, 6);
+        assert_eq!(config.min_asn_diversity, 2);
+        assert!(!config.enforce);
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_mainnet_default() {
+        let config = P2pAntiEclipseConfig::mainnet_default();
+        assert_eq!(config.max_peers_per_ipv4_prefix, 8);
+        assert_eq!(config.min_outbound_peers, 8);
+        assert_eq!(config.min_asn_diversity, 2);
+        assert!(config.enforce);
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_disabled() {
+        let config = P2pAntiEclipseConfig::disabled();
+        assert_eq!(config.max_peers_per_ipv4_prefix, 128);
+        assert_eq!(config.min_outbound_peers, 1);
+        assert_eq!(config.min_asn_diversity, 1);
+        assert!(!config.enforce);
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_validate_mainnet_success() {
+        let config = P2pAntiEclipseConfig::mainnet_default();
+        assert!(config.validate_for_mainnet().is_ok());
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_validate_mainnet_enforce_false() {
+        let config = P2pAntiEclipseConfig {
+            enforce: false,
+            ..P2pAntiEclipseConfig::mainnet_default()
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("enforce must be true"));
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_validate_mainnet_zero_prefix() {
+        let config = P2pAntiEclipseConfig {
+            max_peers_per_ipv4_prefix: 0,
+            ..P2pAntiEclipseConfig::mainnet_default()
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("max_peers_per_ipv4_prefix must be > 0"));
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_validate_mainnet_low_outbound() {
+        let config = P2pAntiEclipseConfig {
+            min_outbound_peers: 2, // Below minimum of 4
+            ..P2pAntiEclipseConfig::mainnet_default()
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("min_outbound_peers must be >= 4"));
+    }
+
+    #[test]
+    fn test_p2p_anti_eclipse_config_validate_mainnet_low_asn_diversity() {
+        let config = P2pAntiEclipseConfig {
+            min_asn_diversity: 1, // Below minimum of 2
+            ..P2pAntiEclipseConfig::mainnet_default()
+        };
+        let result = config.validate_for_mainnet();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("min_asn_diversity must be >= 2"));
+    }
+
+    #[test]
+    fn test_node_config_preset_anti_eclipse() {
+        // DevNet preset
+        let devnet = NodeConfig::devnet_v0_preset();
+        let devnet_eclipse = devnet.p2p_anti_eclipse.as_ref().unwrap();
+        assert_eq!(devnet_eclipse.max_peers_per_ipv4_prefix, 64);
+        assert!(!devnet_eclipse.enforce);
+
+        // TestNet Alpha preset
+        let alpha = NodeConfig::testnet_alpha_preset();
+        let alpha_eclipse = alpha.p2p_anti_eclipse.as_ref().unwrap();
+        assert_eq!(alpha_eclipse.max_peers_per_ipv4_prefix, 16);
+        assert!(!alpha_eclipse.enforce);
+
+        // TestNet Beta preset
+        let beta = NodeConfig::testnet_beta_preset();
+        let beta_eclipse = beta.p2p_anti_eclipse.as_ref().unwrap();
+        assert_eq!(beta_eclipse.max_peers_per_ipv4_prefix, 16);
+        assert!(!beta_eclipse.enforce);
+
+        // MainNet preset
+        let mainnet = NodeConfig::mainnet_preset();
+        let mainnet_eclipse = mainnet.p2p_anti_eclipse.as_ref().unwrap();
+        assert_eq!(mainnet_eclipse.max_peers_per_ipv4_prefix, 8);
+        assert!(mainnet_eclipse.enforce);
+    }
+
+    #[test]
+    fn test_node_config_with_p2p_anti_eclipse_config() {
+        let custom_eclipse = P2pAntiEclipseConfig {
+            max_peers_per_ipv4_prefix: 4,
+            min_outbound_peers: 10,
+            min_asn_diversity: 3,
+            enforce: true,
+        };
+        let config = NodeConfig::mainnet_preset()
+            .with_p2p_anti_eclipse_config(custom_eclipse.clone());
+        let stored = config.p2p_anti_eclipse.as_ref().unwrap();
+        assert_eq!(stored.max_peers_per_ipv4_prefix, 4);
+        assert_eq!(stored.min_outbound_peers, 10);
+        assert_eq!(stored.min_asn_diversity, 3);
+        assert!(stored.enforce);
+    }
+
+    #[test]
+    fn test_mainnet_validation_requires_anti_eclipse_config() {
+        let mut config = NodeConfig::mainnet_preset()
+            .with_data_dir("/data/qbind".to_string())
+            .with_signer_keystore_path("/keystore".to_string());
+        config.p2p_anti_eclipse = None;
+
+        let result = config.validate_mainnet_invariants();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MainnetConfigError::P2pAntiEclipseMisconfigured { reason } => {
+                assert!(reason.contains("p2p_anti_eclipse must be configured"));
+            }
+            e => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_validation_anti_eclipse_enforce_required() {
+        let mut config = NodeConfig::mainnet_preset()
+            .with_data_dir("/data/qbind".to_string())
+            .with_signer_keystore_path("/keystore".to_string());
+        config.p2p_anti_eclipse = Some(P2pAntiEclipseConfig {
+            enforce: false,
+            ..P2pAntiEclipseConfig::mainnet_default()
+        });
+
+        let result = config.validate_mainnet_invariants();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            MainnetConfigError::P2pAntiEclipseMisconfigured { reason } => {
+                assert!(reason.contains("enforce must be true"));
+            }
+            e => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_mainnet_config_error_display_anti_eclipse() {
+        let error = MainnetConfigError::P2pAntiEclipseMisconfigured {
+            reason: "enforce must be true for MainNet".to_string(),
+        };
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("P2P anti-eclipse configuration is invalid"));
+        assert!(error_str.contains("enforce must be true"));
     }
 }
