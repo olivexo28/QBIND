@@ -790,6 +790,797 @@ impl SlashingMetrics {
     }
 }
 
+// ============================================================================
+// T229: Slashing Backend Abstraction
+// ============================================================================
+
+/// Error type for slashing backend operations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SlashingBackendError {
+    /// Validator not found in the registry.
+    ValidatorNotFound(ValidatorId),
+    /// Insufficient stake to slash.
+    InsufficientStake {
+        validator_id: ValidatorId,
+        required_bps: u16,
+        available_stake: u64,
+    },
+    /// Validator already jailed.
+    AlreadyJailed(ValidatorId),
+    /// Other backend error.
+    Other(String),
+}
+
+impl std::fmt::Display for SlashingBackendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SlashingBackendError::ValidatorNotFound(id) => {
+                write!(f, "validator {} not found", id.0)
+            }
+            SlashingBackendError::InsufficientStake {
+                validator_id,
+                required_bps,
+                available_stake,
+            } => {
+                write!(
+                    f,
+                    "validator {} has insufficient stake ({}) for {} bps slash",
+                    validator_id.0, available_stake, required_bps
+                )
+            }
+            SlashingBackendError::AlreadyJailed(id) => {
+                write!(f, "validator {} is already jailed", id.0)
+            }
+            SlashingBackendError::Other(msg) => write!(f, "backend error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for SlashingBackendError {}
+
+/// Backend trait for applying slashing penalties (T229).
+///
+/// This trait abstracts the staking/validator registry module so that
+/// `qbind-consensus` doesn't need to know implementation details.
+/// For T229, we provide an in-memory implementation for tests.
+/// Real wiring to staking module is deferred to T23x.
+pub trait SlashingBackend {
+    /// Burn a percentage of a validator's stake.
+    ///
+    /// # Arguments
+    ///
+    /// * `validator_id` - The validator to slash
+    /// * `slash_bps` - Slash percentage in basis points (1 bps = 0.01%)
+    /// * `offense` - The offense that triggered the slash (for logging)
+    ///
+    /// # Returns
+    ///
+    /// The amount of stake actually burned (may be less if stake is low).
+    fn burn_stake_bps(
+        &mut self,
+        validator_id: ValidatorId,
+        slash_bps: u16,
+        offense: OffenseKind,
+    ) -> Result<u64, SlashingBackendError>;
+
+    /// Jail a validator for a number of epochs.
+    ///
+    /// # Arguments
+    ///
+    /// * `validator_id` - The validator to jail
+    /// * `offense` - The offense that triggered the jailing
+    /// * `jail_epochs` - Number of epochs to jail
+    /// * `current_epoch` - Current epoch number
+    ///
+    /// # Returns
+    ///
+    /// The epoch at which the validator will be unjailed.
+    fn jail_validator(
+        &mut self,
+        validator_id: ValidatorId,
+        offense: OffenseKind,
+        jail_epochs: u32,
+        current_epoch: u64,
+    ) -> Result<u64, SlashingBackendError>;
+
+    /// Check if a validator is currently jailed.
+    fn is_jailed(&self, validator_id: ValidatorId) -> bool;
+
+    /// Get validator's current stake (for logging/metrics).
+    fn get_stake(&self, validator_id: ValidatorId) -> Option<u64>;
+}
+
+/// In-memory slashing backend for testing (T229).
+///
+/// Tracks per-validator stake and jail status in memory.
+/// Used by unit tests and integration harnesses.
+#[derive(Debug, Default)]
+pub struct InMemorySlashingBackend {
+    /// Per-validator stake balances.
+    stakes: HashMap<ValidatorId, u64>,
+    /// Per-validator jail expiration epoch (None = not jailed).
+    jailed_until: HashMap<ValidatorId, u64>,
+    /// Total amount slashed (for metrics).
+    total_slashed: u64,
+    /// Total jail events (for metrics).
+    total_jail_events: u64,
+}
+
+impl InMemorySlashingBackend {
+    /// Create a new in-memory backend with no validators.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create an in-memory backend with initial stakes.
+    ///
+    /// # Arguments
+    ///
+    /// * `initial_stakes` - Iterator of (validator_id, stake) pairs
+    pub fn with_stakes(initial_stakes: impl IntoIterator<Item = (ValidatorId, u64)>) -> Self {
+        let stakes: HashMap<_, _> = initial_stakes.into_iter().collect();
+        Self {
+            stakes,
+            jailed_until: HashMap::new(),
+            total_slashed: 0,
+            total_jail_events: 0,
+        }
+    }
+
+    /// Get the total amount slashed.
+    pub fn total_slashed(&self) -> u64 {
+        self.total_slashed
+    }
+
+    /// Get the total number of jail events.
+    pub fn total_jail_events(&self) -> u64 {
+        self.total_jail_events
+    }
+
+    /// Set a validator's stake (for testing).
+    pub fn set_stake(&mut self, validator_id: ValidatorId, stake: u64) {
+        self.stakes.insert(validator_id, stake);
+    }
+
+    /// Clear jail status (for testing).
+    pub fn clear_jail(&mut self, validator_id: ValidatorId) {
+        self.jailed_until.remove(&validator_id);
+    }
+}
+
+impl SlashingBackend for InMemorySlashingBackend {
+    fn burn_stake_bps(
+        &mut self,
+        validator_id: ValidatorId,
+        slash_bps: u16,
+        offense: OffenseKind,
+    ) -> Result<u64, SlashingBackendError> {
+        let stake = self
+            .stakes
+            .get_mut(&validator_id)
+            .ok_or(SlashingBackendError::ValidatorNotFound(validator_id))?;
+
+        // Calculate slash amount: stake * slash_bps / 10000
+        let slash_amount = (*stake as u128 * u128::from(slash_bps) / 10000) as u64;
+
+        // Apply slash
+        *stake = stake.saturating_sub(slash_amount);
+        self.total_slashed += slash_amount;
+
+        eprintln!(
+            "[SLASHING] Backend: burned {} stake from validator {} for {} ({} bps)",
+            slash_amount,
+            validator_id.0,
+            offense.as_str(),
+            slash_bps
+        );
+
+        Ok(slash_amount)
+    }
+
+    fn jail_validator(
+        &mut self,
+        validator_id: ValidatorId,
+        offense: OffenseKind,
+        jail_epochs: u32,
+        current_epoch: u64,
+    ) -> Result<u64, SlashingBackendError> {
+        // Check validator exists
+        if !self.stakes.contains_key(&validator_id) {
+            return Err(SlashingBackendError::ValidatorNotFound(validator_id));
+        }
+
+        // Calculate unjail epoch
+        let unjail_epoch = current_epoch.saturating_add(u64::from(jail_epochs));
+
+        // Apply jail (even if already jailed, extend to new epoch if later)
+        let entry = self.jailed_until.entry(validator_id).or_insert(0);
+        if unjail_epoch > *entry {
+            *entry = unjail_epoch;
+            self.total_jail_events += 1;
+        }
+
+        eprintln!(
+            "[SLASHING] Backend: jailed validator {} until epoch {} for {} ({} epochs)",
+            validator_id.0, unjail_epoch, offense.as_str(), jail_epochs
+        );
+
+        Ok(unjail_epoch)
+    }
+
+    fn is_jailed(&self, validator_id: ValidatorId) -> bool {
+        self.jailed_until.contains_key(&validator_id)
+    }
+
+    fn get_stake(&self, validator_id: ValidatorId) -> Option<u64> {
+        self.stakes.get(&validator_id).copied()
+    }
+}
+
+// ============================================================================
+// T229: Slashing Mode (re-exported from qbind-node config)
+// ============================================================================
+
+/// Slashing mode for the penalty engine (T229).
+///
+/// This is a local copy of the mode enum for use within qbind-consensus.
+/// The authoritative definition is in qbind-node's node_config.rs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SlashingMode {
+    /// No evidence processing at all.
+    Off,
+    /// Record evidence + metrics only. No stake changes, no jailing.
+    #[default]
+    RecordOnly,
+    /// Enforce penalties for critical offenses only (O1, O2).
+    EnforceCritical,
+    /// Enforce penalties for all offenses (O1–O5). Reserved for future.
+    EnforceAll,
+}
+
+impl SlashingMode {
+    /// Check if penalty enforcement is enabled for critical offenses.
+    pub fn should_enforce_critical(&self) -> bool {
+        matches!(self, SlashingMode::EnforceCritical | SlashingMode::EnforceAll)
+    }
+
+    /// Check if penalty enforcement is enabled for all offenses.
+    pub fn should_enforce_all(&self) -> bool {
+        matches!(self, SlashingMode::EnforceAll)
+    }
+}
+
+// ============================================================================
+// T229: Extended Decision Kinds for Penalty-Applied Outcomes
+// ============================================================================
+
+/// Extended decision outcome for processed slashing evidence (T229).
+///
+/// Adds penalty-applied outcomes to the T228 decision kinds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PenaltyDecision {
+    /// Evidence accepted and penalty applied (slash + optional jail).
+    PenaltyApplied {
+        /// Amount of stake burned (in native units).
+        slashed_amount: u64,
+        /// Epoch at which validator will be unjailed (None = not jailed).
+        jailed_until_epoch: Option<u64>,
+    },
+    /// Evidence accepted but penalty not applied (evidence-only mode for O3/O4/O5).
+    EvidenceOnly,
+    /// Fallback to original decision kind (no penalty action taken).
+    Legacy(SlashingDecisionKind),
+}
+
+impl PenaltyDecision {
+    /// Returns a string label for metrics and logging.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PenaltyDecision::PenaltyApplied { .. } => "penalty_applied",
+            PenaltyDecision::EvidenceOnly => "evidence_only",
+            PenaltyDecision::Legacy(kind) => kind.as_str(),
+        }
+    }
+}
+
+/// Extended slashing record with penalty information (T229).
+#[derive(Clone, Debug)]
+pub struct PenaltySlashingRecord {
+    /// The original evidence that was submitted.
+    pub evidence: SlashingEvidence,
+    /// The penalty decision made.
+    pub penalty_decision: PenaltyDecision,
+    /// The block height at which the decision was made.
+    pub decision_height: u64,
+    /// The view at which the decision was made.
+    pub decision_view: u64,
+    /// Current epoch (for jail expiration context).
+    pub current_epoch: u64,
+}
+
+// ============================================================================
+// T229: Slashing Configuration for PenaltySlashingEngine
+// ============================================================================
+
+/// Configuration for the penalty slashing engine (T229).
+///
+/// This mirrors the config from qbind-node but is local to qbind-consensus
+/// to avoid circular dependencies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PenaltyEngineConfig {
+    /// Slashing mode.
+    pub mode: SlashingMode,
+    /// Slash percentage for O1 (double-signing) in basis points.
+    pub slash_bps_o1: u16,
+    /// Slash percentage for O2 (invalid proposer sig) in basis points.
+    pub slash_bps_o2: u16,
+    /// Whether to jail validator on O1 offense.
+    pub jail_on_o1: bool,
+    /// Number of epochs to jail for O1.
+    pub jail_epochs_o1: u32,
+    /// Whether to jail validator on O2 offense.
+    pub jail_on_o2: bool,
+    /// Number of epochs to jail for O2.
+    pub jail_epochs_o2: u32,
+}
+
+impl Default for PenaltyEngineConfig {
+    fn default() -> Self {
+        // Default to record-only mode (safe default)
+        Self {
+            mode: SlashingMode::RecordOnly,
+            slash_bps_o1: 750,  // 7.5%
+            slash_bps_o2: 500,  // 5%
+            jail_on_o1: true,
+            jail_epochs_o1: 10,
+            jail_on_o2: true,
+            jail_epochs_o2: 5,
+        }
+    }
+}
+
+impl PenaltyEngineConfig {
+    /// Create a DevNet configuration (EnforceCritical mode).
+    pub fn devnet() -> Self {
+        Self {
+            mode: SlashingMode::EnforceCritical,
+            ..Self::default()
+        }
+    }
+
+    /// Create a record-only configuration.
+    pub fn record_only() -> Self {
+        Self {
+            mode: SlashingMode::RecordOnly,
+            ..Self::default()
+        }
+    }
+}
+
+// ============================================================================
+// T229: Extended Context with Epoch Information
+// ============================================================================
+
+/// Extended slashing context with epoch information (T229).
+pub struct PenaltySlashingContext<'a> {
+    /// The current or historical validator set for verification.
+    pub validator_set: &'a ValidatorSet,
+    /// Current block height (for decision metadata).
+    pub current_height: u64,
+    /// Current view (for decision metadata).
+    pub current_view: u64,
+    /// Current epoch (for jail expiration).
+    pub current_epoch: u64,
+}
+
+impl<'a> PenaltySlashingContext<'a> {
+    /// Create a context from the base SlashingContext with epoch info.
+    pub fn from_base(base: &SlashingContext<'a>, current_epoch: u64) -> Self {
+        Self {
+            validator_set: base.validator_set,
+            current_height: base.current_height,
+            current_view: base.current_view,
+            current_epoch,
+        }
+    }
+}
+
+// ============================================================================
+// T229: Penalty Slashing Engine
+// ============================================================================
+
+/// Penalty-applying slashing engine (T229).
+///
+/// This engine builds on top of the T228 infrastructure to:
+/// - Apply penalties for O1 and O2 offenses when mode is EnforceCritical
+/// - Keep O3/O4/O5 in evidence-only mode
+/// - Record all evidence regardless of mode
+/// - Track penalty metrics
+pub struct PenaltySlashingEngine<B: SlashingBackend> {
+    /// The slashing backend for applying penalties.
+    backend: B,
+    /// Engine configuration.
+    config: PenaltyEngineConfig,
+    /// All processed records, keyed by validator ID.
+    records: HashMap<ValidatorId, Vec<PenaltySlashingRecord>>,
+    /// Deduplication set: (validator, offense, height, view).
+    seen_evidence: HashSet<(ValidatorId, OffenseKind, u64, u64)>,
+    /// Counter: evidence submitted by offense kind.
+    evidence_counts: HashMap<OffenseKind, u64>,
+    /// Counter: penalties applied by offense kind.
+    penalty_counts: HashMap<OffenseKind, u64>,
+    /// Total stake slashed.
+    total_stake_slashed: u64,
+    /// Total jail events.
+    total_jail_events: u64,
+}
+
+impl<B: SlashingBackend> PenaltySlashingEngine<B> {
+    /// Create a new penalty slashing engine.
+    pub fn new(backend: B, config: PenaltyEngineConfig) -> Self {
+        Self {
+            backend,
+            config,
+            records: HashMap::new(),
+            seen_evidence: HashSet::new(),
+            evidence_counts: HashMap::new(),
+            penalty_counts: HashMap::new(),
+            total_stake_slashed: 0,
+            total_jail_events: 0,
+        }
+    }
+
+    /// Get the engine configuration.
+    pub fn config(&self) -> &PenaltyEngineConfig {
+        &self.config
+    }
+
+    /// Get a reference to the backend.
+    pub fn backend(&self) -> &B {
+        &self.backend
+    }
+
+    /// Get a mutable reference to the backend.
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
+    }
+
+    /// Get total stake slashed.
+    pub fn total_stake_slashed(&self) -> u64 {
+        self.total_stake_slashed
+    }
+
+    /// Get total jail events.
+    pub fn total_jail_events(&self) -> u64 {
+        self.total_jail_events
+    }
+
+    /// Get penalty count for an offense kind.
+    pub fn penalty_count(&self, offense: OffenseKind) -> u64 {
+        self.penalty_counts.get(&offense).copied().unwrap_or(0)
+    }
+
+    /// Get evidence count for an offense kind.
+    pub fn evidence_count(&self, offense: OffenseKind) -> u64 {
+        self.evidence_counts.get(&offense).copied().unwrap_or(0)
+    }
+
+    /// Check if a validator ID is in the validator set.
+    fn is_known_validator(&self, ctx: &PenaltySlashingContext, validator_id: ValidatorId) -> bool {
+        ctx.validator_set
+            .validators
+            .iter()
+            .any(|v| u64::from(v.validator_id) == validator_id.0)
+    }
+
+    /// Handle new slashing evidence with penalty enforcement.
+    pub fn handle_evidence(
+        &mut self,
+        ctx: &PenaltySlashingContext,
+        evidence: SlashingEvidence,
+    ) -> PenaltySlashingRecord {
+        // Log evidence reception
+        eprintln!(
+            "[SLASHING] T229 Evidence received: validator={}, offense={}, height={}, view={}",
+            evidence.offending_validator.0,
+            evidence.offense.as_str(),
+            evidence.height,
+            evidence.view
+        );
+
+        // 1. Check mode - if Off, reject immediately
+        if self.config.mode == SlashingMode::Off {
+            eprintln!("[SLASHING] Mode is Off - no evidence processing");
+            return self.make_record(
+                evidence,
+                PenaltyDecision::Legacy(SlashingDecisionKind::RejectedInvalid),
+                ctx,
+            );
+        }
+
+        // 2. Check for duplicate
+        let dedup_key = evidence.dedup_key();
+        if self.seen_evidence.contains(&dedup_key) {
+            eprintln!(
+                "[SLASHING] Evidence rejected: duplicate (validator={}, offense={}, height={}, view={})",
+                evidence.offending_validator.0,
+                evidence.offense.as_str(),
+                evidence.height,
+                evidence.view
+            );
+            return self.make_record(
+                evidence,
+                PenaltyDecision::Legacy(SlashingDecisionKind::RejectedDuplicate),
+                ctx,
+            );
+        }
+
+        // 3. Validate structure
+        if let Err(reason) = evidence.validate_structure() {
+            eprintln!(
+                "[SLASHING] Evidence rejected: invalid structure - {} (validator={}, offense={})",
+                reason,
+                evidence.offending_validator.0,
+                evidence.offense.as_str()
+            );
+            return self.make_record(
+                evidence,
+                PenaltyDecision::Legacy(SlashingDecisionKind::RejectedInvalid),
+                ctx,
+            );
+        }
+
+        // 4. Verify offending validator is known
+        if !self.is_known_validator(ctx, evidence.offending_validator) {
+            eprintln!(
+                "[SLASHING] Evidence rejected: unknown validator {} (offense={})",
+                evidence.offending_validator.0,
+                evidence.offense.as_str()
+            );
+            return self.make_record(
+                evidence,
+                PenaltyDecision::Legacy(SlashingDecisionKind::RejectedInvalid),
+                ctx,
+            );
+        }
+
+        // 5. Height sanity check
+        let max_allowed_height = ctx.current_height.saturating_add(100);
+        if evidence.height > max_allowed_height {
+            eprintln!(
+                "[SLASHING] Evidence rejected: height {} too far in future (current={})",
+                evidence.height, ctx.current_height
+            );
+            return self.make_record(
+                evidence,
+                PenaltyDecision::Legacy(SlashingDecisionKind::RejectedInvalid),
+                ctx,
+            );
+        }
+
+        // Mark as seen for deduplication
+        self.seen_evidence.insert(dedup_key);
+
+        // Increment evidence counter
+        *self.evidence_counts.entry(evidence.offense).or_insert(0) += 1;
+
+        // 6. Determine penalty action based on offense and mode
+        let penalty_decision = self.apply_penalty_if_needed(&evidence, ctx);
+
+        self.make_record(evidence, penalty_decision, ctx)
+    }
+
+    /// Apply penalty if needed based on offense and mode.
+    fn apply_penalty_if_needed(
+        &mut self,
+        evidence: &SlashingEvidence,
+        ctx: &PenaltySlashingContext,
+    ) -> PenaltyDecision {
+        let offense = evidence.offense;
+        let validator_id = evidence.offending_validator;
+
+        // Check if this offense should have penalties enforced
+        let should_enforce = match offense {
+            OffenseKind::O1DoubleSign | OffenseKind::O2InvalidProposerSig => {
+                self.config.mode.should_enforce_critical()
+            }
+            // O3/O4/O5 only enforced in EnforceAll mode (future)
+            _ => self.config.mode.should_enforce_all(),
+        };
+
+        if !should_enforce {
+            eprintln!(
+                "[SLASHING] Evidence accepted (evidence-only): validator={}, offense={}, mode={:?}",
+                validator_id.0, offense.as_str(), self.config.mode
+            );
+            return PenaltyDecision::EvidenceOnly;
+        }
+
+        // Get slash and jail parameters for this offense
+        let (slash_bps, should_jail, jail_epochs) = match offense {
+            OffenseKind::O1DoubleSign => (
+                self.config.slash_bps_o1,
+                self.config.jail_on_o1,
+                self.config.jail_epochs_o1,
+            ),
+            OffenseKind::O2InvalidProposerSig => (
+                self.config.slash_bps_o2,
+                self.config.jail_on_o2,
+                self.config.jail_epochs_o2,
+            ),
+            // O3/O4/O5 parameters would go here when implemented
+            _ => {
+                eprintln!(
+                    "[SLASHING] No penalty parameters for offense {}, treating as evidence-only",
+                    offense.as_str()
+                );
+                return PenaltyDecision::EvidenceOnly;
+            }
+        };
+
+        // Apply slash
+        let slashed_amount = match self.backend.burn_stake_bps(validator_id, slash_bps, offense) {
+            Ok(amount) => {
+                self.total_stake_slashed += amount;
+                *self.penalty_counts.entry(offense).or_insert(0) += 1;
+                amount
+            }
+            Err(e) => {
+                eprintln!(
+                    "[SLASHING] Warning: failed to slash validator {}: {}",
+                    validator_id.0, e
+                );
+                0
+            }
+        };
+
+        // Apply jail if configured
+        let jailed_until_epoch = if should_jail && jail_epochs > 0 {
+            match self.backend.jail_validator(
+                validator_id,
+                offense,
+                jail_epochs,
+                ctx.current_epoch,
+            ) {
+                Ok(epoch) => {
+                    self.total_jail_events += 1;
+                    Some(epoch)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[SLASHING] Warning: failed to jail validator {}: {}",
+                        validator_id.0, e
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        eprintln!(
+            "[SLASHING] Penalty applied: validator={}, offense={}, slashed={}, jailed_until={:?}",
+            validator_id.0, offense.as_str(), slashed_amount, jailed_until_epoch
+        );
+
+        PenaltyDecision::PenaltyApplied {
+            slashed_amount,
+            jailed_until_epoch,
+        }
+    }
+
+    /// Create and store a penalty record.
+    fn make_record(
+        &mut self,
+        evidence: SlashingEvidence,
+        penalty_decision: PenaltyDecision,
+        ctx: &PenaltySlashingContext,
+    ) -> PenaltySlashingRecord {
+        let record = PenaltySlashingRecord {
+            evidence: evidence.clone(),
+            penalty_decision,
+            decision_height: ctx.current_height,
+            decision_view: ctx.current_view,
+            current_epoch: ctx.current_epoch,
+        };
+
+        self.records
+            .entry(evidence.offending_validator)
+            .or_default()
+            .push(record.clone());
+
+        record
+    }
+
+    /// Get all penalty records for a validator.
+    pub fn get_records_for_validator(
+        &self,
+        validator_id: ValidatorId,
+    ) -> Vec<PenaltySlashingRecord> {
+        self.records.get(&validator_id).cloned().unwrap_or_default()
+    }
+}
+
+// ============================================================================
+// T229: Penalty Metrics Extension
+// ============================================================================
+
+/// Extended metrics for penalty slashing (T229).
+///
+/// Adds penalty-specific counters on top of the T228 SlashingMetrics.
+#[derive(Debug, Default)]
+pub struct PenaltySlashingMetrics {
+    /// Base slashing metrics (evidence and decisions).
+    pub base: SlashingMetrics,
+
+    // Penalty counters by offense type
+    penalties_o1_double_sign: AtomicU64,
+    penalties_o2_invalid_proposer_sig: AtomicU64,
+
+    // Total stake slashed (cumulative)
+    total_stake_slashed: AtomicU64,
+
+    // Total jail events
+    total_jail_events: AtomicU64,
+}
+
+impl PenaltySlashingMetrics {
+    /// Create new penalty metrics.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Increment penalty counter for the given offense.
+    pub fn inc_penalty(&self, offense: OffenseKind) {
+        match offense {
+            OffenseKind::O1DoubleSign => {
+                self.penalties_o1_double_sign.fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O2InvalidProposerSig => {
+                self.penalties_o2_invalid_proposer_sig
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            // O3/O4/O5 penalty counters would go here when implemented
+            _ => {}
+        }
+    }
+
+    /// Add to total slashed stake.
+    pub fn add_slashed_stake(&self, amount: u64) {
+        self.total_stake_slashed.fetch_add(amount, Ordering::Relaxed);
+    }
+
+    /// Increment jail event counter.
+    pub fn inc_jail_event(&self) {
+        self.total_jail_events.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get penalty count for O1.
+    pub fn penalties_o1_total(&self) -> u64 {
+        self.penalties_o1_double_sign.load(Ordering::Relaxed)
+    }
+
+    /// Get penalty count for O2.
+    pub fn penalties_o2_total(&self) -> u64 {
+        self.penalties_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+    }
+
+    /// Get total penalties applied.
+    pub fn penalties_total(&self) -> u64 {
+        self.penalties_o1_total() + self.penalties_o2_total()
+    }
+
+    /// Get total stake slashed.
+    pub fn total_stake_slashed(&self) -> u64 {
+        self.total_stake_slashed.load(Ordering::Relaxed)
+    }
+
+    /// Get total jail events.
+    pub fn total_jail_events(&self) -> u64 {
+        self.total_jail_events.load(Ordering::Relaxed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

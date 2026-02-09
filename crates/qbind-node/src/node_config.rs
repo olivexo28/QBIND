@@ -1602,6 +1602,332 @@ impl P2pLivenessConfig {
 }
 
 // ============================================================================
+// T229: Slashing Configuration
+// ============================================================================
+
+/// Slashing mode for evidence processing and penalty enforcement (T229).
+///
+/// Determines how the slashing engine processes evidence and whether
+/// penalties (stake burning, jailing) are applied.
+///
+/// # Environments
+///
+/// - **DevNet v0**: `EnforceCritical` (see actual penalties for testing)
+/// - **TestNet Alpha**: `RecordOnly` (evidence + metrics only)
+/// - **TestNet Beta**: `RecordOnly` by default (opt-in to EnforceCritical)
+/// - **MainNet v0**: `RecordOnly` by default (governance can flip to EnforceCritical)
+///
+/// # Slashing Modes
+///
+/// - `Off`: No evidence processing at all. Only for dev tools.
+/// - `RecordOnly`: Record evidence + emit metrics, but no stake changes.
+/// - `EnforceCritical`: Apply penalties for O1 (double-sign) and O2 (invalid proposer sig).
+/// - `EnforceAll`: Apply penalties for all offenses (O1–O5). Reserved for future use.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SlashingMode {
+    /// No evidence processing at all. Only for DevNet/dev tools.
+    ///
+    /// **Not allowed for MainNet** – `validate_mainnet_invariants()` will reject this.
+    Off,
+
+    /// Record evidence + metrics only. No stake changes, no jailing.
+    ///
+    /// This is the default for MainNet v0 until governance enables penalties.
+    #[default]
+    RecordOnly,
+
+    /// Enforce penalties for critical offenses only (O1, O2).
+    ///
+    /// - O1: Classical double-signing → slash + jail
+    /// - O2: Invalid consensus signature as proposer → slash + jail
+    ///
+    /// O3/O4/O5 remain in evidence-only mode.
+    EnforceCritical,
+
+    /// Enforce penalties for all offenses (O1–O5).
+    ///
+    /// Reserved for future use when O3/O4/O5 penalties are finalized.
+    /// Not yet enabled in any environment.
+    EnforceAll,
+}
+
+impl std::fmt::Display for SlashingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SlashingMode::Off => write!(f, "off"),
+            SlashingMode::RecordOnly => write!(f, "record_only"),
+            SlashingMode::EnforceCritical => write!(f, "enforce_critical"),
+            SlashingMode::EnforceAll => write!(f, "enforce_all"),
+        }
+    }
+}
+
+/// Parse a slashing mode from a string.
+///
+/// Valid values: "off", "record_only", "enforce_critical", "enforce_all"
+///
+/// Returns `None` for unrecognized values.
+pub fn parse_slashing_mode(s: &str) -> Option<SlashingMode> {
+    match s.to_lowercase().as_str() {
+        "off" | "disabled" => Some(SlashingMode::Off),
+        "record_only" | "record" | "recordonly" => Some(SlashingMode::RecordOnly),
+        "enforce_critical" | "enforcecritical" | "critical" => Some(SlashingMode::EnforceCritical),
+        "enforce_all" | "enforceall" | "all" => Some(SlashingMode::EnforceAll),
+        _ => None,
+    }
+}
+
+/// Valid slashing mode strings for documentation and error messages.
+pub const VALID_SLASHING_MODES: &[&str] = &["off", "record_only", "enforce_critical", "enforce_all"];
+
+/// Configuration for the slashing penalty engine (T229).
+///
+/// Controls how the node processes slashing evidence and applies penalties.
+/// Penalty parameters are expressed in basis points (1 bps = 0.01%).
+///
+/// # T227 Offense Ranges (for reference)
+///
+/// | Offense | Severity | Slash Range |
+/// |---------|----------|-------------|
+/// | O1 | Critical | 5–10% (500–1000 bps) |
+/// | O2 | High | 5% (500 bps) |
+/// | O3a | Medium | 0–0.5% (0–50 bps) |
+/// | O3b | Medium-High | 1–3% (100–300 bps) |
+/// | O4 | High | 5–10% (500–1000 bps) |
+/// | O5 | Medium-High | 1–5% (100–500 bps) |
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{SlashingConfig, SlashingMode};
+///
+/// // DevNet configuration (EnforceCritical mode)
+/// let config = SlashingConfig::devnet_default();
+/// assert_eq!(config.mode, SlashingMode::EnforceCritical);
+/// assert_eq!(config.slash_bps_o1_double_sign, 750); // 7.5%
+///
+/// // MainNet configuration (RecordOnly mode)
+/// let mainnet = SlashingConfig::mainnet_default();
+/// assert_eq!(mainnet.mode, SlashingMode::RecordOnly);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlashingConfig {
+    /// The slashing mode for this node.
+    pub mode: SlashingMode,
+
+    // ========================================================================
+    // Slash Percentages (in basis points)
+    // ========================================================================
+
+    /// Slash percentage for O1 (double-signing) in basis points.
+    ///
+    /// T227 range: 500–1000 bps (5–10%).
+    /// Default: 750 bps (7.5%).
+    pub slash_bps_o1_double_sign: u16,
+
+    /// Slash percentage for O2 (invalid proposer signature) in basis points.
+    ///
+    /// T227 range: 500 bps (5%).
+    /// Validation allows 450-550 bps tolerance for operational flexibility.
+    /// Default: 500 bps (5%).
+    pub slash_bps_o2_invalid_proposer_sig: u16,
+
+    // ========================================================================
+    // Jailing Configuration
+    // ========================================================================
+
+    /// Whether to jail validator on O1 offense (double-signing).
+    pub jail_on_o1: bool,
+
+    /// Number of epochs to jail validator for O1 offense.
+    ///
+    /// Default: 10 epochs.
+    pub jail_epochs_o1: u32,
+
+    /// Whether to jail validator on O2 offense (invalid proposer sig).
+    pub jail_on_o2: bool,
+
+    /// Number of epochs to jail validator for O2 offense.
+    ///
+    /// Default: 5 epochs.
+    pub jail_epochs_o2: u32,
+}
+
+impl Default for SlashingConfig {
+    fn default() -> Self {
+        Self::devnet_default()
+    }
+}
+
+impl SlashingConfig {
+    /// Create a disabled slashing configuration.
+    ///
+    /// No evidence processing at all. Only for dev tools.
+    pub fn disabled() -> Self {
+        Self {
+            mode: SlashingMode::Off,
+            slash_bps_o1_double_sign: 750,
+            slash_bps_o2_invalid_proposer_sig: 500,
+            jail_on_o1: false,
+            jail_epochs_o1: 0,
+            jail_on_o2: false,
+            jail_epochs_o2: 0,
+        }
+    }
+
+    /// Create the DevNet default configuration (T229).
+    ///
+    /// - mode: EnforceCritical (so we can see actual penalties easily)
+    /// - slash_bps_o1_double_sign: 750 (7.5%, midpoint of T227 range)
+    /// - slash_bps_o2_invalid_proposer_sig: 500 (5%)
+    /// - jail_on_o1: true, jail_epochs_o1: 10
+    /// - jail_on_o2: true, jail_epochs_o2: 5
+    pub fn devnet_default() -> Self {
+        Self {
+            mode: SlashingMode::EnforceCritical,
+            slash_bps_o1_double_sign: 750,  // 7.5% - midpoint of 5-10% range
+            slash_bps_o2_invalid_proposer_sig: 500, // 5%
+            jail_on_o1: true,
+            jail_epochs_o1: 10,
+            jail_on_o2: true,
+            jail_epochs_o2: 5,
+        }
+    }
+
+    /// Create the TestNet Alpha default configuration (T229).
+    ///
+    /// - mode: RecordOnly (evidence + metrics only)
+    /// - Same slash/jail parameters as DevNet (unused in RecordOnly mode)
+    pub fn testnet_alpha_default() -> Self {
+        Self {
+            mode: SlashingMode::RecordOnly,
+            slash_bps_o1_double_sign: 750,
+            slash_bps_o2_invalid_proposer_sig: 500,
+            jail_on_o1: true,
+            jail_epochs_o1: 10,
+            jail_on_o2: true,
+            jail_epochs_o2: 5,
+        }
+    }
+
+    /// Create the TestNet Beta default configuration (T229).
+    ///
+    /// - mode: RecordOnly by default (opt-in to EnforceCritical for testing)
+    /// - Same slash/jail parameters, unused in RecordOnly mode
+    pub fn testnet_beta_default() -> Self {
+        Self::testnet_alpha_default()
+    }
+
+    /// Create the MainNet default configuration (T229).
+    ///
+    /// - mode: RecordOnly by default (governance can flip to EnforceCritical)
+    /// - Slash parameters at T227-compliant values (ready for enforcement)
+    /// - Jail parameters ready for use when penalties enabled
+    pub fn mainnet_default() -> Self {
+        Self {
+            mode: SlashingMode::RecordOnly,
+            slash_bps_o1_double_sign: 750,  // 7.5% - conservative within T227 range
+            slash_bps_o2_invalid_proposer_sig: 500, // 5%
+            jail_on_o1: true,
+            jail_epochs_o1: 10,
+            jail_on_o2: true,
+            jail_epochs_o2: 5,
+        }
+    }
+
+    /// Check if slashing is enabled (not Off mode).
+    pub fn is_enabled(&self) -> bool {
+        self.mode != SlashingMode::Off
+    }
+
+    /// Check if penalty enforcement is enabled (EnforceCritical or EnforceAll).
+    pub fn is_enforcing(&self) -> bool {
+        matches!(self.mode, SlashingMode::EnforceCritical | SlashingMode::EnforceAll)
+    }
+
+    /// Check if O1/O2 penalties should be applied.
+    pub fn should_enforce_critical(&self) -> bool {
+        matches!(self.mode, SlashingMode::EnforceCritical | SlashingMode::EnforceAll)
+    }
+
+    /// Check if O3/O4/O5 penalties should be applied.
+    ///
+    /// Currently only true for EnforceAll mode (reserved for future use).
+    pub fn should_enforce_all(&self) -> bool {
+        self.mode == SlashingMode::EnforceAll
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - mode must not be Off
+    /// - If mode is EnforceCritical or EnforceAll:
+    ///   - slash_bps_o1_double_sign must be in T227 range (500–1000 bps)
+    ///   - slash_bps_o2_invalid_proposer_sig must be ~500 bps (±50 tolerance)
+    ///   - jail_epochs must be > 0 and <= 1,000,000
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        // Mode must not be Off for MainNet
+        if self.mode == SlashingMode::Off {
+            return Err("slashing mode must not be 'off' for MainNet".to_string());
+        }
+
+        // If enforcing, validate parameters
+        if self.is_enforcing() {
+            // O1 slash range: 500-1000 bps (5-10%)
+            if self.slash_bps_o1_double_sign < 500 || self.slash_bps_o1_double_sign > 1000 {
+                return Err(format!(
+                    "slash_bps_o1_double_sign ({}) must be in range 500-1000 for MainNet",
+                    self.slash_bps_o1_double_sign
+                ));
+            }
+
+            // O2 slash: ~500 bps (5%), allow some tolerance
+            if self.slash_bps_o2_invalid_proposer_sig < 450
+                || self.slash_bps_o2_invalid_proposer_sig > 550
+            {
+                return Err(format!(
+                    "slash_bps_o2_invalid_proposer_sig ({}) must be in range 450-550 for MainNet",
+                    self.slash_bps_o2_invalid_proposer_sig
+                ));
+            }
+
+            // Jail epochs must be reasonable if jailing is enabled
+            if self.jail_on_o1 {
+                if self.jail_epochs_o1 == 0 {
+                    return Err(
+                        "jail_epochs_o1 must be > 0 when jail_on_o1 is enabled".to_string()
+                    );
+                }
+                if self.jail_epochs_o1 > 1_000_000 {
+                    return Err(format!(
+                        "jail_epochs_o1 ({}) exceeds maximum of 1,000,000",
+                        self.jail_epochs_o1
+                    ));
+                }
+            }
+
+            if self.jail_on_o2 {
+                if self.jail_epochs_o2 == 0 {
+                    return Err(
+                        "jail_epochs_o2 must be > 0 when jail_on_o2 is enabled".to_string()
+                    );
+                }
+                if self.jail_epochs_o2 > 1_000_000 {
+                    return Err(format!(
+                        "jail_epochs_o2 ({}) exceeds maximum of 1,000,000",
+                        self.jail_epochs_o2
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T170: NetworkTransportConfig
 // ============================================================================
 
@@ -2608,6 +2934,18 @@ pub struct NodeConfig {
     /// - TestNet Alpha/Beta: Standard (15s interval, 10s timeout)
     /// - MainNet v0: Conservative (15s interval, 10s timeout, 3 max failures)
     pub p2p_liveness: P2pLivenessConfig,
+
+    // ========================================================================
+    // T229: Slashing Configuration
+    // ========================================================================
+    /// Slashing penalty engine configuration (T229).
+    ///
+    /// Controls how the node processes slashing evidence and applies penalties.
+    ///
+    /// - DevNet v0: EnforceCritical (see actual penalties for testing)
+    /// - TestNet Alpha/Beta: RecordOnly (evidence + metrics only)
+    /// - MainNet v0: RecordOnly (governance can flip to EnforceCritical later)
+    pub slashing: SlashingConfig,
 }
 
 impl Default for NodeConfig {
@@ -2656,6 +2994,8 @@ impl Default for NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T229: DevNet slashing defaults (EnforceCritical mode)
+            slashing: SlashingConfig::devnet_default(),
         }
     }
 }
@@ -2701,6 +3041,8 @@ impl NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T229: DevNet slashing defaults
+            slashing: SlashingConfig::devnet_default(),
         }
     }
 
@@ -2745,6 +3087,8 @@ impl NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T229: DevNet slashing defaults
+            slashing: SlashingConfig::devnet_default(),
         }
     }
 
@@ -2837,6 +3181,8 @@ impl NodeConfig {
             // T226: DevNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: P2pLivenessConfig::devnet_default(),
+            // T229: DevNet slashing defaults (EnforceCritical mode)
+            slashing: SlashingConfig::devnet_default(),
         }
     }
 
@@ -2904,6 +3250,8 @@ impl NodeConfig {
             // T226: TestNet Alpha discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::testnet_alpha_default(),
             p2p_liveness: P2pLivenessConfig::testnet_alpha_default(),
+            // T229: TestNet Alpha slashing defaults (RecordOnly mode)
+            slashing: SlashingConfig::testnet_alpha_default(),
         }
     }
 
@@ -2984,6 +3332,8 @@ impl NodeConfig {
             // T226: TestNet Beta discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::testnet_beta_default(),
             p2p_liveness: P2pLivenessConfig::testnet_beta_default(),
+            // T229: TestNet Beta slashing defaults (RecordOnly mode)
+            slashing: SlashingConfig::testnet_beta_default(),
         }
     }
 
@@ -3076,6 +3426,8 @@ impl NodeConfig {
             // T226: MainNet discovery and liveness defaults
             p2p_discovery: P2pDiscoveryConfig::mainnet_default(),
             p2p_liveness: P2pLivenessConfig::mainnet_default(),
+            // T229: MainNet slashing defaults (RecordOnly mode, governance can flip)
+            slashing: SlashingConfig::mainnet_default(),
         }
     }
 
@@ -3618,6 +3970,50 @@ impl NodeConfig {
     /// ```
     pub fn with_liveness_config(mut self, config: P2pLivenessConfig) -> Self {
         self.p2p_liveness = config;
+        self
+    }
+
+    // ========================================================================
+    // T229: Slashing Configuration Builder Methods
+    // ========================================================================
+
+    /// Set the slashing configuration (T229).
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The slashing configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, SlashingConfig, SlashingMode};
+    ///
+    /// let config = NodeConfig::testnet_beta_preset()
+    ///     .with_slashing_config(SlashingConfig::devnet_default());
+    /// assert_eq!(config.slashing.mode, SlashingMode::EnforceCritical);
+    /// ```
+    pub fn with_slashing_config(mut self, config: SlashingConfig) -> Self {
+        self.slashing = config;
+        self
+    }
+
+    /// Set the slashing mode (T229).
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The slashing mode to use
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use qbind_node::node_config::{NodeConfig, SlashingMode};
+    ///
+    /// let config = NodeConfig::devnet_v0_preset()
+    ///     .with_slashing_mode(SlashingMode::RecordOnly);
+    /// assert_eq!(config.slashing.mode, SlashingMode::RecordOnly);
+    /// ```
+    pub fn with_slashing_mode(mut self, mode: SlashingMode) -> Self {
+        self.slashing.mode = mode;
         self
     }
 
@@ -4210,6 +4606,13 @@ impl NodeConfig {
             return Err(MainnetConfigError::P2pLivenessMisconfigured { reason });
         }
 
+        // 28. Slashing configuration must be valid for MainNet (T229)
+        // MainNet requires slashing to be at least in RecordOnly mode.
+        // If penalties are enabled, parameters must be within T227 ranges.
+        if let Err(reason) = self.slashing.validate_for_mainnet() {
+            return Err(MainnetConfigError::SlashingMisconfigured { reason });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -4470,6 +4873,17 @@ pub enum MainnetConfigError {
     /// - heartbeat_interval_secs must be > 0
     /// - max_heartbeat_failures must be > 0
     P2pLivenessMisconfigured { reason: String },
+
+    // ========================================================================
+    // T229: Slashing Configuration Errors
+    // ========================================================================
+    /// Slashing configuration is invalid for MainNet (T229).
+    ///
+    /// MainNet requires slashing to be at least in RecordOnly mode:
+    /// - mode must not be Off
+    /// - If enforcing, slash percentages must be in T227 ranges
+    /// - If enforcing, jail epochs must be reasonable
+    SlashingMisconfigured { reason: String },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -4702,6 +5116,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: P2P liveness configuration is invalid: {}",
+                    reason
+                )
+            }
+            // T229: Slashing configuration errors
+            MainnetConfigError::SlashingMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: slashing configuration is invalid: {}",
                     reason
                 )
             }

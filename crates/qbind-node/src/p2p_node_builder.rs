@@ -714,6 +714,8 @@ mod tests {
             // T226 fields
             p2p_discovery: crate::node_config::P2pDiscoveryConfig::devnet_default(),
             p2p_liveness: crate::node_config::P2pLivenessConfig::devnet_default(),
+            // T229 field
+            slashing: crate::node_config::SlashingConfig::devnet_default(),
         }
     }
 
