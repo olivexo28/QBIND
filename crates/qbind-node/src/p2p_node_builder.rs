@@ -718,6 +718,8 @@ mod tests {
             p2p_anti_eclipse: Some(crate::node_config::P2pAntiEclipseConfig::devnet_default()),
             // T229 field
             slashing: crate::node_config::SlashingConfig::devnet_default(),
+            // T232 field
+            genesis_source: crate::node_config::GenesisSourceConfig::devnet_default(),
         }
     }
 
