@@ -5,6 +5,7 @@ pub mod context;
 pub mod error;
 pub mod execution;
 pub mod execution_gas;
+pub mod genesis;
 pub mod monetary_engine;
 pub mod monetary_state;
 pub mod parallel_exec;
@@ -126,4 +127,10 @@ pub use state_snapshot::{
 pub use slashing_ledger::{
     EpochNumber, InMemorySlashingLedger, SlashingLedger, SlashingLedgerError, SlashingRecord,
     StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
+};
+
+// T232: Genesis & Launch State exports
+pub use genesis::{
+    GenesisAllocation, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig,
+    GenesisValidationError, GenesisValidator,
 };

@@ -415,7 +415,67 @@ curl http://localhost:9443/metrics | grep qbind_hsm
 | `backend_mode` | `encrypted-fs` or `hsm-pkcs11` | Required |
 | `rate_limit_rps` | Max signing requests per second | 100 |
 
-### 4.3 Joining the Network
+### 4.3 Genesis Configuration (T232)
+
+MainNet v0 requires an **external genesis file**. Unlike DevNet/TestNet, embedded genesis is not permitted.
+
+#### Obtaining the Canonical Genesis File
+
+1. **Download the official genesis file**:
+
+```bash
+# Download from official release
+curl -LO https://releases.qbind.network/mainnet/v0/genesis.json
+
+# Verify checksum (published on release page)
+sha256sum genesis.json
+# Expected: <official-checksum>
+```
+
+2. **Place genesis file in configuration directory**:
+
+```bash
+sudo mkdir -p /etc/qbind
+sudo cp genesis.json /etc/qbind/genesis.json
+sudo chmod 644 /etc/qbind/genesis.json
+```
+
+#### Verifying Genesis File Integrity
+
+Before starting a node, verify the genesis file:
+
+```bash
+# Check JSON structure
+jq . /etc/qbind/genesis.json > /dev/null
+
+# Verify chain_id matches MainNet
+jq -r '.chain_id' /etc/qbind/genesis.json
+# Expected: qbind-mainnet-v0
+
+# Count initial allocations
+jq '.allocations | length' /etc/qbind/genesis.json
+
+# Count initial validators
+jq '.validators | length' /etc/qbind/genesis.json
+```
+
+#### Using Genesis File at Startup
+
+Pass the `--genesis-path` flag when starting the node:
+
+```bash
+qbind-node \
+  --profile mainnet \
+  --genesis-path /etc/qbind/genesis.json \
+  --data-dir /data/qbind \
+  --signer-mode encrypted-fs \
+  --signer-keystore-path /data/qbind/keystore \
+  --validator-id 42
+```
+
+**Critical**: All MainNet nodes MUST use the identical genesis.json file. Nodes with different genesis files will form incompatible forks.
+
+### 4.4 Joining the Network
 
 #### Cold Start (Genesis Sync)
 
@@ -424,6 +484,7 @@ For new networks or when no snapshots are available:
 ```bash
 qbind-node \
   --profile mainnet \
+  --genesis-path /etc/qbind/genesis.json \
   --data-dir /data/qbind \
   --signer-mode encrypted-fs \
   --signer-keystore-path /data/qbind/keystore \

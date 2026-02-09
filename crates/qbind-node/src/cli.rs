@@ -38,9 +38,9 @@ use clap::Parser;
 use crate::node_config::{
     parse_config_profile, parse_dag_coupling_mode, parse_environment, parse_eviction_rate_mode,
     parse_execution_profile, parse_mempool_mode, parse_network_mode, parse_signer_mode,
-    parse_state_retention_mode, DagCouplingMode, FastSyncConfig, MempoolDosConfig,
-    MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
-    P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, ParseEnvironmentError,
+    parse_state_retention_mode, DagCouplingMode, FastSyncConfig, GenesisSourceConfig,
+    MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig,
+    NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, ParseEnvironmentError,
     SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
@@ -339,6 +339,18 @@ pub struct CliArgs {
     pub hsm_config_path: Option<PathBuf>,
 
     // ========================================================================
+    // T232: Genesis Configuration
+    // ========================================================================
+    /// Path to the external genesis configuration file (T232).
+    ///
+    /// Required for MainNet. Optional for DevNet/TestNet (uses embedded genesis if not provided).
+    /// The file must be a valid JSON file conforming to the GenesisConfig schema.
+    ///
+    /// Example: /etc/qbind/genesis.json
+    #[arg(long = "genesis-path")]
+    pub genesis_path: Option<PathBuf>,
+
+    // ========================================================================
     // T219: Mempool Eviction Rate Limiting Configuration
     // ========================================================================
     /// Mempool eviction rate limiting mode: off, warn, or enforce (T219).
@@ -630,6 +642,8 @@ impl CliArgs {
                 p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
                 // T229: DevNet slashing defaults for legacy path
                 slashing: SlashingConfig::devnet_default(),
+                // T232: DevNet genesis source defaults for legacy path
+                genesis_source: GenesisSourceConfig::devnet_default(),
             }
         };
 
@@ -839,6 +853,17 @@ impl CliArgs {
                 );
             }
             config.mempool_eviction.interval_secs = interval_secs;
+        }
+
+        // T232: Apply genesis path override
+        if let Some(ref path) = self.genesis_path {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T232] CLI override: genesis_source.genesis_path = {}",
+                    path.display()
+                );
+            }
+            config.genesis_source = GenesisSourceConfig::external(path.clone());
         }
 
         // Apply data_dir if specified

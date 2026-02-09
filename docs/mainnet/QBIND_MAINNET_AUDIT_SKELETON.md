@@ -59,6 +59,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
 | **Slashing & PQC Offenses** | T227, T228, T229, T230 | ✅ Mitigated | Design (T227), infrastructure (T228), penalty engine (T229), ledger backend (T230); MainNet defaults to RecordOnly |
+| **Genesis & Launch State** | T232 | ✅ Mitigated | GenesisConfig types, validation, MainNet wiring (T232); CLI `--genesis-path` required for MainNet |
 
 ---
 
@@ -548,6 +549,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~**T228**~~ | ~~**Consensus**~~ | ~~**Slashing Infrastructure & Evidence Skeleton v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T229**~~ | ~~**Consensus**~~ | ~~**Penalty Slashing Engine v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T230**~~ | ~~**Consensus**~~ | ~~**Slashing Ledger Backend v1**~~ | ~~**MN-R1, MN-R9**~~ |
+| ~~**T232**~~ | ~~**Config**~~ | ~~**Genesis & Launch State Specification v0**~~ | ~~**MN-R1, MN-R2**~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 
@@ -645,6 +647,16 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Slashing records persisted for CLI/tooling inspection
 >
 > See `qbind-ledger/src/slashing_ledger.rs`, `qbind-node/src/ledger_slashing_backend.rs`, and test coverage in `t230_slashing_ledger_backend_tests.rs`.
+>
+> **Note**: T232 (Genesis & Launch State Specification v0) completed. This provides:
+> - `GenesisConfig` in `qbind-ledger/src/genesis.rs` with chain_id, allocations, validators, council, monetary
+> - `GenesisAllocation`, `GenesisValidator`, `GenesisCouncilConfig`, `GenesisMonetaryConfig` types
+> - `validate()` method checking key invariants (non-zero amounts, unique addresses, valid council threshold)
+> - `GenesisSourceConfig` in `qbind-node` for embedded vs external genesis loading
+> - MainNet requires `--genesis-path` flag (embedded genesis not allowed)
+> - 16 unit tests in `t232_genesis_config_tests.rs`, 7 tests in `t232_genesis_mainnet_profile_tests.rs`
+>
+> See `qbind-ledger/src/genesis.rs`, `qbind-node/src/node_config.rs` (GenesisSourceConfig), and [QBIND_GENESIS_AND_LAUNCH_DESIGN.md](../consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md).
 
 ---
 

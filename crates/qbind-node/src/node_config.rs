@@ -2126,6 +2126,136 @@ impl SlashingConfig {
 }
 
 // ============================================================================
+// T232: Genesis Source Configuration
+// ============================================================================
+
+/// Source for genesis configuration (T232).
+///
+/// Determines where the genesis configuration is loaded from.
+/// MainNet requires an external genesis file; DevNet/TestNet can use embedded genesis.
+///
+/// # Environments
+///
+/// - **DevNet v0**: `Embedded` (default) — uses built-in test genesis
+/// - **TestNet Alpha/Beta**: `Embedded` (default) or `External` with file path
+/// - **MainNet v0**: `External` (**required**) — must specify `genesis_path`
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::GenesisSourceConfig;
+/// use std::path::PathBuf;
+///
+/// // DevNet: use embedded genesis
+/// let devnet = GenesisSourceConfig::embedded();
+///
+/// // MainNet: require external genesis file
+/// let mainnet = GenesisSourceConfig::external(
+///     PathBuf::from("/etc/qbind/genesis.json")
+/// );
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenesisSourceConfig {
+    /// Whether to use an external genesis file.
+    ///
+    /// - `false` (default): Use embedded/default genesis (DevNet/TestNet)
+    /// - `true`: Load genesis from external file (MainNet required)
+    pub use_external: bool,
+
+    /// Path to external genesis file.
+    ///
+    /// Required when `use_external = true`.
+    /// The file must be a valid JSON file conforming to the GenesisConfig schema.
+    ///
+    /// Example: `/etc/qbind/genesis.json`
+    pub genesis_path: Option<PathBuf>,
+}
+
+impl Default for GenesisSourceConfig {
+    fn default() -> Self {
+        Self::embedded()
+    }
+}
+
+impl GenesisSourceConfig {
+    /// Create an embedded genesis configuration (default).
+    ///
+    /// Uses built-in test genesis for DevNet and TestNet.
+    /// Not valid for MainNet.
+    pub fn embedded() -> Self {
+        Self {
+            use_external: false,
+            genesis_path: None,
+        }
+    }
+
+    /// Create an external genesis configuration.
+    ///
+    /// Loads genesis from the specified file path.
+    /// Required for MainNet.
+    pub fn external(genesis_path: PathBuf) -> Self {
+        Self {
+            use_external: true,
+            genesis_path: Some(genesis_path),
+        }
+    }
+
+    /// Create the DevNet default configuration.
+    ///
+    /// - Uses embedded genesis (no external file required)
+    pub fn devnet_default() -> Self {
+        Self::embedded()
+    }
+
+    /// Create the TestNet Alpha/Beta default configuration.
+    ///
+    /// - Uses embedded genesis by default
+    /// - Operators can override with --genesis-path
+    pub fn testnet_default() -> Self {
+        Self::embedded()
+    }
+
+    /// Create the MainNet default configuration.
+    ///
+    /// - Requires external genesis file (must be set via --genesis-path)
+    /// - Returns a config that will fail validation until path is set
+    pub fn mainnet_default() -> Self {
+        // MainNet requires external genesis, but path must be provided by operator
+        // This will fail validate_for_mainnet() until a path is set
+        Self {
+            use_external: true,
+            genesis_path: None,
+        }
+    }
+
+    /// Check if the genesis source is configured.
+    ///
+    /// Returns true if:
+    /// - Using embedded genesis, or
+    /// - Using external genesis with a valid path
+    pub fn is_configured(&self) -> bool {
+        !self.use_external || self.genesis_path.is_some()
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - Must use external genesis file (`use_external = true`)
+    /// - Must have a genesis path configured
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if !self.use_external {
+            return Err("MainNet requires external genesis file (--genesis-path)".to_string());
+        }
+        if self.genesis_path.is_none() {
+            return Err("genesis_path must be set for MainNet".to_string());
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T170: NetworkTransportConfig
 // ============================================================================
 
@@ -3157,6 +3287,18 @@ pub struct NodeConfig {
     /// - TestNet Alpha/Beta: RecordOnly (evidence + metrics only)
     /// - MainNet v0: RecordOnly (governance can flip to EnforceCritical later)
     pub slashing: SlashingConfig,
+
+    // ========================================================================
+    // T232: Genesis Source Configuration
+    // ========================================================================
+    /// Genesis source configuration (T232).
+    ///
+    /// Controls where the genesis configuration is loaded from.
+    ///
+    /// - DevNet v0: Embedded (uses built-in test genesis)
+    /// - TestNet Alpha/Beta: Embedded (default) or External
+    /// - MainNet v0: External (**required**, must specify genesis_path)
+    pub genesis_source: GenesisSourceConfig,
 }
 
 impl Default for NodeConfig {
@@ -3209,6 +3351,8 @@ impl Default for NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults (EnforceCritical mode)
             slashing: SlashingConfig::devnet_default(),
+            // T232: DevNet genesis source defaults (embedded)
+            genesis_source: GenesisSourceConfig::devnet_default(),
         }
     }
 }
@@ -3258,6 +3402,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults
             slashing: SlashingConfig::devnet_default(),
+            // T232: DevNet genesis source defaults (embedded)
+            genesis_source: GenesisSourceConfig::devnet_default(),
         }
     }
 
@@ -3306,6 +3452,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults
             slashing: SlashingConfig::devnet_default(),
+            // T232: DevNet genesis source defaults (embedded)
+            genesis_source: GenesisSourceConfig::devnet_default(),
         }
     }
 
@@ -3402,6 +3550,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults (EnforceCritical mode)
             slashing: SlashingConfig::devnet_default(),
+            // T232: DevNet genesis source defaults (embedded)
+            genesis_source: GenesisSourceConfig::devnet_default(),
         }
     }
 
@@ -3473,6 +3623,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::testnet_alpha_default()),
             // T229: TestNet Alpha slashing defaults (RecordOnly mode)
             slashing: SlashingConfig::testnet_alpha_default(),
+            // T232: TestNet Alpha genesis source defaults (embedded)
+            genesis_source: GenesisSourceConfig::testnet_default(),
         }
     }
 
@@ -3557,6 +3709,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::testnet_beta_default()),
             // T229: TestNet Beta slashing defaults (RecordOnly mode)
             slashing: SlashingConfig::testnet_beta_default(),
+            // T232: TestNet Beta genesis source defaults (embedded)
+            genesis_source: GenesisSourceConfig::testnet_default(),
         }
     }
 
@@ -3653,6 +3807,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::mainnet_default()),
             // T229: MainNet slashing defaults (RecordOnly mode, governance can flip)
             slashing: SlashingConfig::mainnet_default(),
+            // T232: MainNet genesis source (external file required)
+            genesis_source: GenesisSourceConfig::mainnet_default(),
         }
     }
 
@@ -4877,6 +5033,12 @@ impl NodeConfig {
             return Err(MainnetConfigError::SlashingMisconfigured { reason });
         }
 
+        // 30. Genesis source must be configured for MainNet (T232)
+        // MainNet requires an external genesis file (no embedded genesis).
+        if let Err(reason) = self.genesis_source.validate_for_mainnet() {
+            return Err(MainnetConfigError::GenesisMisconfigured { reason });
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -5161,6 +5323,16 @@ pub enum MainnetConfigError {
     /// - If enforcing, slash percentages must be in T227 ranges
     /// - If enforcing, jail epochs must be reasonable
     SlashingMisconfigured { reason: String },
+
+    // ========================================================================
+    // T232: Genesis Configuration Errors
+    // ========================================================================
+    /// Genesis source configuration is invalid for MainNet (T232).
+    ///
+    /// MainNet requires an external genesis file:
+    /// - use_external must be true
+    /// - genesis_path must be set
+    GenesisMisconfigured { reason: String },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -5409,6 +5581,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: slashing configuration is invalid: {}",
+                    reason
+                )
+            }
+            // T232: Genesis configuration errors
+            MainnetConfigError::GenesisMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: genesis configuration is invalid: {} (--genesis-path=<path>)",
                     reason
                 )
             }

@@ -58,6 +58,40 @@ MainNet v0 is the **production network** for QBIND:
 - Users expect high availability and security
 - All protocol changes require governance approval
 
+### 1.5 Genesis State & Chain ID (T232)
+
+MainNet v0 requires a **canonical genesis state** that establishes the initial network configuration:
+
+| Field | Description | MainNet Requirement |
+| :--- | :--- | :--- |
+| **chain_id** | Network identifier | `qbind-mainnet-v0` |
+| **genesis_time_unix_ms** | Canonical start time | Set at launch |
+| **allocations** | Initial token distribution | Non-zero amounts, unique addresses |
+| **validators** | Initial validator set | At least 1, with PQC keys |
+| **council** | Governance council | threshold ≤ member count |
+| **monetary** | Initial monetary parameters | Bootstrap phase defaults |
+
+**MainNet Genesis Requirements**:
+- **External genesis file required**: MainNet nodes MUST use `--genesis-path` CLI flag
+- **Embedded genesis forbidden**: Unlike DevNet/TestNet, embedded genesis is not allowed
+- **Hash verification**: Operators should verify genesis file hash before startup
+- **Canonical distribution**: All validators MUST use the identical genesis.json
+
+**GenesisConfig Invariants** (enforced by `validate()`):
+1. Non-empty chain_id
+2. All allocation amounts > 0
+3. No duplicate addresses in allocations
+4. At least one validator with non-empty PQC key
+5. Council threshold: 0 < threshold ≤ member count
+6. Total supply > 0 (sum of allocations)
+
+**CLI Usage**:
+```bash
+qbind-node --profile mainnet --genesis-path /etc/qbind/genesis.json --data-dir /data/qbind
+```
+
+See [QBIND_GENESIS_AND_LAUNCH_DESIGN.md](../consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md) for the full genesis specification.
+
 ---
 
 ## 2. Execution & State

@@ -48,6 +48,29 @@ TestNet Beta is the **gas-on, fee-market-on, DAG-default, P2P-preferred** test n
 
 > **For the risk-oriented view and readiness checklist of TestNet Beta, see [QBIND_TESTNET_BETA_AUDIT_SKELETON.md](./QBIND_TESTNET_BETA_AUDIT_SKELETON.md).**
 
+### 1.5 Genesis Configuration (T232)
+
+TestNet Beta uses the same genesis schema as MainNet (`GenesisConfig`), but with different requirements:
+
+| Aspect | TestNet Beta | MainNet v0 |
+| :--- | :--- | :--- |
+| **Genesis Source** | Embedded (default) or External | External (required) |
+| **--genesis-path** | Optional | **Required** |
+| **Chain ID** | `qbind-testnet-beta` | `qbind-mainnet-v0` |
+
+**TestNet Beta Genesis Behavior**:
+- By default, uses embedded test genesis (no `--genesis-path` needed)
+- Optional: Use `--genesis-path` to test external genesis loading flow
+- Serves as practice for MainNet genesis deployment
+
+```bash
+# Default: uses embedded genesis
+qbind-node --profile testnet-beta --data-dir /data/qbind
+
+# Optional: test external genesis (MainNet preparation)
+qbind-node --profile testnet-beta --genesis-path /etc/qbind/testnet-genesis.json --data-dir /data/qbind
+```
+
 ---
 
 ## 2. Execution & State
