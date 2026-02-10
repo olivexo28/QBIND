@@ -770,10 +770,19 @@ This section summarizes key security areas and the "risk budget" for MainNet v0.
 | :--- | :--- |
 | **Fee market manipulation** | Simple priority model; EIP-1559 deferred |
 | **Balance draining** | Property tests verify fee deduction correctness |
-| **DoS via spam** | Gas enforcement + fee-priority eviction |
+| **DoS via spam** | Gas enforcement + fee-priority eviction + per-sender quotas (T218) |
 | **Economic attacks** | Burn + proposer hybrid prevents centralization |
+| **Eviction churn** | Eviction rate limiting (T219/T220) |
 
 **Risk Budget**: Fee market is **medium risk**; simple model reduces complexity but may be gameable.
+
+**Adversarial Analysis (T236)**: The fee market has been stress-tested under adversarial conditions including single-sender spam, front-running patterns, and churn attacks. Key findings:
+- Safety invariants (no balance underflow, no double-spend) verified across all scenarios
+- Per-sender quotas (T218) prevent single-sender monopolization
+- Eviction rate limiting (T219/T220) bounds mempool churn
+- Honest senders maintain meaningful inclusion rates (>30%) even under aggressive attacks
+
+See [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md) for detailed analysis.
 
 ### 6.3 DAG Availability and Consensus Coupling
 

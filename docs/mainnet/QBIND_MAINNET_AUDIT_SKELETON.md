@@ -167,7 +167,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] EMA-based fee smoothing (T202) — **Ready** (per-epoch EMA with phase-dependent λ)
 - [x] Rate-of-change limiters (T203) — **Ready** (per-epoch Δ-limit with phase-specific max_delta_r_inf_per_epoch_bps)
 - [x] Phase transition logic (T204) — **Ready** (time + economic gates wired into consensus; automatic phase transitions)
-- [ ] Fee market analysis under adversarial conditions
+- [x] Fee market analysis under adversarial conditions — **Ready** (T236 harness + [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md))
 - [x] Mempool eviction rate limiting — **Ready** (T219 config/metrics + T220 enforcement)
 - [ ] External audit of fee accounting code
 
@@ -591,6 +591,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
 | ~~**T234**~~ | ~~**Testing**~~ | ~~**PQC E2E Performance & TPS Harness v1**~~ | ~~**MN-R1, MN-R6**~~ |
+| ~~**T236**~~ | ~~**Testing**~~ | ~~**Fee Market Adversarial Analysis & Stress Harness v1**~~ | ~~**MN-R2**~~ |
 | ~~**T227**~~ | ~~**Consensus**~~ | ~~**Slashing & PQC Offenses Design**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T228**~~ | ~~**Consensus**~~ | ~~**Slashing Infrastructure & Evidence Skeleton v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T229**~~ | ~~**Consensus**~~ | ~~**Penalty Slashing Engine v1**~~ | ~~**MN-R1, MN-R9**~~ |
@@ -717,6 +718,16 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - 19 tests in `t233_genesis_hash_tests.rs`, 16 tests in `t233_genesis_cli_tests.rs`
 >
 > See `qbind-ledger/src/genesis.rs`, `qbind-node/src/cli.rs`, and [QBIND_GENESIS_AND_LAUNCH_DESIGN.md §9](../consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md#9-genesis-hash-commitment-t233).
+>
+> **Note**: T236 (Fee Market Adversarial Analysis & Stress Harness v1) completed. This provides:
+> - `FeeAdversarialProfile` enum: Baseline, SpammySingleSender, FrontRunningPattern, ChurnAttack
+> - `FeeAdversarialConfig` with configurable parameters (senders, fees, quotas, eviction settings)
+> - `FeeAdversarialResult` with comprehensive metrics (inclusion counts, latency, fee accounting, safety flags)
+> - 6 test scenarios validating safety invariants under adversarial conditions
+> - Verifies: no negative balances, no double-spend, honest sender inclusion, fee accounting integrity
+> - Demonstrates per-sender quotas (T218) and eviction rate limiting (T219/T220) effectiveness
+>
+> See `qbind-node/tests/t236_fee_market_adversarial_tests.rs` and [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md).
 
 ---
 

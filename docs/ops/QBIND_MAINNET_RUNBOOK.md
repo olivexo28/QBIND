@@ -663,6 +663,36 @@ cargo test -p qbind-node --test t234_pqc_end_to_end_perf_tests test_pqc_perf_bet
 
 **Note**: Specific TPS targets depend on validator hardware, network topology, and geographic distribution. Use T234 to establish baseline performance characteristics for your deployment.
 
+#### Fee Market Adversarial Testing (T236)
+
+The T236 harness validates fee market safety under adversarial conditions including spam, front-running, and churn attacks:
+
+```bash
+# Run all T236 fee market adversarial tests
+cargo test -p qbind-node --test t236_fee_market_adversarial_tests -- --test-threads=1
+
+# Run specific scenario tests
+cargo test -p qbind-node --test t236_fee_market_adversarial_tests test_t236_fee_baseline_sanity
+cargo test -p qbind-node --test t236_fee_market_adversarial_tests test_t236_single_sender_spam_cannot_starve_others
+cargo test -p qbind-node --test t236_fee_market_adversarial_tests test_t236_eviction_churn_under_attack_respects_rate_limits
+```
+
+**Expected Output**:
+- All tests should pass
+- `safety_invariants_hold() == true` — No balance anomalies, no double-spend, no negative balances
+- `honest_inclusion_ratio() > 0.3` — Honest senders not fully starved (>30% inclusion)
+
+**Interpreting Results**:
+
+| Metric | Guidance |
+| :--- | :--- |
+| `honest_txs_included` | Should be > 0 even under attack |
+| `balance_anomalies_detected` | Must be false |
+| `negative_balance_detected` | Must be false |
+| `sender_limit_rejections` | Expected > 0 for spam scenarios (T218 working) |
+
+**Reference**: See [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md) for detailed analysis.
+
 **Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) for the full MainNet readiness checklist.
 
 ### 4.5 Pre-Flight Verification
@@ -1866,6 +1896,10 @@ Before applying any Council-approved upgrade:
   - [ ] Stage B soak passes (T223):
     ```bash
     cargo test -p qbind-node --test t223_stage_b_soak_harness -- --test-threads=1
+    ```
+  - [ ] Fee market adversarial harness passes (T236):
+    ```bash
+    cargo test -p qbind-node --test t236_fee_market_adversarial_tests -- --test-threads=1
     ```
 - [ ] **Verify configuration** matches expected profile:
   ```bash
