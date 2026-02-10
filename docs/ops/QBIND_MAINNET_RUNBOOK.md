@@ -200,9 +200,43 @@ Before starting a MainNet validator, verify:
 - [ ] **Diversity mode** is set to `enforce`
 - [ ] **Monetary mode** is `shadow` (recommended for initial launch) or `active`
 
-### 3.4 Pre-Release Testing
+### 3.4 Pre-Release Testing (Mandatory)
 
-Before release, QA and operators should run the consensus chaos harness tests to validate fault tolerance:
+Before release and before starting any MainNet validator, run the following **mandatory** test harnesses:
+
+#### 3.4.1 MainNet Profile Launch Tests (T185 + T237)
+
+These tests verify that the canonical MainNet configuration profile passes all safety invariants:
+
+```bash
+# Run the T237 launch gates & profile freeze tests (23 tests)
+cargo test -p qbind-node --test t237_mainnet_launch_profile_tests
+
+# Run the T185 mainnet profile tests (original invariants)
+cargo test -p qbind-node --test t185_mainnet_profile_tests
+```
+
+**What these tests cover**:
+
+| Test Category | Tests | Purpose |
+| :--- | :--- | :--- |
+| Positive tests | `test_mainnet_preset_passes_launch_invariants` | Canonical preset validation |
+| DAG coupling | `test_mainnet_rejects_dag_coupling_*` | Consensus coupling enforcement |
+| P2P discovery | `test_mainnet_rejects_discovery_disabled` | Dynamic discovery required |
+| Anti-eclipse | `test_mainnet_rejects_anti_eclipse_*` | Eclipse attack protection |
+| Mempool DoS | `test_mainnet_rejects_mempool_dos_*` | DoS protection enforcement |
+| Eviction | `test_mainnet_rejects_eviction_mode_off` | Rate limiting enforcement |
+| Snapshots | `test_mainnet_rejects_snapshots_disabled` | Recovery capability |
+| Slashing | `test_mainnet_rejects_slashing_mode_off` | Slashing enforcement |
+| Genesis | `test_mainnet_rejects_missing_expected_genesis_hash` | Genesis hash commitment |
+| Monetary | `test_mainnet_rejects_monetary_mode_off` | Monetary tracking |
+| State retention | `test_mainnet_rejects_state_retention_*` | State pruning configuration |
+
+**Expected output**: All tests should pass. If any test fails, do not proceed with MainNet deployment until the issue is resolved.
+
+#### 3.4.2 Consensus Chaos Harness (T222)
+
+These tests validate fault tolerance under adversarial conditions:
 
 ```bash
 # Run all chaos harness tests

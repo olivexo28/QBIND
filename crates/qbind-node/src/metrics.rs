@@ -6530,6 +6530,9 @@ pub struct NodeMetrics {
     snapshot: SnapshotMetrics,
     /// Slashing/penalty metrics (T230).
     slashing: SlashingMetrics,
+    /// MainNet profile invariants validation result (T237).
+    /// 0 = not checked / failed, 1 = passed once.
+    mainnet_invariants_ok: std::sync::atomic::AtomicU8,
 }
 
 impl Default for NodeMetrics {
@@ -6569,6 +6572,7 @@ impl NodeMetrics {
             remote_signer: crate::remote_signer::RemoteSignerMetrics::new(),
             snapshot: SnapshotMetrics::new(),
             slashing: SlashingMetrics::new(),
+            mainnet_invariants_ok: std::sync::atomic::AtomicU8::new(0),
         }
     }
 
@@ -6856,6 +6860,24 @@ impl NodeMetrics {
     /// Get the channel capacity configuration (if set).
     pub fn channel_config(&self) -> Option<ChannelCapacityConfig> {
         self.channel_config.read().ok().and_then(|g| g.clone())
+    }
+
+    /// Mark that MainNet profile invariants passed validation (T237).
+    ///
+    /// Call this after `validate_mainnet_invariants()` returns `Ok(())` to
+    /// record that the node started with a valid MainNet configuration.
+    /// This sets the gauge `qbind_mainnet_profile_invariants_ok` to 1.
+    pub fn set_mainnet_invariants_ok(&self) {
+        self.mainnet_invariants_ok
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Get the MainNet profile invariants status (T237).
+    ///
+    /// Returns 1 if `validate_mainnet_invariants()` passed, 0 otherwise.
+    pub fn mainnet_invariants_ok(&self) -> u8 {
+        self.mainnet_invariants_ok
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Format metrics as a string for logging or HTTP endpoint.
@@ -7208,6 +7230,13 @@ impl NodeMetrics {
         if let Some(env_metrics) = self.environment() {
             output.push_str(&env_metrics.format_metrics());
         }
+
+        // MainNet profile invariants gauge (T237)
+        output.push_str("\n# MainNet profile invariants (T237)\n");
+        output.push_str(&format!(
+            "qbind_mainnet_profile_invariants_ok {}\n",
+            self.mainnet_invariants_ok()
+        ));
 
         // DAG coupling validation metrics (T191)
         output.push('\n');

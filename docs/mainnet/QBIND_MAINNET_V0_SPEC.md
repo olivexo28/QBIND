@@ -327,16 +327,103 @@ MainNet v0 does not specify a hard minimum TPS target but requires:
 
 **Note**: Specific TPS targets are deployment-dependent and will be established based on real-world MainNet validator hardware and geographic distribution. The T234 harness provides the testing framework for measuring performance characteristics in different configurations.
 
-### 2.7 MainNet-Only Invariants
+### 2.7 MainNet Launch Gates & Invariants (T237)
 
-The following invariants are **enforced** for MainNet v0:
+The following invariants are **enforced** by `validate_mainnet_invariants()` at startup. A MainNet node will **refuse to start** if any invariant is violated.
 
-1. **No in-memory-only validator nodes**: All validators MUST use persistent storage
-2. **No LocalMesh networking**: P2P transport is required
-3. **No gas-disabled mode**: Gas enforcement cannot be turned off
-4. **No v0 payloads**: Only `TransferPayloadV1` accepted
-5. **No loopback signer**: Production signing required (HSM or EncryptedFs)
-6. **Snapshots enabled**: Periodic snapshots must be enabled (T215)
+#### Core Execution Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **Environment** | `NetworkEnvironment::Mainnet` | `WrongEnvironment` |
+| **Gas Enforcement** | `gas_enabled = true` | `GasDisabled` |
+| **Fee Priority** | `enable_fee_priority = true` | `FeePriorityDisabled` |
+| **Mempool Mode** | `MempoolMode::Dag` | `WrongMempoolMode` |
+| **DAG Availability** | `dag_availability_enabled = true` | `DagAvailabilityDisabled` |
+| **Data Directory** | `data_dir` is set | `MissingDataDir` |
+
+#### DAG & Consensus Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **DAG Coupling** | `DagCouplingMode::Enforce` | `DagCouplingNotEnforced` |
+| **Stage B** | Allowed but not required; warning if disabled | (warning only) |
+
+#### P2P & Networking Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **Network Mode** | `NetworkMode::P2p` | `WrongNetworkMode` |
+| **P2P Transport** | `enable_p2p = true` | `P2pDisabled` |
+| **Discovery** | `discovery_enabled = true` | `DiscoveryDisabled` |
+| **Outbound Peers** | `target_outbound_peers >= 8` | `InsufficientTargetOutboundPeers` |
+| **Diversity Mode** | `DiversityEnforcementMode::Enforce` | `DiversityNotEnforced` |
+| **Anti-Eclipse** | Config present, `enforce = true`, min_outbound >= 4, min_asn >= 2 | `P2pAntiEclipseMisconfigured` |
+| **Liveness** | `heartbeat_interval_secs > 0`, `max_heartbeat_failures > 0` | `P2pLivenessMisconfigured` |
+
+#### Mempool Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **DoS Limits** | All limits > 0, `max_pending_per_sender < 100,000` | `MempoolDosMisconfigured` |
+| **Eviction Mode** | `EvictionRateMode::Enforce` | `MempoolEvictionMisconfigured` |
+
+#### State & Snapshots Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **State Retention** | Enabled (Height mode) | `StateRetentionDisabled` |
+| **Retain Height** | `retain_height >= 10,000` | `StateRetentionInvalid` |
+| **Snapshots** | `enabled = true` | `SnapshotsDisabled` |
+| **Snapshot Interval** | `10,000 <= interval <= 500,000` | `SnapshotIntervalTooLow/TooHigh` |
+
+#### Signer & Keys Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **Signer Mode** | Not `LoopbackTesting` | `SignerModeLoopbackForbidden` |
+| **Keystore Path** | Required for `EncryptedFsV1` | `SignerKeystorePathMissing` |
+| **Remote Signer URL** | Required for `RemoteSigner` | `RemoteSignerUrlMissing` |
+| **HSM Config** | Required for `HsmPkcs11` | `HsmConfigPathMissing` |
+| **Failure Mode** | `SignerFailureMode::ExitOnFailure` | `SignerFailureModeInvalid` |
+
+#### Slashing Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **Slashing Mode** | Not `Off` (RecordOnly, EnforceCritical, or EnforceAll) | `SlashingMisconfigured` |
+
+#### Monetary Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **Monetary Mode** | Not `Off` (Shadow or Active) | `MonetaryModeOff` |
+| **Fee Distribution** | `FeeDistributionPolicy::mainnet_default()` | `WrongFeeDistributionPolicy` |
+
+#### Genesis Invariants
+
+| Invariant | Requirement | Error on Violation |
+| :--- | :--- | :--- |
+| **Genesis Source** | External file required (`--genesis-path`) | `GenesisMisconfigured` |
+| **Genesis Hash** | `--expect-genesis-hash` required | `ExpectedGenesisHashMissing` |
+
+#### Test Harness
+
+The canonical test harness for these invariants is:
+
+```bash
+# Run the T237 launch profile tests (mandatory pre-launch check)
+cargo test -p qbind-node --test t237_mainnet_launch_profile_tests
+
+# Run the T185 mainnet profile tests (original invariants)
+cargo test -p qbind-node --test t185_mainnet_profile_tests
+```
+
+The `t237_mainnet_launch_profile_tests.rs` file contains:
+- **Positive test**: `test_mainnet_preset_passes_launch_invariants` — verifies canonical preset passes
+- **Negative tests**: One test per subsystem asserting correct `MainnetConfigError` on misconfiguration
+
+See [QBIND_MAINNET_RUNBOOK.md §3](../ops/QBIND_MAINNET_RUNBOOK.md#3-configuration-profiles--invariants) for operational guidance.
 
 ---
 
@@ -1380,6 +1467,7 @@ See [QBIND_MAINNET_RUNBOOK.md §4](../ops/QBIND_MAINNET_RUNBOOK.md#4-bootstrappi
 | **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
 | **External Audit RFP** | [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) | External security audit scope and requirements (T235) |
+| **Launch Gates Test Harness** | `crates/qbind-node/tests/t237_mainnet_launch_profile_tests.rs` | Launch gates & profile freeze tests (T237) |
 | **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance and upgrade envelope design (T224, T225) |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |

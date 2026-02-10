@@ -59,7 +59,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215, T216 | ✅ Mitigated | Stage B metrics (T187), snapshot metrics (T215), runbook (T216) |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
 | **Slashing & PQC Offenses** | T227, T228, T229, T230 | ✅ Mitigated | Design (T227), infrastructure (T228), penalty engine (T229), ledger backend (T230); MainNet defaults to RecordOnly |
-| **Genesis & Launch State** | T232, T233 | ✅ Mitigated | GenesisConfig types (T232), genesis hash commitment + CLI verification (T233); CLI `--genesis-path` and `--expect-genesis-hash` required for MainNet |
+| **Genesis & Launch State** | T232, T233, T237 | ✅ Mitigated | GenesisConfig types (T232), genesis hash commitment + CLI verification (T233), launch gates & profile freeze (T237); CLI `--genesis-path` and `--expect-genesis-hash` required for MainNet |
 | **External Security Audit** | T235 | Partially Mitigated | RFP + scope document ready (T235); vendor selection and audit execution pending |
 
 ---
@@ -76,7 +76,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R4** | P2P & Eclipse Resistance | High | ✅ Mitigated (T205–T207, T226, T231) | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
 | **MN-R5** | Key Management & Remote Signing | Critical | ✅ Mitigated (T209–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
-| **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
+| **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated (T185, T237) | [Spec §2.7](./QBIND_MAINNET_V0_SPEC.md#27-mainnet-launch-gates--invariants-t237) |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
 | **MN-R9** | Slashing & PQC Misbehavior | High | ✅ Mitigated (T229, T230) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
 | **MN-R10** | External Security Audit | Critical | Partially Mitigated (T235) | [RFP Doc](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) |
@@ -487,12 +487,13 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | # | Requirement | Status | Evidence |
 | :--- | :--- | :--- | :--- |
 | 31 | MainNet configuration profile implemented | ✅ Ready | T185 |
-| 32 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185 |
-| 33 | MainNet operational runbook complete | ✅ Ready | T216 [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) |
-| 34 | Prometheus alerting skeleton | ✅ Ready | T216 [qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml) |
-| 35 | Grafana dashboard skeleton | ✅ Ready | T216 [qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json) |
-| 36 | External security audit completed | ⏳ Pending | External |
-| 37 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
+| 32 | MainNet invariant validation (`validate_mainnet_invariants()`) | ✅ Ready | T185, T237 |
+| 33 | MainNet launch gates test harness | ✅ Ready | T237 `t237_mainnet_launch_profile_tests.rs` |
+| 34 | MainNet operational runbook complete | ✅ Ready | T216 [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) |
+| 35 | Prometheus alerting skeleton | ✅ Ready | T216 [qbind_mainnet_alerts.example.yaml](../ops/prometheus/qbind_mainnet_alerts.example.yaml) |
+| 36 | Grafana dashboard skeleton | ✅ Ready | T216 [qbind_mainnet_dashboard.example.json](../ops/grafana/qbind_mainnet_dashboard.example.json) |
+| 37 | External security audit completed | ⏳ Pending | External |
+| 38 | All MainNet-blocking issues resolved | ⏳ Pending | This checklist |
 
 ### 4.8 Readiness Summary
 
@@ -598,6 +599,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~**T230**~~ | ~~**Consensus**~~ | ~~**Slashing Ledger Backend v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T232**~~ | ~~**Config**~~ | ~~**Genesis & Launch State Specification v0**~~ | ~~**MN-R1, MN-R2**~~ |
 | ~~**T233**~~ | ~~**Config**~~ | ~~**Genesis Hash Commitment & Verification CLI v1**~~ | ~~**MN-R1, MN-R2**~~ |
+| ~~**T237**~~ | ~~**Config**~~ | ~~**MainNet Launch Gates & Profile Freeze v1**~~ | ~~**MN-R6, MN-R7**~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | **T235** | **Docs** | **External Security Audit Prep v1 (RFP + Scope + Audit Skeleton Alignment)** | **MN-R10** |
 | External | Security | External security audit | All |
@@ -728,6 +730,25 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Demonstrates per-sender quotas (T218) and eviction rate limiting (T219/T220) effectiveness
 >
 > See `qbind-node/tests/t236_fee_market_adversarial_tests.rs` and [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md).
+>
+> **Note**: T237 (MainNet Launch Gates & Profile Freeze v1) completed. This provides:
+> - Comprehensive `validate_mainnet_invariants()` coverage for all MainNet-critical safety subsystems:
+>   - DAG–Consensus coupling (DagCouplingMode::Enforce required)
+>   - P2P discovery, liveness, and anti-eclipse constraints
+>   - Mempool DoS protections and eviction rate limiting
+>   - State retention and snapshot configuration
+>   - Slashing mode (RecordOnly or higher required)
+>   - Signer modes and failure handling
+>   - Genesis source and hash commitment
+>   - Monetary mode (Shadow or Active required)
+> - New test harness `t237_mainnet_launch_profile_tests.rs` with:
+>   - Positive test: canonical MainNet preset passes all invariants
+>   - Negative tests: per-subsystem tests asserting correct `MainnetConfigError` variants
+>   - 23 tests covering all launch-gate subsystems
+> - Documentation updates to QBIND_MAINNET_V0_SPEC.md (§2.7 Launch Gates table)
+> - Documentation updates to QBIND_MAINNET_RUNBOOK.md (pre-launch checklist)
+>
+> See `qbind-node/tests/t237_mainnet_launch_profile_tests.rs` and [QBIND_MAINNET_V0_SPEC.md §2.7](./QBIND_MAINNET_V0_SPEC.md#27-mainnet-launch-gates--invariants-t237).
 
 ---
 
