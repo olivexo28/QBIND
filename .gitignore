@@ -12,3 +12,6 @@ target/
 
 # MSVC Windows builds
 *.pdb
+
+# Release artifacts (T239)
+/release/

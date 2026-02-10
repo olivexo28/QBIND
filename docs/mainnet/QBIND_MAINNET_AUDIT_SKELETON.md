@@ -60,7 +60,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
 | **Slashing & PQC Offenses** | T227, T228, T229, T230 | ✅ Mitigated | Design (T227), infrastructure (T228), penalty engine (T229), ledger backend (T230); MainNet defaults to RecordOnly |
 | **Genesis & Launch State** | T232, T233, T237 | ✅ Mitigated | GenesisConfig types (T232), genesis hash commitment + CLI verification (T233), launch gates & profile freeze (T237); CLI `--genesis-path` and `--expect-genesis-hash` required for MainNet |
-| **External Security Audit** | T235 | Partially Mitigated | RFP + scope document ready (T235); vendor selection and audit execution pending |
+| **External Security Audit** | T235, T239 | Partially Mitigated | RFP + scope document ready (T235); release manifest and deterministic build tooling (T239); vendor selection and audit execution pending |
 
 ---
 
@@ -79,7 +79,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated (T185, T237, T238.5) | [Spec §2.7](./QBIND_MAINNET_V0_SPEC.md#27-mainnet-launch-gates--invariants-t237) |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
 | **MN-R9** | Slashing & PQC Misbehavior | High | ✅ Mitigated (T229, T230) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
-| **MN-R10** | External Security Audit | Critical | Partially Mitigated (T235, T238.5) | [RFP Doc](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) |
+| **MN-R10** | External Security Audit | Critical | Partially Mitigated (T235, T238.5, T239) | [RFP Doc](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) |
 
 ---
 
@@ -372,6 +372,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 **Current Mitigations**:
 - ✅ **T235: External Security Audit Prep v1** — RFP and scope document ready
+- ✅ **T239: Reproducible MainNet Release Artifacts & Supply-Chain Hardening v1** — Deterministic build scripts, release manifest, binary verification tooling
 - ✅ Comprehensive scope definition covering all MainNet components
 - ✅ Threat model summary with PQC-specific concerns
 - ✅ Vendor qualification requirements defined
@@ -387,6 +388,13 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] **Threat Model Summary**: MN-R1 through MN-R9 + PQC-specific concerns
 - [x] **Artifacts Listing**: Design docs, crates, test harnesses
 - [x] **Vendor Requirements**: BFT, L1, PQC, HSM experience required
+
+**T239 Deliverables**:
+- [x] **Release Manifest Schema**: [QBIND_MAINNET_V0_RELEASE_MANIFEST.md](../release/QBIND_MAINNET_V0_RELEASE_MANIFEST.md)
+- [x] **Example Manifest**: [QBIND_MAINNET_V0_RELEASE_MANIFEST.example.json](../release/QBIND_MAINNET_V0_RELEASE_MANIFEST.example.json)
+- [x] **Build Script**: `scripts/build-mainnet-release.sh` — Deterministic builds with SHA3-256 hashes
+- [x] **Binary Verification**: Hash comparison workflow for operators
+- [x] **Supply-Chain Hardening**: Cargo.lock pinning, toolchain version capture, git provenance
 
 **Additional MainNet Requirements**:
 - [x] RFP/scope document ready — **T235 (Ready)**
@@ -607,6 +615,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~**T237**~~ | ~~**Config**~~ | ~~**MainNet Launch Gates & Profile Freeze v1**~~ | ~~**MN-R6, MN-R7**~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | **T235** | **Docs** | **External Security Audit Prep v1 (RFP + Scope + Audit Skeleton Alignment)** | **MN-R10** |
+| **T239** | **Release** | **Reproducible MainNet Release Artifacts & Supply-Chain Hardening v1** | **MN-R10** |
 | External | Security | External security audit | All |
 
 > **Note**: Stage B production wiring completed in T186 + T187 (strikethrough above).
@@ -775,6 +784,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 - [QBIND MainNet Operational Runbook](../ops/QBIND_MAINNET_RUNBOOK.md) — MainNet operations (T216)
 - [QBIND Multi-Region Dress Rehearsal](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) — Real-infra dress rehearsal procedure (T238.5)
 - [QBIND External Security Audit RFP](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) — External audit scope and requirements (T235)
+- [QBIND MainNet v0 Release Manifest](../release/QBIND_MAINNET_V0_RELEASE_MANIFEST.md) — Release manifest and supply-chain hardening (T239)
 - [QBIND Governance & Upgrades Design](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — Governance and upgrade model (T224)
 - [QBIND DAG Consensus Coupling Design](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — DAG–HotStuff coupling (T188)
 - [QBIND Slashing & PQC Offenses Design](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) — PQC-specific slashing model (T227)
@@ -791,6 +801,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 The following documents should reference this MainNet audit:
 
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
+- [QBIND_MAINNET_V0_RELEASE_MANIFEST.md](../release/QBIND_MAINNET_V0_RELEASE_MANIFEST.md) — Release manifest and binary verification (T239)
 - [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — References audit for operational context (T216)
 - [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) — References audit for MN-R4 (T238.5)
 - [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) — References audit skeleton for MN-R10

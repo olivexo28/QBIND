@@ -1525,6 +1525,23 @@ Before running a MainNet validator, operators MUST:
 2. Read the summarized audit findings and any governance-accepted residual risks
 3. Only run builds at or after the "audited commit" unless explicitly instructed otherwise via governance
 
+**Binary verification using the release manifest (T239)**:
+
+```bash
+# 1. Download the official release manifest
+curl -O https://releases.qbind.io/mainnet-v0/QBIND_MAINNET_V0_RELEASE_MANIFEST.json
+
+# 2. Verify binary hash matches manifest
+sha3sum -a 256 /usr/local/bin/qbind-node
+# Compare against manifest binaries[].sha3_256 for your target
+
+# 3. Verify genesis hash matches manifest
+qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json
+# Compare against manifest genesis.sha3_256
+```
+
+See [QBIND_MAINNET_V0_RELEASE_MANIFEST.md](../release/QBIND_MAINNET_V0_RELEASE_MANIFEST.md) for the complete release manifest schema and verification workflow.
+
 See [QBIND_MAINNET_RUNBOOK.md §4](../ops/QBIND_MAINNET_RUNBOOK.md#4-bootstrapping-a-fresh-mainnet-validator) for operational procedures.
 
 ---
@@ -1534,6 +1551,7 @@ See [QBIND_MAINNET_RUNBOOK.md §4](../ops/QBIND_MAINNET_RUNBOOK.md#4-bootstrappi
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
+| **Release Manifest** | [QBIND_MAINNET_V0_RELEASE_MANIFEST.md](../release/QBIND_MAINNET_V0_RELEASE_MANIFEST.md) | Release artifact hashes and verification (T239) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
 | **External Audit RFP** | [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) | External security audit scope and requirements (T235) |
 | **Launch Gates Test Harness** | `crates/qbind-node/tests/t237_mainnet_launch_profile_tests.rs` | Launch gates & profile freeze tests (T237) |
