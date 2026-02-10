@@ -53,13 +53,14 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Execution & VM** | T163, T164, T171, T177, T179, T186, T187, T193, T223, T234 | ✅ Mitigated | Stage B wired, tested, and soak-verified (T186, T187, T223); E2E perf harness (T234) |
 | **State Persistence & Growth** | T164, T208, T215 | ✅ Mitigated | Pruning (T208) & snapshots (T215) implemented |
 | **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181, T193 | Partially Mitigated | Hybrid fee distribution implemented (T193) |
-| **Mempool & DAG** | T158, T165, T182, T183, T218, T219 | ✅ Mitigated | DoS protections (T218), eviction rate limiting (T219), consensus coupling |
-| **Networking / P2P** | T170, T172, T173, T174, T175 | Partially Mitigated | Discovery, anti-eclipse pending |
-| **Keys & Remote Signer / HSM** | T143, T144, T148, T149 | Open | HSM production integration pending |
-| **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
+| **Mempool & DAG** | T158, T165, T182, T183, T218, T219, T220, T221, T222 | ✅ Mitigated | DoS protections (T218), eviction rate limiting (T219, T220), consensus coupling (T221, T222) |
+| **Networking / P2P** | T170, T172, T173, T174, T175, T205, T206, T207, T226, T231 | ✅ Mitigated | Discovery (T205–T207), liveness (T226), anti-eclipse (T231) implemented |
+| **Keys & Remote Signer / HSM** | T143, T144, T148, T149, T209, T210, T211, T212, T213, T214 | ✅ Mitigated | Key management design (T209), signer modes (T210), HSM (T211), remote signer (T212), rotation (T213), failure modes (T214) |
+| **Observability & Ops** | T154, T155, T157, T158, T187, T215, T216 | ✅ Mitigated | Stage B metrics (T187), snapshot metrics (T215), runbook (T216) |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
 | **Slashing & PQC Offenses** | T227, T228, T229, T230 | ✅ Mitigated | Design (T227), infrastructure (T228), penalty engine (T229), ledger backend (T230); MainNet defaults to RecordOnly |
 | **Genesis & Launch State** | T232, T233 | ✅ Mitigated | GenesisConfig types (T232), genesis hash commitment + CLI verification (T233); CLI `--genesis-path` and `--expect-genesis-hash` required for MainNet |
+| **External Security Audit** | T235 | Partially Mitigated | RFP + scope document ready (T235); vendor selection and audit execution pending |
 
 ---
 
@@ -72,12 +73,13 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R1** | Consensus Safety & Fork Risk | Critical | Partially Mitigated | [Spec §6.3](./QBIND_MAINNET_V0_SPEC.md#63-dag-availability-and-consensus-coupling) |
 | **MN-R2** | Economic Integrity (gas/fees) | High | Partially Mitigated | [Spec §3](./QBIND_MAINNET_V0_SPEC.md#3-gas--fees) |
 | **MN-R3** | State Growth & Data Availability | Medium | ✅ Mitigated (T208, T215) | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
-| **MN-R4** | P2P & Eclipse Resistance | High | Partially Mitigated | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
-| **MN-R5** | Key Management & Remote Signing | Critical | Partially Mitigated (T211–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
+| **MN-R4** | P2P & Eclipse Resistance | High | ✅ Mitigated (T205–T207, T226, T231) | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
+| **MN-R5** | Key Management & Remote Signing | Critical | ✅ Mitigated (T209–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
 | **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated | [Spec §8.3](./QBIND_MAINNET_V0_SPEC.md#83-misconfiguration-handling), T185 |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
 | **MN-R9** | Slashing & PQC Misbehavior | High | ✅ Mitigated (T229, T230) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
+| **MN-R10** | External Security Audit | Critical | Partially Mitigated (T235) | [RFP Doc](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) |
 
 ---
 
@@ -207,10 +209,10 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Eclipse attacks** | Attacker controls all validator peer slots | High | Partially Mitigated |
-| **No dynamic discovery** | Validators cannot find new peers if configured ones fail | High | Open |
+| **Eclipse attacks** | Attacker controls all validator peer slots | High | ✅ Mitigated (T231) |
+| **No dynamic discovery** | Validators cannot find new peers if configured ones fail | High | ✅ Mitigated (T205–T207) |
 | **Sybil attacks** | Attacker creates many fake nodes | High | Mitigated (permissioned) |
-| **Liveness detection gaps** | Crashed peers not automatically removed | Medium | Open |
+| **Liveness detection gaps** | Crashed peers not automatically removed | Medium | ✅ Mitigated (T226) |
 | **Multi-region latency** | P2P not optimized for cross-region | Low | Open |
 
 **Current Mitigations**:
@@ -218,17 +220,17 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ KEMTLS encryption (ML-KEM-768)
 - ✅ Permissioned validator set
 - ✅ Per-peer rate limiting
-- ⏳ Dynamic peer discovery pending
-- ⏳ Peer liveness scoring pending
-- ⏳ Anti-eclipse enforcement pending
+- ✅ **Dynamic peer discovery (T205–T207)** — outbound peer targeting, discovery protocol, integration
+- ✅ **Peer liveness scoring and eviction (T226)** — heartbeat protocol, max_failures tracking
+- ✅ **Anti-eclipse enforcement (T231)** — IP prefix limits, ASN diversity, min_outbound constraints
 
 **Additional MainNet Requirements**:
-- [ ] Dynamic peer discovery protocol
-- [ ] Peer liveness scoring and eviction
-- [ ] Anti-eclipse constraints (ASN diversity, IP range limits)
+- [x] Dynamic peer discovery protocol — **T205–T207 (Ready)**
+- [x] Peer liveness scoring and eviction — **T226 (Ready)**
+- [x] Anti-eclipse constraints (ASN diversity, IP range limits) — **T231 (Ready)**
 - [ ] Multi-region validation testing
 
-**Target Phase**: MainNet v0 (blocking)
+**Target Phase**: ✅ MainNet v0 (core P2P robustness implemented)
 
 ---
 
@@ -238,17 +240,18 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Risk | Description | Severity | Status |
 | :--- | :--- | :--- | :--- |
-| **Key compromise** | Compromised signing key allows forgery | Critical | Partially Mitigated |
-| **No HSM support** | Keys stored on disk vulnerable to theft | High | Mitigated (T211) |
-| **Loopback signer in prod** | Test signer used in production | High | Mitigated (T210) |
-| **Key rotation failures** | Unable to rotate compromised key | Medium | Mitigated (T213) |
-| **HSM failures / signer unavailability** | Validator offline if signer down | High | Partially Mitigated (T214) |
+| **Key compromise** | Compromised signing key allows forgery | Critical | ✅ Mitigated (T209–T214) |
+| **No HSM support** | Keys stored on disk vulnerable to theft | High | ✅ Mitigated (T211) |
+| **Loopback signer in prod** | Test signer used in production | High | ✅ Mitigated (T210) |
+| **Key rotation failures** | Unable to rotate compromised key | Medium | ✅ Mitigated (T213) |
+| **HSM failures / signer unavailability** | Validator offline if signer down | High | ✅ Mitigated (T214) |
 
 **Current Mitigations**:
 - ✅ EncryptedFsV1 keystore (encrypted at rest)
 - ✅ Key separation (consensus vs network keys)
 - ✅ RemoteSigner interface (loopback for testing)
 - ✅ **Key management design complete (T209)** — see [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md)
+- ✅ **Signer mode config (T210)** — `LoopbackTesting` rejected on MainNet via `validate_mainnet_invariants()`
 - ✅ **HSM/PKCS#11 adapter implemented (T211)** — MainNet supports PKCS#11 HSM signer via HsmPkcs11 mode (SoftHSM + hardware HSMs)
 - ✅ **Remote signer protocol implemented (T212)** — TcpKemTlsSignerTransport + qbind-remote-signer daemon
 - ✅ **Key rotation hooks implemented (T213)** — KeyRotationEvent, dual-key grace period, CLI helper
@@ -272,9 +275,9 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [x] **Compromised key handling procedures (T217)** — Ready; see [QBIND_KEY_MANAGEMENT_DESIGN.md §5.4](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md#54-compromised-key-handling-t217) and [QBIND_MAINNET_RUNBOOK.md §10.5](../ops/QBIND_MAINNET_RUNBOOK.md#105-compromised-key-incident-procedures-t217)
 - [ ] External audit of key management code
 
-**Status Summary**: Partially mitigated by T211–T214 and T217 (compromised key handling procedures); only remaining blocker is external audit of key management code.
+**Status Summary**: ✅ Mitigated by T209–T214 and T217 (compromised key handling procedures); external audit of key management code covered by MN-R10 (T235).
 
-**Target Phase**: MainNet v0 (blocking)
+**Target Phase**: ✅ MainNet v0 (key management implementation complete)
 
 ---
 
@@ -350,6 +353,47 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - [ ] On-chain parameter governance (v1.0)
 
 **Target Phase**: Partially Mitigated (T224, T225); on-chain governance planned for v0.x+
+
+---
+
+### 3.10 MN-R10: External Security Audit
+
+**Category**: Pre-launch security validation and independent review
+
+| Risk | Description | Severity | Status |
+| :--- | :--- | :--- | :--- |
+| **Audit not completed** | External security audit not completed before MainNet launch | Critical | Partially Mitigated (T235) |
+| **Audit not scheduled** | No vendor engagement or timeline for audit | High | ✅ Mitigated (T235 RFP ready) |
+| **Incomplete audit scope** | Audit misses critical components | High | ✅ Mitigated (T235 scope defined) |
+| **Findings not addressed** | Critical/High findings not remediated before launch | Critical | Open (awaiting audit) |
+
+**Current Mitigations**:
+- ✅ **T235: External Security Audit Prep v1** — RFP and scope document ready
+- ✅ Comprehensive scope definition covering all MainNet components
+- ✅ Threat model summary with PQC-specific concerns
+- ✅ Vendor qualification requirements defined
+- ✅ Deliverables and timeline expectations documented
+- ⏳ Vendor selection pending
+- ⏳ Audit execution pending
+- ⏳ Finding remediation pending
+
+**T235 Deliverables**:
+- [x] **RFP Document**: [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md)
+- [x] **In-Scope Components**: Consensus, Execution, PQC Crypto, P2P, Mempool, State, Monetary, Keys/HSM, Slashing, Genesis, Performance
+- [x] **Out-of-Scope Definition**: MEV, oracles, on-chain governance, smart contracts
+- [x] **Threat Model Summary**: MN-R1 through MN-R9 + PQC-specific concerns
+- [x] **Artifacts Listing**: Design docs, crates, test harnesses
+- [x] **Vendor Requirements**: BFT, L1, PQC, HSM experience required
+
+**Additional MainNet Requirements**:
+- [x] RFP/scope document ready — **T235 (Ready)**
+- [ ] Vendor selected and engaged
+- [ ] Audit kickoff and onboarding completed
+- [ ] Audit report received
+- [ ] All Critical findings remediated
+- [ ] All High findings remediated or accepted by governance
+
+**Target Phase**: Partially Mitigated (T235 – RFP ready, vendor TBD)
 
 ---
 
@@ -554,6 +598,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~**T232**~~ | ~~**Config**~~ | ~~**Genesis & Launch State Specification v0**~~ | ~~**MN-R1, MN-R2**~~ |
 | ~~**T233**~~ | ~~**Config**~~ | ~~**Genesis Hash Commitment & Verification CLI v1**~~ | ~~**MN-R1, MN-R2**~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
+| **T235** | **Docs** | **External Security Audit Prep v1 (RFP + Scope + Audit Skeleton Alignment)** | **MN-R10** |
 | External | Security | External security audit | All |
 
 > **Note**: Stage B production wiring completed in T186 + T187 (strikethrough above).
@@ -681,6 +726,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 - [QBIND MainNet v0 Specification](./QBIND_MAINNET_V0_SPEC.md) — MainNet architecture
 - [QBIND MainNet Operational Runbook](../ops/QBIND_MAINNET_RUNBOOK.md) — MainNet operations (T216)
+- [QBIND External Security Audit RFP](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) — External audit scope and requirements (T235)
 - [QBIND Governance & Upgrades Design](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — Governance and upgrade model (T224)
 - [QBIND DAG Consensus Coupling Design](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — DAG–HotStuff coupling (T188)
 - [QBIND Slashing & PQC Offenses Design](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) — PQC-specific slashing model (T227)
@@ -698,6 +744,7 @@ The following documents should reference this MainNet audit:
 
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
 - [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — References audit for operational context (T216)
+- [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) — References audit skeleton for MN-R10
 - [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — References audit for MN-R8
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1
 - [QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md](../consensus/QBIND_SLASHING_AND_PQC_OFFENSES_DESIGN.md) — References audit for MN-R1, MN-R9

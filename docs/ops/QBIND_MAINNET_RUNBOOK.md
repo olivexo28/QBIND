@@ -20,7 +20,8 @@
 10. [Incident Playbooks](#10-incident-playbooks)
     - [10.6 Slashing & PQC Offenses (T227)](#106-slashing--pqc-offenses-t227)
 11. [Upgrade Procedures & Governance Hooks (T224)](#11-upgrade-procedures--governance-hooks-t224)
-12. [Related Documents](#12-related-documents)
+12. [External Security Audit Expectations (T235)](#12-external-security-audit-expectations-t235)
+13. [Related Documents](#13-related-documents)
 
 ---
 
@@ -2067,12 +2068,96 @@ For critical security vulnerabilities:
 
 ---
 
-## 12. Related Documents
+## 12. External Security Audit Expectations (T235)
+
+### 12.1 Pre-Launch Audit Requirements
+
+Before running a MainNet validator, operators **MUST** verify the following external security audit requirements:
+
+| Requirement | Description | Verification Method |
+| :--- | :--- | :--- |
+| **Audit Completed** | External security audit has been completed | Check official announcement |
+| **Audited Commit** | Binary matches audited commit | Compare hashes (see §12.2) |
+| **Findings Addressed** | All Critical/High findings remediated | Read audit summary |
+| **Residual Risks** | Any accepted risks documented | Review governance rationale |
+
+### 12.2 Verifying Audited Commit Hash
+
+**Step 1: Obtain the audited commit hash**
+
+The audited commit hash is published in the official audit report and governance announcement.
+
+**Example format** (actual values will be provided in the official announcement):
+
+```
+Audited Commit: 0xabc123...def789
+Audit Date: 2026-MM-DD
+Auditor: [Vendor Name]
+```
+
+**Step 2: Verify binary hash (if using pre-built binaries)**
+
+```bash
+# Compute hash of your binary
+sha3-256 /usr/local/bin/qbind-node
+
+# Compare against the hash in the Upgrade Envelope
+qbind-envelope inspect /etc/qbind/upgrade-envelope.json | grep binary_hashes
+```
+
+**Step 3: Verify reproducible build (if building from source)**
+
+```bash
+# Checkout the audited commit
+git checkout <audited-commit-hash>
+
+# Build with reproducible settings
+cargo build --release --locked
+
+# Compare resulting binary hash
+sha3-256 target/release/qbind-node
+```
+
+### 12.3 Reading the Audit Summary
+
+Before starting a MainNet validator, operators should:
+
+1. **Read the executive summary** of the audit report (public or redacted version)
+2. **Understand any residual risks** that were accepted by governance
+3. **Note any operational recommendations** from the auditors
+4. **Verify their configuration** addresses any audit recommendations
+
+The audit report and summary are available at:
+- **Audit RFP & Scope**: [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md)
+- **Audit Report**: [Published after audit completion]
+- **Governance Acceptance**: [Published if any findings are accepted rather than fixed]
+
+### 12.4 Post-Audit Upgrade Policy
+
+After the initial external audit:
+
+1. **Only run audited code**: MainNet validators should only run builds at or after the "audited commit" unless explicitly instructed otherwise via governance envelope
+2. **Verify upgrade envelopes**: All subsequent upgrades must be verified against council-signed envelopes (see §11.6)
+3. **Monitor for re-audit needs**: Major protocol changes may require additional audit coverage
+
+### 12.5 Emergency Audit Considerations
+
+In the event of a critical security issue discovered post-audit:
+
+1. **Follow emergency patch process** (§11.8)
+2. **Emergency patches may skip full re-audit** with 4-of-7 council threshold
+3. **Targeted security review** may be conducted for emergency changes
+4. **Full re-audit** scheduled for next major release if emergency changes are significant
+
+---
+
+## 13. Related Documents
 
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet v0 Spec** | [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) | MainNet architecture |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) | Risk tracking |
+| **External Audit RFP** | [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) | Audit scope and requirements (T235) |
 | **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance model (T224) |
 | **Key Management Design** | [QBIND_KEY_MANAGEMENT_DESIGN.md](../keys/QBIND_KEY_MANAGEMENT_DESIGN.md) | Key architecture (T209) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy (T194) |

@@ -1320,12 +1320,57 @@ The v0 off-chain model is designed to be compatible with future on-chain migrati
 
 ---
 
-## 12. Related Documents
+## 12. External Security Audit (T235)
+
+### 12.1 Audit Requirement
+
+Before MainNet v0 launch, the protocol **must undergo an external security audit** covering all critical subsystems:
+
+| Area | Description |
+| :--- | :--- |
+| **Consensus & DAG** | HotStuff BFT, DAG availability certificates, consensus coupling |
+| **Execution** | VM v0, Stage B parallel execution, state transitions |
+| **PQC Cryptography** | ML-DSA-44 signatures, ML-KEM-768 key exchange, KEMTLS |
+| **P2P Networking** | Transport, discovery, liveness, anti-eclipse protections |
+| **Key Management** | HSM integration, remote signer, key rotation hooks |
+| **Slashing** | PQC offense taxonomy, penalty engine, ledger backend |
+| **Monetary Policy** | Phase transitions, EMA smoothing, seigniorage distribution |
+| **Genesis & Governance** | Genesis validation, hash commitment, upgrade envelope |
+
+### 12.2 RFP & Scope Document
+
+The complete audit scope, vendor requirements, and expected deliverables are specified in:
+
+- **[QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md)** (T235)
+
+### 12.3 Launch Gate Requirements
+
+MainNet v0 launch requires that:
+
+1. **All Critical findings** from the external audit are remediated
+2. **All High findings** are remediated OR explicitly accepted by governance with documented rationale
+3. The **final audit report** is published (redacted if necessary for security)
+4. Operators can verify the **audited commit hash** matches the binary they are running
+
+### 12.4 Operator Verification
+
+Before running a MainNet validator, operators MUST:
+
+1. Verify the binary matches the audited commit (via hash or reproducible build)
+2. Read the summarized audit findings and any governance-accepted residual risks
+3. Only run builds at or after the "audited commit" unless explicitly instructed otherwise via governance
+
+See [QBIND_MAINNET_RUNBOOK.md §4](../ops/QBIND_MAINNET_RUNBOOK.md#4-bootstrapping-a-fresh-mainnet-validator) for operational procedures.
+
+---
+
+## 13. Related Documents
 
 | Document | Path | Description |
 | :--- | :--- | :--- |
 | **MainNet Runbook** | [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) | MainNet operational runbook (T216) |
 | **MainNet Audit** | [QBIND_MAINNET_AUDIT_SKELETON.md](./QBIND_MAINNET_AUDIT_SKELETON.md) | MainNet risk and readiness tracking |
+| **External Audit RFP** | [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) | External security audit scope and requirements (T235) |
 | **Governance & Upgrades Design** | [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) | Governance and upgrade envelope design (T224, T225) |
 | **DAG Consensus Coupling** | [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) | DAG–HotStuff coupling design (T188) |
 | **Monetary Policy Design** | [QBIND_MONETARY_POLICY_DESIGN.md](../econ/QBIND_MONETARY_POLICY_DESIGN.md) | Monetary policy and inflation design (T194) |
