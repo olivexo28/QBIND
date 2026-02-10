@@ -819,7 +819,35 @@ MainNet v0 requires peer liveness scoring:
 | **Automatic reconnection** | Required (exponential backoff) |
 | **Peer eviction** | Required (low-score peers removed) |
 
-### 5.6 P2P Implementation Status
+### 5.6 Multi-Region Validation Testing (T238)
+
+MainNet v0 validators are expected to operate across multiple geographic regions with varying network conditions. The T238 multi-region latency harness validates consensus safety and liveness under cross-region scenarios:
+
+| Profile | Description | Key Metrics |
+| :--- | :--- | :--- |
+| **Uniform latency** | All regions have similar moderate latency (baseline) | Safety, convergence |
+| **Asymmetric latency** | One region has significantly higher latency | Height divergence bounds |
+| **High jitter** | Cross-region communication has high jitter variance | View-change frequency |
+| **Lossy network** | Some region pairs experience packet loss | Safety under message loss |
+| **Mixed adversarial** | Combination of latency, jitter, and loss | Full stress test |
+
+**Test Harness**:
+```bash
+# Run all T238 multi-region tests
+cargo test -p qbind-node --test t238_multi_region_latency_harness
+
+# Run specific scenario
+cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_uniform_latency_baseline
+```
+
+**Key Invariants Validated**:
+- **Safety**: No block mismatches (`block_mismatch_total == 0`) under any scenario
+- **Bounded divergence**: Height divergence across nodes stays within acceptable bounds
+- **DAG coupling**: Consensus-DAG coupling invariants (I1–I5) maintained
+
+See [QBIND_MAINNET_AUDIT_SKELETON.md §3.5](./QBIND_MAINNET_AUDIT_SKELETON.md#35-mn-r4-p2p--eclipse-resistance) for MN-R4 risk mitigation details.
+
+### 5.7 P2P Implementation Status
 
 From [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md):
 
@@ -829,10 +857,11 @@ From [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md):
 | Consensus/DAG over P2P | ✅ T173 | Yes |
 | P2P receive path | ✅ T174 | Yes |
 | Node P2P wiring | ✅ T175 | Yes |
-| Peer health monitoring | ⏳ Planned | **Yes** |
-| Dynamic discovery | ⏳ Planned | **Yes** |
-| Anti-eclipse measures | ⏳ Planned | **Yes** |
-| Liveness scoring | ⏳ Planned | **Yes** |
+| Peer health monitoring | ✅ T226 | **Yes** |
+| Dynamic discovery | ✅ T205–T207 | **Yes** |
+| Anti-eclipse measures | ✅ T231 | **Yes** |
+| Liveness scoring | ✅ T226 | **Yes** |
+| Multi-region testing | ✅ T238 | **Yes** |
 
 ---
 
@@ -891,7 +920,20 @@ See [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSAR
 | **DoS/bandwidth** | Rate limiting; bounded queues |
 | **Network partitions** | Multi-region guidelines; reconnection policies |
 
-**Risk Budget**: P2P topology is **medium-high risk**; requires production validation.
+**Risk Budget**: P2P topology is **medium-high risk**; validated via T238 multi-region harness.
+
+**Multi-Region Testing (T238)**: The P2P and consensus layers have been stress-tested under simulated multi-region conditions including:
+- Asymmetric latency (one slow region)
+- High jitter environments
+- Lossy network conditions (packet loss)
+- Mixed adversarial scenarios
+
+Key findings:
+- Safety invariants (no block mismatches) maintained under all tested conditions
+- Height convergence stays within acceptable bounds
+- View-change recovery functions correctly under latency stress
+
+See [t238_multi_region_latency_harness.rs](../../crates/qbind-node/tests/t238_multi_region_latency_harness.rs) for the normative test artifact.
 
 ### 6.5 Key Management and Remote Signer / HSM
 

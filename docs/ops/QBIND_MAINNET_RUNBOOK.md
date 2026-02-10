@@ -727,6 +727,50 @@ cargo test -p qbind-node --test t236_fee_market_adversarial_tests test_t236_evic
 
 **Reference**: See [QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md](../econ/QBIND_FEE_MARKET_ADVERSARIAL_ANALYSIS.md) for detailed analysis.
 
+#### Multi-Region P2P & Consensus Latency Testing (T238)
+
+The T238 harness validates consensus safety and P2P liveness under simulated multi-region network conditions:
+
+```bash
+# Run all T238 multi-region latency tests
+cargo test -p qbind-node --test t238_multi_region_latency_harness
+
+# Run specific scenario tests
+cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_uniform_latency_baseline
+cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_asymmetric_latency_one_slow_region
+cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_lossy_network_conditions
+cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_mixed_adversarial_conditions
+```
+
+**Scenarios Tested**:
+
+| Scenario | Description | Purpose |
+| :--- | :--- | :--- |
+| Uniform latency | All regions have similar moderate latency | Baseline validation |
+| Asymmetric latency | One region has significantly higher latency | Slow-region tolerance |
+| High jitter | Cross-region communication has high jitter | Timing variance tolerance |
+| Lossy network | Some region pairs experience packet loss | Message loss resilience |
+| Mixed adversarial | Combination of latency, jitter, and loss | Full stress test |
+
+**Expected Output**:
+- All tests should pass
+- `block_mismatch_total == 0` — No DAG coupling violations
+- `safety_violated == false` — No consensus safety violations
+- `max_height_divergence` within acceptable bounds (< 10 blocks)
+
+**Interpreting Results**:
+
+| Metric | Guidance |
+| :--- | :--- |
+| `max_height_divergence` | Should be < 10 under normal conditions; higher under extreme latency is acceptable if safety holds |
+| `block_mismatch_total` | Must be 0 — any non-zero value indicates consensus coupling bug |
+| `view_changes_total` | Expected to increase under high latency/jitter scenarios |
+| `p50/p90_latency_ms` | Reflects cross-region latency profile used in the test |
+
+**Note**: This harness validates in-process simulation of multi-region behavior. Production deployments should also verify behavior on actual multi-region infrastructure during beta testing.
+
+**Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md §3.5](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md#35-mn-r4-p2p--eclipse-resistance) for MN-R4 risk mitigation details.
+
 **Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) for the full MainNet readiness checklist.
 
 ### 4.5 Pre-Flight Verification
@@ -1934,6 +1978,10 @@ Before applying any Council-approved upgrade:
   - [ ] Fee market adversarial harness passes (T236):
     ```bash
     cargo test -p qbind-node --test t236_fee_market_adversarial_tests -- --test-threads=1
+    ```
+  - [ ] Multi-region latency harness passes (T238):
+    ```bash
+    cargo test -p qbind-node --test t238_multi_region_latency_harness
     ```
 - [ ] **Verify configuration** matches expected profile:
   ```bash

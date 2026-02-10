@@ -213,7 +213,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **No dynamic discovery** | Validators cannot find new peers if configured ones fail | High | ✅ Mitigated (T205–T207) |
 | **Sybil attacks** | Attacker creates many fake nodes | High | Mitigated (permissioned) |
 | **Liveness detection gaps** | Crashed peers not automatically removed | Medium | ✅ Mitigated (T226) |
-| **Multi-region latency** | P2P not optimized for cross-region | Low | Open |
+| **Multi-region latency** | P2P not optimized for cross-region | Low | ✅ Mitigated (T238) |
 
 **Current Mitigations**:
 - ✅ P2P v1 transport (T172)
@@ -223,12 +223,13 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ **Dynamic peer discovery (T205–T207)** — outbound peer targeting, discovery protocol, integration
 - ✅ **Peer liveness scoring and eviction (T226)** — heartbeat protocol, max_failures tracking
 - ✅ **Anti-eclipse enforcement (T231)** — IP prefix limits, ASN diversity, min_outbound constraints
+- ✅ **Multi-region validation testing (T238)** — in-process harness simulating cross-region latency, jitter, and packet loss
 
 **Additional MainNet Requirements**:
 - [x] Dynamic peer discovery protocol — **T205–T207 (Ready)**
 - [x] Peer liveness scoring and eviction — **T226 (Ready)**
 - [x] Anti-eclipse constraints (ASN diversity, IP range limits) — **T231 (Ready)**
-- [ ] Multi-region validation testing
+- [x] Multi-region validation testing — **T238 (Ready)**
 
 **Target Phase**: ✅ MainNet v0 (core P2P robustness implemented)
 
