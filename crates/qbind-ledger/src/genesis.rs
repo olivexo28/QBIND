@@ -713,6 +713,211 @@ impl std::fmt::Display for GenesisValidationError {
 impl std::error::Error for GenesisValidationError {}
 
 // ============================================================================
+// T233: Genesis Hash Commitment Types
+// ============================================================================
+
+/// Type alias for a genesis hash (SHA3-256, 32 bytes).
+///
+/// This hash is computed over the exact bytes of the genesis JSON file,
+/// with NO normalization, whitespace stripping, or key reordering.
+///
+/// # Canonical Definition
+///
+/// ```text
+/// genesis_hash = SHA3-256(genesis_json_bytes)
+/// ```
+///
+/// Where `genesis_json_bytes` is the exact file content as distributed.
+pub type GenesisHash = [u8; 32];
+
+/// Compute the canonical SHA3-256 genesis hash over raw bytes.
+///
+/// This function computes the SHA3-256 hash of the given bytes deterministically.
+/// The bytes should be the exact content of the genesis JSON file.
+///
+/// # Important
+///
+/// - NO JSON normalization is applied
+/// - NO whitespace stripping or key reordering
+/// - The hash is computed over the exact file bytes as distributed
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_ledger::compute_genesis_hash_bytes;
+///
+/// let genesis_json = br#"{"chain_id": "qbind-mainnet-v0"}"#;
+/// let hash = compute_genesis_hash_bytes(genesis_json);
+/// assert_eq!(hash.len(), 32);
+/// ```
+pub fn compute_genesis_hash_bytes(bytes: &[u8]) -> GenesisHash {
+    qbind_hash::sha3_256(bytes)
+}
+
+/// Format a genesis hash as a hex string with 0x prefix.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_ledger::{compute_genesis_hash_bytes, format_genesis_hash};
+///
+/// let hash = compute_genesis_hash_bytes(b"test");
+/// let hex = format_genesis_hash(&hash);
+/// assert!(hex.starts_with("0x"));
+/// assert_eq!(hex.len(), 66); // 0x + 64 hex chars
+/// ```
+pub fn format_genesis_hash(hash: &GenesisHash) -> String {
+    let hex: String = hash.iter().map(|b| format!("{:02x}", b)).collect();
+    format!("0x{}", hex)
+}
+
+/// Parse a genesis hash from a hex string (with or without 0x prefix).
+///
+/// # Arguments
+///
+/// * `hex_str` - A 64-character hex string, optionally prefixed with "0x"
+///
+/// # Returns
+///
+/// * `Ok(GenesisHash)` - The parsed 32-byte hash
+/// * `Err(String)` - Error message if parsing fails
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_ledger::parse_genesis_hash;
+///
+/// // With 0x prefix
+/// let hash1 = parse_genesis_hash(&format!("0x{}", "ab".repeat(32)));
+/// assert!(hash1.is_ok());
+///
+/// // Without prefix
+/// let hash2 = parse_genesis_hash(&"cd".repeat(32));
+/// assert!(hash2.is_ok());
+///
+/// // Invalid length
+/// let hash3 = parse_genesis_hash("0x1234");
+/// assert!(hash3.is_err());
+/// ```
+pub fn parse_genesis_hash(hex_str: &str) -> Result<GenesisHash, String> {
+    // Strip optional 0x prefix
+    let hex = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+
+    // Check length (must be 64 hex chars for 32 bytes)
+    if hex.len() != 64 {
+        return Err(format!(
+            "invalid genesis hash length: expected 64 hex characters, got {}",
+            hex.len()
+        ));
+    }
+
+    // Parse hex string to bytes
+    let mut hash = [0u8; 32];
+    for i in 0..32 {
+        let byte_str = &hex[i * 2..i * 2 + 2];
+        hash[i] = u8::from_str_radix(byte_str, 16).map_err(|e| {
+            format!(
+                "invalid hex character at position {}: {}",
+                i * 2,
+                e
+            )
+        })?;
+    }
+
+    Ok(hash)
+}
+
+// ============================================================================
+// T233: Chain Metadata Types
+// ============================================================================
+
+/// Chain metadata stored during genesis application.
+///
+/// This structure captures the essential identity of a chain and is persisted
+/// at height 0 when the genesis state is applied. It serves as a commitment
+/// that can be verified by operators and auditors.
+///
+/// # Fields
+///
+/// - `chain_id`: The human-readable chain identifier (e.g., "qbind-mainnet-v0")
+/// - `genesis_hash`: The SHA3-256 hash of the genesis JSON file bytes
+///
+/// # Usage
+///
+/// The `ChainMeta` is computed and stored during genesis application:
+/// 1. Load genesis JSON file as raw bytes
+/// 2. Compute `genesis_hash = SHA3-256(bytes)`
+/// 3. Parse genesis config to extract `chain_id`
+/// 4. Persist `ChainMeta { chain_id, genesis_hash }` as part of height 0 state
+///
+/// # Verification
+///
+/// Operators verify chain identity by:
+/// 1. Computing the hash of their local genesis file
+/// 2. Comparing against the stored `ChainMeta.genesis_hash`
+/// 3. Using `--expect-genesis-hash` flag to fail fast on mismatch
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChainMeta {
+    /// Chain identifier from the genesis configuration.
+    pub chain_id: String,
+
+    /// SHA3-256 hash of the exact genesis JSON file bytes.
+    pub genesis_hash: GenesisHash,
+}
+
+impl ChainMeta {
+    /// Create a new ChainMeta.
+    pub fn new(chain_id: impl Into<String>, genesis_hash: GenesisHash) -> Self {
+        Self {
+            chain_id: chain_id.into(),
+            genesis_hash,
+        }
+    }
+
+    /// Get the genesis hash as a hex string with 0x prefix.
+    pub fn genesis_hash_hex(&self) -> String {
+        format_genesis_hash(&self.genesis_hash)
+    }
+}
+
+/// Errors that can occur when storing or loading chain metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChainMetaError {
+    /// Chain metadata already exists (attempted duplicate store).
+    AlreadyExists,
+
+    /// Chain metadata not found.
+    NotFound,
+
+    /// Serialization/deserialization error.
+    SerializationError(String),
+
+    /// Storage backend error.
+    StorageError(String),
+}
+
+impl std::fmt::Display for ChainMetaError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChainMetaError::AlreadyExists => {
+                write!(f, "chain metadata already exists (cannot re-apply genesis)")
+            }
+            ChainMetaError::NotFound => {
+                write!(f, "chain metadata not found")
+            }
+            ChainMetaError::SerializationError(msg) => {
+                write!(f, "chain metadata serialization error: {}", msg)
+            }
+            ChainMetaError::StorageError(msg) => {
+                write!(f, "chain metadata storage error: {}", msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ChainMetaError {}
+
+// ============================================================================
 // Unit Tests
 // ============================================================================
 

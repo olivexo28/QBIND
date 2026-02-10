@@ -74,7 +74,7 @@ MainNet v0 requires a **canonical genesis state** that establishes the initial n
 **MainNet Genesis Requirements**:
 - **External genesis file required**: MainNet nodes MUST use `--genesis-path` CLI flag
 - **Embedded genesis forbidden**: Unlike DevNet/TestNet, embedded genesis is not allowed
-- **Hash verification**: Operators should verify genesis file hash before startup
+- **Hash verification**: Operators MUST verify genesis file hash before startup (see §1.6)
 - **Canonical distribution**: All validators MUST use the identical genesis.json
 
 **GenesisConfig Invariants** (enforced by `validate()`):
@@ -91,6 +91,57 @@ qbind-node --profile mainnet --genesis-path /etc/qbind/genesis.json --data-dir /
 ```
 
 See [QBIND_GENESIS_AND_LAUNCH_DESIGN.md](../consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md) for the full genesis specification.
+
+### 1.6 Genesis Hash Commitment & Verification (T233)
+
+MainNet v0 enforces **genesis hash commitment** to prevent accidental or malicious startup with the wrong genesis file:
+
+**Canonical Genesis Hash Definition**:
+```
+genesis_hash = SHA3-256(genesis_json_bytes)
+```
+
+Where `genesis_json_bytes` is the **exact** content of the genesis file as distributed, with:
+- **No JSON normalization**
+- **No whitespace stripping or key reordering**
+- **Exact byte-for-byte hash**
+
+**MainNet Requirements** (enforced by `validate_mainnet_invariants()`):
+1. **`--expect-genesis-hash` is REQUIRED**: MainNet nodes MUST specify the expected genesis hash
+2. **Hash verification at startup**: Node computes hash from loaded genesis file and compares to expected
+3. **Fail-fast on mismatch**: If hashes don't match, node refuses to start
+
+**CLI Flags**:
+
+| Flag | Description | Required |
+| :--- | :--- | :--- |
+| `--print-genesis-hash` | Print SHA3-256 hash of genesis file and exit | No |
+| `--expect-genesis-hash` | Expected hash to verify at startup | **Yes (MainNet)** |
+
+**Operator Workflow**:
+
+1. **Compute hash** of the official genesis file:
+   ```bash
+   qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json
+   # Output: 0xabc123...def789
+   ```
+
+2. **Start node** with expected hash:
+   ```bash
+   qbind-node --profile mainnet \
+     --genesis-path /etc/qbind/genesis.json \
+     --expect-genesis-hash 0xabc123...def789 \
+     --data-dir /data/qbind
+   ```
+
+3. **Cross-verify** with other validators to ensure all nodes use the same genesis
+
+**Security Rationale**:
+- Prevents fork due to different genesis files
+- Detects distribution channel compromises
+- Provides audit trail for genesis identity
+
+See [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) §4.3 for operational procedures.
 
 ---
 

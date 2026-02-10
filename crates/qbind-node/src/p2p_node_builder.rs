@@ -720,6 +720,7 @@ mod tests {
             slashing: crate::node_config::SlashingConfig::devnet_default(),
             // T232 field
             genesis_source: crate::node_config::GenesisSourceConfig::devnet_default(),
+            expected_genesis_hash: None,
         }
     }
 

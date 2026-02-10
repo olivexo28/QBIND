@@ -467,6 +467,7 @@ Pass the `--genesis-path` flag when starting the node:
 qbind-node \
   --profile mainnet \
   --genesis-path /etc/qbind/genesis.json \
+  --expect-genesis-hash 0x<official-hash> \
   --data-dir /data/qbind \
   --signer-mode encrypted-fs \
   --signer-keystore-path /data/qbind/keystore \
@@ -474,6 +475,84 @@ qbind-node \
 ```
 
 **Critical**: All MainNet nodes MUST use the identical genesis.json file. Nodes with different genesis files will form incompatible forks.
+
+### 4.3.1 Genesis Hash Verification (T233)
+
+MainNet validators MUST verify the genesis file hash before startup. This provides cryptographic assurance that all nodes start from the same genesis state.
+
+#### Step 1: Compute Genesis Hash
+
+Use `--print-genesis-hash` to compute the SHA3-256 hash of your genesis file:
+
+```bash
+qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json
+# Output example: 0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+```
+
+#### Step 2: Verify Against Official Hash
+
+Compare your computed hash against the official hash published on the release page:
+
+```bash
+# Your computed hash
+COMPUTED_HASH=$(qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json)
+
+# Official hash (from release page)
+OFFICIAL_HASH="0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+
+if [ "$COMPUTED_HASH" = "$OFFICIAL_HASH" ]; then
+  echo "✅ Genesis hash verified"
+else
+  echo "❌ Hash mismatch! Do NOT start the node."
+  exit 1
+fi
+```
+
+#### Step 3: Start Node with Expected Hash
+
+Include `--expect-genesis-hash` in your startup command:
+
+```bash
+qbind-node \
+  --profile mainnet \
+  --genesis-path /etc/qbind/genesis.json \
+  --expect-genesis-hash 0xabcdef0123456789...def789 \
+  --data-dir /data/qbind \
+  --signer-mode encrypted-fs \
+  --signer-keystore-path /data/qbind/keystore \
+  --validator-id 42
+```
+
+**Behavior**:
+- Node computes hash from loaded genesis file
+- Compares against `--expect-genesis-hash` value
+- If mismatch: **fails immediately** with clear error message
+- If match: proceeds with normal startup
+
+#### Step 4: Cross-Verify with Other Validators
+
+Before network launch, coordinate with other validators to ensure everyone has the same genesis hash:
+
+```bash
+# Each validator runs:
+qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json
+
+# All validators should produce the identical hash
+```
+
+#### Launch Checklist (T233)
+
+Before starting a MainNet validator, complete this checklist:
+
+- [ ] **Download genesis file** from official distribution channel
+- [ ] **Verify SHA256 checksum** of downloaded file
+- [ ] **Compute genesis hash** using `--print-genesis-hash`
+- [ ] **Compare hash** against official published hash
+- [ ] **Update systemd/launch script** to include `--expect-genesis-hash`
+- [ ] **Cross-verify** hash with at least 2 other validators
+- [ ] **Document hash** in your operations runbook
+
+**Warning**: Starting a MainNet node without `--expect-genesis-hash` will fail with `ExpectedGenesisHashMissing` error.
 
 ### 4.4 Joining the Network
 
@@ -485,6 +564,7 @@ For new networks or when no snapshots are available:
 qbind-node \
   --profile mainnet \
   --genesis-path /etc/qbind/genesis.json \
+  --expect-genesis-hash 0x<official-hash> \
   --data-dir /data/qbind \
   --signer-mode encrypted-fs \
   --signer-keystore-path /data/qbind/keystore \
@@ -511,6 +591,8 @@ qbind-snapshot validate /data/qbind/snapshots/500000
 # 3. Start node with fast-sync
 qbind-node \
   --profile mainnet \
+  --genesis-path /etc/qbind/genesis.json \
+  --expect-genesis-hash 0x<official-hash> \
   --data-dir /data/qbind \
   --fast-sync-snapshot-dir /data/qbind/snapshots/500000 \
   --signer-mode encrypted-fs \

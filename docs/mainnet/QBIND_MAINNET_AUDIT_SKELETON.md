@@ -59,7 +59,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **Observability & Ops** | T154, T155, T157, T158, T187, T215 | Partially Mitigated | Stage B metrics (T187), snapshot metrics (T215); MainNet runbooks pending |
 | **Governance / Upgrades** | T224, T225 | Partially Mitigated | Design & process documented (T224), envelope library & CLI (T225); on-chain governance pending for v0.x |
 | **Slashing & PQC Offenses** | T227, T228, T229, T230 | ✅ Mitigated | Design (T227), infrastructure (T228), penalty engine (T229), ledger backend (T230); MainNet defaults to RecordOnly |
-| **Genesis & Launch State** | T232 | ✅ Mitigated | GenesisConfig types, validation, MainNet wiring (T232); CLI `--genesis-path` required for MainNet |
+| **Genesis & Launch State** | T232, T233 | ✅ Mitigated | GenesisConfig types (T232), genesis hash commitment + CLI verification (T233); CLI `--genesis-path` and `--expect-genesis-hash` required for MainNet |
 
 ---
 
@@ -550,6 +550,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~**T229**~~ | ~~**Consensus**~~ | ~~**Penalty Slashing Engine v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T230**~~ | ~~**Consensus**~~ | ~~**Slashing Ledger Backend v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T232**~~ | ~~**Config**~~ | ~~**Genesis & Launch State Specification v0**~~ | ~~**MN-R1, MN-R2**~~ |
+| ~~**T233**~~ | ~~**Config**~~ | ~~**Genesis Hash Commitment & Verification CLI v1**~~ | ~~**MN-R1, MN-R2**~~ |
 | T19x | Ops | MainNet operational runbook | MN-R6 |
 | External | Security | External security audit | All |
 
@@ -657,6 +658,18 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - 16 unit tests in `t232_genesis_config_tests.rs`, 7 tests in `t232_genesis_mainnet_profile_tests.rs`
 >
 > See `qbind-ledger/src/genesis.rs`, `qbind-node/src/node_config.rs` (GenesisSourceConfig), and [QBIND_GENESIS_AND_LAUNCH_DESIGN.md](../consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md).
+>
+> **Note**: T233 (Genesis Hash Commitment & Verification CLI v1) completed. This provides:
+> - `GenesisHash` type alias and `compute_genesis_hash_bytes()` in `qbind-ledger/src/genesis.rs`
+> - `ChainMeta` struct for chain identity (chain_id + genesis_hash)
+> - `format_genesis_hash()` and `parse_genesis_hash()` utilities
+> - CLI flag `--print-genesis-hash` to print SHA3-256 hash of genesis file
+> - CLI flag `--expect-genesis-hash` to verify hash at startup (MainNet required)
+> - `ExpectedGenesisHashMissing` error in `MainnetConfigError`
+> - `validate_mainnet_invariants()` requires `expected_genesis_hash` for MainNet
+> - 19 tests in `t233_genesis_hash_tests.rs`, 16 tests in `t233_genesis_cli_tests.rs`
+>
+> See `qbind-ledger/src/genesis.rs`, `qbind-node/src/cli.rs`, and [QBIND_GENESIS_AND_LAUNCH_DESIGN.md §9](../consensus/QBIND_GENESIS_AND_LAUNCH_DESIGN.md#9-genesis-hash-commitment-t233).
 
 ---
 

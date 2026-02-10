@@ -35,7 +35,7 @@
 //! let chain_id = config.chain_id();
 //! ```
 
-use qbind_ledger::{FeeDistributionPolicy, MonetaryAccounts, MonetaryMode, SeigniorageSplit};
+use qbind_ledger::{FeeDistributionPolicy, GenesisHash, MonetaryAccounts, MonetaryMode, SeigniorageSplit};
 use qbind_types::{ChainId, NetworkEnvironment};
 use std::path::PathBuf;
 
@@ -3299,6 +3299,22 @@ pub struct NodeConfig {
     /// - TestNet Alpha/Beta: Embedded (default) or External
     /// - MainNet v0: External (**required**, must specify genesis_path)
     pub genesis_source: GenesisSourceConfig,
+
+    // ========================================================================
+    // T233: Genesis Hash Commitment & Verification
+    // ========================================================================
+    /// Expected genesis hash for verification (T233).
+    ///
+    /// If set, the node computes the genesis hash from the loaded genesis file
+    /// and compares it to this expected value. If they don't match, the node
+    /// fails fast at startup.
+    ///
+    /// - DevNet v0: `None` (optional)
+    /// - TestNet Alpha/Beta: `None` (optional, recommended)
+    /// - MainNet v0: **Required** (`validate_mainnet_invariants()` rejects `None`)
+    ///
+    /// The hash is SHA3-256 over the exact bytes of the genesis JSON file.
+    pub expected_genesis_hash: Option<GenesisHash>,
 }
 
 impl Default for NodeConfig {
@@ -3353,6 +3369,8 @@ impl Default for NodeConfig {
             slashing: SlashingConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
+            // T233: No expected genesis hash for DevNet
+            expected_genesis_hash: None,
         }
     }
 }
@@ -3404,6 +3422,8 @@ impl NodeConfig {
             slashing: SlashingConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
+            // T233: No expected genesis hash by default
+            expected_genesis_hash: None,
         }
     }
 
@@ -3454,6 +3474,8 @@ impl NodeConfig {
             slashing: SlashingConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
+            // T233: No expected genesis hash by default
+            expected_genesis_hash: None,
         }
     }
 
@@ -3552,6 +3574,8 @@ impl NodeConfig {
             slashing: SlashingConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
+            // T233: No expected genesis hash for DevNet
+            expected_genesis_hash: None,
         }
     }
 
@@ -3625,6 +3649,8 @@ impl NodeConfig {
             slashing: SlashingConfig::testnet_alpha_default(),
             // T232: TestNet Alpha genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::testnet_default(),
+            // T233: No expected genesis hash for TestNet (optional)
+            expected_genesis_hash: None,
         }
     }
 
@@ -3711,6 +3737,8 @@ impl NodeConfig {
             slashing: SlashingConfig::testnet_beta_default(),
             // T232: TestNet Beta genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::testnet_default(),
+            // T233: No expected genesis hash for TestNet (optional)
+            expected_genesis_hash: None,
         }
     }
 
@@ -3809,6 +3837,9 @@ impl NodeConfig {
             slashing: SlashingConfig::mainnet_default(),
             // T232: MainNet genesis source (external file required)
             genesis_source: GenesisSourceConfig::mainnet_default(),
+            // T233: Expected genesis hash required (must be set via --expect-genesis-hash)
+            // This will fail validate_mainnet_invariants() until a hash is provided
+            expected_genesis_hash: None,
         }
     }
 
@@ -4447,6 +4478,26 @@ impl NodeConfig {
         self
     }
 
+    /// Set the expected genesis hash for MainNet validation (T233).
+    ///
+    /// MainNet nodes MUST specify the expected genesis hash to prevent
+    /// accidental startup with the wrong genesis file.
+    ///
+    /// # Arguments
+    ///
+    /// * `hash` - The expected genesis hash (32-byte array)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let config = NodeConfig::mainnet_preset()
+    ///     .with_expected_genesis_hash([0u8; 32]);
+    /// ```
+    pub fn with_expected_genesis_hash(mut self, hash: GenesisHash) -> Self {
+        self.expected_genesis_hash = Some(hash);
+        self
+    }
+
     /// Create a TestNet Beta preset with LocalMesh for CI-friendly testing (T180).
     ///
     /// This is the same as `testnet_beta_preset()` but forces:
@@ -5064,6 +5115,13 @@ impl NodeConfig {
             return Err(MainnetConfigError::GenesisMisconfigured { reason });
         }
 
+        // 31. Expected genesis hash must be configured for MainNet (T233)
+        // MainNet validators MUST specify the expected genesis hash to prevent
+        // accidental startup with the wrong genesis file.
+        if self.expected_genesis_hash.is_none() {
+            return Err(MainnetConfigError::ExpectedGenesisHashMissing);
+        }
+
         // TODO(future): Add stricter rules for validators vs non-validators
         // when the code has a way to distinguish between them.
         // For now, all invariants are enforced unconditionally.
@@ -5358,6 +5416,16 @@ pub enum MainnetConfigError {
     /// - use_external must be true
     /// - genesis_path must be set
     GenesisMisconfigured { reason: String },
+
+    // ========================================================================
+    // T233: Genesis Hash Commitment Errors
+    // ========================================================================
+    /// Expected genesis hash not configured for MainNet (T233).
+    ///
+    /// MainNet validators MUST specify the expected genesis hash via
+    /// `--expect-genesis-hash` to prevent accidental startup with the
+    /// wrong genesis file.
+    ExpectedGenesisHashMissing,
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -5615,6 +5683,13 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: genesis configuration is invalid: {} (--genesis-path=<path>)",
                     reason
+                )
+            }
+            // T233: Expected genesis hash missing
+            MainnetConfigError::ExpectedGenesisHashMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated: expected genesis hash must be configured (--expect-genesis-hash=0x...)"
                 )
             }
         }
@@ -6493,6 +6568,7 @@ mod tests {
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
             .with_genesis_path("/tmp/test/genesis.json")
+            .with_expected_genesis_hash([0u8; 32])
             .with_stage_b_enabled(false);
 
         // MainNet validation should still pass (Stage B is allowed but not required)
@@ -6508,7 +6584,8 @@ mod tests {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
-            .with_genesis_path("/tmp/test/genesis.json");
+            .with_genesis_path("/tmp/test/genesis.json")
+            .with_expected_genesis_hash([0u8; 32]);
 
         // MainNet validation should pass
         let result = config.validate_mainnet_invariants();
@@ -6690,6 +6767,7 @@ mod tests {
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
             .with_genesis_path("/tmp/test/genesis.json")
+            .with_expected_genesis_hash([0u8; 32])
             .with_dag_coupling_mode(DagCouplingMode::Enforce);
 
         let result = config.validate_mainnet_invariants();
@@ -6778,6 +6856,7 @@ mod tests {
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
             .with_genesis_path("/tmp/test/genesis.json")
+            .with_expected_genesis_hash([0u8; 32])
             .with_monetary_mode(MonetaryMode::Active)
             .with_monetary_accounts(accounts);
 
@@ -6909,7 +6988,8 @@ mod tests {
         let config = NodeConfig::mainnet_preset()
             .with_data_dir("/tmp/test")
             .with_signer_keystore_path("/tmp/test/keystore.json")
-            .with_genesis_path("/tmp/test/genesis.json");
+            .with_genesis_path("/tmp/test/genesis.json")
+            .with_expected_genesis_hash([0u8; 32]);
 
         let result = config.validate_mainnet_invariants();
         assert!(

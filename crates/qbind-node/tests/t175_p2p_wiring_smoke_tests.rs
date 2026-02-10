@@ -86,6 +86,7 @@ fn make_test_p2p_config() -> NodeConfig {
         slashing: SlashingConfig::devnet_default(),
         // T232: Genesis source defaults
         genesis_source: GenesisSourceConfig::devnet_default(),
+        expected_genesis_hash: None,
     }
 }
 
@@ -131,6 +132,7 @@ fn make_test_local_mesh_config() -> NodeConfig {
         slashing: SlashingConfig::devnet_default(),
         // T232: Genesis source defaults
         genesis_source: GenesisSourceConfig::devnet_default(),
+        expected_genesis_hash: None,
     }
 }
 

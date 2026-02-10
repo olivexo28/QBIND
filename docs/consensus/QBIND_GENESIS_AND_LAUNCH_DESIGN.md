@@ -334,25 +334,96 @@ File: `crates/qbind-node/tests/t232_genesis_mainnet_profile_tests.rs`
 
 ---
 
-## 9. Future Work (T233+)
+## 9. Genesis Hash Commitment (T233)
+
+**Status**: Implemented
+
+Genesis hash commitment provides cryptographic verification that all nodes start from the same genesis state.
+
+### 9.1 Canonical Hash Definition
+
+The canonical genesis hash is:
+```
+genesis_hash = SHA3-256(genesis_json_bytes)
+```
+
+Where `genesis_json_bytes` is the **exact** content of the genesis file:
+- **No JSON normalization**: Hash is sensitive to whitespace, key ordering
+- **No preprocessing**: Exact byte-for-byte hash of the distributed file
+
+### 9.2 ChainMeta Persistence
+
+When applying genesis (height 0), the node:
+1. Loads genesis file bytes
+2. Computes `genesis_hash = SHA3-256(bytes)`
+3. Parses genesis config to extract `chain_id`
+4. Creates `ChainMeta { chain_id, genesis_hash }`
+5. Persists `ChainMeta` as part of height 0 state
+
+The `ChainMeta` struct:
+```rust
+pub struct ChainMeta {
+    pub chain_id: String,
+    pub genesis_hash: GenesisHash, // [u8; 32]
+}
+```
+
+### 9.3 CLI Verification
+
+Two CLI flags support genesis hash verification:
+
+| Flag | Description |
+| :--- | :--- |
+| `--print-genesis-hash` | Print hash of genesis file and exit |
+| `--expect-genesis-hash` | Verify hash matches at startup |
+
+**Operator Workflow**:
+```bash
+# Step 1: Compute hash of genesis file
+qbind-node --print-genesis-hash --genesis-path genesis.json
+# Output: 0xabc123...def789
+
+# Step 2: Start node with expected hash
+qbind-node --profile mainnet \
+  --genesis-path genesis.json \
+  --expect-genesis-hash 0xabc123...def789
+```
+
+### 9.4 MainNet Invariant
+
+MainNet validators **MUST** specify `--expect-genesis-hash`:
+- `validate_mainnet_invariants()` returns `ExpectedGenesisHashMissing` if not set
+- Node refuses to start without explicit hash commitment
+
+### 9.5 Security Benefits
+
+- **Fork prevention**: Ensures all validators start from identical genesis
+- **Distribution integrity**: Detects tampered genesis files
+- **Audit compliance**: Provides verifiable genesis identity
+
+---
+
+## 10. Future Work (T234+)
 
 The following features are deferred to future tasks:
 
 1. **Genesis Generator CLI**: Interactive tool to create genesis files
 2. **Vesting Implementation**: Enforcement of `lockup_until_unix_ms` in execution
-3. **Genesis Hash Commitment**: Store genesis hash in first block header
-4. **Multi-sig Ceremony**: Distributed genesis creation with threshold signatures
-5. **Faucet Integration**: Automated initial token distribution tooling
+3. **Multi-sig Ceremony**: Distributed genesis creation with threshold signatures
+4. **Faucet Integration**: Automated initial token distribution tooling
 
 ---
 
-## 10. Implementation References
+## 11. Implementation References
 
 | Component | File |
 | :--- | :--- |
 | Genesis types | `crates/qbind-ledger/src/genesis.rs` |
+| Genesis hash types (T233) | `crates/qbind-ledger/src/genesis.rs` |
 | Genesis source config | `crates/qbind-node/src/node_config.rs` |
-| CLI flag | `crates/qbind-node/src/cli.rs` |
+| CLI flags | `crates/qbind-node/src/cli.rs` |
 | MainNet validation | `crates/qbind-node/src/node_config.rs` |
-| Ledger tests | `crates/qbind-ledger/tests/t232_genesis_config_tests.rs` |
-| Node tests | `crates/qbind-node/tests/t232_genesis_mainnet_profile_tests.rs` |
+| T232 Ledger tests | `crates/qbind-ledger/tests/t232_genesis_config_tests.rs` |
+| T232 Node tests | `crates/qbind-node/tests/t232_genesis_mainnet_profile_tests.rs` |
+| T233 Hash tests | `crates/qbind-ledger/tests/t233_genesis_hash_tests.rs` |
+| T233 CLI tests | `crates/qbind-node/tests/t233_genesis_cli_tests.rs` |

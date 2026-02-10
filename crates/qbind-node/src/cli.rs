@@ -44,7 +44,9 @@ use crate::node_config::{
     SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig, StateRetentionConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
-use qbind_ledger::{parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
+use qbind_ledger::{
+    parse_genesis_hash, parse_monetary_mode, FeeDistributionPolicy, MonetaryMode, SeigniorageSplit,
+};
 
 // ============================================================================
 // CLI Arguments
@@ -351,6 +353,43 @@ pub struct CliArgs {
     pub genesis_path: Option<PathBuf>,
 
     // ========================================================================
+    // T233: Genesis Hash Commitment & Verification
+    // ========================================================================
+    /// Print the SHA3-256 genesis hash of the given genesis file and exit (T233).
+    ///
+    /// Computes the canonical genesis hash over the exact bytes of the genesis file
+    /// (no JSON normalization). Prints the hash as a hex string (0x...) and exits.
+    ///
+    /// Requires --genesis-path to be specified.
+    ///
+    /// Example:
+    /// ```bash
+    /// qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json
+    /// ```
+    #[arg(long = "print-genesis-hash")]
+    pub print_genesis_hash: bool,
+
+    /// Expected genesis hash (T233).
+    ///
+    /// If specified, the node computes the genesis hash from the loaded genesis file
+    /// and compares it to this expected value. If they don't match, the node fails
+    /// fast at startup with a clear error.
+    ///
+    /// Accepts hex string with or without 0x prefix (64 hex characters).
+    ///
+    /// **Required for MainNet**: MainNet validators MUST specify this flag to prevent
+    /// accidental startup with the wrong genesis file.
+    ///
+    /// Example:
+    /// ```bash
+    /// qbind-node --profile mainnet \
+    ///   --genesis-path /etc/qbind/genesis.json \
+    ///   --expect-genesis-hash 0xabc123...
+    /// ```
+    #[arg(long = "expect-genesis-hash")]
+    pub expect_genesis_hash: Option<String>,
+
+    // ========================================================================
     // T219: Mempool Eviction Rate Limiting Configuration
     // ========================================================================
     /// Mempool eviction rate limiting mode: off, warn, or enforce (T219).
@@ -419,6 +458,10 @@ pub enum CliError {
     InvalidSignerMode(String),
     /// Invalid eviction rate mode string (T219).
     InvalidEvictionRateMode(String),
+    /// Invalid genesis hash string (T233).
+    InvalidGenesisHash(String),
+    /// Genesis path required but not provided (T233).
+    GenesisPathRequired(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -484,6 +527,12 @@ impl std::fmt::Display for CliError {
                     "invalid mempool-eviction-mode '{}': expected 'off', 'warn', or 'enforce'",
                     s
                 )
+            }
+            CliError::InvalidGenesisHash(msg) => {
+                write!(f, "invalid genesis hash: {}", msg)
+            }
+            CliError::GenesisPathRequired(msg) => {
+                write!(f, "genesis path required: {}", msg)
             }
         }
     }
@@ -644,6 +693,8 @@ impl CliArgs {
                 slashing: SlashingConfig::devnet_default(),
                 // T232: DevNet genesis source defaults for legacy path
                 genesis_source: GenesisSourceConfig::devnet_default(),
+                // T233: No expected genesis hash by default
+                expected_genesis_hash: None,
             }
         };
 
@@ -864,6 +915,25 @@ impl CliArgs {
                 );
             }
             config.genesis_source = GenesisSourceConfig::external(path.clone());
+        }
+
+        // T233: Apply expected genesis hash override
+        if let Some(ref hash_str) = self.expect_genesis_hash {
+            match parse_genesis_hash(hash_str) {
+                Ok(hash) => {
+                    if self.profile.is_some() {
+                        eprintln!(
+                            "[T233] CLI override: expected_genesis_hash = 0x{}...{}",
+                            &hash_str.replace("0x", "")[..8],
+                            &hash_str.replace("0x", "")[56..]
+                        );
+                    }
+                    config.expected_genesis_hash = Some(hash);
+                }
+                Err(e) => {
+                    return Err(CliError::InvalidGenesisHash(e));
+                }
+            }
         }
 
         // Apply data_dir if specified
