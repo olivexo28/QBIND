@@ -337,7 +337,7 @@ mod tests {
         let batch_ack = domain_prefix(QBIND_DEVNET_CHAIN_ID, DomainKind::BatchAck);
 
         // All must be unique
-        let prefixes = vec![tx, batch, vote, proposal, timeout, newview, batch_ack];
+        let prefixes = [tx, batch, vote, proposal, timeout, newview, batch_ack];
         for i in 0..prefixes.len() {
             for j in (i + 1)..prefixes.len() {
                 assert_ne!(

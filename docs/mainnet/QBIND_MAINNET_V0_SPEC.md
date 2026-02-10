@@ -267,7 +267,67 @@ qbind-node --profile mainnet \
   --data-dir /data/qbind
 ```
 
-### 2.6 MainNet-Only Invariants
+### 2.6 Performance & Benchmarking Evidence
+
+MainNet v0 provides comprehensive performance testing and benchmarking evidence for PQC operations and throughput:
+
+| Test Harness | Purpose | Status | Reference |
+| :--- | :--- | :--- | :--- |
+| **Stage B Soak (T223)** | Long-run determinism + correctness verification | ✅ Ready | `t223_stage_b_soak_harness.rs` |
+| **E2E Perf Harness (T234)** | Realistic TPS/latency measurement with ML-DSA-44 | ✅ Ready | `t234_pqc_end_to_end_perf_tests.rs` |
+| **PQC Cost Benchmarks (T198)** | Microbenchmarks for ML-DSA-44 signing/verification | ✅ Ready | See T198 task spec |
+
+**T223 — Stage B Soak & Determinism Harness**:
+
+- **Purpose**: Verify Stage B parallel execution produces identical results to sequential execution over long randomized workloads
+- **Scope**: 100+ blocks with randomized transaction mixes, multiple senders, varying fee priorities
+- **Assertions**:
+  - Stage B state matches sequential state exactly (balances, nonces, receipts)
+  - `stage_b_mismatch_total` metric remains at 0
+  - Stage B metrics confirm parallel execution usage
+- **Evidence**: Provides determinism guarantee for Stage B safety on MainNet
+
+**T234 — E2E PQC Performance & TPS Harness**:
+
+- **Purpose**: Measure effective TPS and end-to-end latency under realistic settings with real ML-DSA-44 signatures
+- **Scope**: Small in-process cluster (3–4 validators), real PQC signing, controlled load generation
+- **Measurements**:
+  - Effective TPS (committed transactions per second)
+  - End-to-end latency distribution (p50/p90/p99) from submission → commit
+  - Stage B vs sequential performance comparison
+  - Impact of DAG mempool, DoS limits, and eviction rate limiting
+- **Profiles**:
+  - **DevNet Profile**: 3 validators, Stage B off, moderate TPS (200–300)
+  - **Beta Profile**: 4 validators, Stage B on, higher TPS (500+)
+- **Evidence**: Demonstrates that PQC signature costs and Stage B overhead are acceptable for MainNet target throughput
+
+**Running the Harness**:
+
+```bash
+# Run all T234 tests
+cargo test -p qbind-node --test t234_pqc_end_to_end_perf_tests
+
+# Run with nocapture for detailed output
+cargo test -p qbind-node --test t234_pqc_end_to_end_perf_tests -- --nocapture
+```
+
+**Interpreting Results**:
+
+- **Avg TPS**: Expected to be deployment-dependent (validator count, network latency, hardware specs)
+- **Latency p99**: Should be sub-second for typical configurations
+- **Stage B Impact**: Parallel execution should not significantly degrade TPS vs sequential
+- **Reproducibility**: Same seed should produce identical submission/commit counts
+
+**Performance Expectations**:
+
+MainNet v0 does not specify a hard minimum TPS target but requires:
+- All validators process blocks within reasonable time bounds (< 10s per block)
+- Stage B parallelism provides measurable throughput benefit for high-conflict workloads
+- PQC signature verification does not create bottlenecks for typical block sizes
+
+**Note**: Specific TPS targets are deployment-dependent and will be established based on real-world MainNet validator hardware and geographic distribution. The T234 harness provides the testing framework for measuring performance characteristics in different configurations.
+
+### 2.7 MainNet-Only Invariants
 
 The following invariants are **enforced** for MainNet v0:
 

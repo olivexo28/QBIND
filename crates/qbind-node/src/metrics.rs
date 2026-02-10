@@ -4742,11 +4742,14 @@ impl P2pMetrics {
 
     /// Record a discovery exchange result.
     pub fn record_discovery_exchange(&self, success: bool) {
-        self.discovery_exchange_total.fetch_add(1, Ordering::Relaxed);
+        self.discovery_exchange_total
+            .fetch_add(1, Ordering::Relaxed);
         if success {
-            self.discovery_exchange_success.fetch_add(1, Ordering::Relaxed);
+            self.discovery_exchange_success
+                .fetch_add(1, Ordering::Relaxed);
         } else {
-            self.discovery_exchange_failure.fetch_add(1, Ordering::Relaxed);
+            self.discovery_exchange_failure
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -4762,7 +4765,8 @@ impl P2pMetrics {
 
     /// Record a discovery dial attempt result.
     pub fn record_discovery_dial(&self, success: bool) {
-        self.discovery_dial_attempt_total.fetch_add(1, Ordering::Relaxed);
+        self.discovery_dial_attempt_total
+            .fetch_add(1, Ordering::Relaxed);
         if success {
             self.discovery_dial_success.fetch_add(1, Ordering::Relaxed);
         } else {
@@ -4845,11 +4849,16 @@ impl P2pMetrics {
             }
         }
 
-        self.liveness_score_bucket_excellent.store(excellent, Ordering::Relaxed);
-        self.liveness_score_bucket_good.store(good, Ordering::Relaxed);
-        self.liveness_score_bucket_fair.store(fair, Ordering::Relaxed);
-        self.liveness_score_bucket_poor.store(poor, Ordering::Relaxed);
-        self.liveness_score_bucket_critical.store(critical, Ordering::Relaxed);
+        self.liveness_score_bucket_excellent
+            .store(excellent, Ordering::Relaxed);
+        self.liveness_score_bucket_good
+            .store(good, Ordering::Relaxed);
+        self.liveness_score_bucket_fair
+            .store(fair, Ordering::Relaxed);
+        self.liveness_score_bucket_poor
+            .store(poor, Ordering::Relaxed);
+        self.liveness_score_bucket_critical
+            .store(critical, Ordering::Relaxed);
     }
 
     /// Get count of peers with excellent liveness score (90-100).
@@ -4887,12 +4896,18 @@ impl P2pMetrics {
         target_outbound: u32,
         max_known: u32,
     ) {
-        self.discovery_interval_secs.store(discovery_interval as u64, Ordering::Relaxed);
-        self.heartbeat_interval_secs.store(heartbeat_interval as u64, Ordering::Relaxed);
-        self.heartbeat_timeout_secs.store(heartbeat_timeout as u64, Ordering::Relaxed);
-        self.max_heartbeat_failures.store(max_failures as u64, Ordering::Relaxed);
-        self.target_outbound_peers.store(target_outbound as u64, Ordering::Relaxed);
-        self.max_known_peers.store(max_known as u64, Ordering::Relaxed);
+        self.discovery_interval_secs
+            .store(discovery_interval as u64, Ordering::Relaxed);
+        self.heartbeat_interval_secs
+            .store(heartbeat_interval as u64, Ordering::Relaxed);
+        self.heartbeat_timeout_secs
+            .store(heartbeat_timeout as u64, Ordering::Relaxed);
+        self.max_heartbeat_failures
+            .store(max_failures as u64, Ordering::Relaxed);
+        self.target_outbound_peers
+            .store(target_outbound as u64, Ordering::Relaxed);
+        self.max_known_peers
+            .store(max_known as u64, Ordering::Relaxed);
     }
 
     /// Get configured discovery interval in seconds.
@@ -5920,37 +5935,46 @@ impl SlashingMetrics {
 
     /// Increment O2 (invalid proposer sig) evidence counter.
     pub fn inc_evidence_o2(&self) {
-        self.evidence_o2_invalid_proposer_sig.fetch_add(1, Ordering::Relaxed);
+        self.evidence_o2_invalid_proposer_sig
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Increment O3a (single lazy vote) evidence counter.
     pub fn inc_evidence_o3a(&self) {
-        self.evidence_o3a_lazy_vote_single.fetch_add(1, Ordering::Relaxed);
+        self.evidence_o3a_lazy_vote_single
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Increment O3b (repeated lazy votes) evidence counter.
     pub fn inc_evidence_o3b(&self) {
-        self.evidence_o3b_lazy_vote_repeated.fetch_add(1, Ordering::Relaxed);
+        self.evidence_o3b_lazy_vote_repeated
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Increment O4 (invalid DAG cert) evidence counter.
     pub fn inc_evidence_o4(&self) {
-        self.evidence_o4_invalid_dag_cert.fetch_add(1, Ordering::Relaxed);
+        self.evidence_o4_invalid_dag_cert
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Increment O5 (DAG coupling violation) evidence counter.
     pub fn inc_evidence_o5(&self) {
-        self.evidence_o5_dag_coupling_violation.fetch_add(1, Ordering::Relaxed);
+        self.evidence_o5_dag_coupling_violation
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get total evidence submitted for all offense types.
     pub fn evidence_total(&self) -> u64 {
         self.evidence_o1_double_sign.load(Ordering::Relaxed)
-            + self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+            + self
+                .evidence_o2_invalid_proposer_sig
+                .load(Ordering::Relaxed)
             + self.evidence_o3a_lazy_vote_single.load(Ordering::Relaxed)
             + self.evidence_o3b_lazy_vote_repeated.load(Ordering::Relaxed)
             + self.evidence_o4_invalid_dag_cert.load(Ordering::Relaxed)
-            + self.evidence_o5_dag_coupling_violation.load(Ordering::Relaxed)
+            + self
+                .evidence_o5_dag_coupling_violation
+                .load(Ordering::Relaxed)
     }
 
     /// Get O1 evidence count.
@@ -5960,7 +5984,8 @@ impl SlashingMetrics {
 
     /// Get O2 evidence count.
     pub fn evidence_o2_total(&self) -> u64 {
-        self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+        self.evidence_o2_invalid_proposer_sig
+            .load(Ordering::Relaxed)
     }
 
     // ========================================================================
@@ -5974,7 +5999,8 @@ impl SlashingMetrics {
 
     /// Increment O2 penalty counter.
     pub fn inc_penalty_o2(&self) {
-        self.penalty_o2_invalid_proposer_sig.fetch_add(1, Ordering::Relaxed);
+        self.penalty_o2_invalid_proposer_sig
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get total penalties applied.
@@ -5999,12 +6025,14 @@ impl SlashingMetrics {
 
     /// Increment invalid evidence rejection counter.
     pub fn inc_rejected_invalid(&self) {
-        self.evidence_rejected_invalid.fetch_add(1, Ordering::Relaxed);
+        self.evidence_rejected_invalid
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Increment duplicate evidence rejection counter.
     pub fn inc_rejected_duplicate(&self) {
-        self.evidence_rejected_duplicate.fetch_add(1, Ordering::Relaxed);
+        self.evidence_rejected_duplicate
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get total rejected invalid evidence.
@@ -6084,7 +6112,8 @@ impl SlashingMetrics {
         ));
         output.push_str(&format!(
             "qbind_slashing_evidence_total{{offense=\"O2_invalid_proposer_sig\"}} {}\n",
-            self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+            self.evidence_o2_invalid_proposer_sig
+                .load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
             "qbind_slashing_evidence_total{{offense=\"O3a_lazy_vote_single\"}} {}\n",
@@ -6100,7 +6129,8 @@ impl SlashingMetrics {
         ));
         output.push_str(&format!(
             "qbind_slashing_evidence_total{{offense=\"O5_dag_coupling_violation\"}} {}\n",
-            self.evidence_o5_dag_coupling_violation.load(Ordering::Relaxed)
+            self.evidence_o5_dag_coupling_violation
+                .load(Ordering::Relaxed)
         ));
 
         // Penalty counters

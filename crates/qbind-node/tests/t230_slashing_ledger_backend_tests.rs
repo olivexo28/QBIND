@@ -117,11 +117,8 @@ fn make_context(validator_set: &ValidatorSet, current_epoch: u64) -> PenaltySlas
 #[test]
 fn test_ledger_backend_with_penalty_engine_o1() {
     // Create ledger with initial stakes
-    let ledger = InMemorySlashingLedger::with_stakes(vec![
-        (1, 1_000_000),
-        (2, 2_000_000),
-        (3, 3_000_000),
-    ]);
+    let ledger =
+        InMemorySlashingLedger::with_stakes(vec![(1, 1_000_000), (2, 2_000_000), (3, 3_000_000)]);
 
     // Create backend and engine with EnforceCritical mode
     let backend = LedgerSlashingBackend::new(ledger);
@@ -137,7 +134,10 @@ fn test_ledger_backend_with_penalty_engine_o1() {
 
     // Verify penalty was applied
     assert!(
-        matches!(record.penalty_decision, PenaltyDecision::PenaltyApplied { .. }),
+        matches!(
+            record.penalty_decision,
+            PenaltyDecision::PenaltyApplied { .. }
+        ),
         "Expected PenaltyApplied, got {:?}",
         record.penalty_decision
     );
@@ -247,10 +247,7 @@ fn test_ledger_backend_multiple_penalties() {
 
 #[test]
 fn test_ledger_backend_persists_records() {
-    let ledger = InMemorySlashingLedger::with_stakes(vec![
-        (1, 1_000_000),
-        (2, 2_000_000),
-    ]);
+    let ledger = InMemorySlashingLedger::with_stakes(vec![(1, 1_000_000), (2, 2_000_000)]);
 
     let mut backend = LedgerSlashingBackend::new(ledger);
 

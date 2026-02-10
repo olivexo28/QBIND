@@ -248,9 +248,8 @@ impl UpgradeEnvelope {
 
         // Validate binary hashes
         for (platform, hash) in &self.binary_hashes {
-            hash.validate().map_err(|e| {
-                EnvelopeError::InvalidBinaryHash(format!("{} ({})", e, platform))
-            })?;
+            hash.validate()
+                .map_err(|e| EnvelopeError::InvalidBinaryHash(format!("{} ({})", e, platform)))?;
         }
 
         Ok(())
@@ -312,7 +311,10 @@ mod tests {
 
     #[test]
     fn test_upgrade_class_display() {
-        assert_eq!(format!("{}", UpgradeClass::ANonConsensus), "A (Non-Consensus)");
+        assert_eq!(
+            format!("{}", UpgradeClass::ANonConsensus),
+            "A (Non-Consensus)"
+        );
         assert_eq!(
             format!("{}", UpgradeClass::BConsensusCompatible),
             "B (Consensus-Compatible)"

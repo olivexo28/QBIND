@@ -114,7 +114,10 @@ impl<L: SlashingLedger> std::fmt::Debug for LedgerSlashingBackend<L> {
 }
 
 // Convert SlashingLedgerError to SlashingBackendError
-fn convert_ledger_error(err: SlashingLedgerError, validator_id: ValidatorId) -> SlashingBackendError {
+fn convert_ledger_error(
+    err: SlashingLedgerError,
+    validator_id: ValidatorId,
+) -> SlashingBackendError {
     match err {
         SlashingLedgerError::ValidatorNotFound(_) => {
             SlashingBackendError::ValidatorNotFound(validator_id)
@@ -128,9 +131,7 @@ fn convert_ledger_error(err: SlashingLedgerError, validator_id: ValidatorId) -> 
             required_bps,
             available_stake,
         },
-        SlashingLedgerError::AlreadyJailed(_) => {
-            SlashingBackendError::AlreadyJailed(validator_id)
-        }
+        SlashingLedgerError::AlreadyJailed(_) => SlashingBackendError::AlreadyJailed(validator_id),
         SlashingLedgerError::StorageError(msg) => SlashingBackendError::Other(msg),
         SlashingLedgerError::Other(msg) => SlashingBackendError::Other(msg),
     }
@@ -145,7 +146,9 @@ impl<L: SlashingLedger> SlashingBackend for LedgerSlashingBackend<L> {
     ) -> Result<u64, SlashingBackendError> {
         eprintln!(
             "[SLASHING_BACKEND] burn_stake_bps: validator={}, bps={}, offense={}",
-            validator_id.0, slash_bps, offense.as_str()
+            validator_id.0,
+            slash_bps,
+            offense.as_str()
         );
 
         self.ledger
@@ -164,7 +167,9 @@ impl<L: SlashingLedger> SlashingBackend for LedgerSlashingBackend<L> {
 
         eprintln!(
             "[SLASHING_BACKEND] jail_validator: validator={}, offense={}, until_epoch={}",
-            validator_id.0, offense.as_str(), until_epoch
+            validator_id.0,
+            offense.as_str(),
+            until_epoch
         );
 
         self.ledger
@@ -198,10 +203,7 @@ mod tests {
 
     #[test]
     fn test_ledger_slashing_backend_basic() {
-        let ledger = InMemorySlashingLedger::with_stakes(vec![
-            (1, 100_000),
-            (2, 200_000),
-        ]);
+        let ledger = InMemorySlashingLedger::with_stakes(vec![(1, 100_000), (2, 200_000)]);
         let mut backend = LedgerSlashingBackend::new(ledger);
 
         // Check initial stakes

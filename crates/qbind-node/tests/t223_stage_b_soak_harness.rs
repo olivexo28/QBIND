@@ -366,10 +366,7 @@ pub fn run_stage_b_soak(config: StageBSoakConfig) -> StageBSoakResult {
                 } else {
                     MismatchKind::FeeDistributionDivergence
                 },
-                description: format!(
-                    "Block {}, tx {}: {}",
-                    block_idx, tx_idx, reason
-                ),
+                description: format!("Block {}, tx {}: {}", block_idx, tx_idx, reason),
             });
         }
 
@@ -483,7 +480,10 @@ fn test_stage_b_soak_determinism_over_100_blocks() {
     eprintln!("Total txs executed: {}", result.total_txs_executed);
     eprintln!("Total txs succeeded: {}", result.total_txs_succeeded);
     eprintln!("Total txs failed: {}", result.total_txs_failed);
-    eprintln!("Average parallelism (levels): {:.2}", result.avg_parallelism);
+    eprintln!(
+        "Average parallelism (levels): {:.2}",
+        result.avg_parallelism
+    );
 
     // Print any mismatch details
     if !result.mismatch_details.is_empty() {
@@ -528,8 +528,14 @@ fn test_stage_b_soak_short_sanity() {
     let result = run_stage_b_soak(config);
 
     eprintln!("=== Stage B Short Sanity Test ===");
-    eprintln!("Blocks: {}, Mismatches: {}", result.blocks_executed, result.mismatches);
-    eprintln!("Parallel: {}, Fallback: {}", result.stage_b_blocks_parallel, result.stage_b_blocks_fallback);
+    eprintln!(
+        "Blocks: {}, Mismatches: {}",
+        result.blocks_executed, result.mismatches
+    );
+    eprintln!(
+        "Parallel: {}, Fallback: {}",
+        result.stage_b_blocks_parallel, result.stage_b_blocks_fallback
+    );
 
     assert_eq!(result.mismatches, 0, "No mismatches in sanity test");
     assert!(result.blocks_executed >= 15, "At least 15 blocks executed");
@@ -576,11 +582,7 @@ fn test_stage_b_metrics_surface() {
     );
 
     // Verify metric values
-    assert_eq!(
-        metrics.stage_b_enabled(),
-        1,
-        "Stage B should be enabled"
-    );
+    assert_eq!(metrics.stage_b_enabled(), 1, "Stage B should be enabled");
     assert!(
         metrics.stage_b_blocks_parallel() > 0 || metrics.stage_b_blocks_fallback() > 0,
         "Some Stage B blocks should be recorded"
@@ -614,13 +616,22 @@ fn test_stage_b_soak_high_contention() {
     let result = run_stage_b_soak(config);
 
     eprintln!("=== Stage B High Contention Test ===");
-    eprintln!("Blocks: {}, Mismatches: {}", result.blocks_executed, result.mismatches);
-    eprintln!("Parallel: {}, Fallback: {}", result.stage_b_blocks_parallel, result.stage_b_blocks_fallback);
+    eprintln!(
+        "Blocks: {}, Mismatches: {}",
+        result.blocks_executed, result.mismatches
+    );
+    eprintln!(
+        "Parallel: {}, Fallback: {}",
+        result.stage_b_blocks_parallel, result.stage_b_blocks_fallback
+    );
     eprintln!("Avg parallelism (levels): {:.2}", result.avg_parallelism);
 
     // Even with high contention, results should be deterministic
-    assert_eq!(result.mismatches, 0, "No mismatches even with high contention");
-    
+    assert_eq!(
+        result.mismatches, 0,
+        "No mismatches even with high contention"
+    );
+
     // High contention should result in more levels (less parallelism)
     // This is expected behavior, not a failure
     assert!(result.blocks_executed >= 25, "At least 25 blocks executed");
@@ -646,15 +657,24 @@ fn test_stage_b_soak_independent_txs() {
     let result = run_stage_b_soak(config);
 
     eprintln!("=== Stage B Independent TXs Test ===");
-    eprintln!("Blocks: {}, Mismatches: {}", result.blocks_executed, result.mismatches);
-    eprintln!("Parallel: {}, Fallback: {}", result.stage_b_blocks_parallel, result.stage_b_blocks_fallback);
+    eprintln!(
+        "Blocks: {}, Mismatches: {}",
+        result.blocks_executed, result.mismatches
+    );
+    eprintln!(
+        "Parallel: {}, Fallback: {}",
+        result.stage_b_blocks_parallel, result.stage_b_blocks_fallback
+    );
     eprintln!("Avg parallelism (levels): {:.2}", result.avg_parallelism);
 
     assert_eq!(result.mismatches, 0, "No mismatches with independent txs");
-    
+
     // With many senders, we should achieve good parallelism
     // (lower level count means more txs per level = better parallelism)
-    assert!(result.stage_b_blocks_parallel > 0, "Should have some parallel blocks");
+    assert!(
+        result.stage_b_blocks_parallel > 0,
+        "Should have some parallel blocks"
+    );
 }
 
 /// Test determinism with a fixed seed across multiple runs.
@@ -678,10 +698,14 @@ fn test_stage_b_soak_reproducibility() {
     let result2 = run_stage_b_soak(config);
 
     eprintln!("=== Stage B Reproducibility Test ===");
-    eprintln!("Run 1: blocks={}, txs={}, succeeded={}", 
-        result1.blocks_executed, result1.total_txs_executed, result1.total_txs_succeeded);
-    eprintln!("Run 2: blocks={}, txs={}, succeeded={}", 
-        result2.blocks_executed, result2.total_txs_executed, result2.total_txs_succeeded);
+    eprintln!(
+        "Run 1: blocks={}, txs={}, succeeded={}",
+        result1.blocks_executed, result1.total_txs_executed, result1.total_txs_succeeded
+    );
+    eprintln!(
+        "Run 2: blocks={}, txs={}, succeeded={}",
+        result2.blocks_executed, result2.total_txs_executed, result2.total_txs_succeeded
+    );
 
     // Both runs should produce identical results
     assert_eq!(result1.blocks_executed, result2.blocks_executed);
@@ -689,7 +713,10 @@ fn test_stage_b_soak_reproducibility() {
     assert_eq!(result1.total_txs_succeeded, result2.total_txs_succeeded);
     assert_eq!(result1.total_txs_failed, result2.total_txs_failed);
     assert_eq!(result1.mismatches, result2.mismatches);
-    assert_eq!(result1.mismatches, 0, "No mismatches in reproducibility test");
+    assert_eq!(
+        result1.mismatches, 0,
+        "No mismatches in reproducibility test"
+    );
 }
 
 // ============================================================================
@@ -735,7 +762,11 @@ fn test_stage_b_schedule_correctness() {
 
     // All txs share recipient R, so they should be in separate levels
     // (fully sequential schedule expected)
-    assert_eq!(schedule.levels.len(), 4, "Should have 4 levels (fully sequential)");
+    assert_eq!(
+        schedule.levels.len(),
+        4,
+        "Should have 4 levels (fully sequential)"
+    );
 
     // Execute both ways and verify identical results
     let (seq_results, seq_state) = execute_sequential(&transactions, &state);

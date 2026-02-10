@@ -62,12 +62,8 @@ fn test_cli_expect_genesis_hash_flag() {
 fn test_cli_expect_genesis_hash_without_prefix() {
     // Given CLI args with --expect-genesis-hash without 0x prefix
     let expected_hash = "ab".repeat(32);
-    let args = CliArgs::try_parse_from([
-        "qbind-node",
-        "--expect-genesis-hash",
-        &expected_hash,
-    ])
-    .unwrap();
+    let args =
+        CliArgs::try_parse_from(["qbind-node", "--expect-genesis-hash", &expected_hash]).unwrap();
 
     // Then the flag should be set
     assert_eq!(args.expect_genesis_hash, Some(expected_hash));
@@ -81,12 +77,8 @@ fn test_cli_expect_genesis_hash_without_prefix() {
 fn test_to_node_config_sets_expected_genesis_hash() {
     // Given CLI args with a valid expected genesis hash
     let expected_hash = format!("0x{}", "12".repeat(32));
-    let args = CliArgs::try_parse_from([
-        "qbind-node",
-        "--expect-genesis-hash",
-        &expected_hash,
-    ])
-    .unwrap();
+    let args =
+        CliArgs::try_parse_from(["qbind-node", "--expect-genesis-hash", &expected_hash]).unwrap();
 
     // When we convert to NodeConfig
     let config = args.to_node_config().unwrap();
@@ -101,12 +93,8 @@ fn test_to_node_config_sets_expected_genesis_hash() {
 fn test_to_node_config_expected_genesis_hash_parse_error() {
     // Given CLI args with an invalid expected genesis hash
     let invalid_hash = "0x1234"; // Too short
-    let args = CliArgs::try_parse_from([
-        "qbind-node",
-        "--expect-genesis-hash",
-        invalid_hash,
-    ])
-    .unwrap();
+    let args =
+        CliArgs::try_parse_from(["qbind-node", "--expect-genesis-hash", invalid_hash]).unwrap();
 
     // When we convert to NodeConfig
     let result = args.to_node_config();
@@ -125,12 +113,8 @@ fn test_to_node_config_expected_genesis_hash_parse_error() {
 fn test_to_node_config_expected_genesis_hash_invalid_hex() {
     // Given CLI args with invalid hex characters
     let invalid_hash = format!("0x{}", "zz".repeat(32));
-    let args = CliArgs::try_parse_from([
-        "qbind-node",
-        "--expect-genesis-hash",
-        &invalid_hash,
-    ])
-    .unwrap();
+    let args =
+        CliArgs::try_parse_from(["qbind-node", "--expect-genesis-hash", &invalid_hash]).unwrap();
 
     // When we convert to NodeConfig
     let result = args.to_node_config();
@@ -189,10 +173,7 @@ fn test_validate_mainnet_invariants_requires_expected_hash() {
         MainnetConfigError::ExpectedGenesisHashMissing => {
             // Expected error
         }
-        other => panic!(
-            "expected ExpectedGenesisHashMissing, got: {:?}",
-            other
-        ),
+        other => panic!("expected ExpectedGenesisHashMissing, got: {:?}", other),
     }
 }
 
@@ -261,7 +242,8 @@ fn test_testnet_does_not_require_expected_genesis_hash() {
 #[test]
 fn test_genesis_hash_comparison_matching() {
     // Given genesis file content
-    let genesis_bytes = br#"{"chain_id": "qbind-mainnet-v0", "genesis_time_unix_ms": 1738000000000}"#;
+    let genesis_bytes =
+        br#"{"chain_id": "qbind-mainnet-v0", "genesis_time_unix_ms": 1738000000000}"#;
 
     // Compute the actual hash
     let actual_hash = compute_genesis_hash_bytes(genesis_bytes);

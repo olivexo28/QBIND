@@ -219,7 +219,11 @@ fn test_slashing_evidence_round_trip_o2() {
     assert!(evidence.validate_structure().is_ok());
     assert_eq!(evidence.offense, OffenseKind::O2InvalidProposerSig);
 
-    if let EvidencePayloadV1::O2InvalidProposerSig { header, bad_signature } = &evidence.payload {
+    if let EvidencePayloadV1::O2InvalidProposerSig {
+        header,
+        bad_signature,
+    } = &evidence.payload
+    {
         assert_eq!(header.height, 200);
         assert_eq!(header.proposer_id, ValidatorId(2));
         assert_eq!(bad_signature.len(), 64);
@@ -241,7 +245,11 @@ fn test_slashing_evidence_round_trip_o3() {
     assert_eq!(evidence_b.offense, OffenseKind::O3bLazyVoteRepeated);
 
     // Both use O3LazyVote payload
-    if let EvidencePayloadV1::O3LazyVote { vote, invalid_reason } = &evidence_a.payload {
+    if let EvidencePayloadV1::O3LazyVote {
+        vote,
+        invalid_reason,
+    } = &evidence_a.payload
+    {
         assert_eq!(vote.height, 300);
         assert_eq!(*invalid_reason, LazyVoteInvalidReason::InvalidProposerSig);
     } else {
@@ -257,7 +265,11 @@ fn test_slashing_evidence_round_trip_o4() {
     assert!(evidence.validate_structure().is_ok());
     assert_eq!(evidence.offense, OffenseKind::O4InvalidDagCert);
 
-    if let EvidencePayloadV1::O4InvalidDagCert { cert, failure_reason } = &evidence.payload {
+    if let EvidencePayloadV1::O4InvalidDagCert {
+        cert,
+        failure_reason,
+    } = &evidence.payload
+    {
         assert_eq!(cert.signers.len(), 3);
         assert!(matches!(
             failure_reason,
@@ -276,14 +288,15 @@ fn test_slashing_evidence_round_trip_o5() {
     assert!(evidence.validate_structure().is_ok());
     assert_eq!(evidence.offense, OffenseKind::O5DagCouplingViolation);
 
-    if let EvidencePayloadV1::O5DagCouplingViolation { block, dag_state_proof } = &evidence.payload
+    if let EvidencePayloadV1::O5DagCouplingViolation {
+        block,
+        dag_state_proof,
+    } = &evidence.payload
     {
         assert_eq!(block.batch_commitment, [0xFF; 32]);
         assert_eq!(dag_state_proof.frontier_commitments.len(), 2);
         // Invalid commitment 0xFF is not in frontier
-        assert!(!dag_state_proof
-            .frontier_commitments
-            .contains(&[0xFF; 32]));
+        assert!(!dag_state_proof.frontier_commitments.contains(&[0xFF; 32]));
     } else {
         panic!("Expected O5DagCouplingViolation payload");
     }
@@ -521,9 +534,18 @@ fn test_slashing_metrics_record_helper() {
     let metrics = SlashingMetrics::new();
 
     // Use the combined record() helper
-    metrics.record(OffenseKind::O1DoubleSign, SlashingDecisionKind::AcceptedNoOp);
-    metrics.record(OffenseKind::O2InvalidProposerSig, SlashingDecisionKind::RejectedInvalid);
-    metrics.record(OffenseKind::O1DoubleSign, SlashingDecisionKind::RejectedDuplicate);
+    metrics.record(
+        OffenseKind::O1DoubleSign,
+        SlashingDecisionKind::AcceptedNoOp,
+    );
+    metrics.record(
+        OffenseKind::O2InvalidProposerSig,
+        SlashingDecisionKind::RejectedInvalid,
+    );
+    metrics.record(
+        OffenseKind::O1DoubleSign,
+        SlashingDecisionKind::RejectedDuplicate,
+    );
 
     assert_eq!(metrics.evidence_o1_total(), 2);
     assert_eq!(metrics.evidence_o2_total(), 1);
@@ -550,13 +572,19 @@ fn test_slashing_engine_tracks_counts() {
     engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1)); // duplicate
 
     // Check engine counts
-    assert_eq!(engine.evidence_count_by_offense(OffenseKind::O1DoubleSign), 3);
+    assert_eq!(
+        engine.evidence_count_by_offense(OffenseKind::O1DoubleSign),
+        3
+    );
     assert_eq!(
         engine.evidence_count_by_offense(OffenseKind::O2InvalidProposerSig),
         1
     );
     assert_eq!(engine.decision_count(SlashingDecisionKind::AcceptedNoOp), 3);
-    assert_eq!(engine.decision_count(SlashingDecisionKind::RejectedDuplicate), 1);
+    assert_eq!(
+        engine.decision_count(SlashingDecisionKind::RejectedDuplicate),
+        1
+    );
 }
 
 // ============================================================================

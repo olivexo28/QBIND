@@ -35,7 +35,9 @@
 //! let chain_id = config.chain_id();
 //! ```
 
-use qbind_ledger::{FeeDistributionPolicy, GenesisHash, MonetaryAccounts, MonetaryMode, SeigniorageSplit};
+use qbind_ledger::{
+    FeeDistributionPolicy, GenesisHash, MonetaryAccounts, MonetaryMode, SeigniorageSplit,
+};
 use qbind_types::{ChainId, NetworkEnvironment};
 use std::path::PathBuf;
 
@@ -1876,7 +1878,8 @@ pub fn parse_slashing_mode(s: &str) -> Option<SlashingMode> {
 }
 
 /// Valid slashing mode strings for documentation and error messages.
-pub const VALID_SLASHING_MODES: &[&str] = &["off", "record_only", "enforce_critical", "enforce_all"];
+pub const VALID_SLASHING_MODES: &[&str] =
+    &["off", "record_only", "enforce_critical", "enforce_all"];
 
 /// Configuration for the slashing penalty engine (T229).
 ///
@@ -1916,7 +1919,6 @@ pub struct SlashingConfig {
     // ========================================================================
     // Slash Percentages (in basis points)
     // ========================================================================
-
     /// Slash percentage for O1 (double-signing) in basis points.
     ///
     /// T227 range: 500–1000 bps (5–10%).
@@ -1933,7 +1935,6 @@ pub struct SlashingConfig {
     // ========================================================================
     // Jailing Configuration
     // ========================================================================
-
     /// Whether to jail validator on O1 offense (double-signing).
     pub jail_on_o1: bool,
 
@@ -1983,7 +1984,7 @@ impl SlashingConfig {
     pub fn devnet_default() -> Self {
         Self {
             mode: SlashingMode::EnforceCritical,
-            slash_bps_o1_double_sign: 750,  // 7.5% - midpoint of 5-10% range
+            slash_bps_o1_double_sign: 750, // 7.5% - midpoint of 5-10% range
             slash_bps_o2_invalid_proposer_sig: 500, // 5%
             jail_on_o1: true,
             jail_epochs_o1: 10,
@@ -2024,7 +2025,7 @@ impl SlashingConfig {
     pub fn mainnet_default() -> Self {
         Self {
             mode: SlashingMode::RecordOnly,
-            slash_bps_o1_double_sign: 750,  // 7.5% - conservative within T227 range
+            slash_bps_o1_double_sign: 750, // 7.5% - conservative within T227 range
             slash_bps_o2_invalid_proposer_sig: 500, // 5%
             jail_on_o1: true,
             jail_epochs_o1: 10,
@@ -2040,12 +2041,18 @@ impl SlashingConfig {
 
     /// Check if penalty enforcement is enabled (EnforceCritical or EnforceAll).
     pub fn is_enforcing(&self) -> bool {
-        matches!(self.mode, SlashingMode::EnforceCritical | SlashingMode::EnforceAll)
+        matches!(
+            self.mode,
+            SlashingMode::EnforceCritical | SlashingMode::EnforceAll
+        )
     }
 
     /// Check if O1/O2 penalties should be applied.
     pub fn should_enforce_critical(&self) -> bool {
-        matches!(self.mode, SlashingMode::EnforceCritical | SlashingMode::EnforceAll)
+        matches!(
+            self.mode,
+            SlashingMode::EnforceCritical | SlashingMode::EnforceAll
+        )
     }
 
     /// Check if O3/O4/O5 penalties should be applied.
@@ -2094,9 +2101,7 @@ impl SlashingConfig {
             // Jail epochs must be reasonable if jailing is enabled
             if self.jail_on_o1 {
                 if self.jail_epochs_o1 == 0 {
-                    return Err(
-                        "jail_epochs_o1 must be > 0 when jail_on_o1 is enabled".to_string()
-                    );
+                    return Err("jail_epochs_o1 must be > 0 when jail_on_o1 is enabled".to_string());
                 }
                 if self.jail_epochs_o1 > 1_000_000 {
                     return Err(format!(
@@ -2108,9 +2113,7 @@ impl SlashingConfig {
 
             if self.jail_on_o2 {
                 if self.jail_epochs_o2 == 0 {
-                    return Err(
-                        "jail_epochs_o2 must be > 0 when jail_on_o2 is enabled".to_string()
-                    );
+                    return Err("jail_epochs_o2 must be > 0 when jail_on_o2 is enabled".to_string());
                 }
                 if self.jail_epochs_o2 > 1_000_000 {
                     return Err(format!(
@@ -7232,7 +7235,9 @@ mod tests {
         };
         let result = config.validate_for_mainnet();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("heartbeat_interval_secs must be > 0"));
+        assert!(result
+            .unwrap_err()
+            .contains("heartbeat_interval_secs must be > 0"));
     }
 
     #[test]
@@ -7244,7 +7249,9 @@ mod tests {
         };
         let result = config.validate_for_mainnet();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("max_heartbeat_failures must be > 0"));
+        assert!(result
+            .unwrap_err()
+            .contains("max_heartbeat_failures must be > 0"));
     }
 
     #[test]
@@ -7287,8 +7294,7 @@ mod tests {
             max_known_peers: 500,
             outbound_target: 16,
         };
-        let config = NodeConfig::mainnet_preset()
-            .with_discovery_config(custom_discovery.clone());
+        let config = NodeConfig::mainnet_preset().with_discovery_config(custom_discovery.clone());
         assert_eq!(config.p2p_discovery.interval_secs, 60);
         assert_eq!(config.p2p_discovery.max_known_peers, 500);
         assert_eq!(config.p2p_discovery.outbound_target, 16);
@@ -7301,8 +7307,7 @@ mod tests {
             heartbeat_timeout_secs: 20,
             max_heartbeat_failures: 5,
         };
-        let config = NodeConfig::mainnet_preset()
-            .with_liveness_config(custom_liveness.clone());
+        let config = NodeConfig::mainnet_preset().with_liveness_config(custom_liveness.clone());
         assert_eq!(config.p2p_liveness.heartbeat_interval_secs, 30);
         assert_eq!(config.p2p_liveness.heartbeat_timeout_secs, 20);
         assert_eq!(config.p2p_liveness.max_heartbeat_failures, 5);
@@ -7442,7 +7447,9 @@ mod tests {
         };
         let result = config.validate_for_mainnet();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("max_peers_per_ipv4_prefix must be > 0"));
+        assert!(result
+            .unwrap_err()
+            .contains("max_peers_per_ipv4_prefix must be > 0"));
     }
 
     #[test]
@@ -7453,7 +7460,9 @@ mod tests {
         };
         let result = config.validate_for_mainnet();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("min_outbound_peers must be >= 4"));
+        assert!(result
+            .unwrap_err()
+            .contains("min_outbound_peers must be >= 4"));
     }
 
     #[test]
@@ -7464,7 +7473,9 @@ mod tests {
         };
         let result = config.validate_for_mainnet();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("min_asn_diversity must be >= 2"));
+        assert!(result
+            .unwrap_err()
+            .contains("min_asn_diversity must be >= 2"));
     }
 
     #[test]
@@ -7502,8 +7513,8 @@ mod tests {
             min_asn_diversity: 3,
             enforce: true,
         };
-        let config = NodeConfig::mainnet_preset()
-            .with_p2p_anti_eclipse_config(custom_eclipse.clone());
+        let config =
+            NodeConfig::mainnet_preset().with_p2p_anti_eclipse_config(custom_eclipse.clone());
         let stored = config.p2p_anti_eclipse.as_ref().unwrap();
         assert_eq!(stored.max_peers_per_ipv4_prefix, 4);
         assert_eq!(stored.min_outbound_peers, 10);

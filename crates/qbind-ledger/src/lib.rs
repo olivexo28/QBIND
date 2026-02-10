@@ -137,6 +137,6 @@ pub use genesis::{
 
 // T233: Genesis Hash Commitment exports
 pub use genesis::{
-    compute_genesis_hash_bytes, format_genesis_hash, parse_genesis_hash, ChainMeta,
-    ChainMetaError, GenesisHash,
+    compute_genesis_hash_bytes, format_genesis_hash, parse_genesis_hash, ChainMeta, ChainMetaError,
+    GenesisHash,
 };

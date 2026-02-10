@@ -50,7 +50,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 
 | Area | Related Tasks | Risk Status | Notes |
 | :--- | :--- | :--- | :--- |
-| **Execution & VM** | T163, T164, T171, T177, T179, T186, T187, T193, T223 | ✅ Mitigated | Stage B wired, tested, and soak-verified (T186, T187, T223) |
+| **Execution & VM** | T163, T164, T171, T177, T179, T186, T187, T193, T223, T234 | ✅ Mitigated | Stage B wired, tested, and soak-verified (T186, T187, T223); E2E perf harness (T234) |
 | **State Persistence & Growth** | T164, T208, T215 | ✅ Mitigated | Pruning (T208) & snapshots (T215) implemented |
 | **Gas/Fees & Fee Market** | T167, T168, T169, T179, T181, T193 | Partially Mitigated | Hybrid fee distribution implemented (T193) |
 | **Mempool & DAG** | T158, T165, T182, T183, T218, T219 | ✅ Mitigated | DoS protections (T218), eviction rate limiting (T219), consensus coupling |
@@ -368,6 +368,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | 5 | Stage B production wiring complete | ✅ Ready | T186, T187 - wired into VM v0 pipeline |
 | 6 | Stage B vs sequential determinism verified | ✅ Ready | T187 `test_stage_b_pipeline_determinism_against_sequential` |
 | 7 | Stage B soak harness (long-run determinism) | ✅ Ready | T223 `test_stage_b_soak_determinism_over_100_blocks` |
+| 8 | E2E PQC performance & TPS harness complete | ✅ Ready | T234 `t234_pqc_end_to_end_perf_tests.rs` |
 
 ### 4.2 State Persistence & Growth
 
@@ -545,6 +546,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | ~~T193~~ | ~~Gas/Fees~~ | ~~Hybrid fee distribution~~ | ~~MN-R2~~ |
 | ~~T18x~~ | ~~Execution~~ | ~~Stage B production wiring~~ | ~~MN-R1~~ |
 | **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
+| ~~**T234**~~ | ~~**Testing**~~ | ~~**PQC E2E Performance & TPS Harness v1**~~ | ~~**MN-R1, MN-R6**~~ |
 | ~~**T227**~~ | ~~**Consensus**~~ | ~~**Slashing & PQC Offenses Design**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T228**~~ | ~~**Consensus**~~ | ~~**Slashing Infrastructure & Evidence Skeleton v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T229**~~ | ~~**Consensus**~~ | ~~**Penalty Slashing Engine v1**~~ | ~~**MN-R1, MN-R9**~~ |

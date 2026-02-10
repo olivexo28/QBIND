@@ -36,9 +36,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use qbind_gov::{
-    sha3_256_file_hex, verify_envelope, CouncilKeySet, UpgradeEnvelope,
-};
+use qbind_gov::{sha3_256_file_hex, verify_envelope, CouncilKeySet, UpgradeEnvelope};
 
 /// Exit codes for the CLI.
 mod exit_codes {
@@ -109,7 +107,13 @@ fn main() -> ExitCode {
             binary,
             platform,
             output,
-        } => cmd_verify(&envelope, &council_keys, binary.as_deref(), &platform, &output),
+        } => cmd_verify(
+            &envelope,
+            &council_keys,
+            binary.as_deref(),
+            &platform,
+            &output,
+        ),
         Commands::Digest { envelope } => cmd_digest(&envelope),
     }
 }
@@ -153,7 +157,10 @@ fn cmd_inspect(envelope_path: &std::path::Path) -> ExitCode {
     }
 
     println!();
-    println!("Council Approvals:  {} signature(s)", envelope.approval_count());
+    println!(
+        "Council Approvals:  {} signature(s)",
+        envelope.approval_count()
+    );
     for approval in &envelope.council_approvals {
         println!("  - {} ({})", approval.member_id, approval.timestamp);
     }
@@ -248,11 +255,18 @@ fn cmd_verify(
 }
 
 /// Verify binary hash against envelope.
-fn verify_binary_hash(envelope: &UpgradeEnvelope, binary_path: &std::path::Path, platform: &str) -> Option<bool> {
+fn verify_binary_hash(
+    envelope: &UpgradeEnvelope,
+    binary_path: &std::path::Path,
+    platform: &str,
+) -> Option<bool> {
     let expected = match envelope.binary_hash(platform) {
         Some(h) => h,
         None => {
-            eprintln!("Warning: no binary hash for platform '{}' in envelope", platform);
+            eprintln!(
+                "Warning: no binary hash for platform '{}' in envelope",
+                platform
+            );
             return None;
         }
     };
@@ -290,7 +304,10 @@ fn output_text(
     if result.is_valid() {
         println!("Threshold Check:    ✓ PASSED");
     } else {
-        println!("Threshold Check:    ✗ FAILED (need {} more)", result.threshold - result.valid_count);
+        println!(
+            "Threshold Check:    ✗ FAILED (need {} more)",
+            result.threshold - result.valid_count
+        );
     }
 
     // Individual signatures

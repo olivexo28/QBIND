@@ -1559,8 +1559,7 @@ mod tests {
         state.on_peer_connected(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 2)), true);
 
         // Third connection should be rejected
-        let result =
-            state.check_connection(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 3)), true);
+        let result = state.check_connection(&IpAddr::V4(Ipv4Addr::new(10, 0, 1, 3)), true);
         assert!(!result.is_allowed());
         assert_eq!(result.rejection_reason(), Some("anti_eclipse_prefix"));
     }
@@ -1632,9 +1631,7 @@ mod tests {
     #[test]
     fn test_anti_eclipse_check_result_rejected_prefix() {
         let result = AntiEclipseCheckResult::RejectedPrefixLimit {
-            prefix: PeerBucketId::Ipv4Prefix24 {
-                prefix: [10, 0, 1],
-            },
+            prefix: PeerBucketId::Ipv4Prefix24 { prefix: [10, 0, 1] },
             current_count: 8,
             max_allowed: 8,
         };

@@ -458,7 +458,11 @@ mod tests {
 
         let invalid = &result.signatures[0];
         assert!(!invalid.valid);
-        assert!(invalid.error.as_ref().unwrap().contains("unknown council member"));
+        assert!(invalid
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("unknown council member"));
     }
 
     #[test]

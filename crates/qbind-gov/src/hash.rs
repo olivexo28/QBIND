@@ -104,8 +104,7 @@ impl From<&UpgradeEnvelope> for CanonicalEnvelope {
         // UpgradeClass is a simple enum, serialization cannot fail
         fields.insert(
             "class".to_string(),
-            serde_json::to_value(&envelope.class)
-                .expect("UpgradeClass serialization cannot fail"),
+            serde_json::to_value(&envelope.class).expect("UpgradeClass serialization cannot fail"),
         );
 
         fields.insert(
@@ -223,12 +222,14 @@ mod tests {
         let mut envelope2 = test_envelope();
 
         // Add approvals to envelope2
-        envelope2.council_approvals.push(crate::envelope::CouncilSignature {
-            member_id: "c1".to_string(),
-            public_key: "aa".to_string(),
-            signature: "bb".to_string(),
-            timestamp: "2026-01-01T00:00:00Z".to_string(),
-        });
+        envelope2
+            .council_approvals
+            .push(crate::envelope::CouncilSignature {
+                member_id: "c1".to_string(),
+                public_key: "aa".to_string(),
+                signature: "bb".to_string(),
+                timestamp: "2026-01-01T00:00:00Z".to_string(),
+            });
 
         let digest1 = envelope_digest(&envelope1).unwrap();
         let digest2 = envelope_digest(&envelope2).unwrap();
@@ -245,7 +246,10 @@ mod tests {
         let digest1 = envelope_digest(&envelope1).unwrap();
         let digest2 = envelope_digest(&envelope2).unwrap();
 
-        assert_ne!(digest1, digest2, "different content should produce different digest");
+        assert_ne!(
+            digest1, digest2,
+            "different content should produce different digest"
+        );
     }
 
     #[test]

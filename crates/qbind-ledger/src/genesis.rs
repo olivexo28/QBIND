@@ -815,13 +815,8 @@ pub fn parse_genesis_hash(hex_str: &str) -> Result<GenesisHash, String> {
     let mut hash = [0u8; 32];
     for i in 0..32 {
         let byte_str = &hex[i * 2..i * 2 + 2];
-        hash[i] = u8::from_str_radix(byte_str, 16).map_err(|e| {
-            format!(
-                "invalid hex character at position {}: {}",
-                i * 2,
-                e
-            )
-        })?;
+        hash[i] = u8::from_str_radix(byte_str, 16)
+            .map_err(|e| format!("invalid hex character at position {}: {}", i * 2, e))?;
     }
 
     Ok(hash)

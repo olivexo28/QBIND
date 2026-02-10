@@ -384,10 +384,7 @@ fn test_genesis_validator_with_name() {
     config.validators[0].metadata = Some("https://validator-one.example.com".to_string());
 
     assert!(config.validate().is_ok());
-    assert_eq!(
-        config.validators[0].name,
-        Some("Validator One".to_string())
-    );
+    assert_eq!(config.validators[0].name, Some("Validator One".to_string()));
     assert_eq!(
         config.validators[0].metadata,
         Some("https://validator-one.example.com".to_string())

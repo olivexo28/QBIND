@@ -304,7 +304,9 @@ impl SafetySnapshot {
 
     /// Check if liveness requirements are met after cooldown.
     pub fn meets_liveness(&self, min_height: u64, max_height_skew: u64) -> bool {
-        let skew = self.max_committed_height.saturating_sub(self.min_committed_height);
+        let skew = self
+            .max_committed_height
+            .saturating_sub(self.min_committed_height);
         self.max_committed_height >= min_height && skew <= max_height_skew
     }
 

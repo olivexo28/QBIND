@@ -629,6 +629,39 @@ The T222 chaos harness validates consensus safety under adversarial conditions:
 cargo test -p qbind-node --test t222_consensus_chaos_harness -- --test-threads=1
 ```
 
+#### PQC End-to-End Performance & TPS Verification (T234)
+
+The T234 performance harness measures effective TPS and latency with real ML-DSA-44 signatures:
+
+```bash
+# Run all performance tests
+cargo test -p qbind-node --test t234_pqc_end_to_end_perf_tests
+
+# Run specific profile tests with detailed output
+cargo test -p qbind-node --test t234_pqc_end_to_end_perf_tests test_pqc_perf_smoke_stage_b_on -- --nocapture
+
+# Run beta profile for higher load (longer runtime, ignored by default)
+cargo test -p qbind-node --test t234_pqc_end_to_end_perf_tests test_pqc_perf_beta_profile_end_to_end -- --ignored --nocapture
+```
+
+**Expected Output**:
+- `total_committed > 0` — Transactions successfully committed
+- `avg_tps > 0.0` — Positive throughput measured
+- `p99_latency_ms < 10000.0` — Reasonable latency distribution
+- When Stage B is enabled: parallel execution metrics show non-zero usage
+- JSON summary line for structured logging
+
+**Interpreting Results**:
+
+| Metric | Guidance |
+| :--- | :--- |
+| `avg_tps` | Deployment-dependent; compare against target based on validator count and hardware |
+| `p50/p90/p99_latency_ms` | Should be sub-second for typical configs; p99 < 5s is reasonable |
+| `stage_b_enabled` | Confirm Stage B setting matches production intent |
+| `total_rejected` | Should be low; high rejection rate indicates mempool/DoS limit tuning needed |
+
+**Note**: Specific TPS targets depend on validator hardware, network topology, and geographic distribution. Use T234 to establish baseline performance characteristics for your deployment.
+
 **Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) for the full MainNet readiness checklist.
 
 ### 4.5 Pre-Flight Verification

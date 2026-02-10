@@ -67,8 +67,11 @@ pub mod verify;
 
 // Re-export main types
 pub use council::{CouncilKey, CouncilKeySet};
-pub use envelope::{
-    BinaryHashHex, CouncilSignature, EnvelopeError, UpgradeClass, UpgradeEnvelope,
+pub use envelope::{BinaryHashHex, CouncilSignature, EnvelopeError, UpgradeClass, UpgradeEnvelope};
+pub use hash::{
+    envelope_digest, envelope_digest_hex, sha3_256_bytes, sha3_256_file, sha3_256_file_hex,
 };
-pub use hash::{envelope_digest, envelope_digest_hex, sha3_256_bytes, sha3_256_file, sha3_256_file_hex};
-pub use verify::{sign_envelope, verify_envelope, verify_envelope_threshold, SignatureVerification, VerificationResult};
+pub use verify::{
+    sign_envelope, verify_envelope, verify_envelope_threshold, SignatureVerification,
+    VerificationResult,
+};

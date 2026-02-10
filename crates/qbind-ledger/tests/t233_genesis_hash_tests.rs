@@ -33,7 +33,10 @@ fn test_compute_genesis_hash_deterministic() {
     let hash2 = compute_genesis_hash_bytes(bytes);
 
     // Then the hashes must be equal
-    assert_eq!(hash1, hash2, "genesis hash computation must be deterministic");
+    assert_eq!(
+        hash1, hash2,
+        "genesis hash computation must be deterministic"
+    );
     assert_eq!(hash1.len(), 32, "genesis hash must be 32 bytes");
 }
 
@@ -47,7 +50,10 @@ fn test_genesis_hash_different_inputs() {
     let hash2 = compute_genesis_hash_bytes(bytes2);
 
     // Then the hashes must be different
-    assert_ne!(hash1, hash2, "different inputs must produce different hashes");
+    assert_ne!(
+        hash1, hash2,
+        "different inputs must produce different hashes"
+    );
 }
 
 #[test]
@@ -94,9 +100,14 @@ fn test_format_genesis_hash() {
 
     // Then it should be formatted with 0x prefix and lowercase hex
     assert!(hex.starts_with("0x"), "formatted hash must start with 0x");
-    assert_eq!(hex.len(), 66, "formatted hash must be 66 chars (0x + 64 hex)");
     assert_eq!(
-        hex, "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        hex.len(),
+        66,
+        "formatted hash must be 66 chars (0x + 64 hex)"
+    );
+    assert_eq!(
+        hex,
+        "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
     );
 }
 
@@ -239,7 +250,10 @@ fn test_chain_meta_genesis_hash_hex() {
 #[test]
 fn test_chain_meta_serialization_roundtrip() {
     // Given a ChainMeta
-    let original = ChainMeta::new("qbind-testnet-v0", compute_genesis_hash_bytes(b"test genesis"));
+    let original = ChainMeta::new(
+        "qbind-testnet-v0",
+        compute_genesis_hash_bytes(b"test genesis"),
+    );
 
     // When we serialize and deserialize
     let json = serde_json::to_string(&original).expect("should serialize");

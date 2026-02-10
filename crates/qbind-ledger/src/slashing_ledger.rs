@@ -184,10 +184,7 @@ pub trait SlashingLedger {
     fn store_slashing_record(&mut self, record: SlashingRecord) -> Result<(), SlashingLedgerError>;
 
     /// Get all slashing records for a validator.
-    fn get_slashing_records(
-        &self,
-        validator_id: ValidatorLedgerId,
-    ) -> Vec<SlashingRecord>;
+    fn get_slashing_records(&self, validator_id: ValidatorLedgerId) -> Vec<SlashingRecord>;
 
     /// Get all slashing records in the ledger.
     fn get_all_slashing_records(&self) -> Vec<SlashingRecord>;
@@ -220,7 +217,9 @@ impl InMemorySlashingLedger {
     /// # Arguments
     ///
     /// * `initial_stakes` - Iterator of (validator_id, stake) pairs
-    pub fn with_stakes(initial_stakes: impl IntoIterator<Item = (ValidatorLedgerId, StakeAmount)>) -> Self {
+    pub fn with_stakes(
+        initial_stakes: impl IntoIterator<Item = (ValidatorLedgerId, StakeAmount)>,
+    ) -> Self {
         let validator_states: HashMap<_, _> = initial_stakes
             .into_iter()
             .map(|(id, stake)| {
@@ -243,10 +242,7 @@ impl InMemorySlashingLedger {
 
     /// Set a validator's stake (for testing).
     pub fn set_stake(&mut self, validator_id: ValidatorLedgerId, stake: StakeAmount) {
-        self.validator_states
-            .entry(validator_id)
-            .or_default()
-            .stake = stake;
+        self.validator_states.entry(validator_id).or_default().stake = stake;
     }
 
     /// Get the number of validators tracked.
@@ -261,7 +257,10 @@ impl InMemorySlashingLedger {
 
     /// Get total amount slashed across all validators.
     pub fn total_slashed(&self) -> StakeAmount {
-        self.validator_states.values().map(|s| s.total_slashed).sum()
+        self.validator_states
+            .values()
+            .map(|s| s.total_slashed)
+            .sum()
     }
 }
 
@@ -377,11 +376,8 @@ mod tests {
 
     #[test]
     fn test_in_memory_slashing_ledger_basic() {
-        let mut ledger = InMemorySlashingLedger::with_stakes(vec![
-            (1, 100_000),
-            (2, 200_000),
-            (3, 50_000),
-        ]);
+        let mut ledger =
+            InMemorySlashingLedger::with_stakes(vec![(1, 100_000), (2, 200_000), (3, 50_000)]);
 
         // Verify initial state
         assert_eq!(ledger.get_stake(1), Some(100_000));
@@ -400,10 +396,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_slashing_ledger_jail() {
-        let mut ledger = InMemorySlashingLedger::with_stakes(vec![
-            (1, 100_000),
-            (2, 200_000),
-        ]);
+        let mut ledger = InMemorySlashingLedger::with_stakes(vec![(1, 100_000), (2, 200_000)]);
 
         // Jail validator 1 until epoch 10
         let until = ledger.jail_validator(1, 10).unwrap();
@@ -442,10 +435,7 @@ mod tests {
 
     #[test]
     fn test_in_memory_slashing_ledger_records() {
-        let mut ledger = InMemorySlashingLedger::with_stakes(vec![
-            (1, 100_000),
-            (2, 200_000),
-        ]);
+        let mut ledger = InMemorySlashingLedger::with_stakes(vec![(1, 100_000), (2, 200_000)]);
 
         // Store some slashing records
         let record1 = SlashingRecord {

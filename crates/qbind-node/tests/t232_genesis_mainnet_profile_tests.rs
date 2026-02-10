@@ -8,9 +8,7 @@
 //! - **DevNet/TestNet Genesis**: Embedded genesis allowed
 //! - **CLI Flag**: --genesis-path applies correctly
 
-use qbind_node::node_config::{
-    ConfigProfile, GenesisSourceConfig, MainnetConfigError, NodeConfig,
-};
+use qbind_node::node_config::{ConfigProfile, GenesisSourceConfig, MainnetConfigError, NodeConfig};
 use std::path::PathBuf;
 
 // ============================================================================

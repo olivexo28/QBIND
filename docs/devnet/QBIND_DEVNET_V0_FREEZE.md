@@ -91,10 +91,13 @@ This section defines the work buckets required to evolve DevNet v0 into TestNet 
 | **Minimal VM (T163)** | VM v0 with account balances and transfer semantics | New capability | ✅ Done |
 | **State Persistence (T164)** | Persist execution state to disk (RocksDB) | New capability | ✅ Done |
 | **Stage B Parallelism** | Conflict-graph-based parallel execution when VM is in place | R6 | Planned |
+| **E2E Performance Harness (T234)** | Repeatable TPS/latency harness with real ML-DSA-44 signatures | R6 (evidence) | ✅ Done |
 
 **T163 Status**: ✅ Implemented — See [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) for VM v0 semantics.
 
 **T164 Status**: ✅ Implemented — See [QBIND_TESTNET_ALPHA_SPEC.md](../testnet/QBIND_TESTNET_ALPHA_SPEC.md) §4.4 for persistence details.
+
+**T234 Status**: ✅ Implemented — E2E performance harness provides DevNet-grade TPS/latency measurements and supports Stage B on/off comparisons. See `t234_pqc_end_to_end_perf_tests.rs` for implementation.
 
 **References**: [QBIND_PARALLEL_EXECUTION_DESIGN.md](./QBIND_PARALLEL_EXECUTION_DESIGN.md) §4.2
 

@@ -245,7 +245,12 @@ impl SlashingEvidence {
     /// Evidence with the same key is considered duplicate and will be
     /// rejected by the slashing engine.
     pub fn dedup_key(&self) -> (ValidatorId, OffenseKind, u64, u64) {
-        (self.offending_validator, self.offense, self.height, self.view)
+        (
+            self.offending_validator,
+            self.offense,
+            self.height,
+            self.view,
+        )
     }
 
     /// Basic structural validation of the evidence.
@@ -268,7 +273,8 @@ impl SlashingEvidence {
         // Payload must match offense kind
         match (&self.offense, &self.payload) {
             (OffenseKind::O1DoubleSign, EvidencePayloadV1::O1DoubleSign { .. }) => {}
-            (OffenseKind::O2InvalidProposerSig, EvidencePayloadV1::O2InvalidProposerSig { .. }) => {}
+            (OffenseKind::O2InvalidProposerSig, EvidencePayloadV1::O2InvalidProposerSig { .. }) => {
+            }
             (
                 OffenseKind::O3aLazyVoteSingle | OffenseKind::O3bLazyVoteRepeated,
                 EvidencePayloadV1::O3LazyVote { .. },
@@ -546,10 +552,7 @@ impl SlashingEngine for NoopSlashingEngine {
     }
 
     fn get_records_for_validator(&self, validator_id: ValidatorId) -> Vec<SlashingRecord> {
-        self.records
-            .get(&validator_id)
-            .cloned()
-            .unwrap_or_default()
+        self.records.get(&validator_id).cloned().unwrap_or_default()
     }
 
     fn evidence_count_by_offense(&self, offense: OffenseKind) -> u64 {
@@ -614,10 +617,7 @@ impl SlashingStore {
         &self,
         validator_id: ValidatorId,
     ) -> Vec<SlashingRecord> {
-        self.records
-            .get(&validator_id)
-            .cloned()
-            .unwrap_or_default()
+        self.records.get(&validator_id).cloned().unwrap_or_default()
     }
 
     /// Load all records (for iteration/export).
@@ -733,7 +733,8 @@ impl SlashingMetrics {
 
     /// Get evidence count for O2 (invalid proposer sig).
     pub fn evidence_o2_total(&self) -> u64 {
-        self.evidence_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+        self.evidence_o2_invalid_proposer_sig
+            .load(Ordering::Relaxed)
     }
 
     /// Get evidence count for O3a (single lazy vote).
@@ -1002,7 +1003,10 @@ impl SlashingBackend for InMemorySlashingBackend {
 
         eprintln!(
             "[SLASHING] Backend: jailed validator {} until epoch {} for {} ({} epochs)",
-            validator_id.0, unjail_epoch, offense.as_str(), jail_epochs
+            validator_id.0,
+            unjail_epoch,
+            offense.as_str(),
+            jail_epochs
         );
 
         Ok(unjail_epoch)
@@ -1041,7 +1045,10 @@ pub enum SlashingMode {
 impl SlashingMode {
     /// Check if penalty enforcement is enabled for critical offenses.
     pub fn should_enforce_critical(&self) -> bool {
-        matches!(self, SlashingMode::EnforceCritical | SlashingMode::EnforceAll)
+        matches!(
+            self,
+            SlashingMode::EnforceCritical | SlashingMode::EnforceAll
+        )
     }
 
     /// Check if penalty enforcement is enabled for all offenses.
@@ -1129,8 +1136,8 @@ impl Default for PenaltyEngineConfig {
         // Default to record-only mode (safe default)
         Self {
             mode: SlashingMode::RecordOnly,
-            slash_bps_o1: 750,  // 7.5%
-            slash_bps_o2: 500,  // 5%
+            slash_bps_o1: 750, // 7.5%
+            slash_bps_o2: 500, // 5%
             jail_on_o1: true,
             jail_epochs_o1: 10,
             jail_on_o2: true,
@@ -1391,7 +1398,9 @@ impl<B: SlashingBackend> PenaltySlashingEngine<B> {
         if !should_enforce {
             eprintln!(
                 "[SLASHING] Evidence accepted (evidence-only): validator={}, offense={}, mode={:?}",
-                validator_id.0, offense.as_str(), self.config.mode
+                validator_id.0,
+                offense.as_str(),
+                self.config.mode
             );
             return PenaltyDecision::EvidenceOnly;
         }
@@ -1419,7 +1428,10 @@ impl<B: SlashingBackend> PenaltySlashingEngine<B> {
         };
 
         // Apply slash
-        let slashed_amount = match self.backend.burn_stake_bps(validator_id, slash_bps, offense) {
+        let slashed_amount = match self
+            .backend
+            .burn_stake_bps(validator_id, slash_bps, offense)
+        {
             Ok(amount) => {
                 self.total_stake_slashed += amount;
                 *self.penalty_counts.entry(offense).or_insert(0) += 1;
@@ -1436,12 +1448,10 @@ impl<B: SlashingBackend> PenaltySlashingEngine<B> {
 
         // Apply jail if configured
         let jailed_until_epoch = if should_jail && jail_epochs > 0 {
-            match self.backend.jail_validator(
-                validator_id,
-                offense,
-                jail_epochs,
-                ctx.current_epoch,
-            ) {
+            match self
+                .backend
+                .jail_validator(validator_id, offense, jail_epochs, ctx.current_epoch)
+            {
                 Ok(epoch) => {
                     self.total_jail_events += 1;
                     Some(epoch)
@@ -1460,7 +1470,10 @@ impl<B: SlashingBackend> PenaltySlashingEngine<B> {
 
         eprintln!(
             "[SLASHING] Penalty applied: validator={}, offense={}, slashed={}, jailed_until={:?}",
-            validator_id.0, offense.as_str(), slashed_amount, jailed_until_epoch
+            validator_id.0,
+            offense.as_str(),
+            slashed_amount,
+            jailed_until_epoch
         );
 
         PenaltyDecision::PenaltyApplied {
@@ -1534,7 +1547,8 @@ impl PenaltySlashingMetrics {
     pub fn inc_penalty(&self, offense: OffenseKind) {
         match offense {
             OffenseKind::O1DoubleSign => {
-                self.penalties_o1_double_sign.fetch_add(1, Ordering::Relaxed);
+                self.penalties_o1_double_sign
+                    .fetch_add(1, Ordering::Relaxed);
             }
             OffenseKind::O2InvalidProposerSig => {
                 self.penalties_o2_invalid_proposer_sig
@@ -1547,7 +1561,8 @@ impl PenaltySlashingMetrics {
 
     /// Add to total slashed stake.
     pub fn add_slashed_stake(&self, amount: u64) {
-        self.total_stake_slashed.fetch_add(amount, Ordering::Relaxed);
+        self.total_stake_slashed
+            .fetch_add(amount, Ordering::Relaxed);
     }
 
     /// Increment jail event counter.
@@ -1562,7 +1577,8 @@ impl PenaltySlashingMetrics {
 
     /// Get penalty count for O2.
     pub fn penalties_o2_total(&self) -> u64 {
-        self.penalties_o2_invalid_proposer_sig.load(Ordering::Relaxed)
+        self.penalties_o2_invalid_proposer_sig
+            .load(Ordering::Relaxed)
     }
 
     /// Get total penalties applied.
@@ -1654,7 +1670,10 @@ mod tests {
             OffenseKind::O3bLazyVoteRepeated.as_str(),
             "O3b_lazy_vote_repeated"
         );
-        assert_eq!(OffenseKind::O4InvalidDagCert.as_str(), "O4_invalid_dag_cert");
+        assert_eq!(
+            OffenseKind::O4InvalidDagCert.as_str(),
+            "O4_invalid_dag_cert"
+        );
         assert_eq!(
             OffenseKind::O5DagCouplingViolation.as_str(),
             "O5_dag_coupling_violation"
@@ -1758,10 +1777,7 @@ mod tests {
             engine.evidence_count_by_offense(OffenseKind::O1DoubleSign),
             3
         );
-        assert_eq!(
-            engine.decision_count(SlashingDecisionKind::AcceptedNoOp),
-            2
-        );
+        assert_eq!(engine.decision_count(SlashingDecisionKind::AcceptedNoOp), 2);
         assert_eq!(
             engine.decision_count(SlashingDecisionKind::RejectedDuplicate),
             1

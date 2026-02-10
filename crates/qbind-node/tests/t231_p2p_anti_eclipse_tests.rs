@@ -133,7 +133,11 @@ fn test_devnet_permissive_prefix_limit() {
     for i in 0..64u8 {
         let ip: IpAddr = IpAddr::V4(Ipv4Addr::new(base_ip[0], base_ip[1], base_ip[2], i + 1));
         let result = state.check_connection(&ip, true);
-        assert!(result.is_allowed(), "Peer {} should be allowed in DevNet", i + 1);
+        assert!(
+            result.is_allowed(),
+            "Peer {} should be allowed in DevNet",
+            i + 1
+        );
         state.on_peer_connected(&ip, true);
     }
 
@@ -443,9 +447,7 @@ fn test_multiple_connect_disconnect_cycles() {
 fn test_peers_in_prefix_tracking() {
     let mut state = PeerDiversityState::new(64, 4, 2, true);
 
-    let bucket = PeerBucketId::Ipv4Prefix24 {
-        prefix: [10, 0, 1],
-    };
+    let bucket = PeerBucketId::Ipv4Prefix24 { prefix: [10, 0, 1] };
 
     // Initially no peers in prefix
     assert_eq!(state.peers_in_prefix(&bucket), 0);

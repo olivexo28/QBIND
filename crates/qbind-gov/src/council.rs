@@ -173,7 +173,9 @@ impl CouncilKeySet {
 
         // Check threshold sanity
         if self.threshold == 0 {
-            return Err(EnvelopeError::MissingField("threshold must be > 0".to_string()));
+            return Err(EnvelopeError::MissingField(
+                "threshold must be > 0".to_string(),
+            ));
         }
         if self.threshold > self.keys.len() {
             return Err(EnvelopeError::VerificationFailed(format!(

@@ -18,10 +18,9 @@
 //! - Integration-style tests with fake backend
 
 use qbind_consensus::slashing::{
-    BlockHeader, EvidencePayloadV1, InMemorySlashingBackend, OffenseKind,
-    PenaltyDecision, PenaltyEngineConfig, PenaltySlashingContext, PenaltySlashingEngine,
-    PenaltySlashingMetrics, SignedBlockHeader, SlashingBackend, SlashingBackendError,
-    SlashingEvidence, SlashingMode,
+    BlockHeader, EvidencePayloadV1, InMemorySlashingBackend, OffenseKind, PenaltyDecision,
+    PenaltyEngineConfig, PenaltySlashingContext, PenaltySlashingEngine, PenaltySlashingMetrics,
+    SignedBlockHeader, SlashingBackend, SlashingBackendError, SlashingEvidence, SlashingMode,
 };
 use qbind_consensus::{ValidatorId, ValidatorInfo, ValidatorSet};
 use qbind_node::node_config::{
@@ -274,10 +273,7 @@ fn test_nodeconfig_with_slashing_mode_builder() {
 
 #[test]
 fn test_inmemory_backend_burn_stake() {
-    let initial_stakes = vec![
-        (ValidatorId(1), 10_000),
-        (ValidatorId(2), 20_000),
-    ];
+    let initial_stakes = vec![(ValidatorId(1), 10_000), (ValidatorId(2), 20_000)];
     let mut backend = InMemorySlashingBackend::with_stakes(initial_stakes);
 
     // Slash validator 1 by 10% (1000 bps)
@@ -328,7 +324,9 @@ fn test_inmemory_backend_jail_extends_existing() {
     let mut backend = InMemorySlashingBackend::with_stakes(initial_stakes);
 
     // First jail until epoch 110
-    backend.jail_validator(ValidatorId(1), OffenseKind::O1DoubleSign, 10, 100).unwrap();
+    backend
+        .jail_validator(ValidatorId(1), OffenseKind::O1DoubleSign, 10, 100)
+        .unwrap();
 
     // Second offense - jail for 5 more epochs from epoch 105
     // Should extend to 110, but 110 > 110, so no extension
@@ -357,7 +355,10 @@ fn test_penalty_engine_record_only_mode() {
     let evidence = make_o1_evidence(1, 100, 5);
     let record = engine.handle_evidence(&ctx, evidence);
 
-    assert!(matches!(record.penalty_decision, PenaltyDecision::EvidenceOnly));
+    assert!(matches!(
+        record.penalty_decision,
+        PenaltyDecision::EvidenceOnly
+    ));
     assert_eq!(engine.total_stake_slashed(), 0);
     assert_eq!(engine.total_jail_events(), 0);
 }
@@ -367,9 +368,7 @@ fn test_penalty_engine_enforce_critical_o1() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
-    let backend = InMemorySlashingBackend::with_stakes(vec![
-        (ValidatorId(1), 10_000),
-    ]);
+    let backend = InMemorySlashingBackend::with_stakes(vec![(ValidatorId(1), 10_000)]);
     let config = PenaltyEngineConfig::devnet(); // EnforceCritical mode
     let mut engine = PenaltySlashingEngine::new(backend, config);
 
@@ -400,9 +399,7 @@ fn test_penalty_engine_enforce_critical_o2() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
-    let backend = InMemorySlashingBackend::with_stakes(vec![
-        (ValidatorId(2), 20_000),
-    ]);
+    let backend = InMemorySlashingBackend::with_stakes(vec![(ValidatorId(2), 20_000)]);
     let config = PenaltyEngineConfig::devnet();
     let mut engine = PenaltySlashingEngine::new(backend, config);
 
@@ -429,9 +426,7 @@ fn test_penalty_engine_o3_remains_evidence_only() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
-    let backend = InMemorySlashingBackend::with_stakes(vec![
-        (ValidatorId(1), 10_000),
-    ]);
+    let backend = InMemorySlashingBackend::with_stakes(vec![(ValidatorId(1), 10_000)]);
     let config = PenaltyEngineConfig::devnet(); // EnforceCritical mode
     let mut engine = PenaltySlashingEngine::new(backend, config);
 
@@ -439,7 +434,10 @@ fn test_penalty_engine_o3_remains_evidence_only() {
     let evidence = make_o3a_evidence(1, 100, 5);
     let record = engine.handle_evidence(&ctx, evidence);
 
-    assert!(matches!(record.penalty_decision, PenaltyDecision::EvidenceOnly));
+    assert!(matches!(
+        record.penalty_decision,
+        PenaltyDecision::EvidenceOnly
+    ));
     assert_eq!(engine.total_stake_slashed(), 0);
     assert_eq!(engine.total_jail_events(), 0);
 }
@@ -449,9 +447,7 @@ fn test_penalty_engine_off_mode_rejects_all() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
-    let backend = InMemorySlashingBackend::with_stakes(vec![
-        (ValidatorId(1), 10_000),
-    ]);
+    let backend = InMemorySlashingBackend::with_stakes(vec![(ValidatorId(1), 10_000)]);
     let config = PenaltyEngineConfig {
         mode: SlashingMode::Off,
         ..PenaltyEngineConfig::default()
@@ -475,9 +471,7 @@ fn test_penalty_engine_deduplication() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
-    let backend = InMemorySlashingBackend::with_stakes(vec![
-        (ValidatorId(1), 100_000),
-    ]);
+    let backend = InMemorySlashingBackend::with_stakes(vec![(ValidatorId(1), 100_000)]);
     let config = PenaltyEngineConfig::devnet();
     let mut engine = PenaltySlashingEngine::new(backend, config);
 
@@ -487,7 +481,10 @@ fn test_penalty_engine_deduplication() {
     let record2 = engine.handle_evidence(&ctx, evidence);
 
     // First should apply penalty
-    assert!(matches!(record1.penalty_decision, PenaltyDecision::PenaltyApplied { .. }));
+    assert!(matches!(
+        record1.penalty_decision,
+        PenaltyDecision::PenaltyApplied { .. }
+    ));
 
     // Second should be duplicate
     match record2.penalty_decision {
@@ -506,9 +503,7 @@ fn test_penalty_engine_unknown_validator_rejected() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
-    let backend = InMemorySlashingBackend::with_stakes(vec![
-        (ValidatorId(1), 10_000),
-    ]);
+    let backend = InMemorySlashingBackend::with_stakes(vec![(ValidatorId(1), 10_000)]);
     let config = PenaltyEngineConfig::devnet();
     let mut engine = PenaltySlashingEngine::new(backend, config);
 
