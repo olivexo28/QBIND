@@ -317,18 +317,62 @@ See [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) §4.4 for operat
 
 ---
 
-## 8. References
+## 8. Real-Infrastructure Comparison (T238.5)
+
+### 8.1 Synthetic vs Real-Infra Baselines
+
+The T234 and T238 harnesses provide **synthetic baseline** performance numbers under controlled conditions. However, production deployments operate on real infrastructure with actual network latency, jitter, and packet loss.
+
+**T238.5 Multi-Region Dress Rehearsal** defines how to compare real-infra measurements against these synthetic baselines:
+
+| Metric | T234 Synthetic Baseline | Real-Infra Acceptance (T238.5) |
+| :--- | :--- | :--- |
+| **TPS** | As measured in harness | 0.5–2× of synthetic baseline |
+| **p50 Latency** | As measured in harness | 0.5–2× of synthetic baseline |
+| **p90 Latency** | As measured in harness | 0.5–2× of synthetic baseline |
+| **p99 Latency** | As measured in harness | < 10 seconds |
+
+### 8.2 When to Use Each
+
+| Test | Purpose | When to Run |
+| :--- | :--- | :--- |
+| **T234** (synthetic) | Measure baseline TPS/latency on local hardware | Every PR, pre-release |
+| **T238** (synthetic) | Measure multi-region behavior with simulated latency | Every PR, pre-release |
+| **T238.5** (real-infra) | Validate on actual cloud infrastructure | MainNet launch, Class C upgrades |
+
+### 8.3 Mapping T234 Results to T238.5 Expectations
+
+When running T238.5 dress rehearsal:
+
+1. **Run T234** on similar hardware to establish baseline TPS and latency
+2. **Measure network** characteristics between real regions (RTT, jitter, loss)
+3. **Map network profile** to T238 presets (uniform, asymmetric, high-jitter, lossy, mixed)
+4. **Run tests** on real infrastructure
+5. **Compare results** — TPS and latency should be within 0.5–2× of T234 synthetic baseline
+
+If real-infra performance is significantly worse than expected:
+- Check network quality (RTT, jitter, loss)
+- Verify hardware meets minimum requirements
+- Review P2P configuration (outbound peers, anti-eclipse settings)
+
+See [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) for the complete dress rehearsal procedure.
+
+---
+
+## 9. References
 
 - **T234 Implementation**: `crates/qbind-node/tests/t234_pqc_end_to_end_perf_tests.rs`
+- **T238 Multi-Region Harness**: `crates/qbind-node/tests/t238_multi_region_latency_harness.rs`
+- **T238.5 Dress Rehearsal**: [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md)
 - **T223 Stage B Soak**: `crates/qbind-node/tests/t223_stage_b_soak_harness.rs`
 - **T198 PQC Benchmarks**: See task spec for microbenchmark details
-- **MainNet Spec**: [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) §2.6
+- **MainNet Spec**: [QBIND_MAINNET_V0_SPEC.md](../mainnet/QBIND_MAINNET_V0_SPEC.md) §2.6, §5.6.2
 - **MainNet Audit**: [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) §4.1
 - **MainNet Runbook**: [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) §4.4
 
 ---
 
-## 9. Maintenance & Updates
+## 10. Maintenance & Updates
 
 This document should be updated when:
 

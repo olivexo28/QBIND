@@ -73,13 +73,13 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **MN-R1** | Consensus Safety & Fork Risk | Critical | Partially Mitigated | [Spec §6.3](./QBIND_MAINNET_V0_SPEC.md#63-dag-availability-and-consensus-coupling) |
 | **MN-R2** | Economic Integrity (gas/fees) | High | Partially Mitigated | [Spec §3](./QBIND_MAINNET_V0_SPEC.md#3-gas--fees) |
 | **MN-R3** | State Growth & Data Availability | Medium | ✅ Mitigated (T208, T215) | [Spec §2.4](./QBIND_MAINNET_V0_SPEC.md#24-state-growth-management) |
-| **MN-R4** | P2P & Eclipse Resistance | High | ✅ Mitigated (T205–T207, T226, T231) | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
+| **MN-R4** | P2P & Eclipse Resistance | High | ✅ Mitigated (T205–T207, T226, T231, T238, T238.5) | [Spec §5](./QBIND_MAINNET_V0_SPEC.md#5-networking--p2p) |
 | **MN-R5** | Key Management & Remote Signing | Critical | ✅ Mitigated (T209–T214) | [Spec §6.5](./QBIND_MAINNET_V0_SPEC.md#65-key-management-and-remote-signer--hsm) |
 | **MN-R6** | Operational & Monitoring Gaps | Medium | ✅ Mitigated (T216) | [Spec §10](./QBIND_MAINNET_V0_SPEC.md#10-operational-runbook--observability) |
-| **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated (T185, T237) | [Spec §2.7](./QBIND_MAINNET_V0_SPEC.md#27-mainnet-launch-gates--invariants-t237) |
+| **MN-R7** | Misconfiguration / Wrong Profile | High | ✅ Mitigated (T185, T237, T238.5) | [Spec §2.7](./QBIND_MAINNET_V0_SPEC.md#27-mainnet-launch-gates--invariants-t237) |
 | **MN-R8** | Governance & Upgrade Risk | High | Partially Mitigated (T224) | [Spec §11](./QBIND_MAINNET_V0_SPEC.md#11-governance--upgrades-t224) |
 | **MN-R9** | Slashing & PQC Misbehavior | High | ✅ Mitigated (T229, T230) | [Spec §6.7](./QBIND_MAINNET_V0_SPEC.md#67-pqc-specific-slashing-rules-t227) |
-| **MN-R10** | External Security Audit | Critical | Partially Mitigated (T235) | [RFP Doc](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) |
+| **MN-R10** | External Security Audit | Critical | Partially Mitigated (T235, T238.5) | [RFP Doc](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) |
 
 ---
 
@@ -213,7 +213,7 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 | **No dynamic discovery** | Validators cannot find new peers if configured ones fail | High | ✅ Mitigated (T205–T207) |
 | **Sybil attacks** | Attacker creates many fake nodes | High | Mitigated (permissioned) |
 | **Liveness detection gaps** | Crashed peers not automatically removed | Medium | ✅ Mitigated (T226) |
-| **Multi-region latency** | P2P not optimized for cross-region | Low | ✅ Mitigated (T238) |
+| **Multi-region latency** | P2P not optimized for cross-region | Low | ✅ Mitigated (T238 + T238.5) |
 
 **Current Mitigations**:
 - ✅ P2P v1 transport (T172)
@@ -224,12 +224,14 @@ MainNet v0 is the **first production, economic-value-carrying network** for QBIN
 - ✅ **Peer liveness scoring and eviction (T226)** — heartbeat protocol, max_failures tracking
 - ✅ **Anti-eclipse enforcement (T231)** — IP prefix limits, ASN diversity, min_outbound constraints
 - ✅ **Multi-region validation testing (T238)** — in-process harness simulating cross-region latency, jitter, and packet loss
+- ✅ **Multi-region dress rehearsal (T238.5)** — real-infrastructure validation procedure with pass/fail criteria for MainNet launch and Class C upgrades
 
 **Additional MainNet Requirements**:
 - [x] Dynamic peer discovery protocol — **T205–T207 (Ready)**
 - [x] Peer liveness scoring and eviction — **T226 (Ready)**
 - [x] Anti-eclipse constraints (ASN diversity, IP range limits) — **T231 (Ready)**
-- [x] Multi-region validation testing — **T238 (Ready)**
+- [x] Multi-region validation testing (synthetic) — **T238 (Ready)**
+- [x] Multi-region dress rehearsal (real-infra) — **T238.5 (Ready, documentation only)**
 
 **Target Phase**: ✅ MainNet v0 (core P2P robustness implemented)
 
@@ -594,6 +596,8 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 | **T223** | **Testing** | **Stage B soak & determinism harness** | **MN-R1** |
 | ~~**T234**~~ | ~~**Testing**~~ | ~~**PQC E2E Performance & TPS Harness v1**~~ | ~~**MN-R1, MN-R6**~~ |
 | ~~**T236**~~ | ~~**Testing**~~ | ~~**Fee Market Adversarial Analysis & Stress Harness v1**~~ | ~~**MN-R2**~~ |
+| ~~**T238**~~ | ~~**Testing**~~ | ~~**Multi-Region P2P & Consensus Latency Harness v1**~~ | ~~**MN-R4**~~ |
+| ~~**T238.5**~~ | ~~**Docs**~~ | ~~**Multi-Region Dress Rehearsal Guide (real-infra)**~~ | ~~**MN-R4, MN-R7, MN-R10**~~ |
 | ~~**T227**~~ | ~~**Consensus**~~ | ~~**Slashing & PQC Offenses Design**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T228**~~ | ~~**Consensus**~~ | ~~**Slashing Infrastructure & Evidence Skeleton v1**~~ | ~~**MN-R1, MN-R9**~~ |
 | ~~**T229**~~ | ~~**Consensus**~~ | ~~**Penalty Slashing Engine v1**~~ | ~~**MN-R1, MN-R9**~~ |
@@ -750,6 +754,16 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 > - Documentation updates to QBIND_MAINNET_RUNBOOK.md (pre-launch checklist)
 >
 > See `qbind-node/tests/t237_mainnet_launch_profile_tests.rs` and [QBIND_MAINNET_V0_SPEC.md §2.7](./QBIND_MAINNET_V0_SPEC.md#27-mainnet-launch-gates--invariants-t237).
+>
+> **Note**: T238.5 (Multi-Region Dress Rehearsal Guide) completed. This provides:
+> - Real-infrastructure dress rehearsal procedure bridging T238 synthetic harness to cloud deployments
+> - Region selection guidance and mapping of measured RTT/jitter/loss to T238 profile presets
+> - Concrete test sequence (T185, T221, T222, T223, T234, T236, T238) with pass/fail criteria
+> - Integration with governance (T224/T225) for Class C upgrade gates
+> - Copy-paste operator checklist for pre-launch and pre-upgrade validation
+> - Auditors should expect to see T238.5 evidence (network measurements, Prometheus exports, Grafana screenshots, test logs)
+>
+> See [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) for the complete procedure.
 
 ---
 
@@ -759,6 +773,7 @@ This checklist defines the **MUST-HAVE items** for MainNet v0 launch. Each item 
 
 - [QBIND MainNet v0 Specification](./QBIND_MAINNET_V0_SPEC.md) — MainNet architecture
 - [QBIND MainNet Operational Runbook](../ops/QBIND_MAINNET_RUNBOOK.md) — MainNet operations (T216)
+- [QBIND Multi-Region Dress Rehearsal](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) — Real-infra dress rehearsal procedure (T238.5)
 - [QBIND External Security Audit RFP](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) — External audit scope and requirements (T235)
 - [QBIND Governance & Upgrades Design](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — Governance and upgrade model (T224)
 - [QBIND DAG Consensus Coupling Design](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — DAG–HotStuff coupling (T188)
@@ -777,6 +792,7 @@ The following documents should reference this MainNet audit:
 
 - [QBIND_MAINNET_V0_SPEC.md](./QBIND_MAINNET_V0_SPEC.md) — Links to this audit for risk tracking
 - [QBIND_MAINNET_RUNBOOK.md](../ops/QBIND_MAINNET_RUNBOOK.md) — References audit for operational context (T216)
+- [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) — References audit for MN-R4 (T238.5)
 - [QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md](../audit/QBIND_EXTERNAL_SECURITY_AUDIT_RFP.md) — References audit skeleton for MN-R10
 - [QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md](../gov/QBIND_GOVERNANCE_AND_UPGRADES_DESIGN.md) — References audit for MN-R8
 - [QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md](./QBIND_DAG_CONSENSUS_COUPLING_DESIGN.md) — References audit for MN-R1

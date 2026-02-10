@@ -847,6 +847,32 @@ cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_unif
 
 See [QBIND_MAINNET_AUDIT_SKELETON.md §3.5](./QBIND_MAINNET_AUDIT_SKELETON.md#35-mn-r4-p2p--eclipse-resistance) for MN-R4 risk mitigation details.
 
+### 5.6.2 Real-Infra Dress Rehearsal (T238.5)
+
+The T238 synthetic harness is **necessary but not sufficient** for MainNet readiness. Operators must also complete a **real-infrastructure dress rehearsal** (T238.5) before:
+
+- **MainNet v0 launch** — All validators must pass the dress rehearsal on production-like infrastructure
+- **Any Class C protocol upgrade (hard fork)** — Dress rehearsal must be repeated on staging/Beta infrastructure
+
+**T238.5 Dress Rehearsal Scope**:
+
+| Area | Requirements |
+| :--- | :--- |
+| **Region Selection** | ≥ 3 cloud regions across ≥ 2 continents |
+| **Network Measurement** | Document RTT, jitter, loss between all region pairs |
+| **Profile Mapping** | Map measured characteristics to T238 profile presets |
+| **Test Sequence** | Run T185, T221, T222, T223, T234, T236, T238 on live cluster |
+| **Pass Criteria** | Safety invariants, height divergence bounds, P2P health, performance bounds |
+
+**Pass/Fail Criteria**:
+
+- `commit_divergence == false` and `block_mismatch_total == 0` — Hard gates
+- `max_height_divergence ≤ 5` for normal profiles, `≤ 10` for stress profiles
+- P2P `outbound_peers ≥ 4` and `asn_diversity ≥ 2`
+- TPS and latency within 0.5–2× of T234 synthetic baseline
+
+See [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](../ops/QBIND_MULTI_REGION_DRESS_REHEARSAL.md) for the complete dress rehearsal procedure, checklist, and governance integration requirements.
+
 ### 5.7 P2P Implementation Status
 
 From [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md):
@@ -861,7 +887,8 @@ From [QBIND_P2P_NETWORK_DESIGN.md](../network/QBIND_P2P_NETWORK_DESIGN.md):
 | Dynamic discovery | ✅ T205–T207 | **Yes** |
 | Anti-eclipse measures | ✅ T231 | **Yes** |
 | Liveness scoring | ✅ T226 | **Yes** |
-| Multi-region testing | ✅ T238 | **Yes** |
+| Multi-region testing (synthetic) | ✅ T238 | **Yes** |
+| Multi-region dress rehearsal (real-infra) | ✅ T238.5 | **Yes** |
 
 ---
 

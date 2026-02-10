@@ -204,6 +204,8 @@ Before starting a MainNet validator, verify:
 
 Before release and before starting any MainNet validator, run the following **mandatory** test harnesses:
 
+> **Important**: MainNet v0 **cannot** launch until the multi-region dress rehearsal (T238.5) is green. See §3.4.4 below.
+
 #### 3.4.1 MainNet Profile Launch Tests (T185 + T237)
 
 These tests verify that the canonical MainNet configuration profile passes all safety invariants:
@@ -248,6 +250,41 @@ cargo test -p qbind-node --test t222_consensus_chaos_harness test_t222_short_par
 ```
 
 These tests validate that the consensus layer maintains safety (no commit divergence, no DAG/Block mismatches) under adversarial conditions including leader crashes, message loss, and network partitions. See `crates/qbind-node/tests/t222_consensus_chaos_harness.rs` for details.
+
+#### 3.4.3 Multi-Region Latency Harness (T238)
+
+```bash
+# Run all T238 multi-region latency tests
+cargo test -p qbind-node --test t238_multi_region_latency_harness
+```
+
+See §4.4 for detailed test descriptions and metric interpretation.
+
+#### 3.4.4 Multi-Region Dress Rehearsal (T238.5)
+
+**This is a mandatory launch gate.** MainNet v0 cannot launch until the multi-region dress rehearsal passes.
+
+The T238.5 dress rehearsal bridges the synthetic T238 harness to real cloud infrastructure. It must be performed:
+- **Before MainNet v0 launch**
+- **Before any Class C (hard-fork) upgrade**
+
+| Requirement | Details |
+| :--- | :--- |
+| **Regions** | ≥ 3 cloud regions across ≥ 2 continents |
+| **Network Measurement** | RTT, jitter, loss documented for all region pairs |
+| **Test Sequence** | T185, T221, T222, T223, T234, T236, T238 all pass |
+| **Safety Invariants** | `commit_divergence == false`, `block_mismatch_total == 0` |
+| **Divergence Bounds** | `max_height_divergence ≤ 5` (normal), `≤ 10` (stress) |
+| **P2P Health** | `outbound_peers ≥ 4`, `asn_diversity ≥ 2` |
+| **Performance** | TPS/latency within 0.5–2× of T234 synthetic baseline |
+| **Evidence** | Prometheus exports, Grafana screenshots, test logs |
+
+**Complete Procedure**: See [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](./QBIND_MULTI_REGION_DRESS_REHEARSAL.md) for:
+- Region selection guidance
+- Network measurement protocol
+- Profile mapping to T238 presets
+- Detailed pass/fail criteria
+- Copy-paste operator checklist
 
 ### 3.5 CLI Reference
 
@@ -772,6 +809,33 @@ cargo test -p qbind-node --test t238_multi_region_latency_harness test_t238_mixe
 **Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md §3.5](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md#35-mn-r4-p2p--eclipse-resistance) for MN-R4 risk mitigation details.
 
 **Reference**: See [QBIND_MAINNET_AUDIT_SKELETON.md](../mainnet/QBIND_MAINNET_AUDIT_SKELETON.md) for the full MainNet readiness checklist.
+
+#### Multi-Region Dress Rehearsal (T238.5)
+
+While T238 provides synthetic validation, **real-infrastructure dress rehearsal** (T238.5) is **mandatory** before:
+- **MainNet v0 launch**
+- **Any Class C protocol upgrade (hard fork)**
+
+The T238.5 procedure bridges synthetic testing to production by:
+
+1. **Region Selection**: Deploy validators across ≥ 3 cloud regions (≥ 2 continents)
+2. **Network Measurement**: Measure RTT, jitter, and loss between region pairs
+3. **Profile Mapping**: Map observed characteristics to T238 profile presets
+4. **Test Execution**: Run all pre-release tests on the live multi-region cluster
+5. **Validation**: Verify safety invariants and performance bounds
+
+**Quick Reference**:
+
+| Criterion | Requirement |
+| :--- | :--- |
+| `commit_divergence` | Must be `false` |
+| `block_mismatch_total` | Must be `0` |
+| `max_height_divergence` | ≤ 5 (normal profiles), ≤ 10 (stress profiles) |
+| `outbound_peers` | ≥ 4 |
+| `asn_diversity` | ≥ 2 |
+| TPS/Latency | Within 0.5–2× of T234 synthetic baseline |
+
+**Complete Procedure**: See [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](./QBIND_MULTI_REGION_DRESS_REHEARSAL.md) for the full checklist, region selection guidance, and governance integration requirements.
 
 ### 4.5 Pre-Flight Verification
 
@@ -1983,6 +2047,16 @@ Before applying any Council-approved upgrade:
     ```bash
     cargo test -p qbind-node --test t238_multi_region_latency_harness
     ```
+  - [ ] **Multi-region dress rehearsal passes (T238.5)** — Required for Class C upgrades:
+    - [ ] Network measurements documented (RTT, jitter, loss)
+    - [ ] Profile mapping confirmed (matches T238 presets)
+    - [ ] All test sequence passed (T185, T221, T222, T223, T234, T236, T238)
+    - [ ] Safety invariants verified (`commit_divergence == false`, `block_mismatch_total == 0`)
+    - [ ] Height divergence within bounds (≤ 5 normal, ≤ 10 stress)
+    - [ ] P2P health maintained (`outbound_peers ≥ 4`, `asn_diversity ≥ 2`)
+    - [ ] Performance acceptable (TPS/latency within 0.5–2× of T234 baseline)
+    - [ ] Evidence collected (Prometheus exports, Grafana screenshots, test logs)
+    - See [QBIND_MULTI_REGION_DRESS_REHEARSAL.md](./QBIND_MULTI_REGION_DRESS_REHEARSAL.md) for complete procedure
 - [ ] **Verify configuration** matches expected profile:
   ```bash
   qbind-node --profile mainnet --validate-only --data-dir /data/qbind
