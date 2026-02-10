@@ -15,3 +15,7 @@ target/
 
 # Release artifacts (T239)
 /release/
+
+# Generated whitepaper PDF (T240)
+# Build from source with: docs/whitepaper/build_whitepaper.sh
+docs/whitepaper/QBIND_WHITEPAPER.pdf
