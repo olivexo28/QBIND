@@ -321,3 +321,123 @@ Timeout/view-change logic is partially implemented and marked as TODO in driver 
 - Equivocation penalties deferred to future milestone
 
 These limitations are explicitly tracked as roadmap items.
+
+---
+
+# 9. Cryptographic Architecture
+
+QBIND is designed as a post-quantum-secure blockchain.  
+All authentication and key establishment mechanisms are built around post-quantum cryptographic primitives.
+
+This section formalizes the cryptographic roles and security boundaries.
+
+<img src="diagrams/crypto-roles.svg" alt="QBIND Cryptographic Roles Diagram" />
+
+---
+
+## 9.1 Cryptographic Roles
+
+QBIND defines distinct cryptographic roles:
+
+1. Validator Signing Key  
+   - Used for block proposals and votes  
+   - Produces consensus signatures  
+
+2. Network Key (KEM)  
+   - Used for handshake-based session establishment  
+   - Derives symmetric session keys  
+
+3. Session AEAD Keys  
+   - Derived per connection  
+   - Used for encrypted message transport  
+
+4. Governance / Council Keys  
+   - Used to sign upgrade envelopes and parameter changes  
+
+Key role separation prevents cross-layer compromise propagation.
+
+---
+
+## 9.2 Secure Networking (KEM-Based Handshake)
+
+The secure channel is established via a KEM-based handshake.
+
+Properties:
+
+- Transcript-bound key derivation
+- Per-direction symmetric keys
+- Explicit nonce structure
+- Overflow detection
+
+Nonce format:
+
+flag (1 byte) || session_id (3 bytes) || counter (8 bytes)
+
+Session termination occurs on counter overflow to prevent nonce reuse.
+
+Handshake keys are bound to both participants via transcript hashing.
+
+---
+
+## 9.3 Key Storage and Protection
+
+QBIND supports:
+
+- Plaintext keystore (development use)
+- Encrypted keystore (PBKDF2 + AEAD)
+- Remote signer daemon (HSM / airgapped support)
+
+All private key material is wrapped with ZeroizeOnDrop semantics in memory.
+
+MainNet safety rails require encrypted keystore or remote signer.
+
+---
+
+## 9.4 Remote Signer Isolation
+
+The remote signer daemon:
+
+- Isolates validator signing keys
+- Signs consensus messages via authenticated channel
+- Reduces risk of key exfiltration from validator node process
+
+Remote signer failure behavior is configurable:
+- Development mode: warning
+- MainNet mode: process termination
+
+---
+
+## 9.5 Suite Versioning and Downgrade Protection
+
+Cryptographic suites are versioned.
+
+Runtime suite downgrade across epochs is rejected.
+
+Suite downgrade attempts are treated as fatal security violations.
+
+This prevents rollback attacks to weaker cryptographic parameters.
+
+---
+
+## 9.6 Cryptographic Agility Model
+
+QBIND is designed to allow future suite upgrades without chain resets.
+
+Upgrade path requirements:
+
+- Governance-approved suite transition
+- Epoch boundary activation
+- Explicit compatibility rules
+- State persistence compatibility
+
+Cryptographic changes are treated as protocol events, not silent upgrades.
+
+---
+
+## 9.7 Known Gaps
+
+- Full HSM PKCS#11 integration partially implemented
+- Cookie-based DoS protection in handshake not enforced
+- Expanded slashing for equivocation pending
+
+These are roadmap items.
