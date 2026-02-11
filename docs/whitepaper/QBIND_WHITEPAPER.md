@@ -817,3 +817,144 @@ Mitigation:
 - Future cryptographic breakthroughs
 
 QBIND explicitly tracks these risks as roadmap items rather than silent assumptions.
+
+---
+
+# 13. Performance and Scalability Model
+
+QBIND is designed for high throughput and low latency under adversarial conditions, not merely under ideal networking.
+
+This section describes performance characteristics and scalability constraints.
+
+<img src="diagrams/performance-model.svg" alt="QBIND Performance Model Diagram" />
+
+---
+
+## 13.1 Throughput Determinants
+
+Throughput is influenced by:
+
+- Block size
+- Transaction size
+- Execution cost per transaction
+- Signature verification throughput
+- Network propagation delay
+- Quorum formation latency
+
+Consensus throughput is bounded by the slowest of:
+
+1. Proposal dissemination
+2. Vote aggregation
+3. Execution and state persistence
+
+---
+
+## 13.2 Latency Model
+
+Finality latency (ideal case):
+
+≈ 3 consensus rounds (3-chain rule)
+
+Latency increases under:
+
+- Network delay
+- View changes
+- Leader failures
+
+Timeout/view-change optimization is a roadmap item.
+
+---
+
+## 13.3 Parallelism Strategy
+
+QBIND employs:
+
+- Parallel signature verification workers
+- Async execution worker
+- Bounded channel backpressure
+- Optional DAG-based mempool for improved block assembly
+
+Future scalability enhancements may include:
+
+- Optimized async peer management
+- Enhanced DAG-to-consensus coupling
+- Parallel transaction execution (subject to deterministic constraints)
+
+---
+
+## 13.4 Bottlenecks
+
+Primary scaling bottlenecks:
+
+- Cryptographic verification cost
+- State write amplification in RocksDB
+- Network bandwidth limits
+- Execution engine complexity
+
+These are explicitly acknowledged rather than abstracted away.
+
+---
+
+## 13.5 Scalability Roadmap
+
+Planned improvements:
+
+- Timeout/view-change optimization
+- Expanded slashing and penalty enforcement
+- Improved DoS cookie enforcement
+- Enhanced HSM integration
+- Advanced state pruning
+- Deterministic parallel execution exploration
+
+All scalability improvements must preserve safety invariants defined in Sections 8–12.
+
+---
+
+# 14. Long-Term Cryptographic Roadmap
+
+QBIND is designed for long-horizon cryptographic resilience.
+
+---
+
+## 14.1 Post-Quantum Commitment
+
+All authentication and key establishment mechanisms are based on post-quantum primitives.
+
+QBIND does not rely on classical hardness assumptions for validator authentication.
+
+---
+
+## 14.2 Suite Evolution
+
+Future suite upgrades may include:
+
+- Parameter strength increases
+- Alternative PQ signature schemes
+- Alternative KEM constructions
+- Aggregation optimizations
+
+All transitions must follow governance-controlled epoch activation.
+
+---
+
+## 14.3 Research Alignment
+
+QBIND monitors:
+
+- NIST post-quantum standardization outcomes
+- Cryptanalysis developments
+- Performance improvements in PQ primitives
+
+Suite transitions are designed to be non-disruptive and deterministic.
+
+---
+
+## 14.4 Conservative Upgrade Philosophy
+
+QBIND prioritizes:
+
+- Stability over novelty
+- Security over speculative performance gains
+- Formal review before activation
+
+Long-term viability depends on disciplined upgrade control.
