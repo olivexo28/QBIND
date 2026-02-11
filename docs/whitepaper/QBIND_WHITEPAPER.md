@@ -661,3 +661,159 @@ Planned improvements include:
 - Cryptographic agility test harness
 
 Governance evolution is designed to remain deterministic and auditable.
+
+---
+
+# 12. Adversarial Analysis
+
+This section models adversarial conditions under which QBIND must preserve safety and, where possible, liveness.
+
+<img src="diagrams/threat-model.svg" alt="QBIND Threat Model Diagram" />
+
+---
+
+## 12.1 Threat Model
+
+QBIND assumes:
+
+- Up to f Byzantine validators (where N ≥ 3f + 1)
+- Adversarial network capable of:
+  - Message delay
+  - Message reordering
+  - Packet dropping
+  - Partitioning
+- Malicious clients submitting invalid transactions
+- Attempted cryptographic downgrade or replay attacks
+
+The protocol does not assume trusted networking infrastructure.
+
+---
+
+## 12.2 Byzantine Validator Behavior
+
+Possible malicious behaviors:
+
+- Double voting at same height/view
+- Proposing conflicting blocks
+- Withholding votes
+- Delaying quorum formation
+
+Mitigations:
+
+- Double-vote rejection at validator level
+- Lock rule prevents conflicting commits
+- 2f + 1 quorum intersection ensures safety
+- Slashing infrastructure (partial implementation)
+
+Safety remains intact if ≤ f validators are Byzantine.
+
+---
+
+## 12.3 Network-Level Attacks
+
+### Replay Attacks
+
+Mitigated by:
+
+- Nonce-based replay protection in transactions
+- Monotonic session nonce in secure channel
+
+Session termination occurs on nonce overflow.
+
+---
+
+### Message Reordering / Delay
+
+HotStuff safety is preserved under partial synchrony.
+
+Liveness depends on eventual synchrony and functional timeout mechanisms.
+
+Timeout/view-change is partially implemented and remains a roadmap item.
+
+---
+
+### DoS Attacks
+
+Potential vectors:
+
+- Flooding mempool
+- Handshake resource exhaustion
+- Oversized blocks
+- Execution-heavy transactions
+
+Mitigations:
+
+- Gas limits per transaction
+- Bounded mpsc channels (backpressure)
+- Session-level AEAD framing
+- MainNet gas enforcement
+
+Cookie-based handshake DoS mitigation is defined but not yet enforced.
+
+---
+
+## 12.4 Key Compromise Scenarios
+
+### Validator Signing Key Compromise
+
+Impact:
+- Malicious votes or proposals from compromised validator
+
+Mitigation:
+- BFT threshold prevents unilateral commit
+- Slashing planned for economic deterrence
+- Remote signer isolation reduces exposure surface
+
+---
+
+### Network KEM Key Compromise
+
+Impact:
+- Impersonation or MITM attempt
+
+Mitigation:
+- Transcript-bound key derivation
+- Identity binding via delegation certificates
+- Session re-establishment required
+
+---
+
+## 12.5 Crash and Restart Safety
+
+Crash during commit:
+
+- Durable RocksDB writes ensure restart consistency
+- last_committed marker prevents state regression
+- Schema mismatch prevents unsafe startup
+
+Epoch transition writes storage before in-memory update to preserve atomicity.
+
+---
+
+## 12.6 Upgrade Attack Scenarios
+
+### Partial Upgrade Activation
+
+Mitigation:
+- Activation only at epoch boundary
+- Invalid upgrade blocks rejected
+- Non-compatible nodes halt
+
+---
+
+### Suite Downgrade Attempt
+
+Mitigation:
+- Downgrade rejected as fatal violation
+- Versioned suite enforcement
+
+---
+
+## 12.7 Residual Risks
+
+- Liveness under prolonged asynchrony until timeout logic finalized
+- Incomplete slashing economics
+- Cookie-based DoS protection not yet active
+- Future cryptographic breakthroughs
+
+QBIND explicitly tracks these risks as roadmap items rather than silent assumptions.
