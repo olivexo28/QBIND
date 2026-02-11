@@ -146,6 +146,8 @@ These are tracked roadmap items, not assumed guarantees.
 
 This section formalizes the internal runtime structure of a QBIND validator node based on the implemented codebase.
 
+<img src="diagrams/node-runtime-flow.svg" alt="QBIND Node Runtime and Execution Flow Diagram" />
+
 ---
 
 ## 7.1 Async Runtime Model
