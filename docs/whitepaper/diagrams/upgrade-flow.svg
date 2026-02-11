@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 850 320" width="850" height="320">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; fill: #333; }
+      .box-text { font: 12px sans-serif; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .box-text-bold { font: bold 12px sans-serif; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .annotation { font: italic 10px sans-serif; fill: #666; text-anchor: middle; }
+      .side-note { font: bold 11px sans-serif; fill: #c62828; text-anchor: middle; }
+      .side-box-text { font: 11px sans-serif; fill: #c62828; text-anchor: start; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+    <marker id="arrowhead-down" markerWidth="7" markerHeight="10" refX="3.5" refY="9" orient="auto">
+      <polygon points="0 0, 3.5 10, 7 0" fill="#666"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="850" height="320" fill="#ffffff"/>
+  
+  <!-- Title -->
+  <text x="425" y="30" class="title" text-anchor="middle">QBIND Upgrade and Governance Flow</text>
+  
+  <!-- Main Flow: Governance Proposal → Signed Envelope → Included in Block → Committed → Epoch Boundary → Activation -->
+  
+  <!-- Step 1: Governance Proposal -->
+  <rect x="30" y="80" width="110" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="85" y="100" class="box-text-bold">Governance</text>
+  <text x="85" y="115" class="box-text-bold">Proposal</text>
+  
+  <!-- Arrow: Governance Proposal → Signed Envelope -->
+  <line x1="140" y1="105" x2="170" y2="105" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Step 2: Signed Envelope -->
+  <rect x="175" y="80" width="110" height="50" rx="8" fill="#fff3e0" stroke="#f57c00" stroke-width="2"/>
+  <text x="230" y="100" class="box-text-bold">Signed</text>
+  <text x="230" y="115" class="box-text-bold">Envelope</text>
+  
+  <!-- Arrow: Signed Envelope → Included in Block -->
+  <line x1="285" y1="105" x2="315" y2="105" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Step 3: Included in Block -->
+  <rect x="320" y="80" width="110" height="50" rx="8" fill="#fff9c4" stroke="#fbc02d" stroke-width="2"/>
+  <text x="375" y="100" class="box-text-bold">Included in</text>
+  <text x="375" y="115" class="box-text-bold">Block</text>
+  
+  <!-- Arrow: Included in Block → Committed -->
+  <line x1="430" y1="105" x2="460" y2="105" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Step 4: Committed -->
+  <rect x="465" y="80" width="110" height="50" rx="8" fill="#e8f5e9" stroke="#388e3c" stroke-width="2"/>
+  <text x="520" y="105" class="box-text-bold">Committed</text>
+  
+  <!-- Arrow: Committed → Epoch Boundary -->
+  <line x1="575" y1="105" x2="605" y2="105" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Step 5: Epoch Boundary -->
+  <rect x="610" y="80" width="110" height="50" rx="8" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="2"/>
+  <text x="665" y="100" class="box-text-bold">Epoch</text>
+  <text x="665" y="115" class="box-text-bold">Boundary</text>
+  
+  <!-- Arrow: Epoch Boundary → Activation -->
+  <line x1="665" y1="130" x2="665" y2="165" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead-down)"/>
+  
+  <!-- Step 6: Activation -->
+  <rect x="610" y="170" width="110" height="50" rx="8" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="665" y="195" class="box-text-bold">Activation</text>
+  
+  <!-- Side Box: Safety Rails -->
+  <rect x="30" y="180" width="200" height="80" rx="8" fill="#ffebee" stroke="#c62828" stroke-width="2"/>
+  <text x="130" y="200" class="side-note">Safety Rails</text>
+  <text x="45" y="220" class="side-box-text">• Downgrade rejected</text>
+  <text x="45" y="240" class="side-box-text">• Non-compatible node halts</text>
+  
+  <!-- Annotations -->
+  <text x="230" y="150" class="annotation">Council keys sign envelope</text>
+  <line x1="230" y1="140" x2="230" y2="132" stroke="#888" stroke-width="1" stroke-dasharray="3,2"/>
+  
+  <text x="375" y="150" class="annotation">Verifiable before application</text>
+  <line x1="375" y1="140" x2="375" y2="132" stroke="#888" stroke-width="1" stroke-dasharray="3,2"/>
+  
+  <text x="520" y="150" class="annotation">Persisted for auditability</text>
+  <line x1="520" y1="140" x2="520" y2="132" stroke="#888" stroke-width="1" stroke-dasharray="3,2"/>
+  
+  <!-- Footer annotation -->
+  <text x="425" y="295" class="annotation">Upgrades are consensus-aware state transitions, not silent software changes</text>
+</svg>
