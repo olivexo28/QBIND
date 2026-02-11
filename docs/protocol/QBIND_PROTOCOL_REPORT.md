@@ -55,10 +55,12 @@ This section lists items where the whitepaper lacks formal precision.
 | **Description** | The whitepaper describes transaction execution flow (Section 10.3) but lacks a formal state transition function δ(S, tx) → S' with explicit pre/post conditions |
 | **Whitepaper Reference** | Section 10: Transaction and State Model |
 | **Code Reference** | `qbind-ledger/src/`, `qbind-runtime/src/lib.rs` |
-| **Risk Level** | High |
+| **Status** | Mitigated (spec added) |
+| **Risk Level** | Medium |
 | **Justification** | All consensus safety, validator transitions, slashing, and upgrade semantics depend on a formally defined state transition function. |
 | **Action Required** | Add formal δ(S, B) → S′ definition to whitepaper; include transaction validity, gas deduction, slashing application, epoch transitions, and persistence semantics. |
 | **Required Milestone** | Pre-TestNet |
+| **Note** | Formal δ(S, Input) → S′ definition added in Whitepaper Section 16. Implementation unchanged; future changes must preserve defined semantics. |
 
 ## 2.2 Validator Set Transition Formalism
 
@@ -107,8 +109,10 @@ This section lists items where the whitepaper lacks formal precision.
 | **Description** | Epoch boundary semantics insufficiently formalized; activation rules need explicit state mutation description |
 | **Whitepaper Reference** | Section 8, Section 11 |
 | **Code Reference** | `qbind-consensus/`, `qbind-ledger/` |
+| **Status** | Partially Mitigated |
 | **Risk Level** | High |
 | **Action Required** | Define epoch transition function and validator set update semantics |
+| **Note** | Epoch transition formally defined in Whitepaper Section 16. Implementation hardening (crash-window elimination, persistence ordering guarantees) pending before TestNet. |
 
 ---
 
