@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450" width="800" height="450">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; fill: #333; }
+      .box-text { font: 12px sans-serif; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .box-text-bold { font: bold 12px sans-serif; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .arrow-label { font: 10px sans-serif; fill: #555; text-anchor: middle; }
+      .note { font: italic 10px sans-serif; fill: #666; text-anchor: middle; }
+      .note-left { font: italic 10px sans-serif; fill: #666; text-anchor: start; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="450" fill="#ffffff"/>
+  
+  <!-- Title -->
+  <text x="400" y="30" class="title" text-anchor="middle">QBIND Performance Model</text>
+  
+  <!-- Input boxes (top row) -->
+  <!-- Block Size -->
+  <rect x="80" y="70" width="120" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="140" y="95" class="box-text-bold">Block Size</text>
+  
+  <!-- Signature Cost -->
+  <rect x="240" y="70" width="120" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="300" y="95" class="box-text-bold">Signature Cost</text>
+  
+  <!-- Network Delay -->
+  <rect x="440" y="70" width="120" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="500" y="95" class="box-text-bold">Network Delay</text>
+  
+  <!-- Execution Cost -->
+  <rect x="600" y="70" width="120" height="50" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="660" y="95" class="box-text-bold">Execution Cost</text>
+  
+  <!-- Arrows from inputs to center -->
+  <line x1="140" y1="120" x2="330" y2="190" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="300" y1="120" x2="370" y2="190" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="500" y1="120" x2="430" y2="190" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="660" y1="120" x2="470" y2="190" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Central box: Consensus Throughput -->
+  <rect x="300" y="190" width="200" height="70" rx="10" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="400" y="220" class="box-text-bold">Consensus Throughput</text>
+  <text x="400" y="240" class="box-text">(tx/sec)</text>
+  
+  <!-- Arrow from Throughput to Latency -->
+  <line x1="400" y1="260" x2="400" y2="310" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Finality Latency box -->
+  <rect x="300" y="315" width="200" height="60" rx="10" fill="#fff9c4" stroke="#fbc02d" stroke-width="2"/>
+  <text x="400" y="340" class="box-text-bold">Finality Latency</text>
+  <text x="400" y="358" class="box-text">≈ 3 rounds (3-chain rule)</text>
+  
+  <!-- Side note box -->
+  <rect x="580" y="200" width="180" height="80" rx="8" fill="#fce4ec" stroke="#c2185b" stroke-width="2"/>
+  <text x="670" y="225" class="box-text-bold">Bounded by</text>
+  <text x="670" y="245" class="box-text">slowest subsystem:</text>
+  <text x="670" y="265" class="note">dissemination | voting | execution</text>
+  
+  <!-- Arrow from center to side note -->
+  <line x1="500" y1="225" x2="575" y2="235" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Bottom subsystems (to show what bounds throughput) -->
+  <rect x="100" y="380" width="140" height="40" rx="6" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5"/>
+  <text x="170" y="405" class="box-text">Proposal Dissemination</text>
+  
+  <rect x="280" y="380" width="140" height="40" rx="6" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5"/>
+  <text x="350" y="405" class="box-text">Vote Aggregation</text>
+  
+  <rect x="460" y="380" width="140" height="40" rx="6" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="1.5"/>
+  <text x="530" y="405" class="box-text">Execution &amp; Persist</text>
+  
+  <!-- Dashed lines from bottom boxes to latency -->
+  <line x1="170" y1="380" x2="320" y2="375" stroke="#999" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="350" y1="380" x2="400" y2="375" stroke="#999" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="530" y1="380" x2="480" y2="375" stroke="#999" stroke-width="1" stroke-dasharray="4,2"/>
+  
+  <!-- Legend note at bottom -->
+  <text x="400" y="440" class="note">Performance characteristics under adversarial conditions, not merely ideal networking</text>
+</svg>
