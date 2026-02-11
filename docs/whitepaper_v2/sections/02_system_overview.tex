@@ -1,0 +1,74 @@
+% ==============================================================================
+% QBIND whitepaper v2 – system overview and node architecture
+% Page 2 – high-level node and dataflow overview
+%
+% Content must stay consistent with current code and design docs.
+% ==============================================================================
+
+\section{System Overview and Node Architecture}
+
+QBIND is architected around a separation of concerns: data availability is handled by a DAG-based mempool, while total ordering and finality are achieved through a HotStuff-style BFT consensus protocol. All validators participate in both layers, using post-quantum cryptographic primitives (ML-DSA-44 for signatures, ML-KEM-768 for key encapsulation) throughout the consensus-critical path. This section provides a high-level overview of the validator node architecture and the end-to-end transaction lifecycle.
+
+\subsection{Validator Node Components}
+
+A QBIND validator node integrates six major subsystems that operate together to process transactions, achieve consensus, and maintain state.
+
+The \textbf{P2P networking layer} establishes secure, authenticated channels between validators using KEMTLS-based transport. ML-KEM-768 provides quantum-resistant key encapsulation, from which session keys are derived via HKDF and used with ChaCha20-Poly1305 for encrypted communication. The networking layer manages peer discovery, maintains target outbound connections, and enforces anti-eclipse protections including IP prefix limits and ASN diversity requirements to resist isolation attacks.
+
+The \textbf{DAG mempool} receives incoming transactions, batches them into signed units, and coordinates data availability proofs with other validators. When a validator forms a batch, it signs the batch with ML-DSA-44 and disseminates it via gossip. Receiving validators verify the batch and return signed acknowledgments. Once a quorum of 2f+1 acknowledgments is collected, a batch certificate is formed, proving that the data is available across a Byzantine-resistant set of validators. This decouples data dissemination from ordering, enabling parallel batch creation across the validator set.
+
+The \textbf{consensus engine} implements HotStuff-style BFT logic with a 3-chain commit rule. The designated leader for each view proposes a block referencing certified DAG batches (the ``frontier''). Validators verify proposals---including the validity of referenced batch certificates---and cast ML-DSA-44-signed votes. A quorum certificate (QC) is formed upon collecting 2f+1 votes. A block is committed once it has a direct child and grandchild each bearing a QC. The pacemaker manages view transitions via timeout messages when leaders fail to produce valid proposals.
+
+The \textbf{execution engine} applies committed transactions to the account state. For MainNet v0, the VM v0 transfer engine processes balance transfers with mandatory gas accounting. Stage B parallel execution analyzes transaction read/write sets to build a conflict graph and execute non-conflicting transactions concurrently, improving throughput while preserving determinism. All execution results are verified through extensive soak testing to ensure identical outcomes regardless of execution mode.
+
+\textbf{Storage} is backed by RocksDB with write-ahead logging for durability. The block store maintains committed blocks and their metadata, while the account state database tracks balances and nonces. Periodic snapshots enable fast synchronization for new or recovering nodes.
+
+The \textbf{signer and key management interface} abstracts how the node accesses its cryptographic keys. Production validators are expected to use HSM/PKCS\#11 backends or remote signer configurations, where private keys never reside on the consensus node. For testing and development, encrypted filesystem keystores are available. The LoopbackTesting mode (in-memory keys) is explicitly forbidden on MainNet via startup invariant validation.
+
+\subsection{End-to-End Data Flow}
+
+The lifecycle of a transaction through QBIND proceeds as follows:
+
+\begin{enumerate}
+    \item \textbf{Submission}: A user submits an ML-DSA-44-signed transaction to any validator or RPC gateway. The receiving node verifies the signature, checks the nonce against the sender's account state, and validates that the sender can cover the maximum possible fee.
+
+    \item \textbf{Mempool admission}: Upon passing precheck validation, the transaction enters the local DAG mempool. Per-sender quotas and byte limits protect against denial-of-service flooding.
+
+    \item \textbf{Batch formation and certification}: The validator batches pending transactions, signs the batch, and gossips it to peers. Receiving validators verify and return signed acknowledgments. Once 2f+1 acks are collected, a batch certificate is formed, proving data availability.
+
+    \item \textbf{Consensus ordering}: The designated leader constructs a proposal referencing certified batches from the DAG frontier, attaches the parent QC, and signs the proposal. Validators verify the proposal---including certificate validity---and return votes. Upon collecting 2f+1 votes, a QC is formed. Blocks are committed under the 3-chain rule: a block finalizes when it has QC-bearing child and grandchild descendants.
+
+    \item \textbf{Execution}: The execution engine applies committed transactions to the account state, deducting balances, updating nonces, and distributing fees (50\% burned, 50\% to the block proposer). Results are written to storage.
+
+    \item \textbf{Finality}: Once a block is committed via the 3-chain rule, its transactions are finalized. The committed state root becomes the authoritative account state for subsequent transactions.
+\end{enumerate}
+
+This separation of data availability (DAG layer) from ordering (consensus layer) ensures that committed blocks only reference data provably held by a quorum, preventing data-withholding attacks.
+
+\subsection{Roles in the Network}
+
+The current QBIND design defines the following participant roles:
+
+\textbf{Validators} are full consensus participants. They operate all node components described above: P2P networking, DAG mempool, consensus engine, execution engine, storage, and signing infrastructure. Validators stake tokens, produce and vote on blocks, sign batch acknowledgments, and earn rewards from inflation and fees. MainNet v0 targets a small initial validator set, with validators expected to run on commodity server hardware with SSD storage, sufficient network bandwidth, and HSM or remote-signer key protection.
+
+\textbf{RPC gateways} (currently part of validator nodes) accept user-submitted transactions and expose query endpoints for account state, transaction status, and chain data. In the current architecture, validators serve this role directly; dedicated non-validating RPC infrastructure is a roadmap item.
+
+\textbf{Non-validating full nodes} are planned but not yet fully specified. These nodes would synchronize the full chain state, verify blocks, and serve queries without participating in consensus voting. This role enables external parties to independently verify the chain without staking requirements.
+
+\textbf{Light clients and external verifiers} are a roadmap consideration. A light client would verify finality proofs (QCs) and state roots without downloading full block data. The architecture's use of quorum certificates provides a natural basis for compact finality proofs, but the light client protocol is not yet implemented.
+
+\textbf{End users and applications} interact with the network by submitting transactions to validators or RPC gateways. Users hold ML-DSA-44 key pairs for transaction signing. Future wallet and SDK releases will provide reference implementations for key management and transaction construction.
+
+\subsection{Design Objectives and Constraints}
+
+The system architecture reflects the following design objectives, consistent with the protocol's security-first philosophy:
+
+\textbf{Throughput and latency}: MainNet v0 targets approximately 300--500 sustained transactions per second on commodity validator hardware, with sub-2-second median finality in a small validator set. These are reference targets; actual performance depends on validator count, geographic distribution, and hardware specifications. The architecture supports future scaling toward low-thousands TPS through DAG parallelism and Stage B execution.
+
+\textbf{Security and robustness}: All consensus-critical operations use PQC-only primitives (ML-DSA-44, ML-KEM-768). The system tolerates up to f Byzantine validators in a 3f+1 deployment. DoS protections at the mempool layer (per-sender quotas, eviction rate limiting) ensure honest senders retain meaningful inclusion even under spam attacks. Anti-eclipse protections in the P2P layer resist network-level isolation attacks.
+
+\textbf{Operational constraints}: Validators are expected to operate on commodity server hardware with NVMe or SSD storage, stable network connectivity, and HSM or remote-signer key protection for production deployments. The protocol is designed for small-to-medium validator set sizes in the initial phases, with governance-controlled growth as operational experience accumulates.
+
+These objectives are calibrated to prioritize correctness and security over raw performance. The monetary policy explicitly accounts for the higher computational costs of PQC operations through inflation adjustments, ensuring validators are adequately compensated for the additional overhead.
+
+% TODO: add a system overview diagram showing node components and data flow.
