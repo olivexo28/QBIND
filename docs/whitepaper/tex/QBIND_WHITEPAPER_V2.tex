@@ -1,0 +1,608 @@
+% QBIND Whitepaper v2
+\documentclass[11pt]{article}
+
+% === Preamble ===
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue,
+  pdftitle={QBIND: A Post-Quantum Layer-1 for Long-Horizon Security},
+  pdfauthor={QBIND Core Protocol Team}
+}
+
+\title{QBIND: A Post-Quantum Layer-1 for Long-Horizon Security}
+\author{QBIND Core Protocol Team}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+QBIND is a Layer-1 blockchain designed to remain secure in a world where classical cryptography is no longer trustworthy. The protocol is built from the ground up on NIST-standardized post-quantum primitives (ML-DSA-44 signatures and ML-KEM-768 key encapsulation), coupled with a DAG-based data availability layer and HotStuff-style BFT consensus. All validator networking is secured with KEMTLS-style channels, and the economic design explicitly funds the higher cost of post-quantum cryptography while preserving long-term flexibility through on-chain governance and cryptographic agility.
+\end{abstract}
+
+% === Page 1: Executive Overview ===
+\section{Executive Overview}
+
+\subsection{What QBIND Solves}
+Classical proof-of-stake chains rely on cryptographic assumptions (ECDSA, Ed25519, pairing-based SNARKs) that are known to break under sufficiently powerful quantum adversaries. This creates a long-horizon risk: the historical ledger, validator keys, and rollup proofs can all become retroactively forgeable. QBIND removes this dependency at the base layer. Every consensus-critical operation---validator signatures, batch certificates, P2P transport, governance envelopes---is built on post-quantum primitives, and the protocol is engineered so these primitives can be rotated or upgraded if future cryptanalysis demands it.
+
+\subsection{High-Level Architecture at a Glance}
+At a high level, QBIND combines:
+
+\subsubsection{Post-quantum cryptography as a hard requirement}
+\begin{itemize}
+  \item ML-DSA-44 signatures for transactions, consensus votes, batch certificates, and governance.
+  \item ML-KEM-768 for KEMTLS-style validator transport, with HKDF-derived session keys and AEAD-secured streams.
+\end{itemize}
+
+\subsubsection{DAG-based data availability and HotStuff BFT}
+\begin{itemize}
+  \item Validators form transaction batches, exchange ML-DSA-44-signed acknowledgements, and produce batch certificates once 2f+1 validators have the data.
+  \item HotStuff consensus operates on certified DAG frontiers, ensuring that committed blocks only reference data that a quorum already holds.
+\end{itemize}
+
+\subsubsection{Execution and state with explicit PQC cost modeling}
+\begin{itemize}
+  \item A VM v0 transfer engine plus parallel execution path, with state persisted in RocksDB and protected by deterministic test harnesses.
+  \item A monetary engine that adjusts inflation targets for PQC's higher compute, bandwidth, and storage costs, and gradually shifts security funding from inflation to fees as the network matures.
+\end{itemize}
+
+\subsubsection{Governance and upgrades with cryptographic accountability}
+\begin{itemize}
+  \item A protocol council signs upgrade envelopes with ML-DSA-44, specifying protocol versions, activation heights, and binary hashes.
+  \item Node operators verify these envelopes out-of-band and activate upgrades in a coordinated manner, with clear separation between routine updates and hard-fork-class changes.
+\end{itemize}
+
+\section{Motivation and Threat Model}
+
+\subsection{Why a Post-Quantum Layer-1}
+Modern proof-of-stake blockchains are built on classical public-key cryptography: ECDSA and Ed25519 for validator keys and user accounts, pairing-based SNARKs for rollup proofs, and classical key agreement for P2P networking. These schemes are efficient on today's hardware, but the core hardness assumptions are known to fail in the presence of sufficiently large quantum computers. A large enough quantum adversary can break discrete-log-based signatures and invert many currently deployed key exchange schemes.
+
+For most web applications, cryptographic failure is primarily a forward-looking problem: if a scheme breaks, the operator can rotate keys and move traffic to a new protocol. A Layer-1 blockchain is different. It is designed to preserve economic state and consensus history for decades. If the underlying signature schemes become weak, an attacker can not only attack future blocks, but can also forge signatures on historical validator sets, rewrite history, or construct fake proofs for old rollup states.
+
+QBIND is motivated by this long-horizon risk. Instead of treating post-quantum cryptography as a future upgrade, the protocol treats it as a hard requirement at genesis. All consensus-critical keys and messages are defined in terms of post-quantum primitives, and the rest of the design is built around making those primitives practical to deploy.
+
+\subsection{Long-Horizon Risks to Classical Chains}
+If a classical proof-of-stake chain runs for 10--20 years and accumulates significant value, its historical ledger becomes a high-value target. In a world where large quantum computers exist, an attacker with access to archived network traffic and historical block headers can:
+
+\begin{itemize}
+  \item Recover private keys for historical validator sets and governance multisigs.
+  \item Forge signatures on old blocks, votes, or governance proposals.
+  \item Produce alternative histories that appear valid to naive or lightly-verified clients.
+  \item Break rollup proof systems that rely on classical pairing-based SNARKs, invalidating state commitments that were assumed to be binding.
+\end{itemize}
+
+Some mitigations are possible at the application or wallet layer, but none of them fully repair a base-layer design that assumes classical hardness forever. A chain that retrofits post-quantum signatures after the fact still has a long window where historical signatures are forgeable. The longer the chain runs, the more attractive this attack surface becomes.
+
+By starting from a post-quantum design, QBIND aims to minimize this retroactive risk. There is no historical period where consensus-critical signatures are based on ECDSA or Ed25519, and so there is no era of the ledger that becomes trivially forgeable when classical assumptions fail. The remaining risks are tied to the security of the chosen post-quantum schemes and the agility of the protocol to migrate if those schemes degrade.
+
+\subsection{Adversary Model}
+The protocol is designed against an adversary that combines strong network control, significant computational resources (classical and quantum), and economic incentives to corrupt validators or infrastructure.
+
+At a high level, we assume:
+
+\begin{itemize}
+  \item A partially synchronous network with an adversary that can delay, reorder, or drop messages, and can create temporary partitions, but cannot permanently prevent all honest nodes from communicating.
+  \item A validator set of size N, of which up to f < N/3 may behave arbitrarily (Byzantine faults), including equivocation, censorship, and protocol deviations.
+  \item An attacker who can record network traffic indefinitely and attempt large-scale cryptanalysis against any classical primitives that remain in the system.
+  \item An attacker who may compromise a subset of validators through key theft, HSM compromise, or operational failures, potentially in coordination with network-level attacks.
+\end{itemize}
+
+We assume that the NIST-standardized post-quantum schemes deployed in QBIND (for example, ML-DSA-44 and ML-KEM-768) remain secure under their intended hardness assumptions. We also assume that hash functions and symmetric primitives are instantiated with conservative parameters against both classical and quantum adversaries, including quadratic speedups such as Grover's algorithm.
+
+The adversary is not assumed to be limited to short time horizons. Attacks that require years of data collection or multi-year cryptanalytic efforts are considered in scope, as long as they are consistent with the economic value that the chain is expected to secure.
+
+\subsection{Assumptions and Non-Goals}
+QBIND makes several explicit assumptions to keep the protocol design tractable:
+
+\begin{itemize}
+  \item \textbf{Endpoints:} User endpoint security (wallet malware, phishing, device compromise) is out of scope for the base-layer protocol. QBIND provides primitives that wallets can use, but it does not attempt to solve endpoint compromise.
+  \item \textbf{Off-chain infrastructure:} Explorers, indexers, and third-party APIs are assumed to be honest-but-fallible. The protocol is designed so that a full node can independently verify all consensus-critical data without trusting these services.
+  \item \textbf{Economic rationality:} Validators are assumed to be economically motivated but not perfectly rational. The protocol tolerates some fraction of irrational or misconfigured validators as long as the Byzantine bound is respected.
+  \item \textbf{Cross-chain guarantees:} Bridges and external rollups may initially rely on classical cryptography. QBIND does not claim that all external systems interacting with it are post-quantum secure; instead, it focuses on making the base layer robust and providing hooks for more secure bridging mechanisms over time.
+\end{itemize}
+
+These non-goals are not permanent limitations. They define the boundary of what the base-layer protocol is responsible for. Higher layers, wallet designs, and future research milestones can expand the trust model, but they do not change the requirement that the core consensus, data availability, and monetary mechanisms remain post-quantum secure and upgradeable.
+
+% TODO: Later sections will reference ecosystem and validator-internals diagrams from QBIND_DIAGRAMS_DRAFT.md
+
+% TODO: Insert figures for ecosystem and validator internals on later pages
+
+\section{Protocol Overview}
+
+\subsection{Node and Network Architecture}
+At a high level, QBIND separates four concerns: networking, data availability, consensus, and execution. Validator nodes participate in a KEMTLS-secured peer-to-peer network, maintain a DAG-based mempool for \emph{data availability}, run a HotStuff-style BFT engine for ordering, and execute committed blocks against a persistent state store.
+
+Each validator node is organized into layered subsystems:
+
+\begin{itemize}
+  \item A P2P network layer that handles peer discovery, KEMTLS transport using ML-KEM-768, anti-eclipse protections, and basic liveness detection.
+  \item A DAG mempool layer that forms transaction batches, collects acknowledgments from peers, and constructs batch certificates once 2f+1 validators have confirmed storage.
+  \item A consensus layer that runs HotStuff with proposal, voting, and quorum certificate logic, plus a pacemaker that drives view changes under partial synchrony.
+  \item An execution layer that applies committed blocks via the VM v0 transfer engine, with an optional Stage B parallel execution path and deterministic state persistence in RocksDB.
+  \item A signer subsystem that interfaces with ML-DSA-44 key material stored in encrypted files, remote signers, or HSMs, and provides signing services to the DAG and consensus layers.
+\end{itemize}
+
+Full nodes share most of the stack but do not participate in voting or block production. They maintain state, validate blocks, and serve RPC and query traffic to wallets, SDKs, and explorers. Future components such as L2 hubs and bridges attach to the validator layer via RPC and P2P interfaces but do not change the core responsibilities of the base layer.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/qbind-ecosystem.pdf}
+  \caption{QBIND ecosystem: users, wallets, full nodes, validators, explorers, and external systems.}
+  \label{fig:qbind-ecosystem}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/qbind-validator-node.pdf}
+  \caption{Validator node internals: networking, DAG mempool, consensus, execution, and signer services.}
+  \label{fig:qbind-validator-node}
+\end{figure}
+
+\subsection{Transaction Lifecycle}
+QBIND's transaction lifecycle is designed to make data availability and ordering explicit. A transaction moves through distinct stages before it becomes part of the canonical state:
+
+\begin{itemize}
+  \item A user wallet signs a transaction with an ML-DSA-44 key and submits it to an RPC node.
+  \item The RPC node verifies the signature, applies basic stateless validation (format, gas bounds), and inserts the transaction into its local mempool.
+  \item Validator nodes periodically form batches of pending transactions from their mempools, sign each batch with ML-DSA-44, and broadcast these batches over KEMTLS-encrypted P2P channels.
+  \item Upon receiving a batch, peer validators verify its signature and contents and respond with ML-DSA-44-signed acknowledgments. Once the originating validator has collected 2f+1 acknowledgments, it constructs a batch certificate that proves the batch is stored by a quorum.
+  \item The HotStuff leader for the current view assembles a proposal that references one or more certified batches, signs the proposal with ML-DSA-44, and broadcasts it to the validator set.
+  \item Validators verify the proposal, run their local fork choice and safety checks, and, if valid, vote through the HotStuff phases (prepare, pre-commit, commit). Each phase requires a quorum certificate obtained from 2f+1 validators.
+  \item When a block reaches the commit phase, the execution layer processes its transactions, updates the state root, and persists the new state to RocksDB. At this point, the transactions are considered finalized by the protocol.
+\end{itemize}
+
+This separation between batch formation, certification, and consensus proposals makes it explicit when data becomes known to the network and avoids coupling data availability to the timing of a specific block proposal.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/qbind-tx-lifecycle.pdf}
+  \caption{Transaction lifecycle: submission, batching, certification, HotStuff ordering, and execution.}
+  \label{fig:qbind-tx-lifecycle}
+\end{figure}
+
+\subsection{DAG and Consensus Coupling}
+The DAG mempool and the HotStuff consensus engine are deliberately coupled through batch certificates. Consensus never proposes or votes on references to raw mempool entries; it only works with batches that have already been certified by a quorum.
+
+The coupling works as follows:
+
+\begin{itemize}
+  \item The DAG layer aggregates transactions into batches and broadcasts them to peers.
+  \item Each peer independently validates the batch and, if acceptable, issues a signed BatchAck that attests to both validity and local storage.
+  \item Once 2f+1 BatchAck signatures are collected for a given batch, the originating validator builds a BatchCertificate that records the batch identifier and the quorum of acknowledgments.
+  \item The consensus leader is restricted to constructing proposals whose batch references all have valid BatchCertificates. Voters, in turn, check that each referenced batch has a valid certificate and that the certificate contains 2f+1 signatures from the current validator set.
+\end{itemize}
+
+This structure enforces a clear invariant: a block that passes consensus safety checks can only reference data that a quorum of validators has already committed to store. A malicious leader cannot propose blocks built on unavailable data, because honest validators will reject any proposal whose batch commitments do not have valid certificates. Similarly, a minority of withholding validators cannot unilaterally make data disappear once a certificate exists.
+
+By separating data availability (DAG plus BatchCertificates) from ordering (HotStuff) but enforcing a strict coupling between the two, QBIND aims to maintain both high throughput and robust safety against data-withholding attacks, within the standard f < N/3 Byzantine fault model.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/qbind-dag-consensus.pdf}
+  \caption{DAG and consensus coupling: batch formation, BatchAck and BatchCertificate creation, and HotStuff proposals constrained by certificates.}
+  \label{fig:qbind-dag-consensus}
+\end{figure}
+
+\section{Cryptography and Key Management}
+
+\subsection{Post-Quantum Primitives}
+QBIND is built on NIST-standardized post-quantum primitives from the outset. The base protocol assumes post-quantum signatures and key encapsulation wherever consensus safety, data availability, or monetary state are at stake.
+
+On the signature side, QBIND uses ML-DSA-44 as the default scheme for:
+
+\begin{itemize}
+  \item User transaction signatures.
+  \item Consensus messages (proposals, votes, quorum certificates).
+  \item Batch acknowledgments and batch certificates in the DAG layer.
+  \item Governance actions, including upgrade envelopes and parameter changes.
+\end{itemize}
+
+On the key encapsulation side, QBIND uses ML-KEM-768 as the default primitive for securing validator-to-validator transport via KEMTLS. ML-KEM-768 keys are used to derive shared secrets and then symmetric session keys for encrypting P2P streams.
+
+The protocol is parameterized by a \emph{suite identifier} that names a concrete signature or KEM algorithm and its parameters. All consensus-critical encodings and hash domains include both the message type and the suite identifier, to avoid ambiguity during algorithm migrations. Hash functions and AEAD ciphers are chosen from well-studied, conservative constructions with margins against both classical and quantum attacks; the exact choices are implementation details rather than consensus-critical parameters.
+
+\subsection{Key Roles and Key Lifecycle}
+Validator operators manage several distinct key roles. Separating these roles reduces the blast radius of a single compromise and allows operational policies to evolve over time without changing the protocol surface.
+
+In the baseline design, key roles include:
+
+\begin{itemize}
+  \item \textbf{Consensus keys:} ML-DSA-44 keys used to sign proposals, votes, quorum certificates, and other consensus messages. These keys are registered on-chain and tied to validator identities and staking positions.
+  \item \textbf{Network keys:} ML-KEM-768 keys used for KEMTLS handshakes between validators and full nodes. These keys authenticate transport-level sessions and derive symmetric keys for encrypted channels.
+  \item \textbf{Governance keys:} ML-DSA-44 keys held by the protocol council or other governance entities, used to sign upgrade envelopes and critical protocol actions.
+  \item \textbf{User account keys:} ML-DSA-44 keys used by end users and contracts to authorize transactions and manage application-level state.
+\end{itemize}
+
+Key lifecycle management is a joint responsibility of the protocol and the operator:
+
+\begin{itemize}
+  \item \textbf{Key registration and rotation:} Consensus and network keys are registered on-chain with explicit epochs. Rotation requires a transaction that proves continuity of control and avoids creating gaps in the validator set.
+  \item \textbf{Revocation:} In the event of compromise, keys can be revoked through governance or automated slashing mechanisms, depending on the severity and evidence available.
+  \item \textbf{Backup and recovery:} The protocol does not prescribe a specific backup scheme, but it assumes that operators will maintain secure, redundant storage of long-lived keys and that they can provision new keys without disrupting liveness.
+\end{itemize}
+
+\subsection{KEMTLS-Based Networking}
+All validator-to-validator and validator-to-full-node traffic in QBIND is intended to run over KEMTLS-style channels. Instead of relying on classical Diffie--Hellman for key agreement, peers authenticate each other using post-quantum certificates and derive shared secrets using ML-KEM-768.
+
+A typical KEMTLS-style handshake between two validators proceeds conceptually as follows:
+
+\begin{itemize}
+  \item Each validator has a long-term ML-DSA-44 identity key and a corresponding ML-KEM-768 public key bound to that identity.
+  \item When establishing a connection, the initiator sends a KEMTLS ClientHello that includes its supported cipher suites, KEMTLS extensions, and identity information.
+  \item The responder replies with a ServerHello that selects a suite and provides its own identity and KEM public key.
+  \item The initiator encapsulates to the responder's ML-KEM-768 public key, producing a ciphertext and a shared secret. The ciphertext is sent to the responder.
+  \item The responder decapsulates to recover the same shared secret. Both sides then feed the shared secret, transcript hashes, and explicit context strings into a key schedule based on HKDF to derive symmetric session keys for client-to-server and server-to-client directions.
+  \item All subsequent P2P traffic, including DAG batches, acknowledgments, and consensus messages, is transported over AEAD-encrypted channels keyed by these session keys.
+\end{itemize}
+
+Because KEMTLS is treated as mandatory for validator transport, implementations are expected to fail closed if they cannot establish a post-quantum-secure channel. The handshake transcript includes suite identifiers and role labels so that future migrations to new KEM or signature schemes can be negotiated without ambiguity.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/qbind-kemtls-handshake.pdf}
+  \caption{KEMTLS-style handshake using ML-KEM-768 to derive shared secrets and AEAD session keys.}
+  \label{fig:qbind-kemtls-handshake}
+\end{figure}
+
+\subsection{Signer Modes and HSM Integration}
+The signer subsystem in a QBIND node is responsible for all ML-DSA-44 signing operations required by the DAG, consensus, and governance logic. To accommodate different operator security postures, the signer is designed to support multiple deployment modes behind a stable interface.
+
+Typical signer modes include:
+
+\begin{itemize}
+  \item Encrypted file-based keys: Private keys are stored locally in encrypted form, unlocked at node startup via an operator-provided secret. This mode is simple to deploy but has a larger blast radius in case of host compromise.
+  \item Remote signer: The validator node delegates signing operations to a separate process or host over a mutually authenticated KEMTLS channel. This separates key material from the main node and allows for hardened environments such as dedicated signing boxes.
+  \item Hardware Security Module (HSM): The signer interface is backed by an HSM that implements ML-DSA-44 signing and key storage. The node holds references to keys rather than the keys themselves, and all signing happens inside the HSM boundary.
+  \item Loopback mode for testing: A development-only configuration in which keys are generated ephemerally and kept in memory, used for local testing and CI but never for mainnet deployment.
+\end{itemize}
+
+All signer modes expose a common API to the rest of the node: given a domain-separated message digest and a key role, return an ML-DSA-44 signature or an error. The consensus and DAG layers do not need to know whether the signature came from a local file, a remote signer, or an HSM. This abstraction allows operators to upgrade their key management infrastructure over time without requiring protocol changes.
+
+The combination of explicit key roles, KEMTLS-based networking, and pluggable signer modes is intended to make cryptographic upgrades and operational hardening possible without violating protocol invariants or fragmenting the validator set.
+
+\section{Economics and Tokenomics}
+
+\subsection{Monetary Policy Overview}
+QBIND's monetary policy is designed around a simple principle: inflation exists to fund security. New issuance is computed to ensure that validators receive adequate compensation for operational costs and for locking capital in a staking position, recognizing that post-quantum cryptography increases both computational and bandwidth costs compared to classical schemes.
+
+The protocol uses an issuance controller that targets an annualized \emph{security budget} in terms of percentage of total supply per year. Conceptually, per-epoch issuance $I(k)$ is derived from a target budget $B_{\text{target}}(k)$ minus a smoothed estimate of fee revenue $F_{\text{val,avg}}(k)$, subject to upper and lower bounds on the inflation rate. In words, when fees are low, inflation compensates; when fees are high, inflation can safely decrease, and may approach or even drop below the long-run floor.
+
+The controller is explicitly engineered to avoid sudden changes. Fee inputs are passed through an exponential moving average with phase-specific smoothing parameters, and rate-of-change limiters cap how quickly the effective inflation rate can move between epochs. This keeps validator yields and long-run supply behavior predictable, even under transient demand spikes or slowdowns.
+
+QBIND does not commit to a hard supply cap in the Bitcoin sense. Instead, it uses a tightly bounded, decaying inflation path with a nonzero floor in the mature phase. Combined with fee burning, this yields an \emph{uncapped but convergent} supply trajectory: total supply grows rapidly in early years, slows over the first decade, and then approaches an effective \emph{soft cap} as inflation decays and fee burn increases.
+
+\subsection{Inflation Phases and PQC Premium}
+The monetary policy is structured into three phases---Bootstrap, Transition, and Mature---that explicitly account for the cost of post-quantum cryptography over the chain's life. Each phase has a classical target rate $R_{\text{target,classical}}$ and a PQC-adjusted target rate $R_{\text{target,PQC}}$, derived by applying a premium for compute, bandwidth, and storage overhead.
+
+The relationship between classical and PQC-adjusted targets is:
+\[
+R_{\text{target,PQC}} = R_{\text{target,classical}} \times (1 + \beta_{\text{compute}} + \beta_{\text{bandwidth}} + \beta_{\text{storage}}),
+\]
+where the $\beta$ factors reflect the additional cost of ML-DSA-44 signatures and ML-KEM-768 keys relative to classical schemes.
+
+A representative \emph{working configuration} is:
+
+\begin{tabular}{l l l l}
+\textbf{Phase} & \textbf{Classical target} & \textbf{PQC-adjusted range} & \textbf{Floor} \\
+Bootstrap (years 0--3) & 5.0\% annual & 7.5\%--9.0\% annual & None \\
+Transition (years 3--7) & 4.0\% annual & 6.0\%--7.5\% annual & None \\
+Mature (year 7+) & 3.0\% annual & 4.0\%--5.5\% annual & 1.0\%--2.0\% annual \\
+\end{tabular}
+
+Phase transitions are gated by both time and on-chain conditions. Time gates are encoded at genesis and cannot be accelerated without governance action. Economic gates check metrics such as fee coverage ratio, staking participation, and fee volatility before allowing a transition, ensuring that the chain does not prematurely move into a lower-inflation regime that would underfund security.
+
+\subsection{Fee Model and Value Flows}
+Fees in QBIND serve two purposes: pricing access to limited blockspace and providing a non-inflationary source of validator revenue. Together with inflation, they determine the total compensation that validators and other stakeholders receive.
+
+At the transaction level, users pay gas-denominated fees in QBIND (or via conversion mechanisms that ultimately settle in QBIND). In MainNet v0, the fee distribution path is:
+
+\begin{itemize}
+  \item Collected fees per block are split 50\% / 50\%:
+  \item 50\% is burned, permanently removing QBIND from circulation.
+  \item 50\% is paid as a proposer reward to the validator that produced the block.
+\end{itemize}
+
+This hybrid model aligns incentives in several ways:
+
+\begin{itemize}
+  \item Burning a portion of fees benefits all holders and partially offsets inflation, especially in periods of high usage.
+  \item Paying the remaining portion to proposers rewards validators that include transactions and maintain throughput.
+  \item Because the monetary controller accounts for fee revenue when computing new issuance, growing fee income can reduce the required inflation rate over time while keeping the security budget intact.
+\end{itemize}
+
+Inflationary issuance $I(k)$ is split across four sinks:
+
+\begin{itemize}
+  \item Validators: Direct staking rewards, distributed to validators and delegators proportional to stake and performance.
+  \item Protocol treasury: Long-term funding for core development, client diversity, audits, and ecosystem grants.
+  \item Insurance fund: A dedicated reserve for protocol-level incidents, bugs, or cross-chain bridge events, governed separately from the treasury.
+  \item Community fund: Support for public goods, user incentives, infrastructure providers, and other ecosystem programs.
+\end{itemize}
+
+The exact percentages are parameters governed under explicit constraints. A representative \emph{working configuration} split is:
+
+\begin{itemize}
+  \item 50\% of $I(k)$ to validators.
+  \item 30\% of $I(k)$ to the protocol treasury.
+  \item 10\% of $I(k)$ to the insurance fund.
+  \item 10\% of $I(k)$ to the community fund.
+\end{itemize}
+
+Governance can adjust these shares within bounded ranges, but the structure---security first, with dedicated long-term and resilience funds---is part of the core economic design.
+
+\subsection{Supply, Allocation, and Staking Participation}
+QBIND's token supply has three layers:
+
+\begin{itemize}
+  \item Genesis allocation: Who owns what on day one.
+  \item Ongoing seigniorage: Who receives new issuance each epoch.
+  \item Utility: What roles QBIND plays in the protocol (staking, fees, governance, and collateral).
+\end{itemize}
+
+For concreteness, the current \emph{working configuration} assumes:
+
+\begin{itemize}
+  \item A genesis supply on the order of 1,000,000,000 (1B) QBIND units.
+  \item An \emph{uncapped but convergent} supply model, where total supply asymptotically remains within a small multiple of genesis over multi-decade horizons.
+  \item A genesis allocation that balances protocol-controlled supply, contributor incentives, and broad community distribution.
+\end{itemize}
+
+One representative allocation pattern is:
+
+\begin{itemize}
+  \item Protocol treasury and ecosystem: approximately 40\% of genesis, held by a foundation or on-chain treasury, with a 10--15 year runway for grants, infrastructure, and long-term protocol work.
+  \item Community and user incentives: approximately 25\% of genesis, reserved for testnet conversions, early user airdrops, validator bootstrapping, and rollup incentives.
+  \item Core contributors: approximately 20\% of genesis, subject to multi-year vesting (for example, a four-year schedule with a one-year cliff and no instant liquidity).
+  \item Strategic and infrastructure partners: approximately 15\% of genesis, also vested over 3--4 years to align long-term participation.
+\end{itemize}
+
+The guiding constraints are:
+
+\begin{itemize}
+  \item At least half of genesis supply is ultimately controlled by public governance, treasury, or community programs.
+  \item No single private bucket (team, investors, strategic partners) exceeds roughly one quarter of genesis.
+  \item All insider allocations are subject to clear, multi-year vesting and lockup schedules.
+\end{itemize}
+
+On the staking side, QBIND is both the staking and primary utility token:
+
+\begin{itemize}
+  \item Validators and delegators stake QBIND to secure the network and earn a share of inflation and fees.
+  \item Transaction fees on L1 are denominated in QBIND; other assets can pay via internal mechanisms, but settlement is in QBIND.
+  \item Governance weight is linked to QBIND holdings and staking positions, subject to the protocol's governance design (for example, a combination of token-holder vote and expert council).
+\end{itemize}
+
+To keep the validator set both secure and operationally manageable, the protocol enforces:
+
+\begin{itemize}
+  \item A minimum stake per validator, parameterized to avoid thousands of dust validators while allowing a validator set in the low hundreds.
+  \item A target staking participation rate (for example, 50\%--60\% of circulating supply staked), which informs yield modeling but is not enforced directly.
+\end{itemize}
+
+Together, the monetary policy, fee model, and supply allocation aim to fund a post-quantum-secure validator set over decades while avoiding extreme concentration of supply or uncontrolled dilution.
+
+All numerical parameters in this section (inflation ranges, fee splits, allocation percentages, target participation) represent the current working configuration for MainNet v0. They are governed values, not constants baked into the protocol, and can be adjusted within predefined corridors through the upgrade and governance mechanisms described elsewhere in this document.
+
+\section{Roadmap and Future Evolution}
+
+\subsection{Near-Term Milestones (0--2 Years)}
+The initial focus for QBIND is to bring the current post-quantum design to production in a controlled, observable way. The 0--2 year horizon is dominated by mainnet readiness, operational tooling, and the first layer of crypto-agility mechanisms.
+
+Key near-term milestones include:
+
+\begin{itemize}
+  \item MainNet v0 launch:
+  \begin{itemize}
+    \item PQC-only validator set running ML-DSA-44 and ML-KEM-768 for all consensus-critical paths.
+    \item DAG-based data availability and HotStuff consensus validated under realistic workloads.
+    \item Baseline metrics for throughput, latency, and validator resource usage under PQC.
+  \end{itemize}
+  \item Security and reliability hardening:
+  \begin{itemize}
+    \item Continuous fuzzing, adversarial testing, and chaos experiments for the consensus and networking stack.
+    \item Operational playbooks for key rotation, signer migration, and node recovery.
+    \item Formalization of safety invariants around the DAG--consensus coupling and monetary controller.
+  \end{itemize}
+  \item Crypto-agility foundation:
+  \begin{itemize}
+    \item Definition of backup signature and KEM suites at the protocol level, with reserved suite identifiers and encoding rules.
+    \item On-chain representation of suite choices and governance-controlled upgrade envelopes.
+    \item Initial design for multi-suite negotiation at the P2P layer, even if only one suite is enabled by default in v0.
+  \end{itemize}
+  \item Zero-knowledge and L2 groundwork:
+  \begin{itemize}
+    \item Integration of classical proof verifiers (e.g., STARK-style systems) as optional, non-consensus-critical components for rollups and L2s.
+    \item Prototyping of an L2 testnet that settles on QBIND but does not yet require PQ-friendly proofs.
+  \end{itemize}
+\end{itemize}
+
+\subsection{Medium-Term Milestones (2--5 Years)}
+As the base layer stabilizes, the 2--5 year horizon focuses on deepening crypto-agility, improving hardware utilization, and expanding the ecosystem around L2s and bridges.
+
+Representative medium-term milestones include:
+
+\begin{itemize}
+  \item Cryptographic migrations and diversity:
+  \begin{itemize}
+    \item Evaluation and, if warranted, activation of additional post-quantum signature or KEM suites as backups.
+    \item Operational experience with running multiple suites in parallel for different key roles (e.g., consensus versus governance).
+    \item Incremental tightening of parameters or suite preferences as standards and best practices evolve.
+  \end{itemize}
+  \item PQ-aware zero-knowledge and rollups:
+  \begin{itemize}
+    \item Research and prototyping of proof systems that are post-quantum friendly, such as hash-based or STARK-like constructions with conservative assumptions.
+    \item Definition of an L2 interface that explicitly distinguishes between classical and PQ-friendly proof options.
+    \item Migration paths for rollups that initially launch with classical proofs to move towards PQ-friendly systems over time.
+  \end{itemize}
+  \item Hardware acceleration and HSM integration:
+  \begin{itemize}
+    \item Evaluation of GPUs, FPGAs, and dedicated accelerators for ML-DSA-44 verification and ML-KEM-768 operations.
+    \item Standardization of HSM interfaces for QBIND validators, including certification requirements for mainnet use.
+    \item Performance tuning to maintain target throughput and latency as validator hardware profiles evolve.
+  \end{itemize}
+  \item Transport and networking improvements:
+  \begin{itemize}
+    \item Migration towards standardized KEMTLS profiles as they solidify in the broader ecosystem.
+    \item Evaluation and potential adoption of transports such as QUIC, provided they can be integrated without weakening the adversary model.
+    \item Ongoing work on anti-eclipse measures, peer scoring, and DDoS resilience.
+  \end{itemize}
+\end{itemize}
+
+\subsection{Long-Horizon Research Directions (5+ Years)}
+The 5+ year horizon is inherently uncertain. The goal for QBIND is not to predict a single future design, but to keep the base layer modular enough that it can incorporate new cryptographic and systems results without breaking safety or fragmenting the validator set.
+
+Long-horizon research directions include:
+
+\begin{itemize}
+  \item Next-generation post-quantum primitives:
+  \begin{itemize}
+    \item Monitoring advances in lattice, code-based, and hash-based signatures and KEMs, including potential post-standardization cryptanalysis.
+    \item Evaluating candidates that significantly reduce key and signature sizes or improve verification speed without sacrificing security margins.
+    \item Defining criteria for when a new primitive is mature enough to be considered for inclusion as a backup or replacement suite.
+  \end{itemize}
+  \item Fully PQ-secure rollup and L2 stacks:
+  \begin{itemize}
+    \item Designing rollup architectures whose data availability, state commitments, and proofs all rest on post-quantum assumptions.
+    \item Exploring hybrid designs where only the highest-value state paths move to PQ-friendly proofs initially, while lower-risk components remain classical.
+    \item Building migration paths from classical L2s to fully PQ-aware stacks without disrupting users or fragmenting liquidity.
+  \end{itemize}
+  \item Hardware-assisted validation tiers:
+  \begin{itemize}
+    \item Investigating whether optional hardware-assisted validators (for example, with PQC accelerators) can increase throughput without excluding operators that use commodity hardware.
+    \item Designing protocol hooks that allow such accelerators to be used safely, without introducing new single points of failure or trust.
+  \end{itemize}
+  \item Long-term cryptographic agility:
+  \begin{itemize}
+    \item Refining the governance and suite-rotation mechanisms in response to real-world experience.
+    \item Ensuring that suite changes can be executed with clear, auditable processes and minimal downtime.
+  \end{itemize}
+\end{itemize}
+
+\subsection{Open Problems and Non-Commitments}
+The roadmap is explicitly \emph{not a guarantee}. Many of the milestones described above depend on external factors: the maturity of post-quantum standards, the availability of suitable hardware, the evolution of zero-knowledge systems, and the broader economic environment.
+
+Several open problems remain:
+
+\begin{itemize}
+  \item Quantifying long-horizon security: Translating cryptographic parameter choices and hardware trends into concrete statements about expected attack costs over decades.
+  \item Balancing performance and decentralization: Ensuring that PQC overheads and potential hardware accelerators do not push the validator set towards centralization.
+  \item Coordinating ecosystem-wide migrations: Managing the transition from classical to PQ-friendly proofs for L2s, bridges, and external systems that may not be under the protocol's direct control.
+\end{itemize}
+
+QBIND's design philosophy is to prepare the base layer for these challenges by making post-quantum security and cryptographic agility non-negotiable requirements. The exact sequence and timing of roadmap items will be determined by research outcomes, community input, and governance decisions, not by fixed promises embedded in this document.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.9\textwidth]{figures/qbind-roadmap-timeline.pdf}
+  \caption{Roadmap timeline summary across 0--2, 2--5, and 5+ year horizons.}
+  \label{fig:qbind-roadmap-timeline}
+\end{figure}
+
+\section{Risks, Assumptions, and Upgrade Process}
+
+\subsection{Cryptographic and Protocol Risks}
+No cryptographic design can eliminate risk. QBIND's choice to adopt NIST-standardized post-quantum primitives from the outset reduces exposure to known classical failures, but introduces its own set of uncertainties.
+
+Key cryptographic and protocol risks include:
+
+\begin{itemize}
+  \item Residual uncertainty in post-quantum schemes: The security of ML-DSA-44 and ML-KEM-768 ultimately depends on the hardness of underlying lattice problems and on the maturity of implementations. Future cryptanalysis could tighten parameters or reveal new attack vectors.
+  \item Implementation defects: Correctness bugs in the cryptographic libraries, key management interfaces, or protocol encodings can undermine security even if the underlying primitives remain sound.
+  \item Design mistakes in coupling logic: The safety of the DAG--consensus coupling relies on correctly enforcing invariants around batch certificates and quorum sizes. Flaws in these invariants, or in their implementation, could allow data-withholding or double-commit behaviors that the protocol is intended to prevent.
+  \item Governance and suite-rotation errors: The crypto-agility mechanisms that allow the system to migrate to new suites are themselves attack surfaces. Misconfigured suite transitions or ambiguous encodings could split the validator set or weaken security temporarily.
+\end{itemize}
+
+The protocol is designed to make these risks explicit rather than hiding them. Suite identifiers, domain separation, and on-chain representation of algorithm choices are all intended to ensure that migrations can be reasoned about and audited. However, there is no guarantee that future cryptographic developments will align neatly with today's design choices.
+
+\subsection{Economic and Operational Risks}
+QBIND's monetary and operational design is intended to fund a post-quantum validator set over decades, but it is subject to economic and human factors that cannot be fully controlled.
+
+Relevant risks include:
+
+\begin{itemize}
+  \item Misestimation of security budgets: The inflation controller targets a security budget expressed as a percentage of total supply, but this must ultimately map to real-world hardware, energy, and operational costs. If those costs rise faster than anticipated, yields may be insufficient to attract and retain a diverse validator set.
+  \item Demand volatility: Transaction fee revenue can vary widely over time. Prolonged periods of low usage may force the protocol to rely primarily on inflation, increasing dilution. Conversely, periods of extreme demand may stress fee mechanisms and lead to unpredictable user costs.
+  \item Centralization pressure: PQC overheads and potential hardware acceleration may push operators towards specialized setups or data centers. If left unchecked, this can concentrate stake and operational control in a small number of entities.
+  \item Operational mistakes: Misconfigured signers, poor key hygiene, and inadequate monitoring can lead to outages, slashing events, or security incidents that are not caused by the protocol itself but still affect users and the broader ecosystem.
+\end{itemize}
+
+The economic parameters and operational guidelines in this document are based on a \emph{best-effort} assessment of today's conditions. They are expected to be revisited as hardware, markets, and usage patterns evolve.
+
+\subsection{Assumptions Revisited}
+Earlier sections outlined explicit assumptions about the network, adversary capabilities, and non-goals. From a risk-management perspective, the most important assumptions are:
+
+\begin{itemize}
+  \item Network model: The protocol assumes partial synchrony and that an adversary cannot indefinitely partition all honest validators. Long-lived, global partitions are \emph{out of scope}; if they occur, any BFT protocol can be forced into liveness failures.
+  \item Byzantine bound: Safety proofs rely on at most f < N/3 validators behaving arbitrarily. If a larger fraction of stake is compromised or colluding, the protocol cannot guarantee safety.
+  \item Cryptographic hardness: The security of signatures, KEMs, hash functions, and AEADs depends on standard hardness assumptions and conservative parameter choices. If these assumptions fail, the protocol must rely on its upgrade mechanisms to react.
+  \item Endpoint and application security: Wallets, dApps, and off-chain infrastructure are assumed to be fallible and potentially compromised. The base layer provides verifiable state and settlement, but does not shield users from endpoint attacks or application-level bugs.
+\end{itemize}
+
+These assumptions are not unique to QBIND, but they define the boundary between what the base layer is responsible for and what must be handled at higher layers or by operational practices. Violations of these assumptions are expected to result in degraded safety or liveness.
+
+\subsection{Upgrade and Incident Response Process}
+Because long-horizon security cannot be guaranteed, the upgrade and incident response process is an essential part of the design.
+
+At a high level, the process operates in three stages:
+
+\begin{itemize}
+  \item Detection and assessment:
+  \begin{itemize}
+    \item Identify the issue: cryptographic vulnerability, protocol bug, economic misconfiguration, or operational pattern that threatens safety, liveness, or decentralization.
+    \item Triage impact: which components are affected (e.g., a specific suite, a specific client implementation, or a configuration parameter), and on what timescale action is required.
+    \item Publish a technical analysis to the community where appropriate, balancing transparency against the risk of amplifying exploitability.
+  \end{itemize}
+  \item Upgrade envelope preparation:
+  \begin{itemize}
+    \item The protocol governance bodies (for example, a council or foundation) prepare an upgrade envelope that specifies:
+    \begin{itemize}
+      \item The protocol version and affected components.
+      \item The precise changes (new suite identifiers, parameter updates, bug fixes).
+      \item An activation height or epoch and any necessary migration steps.
+      \item References to code commits and reproducible build artifacts.
+    \end{itemize}
+    \item The envelope is signed with ML-DSA-44 governance keys and made available for verification by node operators and the broader community.
+  \end{itemize}
+  \item Operator rollout and coordination:
+  \begin{itemize}
+    \item Node operators verify the envelope signatures, inspect the proposed changes, and update their clients accordingly.
+    \item Upgrades are coordinated to avoid unnecessary chain splits, with clear guidance on timing and rollback procedures if unexpected behavior is observed.
+    \item In severe incidents, temporary safeguards---such as slowing block production, tightening slashing rules, or disabling specific features---may be activated by governance under predefined emergency procedures.
+  \end{itemize}
+\end{itemize}
+
+The intent is to treat upgrades as normal, auditable operations rather than ad hoc interventions. Crypto-agility and parameter governance only contribute to safety if the processes around them are clear enough that operators and users can understand and verify what is happening.
+
+\paragraph{Non-commitment notice.}
+This document describes the QBIND protocol as it is designed at the time of writing. It is not a legal, financial, or investment commitment, and it does not guarantee the future behavior of the protocol, its governance processes, or any associated organizations. All roadmap items, parameters, and processes are subject to change through the governance and upgrade mechanisms outlined above.
+
+\section{Conclusion}
+QBIND is designed as a Layer-1 that treats post-quantum security as a starting point, not an afterthought. The protocol is built around NIST-standardized post-quantum signatures and KEMs, a DAG-based data-availability layer coupled to a HotStuff-style BFT engine, and an economic model that explicitly prices the cost of running a post-quantum validator set over decades.
+
+Rather than optimizing for maximum short-term throughput, QBIND targets a performance regime that remains realistic once the overheads of post-quantum cryptography are included. The architecture separates networking, data availability, consensus, and execution, and defines clear invariants at each boundary. This separation is intended to make both formal reasoning and incremental evolution easier over the lifetime of the system.
+
+From a protocol-design perspective, the main properties that QBIND aims to provide are:
+
+\begin{itemize}
+  \item A base layer in which all consensus-critical signatures and key exchanges are post-quantum, with explicit suite identifiers and domain separation to support future migrations.
+  \item A data-availability and consensus stack that tolerates standard Byzantine faults under partial synchrony, and that resists data-withholding attacks through explicit batch certification.
+  \item A monetary policy and fee model that fund a diverse validator set and acknowledge the higher cost of post-quantum cryptography, while avoiding uncontrolled supply growth.
+  \item Governance and upgrade mechanisms that treat cryptographic agility and parameter changes as normal, auditable operations rather than exceptional events.
+\end{itemize}
+
+The design is intentionally conservative. It assumes that cryptographic standards, hardware capabilities, and application requirements will change over the next decade, and it focuses on keeping the base layer adaptable under those changes. The whitepaper does not claim that the current design is final; it describes a protocol that is meant to evolve, with post-quantum security and long-horizon robustness as its non-negotiable constraints.
+
+\end{document}
