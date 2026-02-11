@@ -1,5 +1,5 @@
 # QBIND Whitepaper
-Version: Draft v2 (Code-Mapped)
+Version: Draft v3 (Full Technical Baseline)
 Status: Technical Specification (No Tokenomics)
 
 ---
@@ -958,3 +958,30 @@ QBIND prioritizes:
 - Formal review before activation
 
 Long-term viability depends on disciplined upgrade control.
+
+---
+
+# 15. Conclusion
+
+QBIND is a post-quantum-secure Layer-1 blockchain designed with explicit safety invariants, deterministic execution, and cryptographic agility as foundational principles.
+
+The system integrates:
+
+- A KEM-based secure networking layer
+- A HotStuff-style BFT consensus protocol
+- Deterministic account-based execution
+- Strict nonce and replay protections
+- Governance-controlled upgrade activation
+- Explicit adversarial modeling
+
+Known gaps are documented transparently and treated as roadmap items rather than implicit guarantees.
+
+QBIND prioritizes:
+
+- Safety over speculative throughput
+- Upgrade discipline over silent transitions
+- Cryptographic resilience over short-term optimization
+
+The long-term viability of QBIND depends on continued cryptographic review, rigorous adversarial testing, and conservative protocol evolution.
+
+This document reflects the current implemented architecture and serves as a technical specification baseline for further development, audit, and deployment.
