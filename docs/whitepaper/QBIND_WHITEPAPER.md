@@ -139,3 +139,41 @@ Handshake transcript binding ensures session keys depend on both parties' contri
 - Slashing penalties are partially implemented; enforcement expansion is planned.
 
 These are tracked roadmap items, not assumed guarantees.
+
+---
+
+# 7. Node Internal Architecture and Execution Flow
+
+This section formalizes the internal runtime structure of a QBIND validator node based on the implemented codebase.
+
+---
+
+## 7.1 Async Runtime Model
+
+QBIND uses a multi-threaded Tokio runtime initialized via:
+
+    #[tokio::main]
+    async fn main()
+
+The runtime spawns independent asynchronous services responsible for networking, consensus progression, execution, and observability.
+
+### Primary Services
+
+- P2P demultiplexer loop
+- Async consensus runner
+- Metrics HTTP server (optional)
+- Async execution worker
+- Secure channel read/write workers
+- Signature verification worker pool
+
+Service communication follows an event-driven architecture.
+
+### Communication Primitives
+
+1. Bounded mpsc Channels  
+   - Default capacity: 1024  
+   - Used for consensus events and P2P message routing  
+   - Provides built-in backpressure  
+
+2. Shared State with Locking  
+   - Mempool uses Arc
