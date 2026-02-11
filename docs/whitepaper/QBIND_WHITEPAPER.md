@@ -441,3 +441,124 @@ Cryptographic changes are treated as protocol events, not silent upgrades.
 - Expanded slashing for equivocation pending
 
 These are roadmap items.
+
+---
+
+# 10. Transaction and State Model
+
+QBIND uses an account-based state model with deterministic transaction execution.
+
+This section formalizes the transaction format, execution semantics, and state persistence guarantees.
+
+<img src="diagrams/tx-state-flow.svg" alt="QBIND Transaction and State Flow Diagram" />
+
+---
+
+## 10.1 Transaction Structure
+
+A transaction contains:
+
+- msg_type
+- version
+- chain_id
+- payer (account ID)
+- nonce
+- fee_limit
+- account list
+- program_id
+- call_data
+- authentication signatures
+
+The transaction format is deterministic and fully serialized prior to consensus inclusion.
+
+Replay protection is enforced via (payer, nonce).
+
+---
+
+## 10.2 Account Model
+
+Each account contains:
+
+- account_id (32 bytes)
+- owner (program identifier)
+- balance (lamports)
+- executable flag
+- rent_epoch
+- arbitrary data payload
+
+Accounts are modified only through program execution.
+
+State transitions are deterministic across validators.
+
+---
+
+## 10.3 Execution Model
+
+Transaction execution occurs only after block commit.
+
+Execution flow:
+
+1. Decode transactions from committed block
+2. Validate signatures and nonce
+3. Execute via runtime
+4. Apply state changes
+5. Remove committed transactions from mempool
+
+Execution is deterministic given identical input state.
+
+Optional EVM execution is supported via integration with the runtime engine.
+
+---
+
+## 10.4 Gas Accounting
+
+Each transaction specifies:
+
+- fee_limit
+- effective gas cost
+
+Execution fails if gas exceeds fee_limit.
+
+Gas prevents:
+
+- Infinite loops
+- Resource exhaustion
+- Denial-of-service via heavy computation
+
+MainNet enforces gas accounting strictly.
+
+---
+
+## 10.5 Persistence Guarantees
+
+Upon commit:
+
+1. State changes applied in memory
+2. Block persisted
+3. QC persisted
+4. last_committed updated
+
+Restart safety is guaranteed via durable RocksDB writes.
+
+Schema version mismatches prevent startup.
+
+---
+
+## 10.6 Determinism Requirements
+
+Consensus safety requires:
+
+- Identical transaction ordering within block
+- Deterministic execution engine
+- Deterministic gas metering
+- Deterministic serialization
+
+Non-deterministic execution would violate safety.
+
+---
+
+## 10.7 Known Gaps
+
+- Advanced state pruning not yet implemented
+- Full formal gas model documentation pending
+- Expanded slashing economics pending
