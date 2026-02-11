@@ -985,3 +985,229 @@ QBIND prioritizes:
 The long-term viability of QBIND depends on continued cryptographic review, rigorous adversarial testing, and conservative protocol evolution.
 
 This document reflects the current implemented architecture and serves as a technical specification baseline for further development, audit, and deployment.
+
+---
+
+# 16. Formal State Transition Model
+
+This section defines QBIND's consensus-critical global state and the deterministic state transition rules applied at commit.
+
+QBIND's state is modeled as a tuple. Some components are persisted (durable) and others are in-memory only (runtime), but both can be consensus-relevant.
+
+---
+
+## 16.1 Global State Tuple
+
+Define the global protocol state **S** as:
+
+```
+S = (
+    Accounts,           // Map<AccountId, Account>
+    Nonces,             // Map<AccountId, u64>
+    ValidatorSet,       // Set<ValidatorSetEntry>
+    Epoch,              // EpochId (u64)
+    SuiteRegistry,      // SuiteRegistry
+    ParamRegistry,      // ParamRegistry
+    MonetaryState,      // MonetaryEpochState
+    SlashingState,      // Map<ValidatorId, ValidatorSlashingState>
+    KeyRotationState,   // KeyRotationRegistry
+
+    // Consensus-specific
+    LockedQC,           // Option<QuorumCertificate>
+    LockedHeight,       // u64
+    LastCommittedBlock, // Option<BlockId>
+    CommittedHeight,    // u64
+
+    // View state
+    CurrentView,        // u64
+    LastVoted,          // Option<(Height, Round, BlockId)>
+
+    // Persistence markers
+    SchemaVersion       // u32
+)
+```
+
+---
+
+## 16.2 Durable vs Runtime State
+
+| Component | Persistence | Consensus-Critical | Location |
+|-----------|-------------|-------------------|----------|
+| Accounts | Durable | ✅ Yes | RocksDB `acct:<id>` |
+| Nonces | Durable | ✅ Yes | RocksDB `nonce:<id>` |
+| ValidatorSet | Runtime | ✅ Yes | Loaded from genesis/config; updated at epoch boundaries |
+| Epoch | Durable | ✅ Yes | RocksDB `meta:current_epoch` |
+| SuiteRegistry | Durable | ✅ Yes | Account data |
+| ParamRegistry | Durable | ✅ Yes | Account data |
+| MonetaryState | Mixed | ✅ Yes | Account data / in-memory |
+| SlashingState | Runtime | ✅ Yes | In-memory (T230) |
+| KeyRotationState | Runtime | ✅ Yes | In-memory until epoch advance |
+| LockedQC | Runtime | ✅ Yes | Reconstructed from last committed |
+| LockedHeight | Runtime | ✅ Yes | Derived from LockedQC |
+| LastCommittedBlock | Durable | ✅ Yes | RocksDB `meta:last_committed` |
+| CommittedHeight | Runtime | ✅ Yes | Derived from last committed |
+| CurrentView | Runtime | ⚠️ Liveness | Pacemaker state |
+| LastVoted | Runtime | ✅ Yes | Double-vote prevention |
+| SchemaVersion | Durable | ⚠️ Startup | RocksDB `meta:schema_version` |
+
+---
+
+## 16.3 State Transition Function
+
+The global state transition function is defined as:
+
+```
+δ: S × Input → S' × Output
+```
+
+Where **Input** is one of:
+
+- `Transaction(tx)` — User transaction execution
+- `BlockCommit(block, qc)` — Finalization of a committed block
+- `EpochBoundary(new_epoch)` — Epoch transition event
+- `UpgradeActivation(upgrade)` — Governance-approved protocol upgrade
+- `SlashingEvidence(evidence)` — Byzantine behavior evidence
+- `ViewChange(new_view)` — Consensus view advancement
+
+And **Output** captures:
+
+- State mutation records
+- Emitted events
+- Error conditions
+
+---
+
+## 16.4 State Mutation Rules
+
+### 16.4.1 Transaction Execution
+
+Upon transaction `tx` applied to state `S`:
+
+1. Verify `tx.nonce == Nonces[tx.payer]`
+2. Verify `Accounts[tx.payer].balance >= tx.fee_limit`
+3. Execute via runtime
+4. Deduct gas from payer balance
+5. Apply account mutations
+6. Increment `Nonces[tx.payer]`
+
+Execution is deterministic given identical input state.
+
+### 16.4.2 Block Commit
+
+Upon committing block `B` with quorum certificate `QC`:
+
+```
+S' = S with:
+    LastCommittedBlock := B.id
+    CommittedHeight := B.height
+    Accounts := apply_transactions(S.Accounts, B.transactions)
+    Nonces := increment_nonces(S.Nonces, B.transactions)
+    LockedQC := QC  (if QC.height > S.LockedHeight)
+    LockedHeight := max(S.LockedHeight, QC.height)
+```
+
+Persistence order:
+
+1. Persist block at `b:<block_id>`
+2. Persist QC at `q:<block_id>`
+3. Update `meta:last_committed`
+
+### 16.4.3 Epoch Transition
+
+Upon epoch boundary from epoch `e` to `e + 1`:
+
+```
+S' = S with:
+    Epoch := e + 1
+    ValidatorSet := compute_next_validator_set(S)
+    MonetaryState := compute_monetary_epoch(S, e + 1)
+    KeyRotationState := advance_key_rotations(S.KeyRotationState, e + 1)
+    SlashingState := process_unjails(S.SlashingState, e + 1)
+```
+
+Epoch is persisted to storage before in-memory state is updated.
+
+### 16.4.4 Slashing Evidence
+
+Upon valid slashing evidence `E` for validator `V`:
+
+```
+S' = S with:
+    SlashingState[V].offense_count := S.SlashingState[V].offense_count + 1
+    SlashingState[V].jailed := true  (if penalty threshold exceeded)
+```
+
+Note: Actual stake burning is deferred to T229+ implementation.
+
+---
+
+## 16.5 Commit Procedure
+
+The commit procedure ensures atomicity and crash safety:
+
+1. **Pre-commit validation**
+   - Verify 3-chain rule satisfied
+   - Verify QC has sufficient voting power
+
+2. **Durable writes (atomic batch)**
+   - Write block to `b:<block_id>`
+   - Write QC to `q:<block_id>`
+   - Update `meta:last_committed`
+
+3. **In-memory state update**
+   - Update LockedQC, LockedHeight
+   - Apply account mutations
+   - Update nonces
+
+4. **Post-commit cleanup**
+   - Remove committed transactions from mempool
+   - Emit commit notification
+
+Writes 1-3 MUST complete before in-memory updates proceed.
+
+---
+
+## 16.6 Determinism Requirements
+
+Consensus safety requires all validators to compute identical state from identical input.
+
+| Requirement | Enforcement |
+|-------------|-------------|
+| Transaction ordering | Block defines canonical order |
+| Execution semantics | Deterministic runtime |
+| Gas metering | Fixed cost model |
+| Serialization | Canonical wire format |
+| Floating-point | Prohibited in consensus path |
+| Time-dependent logic | Uses block height/epoch, not wall-clock |
+
+Non-deterministic execution violates safety and would cause chain forks.
+
+---
+
+## 16.7 Crash Recovery Model
+
+Upon restart, state is recovered as follows:
+
+| State Component | Recovery Method |
+|-----------------|-----------------|
+| LastCommittedBlock | Read `meta:last_committed` |
+| Epoch | Read `meta:current_epoch` |
+| LockedQC | Reconstruct from committed chain |
+| LockedHeight | Derive from LockedQC |
+| CurrentView | Start from committed view + 1 |
+| LastVoted | Reset (conservative: may re-vote) |
+| Mempool | Empty (clients resubmit) |
+| SlashingState | Lost (T230 limitation) |
+
+Recovery invariant: A restarted node MUST NOT commit a block that conflicts with its pre-crash commits.
+
+---
+
+## 16.8 Known Limitations
+
+- Slashing state is in-memory only; evidence lost on restart (T230)
+- Vote history subject to memory eviction
+- Key rotation state not persisted until epoch advance
+- Epoch transition has narrow crash-vulnerability window: a crash between epoch key persistence and in-memory update may cause inconsistent state
+
+These are tracked as roadmap items.
