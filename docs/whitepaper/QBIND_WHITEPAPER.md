@@ -1035,7 +1035,7 @@ S = (
 |-----------|-------------|-------------------|----------|
 | Accounts | Durable | ✅ Yes | RocksDB `acct:<id>` |
 | Nonces | Durable | ✅ Yes | RocksDB `nonce:<id>` |
-| ValidatorSet | Runtime* | ✅ Yes | Loaded from genesis/config |
+| ValidatorSet | Runtime | ✅ Yes | Loaded from genesis/config; updated at epoch boundaries |
 | Epoch | Durable | ✅ Yes | RocksDB `meta:current_epoch` |
 | SuiteRegistry | Durable | ✅ Yes | Account data |
 | ParamRegistry | Durable | ✅ Yes | Account data |
@@ -1049,8 +1049,6 @@ S = (
 | CurrentView | Runtime | ⚠️ Liveness | Pacemaker state |
 | LastVoted | Runtime | ✅ Yes | Double-vote prevention |
 | SchemaVersion | Durable | ⚠️ Startup | RocksDB `meta:schema_version` |
-
-*ValidatorSet is loaded at startup but may be updated at epoch boundaries.
 
 ---
 
@@ -1210,6 +1208,6 @@ Recovery invariant: A restarted node MUST NOT commit a block that conflicts with
 - Slashing state is in-memory only; evidence lost on restart (T230)
 - Vote history subject to memory eviction
 - Key rotation state not persisted until epoch advance
-- Epoch transition has narrow crash-vulnerability window
+- Epoch transition has narrow crash-vulnerability window: a crash between epoch key persistence and in-memory update may cause inconsistent state
 
 These are tracked as roadmap items.
