@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <style>
+      .title { font: bold 18px sans-serif; fill: #333; }
+      .box-text { font: 12px sans-serif; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .box-text-bold { font: bold 12px sans-serif; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .arrow-label { font: 10px sans-serif; fill: #555; text-anchor: middle; }
+      .note { font: italic 10px sans-serif; fill: #666; text-anchor: middle; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="800" height="500" fill="#ffffff"/>
+  
+  <!-- Title -->
+  <text x="400" y="30" class="title" text-anchor="middle">QBIND Cryptographic Roles</text>
+  
+  <!-- Center: Validator Node -->
+  <rect x="300" y="160" width="200" height="80" rx="10" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="400" y="195" class="box-text-bold">Validator Node</text>
+  <text x="400" y="215" class="box-text">(Core Process)</text>
+  
+  <!-- Left Side Keys -->
+  <!-- Signing Key -->
+  <rect x="60" y="130" width="160" height="50" rx="8" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="140" y="155" class="box-text-bold">Signing Key</text>
+  
+  <!-- Network KEM Key -->
+  <rect x="60" y="210" width="160" height="50" rx="8" fill="#fff3e0" stroke="#f57c00" stroke-width="2"/>
+  <text x="140" y="235" class="box-text-bold">Network KEM Key</text>
+  
+  <!-- Right Side Components -->
+  <!-- Remote Signer -->
+  <rect x="580" y="130" width="160" height="50" rx="8" fill="#f3e5f5" stroke="#7b1fa2" stroke-width="2"/>
+  <text x="660" y="150" class="box-text-bold">Remote Signer</text>
+  <text x="660" y="165" class="note">(optional)</text>
+  
+  <!-- Governance Envelope Tool -->
+  <rect x="580" y="210" width="160" height="50" rx="8" fill="#fce4ec" stroke="#c2185b" stroke-width="2"/>
+  <text x="660" y="230" class="box-text-bold">Governance</text>
+  <text x="660" y="245" class="box-text">Envelope Tool</text>
+  
+  <!-- Bottom: Session AEAD Keys -->
+  <rect x="275" y="380" width="250" height="50" rx="8" fill="#fff9c4" stroke="#fbc02d" stroke-width="2"/>
+  <text x="400" y="400" class="box-text-bold">Session AEAD Keys</text>
+  <text x="400" y="418" class="note">(derived per connection)</text>
+  
+  <!-- Arrows: Left to Center -->
+  <line x1="220" y1="155" x2="295" y2="185" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="220" y1="235" x2="295" y2="210" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Arrows: Center to Right -->
+  <line x1="505" y1="185" x2="575" y2="155" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  <line x1="505" y1="210" x2="575" y2="235" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+  
+  <!-- Arrow: Center to Bottom (Handshake → Derive → Session Keys) -->
+  <path d="M 400 240 L 400 375" stroke="#666" stroke-width="1.5" marker-end="url(#arrowhead)" fill="none"/>
+  <text x="400" y="290" class="arrow-label">Handshake</text>
+  <text x="400" y="305" class="arrow-label">↓</text>
+  <text x="400" y="320" class="arrow-label">Derive</text>
+  
+  <!-- Flow Labels - Consensus signing -->
+  <text x="140" y="100" class="arrow-label">Consensus</text>
+  <text x="140" y="115" class="arrow-label">↓ Sign ↓</text>
+  <path d="M 140 270 L 140 290 L 250 290" stroke="#666" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arrowhead)" fill="none"/>
+  <text x="195" y="283" class="arrow-label">Vote</text>
+  
+  <!-- Flow Labels - Governance signing -->
+  <text x="660" y="100" class="arrow-label">Governance</text>
+  <text x="660" y="115" class="arrow-label">↓ Sign ↓</text>
+  <path d="M 660 270 L 660 290 L 550 290" stroke="#666" stroke-width="1.5" stroke-dasharray="4,2" marker-end="url(#arrowhead)" fill="none"/>
+  <text x="605" y="283" class="arrow-label">Upgrade Envelope</text>
+  
+  <!-- Legend -->
+  <text x="400" y="470" class="note">Key role separation prevents cross-layer compromise propagation</text>
+</svg>
