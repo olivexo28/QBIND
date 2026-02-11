@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 280" width="700" height="280">
+  <defs>
+    <style>
+      .title { font: bold 16px sans-serif; fill: #333; }
+      .block-label { font: bold 14px monospace; fill: #333; text-anchor: middle; dominant-baseline: middle; }
+      .qc-label { font: 12px monospace; fill: #666; text-anchor: middle; }
+      .annotation { font: italic 11px sans-serif; fill: #555; text-anchor: middle; }
+      .commit-note { font: bold 12px sans-serif; fill: #2e7d32; text-anchor: middle; }
+      .sig-note { font: 10px sans-serif; fill: #888; text-anchor: middle; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#666"/>
+    </marker>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="700" height="280" fill="#ffffff"/>
+  
+  <!-- Title -->
+  <text x="350" y="25" class="title" text-anchor="middle">HotStuff 3-Chain Commit Rule</text>
+  
+  <!-- QC labels above blocks -->
+  <text x="120" y="70" class="qc-label">QC₀</text>
+  <text x="265" y="70" class="qc-label">QC₁</text>
+  <text x="410" y="70" class="qc-label">QC₂</text>
+  <text x="555" y="70" class="qc-label">QC₃</text>
+  
+  <!-- QC to Block arrows -->
+  <line x1="120" y1="78" x2="120" y2="100" stroke="#999" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="265" y1="78" x2="265" y2="100" stroke="#999" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="410" y1="78" x2="410" y2="100" stroke="#999" stroke-width="1" stroke-dasharray="3,2"/>
+  <line x1="555" y1="78" x2="555" y2="100" stroke="#999" stroke-width="1" stroke-dasharray="3,2"/>
+  
+  <!-- Blocks -->
+  <!-- B0 - Committed block (green highlight) -->
+  <rect x="70" y="100" width="100" height="60" rx="6" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="120" y="130" class="block-label">B₀</text>
+  
+  <!-- B1 -->
+  <rect x="215" y="100" width="100" height="60" rx="6" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="265" y="130" class="block-label">B₁</text>
+  
+  <!-- B2 -->
+  <rect x="360" y="100" width="100" height="60" rx="6" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="410" y="130" class="block-label">B₂</text>
+  
+  <!-- B3 -->
+  <rect x="505" y="100" width="100" height="60" rx="6" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
+  <text x="555" y="130" class="block-label">B₃</text>
+  
+  <!-- Chain arrows between blocks -->
+  <line x1="170" y1="130" x2="210" y2="130" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="315" y1="130" x2="355" y2="130" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="460" y1="130" x2="500" y2="130" stroke="#666" stroke-width="2" marker-end="url(#arrow)"/>
+  
+  <!-- Commit annotation -->
+  <text x="350" y="195" class="commit-note">Commit B₀ when QC₃ observed</text>
+  
+  <!-- Signature annotation -->
+  <text x="350" y="225" class="sig-note">2f + 1 signatures per QC</text>
+  
+  <!-- 3-chain bracket -->
+  <path d="M 120 168 L 120 180 L 555 180 L 555 168" stroke="#888" stroke-width="1.5" fill="none"/>
+  <text x="337" y="250" class="annotation">3-chain: consecutive QC linkage guarantees finality</text>
+</svg>
