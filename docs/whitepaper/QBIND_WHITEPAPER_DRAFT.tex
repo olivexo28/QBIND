@@ -1,0 +1,191 @@
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,calc}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+
+% Color scheme
+\definecolor{qbindblue}{RGB}{0,102,204}
+\definecolor{qbindgray}{RGB}{64,64,64}
+\definecolor{codegreen}{RGB}{0,128,0}
+\definecolor{codegray}{RGB}{128,128,128}
+\definecolor{codepurple}{RGB}{128,0,128}
+
+% Hyperref setup
+\hypersetup{
+    colorlinks=true,
+    linkcolor=qbindblue,
+    filecolor=qbindblue,
+    urlcolor=qbindblue,
+    citecolor=qbindblue,
+    pdftitle={QBIND: A Post-Quantum Layer-1 for Long-Horizon Security},
+    pdfauthor={QBIND Protocol Team},
+}
+
+% Code listing style
+\lstdefinestyle{qbindcode}{
+    backgroundcolor=\color{gray!10},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{qbindblue}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{gray!30}
+}
+\lstset{style=qbindcode}
+
+% Header and footer
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textcolor{qbindgray}{\textit{QBIND Whitepaper}}}
+\fancyhead[R]{\textcolor{qbindgray}{\thepage}}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Title formatting
+\titleformat{\section}
+  {\color{qbindblue}\Large\bfseries}
+  {\thesection}{1em}{}
+
+\titleformat{\subsection}
+  {\color{qbindblue}\large\bfseries}
+  {\thesubsection}{1em}{}
+
+% Document metadata
+\title{
+    \vspace{-2cm}
+    \Huge\textbf{\textcolor{qbindblue}{QBIND}}\\[0.5em]
+    \Large A Post-Quantum Layer-1 for Long-Horizon Security\\[1em]
+    \large\textit{Technical Whitepaper}\\[0.5em]
+    \normalsize Version 0.1.0-draft
+}
+\author{QBIND Protocol Team}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\vspace{2em}
+
+% ABSTRACT
+\begin{abstract}
+\noindent
+QBIND is a Layer-1 blockchain designed to remain secure in a world where classical cryptography is no longer trustworthy. The protocol is built from the ground up on NIST-standardized post-quantum primitives (ML-DSA-44 signatures and ML-KEM-768 key encapsulation), coupled with a DAG-based data availability layer and HotStuff-style BFT consensus. All validator networking is secured with KEMTLS-style channels, and the economic design explicitly funds the higher cost of post-quantum cryptography while preserving long-term flexibility through on-chain governance and cryptographic agility.
+\end{abstract}
+
+\vspace{1em}
+\noindent\textbf{Keywords:} Post-Quantum Cryptography, ML-DSA-44, ML-KEM-768, KEMTLS, HotStuff BFT, DAG Data Availability, Blockchain, Layer-1
+
+\vspace{2em}
+
+\tableofcontents
+\newpage
+
+% SECTION 1: INTRODUCTION
+\section{Introduction}
+
+\subsection{What QBIND Solves}
+
+Classical proof-of-stake chains rely on cryptographic assumptions (ECDSA, Ed25519, pairing-based SNARKs) that are known to break under sufficiently powerful quantum adversaries. This creates a \textbf{long-horizon risk}: the historical ledger, validator keys, and rollup proofs can all become retroactively forgeable. QBIND removes this dependency at the base layer.
+
+Every consensus-critical operation—validator signatures, batch certificates, P2P transport, governance envelopes—is built on post-quantum primitives, and the protocol is engineered so these primitives can be rotated or upgraded if future cryptanalysis demands it.
+
+\subsection{High-Level Architecture}
+
+At a high level, QBIND combines:
+
+\subsubsection{Post-Quantum Cryptography as a Hard Requirement}
+
+\begin{itemize}
+    \item \textbf{ML-DSA-44 signatures} for transactions, consensus votes, batch certificates, and governance.
+    \item \textbf{ML-KEM-768} for KEMTLS-style validator transport, with HKDF-derived session keys and AEAD-secured streams (ChaCha20-Poly1305).
+\end{itemize}
+
+\subsubsection{DAG-Based Data Availability + HotStuff BFT}
+
+\begin{itemize}
+    \item Validators form transaction batches, exchange ML-DSA-44-signed acknowledgements, and produce \textbf{batch certificates} once $2f+1$ validators have the data.
+    \item HotStuff consensus operates on certified DAG frontiers—the set of certified batches not yet committed—ensuring that every block references only data for which a Byzantine-resistant quorum of validators have issued signed acknowledgments.
+    \item This coupling prevents data-withholding attacks and ensures committed blocks are provably available.
+\end{itemize}
+
+\subsubsection{Execution and State with Explicit PQC Cost Modeling}
+
+\begin{itemize}
+    \item A \textbf{VM v0 transfer engine} plus parallel execution path, with state persisted in RocksDB and protected by deterministic test harnesses.
+    \item A \textbf{monetary engine} that adjusts inflation targets for PQC's higher compute, bandwidth, and storage costs, and gradually shifts security funding from inflation to fees as the network matures.
+    \item Gas accounting (T168) and fee distribution policies (T193) that burn fees while providing validator rewards.
+\end{itemize}
+
+\subsubsection{Governance and Upgrades with Cryptographic Accountability}
+
+\begin{itemize}
+    \item A \textbf{protocol council} signs upgrade envelopes with ML-DSA-44, specifying protocol versions, activation heights, and binary hashes (SHA3-256).
+    \item Node operators verify these envelopes using the \texttt{qbind-envelope verify} command, which validates M-of-N council signatures, binary authenticity, and activation parameters before coordinated deployment.
+    \item Clear separation between routine updates and hard-fork-class changes, with coordinated activation at specified block heights.
+\end{itemize}
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering\vspace{2cm}\textit{[Architecture Overview Diagram - To be added]}\vspace{2cm}}}
+\caption{QBIND High-Level Architecture: Layers and Post-Quantum Primitives}
+\label{fig:architecture}
+\end{figure}
+
+\newpage
+
+\section{[Page 2 Content - Awaiting Input]}
+
+\textit{This section will be populated once Page 2 content is provided.}
+
+\newpage
+
+\appendix
+\section{Implementation References}
+
+\subsection{Codebase Structure}
+\begin{itemize}
+    \item \textbf{ML-DSA-44 Implementation:} \texttt{crates/qbind-crypto/src/ml
+dsa44.rs}
+    \item \textbf{ML-KEM-768 Implementation:} \texttt{crates/qbind-crypto/src/ml
+t
+d1000top8n6s0(English)\_kem768.rs}
+    \item \textbf{KEMTLS Handshake:} \texttt{crates/qbind-net/tests/t135\_ml\_kem\_768\_kemtls\_tests.rs}
+    \item \textbf{DAG Mempool:} \texttt{crates/qbind-node/src/dag\_mempool.rs}
+    \item \textbf{HotStuff Consensus:} \texttt{crates/qbind-consensus/}
+    \item \textbf{VM v0 Execution:} \texttt{crates/qbind-ledger/src/execution.rs}
+    \item \textbf{Governance Envelopes:} \texttt{crates/qbind-gov/src/envelope.rs}
+\end{itemize}
+
+\subsection{Design Documents}
+\begin{itemize}
+    \item DAG-Consensus Coupling: \texttt{docs/mainnet/QBIND\_DAG\_CONSENSUS\_COUPLING\_DESIGN.md}
+    \item Governance \& Upgrades: \texttt{docs/gov/QBIND\_GOVERNANCE\_AND\_UPGRADES\_DESIGN.md}
+    \item MainNet v0 Specification: \texttt{docs/mainnet/QBIND\_MAINNET\_V0\_SPEC.md}
+\end{itemize}
+
+\end{document}
