@@ -178,4 +178,146 @@ Service communication follows an event-driven architecture.
    - Provides built-in backpressure  
 
 2. Shared State with Locking  
-   - Mempool uses Arc
+   - Mempool uses Arc<RwLock<...>> for concurrent access
+
+---
+
+# 8. Consensus Protocol Specification
+
+QBIND implements a HotStuff-style Byzantine Fault Tolerant (BFT) consensus protocol with deterministic leader rotation and quorum certificate formation.
+
+This section formalizes the protocol behavior as implemented.
+
+<img src="diagrams/hotstuff-3chain.svg" alt="HotStuff 3-Chain Commit Rule Diagram" />
+
+---
+
+## 8.1 System Model
+
+Let:
+
+- N = number of validators
+- f = maximum Byzantine validators tolerated
+- Quorum threshold = 2f + 1 voting power
+
+Assumption:
+N ≥ 3f + 1
+
+Validators communicate over authenticated channels established via the secure networking layer.
+
+---
+
+## 8.2 Leader Election
+
+Leader selection is deterministic:
+
+leader(view) = validators[ view mod N ]
+
+Each view has exactly one designated proposer.
+
+No VRF-based or stake-weighted randomness is currently implemented.
+
+---
+
+## 8.3 Proposal Structure
+
+A proposal contains:
+
+- block_id
+- parent block reference
+- transaction payload
+- justify QC (quorum certificate for previous block)
+
+The justify QC binds the proposal to a previously certified block.
+
+---
+
+## 8.4 Voting Rule
+
+A validator votes for proposal P in view v if:
+
+1. P.justify_qc.height ≥ locked_height
+2. P extends from the locked block
+3. The validator has not voted for another proposal at (height, view)
+
+Double-vote attempts are rejected.
+
+---
+
+## 8.5 Quorum Certificate (QC)
+
+A QC is formed when ≥ 2f + 1 validators sign the same block hash at the same height and view.
+
+QC structure:
+
+- block_id
+- height
+- view
+- aggregated signatures
+
+QC validation is required before advancing to the next view.
+
+---
+
+## 8.6 3-Chain Commit Rule
+
+QBIND follows a 3-chain commit rule:
+
+If blocks B₀ → B₁ → B₂ → B₃ form a chain of consecutive QCs:
+
+then B₀ becomes committed.
+
+Commit occurs when a QC is observed for the grandchild of a block.
+
+This guarantees safety under partial synchrony.
+
+---
+
+## 8.7 Locking Rule
+
+Each validator maintains a locked_height.
+
+Upon observing a QC at height h:
+
+locked_height := h
+
+Validators must not vote for proposals extending below locked_height.
+
+This prevents conflicting commits.
+
+---
+
+## 8.8 Safety Property (Informal)
+
+Under the assumption that at most f validators are Byzantine:
+
+No two honest validators will commit conflicting blocks.
+
+Reason:
+
+- 2f + 1 quorum intersection ensures at least f + 1 honest overlap
+- Lock rule prevents divergence
+- 3-chain commit rule ensures finality consistency
+
+---
+
+## 8.9 Liveness Assumptions
+
+Liveness requires:
+
+- Eventually synchronous network
+- Leader eventually honest
+- Timeout/view-change mechanism functioning
+
+Note:
+Timeout/view-change logic is partially implemented and marked as TODO in driver components. Liveness under prolonged asynchrony is therefore not fully guaranteed in the current implementation.
+
+---
+
+## 8.10 Known Consensus Gaps
+
+- Timeout and view-change logic incomplete
+- Slashing penalties infrastructure present but not fully enforced
+- Equivocation penalties deferred to future milestone
+
+These limitations are explicitly tracked as roadmap items.
