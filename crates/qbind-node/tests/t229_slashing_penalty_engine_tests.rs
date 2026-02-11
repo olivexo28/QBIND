@@ -100,6 +100,7 @@ fn make_o2_evidence(validator_id: u32, height: u64, view: u64) -> SlashingEviden
                 batch_commitment: [0x00; 32],
             },
             bad_signature: vec![0xFF; 64],
+            header_preimage: vec![0x10; 100],
         },
     }
 }

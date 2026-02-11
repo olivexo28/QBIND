@@ -21,6 +21,8 @@ use qbind_consensus::slashing::{
     SlashingStore,
 };
 use qbind_consensus::{ValidatorId, ValidatorInfo, ValidatorSet};
+use qbind_crypto::ml_dsa44::MlDsa44Backend;
+use qbind_crypto::suite_catalog::SUITE_PQ_RESERVED_1;
 
 // ============================================================================
 // Test Helpers
@@ -49,6 +51,111 @@ fn test_validator_set() -> ValidatorSet {
             },
         ],
         qc_threshold: 201,
+    }
+}
+
+/// Create a test validator set with ML-DSA-44 keys for verification testing.
+fn test_validator_set_with_mldsa44() -> (ValidatorSet, Vec<Vec<u8>>) {
+    let expected_suite_id = SUITE_PQ_RESERVED_1.as_u16() as u8;
+
+    // Generate 3 keypairs
+    let (pk1, sk1) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+    let (pk2, sk2) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+    let (pk3, sk3) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+
+    let vs = ValidatorSet {
+        validators: vec![
+            ValidatorInfo {
+                validator_id: 1,
+                suite_id: expected_suite_id,
+                consensus_pk: pk1,
+                voting_power: 100,
+            },
+            ValidatorInfo {
+                validator_id: 2,
+                suite_id: expected_suite_id,
+                consensus_pk: pk2,
+                voting_power: 100,
+            },
+            ValidatorInfo {
+                validator_id: 3,
+                suite_id: expected_suite_id,
+                consensus_pk: pk3,
+                voting_power: 100,
+            },
+        ],
+        qc_threshold: 201,
+    };
+
+    (vs, vec![sk1, sk2, sk3])
+}
+
+/// Create O1 evidence with real ML-DSA-44 signatures.
+fn make_o1_evidence_with_valid_sigs(
+    validator_id: u32,
+    height: u64,
+    view: u64,
+    sk: &[u8],
+) -> SlashingEvidence {
+    let preimage_a = b"block_a_header_preimage_data_for_testing".to_vec();
+    let preimage_b = b"block_b_header_preimage_data_for_testing".to_vec();
+
+    let sig_a = MlDsa44Backend::sign(sk, &preimage_a).expect("signing failed");
+    let sig_b = MlDsa44Backend::sign(sk, &preimage_b).expect("signing failed");
+
+    SlashingEvidence {
+        version: 1,
+        offense: OffenseKind::O1DoubleSign,
+        offending_validator: ValidatorId(u64::from(validator_id)),
+        height,
+        view,
+        payload: EvidencePayloadV1::O1DoubleSign {
+            block_a: SignedBlockHeader {
+                height,
+                view,
+                block_id: [0xAA; 32],
+                proposer_id: ValidatorId(u64::from(validator_id)),
+                signature: sig_a,
+                header_preimage: preimage_a,
+            },
+            block_b: SignedBlockHeader {
+                height,
+                view,
+                block_id: [0xBB; 32],
+                proposer_id: ValidatorId(u64::from(validator_id)),
+                signature: sig_b,
+                header_preimage: preimage_b,
+            },
+        },
+    }
+}
+
+/// Create O2 evidence with an invalid signature for testing.
+fn make_o2_evidence_with_bad_sig(
+    validator_id: u32,
+    height: u64,
+    view: u64,
+) -> SlashingEvidence {
+    let preimage = b"header_preimage_data_for_o2_testing".to_vec();
+    // Use an invalid signature (wrong size or random data)
+    let bad_sig = vec![0xFF; 100]; // Invalid size for ML-DSA-44
+
+    SlashingEvidence {
+        version: 1,
+        offense: OffenseKind::O2InvalidProposerSig,
+        offending_validator: ValidatorId(u64::from(validator_id)),
+        height,
+        view,
+        payload: EvidencePayloadV1::O2InvalidProposerSig {
+            header: BlockHeader {
+                height,
+                view,
+                proposer_id: ValidatorId(u64::from(validator_id)),
+                batch_commitment: [0x00; 32],
+            },
+            bad_signature: bad_sig,
+            header_preimage: preimage,
+        },
     }
 }
 
@@ -95,6 +202,7 @@ fn make_o2_evidence(validator_id: u32, height: u64, view: u64) -> SlashingEviden
                 batch_commitment: [0x00; 32],
             },
             bad_signature: vec![0xFF; 64],
+            header_preimage: vec![0x10; 100],
         },
     }
 }
@@ -222,11 +330,13 @@ fn test_slashing_evidence_round_trip_o2() {
     if let EvidencePayloadV1::O2InvalidProposerSig {
         header,
         bad_signature,
+        header_preimage,
     } = &evidence.payload
     {
         assert_eq!(header.height, 200);
         assert_eq!(header.proposer_id, ValidatorId(2));
         assert_eq!(bad_signature.len(), 64);
+        assert!(!header_preimage.is_empty());
     } else {
         panic!("Expected O2InvalidProposerSig payload");
     }
@@ -308,7 +418,7 @@ fn test_slashing_evidence_round_trip_o5() {
 
 #[test]
 fn test_slashing_engine_accepts_valid_evidence() {
-    let vs = test_validator_set();
+    let (vs, sks) = test_validator_set_with_mldsa44();
     let ctx = SlashingContext {
         validator_set: &vs,
         current_height: 1000,
@@ -316,7 +426,8 @@ fn test_slashing_engine_accepts_valid_evidence() {
     };
 
     let mut engine = NoopSlashingEngine::new();
-    let evidence = make_o1_evidence(1, 100, 5);
+    // Validator 1 is leader for view 0
+    let evidence = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
 
     let record = engine.handle_evidence(&ctx, evidence);
 
@@ -327,7 +438,7 @@ fn test_slashing_engine_accepts_valid_evidence() {
 
 #[test]
 fn test_slashing_engine_accepts_all_offense_types() {
-    let vs = test_validator_set();
+    let (vs, sks) = test_validator_set_with_mldsa44();
     let ctx = SlashingContext {
         validator_set: &vs,
         current_height: 1000,
@@ -336,27 +447,27 @@ fn test_slashing_engine_accepts_all_offense_types() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // O1
-    let r1 = engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1));
+    // O1 - Validator 1 is leader for view 0
+    let r1 = engine.handle_evidence(&ctx, make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]));
     assert_eq!(r1.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O2
-    let r2 = engine.handle_evidence(&ctx, make_o2_evidence(2, 200, 2));
+    // O2 - Validator 2 is leader for view 1
+    let r2 = engine.handle_evidence(&ctx, make_o2_evidence_with_bad_sig(2, 200, 1));
     assert_eq!(r2.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O3a
+    // O3a - still uses old test helper (no crypto verification for O3)
     let r3a = engine.handle_evidence(&ctx, make_o3a_evidence(3, 300, 3));
     assert_eq!(r3a.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O3b
+    // O3b - still uses old test helper (no crypto verification for O3)
     let r3b = engine.handle_evidence(&ctx, make_o3b_evidence(1, 400, 4));
     assert_eq!(r3b.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O4
+    // O4 - still uses old test helper (no crypto verification for O4)
     let r4 = engine.handle_evidence(&ctx, make_o4_evidence(2, 500, 5));
     assert_eq!(r4.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O5
+    // O5 - still uses old test helper (no crypto verification for O5)
     let r5 = engine.handle_evidence(&ctx, make_o5_evidence(3, 600, 6));
     assert_eq!(r5.decision, SlashingDecisionKind::AcceptedNoOp);
 
@@ -425,7 +536,7 @@ fn test_slashing_engine_rejects_future_height() {
 
 #[test]
 fn test_slashing_engine_deduplicates() {
-    let vs = test_validator_set();
+    let (vs, sks) = test_validator_set_with_mldsa44();
     let ctx = SlashingContext {
         validator_set: &vs,
         current_height: 1000,
@@ -433,7 +544,8 @@ fn test_slashing_engine_deduplicates() {
     };
 
     let mut engine = NoopSlashingEngine::new();
-    let evidence = make_o1_evidence(1, 100, 5);
+    // Validator 1 is leader for view 0
+    let evidence = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
 
     // First submission should be accepted
     let record1 = engine.handle_evidence(&ctx, evidence.clone());
@@ -446,7 +558,7 @@ fn test_slashing_engine_deduplicates() {
 
 #[test]
 fn test_slashing_engine_dedup_key_uniqueness() {
-    let vs = test_validator_set();
+    let (vs, sks) = test_validator_set_with_mldsa44();
     let ctx = SlashingContext {
         validator_set: &vs,
         current_height: 1000,
@@ -455,9 +567,10 @@ fn test_slashing_engine_dedup_key_uniqueness() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // Same validator, same height, different view => different key
-    let e1 = make_o1_evidence(1, 100, 5);
-    let e2 = make_o1_evidence(1, 100, 6);
+    // Same validator (1), same height, different views where they are leader
+    // Validator 1 is leader for view 0, 3, 6, ... (round-robin with 3 validators)
+    let e1 = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
+    let e2 = make_o1_evidence_with_valid_sigs(1, 100, 3, &sks[0]);
 
     let r1 = engine.handle_evidence(&ctx, e1);
     let r2 = engine.handle_evidence(&ctx, e2);
@@ -468,7 +581,7 @@ fn test_slashing_engine_dedup_key_uniqueness() {
 
 #[test]
 fn test_slashing_engine_dedup_different_validators_same_block() {
-    let vs = test_validator_set();
+    let (vs, sks) = test_validator_set_with_mldsa44();
     let ctx = SlashingContext {
         validator_set: &vs,
         current_height: 1000,
@@ -477,9 +590,10 @@ fn test_slashing_engine_dedup_different_validators_same_block() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // Different validators at same height/view => both accepted
-    let e1 = make_o1_evidence(1, 100, 5);
-    let e2 = make_o1_evidence(2, 100, 5);
+    // Different validators at different views where each is leader
+    // Validator 1 is leader for view 0, validator 2 for view 1
+    let e1 = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
+    let e2 = make_o1_evidence_with_valid_sigs(2, 100, 1, &sks[1]);
 
     let r1 = engine.handle_evidence(&ctx, e1);
     let r2 = engine.handle_evidence(&ctx, e2);
@@ -556,7 +670,7 @@ fn test_slashing_metrics_record_helper() {
 
 #[test]
 fn test_slashing_engine_tracks_counts() {
-    let vs = test_validator_set();
+    let (vs, sks) = test_validator_set_with_mldsa44();
     let ctx = SlashingContext {
         validator_set: &vs,
         current_height: 1000,
@@ -565,11 +679,12 @@ fn test_slashing_engine_tracks_counts() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // Submit various evidence
-    engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1));
-    engine.handle_evidence(&ctx, make_o1_evidence(2, 101, 2));
-    engine.handle_evidence(&ctx, make_o2_evidence(3, 102, 3));
-    engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1)); // duplicate
+    // Submit various evidence - validators must be leaders for their views
+    // Validator 1 is leader for view 0, validator 2 for view 1, validator 3 for view 2
+    engine.handle_evidence(&ctx, make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]));
+    engine.handle_evidence(&ctx, make_o1_evidence_with_valid_sigs(2, 101, 1, &sks[1]));
+    engine.handle_evidence(&ctx, make_o2_evidence_with_bad_sig(3, 102, 2));
+    engine.handle_evidence(&ctx, make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0])); // duplicate
 
     // Check engine counts
     assert_eq!(

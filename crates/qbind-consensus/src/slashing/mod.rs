@@ -35,7 +35,9 @@
 //! let record = engine.handle_evidence(&ctx, evidence);
 //! ```
 
-use crate::{ValidatorId, ValidatorSet};
+use crate::{ValidatorId, ValidatorInfo, ValidatorSet};
+use qbind_crypto::ml_dsa44::MlDsa44Backend;
+use qbind_crypto::suite_catalog::SUITE_PQ_RESERVED_1;
 use std::collections::{HashMap, HashSet};
 
 /// Versioned offense taxonomy aligned with T227 design document.
@@ -194,6 +196,8 @@ pub enum EvidencePayloadV1 {
         header: BlockHeader,
         /// The invalid signature bytes.
         bad_signature: Vec<u8>,
+        /// The header preimage (serialized data that was signed).
+        header_preimage: Vec<u8>,
     },
     /// O3: Lazy voting evidence (applies to O3a and O3b).
     O3LazyVote {
@@ -216,6 +220,274 @@ pub enum EvidencePayloadV1 {
         /// Proof that no valid certificate exists for the commitment.
         dag_state_proof: DagStateProof,
     },
+}
+
+// ============================================================================
+// Cryptographic Verification for O1/O2 Evidence
+// ============================================================================
+
+/// Error type for evidence cryptographic verification.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EvidenceVerificationError {
+    /// Validator not found in the validator set.
+    ValidatorNotFound(ValidatorId),
+    /// Suite ID mismatch between evidence and validator record.
+    SuiteMismatch {
+        expected: u8,
+        found: u8,
+    },
+    /// Signature verification failed.
+    SignatureVerificationFailed(String),
+    /// Validator was not the scheduled leader for the slot.
+    NotScheduledLeader {
+        height: u64,
+        view: u64,
+        expected_leader: ValidatorId,
+        actual_proposer: ValidatorId,
+    },
+    /// For O2: Signature unexpectedly verified (should be invalid).
+    SignatureUnexpectedlyValid,
+    /// Evidence payload type mismatch.
+    PayloadTypeMismatch,
+}
+
+impl std::fmt::Display for EvidenceVerificationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EvidenceVerificationError::ValidatorNotFound(id) => {
+                write!(f, "validator {} not found in validator set", id.0)
+            }
+            EvidenceVerificationError::SuiteMismatch { expected, found } => {
+                write!(
+                    f,
+                    "suite ID mismatch: expected {}, found {}",
+                    expected, found
+                )
+            }
+            EvidenceVerificationError::SignatureVerificationFailed(msg) => {
+                write!(f, "signature verification failed: {}", msg)
+            }
+            EvidenceVerificationError::NotScheduledLeader {
+                height,
+                view,
+                expected_leader,
+                actual_proposer,
+            } => {
+                write!(
+                    f,
+                    "validator {} was not scheduled leader for height={}, view={} (expected {})",
+                    actual_proposer.0, height, view, expected_leader.0
+                )
+            }
+            EvidenceVerificationError::SignatureUnexpectedlyValid => {
+                write!(f, "signature unexpectedly verified as valid (expected invalid for O2)")
+            }
+            EvidenceVerificationError::PayloadTypeMismatch => {
+                write!(f, "evidence payload type does not match offense kind")
+            }
+        }
+    }
+}
+
+impl std::error::Error for EvidenceVerificationError {}
+
+/// Get validator info by ValidatorId from the validator set.
+fn get_validator_info(
+    validator_set: &ValidatorSet,
+    validator_id: ValidatorId,
+) -> Option<&ValidatorInfo> {
+    validator_set
+        .validators
+        .iter()
+        .find(|v| u64::from(v.validator_id) == validator_id.0)
+}
+
+/// Compute the expected leader for a given (height, view) using round-robin.
+///
+/// This matches the leader election logic in BasicHotStuffEngine::leader_for_view.
+fn compute_expected_leader(validator_set: &ValidatorSet, view: u64) -> Option<ValidatorId> {
+    if validator_set.validators.is_empty() {
+        return None;
+    }
+    let n = validator_set.validators.len() as u64;
+    let idx = (view % n) as usize;
+    Some(ValidatorId(u64::from(validator_set.validators[idx].validator_id)))
+}
+
+/// Verify cryptographic signatures for O1 (double-sign) evidence.
+///
+/// This function verifies that:
+/// 1. Both block signatures are valid against the accused validator's consensus key
+/// 2. The suite ID matches the validator's registered suite
+/// 3. The validator was the scheduled leader for the (height, view)
+///
+/// # Arguments
+///
+/// * `validator_set` - The validator set for key lookup
+/// * `evidence` - The slashing evidence to verify
+/// * `metrics` - Optional metrics for recording verification failures
+///
+/// # Returns
+///
+/// `Ok(())` if verification passes, `Err(EvidenceVerificationError)` otherwise.
+pub fn verify_o1_evidence(
+    validator_set: &ValidatorSet,
+    evidence: &SlashingEvidence,
+    metrics: Option<&SlashingMetrics>,
+) -> Result<(), EvidenceVerificationError> {
+    // Extract O1 payload
+    let (block_a, block_b) = match &evidence.payload {
+        EvidencePayloadV1::O1DoubleSign { block_a, block_b } => (block_a, block_b),
+        _ => return Err(EvidenceVerificationError::PayloadTypeMismatch),
+    };
+
+    // Get validator info
+    let validator_info = get_validator_info(validator_set, evidence.offending_validator)
+        .ok_or(EvidenceVerificationError::ValidatorNotFound(evidence.offending_validator))?;
+
+    // Check suite ID matches ML-DSA-44 (suite ID 100)
+    let expected_suite_id = SUITE_PQ_RESERVED_1.as_u16() as u8;
+    if validator_info.suite_id != expected_suite_id {
+        return Err(EvidenceVerificationError::SuiteMismatch {
+            expected: expected_suite_id,
+            found: validator_info.suite_id,
+        });
+    }
+
+    // Check validator was scheduled leader for the view
+    let expected_leader = compute_expected_leader(validator_set, evidence.view)
+        .ok_or(EvidenceVerificationError::ValidatorNotFound(evidence.offending_validator))?;
+    
+    if expected_leader != evidence.offending_validator {
+        return Err(EvidenceVerificationError::NotScheduledLeader {
+            height: evidence.height,
+            view: evidence.view,
+            expected_leader,
+            actual_proposer: evidence.offending_validator,
+        });
+    }
+
+    // Verify block_a signature
+    if let Err(e) = MlDsa44Backend::verify(
+        &validator_info.consensus_pk,
+        &block_a.header_preimage,
+        &block_a.signature,
+    ) {
+        if let Some(m) = metrics {
+            m.inc_sig_verification_failure(OffenseKind::O1DoubleSign);
+        }
+        eprintln!(
+            "[SLASHING] O1 block_a signature verification failed: {:?}",
+            e
+        );
+        return Err(EvidenceVerificationError::SignatureVerificationFailed(
+            format!("block_a: {:?}", e),
+        ));
+    }
+
+    // Verify block_b signature
+    if let Err(e) = MlDsa44Backend::verify(
+        &validator_info.consensus_pk,
+        &block_b.header_preimage,
+        &block_b.signature,
+    ) {
+        if let Some(m) = metrics {
+            m.inc_sig_verification_failure(OffenseKind::O1DoubleSign);
+        }
+        eprintln!(
+            "[SLASHING] O1 block_b signature verification failed: {:?}",
+            e
+        );
+        return Err(EvidenceVerificationError::SignatureVerificationFailed(
+            format!("block_b: {:?}", e),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Verify cryptographic signatures for O2 (invalid proposer sig) evidence.
+///
+/// This function verifies that:
+/// 1. The bad_signature FAILS verification against the accused validator's consensus key
+/// 2. The suite ID matches the validator's registered suite
+/// 3. The validator was the scheduled leader for the (height, view)
+///
+/// # Arguments
+///
+/// * `validator_set` - The validator set for key lookup
+/// * `evidence` - The slashing evidence to verify
+/// * `metrics` - Optional metrics for recording verification failures
+///
+/// # Returns
+///
+/// `Ok(())` if verification passes (signature is confirmed invalid), 
+/// `Err(EvidenceVerificationError)` otherwise.
+pub fn verify_o2_evidence(
+    validator_set: &ValidatorSet,
+    evidence: &SlashingEvidence,
+    metrics: Option<&SlashingMetrics>,
+) -> Result<(), EvidenceVerificationError> {
+    // Extract O2 payload
+    let (header, bad_signature, header_preimage) = match &evidence.payload {
+        EvidencePayloadV1::O2InvalidProposerSig {
+            header,
+            bad_signature,
+            header_preimage,
+        } => (header, bad_signature, header_preimage),
+        _ => return Err(EvidenceVerificationError::PayloadTypeMismatch),
+    };
+
+    // Get validator info
+    let validator_info = get_validator_info(validator_set, evidence.offending_validator)
+        .ok_or(EvidenceVerificationError::ValidatorNotFound(evidence.offending_validator))?;
+
+    // Check suite ID matches ML-DSA-44 (suite ID 100)
+    let expected_suite_id = SUITE_PQ_RESERVED_1.as_u16() as u8;
+    if validator_info.suite_id != expected_suite_id {
+        return Err(EvidenceVerificationError::SuiteMismatch {
+            expected: expected_suite_id,
+            found: validator_info.suite_id,
+        });
+    }
+
+    // Check validator was scheduled leader for the view
+    let expected_leader = compute_expected_leader(validator_set, evidence.view)
+        .ok_or(EvidenceVerificationError::ValidatorNotFound(evidence.offending_validator))?;
+    
+    if expected_leader != evidence.offending_validator {
+        return Err(EvidenceVerificationError::NotScheduledLeader {
+            height: evidence.height,
+            view: evidence.view,
+            expected_leader,
+            actual_proposer: header.proposer_id,
+        });
+    }
+
+    // Verify the signature is INVALID (this is the offense we're proving)
+    // If verification succeeds, the evidence is invalid (signature is actually good)
+    match MlDsa44Backend::verify(
+        &validator_info.consensus_pk,
+        header_preimage,
+        bad_signature,
+    ) {
+        Ok(()) => {
+            // Signature verified successfully - this means it's NOT invalid
+            // The evidence is fabricated or incorrect
+            if let Some(m) = metrics {
+                m.inc_sig_verification_failure(OffenseKind::O2InvalidProposerSig);
+            }
+            eprintln!(
+                "[SLASHING] O2 signature unexpectedly verified as valid - evidence invalid"
+            );
+            Err(EvidenceVerificationError::SignatureUnexpectedlyValid)
+        }
+        Err(_) => {
+            // Signature verification failed - this confirms the offense
+            // The proposer did submit an invalid signature
+            Ok(())
+        }
+    }
 }
 
 /// Envelope around versioned evidence formats.
@@ -529,7 +801,47 @@ impl SlashingEngine for NoopSlashingEngine {
             return record;
         }
 
-        // 5. Evidence is valid and new - accept with no-op
+        // 5. Cryptographic verification for O1 and O2 evidence
+        match evidence.offense {
+            OffenseKind::O1DoubleSign => {
+                if let Err(e) = verify_o1_evidence(ctx.validator_set, &evidence, None) {
+                    eprintln!(
+                        "[SLASHING] Evidence rejected: O1 verification failed - {} (validator={})",
+                        e,
+                        evidence.offending_validator.0
+                    );
+                    let record = SlashingRecord {
+                        evidence,
+                        decision: SlashingDecisionKind::RejectedInvalid,
+                        decision_height: ctx.current_height,
+                        decision_view: ctx.current_view,
+                    };
+                    self.record_decision(record.clone());
+                    return record;
+                }
+            }
+            OffenseKind::O2InvalidProposerSig => {
+                if let Err(e) = verify_o2_evidence(ctx.validator_set, &evidence, None) {
+                    eprintln!(
+                        "[SLASHING] Evidence rejected: O2 verification failed - {} (validator={})",
+                        e,
+                        evidence.offending_validator.0
+                    );
+                    let record = SlashingRecord {
+                        evidence,
+                        decision: SlashingDecisionKind::RejectedInvalid,
+                        decision_height: ctx.current_height,
+                        decision_view: ctx.current_view,
+                    };
+                    self.record_decision(record.clone());
+                    return record;
+                }
+            }
+            // O3-O5 verification not implemented yet (Phase 1 only covers O1/O2)
+            _ => {}
+        }
+
+        // 6. Evidence is valid and new - accept with no-op
         eprintln!(
             "[SLASHING] Evidence accepted (no-op): validator={}, offense={}, height={}, view={}",
             evidence.offending_validator.0,
@@ -648,6 +960,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 ///
 /// - `qbind_slashing_evidence_total{offense="O1/O2/..."}` — evidence received
 /// - `qbind_slashing_decisions_total{offense="...",decision="accepted_noop|..."}` — decisions made
+/// - `qbind_slashing_sig_verification_failures_total{offense="O1/O2"}` — signature verification failures
 #[derive(Debug, Default)]
 pub struct SlashingMetrics {
     // Evidence counters by offense type
@@ -662,6 +975,10 @@ pub struct SlashingMetrics {
     decisions_accepted_noop: AtomicU64,
     decisions_rejected_invalid: AtomicU64,
     decisions_rejected_duplicate: AtomicU64,
+
+    // Signature verification failure counters
+    sig_verification_failures_o1: AtomicU64,
+    sig_verification_failures_o2: AtomicU64,
 }
 
 impl SlashingMetrics {
@@ -788,6 +1105,38 @@ impl SlashingMetrics {
         self.decisions_accepted_noop_total()
             + self.decisions_rejected_invalid_total()
             + self.decisions_rejected_duplicate_total()
+    }
+
+    /// Increment signature verification failure counter for the given offense.
+    pub fn inc_sig_verification_failure(&self, offense: OffenseKind) {
+        match offense {
+            OffenseKind::O1DoubleSign => {
+                self.sig_verification_failures_o1
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O2InvalidProposerSig => {
+                self.sig_verification_failures_o2
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            _ => {
+                // No signature verification metrics for other offense types yet
+            }
+        }
+    }
+
+    /// Get signature verification failure count for O1.
+    pub fn sig_verification_failures_o1_total(&self) -> u64 {
+        self.sig_verification_failures_o1.load(Ordering::Relaxed)
+    }
+
+    /// Get signature verification failure count for O2.
+    pub fn sig_verification_failures_o2_total(&self) -> u64 {
+        self.sig_verification_failures_o2.load(Ordering::Relaxed)
+    }
+
+    /// Get total signature verification failure count.
+    pub fn sig_verification_failures_total(&self) -> u64 {
+        self.sig_verification_failures_o1_total() + self.sig_verification_failures_o2_total()
     }
 }
 
@@ -1698,7 +2047,7 @@ mod tests {
 
     #[test]
     fn test_noop_engine_accepts_valid_evidence() {
-        let vs = test_validator_set();
+        let (vs, sks) = test_validator_set_with_mldsa44();
         let ctx = SlashingContext {
             validator_set: &vs,
             current_height: 1000,
@@ -1706,7 +2055,8 @@ mod tests {
         };
 
         let mut engine = NoopSlashingEngine::new();
-        let evidence = make_o1_evidence(1, 100, 5);
+        // Validator 1 is leader for view 0
+        let evidence = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
 
         let record = engine.handle_evidence(&ctx, evidence);
         assert_eq!(record.decision, SlashingDecisionKind::AcceptedNoOp);
@@ -1733,7 +2083,7 @@ mod tests {
 
     #[test]
     fn test_noop_engine_deduplicates() {
-        let vs = test_validator_set();
+        let (vs, sks) = test_validator_set_with_mldsa44();
         let ctx = SlashingContext {
             validator_set: &vs,
             current_height: 1000,
@@ -1741,7 +2091,8 @@ mod tests {
         };
 
         let mut engine = NoopSlashingEngine::new();
-        let evidence = make_o1_evidence(1, 100, 5);
+        // Validator 1 is leader for view 0
+        let evidence = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
 
         // First submission should be accepted
         let record1 = engine.handle_evidence(&ctx, evidence.clone());
@@ -1754,7 +2105,7 @@ mod tests {
 
     #[test]
     fn test_noop_engine_counts() {
-        let vs = test_validator_set();
+        let (vs, sks) = test_validator_set_with_mldsa44();
         let ctx = SlashingContext {
             validator_set: &vs,
             current_height: 1000,
@@ -1764,9 +2115,10 @@ mod tests {
         let mut engine = NoopSlashingEngine::new();
 
         // Submit a few different evidence items
-        let e1 = make_o1_evidence(1, 100, 5);
-        let e2 = make_o1_evidence(2, 101, 6);
-        let e3 = make_o1_evidence(1, 100, 5); // duplicate
+        // Validator 1 is leader for view 0, validator 2 for view 1, validator 3 for view 2
+        let e1 = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
+        let e2 = make_o1_evidence_with_valid_sigs(2, 101, 1, &sks[1]);
+        let e3 = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]); // duplicate
 
         engine.handle_evidence(&ctx, e1);
         engine.handle_evidence(&ctx, e2);
@@ -1824,5 +2176,236 @@ mod tests {
         // Unknown validator returns empty
         let empty = store.load_slashing_records_for_validator(ValidatorId(999));
         assert!(empty.is_empty());
+    }
+
+    // ========================================================================
+    // Tests for O1/O2 cryptographic verification
+    // ========================================================================
+
+    /// Create a test validator set with ML-DSA-44 keys for verification testing.
+    fn test_validator_set_with_mldsa44() -> (ValidatorSet, Vec<Vec<u8>>) {
+        let expected_suite_id = SUITE_PQ_RESERVED_1.as_u16() as u8;
+        
+        // Generate 3 keypairs
+        let (pk1, sk1) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let (pk2, sk2) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+        let (pk3, sk3) = MlDsa44Backend::generate_keypair().expect("keygen failed");
+
+        let vs = ValidatorSet {
+            validators: vec![
+                crate::ValidatorInfo {
+                    validator_id: 1,
+                    suite_id: expected_suite_id,
+                    consensus_pk: pk1,
+                    voting_power: 100,
+                },
+                crate::ValidatorInfo {
+                    validator_id: 2,
+                    suite_id: expected_suite_id,
+                    consensus_pk: pk2,
+                    voting_power: 100,
+                },
+                crate::ValidatorInfo {
+                    validator_id: 3,
+                    suite_id: expected_suite_id,
+                    consensus_pk: pk3,
+                    voting_power: 100,
+                },
+            ],
+            qc_threshold: 201,
+        };
+
+        (vs, vec![sk1, sk2, sk3])
+    }
+
+    /// Create O1 evidence with real ML-DSA-44 signatures.
+    fn make_o1_evidence_with_valid_sigs(
+        validator_id: u32,
+        height: u64,
+        view: u64,
+        sk: &[u8],
+    ) -> SlashingEvidence {
+        let preimage_a = b"block_a_header_preimage_data_for_testing".to_vec();
+        let preimage_b = b"block_b_header_preimage_data_for_testing".to_vec();
+
+        let sig_a = MlDsa44Backend::sign(sk, &preimage_a).expect("signing failed");
+        let sig_b = MlDsa44Backend::sign(sk, &preimage_b).expect("signing failed");
+
+        SlashingEvidence {
+            version: 1,
+            offense: OffenseKind::O1DoubleSign,
+            offending_validator: ValidatorId(u64::from(validator_id)),
+            height,
+            view,
+            payload: EvidencePayloadV1::O1DoubleSign {
+                block_a: SignedBlockHeader {
+                    height,
+                    view,
+                    block_id: [0xAA; 32],
+                    proposer_id: ValidatorId(u64::from(validator_id)),
+                    signature: sig_a,
+                    header_preimage: preimage_a,
+                },
+                block_b: SignedBlockHeader {
+                    height,
+                    view,
+                    block_id: [0xBB; 32],
+                    proposer_id: ValidatorId(u64::from(validator_id)),
+                    signature: sig_b,
+                    header_preimage: preimage_b,
+                },
+            },
+        }
+    }
+
+    /// Create O2 evidence with an invalid signature for testing.
+    fn make_o2_evidence_with_bad_sig(
+        validator_id: u32,
+        height: u64,
+        view: u64,
+    ) -> SlashingEvidence {
+        let preimage = b"header_preimage_data_for_o2_testing".to_vec();
+        // Use an invalid signature (wrong size or random data)
+        let bad_sig = vec![0xFF; 100]; // Invalid size for ML-DSA-44
+
+        SlashingEvidence {
+            version: 1,
+            offense: OffenseKind::O2InvalidProposerSig,
+            offending_validator: ValidatorId(u64::from(validator_id)),
+            height,
+            view,
+            payload: EvidencePayloadV1::O2InvalidProposerSig {
+                header: BlockHeader {
+                    height,
+                    view,
+                    proposer_id: ValidatorId(u64::from(validator_id)),
+                    batch_commitment: [0x00; 32],
+                },
+                bad_signature: bad_sig,
+                header_preimage: preimage,
+            },
+        }
+    }
+
+    /// Create O2 evidence where the signature is actually valid (should be rejected).
+    fn make_o2_evidence_with_valid_sig(
+        validator_id: u32,
+        height: u64,
+        view: u64,
+        sk: &[u8],
+    ) -> SlashingEvidence {
+        let preimage = b"header_preimage_data_for_o2_testing".to_vec();
+        let valid_sig = MlDsa44Backend::sign(sk, &preimage).expect("signing failed");
+
+        SlashingEvidence {
+            version: 1,
+            offense: OffenseKind::O2InvalidProposerSig,
+            offending_validator: ValidatorId(u64::from(validator_id)),
+            height,
+            view,
+            payload: EvidencePayloadV1::O2InvalidProposerSig {
+                header: BlockHeader {
+                    height,
+                    view,
+                    proposer_id: ValidatorId(u64::from(validator_id)),
+                    batch_commitment: [0x00; 32],
+                },
+                bad_signature: valid_sig,
+                header_preimage: preimage,
+            },
+        }
+    }
+
+    #[test]
+    fn test_verify_o1_evidence_valid() {
+        let (vs, sks) = test_validator_set_with_mldsa44();
+        // Validator 1 is at index 0, which is leader for view 0
+        let evidence = make_o1_evidence_with_valid_sigs(1, 100, 0, &sks[0]);
+
+        let result = verify_o1_evidence(&vs, &evidence, None);
+        assert!(result.is_ok(), "Valid O1 evidence should be accepted: {:?}", result);
+    }
+
+    #[test]
+    fn test_verify_o1_evidence_invalid_signature() {
+        let (vs, _sks) = test_validator_set_with_mldsa44();
+        // Use the helper that creates evidence with invalid signatures (wrong key)
+        let evidence = make_o1_evidence(1, 100, 0);
+
+        let result = verify_o1_evidence(&vs, &evidence, None);
+        assert!(
+            matches!(result, Err(EvidenceVerificationError::SignatureVerificationFailed(_))),
+            "Invalid O1 signature should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_verify_o1_evidence_not_scheduled_leader() {
+        let (vs, sks) = test_validator_set_with_mldsa44();
+        // Validator 1 creates evidence but for view 1 where validator 2 is leader
+        let evidence = make_o1_evidence_with_valid_sigs(1, 100, 1, &sks[0]);
+
+        let result = verify_o1_evidence(&vs, &evidence, None);
+        assert!(
+            matches!(result, Err(EvidenceVerificationError::NotScheduledLeader { .. })),
+            "O1 evidence from non-leader should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_verify_o2_evidence_valid() {
+        let (vs, _sks) = test_validator_set_with_mldsa44();
+        // Validator 1 is leader for view 0, create evidence with bad signature
+        let evidence = make_o2_evidence_with_bad_sig(1, 100, 0);
+
+        let result = verify_o2_evidence(&vs, &evidence, None);
+        assert!(result.is_ok(), "Valid O2 evidence (bad sig) should be accepted: {:?}", result);
+    }
+
+    #[test]
+    fn test_verify_o2_evidence_signature_unexpectedly_valid() {
+        let (vs, sks) = test_validator_set_with_mldsa44();
+        // Create O2 evidence but with a valid signature (should be rejected)
+        let evidence = make_o2_evidence_with_valid_sig(1, 100, 0, &sks[0]);
+
+        let result = verify_o2_evidence(&vs, &evidence, None);
+        assert!(
+            matches!(result, Err(EvidenceVerificationError::SignatureUnexpectedlyValid)),
+            "O2 evidence with valid signature should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_verify_o2_evidence_not_scheduled_leader() {
+        let (vs, _sks) = test_validator_set_with_mldsa44();
+        // Validator 1 creates evidence but for view 1 where validator 2 is leader
+        let evidence = make_o2_evidence_with_bad_sig(1, 100, 1);
+
+        let result = verify_o2_evidence(&vs, &evidence, None);
+        assert!(
+            matches!(result, Err(EvidenceVerificationError::NotScheduledLeader { .. })),
+            "O2 evidence from non-leader should be rejected: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_sig_verification_failure_metrics() {
+        let metrics = SlashingMetrics::new();
+
+        assert_eq!(metrics.sig_verification_failures_o1_total(), 0);
+        assert_eq!(metrics.sig_verification_failures_o2_total(), 0);
+        assert_eq!(metrics.sig_verification_failures_total(), 0);
+
+        metrics.inc_sig_verification_failure(OffenseKind::O1DoubleSign);
+        metrics.inc_sig_verification_failure(OffenseKind::O1DoubleSign);
+        metrics.inc_sig_verification_failure(OffenseKind::O2InvalidProposerSig);
+
+        assert_eq!(metrics.sig_verification_failures_o1_total(), 2);
+        assert_eq!(metrics.sig_verification_failures_o2_total(), 1);
+        assert_eq!(metrics.sig_verification_failures_total(), 3);
     }
 }
