@@ -562,3 +562,102 @@ Non-deterministic execution would violate safety.
 - Advanced state pruning not yet implemented
 - Full formal gas model documentation pending
 - Expanded slashing economics pending
+
+---
+
+# 11. Upgrade and Governance Safety Model
+
+QBIND treats protocol upgrades and cryptographic suite transitions as explicit, consensus-aware events.
+
+Upgrades are not silent software changes; they are state transitions governed by protocol rules.
+
+<img src="diagrams/upgrade-flow.svg" alt="QBIND Upgrade and Governance Flow Diagram" />
+
+---
+
+## 11.1 Upgrade Activation Model
+
+Upgrades are activated at epoch boundaries.
+
+An upgrade must satisfy:
+
+1. Governance approval
+2. Inclusion in a committed block
+3. Activation height or epoch specification
+4. Validator compatibility enforcement
+
+Nodes that do not support the activated upgrade will fail startup or halt.
+
+This prevents ambiguous fork conditions.
+
+---
+
+## 11.2 Governance Envelope
+
+Governance actions are packaged in signed envelopes.
+
+Envelope properties:
+
+- Versioned format
+- Signed by authorized council keys
+- Verifiable before application
+- Persisted for auditability
+
+Upgrade envelopes may modify:
+
+- Cryptographic suite parameters
+- Network configuration
+- Economic parameters
+- Validator set rules
+
+---
+
+## 11.3 Cryptographic Suite Transition Safety
+
+Suite transitions must:
+
+- Occur at epoch boundary
+- Be forward-compatible
+- Reject downgrade attempts
+- Maintain deterministic state compatibility
+
+Suite downgrade across epochs is rejected as a fatal violation.
+
+---
+
+## 11.4 MainNet Safety Rails
+
+MainNet enforces stricter conditions than DevNet/TestNet:
+
+- Gas accounting must be enabled
+- P2P networking must be enabled
+- Encrypted keystore or remote signer required
+- Genesis hash validated at startup
+- Schema version compatibility enforced
+
+Nodes violating these conditions terminate.
+
+---
+
+## 11.5 Failure Containment
+
+If an upgrade activation fails validation:
+
+- The block is rejected
+- The QC is invalidated
+- No state transition occurs
+
+This prevents partial upgrade activation.
+
+---
+
+## 11.6 Future Governance Enhancements
+
+Planned improvements include:
+
+- Expanded slashing enforcement
+- Formalized economic governance specification
+- Automated upgrade simulation in TestNet
+- Cryptographic agility test harness
+
+Governance evolution is designed to remain deterministic and auditable.
