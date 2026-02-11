@@ -1211,3 +1211,112 @@ Recovery invariant: A restarted node MUST NOT commit a block that conflicts with
 - Epoch transition has narrow crash-vulnerability window: a crash between epoch key persistence and in-memory update may cause inconsistent state
 
 These are tracked as roadmap items.
+
+---
+
+# 17. View-Change and Liveness Model
+
+QBIND implements a HotStuff-style consensus protocol with deterministic round-robin leader rotation.
+
+This section formalizes view progression and liveness assumptions.
+
+---
+
+## 17.1 View and Leader Definition
+
+Let:
+
+- view ∈ ℕ
+- N = number of validators
+
+Leader selection is deterministic:
+
+leader(view) = ValidatorSet[ view mod N ]
+
+Each view has exactly one designated proposer.
+
+---
+
+## 17.2 Pacemaker State
+
+Each validator maintains:
+
+- CurrentView
+- LockedQC
+- HighestQC
+- TimeoutCounter
+
+Pacemaker state is runtime (in-memory) and reconstructed via synchronization after restart.
+
+---
+
+## 17.3 Timeout Trigger
+
+A timeout event occurs if:
+
+- A validator does not receive a valid proposal for the current view within a bounded time window, or
+- A quorum certificate is not formed within the expected round duration.
+
+Timeout duration may increase exponentially under repeated failures.
+
+Timeout mechanics are partially implemented and remain a pre-TestNet requirement.
+
+---
+
+## 17.4 View Advancement Rule
+
+Upon timeout:
+
+1. CurrentView := CurrentView + 1
+2. Broadcast timeout message (future extension)
+3. Await proposal from leader(CurrentView)
+
+A validator must not decrease its view number.
+
+View advancement must preserve:
+
+- LockedHeight invariant
+- Safety of previously formed QCs
+
+---
+
+## 17.5 Safety Under View Change
+
+Safety is preserved if:
+
+- A validator only votes for proposals extending from blocks with justify_qc.height ≥ locked_height
+- View changes do not alter commit rule semantics
+- No validator double-votes at same (height, view)
+
+Because quorum intersection guarantees overlap of ≥ f+1 honest validators, conflicting commits cannot occur.
+
+---
+
+## 17.6 Liveness Assumptions
+
+QBIND assumes partial synchrony:
+
+There exists a Global Stabilization Time (GST) after which:
+
+- Message delays are bounded
+- Honest leader eventually appears
+- Timeout duration exceeds network delay
+
+Under these conditions, progress resumes and new blocks are committed.
+
+---
+
+## 17.7 Current Limitations
+
+The current implementation includes:
+
+- Deterministic leader rotation
+- Partial timeout scaffolding
+
+However:
+
+- Full timeout broadcast aggregation is not yet implemented
+- Formal liveness proof is not included
+- View-change optimization remains roadmap item
+
+Until full timeout logic is implemented, liveness under prolonged asynchrony is not guaranteed.
