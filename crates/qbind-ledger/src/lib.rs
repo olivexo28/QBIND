@@ -125,9 +125,10 @@ pub use state_snapshot::{
 
 // T230: Slashing Ledger exports
 // M1: Persistent RocksDB-backed slashing ledger
+// M1.2: Atomic persistence for slashing updates
 pub use slashing_ledger::{
     EpochNumber, InMemorySlashingLedger, RocksDbSlashingLedger, SlashingLedger, SlashingLedgerError,
-    SlashingRecord, StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
+    SlashingRecord, SlashingUpdateBatch, StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
 };
 
 // T232: Genesis & Launch State exports
