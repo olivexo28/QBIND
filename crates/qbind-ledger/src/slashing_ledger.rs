@@ -868,7 +868,9 @@ impl RocksDbSlashingLedger {
                         "invalid record_seq length".to_string(),
                     ));
                 }
-                let arr: [u8; 8] = bytes[..].try_into().unwrap();
+                let arr: [u8; 8] = bytes[..]
+                    .try_into()
+                    .expect("length already verified to be 8");
                 Ok(u64::from_be_bytes(arr))
             }
             Ok(None) => Ok(0),
