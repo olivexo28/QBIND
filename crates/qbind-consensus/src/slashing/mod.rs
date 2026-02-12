@@ -433,7 +433,15 @@ impl std::error::Error for EvidenceVerificationError {}
 
 /// Suite ID for ML-DSA-44 (FIPS 204, post-quantum signature suite).
 /// This is the expected suite_id for validators using ML-DSA-44.
-pub const ML_DSA_44_SUITE_ID: u8 = SUITE_PQ_RESERVED_1.as_u16() as u8;
+///
+/// Note: ValidatorInfo.suite_id is u8, so we must ensure the suite ID fits.
+/// SUITE_PQ_RESERVED_1 is currently 100, which fits in u8.
+pub const ML_DSA_44_SUITE_ID: u8 = {
+    let id = SUITE_PQ_RESERVED_1.as_u16();
+    // Compile-time assertion that the value fits in u8
+    assert!(id <= 255, "ML-DSA-44 suite ID must fit in u8");
+    id as u8
+};
 
 /// Look up validator info by ValidatorId.
 fn find_validator_info<'a>(
