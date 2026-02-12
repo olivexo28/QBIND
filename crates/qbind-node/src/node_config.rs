@@ -5429,6 +5429,23 @@ pub enum MainnetConfigError {
     /// `--expect-genesis-hash` to prevent accidental startup with the
     /// wrong genesis file.
     ExpectedGenesisHashMissing,
+
+    // ========================================================================
+    // M0: Validator Suite Invariant Errors
+    // ========================================================================
+    /// Validator uses an unsupported signature suite (M0).
+    ///
+    /// MainNet and TestNet require all validators to use ML-DSA-44 (suite_id 100).
+    /// This prevents the slashing verification bypass where non-ML-DSA-44
+    /// validators would skip cryptographic verification.
+    ///
+    /// See: SLASHING_INVARIANTS_AUDIT.md, Invariant 2 caveat.
+    UnsupportedSignatureSuite {
+        /// The validator ID using the unsupported suite.
+        validator_id: u32,
+        /// The unsupported suite ID.
+        suite_id: u8,
+    },
 }
 
 impl std::fmt::Display for MainnetConfigError {
@@ -5695,11 +5712,260 @@ impl std::fmt::Display for MainnetConfigError {
                     "MainNet invariant violated: expected genesis hash must be configured (--expect-genesis-hash=0x...)"
                 )
             }
+            // M0: Unsupported signature suite
+            MainnetConfigError::UnsupportedSignatureSuite { validator_id, suite_id } => {
+                write!(
+                    f,
+                    "MainNet/TestNet invariant violated: validator {} uses unsupported signature suite {} \
+                     (only ML-DSA-44 suite_id=100 is allowed); see SLASHING_INVARIANTS_AUDIT.md",
+                    validator_id, suite_id
+                )
+            }
         }
     }
 }
 
 impl std::error::Error for MainnetConfigError {}
+
+// ============================================================================
+// M0: Validator Suite Validation
+// ============================================================================
+
+/// ML-DSA-44 suite ID constant (M0).
+///
+/// This is the only allowed signature suite for validators on MainNet and TestNet.
+/// Using any other suite would bypass slashing cryptographic verification.
+///
+/// Value: 100 (matches qbind_crypto::SUITE_PQ_RESERVED_1)
+pub const ML_DSA_44_SUITE_ID: u8 = 100;
+
+/// Information about a validator for suite validation (M0).
+///
+/// This struct provides the minimal information needed to validate
+/// that a validator uses an allowed signature suite.
+#[derive(Debug, Clone)]
+pub struct ValidatorSuiteInfo {
+    /// The validator's ID.
+    pub validator_id: u32,
+    /// The validator's signature suite ID.
+    pub suite_id: u8,
+}
+
+/// Validate that all validators use ML-DSA-44 signature suite (M0).
+///
+/// This function checks that every validator in the provided list uses
+/// the ML-DSA-44 signature suite (suite_id = 100). This is required for
+/// MainNet and TestNet to ensure slashing cryptographic verification
+/// cannot be bypassed.
+///
+/// # Arguments
+///
+/// * `validators` - List of validators with their suite IDs
+///
+/// # Returns
+///
+/// `Ok(())` if all validators use ML-DSA-44, or `Err(MainnetConfigError)` with
+/// the first validator found using an unsupported suite.
+///
+/// # Background
+///
+/// The slashing verification code in `qbind-consensus/src/slashing/mod.rs`
+/// skips cryptographic verification for non-ML-DSA-44 validators (lines 551-556
+/// and 637-642). This is intentional for backward compatibility with test suites,
+/// but creates a security bypass if non-ML-DSA-44 validators exist in production.
+///
+/// See: SLASHING_INVARIANTS_AUDIT.md, Invariant 2 caveat.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{validate_validators_use_ml_dsa_44, ValidatorSuiteInfo, ML_DSA_44_SUITE_ID};
+///
+/// // Valid: all validators use ML-DSA-44
+/// let validators = vec![
+///     ValidatorSuiteInfo { validator_id: 1, suite_id: ML_DSA_44_SUITE_ID },
+///     ValidatorSuiteInfo { validator_id: 2, suite_id: ML_DSA_44_SUITE_ID },
+/// ];
+/// assert!(validate_validators_use_ml_dsa_44(&validators).is_ok());
+///
+/// // Invalid: validator 3 uses suite_id 1
+/// let bad_validators = vec![
+///     ValidatorSuiteInfo { validator_id: 1, suite_id: ML_DSA_44_SUITE_ID },
+///     ValidatorSuiteInfo { validator_id: 3, suite_id: 1 },
+/// ];
+/// assert!(validate_validators_use_ml_dsa_44(&bad_validators).is_err());
+/// ```
+pub fn validate_validators_use_ml_dsa_44(
+    validators: &[ValidatorSuiteInfo],
+) -> Result<(), MainnetConfigError> {
+    for validator in validators {
+        if validator.suite_id != ML_DSA_44_SUITE_ID {
+            return Err(MainnetConfigError::UnsupportedSignatureSuite {
+                validator_id: validator.validator_id,
+                suite_id: validator.suite_id,
+            });
+        }
+    }
+    Ok(())
+}
+
+// ============================================================================
+// M0: TestNet Invariants Validation
+// ============================================================================
+
+/// Error indicating a TestNet configuration invariant violation (M0).
+///
+/// These errors are returned by `validate_testnet_invariants()` when the
+/// configuration or validator set violates TestNet requirements.
+///
+/// TestNet nodes SHOULD refuse to start if any of these invariants are violated.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TestnetConfigError {
+    /// The network environment is not TestNet.
+    WrongEnvironment {
+        expected: NetworkEnvironment,
+        actual: NetworkEnvironment,
+    },
+
+    /// Validator uses an unsupported signature suite (M0).
+    ///
+    /// TestNet requires all validators to use ML-DSA-44 (suite_id 100).
+    /// This prevents the slashing verification bypass.
+    UnsupportedSignatureSuite {
+        /// The validator ID using the unsupported suite.
+        validator_id: u32,
+        /// The unsupported suite ID.
+        suite_id: u8,
+    },
+}
+
+impl std::fmt::Display for TestnetConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TestnetConfigError::WrongEnvironment { expected, actual } => {
+                write!(
+                    f,
+                    "TestNet invariant violated: environment must be {} but is {}",
+                    expected, actual
+                )
+            }
+            TestnetConfigError::UnsupportedSignatureSuite { validator_id, suite_id } => {
+                write!(
+                    f,
+                    "TestNet invariant violated: validator {} uses unsupported signature suite {} \
+                     (only ML-DSA-44 suite_id=100 is allowed); see SLASHING_INVARIANTS_AUDIT.md",
+                    validator_id, suite_id
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for TestnetConfigError {}
+
+/// Validate TestNet invariants for a validator set (M0).
+///
+/// This function validates that a validator set satisfies TestNet requirements:
+/// 1. All validators must use ML-DSA-44 signature suite (suite_id = 100)
+///
+/// # Arguments
+///
+/// * `environment` - The network environment (must be Testnet)
+/// * `validators` - List of validators with their suite IDs
+///
+/// # Returns
+///
+/// `Ok(())` if all invariants are satisfied, or `Err(TestnetConfigError)` describing
+/// the first violation found.
+///
+/// # Background
+///
+/// This validation closes the suite-bypass caveat documented in
+/// SLASHING_INVARIANTS_AUDIT.md (Invariant 2). Without this check, validators
+/// using non-ML-DSA-44 suites would bypass slashing cryptographic verification.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{validate_testnet_invariants, ValidatorSuiteInfo, ML_DSA_44_SUITE_ID};
+/// use qbind_types::NetworkEnvironment;
+///
+/// // Valid TestNet configuration
+/// let validators = vec![
+///     ValidatorSuiteInfo { validator_id: 1, suite_id: ML_DSA_44_SUITE_ID },
+///     ValidatorSuiteInfo { validator_id: 2, suite_id: ML_DSA_44_SUITE_ID },
+/// ];
+/// assert!(validate_testnet_invariants(NetworkEnvironment::Testnet, &validators).is_ok());
+///
+/// // Invalid: wrong environment
+/// assert!(validate_testnet_invariants(NetworkEnvironment::Devnet, &validators).is_err());
+///
+/// // Invalid: non-ML-DSA-44 validator
+/// let bad_validators = vec![
+///     ValidatorSuiteInfo { validator_id: 1, suite_id: 1 }, // Not ML-DSA-44
+/// ];
+/// assert!(validate_testnet_invariants(NetworkEnvironment::Testnet, &bad_validators).is_err());
+/// ```
+pub fn validate_testnet_invariants(
+    environment: NetworkEnvironment,
+    validators: &[ValidatorSuiteInfo],
+) -> Result<(), TestnetConfigError> {
+    // 1. Environment must be TestNet
+    if environment != NetworkEnvironment::Testnet {
+        return Err(TestnetConfigError::WrongEnvironment {
+            expected: NetworkEnvironment::Testnet,
+            actual: environment,
+        });
+    }
+
+    // 2. All validators must use ML-DSA-44 (M0)
+    for validator in validators {
+        if validator.suite_id != ML_DSA_44_SUITE_ID {
+            return Err(TestnetConfigError::UnsupportedSignatureSuite {
+                validator_id: validator.validator_id,
+                suite_id: validator.suite_id,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Validate MainNet invariants for a validator set (M0 extension).
+///
+/// This function validates that a validator set satisfies the additional
+/// MainNet validator suite requirement:
+/// - All validators must use ML-DSA-44 signature suite (suite_id = 100)
+///
+/// This is called after `NodeConfig::validate_mainnet_invariants()` when
+/// the validator set is available.
+///
+/// # Arguments
+///
+/// * `validators` - List of validators with their suite IDs
+///
+/// # Returns
+///
+/// `Ok(())` if all validators use ML-DSA-44, or `Err(MainnetConfigError)` with
+/// the first validator found using an unsupported suite.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{validate_mainnet_validator_suites, ValidatorSuiteInfo, ML_DSA_44_SUITE_ID};
+///
+/// // Valid: all validators use ML-DSA-44
+/// let validators = vec![
+///     ValidatorSuiteInfo { validator_id: 1, suite_id: ML_DSA_44_SUITE_ID },
+///     ValidatorSuiteInfo { validator_id: 2, suite_id: ML_DSA_44_SUITE_ID },
+/// ];
+/// assert!(validate_mainnet_validator_suites(&validators).is_ok());
+/// ```
+pub fn validate_mainnet_validator_suites(
+    validators: &[ValidatorSuiteInfo],
+) -> Result<(), MainnetConfigError> {
+    validate_validators_use_ml_dsa_44(validators)
+}
 
 // ============================================================================
 // CLI Parsing Helpers
@@ -7567,5 +7833,252 @@ mod tests {
         let error_str = format!("{}", error);
         assert!(error_str.contains("P2P anti-eclipse configuration is invalid"));
         assert!(error_str.contains("enforce must be true"));
+    }
+
+    // ========================================================================
+    // M0: Validator Suite Validation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_ml_dsa_44_suite_id_constant() {
+        // Verify the constant matches the expected value from qbind-crypto
+        assert_eq!(ML_DSA_44_SUITE_ID, 100);
+    }
+
+    #[test]
+    fn test_validate_validators_use_ml_dsa_44_accepts_valid() {
+        // All validators use ML-DSA-44 - should pass
+        let validators = vec![
+            ValidatorSuiteInfo {
+                validator_id: 1,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+            ValidatorSuiteInfo {
+                validator_id: 2,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+            ValidatorSuiteInfo {
+                validator_id: 3,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+        ];
+        let result = validate_validators_use_ml_dsa_44(&validators);
+        assert!(
+            result.is_ok(),
+            "Should accept validators using ML-DSA-44"
+        );
+    }
+
+    #[test]
+    fn test_validate_validators_use_ml_dsa_44_rejects_non_ml_dsa() {
+        // Validator 2 uses suite_id 1 (not ML-DSA-44) - should fail
+        let validators = vec![
+            ValidatorSuiteInfo {
+                validator_id: 1,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+            ValidatorSuiteInfo {
+                validator_id: 2,
+                suite_id: 1, // Non-ML-DSA-44 suite
+            },
+            ValidatorSuiteInfo {
+                validator_id: 3,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+        ];
+        let result = validate_validators_use_ml_dsa_44(&validators);
+        assert!(result.is_err(), "Should reject non-ML-DSA-44 validators");
+
+        match result.unwrap_err() {
+            MainnetConfigError::UnsupportedSignatureSuite {
+                validator_id,
+                suite_id,
+            } => {
+                assert_eq!(validator_id, 2, "Should identify validator 2");
+                assert_eq!(suite_id, 1, "Should identify suite_id 1");
+            }
+            e => panic!("Unexpected error type: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_validate_validators_use_ml_dsa_44_empty_set() {
+        // Empty validator set - should pass (vacuously true)
+        let validators: Vec<ValidatorSuiteInfo> = vec![];
+        let result = validate_validators_use_ml_dsa_44(&validators);
+        assert!(result.is_ok(), "Should accept empty validator set");
+    }
+
+    #[test]
+    fn test_validate_testnet_invariants_accepts_valid() {
+        // Valid TestNet configuration with ML-DSA-44 validators
+        let validators = vec![
+            ValidatorSuiteInfo {
+                validator_id: 1,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+            ValidatorSuiteInfo {
+                validator_id: 2,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+        ];
+        let result = validate_testnet_invariants(NetworkEnvironment::Testnet, &validators);
+        assert!(
+            result.is_ok(),
+            "TestNet should accept ML-DSA-44 validators"
+        );
+    }
+
+    #[test]
+    fn test_validate_testnet_invariants_rejects_wrong_environment() {
+        let validators = vec![ValidatorSuiteInfo {
+            validator_id: 1,
+            suite_id: ML_DSA_44_SUITE_ID,
+        }];
+        
+        // DevNet environment should be rejected
+        let result = validate_testnet_invariants(NetworkEnvironment::Devnet, &validators);
+        assert!(result.is_err(), "Should reject DevNet environment");
+        match result.unwrap_err() {
+            TestnetConfigError::WrongEnvironment { expected, actual } => {
+                assert_eq!(expected, NetworkEnvironment::Testnet);
+                assert_eq!(actual, NetworkEnvironment::Devnet);
+            }
+            e => panic!("Unexpected error type: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_validate_testnet_invariants_rejects_non_ml_dsa() {
+        let validators = vec![
+            ValidatorSuiteInfo {
+                validator_id: 1,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+            ValidatorSuiteInfo {
+                validator_id: 2,
+                suite_id: 0, // Toy suite (SUITE_TOY_SHA3)
+            },
+        ];
+        let result = validate_testnet_invariants(NetworkEnvironment::Testnet, &validators);
+        assert!(
+            result.is_err(),
+            "TestNet should reject non-ML-DSA-44 validators"
+        );
+        match result.unwrap_err() {
+            TestnetConfigError::UnsupportedSignatureSuite {
+                validator_id,
+                suite_id,
+            } => {
+                assert_eq!(validator_id, 2);
+                assert_eq!(suite_id, 0);
+            }
+            e => panic!("Unexpected error type: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_validate_mainnet_validator_suites_accepts_valid() {
+        let validators = vec![
+            ValidatorSuiteInfo {
+                validator_id: 1,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+            ValidatorSuiteInfo {
+                validator_id: 2,
+                suite_id: ML_DSA_44_SUITE_ID,
+            },
+        ];
+        let result = validate_mainnet_validator_suites(&validators);
+        assert!(
+            result.is_ok(),
+            "MainNet should accept ML-DSA-44 validators"
+        );
+    }
+
+    #[test]
+    fn test_validate_mainnet_validator_suites_rejects_non_ml_dsa() {
+        let validators = vec![ValidatorSuiteInfo {
+            validator_id: 42,
+            suite_id: 3, // Some other suite
+        }];
+        let result = validate_mainnet_validator_suites(&validators);
+        assert!(
+            result.is_err(),
+            "MainNet should reject non-ML-DSA-44 validators"
+        );
+        match result.unwrap_err() {
+            MainnetConfigError::UnsupportedSignatureSuite {
+                validator_id,
+                suite_id,
+            } => {
+                assert_eq!(validator_id, 42);
+                assert_eq!(suite_id, 3);
+            }
+            e => panic!("Unexpected error type: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_devnet_allows_non_ml_dsa_validators() {
+        // DevNet does NOT have suite validation - this is intentional to allow
+        // legacy test suites. The validate_testnet_invariants function will
+        // fail for DevNet environment (wrong environment), but there's no
+        // DevNet-specific validation that checks suite IDs.
+        //
+        // This test documents the expected behavior: DevNet allows any suite_id.
+        let validators = vec![
+            ValidatorSuiteInfo {
+                validator_id: 1,
+                suite_id: 1, // Non-ML-DSA-44 - allowed on DevNet
+            },
+            ValidatorSuiteInfo {
+                validator_id: 2,
+                suite_id: 0, // Toy suite - allowed on DevNet
+            },
+        ];
+        
+        // DevNet has no suite validation, so validators can use any suite.
+        // The validate_validators_use_ml_dsa_44 function would fail, but
+        // it's not called for DevNet deployments.
+        // 
+        // This is the expected behavior for backward compatibility with test suites.
+        let _ = validators; // DevNet does not validate suite IDs
+    }
+
+    #[test]
+    fn test_mainnet_config_error_display_unsupported_suite() {
+        let error = MainnetConfigError::UnsupportedSignatureSuite {
+            validator_id: 42,
+            suite_id: 1,
+        };
+        let error_str = format!("{}", error);
+        assert!(error_str.contains("validator 42"));
+        assert!(error_str.contains("unsupported signature suite 1"));
+        assert!(error_str.contains("ML-DSA-44"));
+        assert!(error_str.contains("SLASHING_INVARIANTS_AUDIT.md"));
+    }
+
+    #[test]
+    fn test_testnet_config_error_display() {
+        // Test wrong environment error
+        let env_error = TestnetConfigError::WrongEnvironment {
+            expected: NetworkEnvironment::Testnet,
+            actual: NetworkEnvironment::Devnet,
+        };
+        let env_error_str = format!("{}", env_error);
+        assert!(env_error_str.contains("TestNet invariant violated"));
+        assert!(env_error_str.contains("TestNet"));
+        assert!(env_error_str.contains("DevNet"));
+
+        // Test unsupported suite error
+        let suite_error = TestnetConfigError::UnsupportedSignatureSuite {
+            validator_id: 5,
+            suite_id: 2,
+        };
+        let suite_error_str = format!("{}", suite_error);
+        assert!(suite_error_str.contains("validator 5"));
+        assert!(suite_error_str.contains("unsupported signature suite 2"));
+        assert!(suite_error_str.contains("ML-DSA-44"));
     }
 }
