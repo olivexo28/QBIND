@@ -154,23 +154,49 @@ fn test_slashing_config_devnet_default() {
 #[test]
 fn test_slashing_config_mainnet_default() {
     let config = SlashingConfig::mainnet_default();
-    assert_eq!(config.mode, NodeSlashingMode::RecordOnly);
-    // Same parameters, ready for enforcement when governance enables
+    // M4: MainNet default is now EnforceCritical, not RecordOnly
+    assert_eq!(config.mode, NodeSlashingMode::EnforceCritical);
+    // Same parameters, ready for enforcement
     assert_eq!(config.slash_bps_o1_double_sign, 750);
     assert_eq!(config.slash_bps_o2_invalid_proposer_sig, 500);
 }
 
 #[test]
 fn test_slashing_config_is_enforcing() {
-    let record_only = SlashingConfig::mainnet_default();
-    assert!(!record_only.is_enforcing());
+    // M4: MainNet default is now EnforceCritical (enforcing)
+    let mainnet_default = SlashingConfig::mainnet_default();
+    assert!(mainnet_default.is_enforcing());
 
     let enforce_critical = SlashingConfig::devnet_default();
     assert!(enforce_critical.is_enforcing());
+    
+    // RecordOnly is not enforcing
+    let record_only = SlashingConfig {
+        mode: NodeSlashingMode::RecordOnly,
+        ..SlashingConfig::mainnet_default()
+    };
+    assert!(!record_only.is_enforcing());
 }
 
 #[test]
-fn test_slashing_config_validate_for_mainnet_accepts_record_only() {
+fn test_slashing_config_validate_for_mainnet_rejects_record_only() {
+    // M4: RecordOnly is now forbidden for MainNet
+    let config = SlashingConfig {
+        mode: NodeSlashingMode::RecordOnly,
+        ..SlashingConfig::mainnet_default()
+    };
+    let result = config.validate_for_mainnet();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("record_only") || err.contains("RecordOnly"),
+        "Expected error about 'record_only' mode, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_slashing_config_validate_for_mainnet_accepts_enforce_critical() {
     let config = SlashingConfig::mainnet_default();
     assert!(config.validate_for_mainnet().is_ok());
 }
@@ -181,9 +207,9 @@ fn test_slashing_config_validate_for_mainnet_rejects_off() {
     let result = config.validate_for_mainnet();
     assert!(result.is_err());
     let err = result.unwrap_err();
-    // Check for the specific error message about slashing mode being 'off'
+    // M4: Updated error message
     assert!(
-        err.contains("slashing mode must not be 'off'"),
+        err.contains("off") || err.contains("Off") || err.contains("forbidden"),
         "Expected error about 'off' mode, got: {}",
         err
     );
@@ -238,9 +264,10 @@ fn test_nodeconfig_devnet_preset_has_enforce_critical() {
 }
 
 #[test]
-fn test_nodeconfig_mainnet_preset_has_record_only() {
+fn test_nodeconfig_mainnet_preset_has_enforce_critical() {
+    // M4: MainNet preset now uses EnforceCritical
     let config = NodeConfig::mainnet_preset();
-    assert_eq!(config.slashing.mode, NodeSlashingMode::RecordOnly);
+    assert_eq!(config.slashing.mode, NodeSlashingMode::EnforceCritical);
 }
 
 #[test]
@@ -565,15 +592,35 @@ fn test_mainnet_invariants_reject_slashing_off() {
 }
 
 #[test]
-fn test_mainnet_invariants_accept_record_only() {
-    // MainNet preset uses RecordOnly by default
+fn test_mainnet_invariants_reject_record_only() {
+    // M4: RecordOnly is now forbidden for MainNet
+    let mut config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_signer_keystore_path("/data/qbind/keystore")
+        .with_snapshot_dir("/data/qbind/snapshots");
+
+    config.slashing.mode = NodeSlashingMode::RecordOnly;
+
+    // Slashing config validation should fail
+    let result = config.slashing.validate_for_mainnet();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("record_only") || err.contains("RecordOnly"),
+        "Expected error about 'record_only' mode, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_mainnet_invariants_accept_enforce_critical() {
+    // M4: MainNet preset uses EnforceCritical by default
     let config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
         .with_signer_keystore_path("/data/qbind/keystore")
         .with_snapshot_dir("/data/qbind/snapshots");
 
-    // Note: Full MainNet validation requires many other settings,
-    // but slashing specifically should pass
-    assert_eq!(config.slashing.mode, NodeSlashingMode::RecordOnly);
+    // MainNet default is now EnforceCritical
+    assert_eq!(config.slashing.mode, NodeSlashingMode::EnforceCritical);
     assert!(config.slashing.validate_for_mainnet().is_ok());
 }

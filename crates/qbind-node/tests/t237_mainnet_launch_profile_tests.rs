@@ -30,7 +30,8 @@
 //! | Mempool DoS | `test_mainnet_rejects_mempool_dos_zero_limits` | `MempoolDosMisconfigured` |
 //! | Eviction rate | `test_mainnet_rejects_eviction_mode_off` | `MempoolEvictionMisconfigured` |
 //! | Snapshots | `test_mainnet_rejects_snapshots_disabled` | `SnapshotsDisabled` |
-//! | Slashing | `test_mainnet_rejects_slashing_mode_off` | `SlashingMisconfigured` |
+//! | Slashing (Off) | `test_mainnet_rejects_slashing_mode_off` | `SlashingMisconfigured` |
+//! | Slashing (RecordOnly) | `test_mainnet_rejects_slashing_mode_record_only` | `SlashingMisconfigured` (M4) |
 //! | Genesis hash | `test_mainnet_rejects_missing_expected_genesis_hash` | `ExpectedGenesisHashMissing` |
 //! | Monetary mode | `test_mainnet_rejects_monetary_mode_off` | `MonetaryModeOff` |
 //! | State retention | `test_mainnet_rejects_state_retention_disabled` | `StateRetentionDisabled` |
@@ -618,22 +619,12 @@ fn test_mainnet_config_error_display_messages() {
 // Part 5: Compatibility Tests
 // ============================================================================
 
-/// Test: MainNet preset is compatible with slashing modes RecordOnly, EnforceCritical, EnforceAll
+/// Test: MainNet preset is compatible with slashing modes EnforceCritical and EnforceAll
+///
+/// M4 Requirement: MainNet MUST use enforcement mode. RecordOnly is forbidden.
 #[test]
 fn test_mainnet_accepts_valid_slashing_modes() {
-    // RecordOnly (default for MainNet v0)
-    let config_record_only = NodeConfig::mainnet_preset()
-        .with_data_dir("/data/qbind")
-        .with_genesis_path("/data/qbind/genesis.json")
-        .with_expected_genesis_hash([0xAB; 32])
-        .with_signer_keystore_path("/data/qbind/keystore")
-        .with_slashing_mode(SlashingMode::RecordOnly);
-    assert!(
-        config_record_only.validate_mainnet_invariants().is_ok(),
-        "RecordOnly should be accepted"
-    );
-
-    // EnforceCritical
+    // EnforceCritical (default for MainNet per M4)
     let config_enforce_critical = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
         .with_genesis_path("/data/qbind/genesis.json")
@@ -656,6 +647,36 @@ fn test_mainnet_accepts_valid_slashing_modes() {
         config_enforce_all.validate_mainnet_invariants().is_ok(),
         "EnforceAll should be accepted"
     );
+}
+
+/// Test: MainNet rejects RecordOnly slashing mode (M4 requirement)
+///
+/// M4 Requirement: RecordOnly only logs evidence without applying penalties,
+/// which provides no economic deterrent for Byzantine behavior. MainNet must
+/// use enforcement mode.
+#[test]
+fn test_mainnet_rejects_slashing_mode_record_only() {
+    let config = NodeConfig::mainnet_preset()
+        .with_data_dir("/data/qbind")
+        .with_genesis_path("/data/qbind/genesis.json")
+        .with_expected_genesis_hash([0xAB; 32])
+        .with_signer_keystore_path("/data/qbind/keystore")
+        .with_slashing_mode(SlashingMode::RecordOnly);
+
+    let result = config.validate_mainnet_invariants();
+
+    assert!(result.is_err(), "Should reject slashing mode RecordOnly");
+    match result {
+        Err(MainnetConfigError::SlashingMisconfigured { reason }) => {
+            assert!(
+                reason.contains("record_only") || reason.contains("RecordOnly"),
+                "Error reason should mention RecordOnly mode: {}",
+                reason
+            );
+        }
+        Err(e) => panic!("Expected SlashingMisconfigured, got: {:?}", e),
+        Ok(()) => panic!("Expected error"),
+    }
 }
 
 /// Test: MainNet accepts both Shadow and Active monetary modes
