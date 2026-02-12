@@ -5736,8 +5736,16 @@ impl std::error::Error for MainnetConfigError {}
 /// This is the only allowed signature suite for validators on MainNet and TestNet.
 /// Using any other suite would bypass slashing cryptographic verification.
 ///
-/// Value: 100 (matches qbind_crypto::SUITE_PQ_RESERVED_1)
-pub const ML_DSA_44_SUITE_ID: u8 = 100;
+/// Value: 100 (derived from qbind_crypto::SUITE_PQ_RESERVED_1)
+///
+/// Note: This constant is derived at compile-time from the crypto crate to ensure
+/// it stays synchronized with the canonical suite ID definition.
+pub const ML_DSA_44_SUITE_ID: u8 = {
+    let id = qbind_crypto::SUITE_PQ_RESERVED_1.as_u16();
+    // Compile-time assertion that the value fits in u8
+    assert!(id <= 255, "ML-DSA-44 suite ID must fit in u8");
+    id as u8
+};
 
 /// Information about a validator for suite validation (M0).
 ///
@@ -7935,7 +7943,7 @@ mod tests {
             validator_id: 1,
             suite_id: ML_DSA_44_SUITE_ID,
         }];
-        
+
         // DevNet environment should be rejected
         let result = validate_testnet_invariants(NetworkEnvironment::Devnet, &validators);
         assert!(result.is_err(), "Should reject DevNet environment");
@@ -8037,11 +8045,11 @@ mod tests {
                 suite_id: 0, // Toy suite - allowed on DevNet
             },
         ];
-        
+
         // DevNet has no suite validation, so validators can use any suite.
         // The validate_validators_use_ml_dsa_44 function would fail, but
         // it's not called for DevNet deployments.
-        // 
+        //
         // This is the expected behavior for backward compatibility with test suites.
         let _ = validators; // DevNet does not validate suite IDs
     }
