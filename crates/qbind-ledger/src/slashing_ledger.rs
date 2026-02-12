@@ -541,6 +541,10 @@ pub struct RocksDbSlashingLedger {
     /// Populated on startup from the database.
     /// Uses 32-byte SHA3-256 evidence IDs (M1.1 hardening).
     seen_evidence_cache: HashSet<[u8; 32]>,
+    /// Test-only: When true, forces apply_slashing_update_atomic() to simulate
+    /// a WriteBatch commit failure (M1.3 atomicity testing).
+    #[cfg(test)]
+    inject_write_failure: bool,
 }
 
 impl std::fmt::Debug for RocksDbSlashingLedger {
@@ -591,6 +595,8 @@ impl RocksDbSlashingLedger {
         Ok(Self {
             db,
             seen_evidence_cache,
+            #[cfg(test)]
+            inject_write_failure: false,
         })
     }
 
@@ -838,6 +844,40 @@ impl RocksDbSlashingLedger {
             .map_err(|e| SlashingLedgerError::StorageError(e.to_string()))
     }
 
+    /// Test-only: Enable or disable write failure injection for atomicity testing (M1.3).
+    ///
+    /// When enabled, `apply_slashing_update_atomic()` will fail before committing
+    /// the RocksDB WriteBatch, allowing tests to verify that no partial state
+    /// is left behind on failures.
+    #[cfg(test)]
+    pub fn set_inject_write_failure(&mut self, inject: bool) {
+        self.inject_write_failure = inject;
+    }
+
+    /// Test-only: Get the current record sequence number without incrementing it (M1.3).
+    ///
+    /// Returns the current value of the record sequence counter from storage.
+    /// Used by atomicity tests to verify the sequence counter is unchanged after
+    /// a simulated write failure.
+    #[cfg(test)]
+    pub fn get_current_record_seq(&self) -> Result<u64, SlashingLedgerError> {
+        match self.db.get(RECORD_SEQ_KEY) {
+            Ok(Some(bytes)) => {
+                if bytes.len() != 8 {
+                    return Err(SlashingLedgerError::StorageError(
+                        "invalid record_seq length".to_string(),
+                    ));
+                }
+                let arr: [u8; 8] = bytes[..]
+                    .try_into()
+                    .expect("length already verified to be 8");
+                Ok(u64::from_be_bytes(arr))
+            }
+            Ok(None) => Ok(0),
+            Err(e) => Err(SlashingLedgerError::StorageError(e.to_string())),
+        }
+    }
+
     /// Apply a batch of slashing updates atomically (M1.2).
     ///
     /// This method commits all operations in the batch using a single RocksDB
@@ -951,6 +991,14 @@ impl RocksDbSlashingLedger {
         }
 
         // 4. Commit the entire batch atomically
+        // Test-only: Inject write failure if enabled (M1.3 atomicity testing)
+        #[cfg(test)]
+        if self.inject_write_failure {
+            return Err(SlashingLedgerError::StorageError(
+                "injected write failure for atomicity test (M1.3)".to_string(),
+            ));
+        }
+
         self.db
             .write(write_batch)
             .map_err(|e| SlashingLedgerError::StorageError(e.to_string()))?;
@@ -1871,5 +1919,182 @@ mod tests {
         assert!(batch.validator_state.is_some());
         assert!(batch.evidence_id.is_some());
         assert!(batch.slashing_record.is_some());
+    }
+
+    // ============================================================================
+    // M1.3: Failure-Injection Atomicity Test
+    // ============================================================================
+
+    /// Tests that when `apply_slashing_update_atomic()` fails due to an injected
+    /// write failure, NO partial state is left behind.
+    ///
+    /// This proves the atomicity guarantee: either all operations succeed together,
+    /// or none of them take effect.
+    ///
+    /// Verifies:
+    /// - Validator state key unchanged
+    /// - Evidence marker absent (not added)
+    /// - Record sequence counter unchanged
+    /// - Slashing record key absent
+    /// - In-memory evidence cache not updated
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_write_failure_no_partial_state() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        // 1. Initialize ledger + validator state
+        let initial_stake: StakeAmount = 1_000_000;
+        ledger.initialize_validator(1, initial_stake).unwrap();
+
+        let initial_state = ledger.get_validator_state(1).unwrap();
+        assert_eq!(initial_state.stake, initial_stake);
+        assert_eq!(initial_state.total_slashed, 0);
+        assert_eq!(initial_state.jail_count, 0);
+        assert!(initial_state.jailed_until_epoch.is_none());
+
+        // Capture initial record sequence counter
+        let initial_record_seq = ledger.get_current_record_seq().unwrap();
+
+        // 2. Prepare SlashingUpdateBatch with state update + evidence_id + record
+        let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"test_write_failure_evidence");
+
+        // Verify evidence is NOT seen yet
+        assert!(!ledger.is_evidence_seen(&evidence_id));
+
+        let updated_state = ValidatorSlashingState {
+            stake: 900_000,              // Post-slash stake
+            jailed_until_epoch: Some(100),
+            total_slashed: 100_000,
+            jail_count: 1,
+            last_offense_epoch: Some(50),
+        };
+
+        let record = SlashingRecord {
+            validator_id: 1,
+            offense_kind: "O1_double_sign".to_string(),
+            slashed_amount: 100_000,
+            jailed: true,
+            jailed_until_epoch: Some(100),
+            height: 5000,
+            view: 100,
+            epoch: 50,
+        };
+
+        let mut batch = SlashingUpdateBatch::new();
+        batch.set_validator_state(1, updated_state);
+        batch.set_evidence_id(evidence_id);
+        batch.set_slashing_record(record);
+
+        // 3. Force write_batch failure
+        ledger.set_inject_write_failure(true);
+
+        // Attempt the atomic update - it should fail
+        let result = ledger.apply_slashing_update_atomic(batch);
+        assert!(
+            result.is_err(),
+            "Expected apply_slashing_update_atomic to fail with injected error"
+        );
+
+        // Verify error message contains expected injection marker
+        if let Err(SlashingLedgerError::StorageError(msg)) = &result {
+            assert!(
+                msg.contains("injected write failure"),
+                "Error message should indicate injected failure: {}",
+                msg
+            );
+        } else {
+            panic!("Expected StorageError, got: {:?}", result);
+        }
+
+        // 4. Assert NO partial state was left behind
+
+        // (a) Validator state key unchanged - should still be the initial state
+        let state_after = ledger.get_validator_state(1).unwrap();
+        assert_eq!(
+            state_after.stake, initial_stake,
+            "Validator stake should be unchanged after write failure"
+        );
+        assert_eq!(
+            state_after.total_slashed, 0,
+            "Total slashed should be unchanged after write failure"
+        );
+        assert_eq!(
+            state_after.jail_count, 0,
+            "Jail count should be unchanged after write failure"
+        );
+        assert!(
+            state_after.jailed_until_epoch.is_none(),
+            "Jailed_until_epoch should be unchanged (None) after write failure"
+        );
+
+        // (b) Evidence marker absent - not added to DB
+        // Re-open ledger to verify evidence is not persisted
+        drop(ledger);
+        let ledger2 = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+        assert!(
+            !ledger2.is_evidence_seen(&evidence_id),
+            "Evidence marker should NOT be present after write failure"
+        );
+
+        // (c) Record sequence counter unchanged
+        let record_seq_after = ledger2.get_current_record_seq().unwrap();
+        assert_eq!(
+            record_seq_after, initial_record_seq,
+            "Record sequence counter should be unchanged after write failure"
+        );
+
+        // (d) Record key absent - verify no slashing record was stored
+        let records = ledger2.get_slashing_records(1);
+        assert!(
+            records.is_empty(),
+            "No slashing records should exist after write failure"
+        );
+
+        // (e) In-memory evidence cache not updated
+        // This was already verified above via is_evidence_seen() on ledger2
+        // (which loads cache on open), but let's be explicit:
+        assert!(
+            !ledger2.is_evidence_seen(&evidence_id),
+            "In-memory evidence cache should not contain the evidence after write failure"
+        );
+
+        // 5. Verify normal operation works after disabling injection
+        // (Re-open to get a fresh ledger without the failure flag)
+        drop(ledger2);
+        let mut ledger3 = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        let mut batch2 = SlashingUpdateBatch::new();
+        let updated_state2 = ValidatorSlashingState {
+            stake: 900_000,
+            jailed_until_epoch: Some(100),
+            total_slashed: 100_000,
+            jail_count: 1,
+            last_offense_epoch: Some(50),
+        };
+        batch2.set_validator_state(1, updated_state2);
+        batch2.set_evidence_id(evidence_id);
+
+        let record2 = SlashingRecord {
+            validator_id: 1,
+            offense_kind: "O1_double_sign".to_string(),
+            slashed_amount: 100_000,
+            jailed: true,
+            jailed_until_epoch: Some(100),
+            height: 5000,
+            view: 100,
+            epoch: 50,
+        };
+        batch2.set_slashing_record(record2);
+
+        // This time it should succeed
+        ledger3.apply_slashing_update_atomic(batch2).unwrap();
+
+        // Verify state was updated
+        let final_state = ledger3.get_validator_state(1).unwrap();
+        assert_eq!(final_state.stake, 900_000);
+        assert_eq!(final_state.total_slashed, 100_000);
+        assert!(ledger3.is_evidence_seen(&evidence_id));
+        let final_records = ledger3.get_slashing_records(1);
+        assert_eq!(final_records.len(), 1);
     }
 }
