@@ -8270,4 +8270,112 @@ mod tests {
         assert!(suite_error_str.contains("unsupported signature suite 2"));
         assert!(suite_error_str.contains("ML-DSA-44"));
     }
+
+    // ========================================================================
+    // M2: ValidatorStakeConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validator_stake_config_devnet_default() {
+        let config = ValidatorStakeConfig::devnet_default();
+        assert_eq!(config.min_validator_stake, MIN_VALIDATOR_STAKE_DEVNET);
+        assert_eq!(config.min_validator_stake, 1_000_000); // 1 QBIND
+        assert!(!config.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_validator_stake_config_testnet_default() {
+        let config = ValidatorStakeConfig::testnet_default();
+        assert_eq!(config.min_validator_stake, MIN_VALIDATOR_STAKE_TESTNET);
+        assert_eq!(config.min_validator_stake, 10_000_000); // 10 QBIND
+        assert!(!config.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_validator_stake_config_mainnet_default() {
+        let config = ValidatorStakeConfig::mainnet_default();
+        assert_eq!(config.min_validator_stake, MIN_VALIDATOR_STAKE_MAINNET);
+        assert_eq!(config.min_validator_stake, 100_000_000_000); // 100,000 QBIND
+        assert!(config.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_validator_stake_config_is_stake_sufficient() {
+        let config = ValidatorStakeConfig::devnet_default();
+
+        // Below threshold
+        assert!(!config.is_stake_sufficient(999_999));
+
+        // At threshold
+        assert!(config.is_stake_sufficient(1_000_000));
+
+        // Above threshold
+        assert!(config.is_stake_sufficient(1_000_001));
+        assert!(config.is_stake_sufficient(u64::MAX));
+    }
+
+    #[test]
+    fn test_validator_stake_config_validate_for_mainnet() {
+        // Valid MainNet config
+        let valid = ValidatorStakeConfig::mainnet_default();
+        assert!(valid.validate_for_mainnet().is_ok());
+
+        // Invalid: stake too low
+        let low_stake = ValidatorStakeConfig {
+            min_validator_stake: MIN_VALIDATOR_STAKE_MAINNET - 1,
+            fail_fast_on_startup: true,
+        };
+        let err = low_stake.validate_for_mainnet();
+        assert!(err.is_err());
+        assert!(err.unwrap_err().contains("min_validator_stake"));
+
+        // Invalid: fail_fast disabled
+        let no_fail_fast = ValidatorStakeConfig {
+            min_validator_stake: MIN_VALIDATOR_STAKE_MAINNET,
+            fail_fast_on_startup: false,
+        };
+        let err = no_fail_fast.validate_for_mainnet();
+        assert!(err.is_err());
+        assert!(err.unwrap_err().contains("fail_fast_on_startup"));
+    }
+
+    #[test]
+    fn test_devnet_preset_validator_stake() {
+        let config = NodeConfig::devnet_v0_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_DEVNET
+        );
+        assert!(!config.validator_stake.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_testnet_alpha_preset_validator_stake() {
+        let config = NodeConfig::testnet_alpha_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_TESTNET
+        );
+        assert!(!config.validator_stake.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_testnet_beta_preset_validator_stake() {
+        let config = NodeConfig::testnet_beta_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_TESTNET
+        );
+        assert!(!config.validator_stake.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_mainnet_preset_validator_stake() {
+        let config = NodeConfig::mainnet_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_MAINNET
+        );
+        assert!(config.validator_stake.fail_fast_on_startup);
+    }
 }
