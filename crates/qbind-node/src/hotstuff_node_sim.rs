@@ -68,6 +68,7 @@ use qbind_consensus::pacemaker::{
 use qbind_consensus::timeout::TimeoutMsg;
 use qbind_consensus::validator_set::{
     ConsensusValidatorSet, EpochId, EpochState, EpochStateProvider,
+    StakeFilteringEpochStateProvider,
 };
 use qbind_consensus::verify_job::{ConsensusMsgKind, ConsensusVerifyJob};
 use qbind_net::{ClientConnectionConfig, ServerConnectionConfig};
@@ -88,6 +89,29 @@ const TX_NONCE_SIZE: usize = 8;
 const TX_PAYLOAD_LEN_SIZE: usize = 4;
 const TX_SIG_LEN_SIZE: usize = 4;
 const TX_SUITE_ID_SIZE: usize = 2;
+
+// ============================================================================
+// M2.3: Arc Epoch State Provider Wrapper
+// ============================================================================
+
+/// Wrapper type that adapts `Arc<dyn EpochStateProvider>` to implement `EpochStateProvider`.
+///
+/// This wrapper is necessary because `StakeFilteringEpochStateProvider<P>` requires `P`
+/// to implement `EpochStateProvider`, but we want to accept any `Arc<dyn EpochStateProvider>`
+/// from the builder API.
+///
+/// # M2.3 Integration
+///
+/// This type enables the `with_stake_filtering_epoch_state_provider` method to wrap
+/// any dynamically-dispatched `EpochStateProvider` with stake filtering.
+#[derive(Debug, Clone)]
+struct ArcEpochStateProvider(Arc<dyn EpochStateProvider>);
+
+impl EpochStateProvider for ArcEpochStateProvider {
+    fn get_epoch_state(&self, epoch: EpochId) -> Option<EpochState> {
+        self.0.get_epoch_state(epoch)
+    }
+}
 
 // ============================================================================
 // Error types
@@ -903,6 +927,66 @@ impl NodeHotstuffHarness {
     /// ```
     pub fn with_epoch_state_provider(mut self, provider: Arc<dyn EpochStateProvider>) -> Self {
         self.epoch_state_provider = Some(provider);
+        self
+    }
+
+    /// Attach an epoch state provider with stake filtering (M2.3).
+    ///
+    /// This method wraps the given inner provider with a `StakeFilteringEpochStateProvider`
+    /// that filters out validators with stake below `min_validator_stake` at epoch boundaries.
+    ///
+    /// # M2.3 Integration
+    ///
+    /// This is the canonical integration point for minimum stake enforcement in production
+    /// (TestNet/MainNet) deployments. When epoch transitions occur via `handle_potential_reconfig_commit()`,
+    /// the epoch state returned by this provider will have low-stake validators excluded.
+    ///
+    /// # Fail-Closed Behavior
+    ///
+    /// If stake filtering would result in an empty validator set (all validators below threshold),
+    /// the provider returns `None`, and the epoch transition will fail with an error. This prevents
+    /// the network from entering a state with no eligible validators.
+    ///
+    /// # Arguments
+    ///
+    /// - `inner_provider`: The inner `EpochStateProvider` that supplies validator candidates.
+    /// - `min_validator_stake`: Minimum stake required for inclusion (in microQBIND).
+    ///
+    /// # Returns
+    ///
+    /// Returns `self` for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_consensus::validator_set::StaticEpochStateProvider;
+    /// use qbind_node::node_config::ValidatorStakeConfig;
+    ///
+    /// let inner_provider = StaticEpochStateProvider::new()
+    ///     .with_epoch(epoch0)
+    ///     .with_epoch(epoch1);
+    ///
+    /// // Use TestNet minimum stake (10 QBIND)
+    /// let stake_config = ValidatorStakeConfig::testnet_default();
+    ///
+    /// let harness = NodeHotstuffHarness::new(...)?
+    ///     .with_stake_filtering_epoch_state_provider(
+    ///         Arc::new(inner_provider),
+    ///         stake_config.min_validator_stake,
+    ///     );
+    /// ```
+    pub fn with_stake_filtering_epoch_state_provider(
+        mut self,
+        inner_provider: Arc<dyn EpochStateProvider>,
+        min_validator_stake: u64,
+    ) -> Self {
+        // Wrap the inner provider with stake filtering
+        let filtering_provider = StakeFilteringEpochStateProvider::new(
+            // Wrap the Arc with ArcEpochStateProvider for trait implementation
+            ArcEpochStateProvider(inner_provider),
+            min_validator_stake,
+        );
+        self.epoch_state_provider = Some(Arc::new(filtering_provider));
         self
     }
 
