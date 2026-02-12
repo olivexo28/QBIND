@@ -13,7 +13,7 @@ use qbind_node::node_config::{
     DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
     MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
     P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode, SignerMode,
-    SlashingConfig, SnapshotConfig, StateRetentionConfig,
+    SlashingConfig, SnapshotConfig, StateRetentionConfig, ValidatorStakeConfig,
 };
 use qbind_node::p2p_node_builder::{P2pNodeBuilder, P2pNodeError};
 use qbind_types::NetworkEnvironment;
@@ -84,6 +84,8 @@ fn make_test_p2p_config() -> NodeConfig {
         p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
         // T229: Slashing defaults
         slashing: SlashingConfig::devnet_default(),
+        // M2: Validator stake defaults
+        validator_stake: ValidatorStakeConfig::devnet_default(),
         // T232: Genesis source defaults
         genesis_source: GenesisSourceConfig::devnet_default(),
         expected_genesis_hash: None,
@@ -130,6 +132,8 @@ fn make_test_local_mesh_config() -> NodeConfig {
         p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
         // T229: Slashing defaults
         slashing: SlashingConfig::devnet_default(),
+        // M2: Validator stake defaults
+        validator_stake: ValidatorStakeConfig::devnet_default(),
         // T232: Genesis source defaults
         genesis_source: GenesisSourceConfig::devnet_default(),
         expected_genesis_hash: None,

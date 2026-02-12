@@ -59,6 +59,7 @@ fn test_param_registry_genesis() {
         slash_bps_precommit: 10_000,
         reporter_reward_bps: 5_000,
         reserved1: 0,
+        min_validator_stake: 0,
     };
 
     assert_eq!(params.version, 1);

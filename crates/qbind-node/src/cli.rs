@@ -42,6 +42,7 @@ use crate::node_config::{
     MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig,
     NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, ParseEnvironmentError,
     SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig, StateRetentionConfig,
+    ValidatorStakeConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{
@@ -691,6 +692,8 @@ impl CliArgs {
                 p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
                 // T229: DevNet slashing defaults for legacy path
                 slashing: SlashingConfig::devnet_default(),
+                // M2: DevNet validator stake defaults for legacy path
+                validator_stake: ValidatorStakeConfig::devnet_default(),
                 // T232: DevNet genesis source defaults for legacy path
                 genesis_source: GenesisSourceConfig::devnet_default(),
                 // T233: No expected genesis hash by default

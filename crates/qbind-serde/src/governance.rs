@@ -1,6 +1,7 @@
 use crate::error::StateError;
 use crate::io::{
-    get_bytes, get_u16, get_u8, len_to_u16, put_bytes, put_u16, put_u8, StateDecode, StateEncode,
+    get_bytes, get_u16, get_u64, get_u8, len_to_u16, put_bytes, put_u16, put_u64, put_u8,
+    StateDecode, StateEncode,
 };
 use qbind_types::{
     Hash32, LaunchChecklist, MainnetStatus, ParamRegistry, SafetyCouncilKeyAccount,
@@ -159,6 +160,7 @@ impl StateEncode for ParamRegistry {
         put_u16(out, self.slash_bps_precommit);
         put_u16(out, self.reporter_reward_bps);
         put_u16(out, self.reserved1);
+        put_u64(out, self.min_validator_stake); // M2: Minimum validator stake
     }
 }
 
@@ -178,6 +180,7 @@ impl StateDecode for ParamRegistry {
         let slash_bps_precommit = get_u16(input)?;
         let reporter_reward_bps = get_u16(input)?;
         let reserved1 = get_u16(input)?;
+        let min_validator_stake = get_u64(input)?; // M2: Minimum validator stake
 
         Ok(ParamRegistry {
             version,
@@ -187,6 +190,7 @@ impl StateDecode for ParamRegistry {
             slash_bps_precommit,
             reporter_reward_bps,
             reserved1,
+            min_validator_stake,
         })
     }
 }

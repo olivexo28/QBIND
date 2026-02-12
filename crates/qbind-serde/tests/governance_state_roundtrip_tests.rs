@@ -165,6 +165,7 @@ fn param_registry_roundtrip() {
         slash_bps_precommit: 200,
         reporter_reward_bps: 10,
         reserved1: 0,
+        min_validator_stake: 0,
     };
 
     let mut buf = Vec::new();
@@ -193,6 +194,7 @@ fn param_registry_roundtrip_all_statuses() {
             slash_bps_precommit: 1000,
             reporter_reward_bps: 50,
             reserved1: 0,
+            min_validator_stake: 0,
         };
 
         let mut buf = Vec::new();
@@ -215,6 +217,7 @@ fn param_registry_max_values() {
         slash_bps_precommit: u16::MAX,
         reporter_reward_bps: u16::MAX,
         reserved1: u16::MAX,
+        min_validator_stake: u64::MAX,
     };
 
     let mut buf = Vec::new();

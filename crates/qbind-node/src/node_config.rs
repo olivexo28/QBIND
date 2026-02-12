@@ -2129,6 +2129,137 @@ impl SlashingConfig {
 }
 
 // ============================================================================
+// M2: Validator Stake Configuration
+// ============================================================================
+
+/// Minimum stake required for validator registration in microQBIND.
+///
+/// All internal stake values are stored in microQBIND (1 QBIND = 1,000,000 microQBIND).
+///
+/// | Network | Minimum Stake (microQBIND) | Equivalent (QBIND) | Rationale |
+/// |---------|----------------------------|--------------------| ----------|
+/// | DevNet  | 1,000,000                  | 1 QBIND            | Low barrier for testing |
+/// | TestNet | 10,000,000                 | 10 QBIND           | Moderate barrier for realistic testing |
+/// | MainNet | 100,000,000,000            | 100,000 QBIND      | Economic security threshold |
+
+/// Minimum validator stake for DevNet (1 QBIND = 1,000,000 microQBIND).
+pub const MIN_VALIDATOR_STAKE_DEVNET: u64 = 1_000_000;
+
+/// Minimum validator stake for TestNet (10 QBIND = 10,000,000 microQBIND).
+pub const MIN_VALIDATOR_STAKE_TESTNET: u64 = 10_000_000;
+
+/// Minimum validator stake for MainNet (100,000 QBIND = 100,000,000,000 microQBIND).
+pub const MIN_VALIDATOR_STAKE_MAINNET: u64 = 100_000_000_000;
+
+/// Configuration for validator stake requirements (M2).
+///
+/// Controls minimum stake enforcement at validator registration and epoch transitions.
+/// Validators must have at least `min_validator_stake` to:
+/// 1. Register as a validator
+/// 2. Remain eligible for the validator set at epoch boundaries
+///
+/// # Environments
+///
+/// - **DevNet v0**: 1,000,000 microQBIND (1 QBIND) — low barrier for testing
+/// - **TestNet Alpha/Beta**: 10,000,000 microQBIND (10 QBIND) — moderate barrier
+/// - **MainNet v0**: 100,000,000,000 microQBIND (100,000 QBIND) — economic security
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::ValidatorStakeConfig;
+///
+/// // DevNet configuration
+/// let config = ValidatorStakeConfig::devnet_default();
+/// assert_eq!(config.min_validator_stake, 1_000_000);
+///
+/// // MainNet configuration
+/// let mainnet = ValidatorStakeConfig::mainnet_default();
+/// assert_eq!(mainnet.min_validator_stake, 100_000_000_000);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidatorStakeConfig {
+    /// Minimum stake required for validator registration and eligibility (in microQBIND).
+    ///
+    /// Validators with stake below this threshold:
+    /// - Cannot register as new validators
+    /// - Are excluded from the validator set at epoch boundaries
+    pub min_validator_stake: u64,
+
+    /// Whether to fail-fast at startup if active validators are below threshold.
+    ///
+    /// - `true` (MainNet default): Fail startup if any active validator is below min
+    /// - `false` (DevNet/TestNet): Exclude below-threshold validators but continue
+    pub fail_fast_on_startup: bool,
+}
+
+impl Default for ValidatorStakeConfig {
+    fn default() -> Self {
+        Self::devnet_default()
+    }
+}
+
+impl ValidatorStakeConfig {
+    /// Create the DevNet default configuration (M2).
+    ///
+    /// - min_validator_stake: 1,000,000 microQBIND (1 QBIND)
+    /// - fail_fast_on_startup: false (exclude below-threshold but continue)
+    pub fn devnet_default() -> Self {
+        Self {
+            min_validator_stake: MIN_VALIDATOR_STAKE_DEVNET,
+            fail_fast_on_startup: false,
+        }
+    }
+
+    /// Create the TestNet Alpha/Beta default configuration (M2).
+    ///
+    /// - min_validator_stake: 10,000,000 microQBIND (10 QBIND)
+    /// - fail_fast_on_startup: false (exclude below-threshold but continue)
+    pub fn testnet_default() -> Self {
+        Self {
+            min_validator_stake: MIN_VALIDATOR_STAKE_TESTNET,
+            fail_fast_on_startup: false,
+        }
+    }
+
+    /// Create the MainNet default configuration (M2).
+    ///
+    /// - min_validator_stake: 100,000,000,000 microQBIND (100,000 QBIND)
+    /// - fail_fast_on_startup: true (fail startup if any validator below min)
+    pub fn mainnet_default() -> Self {
+        Self {
+            min_validator_stake: MIN_VALIDATOR_STAKE_MAINNET,
+            fail_fast_on_startup: true,
+        }
+    }
+
+    /// Check if a stake amount meets the minimum threshold.
+    pub fn is_stake_sufficient(&self, stake: u64) -> bool {
+        stake >= self.min_validator_stake
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements:
+    /// - min_validator_stake must be at least MIN_VALIDATOR_STAKE_MAINNET
+    /// - fail_fast_on_startup should be true
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        if self.min_validator_stake < MIN_VALIDATOR_STAKE_MAINNET {
+            return Err(format!(
+                "min_validator_stake ({}) must be at least {} for MainNet",
+                self.min_validator_stake, MIN_VALIDATOR_STAKE_MAINNET
+            ));
+        }
+        if !self.fail_fast_on_startup {
+            return Err("fail_fast_on_startup must be true for MainNet".to_string());
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
 // T232: Genesis Source Configuration
 // ============================================================================
 
@@ -3292,6 +3423,18 @@ pub struct NodeConfig {
     pub slashing: SlashingConfig,
 
     // ========================================================================
+    // M2: Validator Stake Configuration
+    // ========================================================================
+    /// Validator stake configuration (M2).
+    ///
+    /// Controls minimum stake enforcement at validator registration and epoch transitions.
+    ///
+    /// - DevNet v0: 1 QBIND minimum (low barrier for testing)
+    /// - TestNet Alpha/Beta: 10 QBIND minimum (moderate barrier)
+    /// - MainNet v0: 100,000 QBIND minimum (economic security)
+    pub validator_stake: ValidatorStakeConfig,
+
+    // ========================================================================
     // T232: Genesis Source Configuration
     // ========================================================================
     /// Genesis source configuration (T232).
@@ -3370,6 +3513,8 @@ impl Default for NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults (EnforceCritical mode)
             slashing: SlashingConfig::devnet_default(),
+            // M2: DevNet validator stake defaults (low barrier)
+            validator_stake: ValidatorStakeConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
             // T233: No expected genesis hash for DevNet
@@ -3423,6 +3568,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults
             slashing: SlashingConfig::devnet_default(),
+            // M2: DevNet validator stake defaults
+            validator_stake: ValidatorStakeConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
             // T233: No expected genesis hash by default
@@ -3475,6 +3622,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults
             slashing: SlashingConfig::devnet_default(),
+            // M2: DevNet validator stake defaults
+            validator_stake: ValidatorStakeConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
             // T233: No expected genesis hash by default
@@ -3575,6 +3724,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::devnet_default()),
             // T229: DevNet slashing defaults (EnforceCritical mode)
             slashing: SlashingConfig::devnet_default(),
+            // M2: DevNet validator stake defaults (low barrier)
+            validator_stake: ValidatorStakeConfig::devnet_default(),
             // T232: DevNet genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::devnet_default(),
             // T233: No expected genesis hash for DevNet
@@ -3650,6 +3801,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::testnet_alpha_default()),
             // T229: TestNet Alpha slashing defaults (RecordOnly mode)
             slashing: SlashingConfig::testnet_alpha_default(),
+            // M2: TestNet validator stake defaults (moderate barrier)
+            validator_stake: ValidatorStakeConfig::testnet_default(),
             // T232: TestNet Alpha genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::testnet_default(),
             // T233: No expected genesis hash for TestNet (optional)
@@ -3738,6 +3891,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::testnet_beta_default()),
             // T229: TestNet Beta slashing defaults (RecordOnly mode)
             slashing: SlashingConfig::testnet_beta_default(),
+            // M2: TestNet validator stake defaults (moderate barrier)
+            validator_stake: ValidatorStakeConfig::testnet_default(),
             // T232: TestNet Beta genesis source defaults (embedded)
             genesis_source: GenesisSourceConfig::testnet_default(),
             // T233: No expected genesis hash for TestNet (optional)
@@ -3838,6 +3993,8 @@ impl NodeConfig {
             p2p_anti_eclipse: Some(P2pAntiEclipseConfig::mainnet_default()),
             // T229: MainNet slashing defaults (RecordOnly mode, governance can flip)
             slashing: SlashingConfig::mainnet_default(),
+            // M2: MainNet validator stake defaults (high barrier, fail-fast)
+            validator_stake: ValidatorStakeConfig::mainnet_default(),
             // T232: MainNet genesis source (external file required)
             genesis_source: GenesisSourceConfig::mainnet_default(),
             // T233: Expected genesis hash required (must be set via --expect-genesis-hash)
@@ -5112,13 +5269,19 @@ impl NodeConfig {
             return Err(MainnetConfigError::SlashingMisconfigured { reason });
         }
 
-        // 30. Genesis source must be configured for MainNet (T232)
+        // 30. Validator stake configuration must be valid for MainNet (M2)
+        // MainNet requires minimum stake enforcement with fail-fast on startup.
+        if let Err(reason) = self.validator_stake.validate_for_mainnet() {
+            return Err(MainnetConfigError::ValidatorStakeMisconfigured { reason });
+        }
+
+        // 31. Genesis source must be configured for MainNet (T232)
         // MainNet requires an external genesis file (no embedded genesis).
         if let Err(reason) = self.genesis_source.validate_for_mainnet() {
             return Err(MainnetConfigError::GenesisMisconfigured { reason });
         }
 
-        // 31. Expected genesis hash must be configured for MainNet (T233)
+        // 32. Expected genesis hash must be configured for MainNet (T233)
         // MainNet validators MUST specify the expected genesis hash to prevent
         // accidental startup with the wrong genesis file.
         if self.expected_genesis_hash.is_none() {
@@ -5409,6 +5572,16 @@ pub enum MainnetConfigError {
     /// - If enforcing, slash percentages must be in T227 ranges
     /// - If enforcing, jail epochs must be reasonable
     SlashingMisconfigured { reason: String },
+
+    // ========================================================================
+    // M2: Validator Stake Configuration Errors
+    // ========================================================================
+    /// Validator stake configuration is invalid for MainNet (M2).
+    ///
+    /// MainNet requires minimum stake enforcement:
+    /// - min_validator_stake must be at least MIN_VALIDATOR_STAKE_MAINNET
+    /// - fail_fast_on_startup must be true
+    ValidatorStakeMisconfigured { reason: String },
 
     // ========================================================================
     // T232: Genesis Configuration Errors
@@ -5710,6 +5883,14 @@ impl std::fmt::Display for MainnetConfigError {
                 write!(
                     f,
                     "MainNet invariant violated: expected genesis hash must be configured (--expect-genesis-hash=0x...)"
+                )
+            }
+            // M2: Validator stake configuration errors
+            MainnetConfigError::ValidatorStakeMisconfigured { reason } => {
+                write!(
+                    f,
+                    "MainNet invariant violated: validator stake configuration is invalid: {}",
+                    reason
                 )
             }
             // M0: Unsupported signature suite
@@ -8088,5 +8269,113 @@ mod tests {
         assert!(suite_error_str.contains("validator 5"));
         assert!(suite_error_str.contains("unsupported signature suite 2"));
         assert!(suite_error_str.contains("ML-DSA-44"));
+    }
+
+    // ========================================================================
+    // M2: ValidatorStakeConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validator_stake_config_devnet_default() {
+        let config = ValidatorStakeConfig::devnet_default();
+        assert_eq!(config.min_validator_stake, MIN_VALIDATOR_STAKE_DEVNET);
+        assert_eq!(config.min_validator_stake, 1_000_000); // 1 QBIND
+        assert!(!config.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_validator_stake_config_testnet_default() {
+        let config = ValidatorStakeConfig::testnet_default();
+        assert_eq!(config.min_validator_stake, MIN_VALIDATOR_STAKE_TESTNET);
+        assert_eq!(config.min_validator_stake, 10_000_000); // 10 QBIND
+        assert!(!config.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_validator_stake_config_mainnet_default() {
+        let config = ValidatorStakeConfig::mainnet_default();
+        assert_eq!(config.min_validator_stake, MIN_VALIDATOR_STAKE_MAINNET);
+        assert_eq!(config.min_validator_stake, 100_000_000_000); // 100,000 QBIND
+        assert!(config.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_validator_stake_config_is_stake_sufficient() {
+        let config = ValidatorStakeConfig::devnet_default();
+
+        // Below threshold
+        assert!(!config.is_stake_sufficient(999_999));
+
+        // At threshold
+        assert!(config.is_stake_sufficient(1_000_000));
+
+        // Above threshold
+        assert!(config.is_stake_sufficient(1_000_001));
+        assert!(config.is_stake_sufficient(u64::MAX));
+    }
+
+    #[test]
+    fn test_validator_stake_config_validate_for_mainnet() {
+        // Valid MainNet config
+        let valid = ValidatorStakeConfig::mainnet_default();
+        assert!(valid.validate_for_mainnet().is_ok());
+
+        // Invalid: stake too low
+        let low_stake = ValidatorStakeConfig {
+            min_validator_stake: MIN_VALIDATOR_STAKE_MAINNET - 1,
+            fail_fast_on_startup: true,
+        };
+        let err = low_stake.validate_for_mainnet();
+        assert!(err.is_err());
+        assert!(err.unwrap_err().contains("min_validator_stake"));
+
+        // Invalid: fail_fast disabled
+        let no_fail_fast = ValidatorStakeConfig {
+            min_validator_stake: MIN_VALIDATOR_STAKE_MAINNET,
+            fail_fast_on_startup: false,
+        };
+        let err = no_fail_fast.validate_for_mainnet();
+        assert!(err.is_err());
+        assert!(err.unwrap_err().contains("fail_fast_on_startup"));
+    }
+
+    #[test]
+    fn test_devnet_preset_validator_stake() {
+        let config = NodeConfig::devnet_v0_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_DEVNET
+        );
+        assert!(!config.validator_stake.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_testnet_alpha_preset_validator_stake() {
+        let config = NodeConfig::testnet_alpha_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_TESTNET
+        );
+        assert!(!config.validator_stake.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_testnet_beta_preset_validator_stake() {
+        let config = NodeConfig::testnet_beta_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_TESTNET
+        );
+        assert!(!config.validator_stake.fail_fast_on_startup);
+    }
+
+    #[test]
+    fn test_mainnet_preset_validator_stake() {
+        let config = NodeConfig::mainnet_preset();
+        assert_eq!(
+            config.validator_stake.min_validator_stake,
+            MIN_VALIDATOR_STAKE_MAINNET
+        );
+        assert!(config.validator_stake.fail_fast_on_startup);
     }
 }

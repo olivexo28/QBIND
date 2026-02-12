@@ -3,7 +3,7 @@ use std::sync::Arc;
 use qbind_crypto::CryptoProvider;
 use qbind_ledger::{AccountStore, ExecutionContext, ExecutionError, InMemoryAccountStore, Program};
 use qbind_serde::StateDecode;
-use qbind_system::ValidatorProgram;
+use qbind_system::{is_stake_sufficient, ValidatorProgram};
 use qbind_types::{AccountId, ValidatorRecord, ValidatorStatus};
 use qbind_wire::io::WireEncode;
 use qbind_wire::tx::{Transaction, TxAccountMeta};
@@ -156,4 +156,280 @@ fn register_validator_fails_if_already_exists() {
         }
         other => panic!("unexpected error: {:?}", other),
     }
+}
+
+// ============================================================================
+// M2: Minimum Stake Enforcement Tests
+// ============================================================================
+
+/// Test that registration fails when stake is below minimum threshold.
+#[test]
+fn register_validator_rejects_stake_below_minimum() {
+    let validator_id = dummy_account_id(0xEE);
+    let owner_keyset_id = dummy_account_id(0xFF);
+    let min_stake = 1_000_000; // 1 QBIND minimum
+
+    // Stake is below minimum (only 999_999)
+    let call = RegisterValidatorCall {
+        version: 1,
+        validator_id,
+        owner_keyset_id,
+        consensus_suite_id: 0x01,
+        consensus_pk: vec![0x11, 0x22],
+        network_suite_id: 0x02,
+        network_pk: vec![0x33, 0x44],
+        stake: 999_999, // Below min_stake
+    };
+
+    let mut call_data = Vec::new();
+    call.encode(&mut call_data);
+
+    let program_id = ValidatorProgram::id();
+    let tx = Transaction {
+        version: 1,
+        chain_id: 1,
+        payer: dummy_account_id(0x01),
+        nonce: 1,
+        fee_limit: 1_000_000,
+        accounts: vec![TxAccountMeta {
+            account_id: validator_id,
+            flags: 0b0000_0011,
+            access_hint: 0b0000_0011,
+            reserved0: [0u8; 2],
+        }],
+        program_id,
+        call_data,
+        auths: Vec::new(),
+    };
+
+    let mut store = InMemoryAccountStore::new();
+    let crypto = Arc::new(DummyCryptoProvider) as Arc<dyn CryptoProvider>;
+    // Use new_with_min_stake to set the minimum stake threshold
+    let mut ctx = ExecutionContext::new_with_min_stake(&mut store, crypto, min_stake);
+
+    let program = ValidatorProgram::new();
+
+    // Registration should fail due to insufficient stake
+    let err = program
+        .execute(&mut ctx, &tx)
+        .expect_err("registration should fail with stake below minimum");
+
+    match err {
+        ExecutionError::ProgramError(msg) => {
+            assert!(
+                msg.contains("stake below minimum"),
+                "expected stake error message, got: {}",
+                msg
+            );
+        }
+        other => panic!("unexpected error: {:?}", other),
+    }
+
+    // Verify the account was not created
+    assert!(
+        store.get(&validator_id).is_none(),
+        "validator account should not be created"
+    );
+}
+
+/// Test that registration succeeds when stake equals minimum threshold.
+#[test]
+fn register_validator_accepts_stake_at_minimum() {
+    let validator_id = dummy_account_id(0xA1);
+    let owner_keyset_id = dummy_account_id(0xA2);
+    let min_stake = 1_000_000; // 1 QBIND minimum
+
+    // Stake is exactly at minimum
+    let call = RegisterValidatorCall {
+        version: 1,
+        validator_id,
+        owner_keyset_id,
+        consensus_suite_id: 0x01,
+        consensus_pk: vec![0x11, 0x22],
+        network_suite_id: 0x02,
+        network_pk: vec![0x33, 0x44],
+        stake: min_stake, // Exactly at minimum
+    };
+
+    let mut call_data = Vec::new();
+    call.encode(&mut call_data);
+
+    let program_id = ValidatorProgram::id();
+    let tx = Transaction {
+        version: 1,
+        chain_id: 1,
+        payer: dummy_account_id(0x01),
+        nonce: 1,
+        fee_limit: 1_000_000,
+        accounts: vec![TxAccountMeta {
+            account_id: validator_id,
+            flags: 0b0000_0011,
+            access_hint: 0b0000_0011,
+            reserved0: [0u8; 2],
+        }],
+        program_id,
+        call_data,
+        auths: Vec::new(),
+    };
+
+    let mut store = InMemoryAccountStore::new();
+    let crypto = Arc::new(DummyCryptoProvider) as Arc<dyn CryptoProvider>;
+    let mut ctx = ExecutionContext::new_with_min_stake(&mut store, crypto, min_stake);
+
+    let program = ValidatorProgram::new();
+
+    // Registration should succeed with stake at minimum
+    program
+        .execute(&mut ctx, &tx)
+        .expect("registration should succeed with stake at minimum");
+
+    // Verify the account was created
+    let stored = store.get(&validator_id).expect("validator account created");
+    assert_eq!(stored.id, validator_id);
+
+    let mut slice: &[u8] = &stored.data;
+    let decoded = ValidatorRecord::decode_state(&mut slice).expect("decode ValidatorRecord");
+    assert_eq!(decoded.stake, min_stake);
+}
+
+/// Test that registration succeeds when stake is above minimum threshold.
+#[test]
+fn register_validator_accepts_stake_above_minimum() {
+    let validator_id = dummy_account_id(0xB1);
+    let owner_keyset_id = dummy_account_id(0xB2);
+    let min_stake = 1_000_000; // 1 QBIND minimum
+
+    // Stake is above minimum
+    let call = RegisterValidatorCall {
+        version: 1,
+        validator_id,
+        owner_keyset_id,
+        consensus_suite_id: 0x01,
+        consensus_pk: vec![0x11, 0x22],
+        network_suite_id: 0x02,
+        network_pk: vec![0x33, 0x44],
+        stake: 10_000_000_000, // 10,000 QBIND - well above minimum
+    };
+
+    let mut call_data = Vec::new();
+    call.encode(&mut call_data);
+
+    let program_id = ValidatorProgram::id();
+    let tx = Transaction {
+        version: 1,
+        chain_id: 1,
+        payer: dummy_account_id(0x01),
+        nonce: 1,
+        fee_limit: 1_000_000,
+        accounts: vec![TxAccountMeta {
+            account_id: validator_id,
+            flags: 0b0000_0011,
+            access_hint: 0b0000_0011,
+            reserved0: [0u8; 2],
+        }],
+        program_id,
+        call_data,
+        auths: Vec::new(),
+    };
+
+    let mut store = InMemoryAccountStore::new();
+    let crypto = Arc::new(DummyCryptoProvider) as Arc<dyn CryptoProvider>;
+    let mut ctx = ExecutionContext::new_with_min_stake(&mut store, crypto, min_stake);
+
+    let program = ValidatorProgram::new();
+
+    // Registration should succeed with stake above minimum
+    program
+        .execute(&mut ctx, &tx)
+        .expect("registration should succeed with stake above minimum");
+
+    // Verify the account was created with correct stake
+    let stored = store.get(&validator_id).expect("validator account created");
+    let mut slice: &[u8] = &stored.data;
+    let decoded = ValidatorRecord::decode_state(&mut slice).expect("decode ValidatorRecord");
+    assert_eq!(decoded.stake, 10_000_000_000);
+}
+
+/// Test that zero stake is rejected when min_stake > 0.
+#[test]
+fn register_validator_rejects_zero_stake_when_min_is_set() {
+    let validator_id = dummy_account_id(0xC1);
+    let owner_keyset_id = dummy_account_id(0xC2);
+    let min_stake = 1_000_000; // 1 QBIND minimum
+
+    // Zero stake should be rejected
+    let call = RegisterValidatorCall {
+        version: 1,
+        validator_id,
+        owner_keyset_id,
+        consensus_suite_id: 0x01,
+        consensus_pk: vec![0x11, 0x22],
+        network_suite_id: 0x02,
+        network_pk: vec![0x33, 0x44],
+        stake: 0, // Zero stake
+    };
+
+    let mut call_data = Vec::new();
+    call.encode(&mut call_data);
+
+    let program_id = ValidatorProgram::id();
+    let tx = Transaction {
+        version: 1,
+        chain_id: 1,
+        payer: dummy_account_id(0x01),
+        nonce: 1,
+        fee_limit: 1_000_000,
+        accounts: vec![TxAccountMeta {
+            account_id: validator_id,
+            flags: 0b0000_0011,
+            access_hint: 0b0000_0011,
+            reserved0: [0u8; 2],
+        }],
+        program_id,
+        call_data,
+        auths: Vec::new(),
+    };
+
+    let mut store = InMemoryAccountStore::new();
+    let crypto = Arc::new(DummyCryptoProvider) as Arc<dyn CryptoProvider>;
+    let mut ctx = ExecutionContext::new_with_min_stake(&mut store, crypto, min_stake);
+
+    let program = ValidatorProgram::new();
+
+    // Registration should fail with zero stake
+    let err = program
+        .execute(&mut ctx, &tx)
+        .expect_err("registration should fail with zero stake");
+
+    match err {
+        ExecutionError::ProgramError(msg) => {
+            assert!(
+                msg.contains("stake below minimum"),
+                "expected stake error message, got: {}",
+                msg
+            );
+        }
+        other => panic!("unexpected error: {:?}", other),
+    }
+}
+
+/// Test the is_stake_sufficient helper function.
+#[test]
+fn test_is_stake_sufficient_helper() {
+    // Below minimum
+    assert!(!is_stake_sufficient(999_999, 1_000_000));
+
+    // At minimum
+    assert!(is_stake_sufficient(1_000_000, 1_000_000));
+
+    // Above minimum
+    assert!(is_stake_sufficient(1_000_001, 1_000_000));
+
+    // Zero min_stake allows any stake (including zero)
+    assert!(is_stake_sufficient(0, 0));
+    assert!(is_stake_sufficient(1, 0));
+
+    // Edge case: max stake values
+    assert!(is_stake_sufficient(u64::MAX, u64::MAX));
+    assert!(!is_stake_sufficient(u64::MAX - 1, u64::MAX));
 }

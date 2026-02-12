@@ -4,4 +4,4 @@ pub mod validator_program;
 
 pub use governance_program::GovernanceProgram;
 pub use keyset_program::KeysetProgram;
-pub use validator_program::ValidatorProgram;
+pub use validator_program::{is_stake_sufficient, ValidatorError, ValidatorProgram};

@@ -14,6 +14,8 @@ use qbind_types::{
     SafetyCouncilKeyset, SuiteRegistry,
 };
 
+const GENESIS_MIN_VALIDATOR_STAKE: u64 = 1_000_000;
+
 /// Build the canonical genesis `SuiteRegistry` value.
 fn build_genesis_suite_registry() -> SuiteRegistry {
     qbind_types::genesis_suite_registry()
@@ -36,6 +38,7 @@ fn build_genesis_param_registry() -> ParamRegistry {
         slash_bps_precommit: 10_000, // 100%
         reporter_reward_bps: 1_000,  // 10%
         reserved1: 0,
+        min_validator_stake: GENESIS_MIN_VALIDATOR_STAKE,
     }
 }
 
