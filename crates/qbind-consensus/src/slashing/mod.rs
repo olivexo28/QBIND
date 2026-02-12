@@ -248,7 +248,10 @@ impl SlashingEvidence {
     ///
     /// Evidence with the same key is considered duplicate and will be
     /// rejected by the slashing engine.
-    #[deprecated(note = "use evidence_id() for content-addressed deduplication (M1.1)")]
+    #[deprecated(
+        since = "0.2.0",
+        note = "use SlashingEvidence::evidence_id() for content-addressed deduplication (M1.1 hardening)"
+    )]
     pub fn dedup_key(&self) -> (ValidatorId, OffenseKind, u64, u64) {
         (
             self.offending_validator,

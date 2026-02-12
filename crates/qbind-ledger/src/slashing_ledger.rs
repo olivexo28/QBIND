@@ -686,7 +686,8 @@ impl RocksDbSlashingLedger {
     /// # Deprecated
     ///
     /// This method is deprecated in favor of using `evidence_id()` from
-    /// `SlashingEvidence` for content-addressed deduplication (M1.1 hardening).
+    /// `SlashingEvidence` (in qbind-consensus crate) for content-addressed 
+    /// deduplication (M1.1 hardening).
     ///
     /// # Arguments
     ///
@@ -698,7 +699,10 @@ impl RocksDbSlashingLedger {
     /// # Returns
     ///
     /// A string key in the format: `"{validator_id}:{offense}:{height}:{view}"`
-    #[deprecated(note = "use SlashingEvidence::evidence_id() for content-addressed deduplication (M1.1)")]
+    #[deprecated(
+        since = "0.2.0",
+        note = "use qbind_consensus::slashing::SlashingEvidence::evidence_id() for content-addressed deduplication (M1.1 hardening)"
+    )]
     pub fn format_dedup_key(
         validator_id: ValidatorLedgerId,
         offense_kind: &str,
