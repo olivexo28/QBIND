@@ -990,6 +990,63 @@ impl NodeHotstuffHarness {
         self
     }
 
+    /// M2.4: Enable stake filtering based on NodeConfig environment.
+    ///
+    /// This method enables stake filtering for TestNet and MainNet deployments
+    /// by wrapping the provided epoch state provider with `StakeFilteringEpochStateProvider`.
+    ///
+    /// # Behavior by Environment
+    ///
+    /// - **DevNet**: Stake filtering is applied with a low threshold (1 QBIND)
+    /// - **TestNet**: Stake filtering is applied with moderate threshold (10 QBIND)
+    /// - **MainNet**: Stake filtering is applied with full economic threshold (100,000 QBIND)
+    ///
+    /// # Fail-Closed Behavior
+    ///
+    /// If stake filtering would result in an empty validator set (all validators excluded),
+    /// the provider returns `None`, and the epoch transition will fail with an error.
+    /// This prevents the network from entering a state with no eligible validators.
+    ///
+    /// # Arguments
+    ///
+    /// - `inner_provider`: The inner `EpochStateProvider` that supplies validator candidates.
+    /// - `node_config`: The node configuration containing the validator stake config.
+    ///
+    /// # Returns
+    ///
+    /// Returns `self` for method chaining.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_consensus::validator_set::StaticEpochStateProvider;
+    /// use qbind_node::node_config::NodeConfig;
+    ///
+    /// let inner_provider = StaticEpochStateProvider::new()
+    ///     .with_epoch(epoch0)
+    ///     .with_epoch(epoch1);
+    ///
+    /// let config = NodeConfig::testnet_alpha_default();
+    ///
+    /// let harness = NodeHotstuffHarness::new(...)?
+    ///     .enable_stake_filtering_for_environment(
+    ///         Arc::new(inner_provider),
+    ///         &config,
+    ///     );
+    /// ```
+    pub fn enable_stake_filtering_for_environment(
+        self,
+        inner_provider: Arc<dyn EpochStateProvider>,
+        node_config: &crate::node_config::NodeConfig,
+    ) -> Self {
+        let min_stake = node_config.validator_stake.min_validator_stake;
+        eprintln!(
+            "[M2.4] Enabling stake filtering for {:?} with min_validator_stake={}",
+            node_config.environment, min_stake
+        );
+        self.with_stake_filtering_epoch_state_provider(inner_provider, min_stake)
+    }
+
     /// Attach governance for runtime suite validation (T125).
     ///
     /// When governance is attached, it's used to extract suite IDs from epoch
@@ -2311,6 +2368,78 @@ impl NodeHotstuffHarness {
         harness.signing_key = Some(signing_key);
 
         Ok(harness)
+    }
+
+    /// M2.4: Create a `NodeHotstuffHarness` with stake filtering enabled for production.
+    ///
+    /// This is the production constructor for TestNet/MainNet deployments that
+    /// ensures minimum stake filtering is wired into the epoch transition path.
+    ///
+    /// # M2.4 Integration
+    ///
+    /// This constructor wraps the provided epoch state provider with
+    /// `StakeFilteringEpochStateProvider` using the `min_validator_stake` threshold
+    /// from the node configuration. This ensures:
+    ///
+    /// - Validators with stake below threshold are excluded at epoch boundaries
+    /// - Leader schedule and quorum calculations use only eligible validators
+    /// - Fail-closed behavior if all validators are excluded
+    ///
+    /// # Arguments
+    ///
+    /// - `cfg`: The validator configuration
+    /// - `client_cfg`: Client-side KEMTLS connection config
+    /// - `server_cfg`: Server-side KEMTLS connection config
+    /// - `signer_cfg`: Optional signer backend configuration
+    /// - `node_config`: Node configuration containing environment and stake config
+    /// - `epoch_state_provider`: The epoch state provider to wrap with stake filtering
+    ///
+    /// # Returns
+    ///
+    /// A new `NodeHotstuffHarness` with stake filtering enabled.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use qbind_consensus::validator_set::StaticEpochStateProvider;
+    /// use qbind_node::node_config::NodeConfig;
+    ///
+    /// let epoch_provider = Arc::new(StaticEpochStateProvider::new()
+    ///     .with_epoch(epoch0)
+    ///     .with_epoch(epoch1));
+    ///
+    /// let node_config = NodeConfig::testnet_alpha_default();
+    ///
+    /// let harness = NodeHotstuffHarness::new_with_stake_filtering(
+    ///     &cfg,
+    ///     client_cfg,
+    ///     server_cfg,
+    ///     None,
+    ///     &node_config,
+    ///     epoch_provider,
+    /// )?;
+    /// ```
+    pub fn new_with_stake_filtering(
+        cfg: &NodeValidatorConfig,
+        client_cfg: ClientConnectionConfig,
+        server_cfg: ServerConnectionConfig,
+        signer_cfg: Option<crate::validator_config::ValidatorSignerConfig>,
+        node_config: &crate::node_config::NodeConfig,
+        epoch_state_provider: Arc<dyn EpochStateProvider>,
+    ) -> Result<Self, NodeHotstuffHarnessError> {
+        // Create base harness
+        let harness = Self::new_from_validator_config(cfg, client_cfg, server_cfg, signer_cfg)?;
+
+        // Wire stake filtering using node config
+        let harness_with_filtering =
+            harness.enable_stake_filtering_for_environment(epoch_state_provider, node_config);
+
+        eprintln!(
+            "[M2.4] Created harness with stake filtering for environment={:?}, min_stake={}",
+            node_config.environment, node_config.validator_stake.min_validator_stake
+        );
+
+        Ok(harness_with_filtering)
     }
 
     /// One iteration of the node-side consensus simulation.
