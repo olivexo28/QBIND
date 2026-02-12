@@ -218,6 +218,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 |------|-------|------------|---------------|----------|
 | Liveness failure under partition | Consensus | Implement timeout/view-change (TODO) | High until implemented | Critical |
 | No slashing enforcement | Consensus | Complete T229+ implementation | High until enforced | Critical |
+| Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Connection exhaustion (DoS) | Networking | Implement DoS cookie enforcement | Medium | High |
 | Peer identity spoofing | Networking | Extract NodeId from KEMTLS cert | Medium | High |
 | Key exposure on validator host | Crypto | Enable HSM/PKCS#11 integration | Medium (optional HSM) | High |

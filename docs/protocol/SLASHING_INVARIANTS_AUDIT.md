@@ -104,11 +104,39 @@ pub fn verify_o2_evidence(...) -> Result<(), EvidenceVerificationError> {
 
 ### Summary
 
-⚠️ **PARTIALLY CONFIRMED WITH CAVEAT**: The current implementation skips cryptographic verification for validators with non-ML-DSA-44 suite IDs. This is intentional for backward compatibility with test suites, but **creates a potential bypass path if non-ML-DSA-44 validators exist in production**.
+✅ **MITIGATED FOR TESTNET/MAINNET (M0)**: The suite bypass caveat has been addressed by adding runtime invariant validation that rejects validator sets containing any `suite_id != ML_DSA_44_SUITE_ID` for TestNet and MainNet deployments.
+
+The underlying code in `qbind-consensus/src/slashing/mod.rs` still skips cryptographic verification for validators with non-ML-DSA-44 suite IDs (for backward compatibility with DevNet test suites), but **TestNet and MainNet deployments now fail fast** if any validator uses a non-ML-DSA-44 suite.
+
+### Mitigation Implementation (M0)
+
+**File**: `crates/qbind-node/src/node_config.rs`
+
+The following functions were added to enforce the ML-DSA-44 requirement:
+
+1. **`validate_validators_use_ml_dsa_44()`**: Core validation function that rejects any validator with `suite_id != 100` (ML-DSA-44).
+
+2. **`validate_testnet_invariants()`**: Validates TestNet environment and ensures all validators use ML-DSA-44.
+
+3. **`validate_mainnet_validator_suites()`**: Validates that all validators in a MainNet validator set use ML-DSA-44.
+
+4. **`MainnetConfigError::UnsupportedSignatureSuite`**: Error variant for clear startup failure message.
+
+5. **`TestnetConfigError::UnsupportedSignatureSuite`**: Error variant for TestNet validation failures.
+
+**Constant**: `ML_DSA_44_SUITE_ID = 100` (matches `qbind_crypto::SUITE_PQ_RESERVED_1`)
+
+### Environment Behavior
+
+| Environment | Suite Validation | Non-ML-DSA-44 Validators |
+|-------------|------------------|--------------------------|
+| DevNet      | Not enforced     | Allowed (for legacy tests) |
+| TestNet     | Enforced by `validate_testnet_invariants()` | Rejected at startup |
+| MainNet     | Enforced by `validate_mainnet_validator_suites()` | Rejected at startup |
 
 ### Code References
 
-#### O1 Verification Suite Check
+#### O1 Verification Suite Check (unchanged)
 
 **File**: `crates/qbind-consensus/src/slashing/mod.rs:551-556`
 
@@ -121,7 +149,7 @@ if validator_info.suite_id != ML_DSA_44_SUITE_ID {
 }
 ```
 
-#### O2 Verification Suite Check
+#### O2 Verification Suite Check (unchanged)
 
 **File**: `crates/qbind-consensus/src/slashing/mod.rs:637-642`
 
@@ -147,22 +175,34 @@ pub const ML_DSA_44_SUITE_ID: u8 = {
 };
 ```
 
-### Security Implication
+### Security Implication (Residual for DevNet only)
 
-**If non-ML-DSA-44 validators exist** in the validator set, evidence against them will:
+**For DevNet only**: If non-ML-DSA-44 validators exist in the validator set, evidence against them will:
 1. Pass structural validation
 2. Pass validator existence check
 3. Pass leader schedule check
 4. **Skip** signature verification (lines 553-556 and 639-642)
 5. Be **accepted** without cryptographic proof
 
-### Mitigation
-
-The QBIND production deployment requires all validators to use ML-DSA-44 (FIPS 204 post-quantum signatures). The code comment explicitly states this bypass is for "backward compatibility with test suites" using non-PQ signature schemes.
-
-**Recommendation**: Add runtime assertion or MainNet validation to ensure all validators have `suite_id == ML_DSA_44_SUITE_ID` before enabling penalty enforcement.
+**For TestNet/MainNet**: This path is unreachable because `validate_testnet_invariants()` and `validate_mainnet_validator_suites()` reject any non-ML-DSA-44 validators at startup.
 
 ### Test Evidence
+
+**File**: `crates/qbind-node/src/node_config.rs` (tests module)
+
+New tests added (M0):
+- `test_ml_dsa_44_suite_id_constant`
+- `test_validate_validators_use_ml_dsa_44_accepts_valid`
+- `test_validate_validators_use_ml_dsa_44_rejects_non_ml_dsa`
+- `test_validate_validators_use_ml_dsa_44_empty_set`
+- `test_validate_testnet_invariants_accepts_valid`
+- `test_validate_testnet_invariants_rejects_wrong_environment`
+- `test_validate_testnet_invariants_rejects_non_ml_dsa`
+- `test_validate_mainnet_validator_suites_accepts_valid`
+- `test_validate_mainnet_validator_suites_rejects_non_ml_dsa`
+- `test_devnet_allows_non_ml_dsa_validators`
+- `test_mainnet_config_error_display_unsupported_suite`
+- `test_testnet_config_error_display`
 
 **File**: `crates/qbind-consensus/src/slashing/mod.rs:2041-2065`
 
@@ -368,7 +408,7 @@ This metric is called at lines 566-567 and 583-584 (for O1) and lines 665-667 (f
 | Invariant | Status | Primary Code Reference |
 |-----------|--------|------------------------|
 | 1. No penalty without crypto verification (O1/O2) | ✅ CONFIRMED | `mod.rs:892-929` |
-| 2. Non-ML-DSA-44 bypass prevention | ⚠️ CAVEAT | `mod.rs:551-556, 637-642` |
+| 2. Non-ML-DSA-44 bypass prevention | ✅ MITIGATED (M0) | `node_config.rs:validate_testnet_invariants()`, `node_config.rs:validate_mainnet_validator_suites()` |
 | 3. Verification errors fail closed | ✅ CONFIRMED | `mod.rs:474-497, 896-909, 912-925` |
 | 4. No logging-only fallback paths | ✅ CONFIRMED | Grep analysis of all `eprintln!` calls |
 
@@ -376,24 +416,38 @@ This metric is called at lines 566-567 and 583-584 (for O1) and lines 665-667 (f
 
 ## Recommendations
 
-### For Invariant 2 (Non-ML-DSA-44 Bypass)
+### For Invariant 2 (Non-ML-DSA-44 Bypass) - ✅ IMPLEMENTED (M0)
 
-Add a MainNet invariant check to ensure all validators use ML-DSA-44:
+Runtime invariant validation was added to ensure all validators use ML-DSA-44:
 
-**Proposed location**: `crates/qbind-node/src/node_config.rs`, `validate_mainnet_invariants()` function
+**Implementation location**: `crates/qbind-node/src/node_config.rs`
 
 ```rust
-// Ensure all validators use ML-DSA-44 suite
-for validator in &self.validator_set.validators {
-    if validator.suite_id != ML_DSA_44_SUITE_ID {
-        return Err(MainnetConfigError::UnsupportedSignatureSuite {
-            validator_id: validator.validator_id,
-            suite_id: validator.suite_id,
-        });
+/// ML-DSA-44 suite ID constant (M0).
+pub const ML_DSA_44_SUITE_ID: u8 = 100;
+
+/// Validate that all validators use ML-DSA-44 signature suite (M0).
+pub fn validate_validators_use_ml_dsa_44(
+    validators: &[ValidatorSuiteInfo],
+) -> Result<(), MainnetConfigError> {
+    for validator in validators {
+        if validator.suite_id != ML_DSA_44_SUITE_ID {
+            return Err(MainnetConfigError::UnsupportedSignatureSuite {
+                validator_id: validator.validator_id,
+                suite_id: validator.suite_id,
+            });
+        }
     }
+    Ok(())
 }
 ```
 
+The following functions enforce this at startup:
+- `validate_testnet_invariants()` - For TestNet deployments
+- `validate_mainnet_validator_suites()` - For MainNet deployments
+
+DevNet allows non-ML-DSA-44 validators for backward compatibility with legacy test suites.
+
 ---
 
-*Document created for Pre-TestNet security audit. All code references verified against QBIND repository (2026-02-12).*
+*Document created for Pre-TestNet security audit. All code references verified against QBIND repository (2026-02-12). Invariant 2 caveat mitigated with M0 implementation (2026-02-12).*
