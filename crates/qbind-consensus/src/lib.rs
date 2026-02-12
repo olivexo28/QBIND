@@ -97,7 +97,8 @@ pub use timeout::{
 pub use validator_set::{
     build_validator_set_with_stake_filter, BlockPayloadType, ConsensusValidatorSet, EpochId,
     EpochState, EpochStateProvider, EpochTransitionError, EpochValidationError, ReconfigPayload,
-    StaticEpochStateProvider, ValidatorCandidate, ValidatorSetBuildResult, ValidatorSetEntry,
+    StakeFilterEmptySetError, StakeFilteringEpochStateProvider, StaticEpochStateProvider,
+    ValidatorCandidate, ValidatorSetBuildResult, ValidatorSetEntry,
 };
 pub use verify::{
     ensure_qc_suite_matches_epoch, ConsensusVerifier, NoopConsensusVerifier, VerificationError,

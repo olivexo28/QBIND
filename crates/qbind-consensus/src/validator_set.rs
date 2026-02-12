@@ -881,6 +881,204 @@ impl EpochStateProvider for StaticEpochStateProvider {
 }
 
 // ============================================================================
+// M2.2: Stake Filtering Epoch State Provider
+// ============================================================================
+
+/// Error returned when stake filtering excludes all validators.
+///
+/// This is a fail-closed guard: if minimum stake filtering would result in
+/// an empty validator set, the epoch transition must fail rather than
+/// proceeding with undefined consensus behavior.
+#[derive(Debug, Clone)]
+pub struct StakeFilterEmptySetError {
+    /// The epoch that was being transitioned to.
+    pub epoch: EpochId,
+    /// Number of validators that were candidates before filtering.
+    pub total_candidates: usize,
+    /// The minimum stake threshold that excluded all candidates.
+    pub min_stake: u64,
+}
+
+impl std::fmt::Display for StakeFilterEmptySetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "stake filtering for epoch {} excluded all {} validators (min_stake={}). \
+             This is a Pre-TestNet fail-closed guard.",
+            self.epoch, self.total_candidates, self.min_stake
+        )
+    }
+}
+
+impl std::error::Error for StakeFilterEmptySetError {}
+
+/// A stake-filtering wrapper around an inner `EpochStateProvider`.
+///
+/// This provider applies minimum stake filtering to validator sets at epoch
+/// boundaries. It wraps an inner provider that supplies validator candidates
+/// with their stake amounts, then filters out validators with insufficient stake.
+///
+/// # M2.2 Integration
+///
+/// This provider is the canonical integration point for minimum stake enforcement
+/// at epoch transitions. When `get_epoch_state()` is called:
+///
+/// 1. The inner provider supplies validator candidates with stake amounts
+/// 2. `build_validator_set_with_stake_filter()` filters out validators below threshold
+/// 3. A new `EpochState` is constructed with only the eligible validators
+///
+/// # Fail-Closed Behavior
+///
+/// If filtering would result in an empty validator set (all candidates below
+/// minimum stake), `get_epoch_state()` returns `None` rather than proceeding
+/// with undefined consensus behavior. The `last_filter_error()` method can
+/// be called to retrieve details about why filtering failed.
+///
+/// # Determinism
+///
+/// The filtering is deterministic: validators are sorted by `ValidatorId`
+/// before filtering, ensuring all nodes derive the same validator set.
+///
+/// # Example
+///
+/// ```ignore
+/// use qbind_consensus::validator_set::{
+///     EpochStateProvider, StaticEpochStateProvider, StakeFilteringEpochStateProvider,
+///     EpochState, EpochId, ValidatorCandidate,
+/// };
+/// use std::sync::Arc;
+///
+/// // Create inner provider with validator candidates
+/// let inner = Arc::new(StaticEpochStateProvider::new().with_epoch(epoch_state));
+///
+/// // Create stake-filtering provider with 1 QBIND minimum stake
+/// let provider = StakeFilteringEpochStateProvider::new(inner, 1_000_000);
+///
+/// // get_epoch_state now returns filtered validator set
+/// let filtered_state = provider.get_epoch_state(EpochId::new(1));
+/// ```
+#[derive(Debug)]
+pub struct StakeFilteringEpochStateProvider<P: EpochStateProvider> {
+    inner: P,
+    min_validator_stake: u64,
+    /// Last error encountered during filtering (for diagnostics).
+    /// This is used for fail-closed error reporting.
+    last_filter_error: std::sync::Mutex<Option<StakeFilterEmptySetError>>,
+}
+
+impl<P: EpochStateProvider> StakeFilteringEpochStateProvider<P> {
+    /// Create a new stake-filtering provider wrapping an inner provider.
+    ///
+    /// # Arguments
+    ///
+    /// * `inner` - The inner provider supplying validator candidates.
+    /// * `min_validator_stake` - Minimum stake required for inclusion (in microQBIND).
+    ///
+    /// # Notes
+    ///
+    /// The inner provider must supply `EpochState` objects where validators
+    /// have stake information available. For production use, this typically
+    /// means the inner provider reads from ledger state.
+    pub fn new(inner: P, min_validator_stake: u64) -> Self {
+        Self {
+            inner,
+            min_validator_stake,
+            last_filter_error: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// Get the minimum stake threshold used for filtering.
+    pub fn min_validator_stake(&self) -> u64 {
+        self.min_validator_stake
+    }
+
+    /// Get the last filter error, if any.
+    ///
+    /// This is useful for diagnostics when `get_epoch_state()` returns `None`
+    /// due to stake filtering excluding all validators.
+    pub fn last_filter_error(&self) -> Option<StakeFilterEmptySetError> {
+        self.last_filter_error.lock().unwrap().clone()
+    }
+
+    /// Clear the last filter error.
+    pub fn clear_last_filter_error(&self) {
+        *self.last_filter_error.lock().unwrap() = None;
+    }
+}
+
+impl<P: EpochStateProvider> EpochStateProvider for StakeFilteringEpochStateProvider<P> {
+    fn get_epoch_state(&self, epoch: EpochId) -> Option<EpochState> {
+        // Get the epoch state from the inner provider
+        let inner_state = self.inner.get_epoch_state(epoch)?;
+
+        // If min_validator_stake is 0, no filtering needed - pass through
+        if self.min_validator_stake == 0 {
+            return Some(inner_state);
+        }
+
+        // Convert validators to candidates for stake filtering
+        // NOTE: In this implementation, we use voting_power as a proxy for stake
+        // since the current EpochState doesn't carry explicit stake values.
+        // For production ledger-backed providers, this should be replaced with
+        // actual stake values from ValidatorRecord.stake.
+        let candidates: Vec<ValidatorCandidate> = inner_state
+            .validator_set
+            .iter()
+            .map(|entry| {
+                // Use voting_power as stake proxy. In production, this would be
+                // replaced with actual ledger stake lookup.
+                ValidatorCandidate::new(entry.id, entry.voting_power, entry.voting_power)
+            })
+            .collect();
+
+        let total_candidates = candidates.len();
+
+        // Apply stake filtering
+        match build_validator_set_with_stake_filter(candidates, self.min_validator_stake) {
+            Ok(result) => {
+                // Clear any previous error
+                self.clear_last_filter_error();
+
+                // Log excluded validators for observability
+                if !result.excluded.is_empty() {
+                    eprintln!(
+                        "[M2.2] Epoch {} stake filtering: {} validators included, {} excluded (min_stake={})",
+                        epoch.as_u64(),
+                        result.validator_set.len(),
+                        result.excluded.len(),
+                        self.min_validator_stake
+                    );
+                    for excluded in &result.excluded {
+                        eprintln!(
+                            "[M2.2]   Excluded validator {} (stake={} < min_stake={})",
+                            excluded.validator_id.as_u64(),
+                            excluded.stake,
+                            self.min_validator_stake
+                        );
+                    }
+                }
+
+                Some(EpochState::new(epoch, result.validator_set))
+            }
+            Err(_) => {
+                // Fail closed: all validators excluded
+                let error = StakeFilterEmptySetError {
+                    epoch,
+                    total_candidates,
+                    min_stake: self.min_validator_stake,
+                };
+                eprintln!(
+                    "[M2.2] FAIL CLOSED: {}",
+                    error
+                );
+                *self.last_filter_error.lock().unwrap() = Some(error);
+                None
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Epoch Transition Error (T102)
 // ============================================================================
 
