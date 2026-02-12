@@ -220,6 +220,17 @@ This section lists items marked TODO or partially implemented in the codebase.
 | **Status** | ✅ Fully Mitigated (M2.1 + M2.2 + M2.3 + M2.4) |
 | **Note** | **M2.1**: `build_validator_set_with_stake_filter()` provides deterministic stake-based filtering for epoch boundary validator set derivation. **M2.2**: `StakeFilteringEpochStateProvider` wraps `EpochStateProvider` to integrate filtering into the canonical epoch transition path. **M2.3**: `with_stake_filtering_epoch_state_provider()` method in `NodeHotstuffHarness` wires stake filtering into the production epoch transition path. **M2.4**: `new_with_stake_filtering()` and `enable_stake_filtering_for_environment()` provide production-ready constructors for TestNet/MainNet. Validators with `stake < min_validator_stake` are excluded from the active set. Fail-closed behavior: if filtering excludes all validators, epoch transition fails with `StakeFilterEmptySetError`. Implementation in `crates/qbind-consensus/src/validator_set.rs` and `crates/qbind-node/src/hotstuff_node_sim.rs`. Tests in `crates/qbind-consensus/tests/validator_set_tests.rs`, `crates/qbind-consensus/tests/m2_2_stake_filter_epoch_transition_tests.rs`, `crates/qbind-node/tests/m2_3_stake_filtering_node_integration_tests.rs`, and `crates/qbind-node/tests/m2_4_production_stake_filtering_tests.rs`. |
 
+## 3.12 MainNet Slashing Mode Enforcement (M4)
+
+| Field | Value |
+|-------|-------|
+| **File Path** | `crates/qbind-node/src/node_config.rs` |
+| **Description** | MainNet slashing mode enforcement to prevent running without penalties |
+| **Security Impact** | Without enforcement, operators could disable penalties, removing economic deterrent for Byzantine behavior |
+| **Required Milestone** | Pre-MainNet |
+| **Status** | ✅ Fully Mitigated (M4) |
+| **Note** | **M4**: `validate_for_mainnet()` in `SlashingConfig` now rejects `Off` and `RecordOnly` modes for MainNet. MainNet must use `EnforceCritical` or `EnforceAll`. TestNet prefers enforcement (default is `EnforceCritical`) but allows `RecordOnly` with a warning for testing. DevNet allows all modes for development flexibility. Implementation in `crates/qbind-node/src/node_config.rs`. Tests in `crates/qbind-node/tests/m4_slashing_mode_enforcement_tests.rs` and `crates/qbind-node/tests/t237_mainnet_launch_profile_tests.rs`. |
+
 ---
 
 # 4. Security Risk Register
@@ -227,7 +238,8 @@ This section lists items marked TODO or partially implemented in the codebase.
 | Risk | Layer | Mitigation | Residual Risk | Priority |
 |------|-------|------------|---------------|----------|
 | Liveness failure under partition | Consensus | Implement timeout/view-change (TODO) | High until implemented | Critical |
-| No slashing enforcement | Consensus | Complete T229+ implementation | High until enforced | Critical |
+| No slashing enforcement | Consensus | Complete T229+ implementation | Medium (mode bypass mitigated by M4; penalty application still TODO) | High |
+| Slashing mode bypass (M4) | Config | `validate_for_mainnet()` rejects `Off`/`RecordOnly` modes; MainNet requires `EnforceCritical` or `EnforceAll` | Low (mitigated M4) | Mitigated |
 | No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary via `StakeFilteringEpochStateProvider` + `build_validator_set_with_stake_filter()` + `with_stake_filtering_epoch_state_provider()` + `new_with_stake_filtering()`; fail-closed if all validators excluded | Low (fully mitigated M2.1+M2.2+M2.3+M2.4) | Mitigated |
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
