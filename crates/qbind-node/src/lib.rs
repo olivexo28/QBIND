@@ -289,9 +289,10 @@ pub use qbind_ledger::{
 };
 
 // T230 Slashing Ledger exports (re-exported from qbind-ledger)
+// M1: Persistent RocksDB-backed slashing ledger
 pub use qbind_ledger::{
-    EpochNumber, InMemorySlashingLedger, SlashingLedger, SlashingLedgerError, SlashingRecord,
-    StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
+    EpochNumber, InMemorySlashingLedger, RocksDbSlashingLedger, SlashingLedger, SlashingLedgerError,
+    SlashingRecord, StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
 };
 
 // T170 P2P Service exports
