@@ -40,6 +40,144 @@ pub struct ValidatorSetEntry {
     pub voting_power: u64,
 }
 
+// ============================================================================
+// M2.1: Validator Candidate for Stake Filtering
+// ============================================================================
+
+/// A candidate validator with stake information for epoch boundary filtering.
+///
+/// This struct represents a validator candidate before stake filtering is applied.
+/// At epoch boundaries, candidates with `stake < min_validator_stake` are excluded
+/// from the final `ConsensusValidatorSet`.
+///
+/// # Design Note (M2.1)
+///
+/// The `stake` field is the canonical on-chain stake from `ValidatorRecord.stake`.
+/// This ensures that stake filtering uses the same value as other protocol components
+/// (e.g., slashing, rewards). The stake is NOT an in-memory mirror but should be
+/// read directly from the ledger state.
+///
+/// # Determinism
+///
+/// For deterministic validator set derivation across nodes:
+/// - Candidates are sorted by `validator_id` (ascending) before filtering
+/// - Filtering is applied uniformly using the same `min_validator_stake` threshold
+/// - The resulting set has consistent ordering regardless of input order
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorCandidate {
+    /// The validator's canonical identity.
+    pub validator_id: ValidatorId,
+    /// The validator's current stake from on-chain `ValidatorRecord.stake` (in microQBIND).
+    pub stake: u64,
+    /// The voting power to assign if this validator passes stake filtering.
+    /// For uniform voting power, this is typically 1.
+    pub voting_power: u64,
+}
+
+impl ValidatorCandidate {
+    /// Create a new validator candidate.
+    pub fn new(validator_id: ValidatorId, stake: u64, voting_power: u64) -> Self {
+        Self {
+            validator_id,
+            stake,
+            voting_power,
+        }
+    }
+}
+
+/// Result of building a validator set with stake filtering.
+///
+/// This struct provides visibility into which validators were included
+/// and which were excluded due to insufficient stake.
+#[derive(Debug, Clone)]
+pub struct ValidatorSetBuildResult {
+    /// The resulting validator set (validators with stake >= min_validator_stake).
+    pub validator_set: ConsensusValidatorSet,
+    /// Validators that were excluded due to stake < min_validator_stake.
+    /// Sorted by validator_id for deterministic ordering.
+    pub excluded: Vec<ValidatorCandidate>,
+}
+
+/// Build a `ConsensusValidatorSet` from validator candidates with stake filtering.
+///
+/// This function applies the M2.1 minimum stake requirement at epoch boundaries:
+/// - Only validators with `stake >= min_validator_stake` are included
+/// - Validators are sorted by `validator_id` for deterministic ordering
+/// - The resulting set has consistent ordering regardless of input candidate order
+///
+/// # Arguments
+///
+/// * `candidates` - Iterator of validator candidates with stake information
+/// * `min_validator_stake` - Minimum stake required for inclusion (in microQBIND)
+///
+/// # Returns
+///
+/// * `Ok(ValidatorSetBuildResult)` - The filtered validator set and excluded candidates
+/// * `Err(String)` - If no validators meet the minimum stake requirement
+///
+/// # Determinism Guarantees
+///
+/// This function ensures deterministic output:
+/// 1. Candidates are sorted by `validator_id` (ascending)
+/// 2. Filtering uses `>=` comparison (inclusive of threshold)
+/// 3. The same inputs always produce the same outputs
+///
+/// # Example
+///
+/// ```ignore
+/// use qbind_consensus::validator_set::{ValidatorCandidate, build_validator_set_with_stake_filter};
+/// use qbind_consensus::ids::ValidatorId;
+///
+/// let candidates = vec![
+///     ValidatorCandidate::new(ValidatorId::new(1), 500_000, 1),  // Below threshold
+///     ValidatorCandidate::new(ValidatorId::new(2), 1_000_000, 1), // At threshold
+///     ValidatorCandidate::new(ValidatorId::new(3), 2_000_000, 1), // Above threshold
+/// ];
+///
+/// // With min_stake = 1_000_000 (1 QBIND in microQBIND)
+/// let result = build_validator_set_with_stake_filter(candidates, 1_000_000)?;
+///
+/// // Validator 1 excluded (500k < 1M)
+/// // Validators 2 and 3 included (1M >= 1M, 2M >= 1M)
+/// assert_eq!(result.validator_set.len(), 2);
+/// assert_eq!(result.excluded.len(), 1);
+/// assert_eq!(result.excluded[0].validator_id, ValidatorId::new(1));
+/// ```
+pub fn build_validator_set_with_stake_filter<I>(
+    candidates: I,
+    min_validator_stake: u64,
+) -> Result<ValidatorSetBuildResult, String>
+where
+    I: IntoIterator<Item = ValidatorCandidate>,
+{
+    // Collect and sort candidates by validator_id for deterministic ordering
+    let mut all_candidates: Vec<ValidatorCandidate> = candidates.into_iter().collect();
+    all_candidates.sort_by_key(|c| c.validator_id);
+
+    // Partition into included and excluded based on stake threshold
+    let mut included = Vec::new();
+    let mut excluded = Vec::new();
+
+    for candidate in all_candidates {
+        if candidate.stake >= min_validator_stake {
+            included.push(ValidatorSetEntry {
+                id: candidate.validator_id,
+                voting_power: candidate.voting_power,
+            });
+        } else {
+            excluded.push(candidate);
+        }
+    }
+
+    // Create the validator set (will fail if empty)
+    let validator_set = ConsensusValidatorSet::new(included)?;
+
+    Ok(ValidatorSetBuildResult {
+        validator_set,
+        excluded,
+    })
+}
+
 /// A set of validators that form the consensus committee.
 ///
 /// `ConsensusValidatorSet` provides:

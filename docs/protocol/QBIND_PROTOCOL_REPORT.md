@@ -217,6 +217,8 @@ This section lists items marked TODO or partially implemented in the codebase.
 | **Description** | ValidatorSet derivation does not exclude stake < min_validator_stake yet |
 | **Security Impact** | Validators with insufficient stake may remain in the active set after epoch transition |
 | **Required Milestone** | Pre-TestNet |
+| **Status** | ✅ Mitigated (M2.1) |
+| **Note** | `build_validator_set_with_stake_filter()` provides deterministic stake-based filtering for epoch boundary validator set derivation. Validators with `stake < min_validator_stake` are excluded from the active set. Function located in `crates/qbind-consensus/src/validator_set.rs`. Tests in `crates/qbind-consensus/tests/validator_set_tests.rs`. |
 
 ---
 
@@ -226,7 +228,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 |------|-------|------------|---------------|----------|
 | Liveness failure under partition | Consensus | Implement timeout/view-change (TODO) | High until implemented | Critical |
 | No slashing enforcement | Consensus | Complete T229+ implementation | High until enforced | Critical |
-| No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary; MainNet fail-fast | Medium (partially mitigated; epoch-boundary enforcement pending) | High |
+| No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary via `build_validator_set_with_stake_filter()`; MainNet fail-fast | Low (mitigated) | Mitigated |
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
 | Connection exhaustion (DoS) | Networking | Implement DoS cookie enforcement | Medium | High |
