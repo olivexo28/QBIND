@@ -982,7 +982,7 @@ impl NodeHotstuffHarness {
     ) -> Self {
         // Wrap the inner provider with stake filtering
         let filtering_provider = StakeFilteringEpochStateProvider::new(
-            // Box the Arc as an owned provider
+            // Wrap the Arc with ArcEpochStateProvider for trait implementation
             ArcEpochStateProvider(inner_provider),
             min_validator_stake,
         );
