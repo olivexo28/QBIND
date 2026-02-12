@@ -1501,6 +1501,14 @@ impl AsyncPeerManagerImpl {
                     AsyncPeerManagerError::Io(e)
                 })?;
 
+                // Ensure the std stream is in blocking mode for the handshake.
+                // Tokio streams are non-blocking by default; leaving them as-is can
+                // yield spurious WouldBlock errors during the blocking handshake.
+                std_stream.set_nonblocking(false).map_err(|e| {
+                    kemtls_metrics.inc_handshake_failure(KemtlsHandshakeFailureReason::Io);
+                    AsyncPeerManagerError::Io(e)
+                })?;
+
                 // Clone the config for the blocking task (it's wrapped in Arc)
                 let server_cfg_inner = (*server_config).clone();
 
