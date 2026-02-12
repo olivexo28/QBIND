@@ -1832,7 +1832,10 @@ pub enum SlashingMode {
 
     /// Record evidence + metrics only. No stake changes, no jailing.
     ///
-    /// This is the default for MainNet v0 until governance enables penalties.
+    /// Allowed for TestNet (with warning) and DevNet only.
+    ///
+    /// **Not allowed for MainNet (M4)** – `validate_mainnet_invariants()` will reject this.
+    /// MainNet requires enforcement to deter Byzantine behavior.
     #[default]
     RecordOnly,
 
@@ -1842,12 +1845,16 @@ pub enum SlashingMode {
     /// - O2: Invalid consensus signature as proposer → slash + jail
     ///
     /// O3/O4/O5 remain in evidence-only mode.
+    ///
+    /// **Required for MainNet (M4)** – This is the minimum enforcement level.
     EnforceCritical,
 
     /// Enforce penalties for all offenses (O1–O5).
     ///
     /// Reserved for future use when O3/O4/O5 penalties are finalized.
     /// Not yet enabled in any environment.
+    ///
+    /// **Allowed for MainNet** – Strictest enforcement level.
     EnforceAll,
 }
 
@@ -1907,9 +1914,9 @@ pub const VALID_SLASHING_MODES: &[&str] =
 /// assert_eq!(config.mode, SlashingMode::EnforceCritical);
 /// assert_eq!(config.slash_bps_o1_double_sign, 750); // 7.5%
 ///
-/// // MainNet configuration (RecordOnly mode)
+/// // MainNet configuration (EnforceCritical mode, M4 requirement)
 /// let mainnet = SlashingConfig::mainnet_default();
-/// assert_eq!(mainnet.mode, SlashingMode::RecordOnly);
+/// assert_eq!(mainnet.mode, SlashingMode::EnforceCritical);
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SlashingConfig {
@@ -1995,11 +2002,14 @@ impl SlashingConfig {
 
     /// Create the TestNet Alpha default configuration (T229).
     ///
-    /// - mode: RecordOnly (evidence + metrics only)
-    /// - Same slash/jail parameters as DevNet (unused in RecordOnly mode)
+    /// - mode: EnforceCritical (recommended per M4)
+    /// - Same slash/jail parameters as DevNet
+    ///
+    /// **M4 Recommendation**: TestNet Alpha defaults to enforcement mode to
+    /// validate penalty mechanics. RecordOnly is allowed with explicit opt-in.
     pub fn testnet_alpha_default() -> Self {
         Self {
-            mode: SlashingMode::RecordOnly,
+            mode: SlashingMode::EnforceCritical,
             slash_bps_o1_double_sign: 750,
             slash_bps_o2_invalid_proposer_sig: 500,
             jail_on_o1: true,
@@ -2009,22 +2019,28 @@ impl SlashingConfig {
         }
     }
 
-    /// Create the TestNet Beta default configuration (T229).
+    /// Create the TestNet Beta default configuration (T229, M4).
     ///
-    /// - mode: RecordOnly by default (opt-in to EnforceCritical for testing)
-    /// - Same slash/jail parameters, unused in RecordOnly mode
+    /// - mode: EnforceCritical (recommended per M4)
+    /// - Same slash/jail parameters as TestNet Alpha
+    ///
+    /// **M4 Recommendation**: TestNet Beta defaults to enforcement mode.
+    /// RecordOnly is allowed with explicit opt-in (and logs a warning).
     pub fn testnet_beta_default() -> Self {
         Self::testnet_alpha_default()
     }
 
-    /// Create the MainNet default configuration (T229).
+    /// Create the MainNet default configuration (T229, M4).
     ///
-    /// - mode: RecordOnly by default (governance can flip to EnforceCritical)
-    /// - Slash parameters at T227-compliant values (ready for enforcement)
-    /// - Jail parameters ready for use when penalties enabled
+    /// - mode: EnforceCritical (required for MainNet per M4)
+    /// - Slash parameters at T227-compliant values
+    /// - Jail parameters enabled for critical offenses
+    ///
+    /// **M4 Requirement**: MainNet cannot run with slashing disabled (RecordOnly/Off).
+    /// Validators must have enforcement enabled to deter Byzantine behavior.
     pub fn mainnet_default() -> Self {
         Self {
-            mode: SlashingMode::RecordOnly,
+            mode: SlashingMode::EnforceCritical,
             slash_bps_o1_double_sign: 750, // 7.5% - conservative within T227 range
             slash_bps_o2_invalid_proposer_sig: 500, // 5%
             jail_on_o1: true,
@@ -2066,24 +2082,125 @@ impl SlashingConfig {
     ///
     /// Returns `Ok(())` if valid, or an error message if invalid.
     ///
-    /// MainNet requirements:
-    /// - mode must not be Off
-    /// - If mode is EnforceCritical or EnforceAll:
-    ///   - slash_bps_o1_double_sign must be in T227 range (500–1000 bps)
-    ///   - slash_bps_o2_invalid_proposer_sig must be ~500 bps (±50 tolerance)
-    ///   - jail_epochs must be > 0 and <= 1,000,000
+    /// MainNet requirements (M4):
+    /// - mode must be EnforceCritical or EnforceAll (Off and RecordOnly are forbidden)
+    /// - slash_bps_o1_double_sign must be in T227 range (500–1000 bps)
+    /// - slash_bps_o2_invalid_proposer_sig must be ~500 bps (±50 tolerance)
+    /// - jail_epochs must be > 0 and <= 1,000,000
+    ///
+    /// **M4 Security Requirement**: MainNet cannot run with slashing disabled.
+    /// RecordOnly mode only logs evidence without applying penalties, which provides
+    /// no economic deterrent for Byzantine behavior.
     pub fn validate_for_mainnet(&self) -> Result<(), String> {
-        // Mode must not be Off for MainNet
-        if self.mode == SlashingMode::Off {
-            return Err("slashing mode must not be 'off' for MainNet".to_string());
+        // M4: Mode must be enforcing (EnforceCritical or EnforceAll) for MainNet
+        // Off and RecordOnly are forbidden to ensure economic security
+        match self.mode {
+            SlashingMode::Off => {
+                return Err("slashing mode 'off' is forbidden for MainNet; \
+                            use 'enforce_critical' or 'enforce_all'"
+                    .to_string());
+            }
+            SlashingMode::RecordOnly => {
+                return Err("slashing mode 'record_only' is forbidden for MainNet (M4); \
+                            MainNet requires enforcement to deter Byzantine behavior; \
+                            use 'enforce_critical' or 'enforce_all'"
+                    .to_string());
+            }
+            SlashingMode::EnforceCritical | SlashingMode::EnforceAll => {
+                // Valid modes for MainNet
+            }
         }
 
-        // If enforcing, validate parameters
+        // Validate parameters (mode is guaranteed to be enforcing at this point)
+        // O1 slash range: 500-1000 bps (5-10%)
+        if self.slash_bps_o1_double_sign < 500 || self.slash_bps_o1_double_sign > 1000 {
+            return Err(format!(
+                "slash_bps_o1_double_sign ({}) must be in range 500-1000 for MainNet",
+                self.slash_bps_o1_double_sign
+            ));
+        }
+
+        // O2 slash: ~500 bps (5%), allow some tolerance
+        if self.slash_bps_o2_invalid_proposer_sig < 450
+            || self.slash_bps_o2_invalid_proposer_sig > 550
+        {
+            return Err(format!(
+                "slash_bps_o2_invalid_proposer_sig ({}) must be in range 450-550 for MainNet",
+                self.slash_bps_o2_invalid_proposer_sig
+            ));
+        }
+
+        // Jail epochs must be reasonable if jailing is enabled
+        if self.jail_on_o1 {
+            if self.jail_epochs_o1 == 0 {
+                return Err("jail_epochs_o1 must be > 0 when jail_on_o1 is enabled".to_string());
+            }
+            if self.jail_epochs_o1 > 1_000_000 {
+                return Err(format!(
+                    "jail_epochs_o1 ({}) exceeds maximum of 1,000,000",
+                    self.jail_epochs_o1
+                ));
+            }
+        }
+
+        if self.jail_on_o2 {
+            if self.jail_epochs_o2 == 0 {
+                return Err("jail_epochs_o2 must be > 0 when jail_on_o2 is enabled".to_string());
+            }
+            if self.jail_epochs_o2 > 1_000_000 {
+                return Err(format!(
+                    "jail_epochs_o2 ({}) exceeds maximum of 1,000,000",
+                    self.jail_epochs_o2
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validate the configuration for TestNet and emit warnings if needed (M4).
+    ///
+    /// Returns `Ok(())` if valid. If RecordOnly mode is used, logs a warning
+    /// but does not fail.
+    ///
+    /// TestNet requirements (M4):
+    /// - mode must not be Off
+    /// - EnforceCritical or EnforceAll is preferred
+    /// - RecordOnly is allowed but generates a warning (explicitly opted-in for testing)
+    /// - If enforcing, parameters are validated for correctness
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if using preferred mode (EnforceCritical/EnforceAll)
+    /// `Ok(false)` if using RecordOnly (warning logged)
+    /// `Err(String)` if Off mode or invalid parameters
+    pub fn validate_for_testnet(&self) -> Result<bool, String> {
+        match self.mode {
+            SlashingMode::Off => {
+                return Err("slashing mode 'off' is forbidden for TestNet; \
+                            use 'enforce_critical' (recommended) or 'record_only' (for testing)"
+                    .to_string());
+            }
+            SlashingMode::RecordOnly => {
+                // Allowed but warn loudly
+                eprintln!(
+                    "[M4 WARNING] TestNet: slashing mode is 'record_only'. \
+                     Enforcement is RECOMMENDED to validate penalty mechanics. \
+                     Set --slashing-mode=enforce_critical for production-like behavior."
+                );
+                return Ok(false);
+            }
+            SlashingMode::EnforceCritical | SlashingMode::EnforceAll => {
+                // Preferred modes for TestNet
+            }
+        }
+
+        // Validate parameters if enforcing
         if self.is_enforcing() {
             // O1 slash range: 500-1000 bps (5-10%)
             if self.slash_bps_o1_double_sign < 500 || self.slash_bps_o1_double_sign > 1000 {
                 return Err(format!(
-                    "slash_bps_o1_double_sign ({}) must be in range 500-1000 for MainNet",
+                    "slash_bps_o1_double_sign ({}) must be in range 500-1000 for TestNet",
                     self.slash_bps_o1_double_sign
                 ));
             }
@@ -2093,37 +2210,23 @@ impl SlashingConfig {
                 || self.slash_bps_o2_invalid_proposer_sig > 550
             {
                 return Err(format!(
-                    "slash_bps_o2_invalid_proposer_sig ({}) must be in range 450-550 for MainNet",
+                    "slash_bps_o2_invalid_proposer_sig ({}) must be in range 450-550 for TestNet",
                     self.slash_bps_o2_invalid_proposer_sig
                 ));
             }
-
-            // Jail epochs must be reasonable if jailing is enabled
-            if self.jail_on_o1 {
-                if self.jail_epochs_o1 == 0 {
-                    return Err("jail_epochs_o1 must be > 0 when jail_on_o1 is enabled".to_string());
-                }
-                if self.jail_epochs_o1 > 1_000_000 {
-                    return Err(format!(
-                        "jail_epochs_o1 ({}) exceeds maximum of 1,000,000",
-                        self.jail_epochs_o1
-                    ));
-                }
-            }
-
-            if self.jail_on_o2 {
-                if self.jail_epochs_o2 == 0 {
-                    return Err("jail_epochs_o2 must be > 0 when jail_on_o2 is enabled".to_string());
-                }
-                if self.jail_epochs_o2 > 1_000_000 {
-                    return Err(format!(
-                        "jail_epochs_o2 ({}) exceeds maximum of 1,000,000",
-                        self.jail_epochs_o2
-                    ));
-                }
-            }
         }
 
+        Ok(true)
+    }
+
+    /// Validate the configuration for DevNet (M4).
+    ///
+    /// DevNet has no restrictions on slashing mode (all modes allowed).
+    /// This allows testing various slashing scenarios including Off and RecordOnly.
+    ///
+    /// Returns `Ok(())` always for DevNet.
+    pub fn validate_for_devnet(&self) -> Result<(), String> {
+        // DevNet allows all modes for testing flexibility
         Ok(())
     }
 }
