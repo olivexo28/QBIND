@@ -740,3 +740,202 @@ fn test_slashing_decision_kind_string_representation() {
     assert!(!SlashingDecisionKind::RejectedInvalid.as_str().is_empty());
     assert!(!SlashingDecisionKind::RejectedDuplicate.as_str().is_empty());
 }
+
+// ============================================================================
+// M1.1 Evidence ID Tests
+// ============================================================================
+
+#[test]
+fn test_evidence_id_deterministic() {
+    // evidence_id should be deterministic for the same evidence
+    let e1 = make_o1_evidence(1, 100, 0);
+    let e2 = make_o1_evidence(1, 100, 0);
+
+    let id1 = e1.evidence_id();
+    let id2 = e2.evidence_id();
+
+    assert_eq!(id1, id2, "evidence_id should be deterministic for identical evidence");
+}
+
+#[test]
+fn test_evidence_id_unique_for_different_evidence() {
+    // Different evidence should have different IDs
+    let e1 = make_o1_evidence(1, 100, 0);
+    let e2 = make_o1_evidence(1, 100, 1); // Different view
+    let e3 = make_o1_evidence(2, 100, 0); // Different validator
+
+    let id1 = e1.evidence_id();
+    let id2 = e2.evidence_id();
+    let id3 = e3.evidence_id();
+
+    assert_ne!(id1, id2, "Different views should have different evidence IDs");
+    assert_ne!(id1, id3, "Different validators should have different evidence IDs");
+    assert_ne!(id2, id3, "Different views and validators should have different evidence IDs");
+}
+
+#[test]
+fn test_evidence_id_differs_by_block_content() {
+    // O1 evidence with different block_ids should have different evidence IDs
+    // even if validator, height, view are the same
+
+    let e1 = SlashingEvidence {
+        version: 1,
+        offense: OffenseKind::O1DoubleSign,
+        offending_validator: ValidatorId(1),
+        height: 100,
+        view: 0,
+        payload: EvidencePayloadV1::O1DoubleSign {
+            block_a: SignedBlockHeader {
+                height: 100,
+                view: 0,
+                block_id: [0xAA; 32], // Different block_id
+                proposer_id: ValidatorId(1),
+                signature: vec![0x01; 64],
+                header_preimage: vec![0x10; 100],
+            },
+            block_b: SignedBlockHeader {
+                height: 100,
+                view: 0,
+                block_id: [0xBB; 32],
+                proposer_id: ValidatorId(1),
+                signature: vec![0x02; 64],
+                header_preimage: vec![0x20; 100],
+            },
+        },
+    };
+
+    let e2 = SlashingEvidence {
+        version: 1,
+        offense: OffenseKind::O1DoubleSign,
+        offending_validator: ValidatorId(1),
+        height: 100,
+        view: 0,
+        payload: EvidencePayloadV1::O1DoubleSign {
+            block_a: SignedBlockHeader {
+                height: 100,
+                view: 0,
+                block_id: [0xCC; 32], // Different block_id
+                proposer_id: ValidatorId(1),
+                signature: vec![0x01; 64],
+                header_preimage: vec![0x10; 100],
+            },
+            block_b: SignedBlockHeader {
+                height: 100,
+                view: 0,
+                block_id: [0xDD; 32], // Different block_id
+                proposer_id: ValidatorId(1),
+                signature: vec![0x02; 64],
+                header_preimage: vec![0x20; 100],
+            },
+        },
+    };
+
+    let id1 = e1.evidence_id();
+    let id2 = e2.evidence_id();
+
+    assert_ne!(
+        id1, id2,
+        "Evidence with different block IDs should have different evidence IDs"
+    );
+}
+
+#[test]
+fn test_evidence_id_is_32_bytes() {
+    let e = make_o1_evidence(1, 100, 0);
+    let id = e.evidence_id();
+
+    assert_eq!(id.len(), 32, "evidence_id should be 32 bytes (SHA3-256)");
+}
+
+#[test]
+fn test_evidence_id_all_offense_types() {
+    // Ensure evidence_id works for all offense types
+    let e_o1 = make_o1_evidence(1, 100, 0);
+    let e_o2 = make_o2_evidence(2, 101, 1);
+    let e_o3a = make_o3a_evidence(1, 102, 2);
+    let e_o3b = make_o3b_evidence(2, 103, 3);
+    let e_o4 = make_o4_evidence(1, 104, 4);
+    let e_o5 = make_o5_evidence(2, 105, 5);
+
+    // All should produce valid 32-byte IDs
+    assert_eq!(e_o1.evidence_id().len(), 32);
+    assert_eq!(e_o2.evidence_id().len(), 32);
+    assert_eq!(e_o3a.evidence_id().len(), 32);
+    assert_eq!(e_o3b.evidence_id().len(), 32);
+    assert_eq!(e_o4.evidence_id().len(), 32);
+    assert_eq!(e_o5.evidence_id().len(), 32);
+
+    // All should be different (different offenses)
+    let ids = vec![
+        e_o1.evidence_id(),
+        e_o2.evidence_id(),
+        e_o3a.evidence_id(),
+        e_o3b.evidence_id(),
+        e_o4.evidence_id(),
+        e_o5.evidence_id(),
+    ];
+    for i in 0..ids.len() {
+        for j in (i + 1)..ids.len() {
+            assert_ne!(ids[i], ids[j], "Different evidence should have different IDs");
+        }
+    }
+}
+
+#[test]
+fn test_evidence_id_deduplication_in_engine() {
+    // Test that the engine correctly deduplicates using evidence_id
+    let vs = test_validator_set();
+    let ctx = SlashingContext {
+        validator_set: &vs,
+        current_height: 1000,
+        current_view: 10,
+    };
+
+    let mut engine = NoopSlashingEngine::new();
+
+    let evidence = make_o1_evidence(1, 100, 0);
+
+    // First submission should be accepted
+    let record1 = engine.handle_evidence(&ctx, evidence.clone());
+    assert_eq!(record1.decision, SlashingDecisionKind::AcceptedNoOp);
+
+    // Second submission of identical evidence should be rejected as duplicate
+    let record2 = engine.handle_evidence(&ctx, evidence.clone());
+    assert_eq!(record2.decision, SlashingDecisionKind::RejectedDuplicate);
+
+    // Evidence with different content but same (validator, height, view)
+    // should still be accepted since evidence_id is content-addressed
+    let evidence_different_content = SlashingEvidence {
+        version: 1,
+        offense: OffenseKind::O1DoubleSign,
+        offending_validator: ValidatorId(1),
+        height: 100,
+        view: 0,
+        payload: EvidencePayloadV1::O1DoubleSign {
+            block_a: SignedBlockHeader {
+                height: 100,
+                view: 0,
+                block_id: [0xEE; 32], // Different content
+                proposer_id: ValidatorId(1),
+                signature: vec![0xEE; 64],
+                header_preimage: vec![0xEE; 100],
+            },
+            block_b: SignedBlockHeader {
+                height: 100,
+                view: 0,
+                block_id: [0xFF; 32], // Different content
+                proposer_id: ValidatorId(1),
+                signature: vec![0xFF; 64],
+                header_preimage: vec![0xFF; 100],
+            },
+        },
+    };
+
+    // This should be accepted because it has different evidence_id
+    let record3 = engine.handle_evidence(&ctx, evidence_different_content);
+    assert_eq!(
+        record3.decision,
+        SlashingDecisionKind::AcceptedNoOp,
+        "Evidence with different content should be accepted even if validator/height/view match"
+    );
+}

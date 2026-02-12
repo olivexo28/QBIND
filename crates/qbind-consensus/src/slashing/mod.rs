@@ -240,11 +240,15 @@ pub struct SlashingEvidence {
     pub payload: EvidencePayloadV1,
 }
 
+/// Domain tag for evidence ID computation (M1.1 hardening).
+const EVIDENCE_ID_DOMAIN_TAG: &str = "QBIND:slash:evidence:v1";
+
 impl SlashingEvidence {
     /// Compute a deduplication key for this evidence.
     ///
     /// Evidence with the same key is considered duplicate and will be
     /// rejected by the slashing engine.
+    #[deprecated(note = "use evidence_id() for content-addressed deduplication (M1.1)")]
     pub fn dedup_key(&self) -> (ValidatorId, OffenseKind, u64, u64) {
         (
             self.offending_validator,
@@ -252,6 +256,105 @@ impl SlashingEvidence {
             self.height,
             self.view,
         )
+    }
+
+    /// Compute a cryptographically unique evidence ID (M1.1 hardening).
+    ///
+    /// The evidence ID is computed as:
+    /// ```text
+    /// sha3_256("QBIND:slash:evidence:v1" || canonical_evidence_bytes)
+    /// ```
+    ///
+    /// Where `canonical_evidence_bytes` includes all fields necessary to uniquely
+    /// identify the offense:
+    /// - O1: (validator_id, height, view, block_id_a, block_id_b, sig_a, sig_b)
+    /// - O2: (validator_id, height, view, header_hash, signature_bytes)
+    /// - O3-O5: (validator_id, height, view, offense_kind, payload-specific fields)
+    ///
+    /// This provides content-addressed deduplication that is resilient to
+    /// replay attacks and cannot be bypassed by key manipulation.
+    pub fn evidence_id(&self) -> [u8; 32] {
+        let canonical_bytes = self.canonical_bytes();
+        qbind_hash::hash::sha3_256_tagged(EVIDENCE_ID_DOMAIN_TAG, &canonical_bytes)
+    }
+
+    /// Compute the canonical bytes for this evidence.
+    ///
+    /// The canonical encoding is deterministic and includes all fields necessary
+    /// to uniquely identify the offense. The format is:
+    /// ```text
+    /// [validator_id: 8 bytes BE] || [height: 8 bytes BE] || [view: 8 bytes BE] ||
+    /// [offense_kind: 1 byte] || [payload-specific bytes]
+    /// ```
+    fn canonical_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+
+        // Common header: validator_id (8 bytes), height (8 bytes), view (8 bytes), offense (1 byte)
+        bytes.extend_from_slice(&self.offending_validator.0.to_be_bytes());
+        bytes.extend_from_slice(&self.height.to_be_bytes());
+        bytes.extend_from_slice(&self.view.to_be_bytes());
+        bytes.push(self.offense_kind_byte());
+
+        // Payload-specific canonical encoding
+        match &self.payload {
+            EvidencePayloadV1::O1DoubleSign { block_a, block_b } => {
+                // O1: block_id_a (32), block_id_b (32), sig_a (len + bytes), sig_b (len + bytes)
+                bytes.extend_from_slice(&block_a.block_id);
+                bytes.extend_from_slice(&block_b.block_id);
+                // Length-prefixed signatures for unambiguous parsing
+                bytes.extend_from_slice(&(block_a.signature.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(&block_a.signature);
+                bytes.extend_from_slice(&(block_b.signature.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(&block_b.signature);
+            }
+            EvidencePayloadV1::O2InvalidProposerSig { header, bad_signature } => {
+                // O2: header fields hash + bad_signature
+                // Use batch_commitment as header hash (32 bytes)
+                bytes.extend_from_slice(&header.batch_commitment);
+                bytes.extend_from_slice(&(bad_signature.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(bad_signature);
+            }
+            EvidencePayloadV1::O3LazyVote { vote, invalid_reason: _ } => {
+                // O3: vote block_id + signature
+                bytes.extend_from_slice(&vote.block_id);
+                bytes.extend_from_slice(&(vote.signature.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(&vote.signature);
+            }
+            EvidencePayloadV1::O4InvalidDagCert { cert, failure_reason: _ } => {
+                // O4: batch_commitment + dag_round + aggregated signatures
+                bytes.extend_from_slice(&cert.batch_commitment);
+                bytes.extend_from_slice(&cert.dag_round.to_be_bytes());
+                // Include number of signatures and concatenated signatures
+                bytes.extend_from_slice(&(cert.signatures.len() as u32).to_be_bytes());
+                for sig in &cert.signatures {
+                    bytes.extend_from_slice(&(sig.len() as u32).to_be_bytes());
+                    bytes.extend_from_slice(sig);
+                }
+            }
+            EvidencePayloadV1::O5DagCouplingViolation { block, dag_state_proof } => {
+                // O5: block batch_commitment + dag_round + frontier hashes
+                bytes.extend_from_slice(&block.batch_commitment);
+                bytes.extend_from_slice(&dag_state_proof.dag_round.to_be_bytes());
+                bytes.extend_from_slice(&(dag_state_proof.frontier_commitments.len() as u32).to_be_bytes());
+                for commitment in &dag_state_proof.frontier_commitments {
+                    bytes.extend_from_slice(commitment);
+                }
+            }
+        }
+
+        bytes
+    }
+
+    /// Get a byte representation of the offense kind for canonical encoding.
+    fn offense_kind_byte(&self) -> u8 {
+        match self.offense {
+            OffenseKind::O1DoubleSign => 0x01,
+            OffenseKind::O2InvalidProposerSig => 0x02,
+            OffenseKind::O3aLazyVoteSingle => 0x03,
+            OffenseKind::O3bLazyVoteRepeated => 0x04,
+            OffenseKind::O4InvalidDagCert => 0x05,
+            OffenseKind::O5DagCouplingViolation => 0x06,
+        }
     }
 
     /// Basic structural validation of the evidence.
@@ -749,8 +852,8 @@ pub trait SlashingEngine {
 pub struct NoopSlashingEngine {
     /// All processed records, keyed by validator ID.
     records: HashMap<ValidatorId, Vec<SlashingRecord>>,
-    /// Deduplication set: (validator, offense, height, view).
-    seen_evidence: HashSet<(ValidatorId, OffenseKind, u64, u64)>,
+    /// Deduplication set: content-addressed evidence IDs (M1.1 hardening).
+    seen_evidence: HashSet<[u8; 32]>,
     /// Counter: evidence submitted by offense kind.
     evidence_counts: HashMap<OffenseKind, u64>,
     /// Counter: decisions by decision kind.
@@ -816,9 +919,9 @@ impl SlashingEngine for NoopSlashingEngine {
             evidence.view
         );
 
-        // 1. Check for duplicate
-        let dedup_key = evidence.dedup_key();
-        if self.seen_evidence.contains(&dedup_key) {
+        // 1. Check for duplicate using content-addressed evidence_id (M1.1)
+        let evidence_id = evidence.evidence_id();
+        if self.seen_evidence.contains(&evidence_id) {
             eprintln!(
                 "[SLASHING] Evidence rejected: duplicate (validator={}, offense={}, height={}, view={})",
                 evidence.offending_validator.0,
@@ -937,8 +1040,8 @@ impl SlashingEngine for NoopSlashingEngine {
             evidence.view
         );
 
-        // Mark as seen for deduplication
-        self.seen_evidence.insert(dedup_key);
+        // Mark as seen for deduplication (M1.1: content-addressed)
+        self.seen_evidence.insert(evidence_id);
 
         let record = SlashingRecord {
             evidence,
@@ -1647,8 +1750,8 @@ pub struct PenaltySlashingEngine<B: SlashingBackend> {
     config: PenaltyEngineConfig,
     /// All processed records, keyed by validator ID.
     records: HashMap<ValidatorId, Vec<PenaltySlashingRecord>>,
-    /// Deduplication set: (validator, offense, height, view).
-    seen_evidence: HashSet<(ValidatorId, OffenseKind, u64, u64)>,
+    /// Deduplication set: content-addressed evidence IDs (M1.1 hardening).
+    seen_evidence: HashSet<[u8; 32]>,
     /// Counter: evidence submitted by offense kind.
     evidence_counts: HashMap<OffenseKind, u64>,
     /// Counter: penalties applied by offense kind.
@@ -1742,9 +1845,9 @@ impl<B: SlashingBackend> PenaltySlashingEngine<B> {
             );
         }
 
-        // 2. Check for duplicate
-        let dedup_key = evidence.dedup_key();
-        if self.seen_evidence.contains(&dedup_key) {
+        // 2. Check for duplicate using content-addressed evidence_id (M1.1)
+        let evidence_id = evidence.evidence_id();
+        if self.seen_evidence.contains(&evidence_id) {
             eprintln!(
                 "[SLASHING] Evidence rejected: duplicate (validator={}, offense={}, height={}, view={})",
                 evidence.offending_validator.0,
@@ -1802,8 +1905,8 @@ impl<B: SlashingBackend> PenaltySlashingEngine<B> {
             );
         }
 
-        // Mark as seen for deduplication
-        self.seen_evidence.insert(dedup_key);
+        // Mark as seen for deduplication (M1.1: content-addressed)
+        self.seen_evidence.insert(evidence_id);
 
         // Increment evidence counter
         *self.evidence_counts.entry(evidence.offense).or_insert(0) += 1;
