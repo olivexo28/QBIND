@@ -206,12 +206,14 @@ where
 
 ### Conclusion for Question 1:
 
-The function `build_validator_set_with_stake_filter()` is **NOT invoked** in the canonical epoch transition path. The current path:
-- Retrieves `EpochState` from `EpochStateProvider` 
-- Extracts the pre-constructed `ConsensusValidatorSet` from `EpochState`
-- Passes it directly to `BasicHotStuffEngine::transition_to_epoch()`
+**With M2.3 Integration**, the function `build_validator_set_with_stake_filter()` **IS invoked** in the canonical epoch transition path when `StakeFilteringEpochStateProvider` is wired via `with_stake_filtering_epoch_state_provider()`:
 
-There is **no point** in this flow where stake filtering is applied.
+- `EpochStateProvider::get_epoch_state()` is called
+- If provider is `StakeFilteringEpochStateProvider`, it internally calls `build_validator_set_with_stake_filter()`
+- Returns filtered `EpochState` (or `None` if all excluded)
+- Filtered `ConsensusValidatorSet` is passed to `BasicHotStuffEngine::transition_to_epoch()`
+
+**M2.4 Note**: The `new_with_stake_filtering()` constructor and `enable_stake_filtering_for_environment()` method in `NodeHotstuffHarness` provide the recommended production integration path. TestNet/MainNet deployments should use these methods to ensure stake filtering is always enabled.
 
 ---
 
@@ -501,72 +503,30 @@ transition_to_epoch(new_validator_set)  ← Receives ConsensusValidatorSet
 | `ValidatorStakeConfig` with thresholds | ✅ Implemented | `node_config.rs:2180-2260` |
 | Quorum calculation using validator set | ✅ Implemented | `validator_set.rs:315-328` |
 | Leader schedule using validator set | ✅ Implemented | `basic_hotstuff_engine.rs:613-618` |
-| **Production integration at epoch boundary** | ❌ **MISSING** | No production code calls filter |
+| `StakeFilteringEpochStateProvider` (M2.2) | ✅ Implemented | `validator_set.rs:883-1055` |
+| `with_stake_filtering_epoch_state_provider()` (M2.3) | ✅ Implemented | `hotstuff_node_sim.rs:978-991` |
+| `enable_stake_filtering_for_environment()` (M2.4) | ✅ Implemented | `hotstuff_node_sim.rs:993-1047` |
+| `new_with_stake_filtering()` (M2.4) | ✅ Implemented | `hotstuff_node_sim.rs:2372-2434` |
+| **Production integration at epoch boundary** | ✅ **AVAILABLE** | Use M2.4 methods for TestNet/MainNet |
 
-### Gap Analysis:
+### M2.4 Production Wiring:
 
-**Missing Components**:
+Production deployments (TestNet/MainNet) should use one of these methods:
 
-1. **Production EpochStateProvider Implementation**:
+1. **`new_with_stake_filtering()`**: Production constructor that wires stake filtering automatically
+2. **`enable_stake_filtering_for_environment()`**: Builder method to enable filtering based on `NodeConfig`
+
+### Remaining Integration Work:
+
+The remaining work involves wiring the actual ledger-backed `EpochStateProvider` implementation:
+
+1. **Production EpochStateProvider Implementation** (Future Work):
    - Should read `ValidatorRecord` from ledger state
    - Should extract `validator_id` and `stake` fields
-   - Should create `ValidatorCandidate` list
-   - Should call `build_validator_set_with_stake_filter()`
-   - Should construct `EpochState` with filtered set
-   - **Location**: Not yet implemented
+   - Should wrap with `StakeFilteringEpochStateProvider` using `NodeConfig.validator_stake.min_validator_stake`
+   - **Location**: To be implemented in a ledger-backed provider
 
-2. **Integration Point**:
-   - Current: `EpochStateProvider::get_epoch_state()` returns pre-constructed states
-   - Needed: Dynamic construction with stake filtering from ledger
-   - **Gap**: No bridge between ledger state and stake-filtered validator set construction
-
-3. **Ledger Integration**:
-   - Need to read `ValidatorRecord.stake` field at epoch boundary
-   - Need to pass `ValidatorStakeConfig.min_validator_stake` threshold
-   - **Gap**: No code path reads validator stakes at epoch transition time
-
-### Recommendations:
-
-1. **Implement Production EpochStateProvider**:
-   ```rust
-   // Pseudocode for missing implementation
-   impl EpochStateProvider for LedgerBackedEpochStateProvider {
-       fn get_epoch_state(&self, epoch: EpochId) -> Option<EpochState> {
-           // 1. Read validator records from ledger
-           let validator_records = self.ledger.read_validators(epoch)?;
-           
-           // 2. Convert to ValidatorCandidate list
-           let candidates: Vec<ValidatorCandidate> = validator_records
-               .into_iter()
-               .filter(|v| v.status == ValidatorStatus::Active)
-               .map(|v| ValidatorCandidate {
-                   validator_id: v.id,
-                   stake: v.stake,  // From ValidatorRecord.stake
-                   voting_power: 1, // Uniform voting power
-               })
-               .collect();
-           
-           // 3. Apply stake filtering
-           let min_stake = self.config.validator_stake.min_validator_stake;
-           let result = build_validator_set_with_stake_filter(candidates, min_stake).ok()?;
-           
-           // 4. Construct EpochState
-           Some(EpochState::new(epoch, result.validator_set))
-       }
-   }
-   ```
-
-2. **Add Integration Test**:
-   - Create test that simulates epoch transition with stake-filtered validator set
-   - Verify excluded validators don't participate in consensus
-   - Verify quorum and leader schedule use only eligible validators
-
-3. **Update Documentation**:
-   - Clarify that M2.1 mitigation is implemented but not yet integrated
-   - Document the production integration plan
-   - Update `QBIND_PROTOCOL_REPORT.md` to reflect current status
-
-4. **Consider Startup Validation**:
+2. **Startup Validation** (Recommended):
    - Implement `fail_fast_on_startup` logic (already in config)
    - Verify initial validator set meets minimum stake requirements
    - Location: Add to startup validation in `crates/qbind-node/src/startup_validation.rs`
@@ -581,7 +541,12 @@ transition_to_epoch(new_validator_set)  ← Receives ConsensusValidatorSet
    - `crates/qbind-consensus/src/validator_set.rs:44-178` - ValidatorCandidate, build_validator_set_with_stake_filter()
    - `crates/qbind-consensus/src/validator_set.rs:883-1055` - StakeFilteringEpochStateProvider (M2.2)
    
-2. **Consensus Validator Set**:
+2. **M2.3/M2.4 Production Integration**:
+   - `crates/qbind-node/src/hotstuff_node_sim.rs:978-991` - with_stake_filtering_epoch_state_provider()
+   - `crates/qbind-node/src/hotstuff_node_sim.rs:993-1047` - enable_stake_filtering_for_environment()
+   - `crates/qbind-node/src/hotstuff_node_sim.rs:2372-2434` - new_with_stake_filtering()
+   
+3. **Consensus Validator Set**:
    - `crates/qbind-consensus/src/validator_set.rs:181-329` - ConsensusValidatorSet, has_quorum(), two_thirds_vp()
    
 3. **Epoch State**:
@@ -738,6 +703,63 @@ For TestNet/MainNet deployments:
 3. Use `with_stake_filtering_epoch_state_provider()` when building the `NodeHotstuffHarness`
 
 The epoch transition handler (`handle_potential_reconfig_commit()`) will automatically receive filtered validator sets when calling `provider.get_epoch_state()`.
+
+---
+
+## 9. M2.4 Production Constructor Addendum
+
+**Date**: 2026-02-12  
+**Status**: ✅ PRODUCTION CONSTRUCTORS ADDED
+
+### Summary
+
+M2.4 adds production-ready constructors to simplify stake filtering wiring for TestNet/MainNet deployments.
+
+### New Methods
+
+1. **`enable_stake_filtering_for_environment()`** (`hotstuff_node_sim.rs:993-1047`):
+   - Builder method that wraps any `EpochStateProvider` with stake filtering
+   - Uses `min_validator_stake` from `NodeConfig.validator_stake`
+   - Logs the environment and threshold for debugging
+
+2. **`new_with_stake_filtering()`** (`hotstuff_node_sim.rs:2372-2434`):
+   - All-in-one production constructor
+   - Creates `NodeHotstuffHarness` with stake filtering already wired
+   - Recommended for TestNet/MainNet deployments
+
+### Test Coverage (11 tests in `m2_4_production_stake_filtering_tests.rs`):
+   - Config preset stake values (DevNet/TestNet/MainNet)
+   - Stake filtering with TestNet threshold
+   - Stake filtering with MainNet threshold
+   - Stake filtering with DevNet threshold
+   - Fail-closed behavior
+   - Epoch transition with filtered sets
+   - MainNet config validation
+
+### Usage
+
+```rust
+use qbind_node::NodeHotstuffHarness;
+use qbind_node::node_config::NodeConfig;
+use std::sync::Arc;
+
+// Method 1: Production constructor (recommended)
+let harness = NodeHotstuffHarness::new_with_stake_filtering(
+    &cfg,
+    client_cfg,
+    server_cfg,
+    None,
+    &NodeConfig::testnet_alpha_preset(),
+    Arc::new(inner_provider),
+)?;
+
+// Method 2: Builder pattern
+let harness = NodeHotstuffHarness::new_from_validator_config(&cfg, client_cfg, server_cfg, None)?
+    .enable_stake_filtering_for_environment(
+        Arc::new(inner_provider),
+        &NodeConfig::testnet_alpha_preset(),
+    );
+```
 
 ---
 
