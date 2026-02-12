@@ -421,6 +421,83 @@ const RECORD_PREFIX: &[u8] = b"slash:record:";
 /// Key for record sequence counter metadata.
 const RECORD_SEQ_KEY: &[u8] = b"slash:meta:record_seq";
 
+// ============================================================================
+// Atomic Slashing Update Batch (M1.2)
+// ============================================================================
+
+/// Represents a batch of slashing updates to be committed atomically (M1.2).
+///
+/// This struct collects all the operations that should be committed in a single
+/// RocksDB WriteBatch to ensure consistency. All changes either succeed together
+/// or fail together, preventing partial state corruption on crashes.
+///
+/// # Invariants
+///
+/// When `apply_slashing_update_atomic()` is called, the following are committed
+/// atomically in ONE RocksDB WriteBatch:
+/// - Validator slashing state update (`slash:val:<validator_id>:state`)
+/// - Evidence deduplication marker (`slash:evidence:<evidence_id>`)
+/// - Slashing record (`slash:record:<validator_id>:<seq>`)
+/// - Record sequence counter update (`slash:meta:record_seq`)
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_ledger::{RocksDbSlashingLedger, SlashingUpdateBatch, SlashingRecord};
+///
+/// let mut batch = SlashingUpdateBatch::new();
+/// batch.set_validator_state(validator_id, updated_state);
+/// batch.set_evidence_id(evidence_id);
+/// batch.set_slashing_record(record);
+///
+/// ledger.apply_slashing_update_atomic(batch)?;
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct SlashingUpdateBatch {
+    /// Updated validator state (validator_id -> new state).
+    pub validator_state: Option<(ValidatorLedgerId, ValidatorSlashingState)>,
+    /// Evidence ID to mark as seen (32-byte SHA3-256 hash).
+    pub evidence_id: Option<[u8; 32]>,
+    /// Slashing record to store (for audit trail).
+    pub slashing_record: Option<SlashingRecord>,
+}
+
+impl SlashingUpdateBatch {
+    /// Create a new empty slashing update batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the validator state to update.
+    pub fn set_validator_state(
+        &mut self,
+        validator_id: ValidatorLedgerId,
+        state: ValidatorSlashingState,
+    ) -> &mut Self {
+        self.validator_state = Some((validator_id, state));
+        self
+    }
+
+    /// Set the evidence ID to mark as seen.
+    pub fn set_evidence_id(&mut self, evidence_id: [u8; 32]) -> &mut Self {
+        self.evidence_id = Some(evidence_id);
+        self
+    }
+
+    /// Set the slashing record to store.
+    pub fn set_slashing_record(&mut self, record: SlashingRecord) -> &mut Self {
+        self.slashing_record = Some(record);
+        self
+    }
+
+    /// Check if the batch has any operations to apply.
+    pub fn is_empty(&self) -> bool {
+        self.validator_state.is_none()
+            && self.evidence_id.is_none()
+            && self.slashing_record.is_none()
+    }
+}
+
 /// Persistent RocksDB-backed slashing ledger (M1).
 ///
 /// Provides restart-safe persistence for:
@@ -759,6 +836,140 @@ impl RocksDbSlashingLedger {
         self.db
             .flush()
             .map_err(|e| SlashingLedgerError::StorageError(e.to_string()))
+    }
+
+    /// Apply a batch of slashing updates atomically (M1.2).
+    ///
+    /// This method commits all operations in the batch using a single RocksDB
+    /// WriteBatch, ensuring atomicity. Either all changes succeed together or
+    /// all fail together, preventing partial state corruption.
+    ///
+    /// # Atomic Operations
+    ///
+    /// The following are committed in ONE WriteBatch:
+    /// - Validator slashing state update (`slash:val:<validator_id>:state`)
+    /// - Evidence deduplication marker (`slash:evidence:<evidence_id>`)
+    /// - Slashing record (`slash:record:<validator_id>:<seq>`)
+    /// - Record sequence counter update (`slash:meta:record_seq`)
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` - The batch of slashing updates to apply.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` on success, or `SlashingLedgerError::StorageError` if
+    /// the write batch fails to commit.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_ledger::{RocksDbSlashingLedger, SlashingUpdateBatch, SlashingRecord, ValidatorSlashingState};
+    ///
+    /// let mut ledger = RocksDbSlashingLedger::open(path)?;
+    ///
+    /// // Build the atomic batch
+    /// let mut batch = SlashingUpdateBatch::new();
+    ///
+    /// // Set updated validator state (after slashing)
+    /// let mut state = ledger.get_validator_state(validator_id).unwrap_or_default();
+    /// let slash_amount = (state.stake as u128 * 750 / 10000) as u64; // 7.5% slash
+    /// state.stake = state.stake.saturating_sub(slash_amount);
+    /// state.total_slashed += slash_amount;
+    /// state.jailed_until_epoch = Some(current_epoch + 10);
+    /// state.jail_count += 1;
+    /// batch.set_validator_state(validator_id, state);
+    ///
+    /// // Set evidence ID to mark as seen
+    /// batch.set_evidence_id(evidence_id);
+    ///
+    /// // Set slashing record for audit trail
+    /// let record = SlashingRecord { /* ... */ };
+    /// batch.set_slashing_record(record);
+    ///
+    /// // Commit all changes atomically
+    /// ledger.apply_slashing_update_atomic(batch)?;
+    /// ```
+    pub fn apply_slashing_update_atomic(
+        &mut self,
+        batch: SlashingUpdateBatch,
+    ) -> Result<(), SlashingLedgerError> {
+        // If batch is empty, nothing to do
+        if batch.is_empty() {
+            return Ok(());
+        }
+
+        // Create RocksDB WriteBatch for atomic commit
+        let mut write_batch = rocksdb::WriteBatch::default();
+
+        // 1. Add validator state update to batch
+        if let Some((validator_id, state)) = &batch.validator_state {
+            let key = Self::validator_state_key(*validator_id);
+            let json = serde_json::to_vec(state).map_err(|e| {
+                SlashingLedgerError::StorageError(format!("JSON encode error: {}", e))
+            })?;
+            write_batch.put(&key, &json);
+        }
+
+        // 2. Add evidence deduplication marker to batch
+        if let Some(evidence_id) = &batch.evidence_id {
+            // Skip if already seen (cache is authoritative for seen evidence)
+            if !self.seen_evidence_cache.contains(evidence_id) {
+                let key = Self::evidence_dedup_key(evidence_id);
+                write_batch.put(&key, &[1u8]);
+            }
+        }
+
+        // 3. Add slashing record and update sequence counter
+        if let Some(record) = &batch.slashing_record {
+            // Get next sequence number
+            let current_seq = match self.db.get(RECORD_SEQ_KEY) {
+                Ok(Some(bytes)) => {
+                    if bytes.len() != 8 {
+                        return Err(SlashingLedgerError::StorageError(
+                            "invalid record_seq length".to_string(),
+                        ));
+                    }
+                    let arr: [u8; 8] = bytes[..].try_into().unwrap();
+                    u64::from_be_bytes(arr)
+                }
+                Ok(None) => 0,
+                Err(e) => return Err(SlashingLedgerError::StorageError(e.to_string())),
+            };
+
+            let next_seq = current_seq.saturating_add(1);
+
+            // Add record to batch
+            let record_key = Self::record_key(record.validator_id, current_seq);
+            let record_json = serde_json::to_vec(record).map_err(|e| {
+                SlashingLedgerError::StorageError(format!("JSON encode error: {}", e))
+            })?;
+            write_batch.put(&record_key, &record_json);
+
+            // Add sequence counter update to batch
+            write_batch.put(RECORD_SEQ_KEY, &next_seq.to_be_bytes());
+        }
+
+        // 4. Commit the entire batch atomically
+        self.db
+            .write(write_batch)
+            .map_err(|e| SlashingLedgerError::StorageError(e.to_string()))?;
+
+        // 5. Update in-memory cache AFTER successful write
+        //    (cache is updated last to maintain consistency)
+        if let Some(evidence_id) = batch.evidence_id {
+            self.seen_evidence_cache.insert(evidence_id);
+        }
+
+        // Log the atomic update for debugging
+        if let Some((validator_id, state)) = &batch.validator_state {
+            eprintln!(
+                "[SLASHING_LEDGER] Atomic update: validator={}, stake={}, jailed_until={:?}, total_slashed={}",
+                validator_id, state.stake, state.jailed_until_epoch, state.total_slashed
+            );
+        }
+
+        Ok(())
     }
 }
 
@@ -1367,5 +1578,298 @@ mod tests {
 
         // The last_offense_epoch field is available for tracking (can be updated via
         // direct state modification if needed in future - for now it's tracked in records)
+    }
+
+    // ============================================================================
+    // Atomic Slashing Update Tests (M1.2)
+    // ============================================================================
+
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_batch_empty() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        // Empty batch should succeed without doing anything
+        let batch = SlashingUpdateBatch::new();
+        assert!(batch.is_empty());
+        ledger.apply_slashing_update_atomic(batch).unwrap();
+    }
+
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_state_only() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        // Initialize validator
+        ledger.initialize_validator(1, 1_000_000).unwrap();
+
+        // Build atomic batch with state update only
+        let mut batch = SlashingUpdateBatch::new();
+        let updated_state = ValidatorSlashingState {
+            stake: 925_000,           // Slashed 75K
+            jailed_until_epoch: Some(100),
+            total_slashed: 75_000,
+            jail_count: 1,
+            last_offense_epoch: Some(10),
+        };
+        batch.set_validator_state(1, updated_state.clone());
+
+        // Apply atomic update
+        ledger.apply_slashing_update_atomic(batch).unwrap();
+
+        // Verify state was updated
+        let state = ledger.get_validator_state(1).unwrap();
+        assert_eq!(state.stake, 925_000);
+        assert_eq!(state.jailed_until_epoch, Some(100));
+        assert_eq!(state.total_slashed, 75_000);
+        assert_eq!(state.jail_count, 1);
+        assert_eq!(state.last_offense_epoch, Some(10));
+    }
+
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_full() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        // Initialize validator
+        ledger.initialize_validator(1, 1_000_000).unwrap();
+
+        // Build atomic batch with all components
+        let mut batch = SlashingUpdateBatch::new();
+
+        // 1. State update
+        let updated_state = ValidatorSlashingState {
+            stake: 925_000,
+            jailed_until_epoch: Some(100),
+            total_slashed: 75_000,
+            jail_count: 1,
+            last_offense_epoch: Some(10),
+        };
+        batch.set_validator_state(1, updated_state);
+
+        // 2. Evidence ID
+        let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"atomic_test_evidence");
+        batch.set_evidence_id(evidence_id);
+
+        // 3. Slashing record
+        let record = SlashingRecord {
+            validator_id: 1,
+            offense_kind: "O1_double_sign".to_string(),
+            slashed_amount: 75_000,
+            jailed: true,
+            jailed_until_epoch: Some(100),
+            height: 1000,
+            view: 50,
+            epoch: 10,
+        };
+        batch.set_slashing_record(record.clone());
+
+        // Apply atomic update
+        ledger.apply_slashing_update_atomic(batch).unwrap();
+
+        // Verify all components were persisted
+        // 1. Check state
+        let state = ledger.get_validator_state(1).unwrap();
+        assert_eq!(state.stake, 925_000);
+        assert_eq!(state.jailed_until_epoch, Some(100));
+        assert_eq!(state.total_slashed, 75_000);
+
+        // 2. Check evidence marker
+        assert!(ledger.is_evidence_seen(&evidence_id));
+
+        // 3. Check record
+        let records = ledger.get_slashing_records(1);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].slashed_amount, 75_000);
+        assert_eq!(records[0].offense_kind, "O1_double_sign");
+    }
+
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_persistence() {
+        let temp_dir = tempfile::tempdir().unwrap();
+
+        // Write data in first session using atomic update
+        let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"atomic_persistence_test");
+        {
+            let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+            ledger.initialize_validator(1, 1_000_000).unwrap();
+
+            // Build and apply atomic batch
+            let mut batch = SlashingUpdateBatch::new();
+
+            let updated_state = ValidatorSlashingState {
+                stake: 850_000,
+                jailed_until_epoch: Some(200),
+                total_slashed: 150_000,
+                jail_count: 2,
+                last_offense_epoch: Some(50),
+            };
+            batch.set_validator_state(1, updated_state);
+            batch.set_evidence_id(evidence_id);
+
+            let record = SlashingRecord {
+                validator_id: 1,
+                offense_kind: "O2_invalid_proposer_sig".to_string(),
+                slashed_amount: 150_000,
+                jailed: true,
+                jailed_until_epoch: Some(200),
+                height: 5000,
+                view: 100,
+                epoch: 50,
+            };
+            batch.set_slashing_record(record);
+
+            ledger.apply_slashing_update_atomic(batch).unwrap();
+            ledger.flush().unwrap();
+        }
+
+        // Reopen and verify all data persisted
+        {
+            let ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+            // Check state persisted
+            let state = ledger.get_validator_state(1).unwrap();
+            assert_eq!(state.stake, 850_000);
+            assert_eq!(state.jailed_until_epoch, Some(200));
+            assert_eq!(state.total_slashed, 150_000);
+            assert_eq!(state.jail_count, 2);
+
+            // Check evidence marker persisted (loaded into cache on open)
+            assert!(ledger.is_evidence_seen(&evidence_id));
+
+            // Check record persisted
+            let records = ledger.get_slashing_records(1);
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].slashed_amount, 150_000);
+        }
+    }
+
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_duplicate_evidence_skipped() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        ledger.initialize_validator(1, 1_000_000).unwrap();
+
+        let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"duplicate_evidence_test");
+
+        // First atomic update with evidence
+        let mut batch1 = SlashingUpdateBatch::new();
+        let state1 = ValidatorSlashingState {
+            stake: 925_000,
+            jailed_until_epoch: Some(100),
+            total_slashed: 75_000,
+            jail_count: 1,
+            last_offense_epoch: Some(10),
+        };
+        batch1.set_validator_state(1, state1);
+        batch1.set_evidence_id(evidence_id);
+        ledger.apply_slashing_update_atomic(batch1).unwrap();
+
+        // Second atomic update with same evidence ID (should skip the evidence marker)
+        let mut batch2 = SlashingUpdateBatch::new();
+        let state2 = ValidatorSlashingState {
+            stake: 900_000,  // Different state
+            jailed_until_epoch: Some(100),
+            total_slashed: 100_000,
+            jail_count: 1,
+            last_offense_epoch: Some(10),
+        };
+        batch2.set_validator_state(1, state2);
+        batch2.set_evidence_id(evidence_id);  // Same evidence ID
+
+        // This should succeed (duplicate evidence is skipped, not rejected)
+        ledger.apply_slashing_update_atomic(batch2).unwrap();
+
+        // Verify state was updated to second value
+        let state = ledger.get_validator_state(1).unwrap();
+        assert_eq!(state.stake, 900_000);
+        assert_eq!(state.total_slashed, 100_000);
+
+        // Evidence is still marked as seen
+        assert!(ledger.is_evidence_seen(&evidence_id));
+    }
+
+    #[test]
+    fn test_rocksdb_slashing_ledger_atomic_update_multiple_validators() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
+
+        // Initialize multiple validators
+        ledger.initialize_validator(1, 1_000_000).unwrap();
+        ledger.initialize_validator(2, 2_000_000).unwrap();
+
+        // Atomic update for validator 1
+        let mut batch1 = SlashingUpdateBatch::new();
+        let state1 = ValidatorSlashingState {
+            stake: 925_000,
+            jailed_until_epoch: Some(100),
+            total_slashed: 75_000,
+            jail_count: 1,
+            last_offense_epoch: Some(10),
+        };
+        batch1.set_validator_state(1, state1);
+        let evidence_id_1: [u8; 32] = qbind_hash::sha3_256(b"validator_1_evidence");
+        batch1.set_evidence_id(evidence_id_1);
+        ledger.apply_slashing_update_atomic(batch1).unwrap();
+
+        // Atomic update for validator 2
+        let mut batch2 = SlashingUpdateBatch::new();
+        let state2 = ValidatorSlashingState {
+            stake: 1_800_000,
+            jailed_until_epoch: Some(200),
+            total_slashed: 200_000,
+            jail_count: 1,
+            last_offense_epoch: Some(20),
+        };
+        batch2.set_validator_state(2, state2);
+        let evidence_id_2: [u8; 32] = qbind_hash::sha3_256(b"validator_2_evidence");
+        batch2.set_evidence_id(evidence_id_2);
+        ledger.apply_slashing_update_atomic(batch2).unwrap();
+
+        // Verify both validators' states
+        let v1_state = ledger.get_validator_state(1).unwrap();
+        assert_eq!(v1_state.stake, 925_000);
+        assert!(ledger.is_evidence_seen(&evidence_id_1));
+
+        let v2_state = ledger.get_validator_state(2).unwrap();
+        assert_eq!(v2_state.stake, 1_800_000);
+        assert!(ledger.is_evidence_seen(&evidence_id_2));
+    }
+
+    #[test]
+    fn test_slashing_update_batch_builder() {
+        // Test the builder pattern
+        let mut batch = SlashingUpdateBatch::new();
+        assert!(batch.is_empty());
+
+        let state = ValidatorSlashingState {
+            stake: 100_000,
+            jailed_until_epoch: None,
+            total_slashed: 0,
+            jail_count: 0,
+            last_offense_epoch: None,
+        };
+        batch.set_validator_state(1, state);
+        assert!(!batch.is_empty());
+
+        let evidence_id: [u8; 32] = [0u8; 32];
+        batch.set_evidence_id(evidence_id);
+
+        let record = SlashingRecord {
+            validator_id: 1,
+            offense_kind: "test".to_string(),
+            slashed_amount: 0,
+            jailed: false,
+            jailed_until_epoch: None,
+            height: 0,
+            view: 0,
+            epoch: 0,
+        };
+        batch.set_slashing_record(record);
+
+        assert!(batch.validator_state.is_some());
+        assert!(batch.evidence_id.is_some());
+        assert!(batch.slashing_record.is_some());
     }
 }
