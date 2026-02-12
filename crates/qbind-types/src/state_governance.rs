@@ -51,7 +51,11 @@ pub struct ParamRegistry {
     pub slash_bps_precommit: u16,
     pub reporter_reward_bps: u16,
     pub reserved1: u16,
-    // future: other global params (validator caps, epochs, etc.)
+    // M2: Minimum stake requirement for validator registration and eligibility
+    // Validators must have at least this much stake (in microQBIND) to:
+    // 1. Register as a validator
+    // 2. Remain eligible for the validator set at epoch boundaries
+    pub min_validator_stake: u64,
 }
 
 /// Canonical SafetyCouncilKeyset for qbind v1 genesis.

@@ -218,6 +218,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 |------|-------|------------|---------------|----------|
 | Liveness failure under partition | Consensus | Implement timeout/view-change (TODO) | High until implemented | Critical |
 | No slashing enforcement | Consensus | Complete T229+ implementation | High until enforced | Critical |
+| No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary; MainNet fail-fast | Low (mitigated) | Mitigated |
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
 | Connection exhaustion (DoS) | Networking | Implement DoS cookie enforcement | Medium | High |
