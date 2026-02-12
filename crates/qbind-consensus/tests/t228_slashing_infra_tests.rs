@@ -316,7 +316,8 @@ fn test_slashing_engine_accepts_valid_evidence() {
     };
 
     let mut engine = NoopSlashingEngine::new();
-    let evidence = make_o1_evidence(1, 100, 5);
+    // Use view=0 where validator 1 (at index 0) is the leader
+    let evidence = make_o1_evidence(1, 100, 0);
 
     let record = engine.handle_evidence(&ctx, evidence);
 
@@ -336,27 +337,27 @@ fn test_slashing_engine_accepts_all_offense_types() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // O1
-    let r1 = engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1));
+    // O1: validator 1 is leader at view 0 (0 % 3 = 0)
+    let r1 = engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 0));
     assert_eq!(r1.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O2
-    let r2 = engine.handle_evidence(&ctx, make_o2_evidence(2, 200, 2));
+    // O2: validator 2 is leader at view 1 (1 % 3 = 1)
+    let r2 = engine.handle_evidence(&ctx, make_o2_evidence(2, 200, 1));
     assert_eq!(r2.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O3a
+    // O3a (no cryptographic verification yet)
     let r3a = engine.handle_evidence(&ctx, make_o3a_evidence(3, 300, 3));
     assert_eq!(r3a.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O3b
+    // O3b (no cryptographic verification yet)
     let r3b = engine.handle_evidence(&ctx, make_o3b_evidence(1, 400, 4));
     assert_eq!(r3b.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O4
+    // O4 (no cryptographic verification yet)
     let r4 = engine.handle_evidence(&ctx, make_o4_evidence(2, 500, 5));
     assert_eq!(r4.decision, SlashingDecisionKind::AcceptedNoOp);
 
-    // O5
+    // O5 (no cryptographic verification yet)
     let r5 = engine.handle_evidence(&ctx, make_o5_evidence(3, 600, 6));
     assert_eq!(r5.decision, SlashingDecisionKind::AcceptedNoOp);
 
@@ -433,7 +434,8 @@ fn test_slashing_engine_deduplicates() {
     };
 
     let mut engine = NoopSlashingEngine::new();
-    let evidence = make_o1_evidence(1, 100, 5);
+    // Use view=0 where validator 1 is leader
+    let evidence = make_o1_evidence(1, 100, 0);
 
     // First submission should be accepted
     let record1 = engine.handle_evidence(&ctx, evidence.clone());
@@ -456,8 +458,9 @@ fn test_slashing_engine_dedup_key_uniqueness() {
     let mut engine = NoopSlashingEngine::new();
 
     // Same validator, same height, different view => different key
-    let e1 = make_o1_evidence(1, 100, 5);
-    let e2 = make_o1_evidence(1, 100, 6);
+    // validator 1 is leader at view 0 and view 3
+    let e1 = make_o1_evidence(1, 100, 0);
+    let e2 = make_o1_evidence(1, 100, 3);
 
     let r1 = engine.handle_evidence(&ctx, e1);
     let r2 = engine.handle_evidence(&ctx, e2);
@@ -477,9 +480,10 @@ fn test_slashing_engine_dedup_different_validators_same_block() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // Different validators at same height/view => both accepted
-    let e1 = make_o1_evidence(1, 100, 5);
-    let e2 = make_o1_evidence(2, 100, 5);
+    // Different validators at same height but different views (each as leader)
+    // validator 1 is leader at view 0, validator 2 at view 1
+    let e1 = make_o1_evidence(1, 100, 0);
+    let e2 = make_o1_evidence(2, 100, 1);
 
     let r1 = engine.handle_evidence(&ctx, e1);
     let r2 = engine.handle_evidence(&ctx, e2);
@@ -565,11 +569,12 @@ fn test_slashing_engine_tracks_counts() {
 
     let mut engine = NoopSlashingEngine::new();
 
-    // Submit various evidence
-    engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1));
-    engine.handle_evidence(&ctx, make_o1_evidence(2, 101, 2));
-    engine.handle_evidence(&ctx, make_o2_evidence(3, 102, 3));
-    engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 1)); // duplicate
+    // Submit various evidence with correct views for each validator
+    // validator 1 is leader at view 0, validator 2 at view 1, validator 3 at view 2
+    engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 0));
+    engine.handle_evidence(&ctx, make_o1_evidence(2, 101, 1));
+    engine.handle_evidence(&ctx, make_o2_evidence(3, 102, 2));
+    engine.handle_evidence(&ctx, make_o1_evidence(1, 100, 0)); // duplicate
 
     // Check engine counts
     assert_eq!(
