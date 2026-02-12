@@ -95,9 +95,9 @@ pub use timeout::{
     TimeoutValidationError, TIMEOUT_SUITE_ID,
 };
 pub use validator_set::{
-    BlockPayloadType, ConsensusValidatorSet, EpochId, EpochState, EpochStateProvider,
-    EpochTransitionError, EpochValidationError, ReconfigPayload, StaticEpochStateProvider,
-    ValidatorSetEntry,
+    build_validator_set_with_stake_filter, BlockPayloadType, ConsensusValidatorSet, EpochId,
+    EpochState, EpochStateProvider, EpochTransitionError, EpochValidationError, ReconfigPayload,
+    StaticEpochStateProvider, ValidatorCandidate, ValidatorSetBuildResult, ValidatorSetEntry,
 };
 pub use verify::{
     ensure_qc_suite_matches_epoch, ConsensusVerifier, NoopConsensusVerifier, VerificationError,
