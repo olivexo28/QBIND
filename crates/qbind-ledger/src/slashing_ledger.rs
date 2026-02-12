@@ -460,9 +460,10 @@ const RECORD_SEQ_KEY: &[u8] = b"slash:meta:record_seq";
 pub struct RocksDbSlashingLedger {
     /// The underlying RocksDB instance.
     db: rocksdb::DB,
-    /// In-memory cache of seen evidence for fast deduplication checks.
+    /// In-memory cache of seen evidence IDs for fast deduplication checks.
     /// Populated on startup from the database.
-    seen_evidence_cache: HashSet<String>,
+    /// Uses 32-byte SHA3-256 evidence IDs (M1.1 hardening).
+    seen_evidence_cache: HashSet<[u8; 32]>,
 }
 
 impl std::fmt::Debug for RocksDbSlashingLedger {
@@ -517,19 +518,25 @@ impl RocksDbSlashingLedger {
     }
 
     /// Load evidence deduplication markers from the database into memory.
-    fn load_evidence_cache(db: &rocksdb::DB) -> Result<HashSet<String>, SlashingLedgerError> {
+    /// Supports both legacy string keys and new 32-byte evidence IDs (M1.1).
+    fn load_evidence_cache(db: &rocksdb::DB) -> Result<HashSet<[u8; 32]>, SlashingLedgerError> {
         let mut cache = HashSet::new();
         let iter = db.prefix_iterator(EVIDENCE_DEDUP_PREFIX);
 
         for item in iter {
             match item {
                 Ok((key, _value)) => {
-                    // Extract the dedup key from the full key
+                    // Extract the evidence ID from the full key
                     if key.starts_with(EVIDENCE_DEDUP_PREFIX) {
-                        let dedup_key = &key[EVIDENCE_DEDUP_PREFIX.len()..];
-                        if let Ok(s) = std::str::from_utf8(dedup_key) {
-                            cache.insert(s.to_string());
+                        let evidence_id_bytes = &key[EVIDENCE_DEDUP_PREFIX.len()..];
+                        // M1.1: Evidence IDs are 32-byte hashes
+                        if evidence_id_bytes.len() == 32 {
+                            let mut id = [0u8; 32];
+                            id.copy_from_slice(evidence_id_bytes);
+                            cache.insert(id);
                         }
+                        // Legacy string keys are not loaded into the new cache
+                        // They will be orphaned but harmless in storage
                     }
                 }
                 Err(e) => {
@@ -553,11 +560,12 @@ impl RocksDbSlashingLedger {
         key
     }
 
-    /// Build the key for an evidence deduplication marker.
-    fn evidence_dedup_key(dedup_key: &str) -> Vec<u8> {
-        let mut key = Vec::with_capacity(EVIDENCE_DEDUP_PREFIX.len() + dedup_key.len());
+    /// Build the key for an evidence deduplication marker (M1.1 hardening).
+    /// Uses 32-byte evidence ID instead of string key.
+    fn evidence_dedup_key(evidence_id: &[u8; 32]) -> Vec<u8> {
+        let mut key = Vec::with_capacity(EVIDENCE_DEDUP_PREFIX.len() + 32);
         key.extend_from_slice(EVIDENCE_DEDUP_PREFIX);
-        key.extend_from_slice(dedup_key.as_bytes());
+        key.extend_from_slice(evidence_id);
         key
     }
 
@@ -636,40 +644,50 @@ impl RocksDbSlashingLedger {
         self.initialize_validator(validator_id, stake)
     }
 
-    /// Check if evidence with the given deduplication key has been seen.
+    /// Check if evidence with the given ID has been seen (M1.1 hardening).
     ///
     /// Uses the in-memory cache for fast lookups.
-    pub fn is_evidence_seen(&self, dedup_key: &str) -> bool {
-        self.seen_evidence_cache.contains(dedup_key)
-    }
-
-    /// Mark evidence as seen to prevent replay/double-penalty.
     ///
     /// # Arguments
     ///
-    /// * `dedup_key` - A string key uniquely identifying the evidence
-    ///   (typically: `"{validator_id}:{offense}:{height}:{view}"`)
+    /// * `evidence_id` - A 32-byte SHA3-256 hash uniquely identifying the evidence.
+    pub fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        self.seen_evidence_cache.contains(evidence_id)
+    }
+
+    /// Mark evidence as seen to prevent replay/double-penalty (M1.1 hardening).
+    ///
+    /// # Arguments
+    ///
+    /// * `evidence_id` - A 32-byte SHA3-256 hash uniquely identifying the evidence.
+    ///   Computed as: sha3_256("QBIND:slash:evidence:v1" || canonical_evidence_bytes)
     ///
     /// # Errors
     ///
     /// Returns `SlashingLedgerError::StorageError` on database errors.
-    pub fn mark_evidence_seen(&mut self, dedup_key: &str) -> Result<(), SlashingLedgerError> {
+    pub fn mark_evidence_seen(&mut self, evidence_id: &[u8; 32]) -> Result<(), SlashingLedgerError> {
         // Already seen? Skip
-        if self.seen_evidence_cache.contains(dedup_key) {
+        if self.seen_evidence_cache.contains(evidence_id) {
             return Ok(());
         }
 
-        let key = Self::evidence_dedup_key(dedup_key);
+        let key = Self::evidence_dedup_key(evidence_id);
         self.db
             .put(&key, &[1u8])
             .map_err(|e| SlashingLedgerError::StorageError(e.to_string()))?;
 
-        self.seen_evidence_cache.insert(dedup_key.to_string());
+        self.seen_evidence_cache.insert(*evidence_id);
 
         Ok(())
     }
 
-    /// Format a deduplication key from evidence components.
+    /// Format a deduplication key from evidence components (legacy, deprecated).
+    ///
+    /// # Deprecated
+    ///
+    /// This method is deprecated in favor of using `evidence_id()` from
+    /// `SlashingEvidence` (in qbind-consensus crate) for content-addressed 
+    /// deduplication (M1.1 hardening).
     ///
     /// # Arguments
     ///
@@ -681,6 +699,10 @@ impl RocksDbSlashingLedger {
     /// # Returns
     ///
     /// A string key in the format: `"{validator_id}:{offense}:{height}:{view}"`
+    #[deprecated(
+        since = "0.2.0",
+        note = "use qbind_consensus::slashing::SlashingEvidence::evidence_id() for content-addressed deduplication (M1.1 hardening)"
+    )]
     pub fn format_dedup_key(
         validator_id: ValidatorLedgerId,
         offense_kind: &str,
@@ -1258,9 +1280,9 @@ mod tests {
             };
             ledger.store_slashing_record(record).unwrap();
 
-            // Mark evidence as seen
-            let dedup_key = RocksDbSlashingLedger::format_dedup_key(1, "O1_double_sign", 500, 50);
-            ledger.mark_evidence_seen(&dedup_key).unwrap();
+            // Mark evidence as seen using 32-byte evidence ID (M1.1)
+            let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"test_evidence_1");
+            ledger.mark_evidence_seen(&evidence_id).unwrap();
 
             ledger.flush().unwrap();
         }
@@ -1286,13 +1308,12 @@ mod tests {
             assert_eq!(records[0].slashed_amount, 75_000);
 
             // Check evidence dedup marker persisted (loaded into cache)
-            let dedup_key = RocksDbSlashingLedger::format_dedup_key(1, "O1_double_sign", 500, 50);
-            assert!(ledger.is_evidence_seen(&dedup_key));
+            let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"test_evidence_1");
+            assert!(ledger.is_evidence_seen(&evidence_id));
 
             // Check unknown evidence not seen
-            let unknown_key =
-                RocksDbSlashingLedger::format_dedup_key(999, "O1_double_sign", 999, 999);
-            assert!(!ledger.is_evidence_seen(&unknown_key));
+            let unknown_id: [u8; 32] = qbind_hash::sha3_256(b"unknown_evidence");
+            assert!(!ledger.is_evidence_seen(&unknown_id));
         }
     }
 
@@ -1301,18 +1322,19 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let mut ledger = RocksDbSlashingLedger::open(temp_dir.path()).unwrap();
 
-        let dedup_key = "1:O1_double_sign:100:50";
+        // Use 32-byte evidence ID (M1.1 hardening)
+        let evidence_id: [u8; 32] = qbind_hash::sha3_256(b"test_evidence_dedup");
 
         // Initially not seen
-        assert!(!ledger.is_evidence_seen(dedup_key));
+        assert!(!ledger.is_evidence_seen(&evidence_id));
 
         // Mark as seen
-        ledger.mark_evidence_seen(dedup_key).unwrap();
-        assert!(ledger.is_evidence_seen(dedup_key));
+        ledger.mark_evidence_seen(&evidence_id).unwrap();
+        assert!(ledger.is_evidence_seen(&evidence_id));
 
         // Mark again (should be no-op)
-        ledger.mark_evidence_seen(dedup_key).unwrap();
-        assert!(ledger.is_evidence_seen(dedup_key));
+        ledger.mark_evidence_seen(&evidence_id).unwrap();
+        assert!(ledger.is_evidence_seen(&evidence_id));
     }
 
     #[test]
