@@ -113,6 +113,11 @@ pub use slashing::{
     SlashingEngine, SlashingEvidence, SlashingMetrics, SlashingRecord, SlashingStore,
 };
 
+// Phase 1 Economic Hardening: Cryptographic verification exports
+pub use slashing::{
+    verify_o1_evidence, verify_o2_evidence, EvidenceVerificationError, ML_DSA_44_SUITE_ID,
+};
+
 use qbind_crypto::CryptoProvider;
 use qbind_hash::vote_digest;
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate as WireQuorumCertificate, Vote};
