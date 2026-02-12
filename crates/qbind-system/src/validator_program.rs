@@ -8,6 +8,54 @@ use qbind_wire::validator::{RegisterValidatorCall, OP_REGISTER_VALIDATOR};
 /// Hard-coded ProgramId for the validator system program (placeholder for now).
 pub const VALIDATOR_PROGRAM_ID: ProgramId = [0x56; 32]; // 'V'
 
+// ============================================================================
+// M2: Validator Error Types
+// ============================================================================
+
+/// Errors specific to validator operations.
+///
+/// These errors provide detailed information about validation failures
+/// during validator registration and other validator-related operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidatorError {
+    /// The stake provided is below the required minimum.
+    ///
+    /// This error is returned when a validator registration attempt
+    /// provides stake less than the network's `min_validator_stake` parameter.
+    StakeTooLow {
+        /// The stake amount provided in the registration call.
+        stake: u64,
+        /// The minimum stake required by the network.
+        min: u64,
+    },
+    /// The validator account already exists.
+    AlreadyExists,
+    /// Invalid registration data.
+    InvalidData(&'static str),
+}
+
+impl std::fmt::Display for ValidatorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ValidatorError::StakeTooLow { stake, min } => {
+                write!(
+                    f,
+                    "stake {} is below minimum required stake {} for validator registration",
+                    stake, min
+                )
+            }
+            ValidatorError::AlreadyExists => {
+                write!(f, "validator already exists")
+            }
+            ValidatorError::InvalidData(msg) => {
+                write!(f, "invalid validator data: {}", msg)
+            }
+        }
+    }
+}
+
+impl std::error::Error for ValidatorError {}
+
 /// ValidatorProgram implements validator registration and, later, key rotation and slashing.
 pub struct ValidatorProgram;
 
@@ -79,6 +127,15 @@ impl ValidatorProgram {
             return Err(ExecutionError::ProgramError("validator already exists"));
         }
 
+        // M2: Enforce minimum stake requirement.
+        // Validators must have at least min_validator_stake to register.
+        let min_stake = ctx.min_validator_stake;
+        if call.stake < min_stake {
+            return Err(ExecutionError::ProgramError(
+                "stake below minimum required for validator registration",
+            ));
+        }
+
         // Build initial ValidatorRecord.
         let record = ValidatorRecord {
             version: 1,
@@ -106,4 +163,24 @@ impl ValidatorProgram {
 
         Ok(())
     }
+}
+
+// ============================================================================
+// M2: Helper functions for minimum stake validation
+// ============================================================================
+
+/// Check if a validator's stake meets the minimum threshold.
+///
+/// This function is used during epoch transitions to determine validator eligibility.
+///
+/// # Arguments
+///
+/// * `stake` - The validator's current stake in microQBIND
+/// * `min_stake` - The minimum required stake in microQBIND
+///
+/// # Returns
+///
+/// `true` if stake >= min_stake, `false` otherwise.
+pub fn is_stake_sufficient(stake: u64, min_stake: u64) -> bool {
+    stake >= min_stake
 }
