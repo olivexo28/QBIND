@@ -2833,9 +2833,11 @@ impl NodeHotstuffHarness {
                     .engine_mut()
                     .on_vote_event(from_validator, &vote);
 
-                // If a QC was formed, notify the pacemaker
+                // If a QC was formed, notify the pacemakers
+                // M5: Reset timeout escalation (consecutive_timeouts) on QC formation
                 if let Ok(Some(qc)) = result {
                     self.pacemaker.on_qc(qc.view);
+                    self.timeout_pacemaker.on_qc(qc.view);
                 }
             }
         }
@@ -2994,9 +2996,11 @@ impl NodeHotstuffHarness {
                             .engine_mut()
                             .on_vote_event(result.job.validator_id, &vote);
 
-                        // If a QC was formed, notify the pacemaker
+                        // If a QC was formed, notify the pacemakers
+                        // M5: Reset timeout escalation (consecutive_timeouts) on QC formation
                         if let Ok(Some(qc)) = engine_result {
                             self.pacemaker.on_qc(qc.view);
+                            self.timeout_pacemaker.on_qc(qc.view);
                         }
                     }
                 }
