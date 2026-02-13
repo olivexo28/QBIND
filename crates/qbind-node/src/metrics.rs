@@ -4177,6 +4177,441 @@ impl std::fmt::Display for SignerModeKind {
 }
 
 // ============================================================================
+// SignerIsolationMetrics (M10) - Production-grade key isolation metrics
+// ============================================================================
+
+// Note: Uses the existing SignerHealth enum defined later in this file.
+// SignerHealth variants: Healthy, Degraded, Failed
+// For M10 "unavailable", we use Failed status.
+
+/// Metrics for production-grade signer isolation (M10).
+///
+/// Tracks:
+/// - signer_requests_total by mode (local/remote/hsm) and kind (proposal/vote/timeout)
+/// - signer_failures_total by mode and reason
+/// - signer_latency_ms histogram buckets
+/// - signer_health_status
+/// - signer_replay_rejections_total
+/// - signer_connect/disconnect events
+///
+/// # Security Note
+///
+/// No secrets, key IDs, passphrases, or key material are exposed
+/// in these metrics. Only aggregate counts and latencies are tracked.
+///
+/// # Thread Safety
+///
+/// All counters use `AtomicU64` with relaxed ordering for performance.
+#[derive(Debug, Default)]
+pub struct SignerIsolationMetrics {
+    // Request counters by mode and kind
+    requests_local_proposal: AtomicU64,
+    requests_local_vote: AtomicU64,
+    requests_local_timeout: AtomicU64,
+    requests_remote_proposal: AtomicU64,
+    requests_remote_vote: AtomicU64,
+    requests_remote_timeout: AtomicU64,
+    requests_hsm_proposal: AtomicU64,
+    requests_hsm_vote: AtomicU64,
+    requests_hsm_timeout: AtomicU64,
+
+    // Failure counters by mode and reason
+    failures_local_crypto: AtomicU64,
+    failures_local_invalid_key: AtomicU64,
+    failures_remote_unavailable: AtomicU64,
+    failures_remote_timeout: AtomicU64,
+    failures_remote_replay: AtomicU64,
+    failures_remote_malformed: AtomicU64,
+    failures_hsm_unavailable: AtomicU64,
+    failures_hsm_session: AtomicU64,
+
+    // Latency histogram buckets (ms): 1, 5, 10, 25, 50, 100, 250, 500, 1000, +Inf
+    latency_bucket_1ms: AtomicU64,
+    latency_bucket_5ms: AtomicU64,
+    latency_bucket_10ms: AtomicU64,
+    latency_bucket_25ms: AtomicU64,
+    latency_bucket_50ms: AtomicU64,
+    latency_bucket_100ms: AtomicU64,
+    latency_bucket_250ms: AtomicU64,
+    latency_bucket_500ms: AtomicU64,
+    latency_bucket_1000ms: AtomicU64,
+    latency_bucket_inf: AtomicU64,
+    latency_sum_ms: AtomicU64,
+    latency_count: AtomicU64,
+
+    // Health and connection tracking
+    health_status: AtomicU64, // 0=unavailable, 1=degraded, 2=healthy
+    connect_total: AtomicU64,
+    disconnect_total: AtomicU64,
+    replay_rejections_total: AtomicU64,
+}
+
+impl SignerIsolationMetrics {
+    /// Create a new metrics instance with all counters at zero.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a signer request.
+    pub fn inc_request(&self, mode: SignerModeKind, kind: SignRequestKind) {
+        match (mode, kind) {
+            (SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1, SignRequestKind::Proposal) => {
+                self.requests_local_proposal.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1, SignRequestKind::Vote) => {
+                self.requests_local_vote.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1, SignRequestKind::Timeout) => {
+                self.requests_local_timeout.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::RemoteSigner, SignRequestKind::Proposal) => {
+                self.requests_remote_proposal.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::RemoteSigner, SignRequestKind::Vote) => {
+                self.requests_remote_vote.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::RemoteSigner, SignRequestKind::Timeout) => {
+                self.requests_remote_timeout.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::HsmPkcs11, SignRequestKind::Proposal) => {
+                self.requests_hsm_proposal.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::HsmPkcs11, SignRequestKind::Vote) => {
+                self.requests_hsm_vote.fetch_add(1, Ordering::Relaxed);
+            }
+            (SignerModeKind::HsmPkcs11, SignRequestKind::Timeout) => {
+                self.requests_hsm_timeout.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Get total requests for a mode.
+    pub fn requests_total_by_mode(&self, mode: SignerModeKind) -> u64 {
+        match mode {
+            SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1 => {
+                self.requests_local_proposal.load(Ordering::Relaxed)
+                    + self.requests_local_vote.load(Ordering::Relaxed)
+                    + self.requests_local_timeout.load(Ordering::Relaxed)
+            }
+            SignerModeKind::RemoteSigner => {
+                self.requests_remote_proposal.load(Ordering::Relaxed)
+                    + self.requests_remote_vote.load(Ordering::Relaxed)
+                    + self.requests_remote_timeout.load(Ordering::Relaxed)
+            }
+            SignerModeKind::HsmPkcs11 => {
+                self.requests_hsm_proposal.load(Ordering::Relaxed)
+                    + self.requests_hsm_vote.load(Ordering::Relaxed)
+                    + self.requests_hsm_timeout.load(Ordering::Relaxed)
+            }
+        }
+    }
+
+    /// Get total requests across all modes.
+    pub fn requests_total(&self) -> u64 {
+        self.requests_local_proposal.load(Ordering::Relaxed)
+            + self.requests_local_vote.load(Ordering::Relaxed)
+            + self.requests_local_timeout.load(Ordering::Relaxed)
+            + self.requests_remote_proposal.load(Ordering::Relaxed)
+            + self.requests_remote_vote.load(Ordering::Relaxed)
+            + self.requests_remote_timeout.load(Ordering::Relaxed)
+            + self.requests_hsm_proposal.load(Ordering::Relaxed)
+            + self.requests_hsm_vote.load(Ordering::Relaxed)
+            + self.requests_hsm_timeout.load(Ordering::Relaxed)
+    }
+
+    /// Record a local signer failure.
+    pub fn inc_failure_local_crypto(&self) {
+        self.failures_local_crypto.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a local invalid key failure.
+    pub fn inc_failure_local_invalid_key(&self) {
+        self.failures_local_invalid_key.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a remote signer unavailable failure.
+    pub fn inc_failure_remote_unavailable(&self) {
+        self.failures_remote_unavailable.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a remote signer timeout failure.
+    pub fn inc_failure_remote_timeout(&self) {
+        self.failures_remote_timeout.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a remote signer replay rejection.
+    pub fn inc_failure_remote_replay(&self) {
+        self.failures_remote_replay.fetch_add(1, Ordering::Relaxed);
+        self.replay_rejections_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a remote signer malformed response.
+    pub fn inc_failure_remote_malformed(&self) {
+        self.failures_remote_malformed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record an HSM unavailable failure.
+    pub fn inc_failure_hsm_unavailable(&self) {
+        self.failures_hsm_unavailable.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record an HSM session error.
+    pub fn inc_failure_hsm_session(&self) {
+        self.failures_hsm_session.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total failures across all modes.
+    pub fn failures_total(&self) -> u64 {
+        self.failures_local_crypto.load(Ordering::Relaxed)
+            + self.failures_local_invalid_key.load(Ordering::Relaxed)
+            + self.failures_remote_unavailable.load(Ordering::Relaxed)
+            + self.failures_remote_timeout.load(Ordering::Relaxed)
+            + self.failures_remote_replay.load(Ordering::Relaxed)
+            + self.failures_remote_malformed.load(Ordering::Relaxed)
+            + self.failures_hsm_unavailable.load(Ordering::Relaxed)
+            + self.failures_hsm_session.load(Ordering::Relaxed)
+    }
+
+    /// Record a signing latency observation.
+    pub fn record_latency(&self, latency_ms: u64) {
+        self.latency_sum_ms.fetch_add(latency_ms, Ordering::Relaxed);
+        self.latency_count.fetch_add(1, Ordering::Relaxed);
+
+        // Update histogram buckets (cumulative)
+        if latency_ms <= 1 {
+            self.latency_bucket_1ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 5 {
+            self.latency_bucket_5ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 10 {
+            self.latency_bucket_10ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 25 {
+            self.latency_bucket_25ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 50 {
+            self.latency_bucket_50ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 100 {
+            self.latency_bucket_100ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 250 {
+            self.latency_bucket_250ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 500 {
+            self.latency_bucket_500ms.fetch_add(1, Ordering::Relaxed);
+        }
+        if latency_ms <= 1000 {
+            self.latency_bucket_1000ms.fetch_add(1, Ordering::Relaxed);
+        }
+        self.latency_bucket_inf.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get average latency in milliseconds.
+    pub fn avg_latency_ms(&self) -> f64 {
+        let count = self.latency_count.load(Ordering::Relaxed);
+        if count == 0 {
+            0.0
+        } else {
+            self.latency_sum_ms.load(Ordering::Relaxed) as f64 / count as f64
+        }
+    }
+
+    /// Set the health status.
+    pub fn set_health(&self, health: SignerHealth) {
+        let value = match health {
+            SignerHealth::Failed => 0,   // Failed = unavailable/fail-closed
+            SignerHealth::Degraded => 1,
+            SignerHealth::Healthy => 2,
+        };
+        self.health_status.store(value, Ordering::Relaxed);
+    }
+
+    /// Get the health status.
+    pub fn health(&self) -> SignerHealth {
+        match self.health_status.load(Ordering::Relaxed) {
+            0 => SignerHealth::Failed,
+            1 => SignerHealth::Degraded,
+            _ => SignerHealth::Healthy,
+        }
+    }
+
+    /// Record a signer connect event.
+    pub fn inc_connect(&self) {
+        self.connect_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a signer disconnect event.
+    pub fn inc_disconnect(&self) {
+        self.disconnect_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get total connect events.
+    pub fn connect_total(&self) -> u64 {
+        self.connect_total.load(Ordering::Relaxed)
+    }
+
+    /// Get total disconnect events.
+    pub fn disconnect_total(&self) -> u64 {
+        self.disconnect_total.load(Ordering::Relaxed)
+    }
+
+    /// Get total replay rejections.
+    pub fn replay_rejections_total(&self) -> u64 {
+        self.replay_rejections_total.load(Ordering::Relaxed)
+    }
+
+    /// Format metrics as Prometheus-style output.
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Signer isolation metrics (M10)\n");
+
+        // Requests by mode and kind
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"local\",kind=\"proposal\"}} {}\n",
+            self.requests_local_proposal.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"local\",kind=\"vote\"}} {}\n",
+            self.requests_local_vote.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"local\",kind=\"timeout\"}} {}\n",
+            self.requests_local_timeout.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"remote\",kind=\"proposal\"}} {}\n",
+            self.requests_remote_proposal.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"remote\",kind=\"vote\"}} {}\n",
+            self.requests_remote_vote.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"remote\",kind=\"timeout\"}} {}\n",
+            self.requests_remote_timeout.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"hsm\",kind=\"proposal\"}} {}\n",
+            self.requests_hsm_proposal.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"hsm\",kind=\"vote\"}} {}\n",
+            self.requests_hsm_vote.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_requests_total{{mode=\"hsm\",kind=\"timeout\"}} {}\n",
+            self.requests_hsm_timeout.load(Ordering::Relaxed)
+        ));
+
+        // Failures by mode and reason
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"local\",reason=\"crypto\"}} {}\n",
+            self.failures_local_crypto.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"local\",reason=\"invalid_key\"}} {}\n",
+            self.failures_local_invalid_key.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"remote\",reason=\"unavailable\"}} {}\n",
+            self.failures_remote_unavailable.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"remote\",reason=\"timeout\"}} {}\n",
+            self.failures_remote_timeout.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"remote\",reason=\"replay\"}} {}\n",
+            self.failures_remote_replay.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"remote\",reason=\"malformed\"}} {}\n",
+            self.failures_remote_malformed.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"hsm\",reason=\"unavailable\"}} {}\n",
+            self.failures_hsm_unavailable.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_failures_total{{mode=\"hsm\",reason=\"session\"}} {}\n",
+            self.failures_hsm_session.load(Ordering::Relaxed)
+        ));
+
+        // Latency histogram
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"1\"}} {}\n",
+            self.latency_bucket_1ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"5\"}} {}\n",
+            self.latency_bucket_5ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"10\"}} {}\n",
+            self.latency_bucket_10ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"25\"}} {}\n",
+            self.latency_bucket_25ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"50\"}} {}\n",
+            self.latency_bucket_50ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"100\"}} {}\n",
+            self.latency_bucket_100ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"250\"}} {}\n",
+            self.latency_bucket_250ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"500\"}} {}\n",
+            self.latency_bucket_500ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"1000\"}} {}\n",
+            self.latency_bucket_1000ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_bucket{{le=\"+Inf\"}} {}\n",
+            self.latency_bucket_inf.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_sum {}\n",
+            self.latency_sum_ms.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_signer_latency_ms_count {}\n",
+            self.latency_count.load(Ordering::Relaxed)
+        ));
+
+        // Health and connection events
+        output.push_str(&format!(
+            "qbind_signer_health_status{{status=\"{}\"}} 1\n",
+            self.health()
+        ));
+        output.push_str(&format!(
+            "qbind_signer_connect_total {}\n",
+            self.connect_total()
+        ));
+        output.push_str(&format!(
+            "qbind_signer_disconnect_total {}\n",
+            self.disconnect_total()
+        ));
+        output.push_str(&format!(
+            "qbind_signer_replay_rejections_total {}\n",
+            self.replay_rejections_total()
+        ));
+
+        output
+    }
+}
+
+// ============================================================================
 // EnvironmentMetrics (T162) - Network environment info metric
 // ============================================================================
 
