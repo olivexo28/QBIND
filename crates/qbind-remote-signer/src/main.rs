@@ -254,51 +254,127 @@ impl DaemonMetrics {
 }
 
 // ============================================================================
-// Protocol
+// Protocol (M10)
 // ============================================================================
 
+use qbind_node::remote_signer::REMOTE_SIGNER_DOMAIN_TAG;
+
+/// Decode a RemoteSignRequest from wire format (M10).
+///
+/// # Wire Format
+///
+/// ```text
+/// domain_tag:     "QBIND:remote-signer:v1" (23 bytes)
+/// request_id:     8 bytes LE
+/// validator_id:   8 bytes LE
+/// suite_id:       2 bytes LE
+/// kind:           1 byte (message type)
+/// view_present:   1 byte flag
+/// view:           8 bytes LE (if present)
+/// preimage_len:   4 bytes LE
+/// preimage:       variable length
+/// ```
 fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
-    if data.len() < 24 {
+    let domain_tag = REMOTE_SIGNER_DOMAIN_TAG.as_bytes();
+    let header_len = domain_tag.len() + 8 + 8 + 2 + 1 + 9 + 4; // 55 bytes minimum
+
+    if data.len() < header_len {
         return Err(RemoteSignError::TransportError);
     }
-    let validator_id = u64::from_le_bytes([
-        data[0], data[1], data[2], data[3], data[4], data[5], data[6], data[7],
+
+    // Verify domain tag
+    if &data[..domain_tag.len()] != domain_tag {
+        return Err(RemoteSignError::TransportError);
+    }
+
+    let mut offset = domain_tag.len();
+
+    // request_id: 8 bytes LE
+    let request_id = u64::from_le_bytes([
+        data[offset], data[offset+1], data[offset+2], data[offset+3],
+        data[offset+4], data[offset+5], data[offset+6], data[offset+7],
     ]);
-    let suite_id = u16::from_le_bytes([data[8], data[9]]);
-    let kind = match data[10] {
-        0 => RemoteSignRequestKind::Proposal,
-        1 => RemoteSignRequestKind::Vote,
-        2 => RemoteSignRequestKind::Timeout,
-        _ => return Err(RemoteSignError::TransportError),
-    };
-    let view = if data[11] != 0 {
-        Some(u64::from_le_bytes([
-            data[12], data[13], data[14], data[15], data[16], data[17], data[18], data[19],
-        ]))
+    offset += 8;
+
+    // validator_id: 8 bytes LE
+    let validator_id = u64::from_le_bytes([
+        data[offset], data[offset+1], data[offset+2], data[offset+3],
+        data[offset+4], data[offset+5], data[offset+6], data[offset+7],
+    ]);
+    offset += 8;
+
+    // suite_id: 2 bytes LE
+    let suite_id = u16::from_le_bytes([data[offset], data[offset+1]]);
+    offset += 2;
+
+    // kind: 1 byte (using message_type constants)
+    let kind = RemoteSignRequestKind::from_message_type(data[offset])
+        .ok_or(RemoteSignError::TransportError)?;
+    offset += 1;
+
+    // view: 1 byte present flag + 8 bytes LE
+    let view = if data[offset] != 0 {
+        offset += 1;
+        let v = u64::from_le_bytes([
+            data[offset], data[offset+1], data[offset+2], data[offset+3],
+            data[offset+4], data[offset+5], data[offset+6], data[offset+7],
+        ]);
+        offset += 8;
+        Some(v)
     } else {
+        offset += 9; // skip flag + empty view bytes
         None
     };
-    let preimage_len = u32::from_le_bytes([data[20], data[21], data[22], data[23]]) as usize;
-    if data.len() < 24 + preimage_len {
+
+    // preimage_len: 4 bytes LE
+    let preimage_len = u32::from_le_bytes([
+        data[offset], data[offset+1], data[offset+2], data[offset+3],
+    ]) as usize;
+    offset += 4;
+
+    if data.len() < offset + preimage_len {
         return Err(RemoteSignError::TransportError);
     }
+
     Ok(RemoteSignRequest {
+        request_id,
         validator_id: ValidatorId::new(validator_id),
         suite_id,
         kind,
         view,
-        preimage: data[24..24 + preimage_len].to_vec(),
+        preimage: data[offset..offset + preimage_len].to_vec(),
     })
 }
 
+/// Encode a RemoteSignResponse to wire format (M10).
+///
+/// # Wire Format
+///
+/// Success:
+/// ```text
+/// status:         1 byte (0 = success)
+/// request_id:     8 bytes LE (echo)
+/// signature_len:  4 bytes LE
+/// signature:      variable length
+/// ```
+///
+/// Error:
+/// ```text
+/// status:         1 byte (non-zero = error)
+/// request_id:     8 bytes LE (echo)
+/// error_code:     1 byte
+/// ```
 fn encode_response(response: &RemoteSignResponse) -> Vec<u8> {
     if let Some(ref sig) = response.signature {
-        let mut buf = Vec::with_capacity(5 + sig.len());
+        // Success: status(1) + request_id(8) + sig_len(4) + sig
+        let mut buf = Vec::with_capacity(13 + sig.len());
         buf.push(0u8);
+        buf.extend_from_slice(&response.request_id.to_le_bytes());
         buf.extend_from_slice(&(sig.len() as u32).to_le_bytes());
         buf.extend_from_slice(sig);
         buf
     } else if let Some(ref err) = response.error {
+        // Error: status(1) + request_id(8) + error_code(1)
         let code = match err {
             RemoteSignError::InvalidKey => 1u8,
             RemoteSignError::CryptoError => 2,
@@ -307,10 +383,22 @@ fn encode_response(response: &RemoteSignResponse) -> Vec<u8> {
             RemoteSignError::Timeout => 5,
             RemoteSignError::RateLimited => 6,
             RemoteSignError::ServerError => 7,
+            RemoteSignError::ReplayDetected => 8,
+            RemoteSignError::SignerUnavailable => 9,
+            RemoteSignError::MalformedResponse => 10,
         };
-        vec![1u8, code]
+        let mut buf = Vec::with_capacity(10);
+        buf.push(1u8);
+        buf.extend_from_slice(&response.request_id.to_le_bytes());
+        buf.push(code);
+        buf
     } else {
-        vec![1u8, 7u8]
+        // Unexpected: no signature and no error
+        let mut buf = Vec::with_capacity(10);
+        buf.push(1u8);
+        buf.extend_from_slice(&response.request_id.to_le_bytes());
+        buf.push(7u8); // ServerError
+        buf
     }
 }
 
@@ -414,6 +502,7 @@ fn handle_connection(
         if !rate_limiter.check() {
             metrics.inc_rate_limited();
             let resp = RemoteSignResponse {
+                request_id: 0, // Unknown request_id for rate limit
                 signature: None,
                 error: Some(RemoteSignError::RateLimited),
             };
@@ -428,8 +517,9 @@ fn handle_connection(
             Err(_) => {
                 metrics.inc_rejected();
                 let resp = RemoteSignResponse {
+                    request_id: 0, // Unknown request_id for parse error
                     signature: None,
-                    error: Some(RemoteSignError::TransportError),
+                    error: Some(RemoteSignError::MalformedResponse),
                 };
                 if channel.send_app(&encode_response(&resp)).is_err() {
                     break;
@@ -451,9 +541,12 @@ fn validate_and_sign(
     signer: &dyn ValidatorSigner,
     metrics: &DaemonMetrics,
 ) -> RemoteSignResponse {
+    let request_id = request.request_id;
+
     if request.validator_id != *signer.validator_id() {
         metrics.inc_rejected();
         return RemoteSignResponse {
+            request_id,
             signature: None,
             error: Some(RemoteSignError::Unauthorized),
         };
@@ -461,6 +554,7 @@ fn validate_and_sign(
     if request.suite_id != 100 {
         metrics.inc_rejected();
         return RemoteSignResponse {
+            request_id,
             signature: None,
             error: Some(RemoteSignError::Unauthorized),
         };
@@ -468,8 +562,9 @@ fn validate_and_sign(
     if request.preimage.len() > MAX_PREIMAGE_SIZE {
         metrics.inc_rejected();
         return RemoteSignResponse {
+            request_id,
             signature: None,
-            error: Some(RemoteSignError::TransportError),
+            error: Some(RemoteSignError::MalformedResponse),
         };
     }
 
@@ -484,6 +579,7 @@ fn validate_and_sign(
         Ok(signature) => {
             metrics.inc_signatures();
             RemoteSignResponse {
+                request_id,
                 signature: Some(signature),
                 error: None,
             }
@@ -500,6 +596,7 @@ fn validate_and_sign(
                 }
             };
             RemoteSignResponse {
+                request_id,
                 signature: None,
                 error: Some(error),
             }
@@ -597,6 +694,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use qbind_node::remote_signer::message_type;
 
     #[test]
     fn test_config_parse() {
@@ -621,28 +719,79 @@ keystore_entry_id = "validator42"
     }
 
     #[test]
-    fn test_decode_request() {
+    fn test_decode_request_m10() {
+        // Build a proper M10 format request
+        let domain_tag = REMOTE_SIGNER_DOMAIN_TAG.as_bytes();
         let mut data = Vec::new();
-        data.extend_from_slice(&42u64.to_le_bytes());
-        data.extend_from_slice(&100u16.to_le_bytes());
-        data.push(0);
-        data.push(0);
-        data.extend_from_slice(&0u64.to_le_bytes());
-        data.extend_from_slice(&4u32.to_le_bytes());
-        data.extend_from_slice(&[1, 2, 3, 4]);
+        data.extend_from_slice(domain_tag);           // domain tag
+        data.extend_from_slice(&1u64.to_le_bytes());  // request_id
+        data.extend_from_slice(&42u64.to_le_bytes()); // validator_id
+        data.extend_from_slice(&100u16.to_le_bytes()); // suite_id
+        data.push(message_type::SIGN_PROPOSAL);       // kind
+        data.push(0);                                  // view not present
+        data.extend_from_slice(&0u64.to_le_bytes());  // view (unused)
+        data.extend_from_slice(&4u32.to_le_bytes());  // preimage_len
+        data.extend_from_slice(&[1, 2, 3, 4]);        // preimage
+
         let req = decode_request(&data).unwrap();
+        assert_eq!(req.request_id, 1);
         assert_eq!(req.validator_id, ValidatorId::new(42));
+        assert_eq!(req.suite_id, 100);
+        assert_eq!(req.kind, RemoteSignRequestKind::Proposal);
         assert_eq!(req.preimage, vec![1, 2, 3, 4]);
     }
 
     #[test]
-    fn test_encode_response_success() {
+    fn test_decode_request_rejects_wrong_domain_tag() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b"WRONG:domain:tag:xxx"); // wrong domain tag (same length)
+        data.extend_from_slice(&1u64.to_le_bytes());
+        data.extend_from_slice(&42u64.to_le_bytes());
+        data.extend_from_slice(&100u16.to_le_bytes());
+        data.push(message_type::SIGN_PROPOSAL);
+        data.push(0);
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&4u32.to_le_bytes());
+        data.extend_from_slice(&[1, 2, 3, 4]);
+
+        assert!(decode_request(&data).is_err());
+    }
+
+    #[test]
+    fn test_encode_response_success_m10() {
         let resp = RemoteSignResponse {
+            request_id: 42,
             signature: Some(vec![1, 2, 3]),
             error: None,
         };
         let enc = encode_response(&resp);
-        assert_eq!(enc[0], 0);
+        assert_eq!(enc[0], 0); // status = success
+        // request_id is bytes 1-8
+        let request_id = u64::from_le_bytes([
+            enc[1], enc[2], enc[3], enc[4], enc[5], enc[6], enc[7], enc[8],
+        ]);
+        assert_eq!(request_id, 42);
+        // sig_len is bytes 9-12
+        let sig_len = u32::from_le_bytes([enc[9], enc[10], enc[11], enc[12]]);
+        assert_eq!(sig_len, 3);
+        // signature is bytes 13-15
+        assert_eq!(&enc[13..16], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn test_encode_response_error_m10() {
+        let resp = RemoteSignResponse {
+            request_id: 123,
+            signature: None,
+            error: Some(RemoteSignError::ReplayDetected),
+        };
+        let enc = encode_response(&resp);
+        assert_eq!(enc[0], 1); // status = error
+        let request_id = u64::from_le_bytes([
+            enc[1], enc[2], enc[3], enc[4], enc[5], enc[6], enc[7], enc[8],
+        ]);
+        assert_eq!(request_id, 123);
+        assert_eq!(enc[9], 8); // ReplayDetected error code
     }
 
     #[test]

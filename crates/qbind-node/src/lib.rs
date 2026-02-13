@@ -333,8 +333,8 @@ pub use metrics::{
     DisconnectReason, EnvironmentMetrics, ExecutionErrorReason, ExecutionMetrics, InboundMsgKind,
     KeystoreBackendKind, MempoolMetrics, MempoolRejectReason, MonetaryMetrics, NetworkMetrics,
     NodeMetrics, OutboundMsgKind, P2pMetrics, PeerCounters, PeerNetworkMetrics, RuntimeMetrics,
-    SignRequestKind, SignerHealth, SignerKeystoreMetrics, SignerModeKind, SlashingMetrics,
-    SpawnBlockingMetrics, StorageMetrics, StorageOp, ValidatorEquivocationMetrics,
+    SignRequestKind, SignerHealth, SignerIsolationMetrics, SignerKeystoreMetrics, SignerModeKind,
+    SlashingMetrics, SpawnBlockingMetrics, StorageMetrics, StorageOp, ValidatorEquivocationMetrics,
     ValidatorVoteCounters, ValidatorVoteMetrics, ViewLagMetrics, MAX_TRACKED_PEERS,
     MAX_TRACKED_VALIDATORS,
 };
@@ -374,11 +374,12 @@ pub use validator_signer::{
     make_local_validator_signer, LocalKeySigner, SignError, ValidatorSigner,
 };
 
-// Remote signer exports (T149, T212)
+// Remote signer exports (T149, T212, M10)
 pub use remote_signer::{
     LoopbackSignerTransport, RemoteSignError, RemoteSignRequest, RemoteSignRequestKind,
     RemoteSignResponse, RemoteSignerClient, RemoteSignerMetrics, RemoteSignerTransport,
     TcpKemTlsSignerTransport, DEFAULT_REMOTE_SIGNER_TIMEOUT_MS, MAX_PREIMAGE_SIZE,
+    REMOTE_SIGNER_DOMAIN_TAG, message_type,
 };
 
 // Verification pool exports (T147)
