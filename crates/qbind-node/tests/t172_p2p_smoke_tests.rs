@@ -26,6 +26,8 @@ fn create_test_connection_configs(
     let server_kem_sk = vec![0u8; 32];
     let server_kem_pk = vec![0u8; 32];
 
+    let validator_id = [0u8; 32];
+
     let server_cfg = ServerConnectionConfig {
         handshake_config: ServerHandshakeConfig {
             kem_suite_id: 1,
@@ -35,6 +37,8 @@ fn create_test_connection_configs(
             local_delegation_cert: vec![],
             local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
             kem_metrics: None,
+            cookie_config: None,
+            local_validator_id: validator_id,
         },
         server_random: [0u8; 32],
     };
