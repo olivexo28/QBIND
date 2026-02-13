@@ -42,6 +42,14 @@ pub fn network_delegation_cert_digest(cert: &NetworkDelegationCert) -> Hash32 {
 /// Domain tag for NodeId derivation (M7).
 pub const NODEID_DOMAIN_TAG: &str = "QBIND:nodeid:v1";
 
+/// Domain tag for inbound session identifier (M7).
+///
+/// This is used for server-side inbound connections where the client's
+/// cryptographic identity cannot be derived from the KEMTLS handshake alone.
+/// The session identifier provides uniqueness but is NOT cryptographically
+/// bound to the client's identity.
+pub const INBOUND_SESSION_DOMAIN_TAG: &str = "QBIND:inbound:session:v1";
+
 /// Derive a NodeId from a NetworkDelegationCert (M7).
 ///
 /// The NodeId is cryptographically bound to the peer's KEMTLS identity by

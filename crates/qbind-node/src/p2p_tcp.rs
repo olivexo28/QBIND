@@ -86,7 +86,7 @@ use crate::node_config::NetworkTransportConfig;
 use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::secure_channel::{accept_kemtls_async, connect_kemtls_async, SecureChannelAsync};
 use qbind_crypto::CryptoProvider;
-use qbind_hash::derive_node_id_from_pubkey;
+use qbind_hash::{derive_node_id_from_pubkey, INBOUND_SESSION_DOMAIN_TAG};
 use qbind_net::{ClientConnectionConfig, ServerConnectionConfig};
 
 // ============================================================================
@@ -447,14 +447,17 @@ impl TcpKemTlsP2pService {
         // (client sends their delegation cert) which is not in the current protocol.
         let session_id = inbound_session_counter.fetch_add(1, Ordering::Relaxed);
         let mut preimage = Vec::new();
-        preimage.extend_from_slice(b"QBIND:inbound:session:v1:");
+        preimage.extend_from_slice(INBOUND_SESSION_DOMAIN_TAG.as_bytes());
+        preimage.extend_from_slice(b":");
         preimage.extend_from_slice(&server_cfg.handshake_config.local_validator_id);
         preimage.extend_from_slice(&session_id.to_be_bytes());
         preimage.extend_from_slice(peer_addr.to_string().as_bytes());
         let node_id_bytes = qbind_hash::sha3_256(&preimage);
         let node_id = NodeId::new(node_id_bytes);
 
-        // Log that this is a temporary session ID (not cryptographically bound to peer)
+        // Note: This log uses println! for consistency with existing P2P logging in this file.
+        // The P2P layer uses println! for status messages throughout (see lines 343, 369, etc.)
+        // A future refactoring could migrate to a structured logging framework.
         println!(
             "[P2P] Inbound connection from {} assigned temporary session NodeId {:?}",
             peer_addr, node_id

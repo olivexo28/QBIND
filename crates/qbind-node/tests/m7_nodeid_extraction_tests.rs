@@ -6,7 +6,10 @@
 //! 3. NodeId no longer defaults to zero for outbound connections
 //! 4. The derivation uses the correct domain separation tag
 
-use qbind_hash::{derive_node_id_from_cert, derive_node_id_from_pubkey, NODEID_DOMAIN_TAG};
+use qbind_hash::{
+    derive_node_id_from_cert, derive_node_id_from_pubkey, INBOUND_SESSION_DOMAIN_TAG,
+    NODEID_DOMAIN_TAG,
+};
 use qbind_wire::net::NetworkDelegationCert;
 
 // ============================================================================
@@ -73,6 +76,12 @@ fn test_nodeid_is_not_zero_for_valid_input() {
 #[test]
 fn test_nodeid_domain_tag() {
     assert_eq!(NODEID_DOMAIN_TAG, "QBIND:nodeid:v1");
+}
+
+/// Test 6b: Inbound session domain tag is correct
+#[test]
+fn test_inbound_session_domain_tag() {
+    assert_eq!(INBOUND_SESSION_DOMAIN_TAG, "QBIND:inbound:session:v1");
 }
 
 /// Test 7: Certs with only signature difference produce different NodeIds
