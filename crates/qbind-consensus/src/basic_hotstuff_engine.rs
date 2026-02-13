@@ -1233,7 +1233,7 @@ impl BasicHotStuffEngine<[u8; 32]> {
     }
 
     // ========================================================================
-    // Timeout / View-Change Methods (T146)
+    // Timeout / View-Change Methods (T146, M5)
     // ========================================================================
 
     /// Check if we have already emitted a timeout for the current view.
@@ -1259,6 +1259,96 @@ impl BasicHotStuffEngine<[u8; 32]> {
     pub fn create_timeout_msg(&self) -> TimeoutMsg<[u8; 32]> {
         let high_qc = self.state.locked_qc().cloned();
         TimeoutMsg::new(self.current_view, high_qc, self.local_id)
+    }
+
+    /// Safely advance to a target view with monotonicity enforcement (M5).
+    ///
+    /// This method ensures that the view number never decreases and logs
+    /// any attempts to violate this invariant.
+    ///
+    /// # Arguments
+    ///
+    /// - `target_view`: The view to advance to
+    ///
+    /// # Returns
+    ///
+    /// - `true` if the view was successfully advanced
+    /// - `false` if the target view is not greater than the current view (fail-closed)
+    ///
+    /// # Safety (M5)
+    ///
+    /// This method implements fail-closed behavior:
+    /// - If target_view <= current_view, the view is NOT changed
+    /// - An error is logged for monitoring/debugging
+    /// - Safety is preserved over liveness
+    pub fn try_advance_to_view(&mut self, target_view: u64) -> bool {
+        if target_view <= self.current_view {
+            // M5: Fail-closed behavior - log error but do not produce unsafe state
+            eprintln!(
+                "[M5] WARN: Attempted to advance to view {} but current_view is {} - ignoring to preserve safety",
+                target_view, self.current_view
+            );
+            return false;
+        }
+
+        let from_view = self.current_view;
+
+        // Record metrics
+        self.record_view_duration_internal(from_view, target_view);
+        self.record_progress_view_change_internal(from_view, target_view);
+
+        // Update view state
+        self.current_view = target_view;
+        self.proposed_in_view = false;
+        self.voted_in_view = false;
+        self.timeout_emitted_in_view = false;
+        self.last_view_start_instant = Some(Instant::now());
+
+        true
+    }
+
+    /// Get the locked height from the locked QC (M5).
+    ///
+    /// This returns the view of the locked QC, which is used for safety checks
+    /// to ensure validators don't vote below the locked height.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(view)` if there is a locked QC
+    /// - `None` if there is no lock yet (genesis state)
+    pub fn locked_height(&self) -> Option<u64> {
+        self.state.locked_qc().map(|qc| qc.view)
+    }
+
+    /// Check if it's safe to vote for a block at the given height (M5).
+    ///
+    /// This implements the locked-height safety check: validators should not
+    /// vote for blocks that could conflict with already locked blocks.
+    ///
+    /// # Arguments
+    ///
+    /// - `justify_qc_view`: The view of the block's justify QC (optional)
+    ///
+    /// # Returns
+    ///
+    /// - `true` if voting is safe
+    /// - `false` if voting could violate safety (fail-closed)
+    ///
+    /// # Safety Rules (M5)
+    ///
+    /// 1. If no locked QC, voting is allowed (genesis)
+    /// 2. If justify_qc.view >= locked_qc.view, voting is allowed
+    /// 3. Otherwise, fail-closed (do not vote)
+    pub fn is_safe_to_vote_at_height(&self, justify_qc_view: Option<u64>) -> bool {
+        let locked_view = match self.locked_height() {
+            None => return true, // No lock yet, safe to vote
+            Some(v) => v,
+        };
+
+        match justify_qc_view {
+            Some(jv) if jv >= locked_view => true,
+            _ => false,
+        }
     }
 
     /// Process an incoming timeout message from another validator.
