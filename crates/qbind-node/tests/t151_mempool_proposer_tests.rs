@@ -16,7 +16,7 @@ use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_crypto::ValidatorSigningKey;
 use qbind_ledger::{get_account_nonce, NonceExecutionEngine, QbindTransaction, UserPublicKey};
-use qbind_net::{ClientConnectionConfig, ServerConnectionConfig};
+use qbind_net::{ClientConnectionConfig, MutualAuthMode, ServerConnectionConfig};
 use qbind_node::{
     validator_config::{make_test_local_validator_config, NodeValidatorConfig},
     InMemoryExecutionAdapter, InMemoryKeyProvider, InMemoryMempool, LocalKeySigner, Mempool,
@@ -176,6 +176,7 @@ fn create_test_configs() -> (ClientConnectionConfig, ServerConnectionConfig) {
             crypto: provider.clone(),
             peer_root_network_pk: vec![0u8; 32],
             kem_metrics: None,
+            local_delegation_cert: None, // M8: No client cert for backward compat tests
         },
         client_random: [0u8; 32],
         validator_id,
@@ -193,6 +194,8 @@ fn create_test_configs() -> (ClientConnectionConfig, ServerConnectionConfig) {
             kem_metrics: None,
             cookie_config: None,
             local_validator_id: validator_id,
+            mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+            trusted_client_roots: None,
         },
         server_random: [0u8; 32],
     };

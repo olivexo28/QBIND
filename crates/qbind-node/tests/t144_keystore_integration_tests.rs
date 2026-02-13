@@ -22,7 +22,7 @@ const EXPECTED_SUITE_ID: u8 = 100;
 /// Suite ID as u16 for comparing with wire types.
 const EXPECTED_SUITE_ID_U16: u16 = 100;
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, ServerConnectionConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
     ServerHandshakeConfig,
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
@@ -261,6 +261,7 @@ fn create_test_setup() -> TestSetup {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_handshake_cfg = ServerHandshakeConfig {
@@ -273,6 +274,8 @@ fn create_test_setup() -> TestSetup {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_cfg = ClientConnectionConfig {

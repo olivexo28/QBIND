@@ -52,7 +52,7 @@ use qbind_ledger::{
     QbindTransaction, RocksDbAccountState, TransferPayload,
 };
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, ServerConnectionConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
     ServerHandshakeConfig,
 };
 use qbind_node::execution_adapter::{
@@ -725,6 +725,7 @@ fn create_kemtls_config_for_node(node_index: usize) -> NodeKemtlsConfig {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_handshake_cfg = ServerHandshakeConfig {
@@ -737,6 +738,8 @@ fn create_kemtls_config_for_node(node_index: usize) -> NodeKemtlsConfig {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_cfg = ClientConnectionConfig {
