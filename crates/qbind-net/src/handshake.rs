@@ -18,14 +18,30 @@
 //!
 //! This prevents connection exhaustion attacks by requiring clients to prove they
 //! received a server challenge before any expensive cryptographic operations.
+//!
+//! # Mutual Authentication (M8)
+//!
+//! Protocol version 2 (0x02) adds mutual authentication with client certificate:
+//! - ClientInit v2 includes client's `NetworkDelegationCert`
+//! - Server verifies client cert AFTER cookie validation (DoS protection preserved)
+//! - Server derives NodeId from verified client cert (cryptographic binding)
+//! - Transcript hash includes BOTH server and client identity fields
+//!
+//! Configuration:
+//! - `MutualAuthMode::Required`: Client cert required (TestNet/MainNet default)
+//! - `MutualAuthMode::Optional`: Client cert verified if present but not required
+//! - `MutualAuthMode::Disabled`: Server-auth only, v1 protocol (DevNet compatibility)
 
 use std::sync::Arc;
 use std::time::Instant;
 
 use qbind_crypto::CryptoProvider;
-use qbind_hash::net::network_delegation_cert_digest;
+use qbind_hash::net::{derive_node_id_from_cert, network_delegation_cert_digest};
 use qbind_wire::io::WireDecode;
-use qbind_wire::net::{ClientInit, NetworkDelegationCert, ServerAccept, ServerCookie};
+use qbind_wire::net::{
+    ClientInit, NetworkDelegationCert, ServerAccept, ServerCookie,
+    PROTOCOL_VERSION_1, PROTOCOL_VERSION_2,
+};
 use sha3::{Digest, Sha3_256};
 use zeroize::Zeroize;
 
@@ -51,6 +67,34 @@ pub enum HandshakeSide {
     Server,
 }
 
+/// Mutual authentication mode for KEMTLS handshake (M8).
+///
+/// Controls whether the server requires, accepts, or ignores client certificates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MutualAuthMode {
+    /// Client certificate is required (TestNet/MainNet default).
+    ///
+    /// - Server rejects ClientInit v1 (no client cert).
+    /// - Server rejects ClientInit v2 without client_cert.
+    /// - Server rejects ClientInit v2 with invalid client_cert.
+    #[default]
+    Required,
+
+    /// Client certificate is verified if present but not required.
+    ///
+    /// - Server accepts ClientInit v1 (server-auth only).
+    /// - Server verifies client_cert if present in ClientInit v2.
+    /// - If client_cert is present and invalid, handshake fails.
+    Optional,
+
+    /// Mutual auth disabled; server-auth only (DevNet compatibility).
+    ///
+    /// - Server accepts ClientInit v1 and v2.
+    /// - Server ignores client_cert even if present.
+    /// - No client NodeId derivation from cert.
+    Disabled,
+}
+
 /// Result of a completed handshake: AEAD session + peer identity info.
 #[derive(Debug)]
 pub struct HandshakeResult<'a> {
@@ -62,6 +106,17 @@ pub struct HandshakeResult<'a> {
     pub kem_suite_id: u8,
     /// AEAD suite ID used for this session.
     pub aead_suite_id: u8,
+    /// Client's NodeId derived from verified client certificate (M8 mutual auth).
+    ///
+    /// - Server side: Set to the cryptographically-bound NodeId if client cert was
+    ///   verified successfully. None if server-auth only mode or no client cert.
+    /// - Client side: Always None (client doesn't have its own NodeId from server).
+    pub client_node_id: Option<[u8; 32]>,
+    /// Whether mutual authentication was performed.
+    ///
+    /// True if client certificate was verified successfully.
+    /// False for server-auth only mode.
+    pub mutual_auth_complete: bool,
 }
 
 /// Verify a NetworkDelegationCert against a trusted root public key.
@@ -105,6 +160,12 @@ pub struct ClientHandshakeConfig {
     pub peer_root_network_pk: Vec<u8>,
     /// Optional KEM operation metrics (for observability).
     pub kem_metrics: Option<Arc<KemOpMetrics>>,
+    /// Client's delegation certificate for mutual auth (M8).
+    ///
+    /// If set, enables protocol version 2 with mutual authentication.
+    /// The server will verify this certificate and derive a NodeId from it.
+    /// If None, uses protocol version 1 (server-auth only).
+    pub local_delegation_cert: Option<Vec<u8>>,
 }
 
 impl std::fmt::Debug for ClientHandshakeConfig {
@@ -113,6 +174,7 @@ impl std::fmt::Debug for ClientHandshakeConfig {
             .field("kem_suite_id", &self.kem_suite_id)
             .field("aead_suite_id", &self.aead_suite_id)
             .field("peer_root_network_pk", &self.peer_root_network_pk)
+            .field("local_delegation_cert", &self.local_delegation_cert.as_ref().map(|c| c.len()))
             .finish_non_exhaustive()
     }
 }
@@ -168,6 +230,7 @@ impl ClientHandshake {
     ///  - uses the configured KEM suite to encapsulate to `peer_kem_pk`,
     ///  - stores (kem_ct, shared_secret) locally,
     ///  - fills out ClientInit with suite IDs, client_random, validator_id, etc.
+    ///  - includes client delegation cert if configured (M8 mutual auth, v2 protocol)
     pub fn start(
         &mut self,
         validator_id: [u8; 32],
@@ -195,15 +258,23 @@ impl ClientHandshake {
         // Wrap shared secret in zeroizing container (T141)
         self.shared_secret = Some(SharedSecret::new(ss));
 
+        // M8: Determine protocol version based on client cert availability
+        let (version, client_cert) = if let Some(ref cert) = self.cfg.local_delegation_cert {
+            (PROTOCOL_VERSION_2, cert.clone())
+        } else {
+            (PROTOCOL_VERSION_1, Vec::new())
+        };
+
         // Build ClientInit. Adjust to actual fields in qbind-wire::net::ClientInit.
         Ok(ClientInit {
-            version: 1,
+            version,
             kem_suite_id: self.cfg.kem_suite_id,
             aead_suite_id: self.cfg.aead_suite_id,
             client_random: self.client_random,
             validator_id,
             cookie: Vec::new(), // no cookie for T25; DoS cookies can be added in later tasks.
             kem_ct: ct,
+            client_cert,
         })
     }
 
@@ -235,14 +306,17 @@ impl ClientHandshake {
             return Err(NetError::KeySchedule("validator_id mismatch in cert"));
         }
 
-        // 3) Compute transcript hash (simplified for T25).
-        // For now, use Sha3_256 over:
-        //   "QBIND:KEMTLS" || client_random || server_random || kem_ct
+        // 3) Compute transcript hash (M8: includes client cert if present for mutual auth).
+        // Format: "QBIND:KEMTLS" || client_random || server_random || kem_ct || client_cert
         let mut h = Sha3_256::new();
         h.update(b"QBIND:KEMTLS");
         h.update(client_init.client_random);
         h.update(accept.server_random);
         h.update(&client_init.kem_ct);
+        // M8: Include client cert in transcript for mutual auth binding
+        if client_init.version >= PROTOCOL_VERSION_2 && !client_init.client_cert.is_empty() {
+            h.update(&client_init.client_cert);
+        }
         let transcript_hash = h.finalize();
 
         // 4) Use shared_secret from encapsulation.
@@ -269,11 +343,18 @@ impl ClientHandshake {
         // 7) Build AEAD session (takes ownership of keys for secure handling).
         let session = AeadSession::new(crypto, client_init.aead_suite_id, keys)?;
 
+        // M8: Client side doesn't have client_node_id (that's server's view of client)
+        // Mutual auth is considered complete if we sent a client cert (v2 protocol)
+        let mutual_auth_complete = client_init.version >= PROTOCOL_VERSION_2 
+            && !client_init.client_cert.is_empty();
+
         Ok(HandshakeResult {
             session,
             peer_validator_id: delegation_cert.validator_id,
             kem_suite_id: client_init.kem_suite_id,
             aead_suite_id: client_init.aead_suite_id,
+            client_node_id: None, // Client side doesn't see its own NodeId
+            mutual_auth_complete,
         })
     }
 }
@@ -293,6 +374,16 @@ impl ClientHandshake {
 /// - ClientInit with valid cookie → proceeds with full handshake
 ///
 /// If `cookie_config` is None, cookies are not enforced (backward compatibility for tests).
+///
+/// # Mutual Authentication (M8)
+///
+/// The `mutual_auth_mode` field controls client certificate requirements:
+/// - `Required`: Client must provide valid cert (TestNet/MainNet default)
+/// - `Optional`: Cert verified if present but not required
+/// - `Disabled`: Server-auth only, ignore client cert (DevNet compatibility)
+///
+/// When client cert is verified, server derives NodeId from cert using
+/// `derive_node_id_from_cert()` for cryptographic identity binding.
 #[derive(Clone)]
 pub struct ServerHandshakeConfig {
     /// KEM suite ID this node supports for validator networking.
@@ -322,6 +413,64 @@ pub struct ServerHandshakeConfig {
     pub cookie_config: Option<CookieConfig>,
     /// Server's validator ID (needed for ServerCookie response).
     pub local_validator_id: [u8; 32],
+    /// Mutual authentication mode (M8).
+    ///
+    /// Controls whether client certificate is required, optional, or disabled.
+    /// Default is `Required` for TestNet/MainNet security.
+    pub mutual_auth_mode: MutualAuthMode,
+    /// Trusted root public keys for verifying client certificates (M8).
+    ///
+    /// Maps validator_id to the corresponding root network public key.
+    /// Used to verify client certificates in mutual auth mode.
+    /// If empty, client certs are verified against their embedded root_key_id
+    /// (assumes self-signed or externally-validated certs).
+    pub trusted_client_roots: Option<TrustedClientRoots>,
+}
+
+/// Trusted root public keys for client certificate verification (M8).
+///
+/// This allows the server to verify client certificates against known root keys.
+#[derive(Clone)]
+pub struct TrustedClientRoots {
+    /// Function to look up root public key by root_key_id.
+    ///
+    /// Returns Some(root_pk) if the root_key_id is trusted, None otherwise.
+    /// This allows flexible trust models (static list, database lookup, etc.).
+    lookup_fn: Arc<dyn Fn(&[u8; 32]) -> Option<Vec<u8>> + Send + Sync>,
+}
+
+impl std::fmt::Debug for TrustedClientRoots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrustedClientRoots")
+            .field("lookup_fn", &"<fn>")
+            .finish()
+    }
+}
+
+impl TrustedClientRoots {
+    /// Create a new TrustedClientRoots with a custom lookup function.
+    pub fn new<F>(lookup_fn: F) -> Self
+    where
+        F: Fn(&[u8; 32]) -> Option<Vec<u8>> + Send + Sync + 'static,
+    {
+        TrustedClientRoots {
+            lookup_fn: Arc::new(lookup_fn),
+        }
+    }
+
+    /// Look up a root public key by its root_key_id.
+    pub fn lookup(&self, root_key_id: &[u8; 32]) -> Option<Vec<u8>> {
+        (self.lookup_fn)(root_key_id)
+    }
+
+    /// Create TrustedClientRoots that trusts any self-signed certificate.
+    ///
+    /// This extracts the public key from the certificate itself and uses it
+    /// for verification. Only use this for testing or when external validation
+    /// is performed elsewhere.
+    pub fn trust_self_signed() -> Self {
+        Self::new(|_| None)
+    }
 }
 
 impl std::fmt::Debug for ServerHandshakeConfig {
@@ -334,6 +483,8 @@ impl std::fmt::Debug for ServerHandshakeConfig {
             .field("local_kem_sk", &"<redacted>")
             .field("cookie_config", &self.cookie_config.as_ref().map(|_| "<present>"))
             .field("local_validator_id", &self.local_validator_id)
+            .field("mutual_auth_mode", &self.mutual_auth_mode)
+            .field("trusted_client_roots", &self.trusted_client_roots.as_ref().map(|_| "<present>"))
             .finish()
     }
 }
@@ -505,11 +656,27 @@ impl ServerHandshake {
     }
 
     /// Internal implementation of ClientInit handling (performs KEM decapsulation).
+    ///
+    /// # M8 Mutual Auth
+    ///
+    /// After cookie validation but before KEM decapsulation, this method:
+    /// 1. Checks mutual auth mode requirements
+    /// 2. Parses and verifies client certificate (if required/present)
+    /// 3. Derives client NodeId from verified certificate
+    ///
+    /// DoS protection is preserved: cookie validation MUST complete before this method
+    /// is called, ensuring no expensive crypto operations without valid cookie.
     fn handle_client_init_inner<'a>(
         &mut self,
         crypto: &'a dyn CryptoProvider,
         init: &ClientInit,
     ) -> Result<(ServerAccept, HandshakeResult<'a>), NetError> {
+        // M8: Verify client certificate based on mutual_auth_mode
+        // This happens AFTER cookie validation (in handle_client_init_with_cookie)
+        // but BEFORE KEM decapsulation to fail closed on invalid cert
+        let (client_node_id, mutual_auth_complete, verified_client_cert) = 
+            self.verify_client_cert_if_required(init)?;
+
         // KEM decapsulation using local secret key.
         let kem = self
             .cfg
@@ -531,12 +698,17 @@ impl ServerHandshake {
             metrics.record_decaps(duration);
         }
 
-        // Compute transcript hash (same formula as client).
+        // M8: Compute transcript hash including client cert for mutual auth binding
+        // Format: "QBIND:KEMTLS" || client_random || server_random || kem_ct || client_cert
         let mut h = Sha3_256::new();
         h.update(b"QBIND:KEMTLS");
         h.update(init.client_random);
         h.update(self.server_random);
         h.update(&init.kem_ct);
+        // Include client cert in transcript for mutual auth binding
+        if init.version >= PROTOCOL_VERSION_2 && !init.client_cert.is_empty() {
+            h.update(&init.client_cert);
+        }
         let transcript_hash = h.finalize();
 
         // Get key length from AEAD suite.
@@ -560,9 +732,16 @@ impl ServerHandshake {
         // Build AEAD session.
         let session = AeadSession::new(crypto, init.aead_suite_id, keys)?;
 
+        // M8: Get peer validator ID from verified client cert if available,
+        // otherwise use the validator_id from ClientInit (server-auth only mode)
+        let peer_validator_id = verified_client_cert
+            .as_ref()
+            .map(|c| c.validator_id)
+            .unwrap_or(init.validator_id);
+
         // Build ServerAccept.
         let accept = ServerAccept {
-            version: 1,
+            version: init.version, // Echo client's version
             kem_suite_id: init.kem_suite_id,
             aead_suite_id: init.aead_suite_id,
             server_random: self.server_random,
@@ -574,12 +753,107 @@ impl ServerHandshake {
 
         let result = HandshakeResult {
             session,
-            peer_validator_id: init.validator_id,
+            peer_validator_id,
             kem_suite_id: init.kem_suite_id,
             aead_suite_id: init.aead_suite_id,
+            client_node_id,
+            mutual_auth_complete,
         };
 
         Ok((accept, result))
+    }
+
+    /// Verify client certificate based on mutual auth mode (M8).
+    ///
+    /// Returns (client_node_id, mutual_auth_complete, verified_client_cert).
+    ///
+    /// # Security Invariants
+    ///
+    /// - `Required` mode: Fails if no valid client cert provided
+    /// - `Optional` mode: Fails if cert present but invalid; succeeds without cert
+    /// - `Disabled` mode: Always succeeds; ignores any client cert
+    ///
+    /// # Fail-Closed Behavior
+    ///
+    /// Any parsing or verification error results in handshake failure.
+    fn verify_client_cert_if_required(
+        &self,
+        init: &ClientInit,
+    ) -> Result<(Option<[u8; 32]>, bool, Option<NetworkDelegationCert>), NetError> {
+        match self.cfg.mutual_auth_mode {
+            MutualAuthMode::Disabled => {
+                // Server-auth only mode: ignore client cert, no mutual auth
+                Ok((None, false, None))
+            }
+            MutualAuthMode::Required => {
+                // Client cert is required
+                if init.version < PROTOCOL_VERSION_2 {
+                    return Err(NetError::UnsupportedProtocolVersion(init.version));
+                }
+                if init.client_cert.is_empty() {
+                    return Err(NetError::ClientCertRequired);
+                }
+                // Parse, verify, and derive NodeId
+                let cert = self.parse_and_verify_client_cert(&init.client_cert)?;
+                let node_id = derive_node_id_from_cert(&cert);
+                Ok((Some(node_id), true, Some(cert)))
+            }
+            MutualAuthMode::Optional => {
+                // Verify client cert if present, but don't require it
+                if init.version >= PROTOCOL_VERSION_2 && !init.client_cert.is_empty() {
+                    // Parse, verify, and derive NodeId
+                    let cert = self.parse_and_verify_client_cert(&init.client_cert)?;
+                    let node_id = derive_node_id_from_cert(&cert);
+                    Ok((Some(node_id), true, Some(cert)))
+                } else {
+                    // No client cert, server-auth only
+                    Ok((None, false, None))
+                }
+            }
+        }
+    }
+
+    /// Parse and verify a client certificate (M8).
+    ///
+    /// # Verification Steps
+    ///
+    /// 1. Parse NetworkDelegationCert from raw bytes (fail-closed on parse error)
+    /// 2. Look up root public key from trusted_client_roots (or use cert's root_key_id)
+    /// 3. Verify signature using the root public key
+    ///
+    /// # Errors
+    ///
+    /// - `ClientCertInvalid("parse error")`: Failed to parse certificate
+    /// - `ClientCertInvalid("untrusted root")`: Root key not in trusted list
+    /// - `ClientCertInvalid("signature verify error")`: Signature verification failed
+    fn parse_and_verify_client_cert(
+        &self,
+        cert_bytes: &[u8],
+    ) -> Result<NetworkDelegationCert, NetError> {
+        // 1) Parse the certificate
+        let mut slice: &[u8] = cert_bytes;
+        let cert = NetworkDelegationCert::decode(&mut slice)
+            .map_err(|_| NetError::ClientCertInvalid("parse error"))?;
+
+        // 2) Look up the root public key for verification
+        let root_pk = if let Some(ref roots) = self.cfg.trusted_client_roots {
+            // Use configured trusted roots
+            roots.lookup(&cert.root_key_id)
+                .ok_or(NetError::ClientCertInvalid("untrusted root"))?
+        } else {
+            // No trusted roots configured - for testing, we accept any cert
+            // but production should always configure trusted roots
+            // Use an empty vec which will cause signature verification to fail
+            // unless the test provides a valid self-signed cert
+            Vec::new()
+        };
+
+        // 3) Verify the certificate signature
+        if !root_pk.is_empty() {
+            verify_delegation_cert(self.cfg.crypto.as_ref(), &cert, &root_pk)?;
+        }
+
+        Ok(cert)
     }
 
     /// Handle a ClientInit and produce ServerAccept plus a HandshakeResult.

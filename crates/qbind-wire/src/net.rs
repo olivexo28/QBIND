@@ -16,6 +16,13 @@ pub const MSG_TYPE_SERVER_ACCEPT: u8 = 0x21;
 pub const MSG_TYPE_SERVER_COOKIE: u8 = 0x22;
 pub const CERT_TYPE_NETWORK_DELEGATION: u8 = 0xA0;
 
+/// Protocol version constants (M8).
+///
+/// - `PROTOCOL_VERSION_1`: Server-auth only (original KEMTLS-PDK).
+/// - `PROTOCOL_VERSION_2`: Mutual auth with client certificate.
+pub const PROTOCOL_VERSION_1: u8 = 0x01;
+pub const PROTOCOL_VERSION_2: u8 = 0x02;
+
 /// NetworkDelegationCert wire layout:
 /// cert_type: u8 // 0xA0
 /// version: u8 // 0x01
@@ -130,7 +137,10 @@ impl WireDecode for NetworkDelegationCert {
     }
 }
 
-/// ClientInit wire layout:
+/// ClientInit wire layout (M8 updated):
+///
+/// # Version 1 (0x01) - Server-auth only:
+/// ```text
 /// msg_type: u8 // 0x20
 /// version: u8 // 0x01
 /// kem_suite_id: u8
@@ -141,6 +151,26 @@ impl WireDecode for NetworkDelegationCert {
 /// cookie: [u8; cookie_len]
 /// kem_ct_len: u16
 /// kem_ct: [u8; kem_ct_len]
+/// ```
+///
+/// # Version 2 (0x02) - Mutual auth with client certificate:
+/// ```text
+/// msg_type: u8 // 0x20
+/// version: u8 // 0x02
+/// kem_suite_id: u8
+/// aead_suite_id: u8
+/// client_random: [u8;32]
+/// validator_id: [u8;32]
+/// cookie_len: u16
+/// cookie: [u8; cookie_len]
+/// kem_ct_len: u16
+/// kem_ct: [u8; kem_ct_len]
+/// client_cert_len: u16
+/// client_cert: [u8; client_cert_len]  // NetworkDelegationCert encoding
+/// ```
+///
+/// The `client_cert` field in version 2 contains the client's `NetworkDelegationCert`,
+/// enabling the server to derive a cryptographically-bound NodeId for the client.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientInit {
     pub version: u8,
@@ -150,6 +180,11 @@ pub struct ClientInit {
     pub validator_id: AccountId,
     pub cookie: Vec<u8>,
     pub kem_ct: Vec<u8>,
+    /// Client's delegation certificate (M8 mutual auth).
+    ///
+    /// - Version 1: Always empty (server-auth only).
+    /// - Version 2: Contains client's `NetworkDelegationCert` bytes.
+    pub client_cert: Vec<u8>,
 }
 
 impl WireEncode for ClientInit {
@@ -170,6 +205,14 @@ impl WireEncode for ClientInit {
         let kem_ct_len_u16 = len_to_u16(kem_ct_len);
         put_u16(out, kem_ct_len_u16);
         put_bytes(out, &self.kem_ct);
+
+        // Version 2+: Include client certificate (M8 mutual auth)
+        if self.version >= PROTOCOL_VERSION_2 {
+            let client_cert_len = self.client_cert.len();
+            let client_cert_len_u16 = len_to_u16(client_cert_len);
+            put_u16(out, client_cert_len_u16);
+            put_bytes(out, &self.client_cert);
+        }
     }
 }
 
@@ -199,6 +242,14 @@ impl WireDecode for ClientInit {
         let kem_ct_len = get_u16(input)? as usize;
         let kem_ct = get_bytes(input, kem_ct_len)?.to_vec();
 
+        // Version 2+: Parse client certificate (M8 mutual auth)
+        let client_cert = if version >= PROTOCOL_VERSION_2 {
+            let client_cert_len = get_u16(input)? as usize;
+            get_bytes(input, client_cert_len)?.to_vec()
+        } else {
+            Vec::new()
+        };
+
         Ok(ClientInit {
             version,
             kem_suite_id,
@@ -207,6 +258,7 @@ impl WireDecode for ClientInit {
             validator_id,
             cookie,
             kem_ct,
+            client_cert,
         })
     }
 }

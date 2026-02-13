@@ -22,7 +22,8 @@ pub use framed_io::{
 };
 pub use handshake::{
     ClientHandshake, ClientHandshakeConfig, ConnectionState, HandshakeResult, HandshakeSide,
-    ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse,
+    MutualAuthMode, ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse,
+    TrustedClientRoots,
 };
 pub use handshake_packet::{
     pack_client_init, pack_server_accept, pack_server_cookie, unpack_client_init,

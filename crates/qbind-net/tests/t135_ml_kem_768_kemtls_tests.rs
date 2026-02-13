@@ -21,7 +21,8 @@ use qbind_crypto::{
     StaticCryptoProvider, AEAD_SUITE_CHACHA20_POLY1305, KEM_SUITE_ML_KEM_768,
 };
 use qbind_net::{
-    ClientHandshake, ClientHandshakeConfig, KemPrivateKey, ServerHandshake, ServerHandshakeConfig,
+    ClientHandshake, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerHandshake,
+    ServerHandshakeConfig,
 };
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -156,6 +157,7 @@ fn ml_kem_768_handshake_roundtrip_succeeds() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     // Server config
@@ -169,6 +171,8 @@ fn ml_kem_768_handshake_roundtrip_succeeds() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     // Client random
@@ -296,6 +300,7 @@ fn ml_kem_768_corrupted_ciphertext_causes_failure() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -308,6 +313,8 @@ fn ml_kem_768_corrupted_ciphertext_causes_failure() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_random = [0u8; 32];
@@ -440,6 +447,7 @@ fn ml_kem_768_configuration_test() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -452,6 +460,8 @@ fn ml_kem_768_configuration_test() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_random = [0u8; 32];

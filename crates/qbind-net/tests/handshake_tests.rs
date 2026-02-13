@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientHandshake, ClientHandshakeConfig, KemPrivateKey, ServerHandshake, ServerHandshakeConfig,
+    ClientHandshake, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerHandshake,
+    ServerHandshakeConfig,
 };
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -262,6 +263,7 @@ fn handshake_roundtrip_succeeds() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     // Server config
@@ -275,6 +277,8 @@ fn handshake_roundtrip_succeeds() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     // Client random
@@ -363,6 +367,7 @@ fn handshake_aead_session_works() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -375,6 +380,8 @@ fn handshake_aead_session_works() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let mut client_random = [0u8; 32];
@@ -471,6 +478,7 @@ fn handshake_suite_mismatch_fails() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     // Server supports the original suite
@@ -484,6 +492,8 @@ fn handshake_suite_mismatch_fails() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_random = [0u8; 32];
@@ -546,6 +556,7 @@ fn handshake_server_rejects_wrong_kem_suite() {
         crypto: client_provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -558,6 +569,8 @@ fn handshake_server_rejects_wrong_kem_suite() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_random = [0u8; 32];
@@ -621,6 +634,7 @@ fn handshake_validator_id_mismatch_fails() {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -633,6 +647,8 @@ fn handshake_validator_id_mismatch_fails() {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id_b,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_random = [0u8; 32];
