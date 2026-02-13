@@ -2242,6 +2242,7 @@ dependencies = [
  "qbind-hash",
  "qbind-wire",
  "sha3",
+ "subtle",
  "zeroize",
 ]
 

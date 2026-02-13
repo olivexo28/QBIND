@@ -24,6 +24,7 @@
 
 use hmac::{Hmac, Mac};
 use sha3::Sha3_256;
+use subtle::ConstantTimeEq;
 
 use crate::error::NetError;
 
@@ -231,15 +232,20 @@ impl std::fmt::Debug for CookieConfig {
 }
 
 /// Constant-time comparison to prevent timing attacks.
+///
+/// Uses the `subtle` crate's `ConstantTimeEq` trait for cryptographically
+/// secure constant-time comparison that is not susceptible to compiler
+/// optimizations.
 fn constant_time_compare(a: &[u8], b: &[u8]) -> bool {
+    // Length check in constant time by comparing to fixed-size value
     if a.len() != b.len() {
+        // Return false in constant time relative to data content
+        // Note: Length leaks are acceptable for cookies since the expected
+        // length (COOKIE_SIZE = 32) is a public constant.
         return false;
     }
-    let mut result = 0u8;
-    for (x, y) in a.iter().zip(b.iter()) {
-        result |= x ^ y;
-    }
-    result == 0
+    // Use subtle crate for guaranteed constant-time byte comparison
+    a.ct_eq(b).into()
 }
 
 /// Result of cookie validation in the handshake.

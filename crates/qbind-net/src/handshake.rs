@@ -469,6 +469,11 @@ impl ServerHandshake {
     }
 
     /// Generate a ServerCookie challenge response.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `cookie_config` is None. This method should only be called
+    /// from `handle_client_init_with_cookie` after confirming cookie_config is Some.
     fn generate_cookie_challenge(
         &self,
         init: &ClientInit,
@@ -476,7 +481,7 @@ impl ServerHandshake {
         current_time_secs: u64,
     ) -> Result<ServerHandshakeResponse<'static>, NetError> {
         let cookie_cfg = self.cfg.cookie_config.as_ref()
-            .ok_or(NetError::Protocol("cookie_config required for challenge"))?;
+            .expect("generate_cookie_challenge called without cookie_config; this is a bug");
 
         let cookie = cookie_cfg.generate(
             client_ip,
