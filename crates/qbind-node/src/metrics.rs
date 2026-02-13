@@ -4592,7 +4592,7 @@ impl SignerIsolationMetrics {
         // Health and connection events
         output.push_str(&format!(
             "qbind_signer_health_status{{status=\"{}\"}} 1\n",
-            self.health()  // Uses Display trait
+            self.health()
         ));
         output.push_str(&format!(
             "qbind_signer_connect_total {}\n",

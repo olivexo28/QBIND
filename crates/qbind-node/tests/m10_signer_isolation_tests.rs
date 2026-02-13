@@ -117,7 +117,7 @@ fn m10_replay_protection_allows_incrementing_request_id() {
             view: None,
             preimage: preimage.to_vec(),
         };
-        let resp = transport.send_sign_request(req).expect(&format!("request {} failed", i));
+        let resp = transport.send_sign_request(req).unwrap_or_else(|e| panic!("request {} failed: {:?}", i, e));
         assert!(resp.signature.is_some(), "request {} should succeed", i);
         assert_eq!(resp.request_id, i);
     }

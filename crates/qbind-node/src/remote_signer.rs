@@ -876,6 +876,13 @@ impl TcpKemTlsSignerTransport {
     /// request_id:     8 bytes LE (echo)
     /// error_code:     1 byte
     /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The raw response bytes from the remote signer
+    /// * `expected_request_id` - The request_id we sent, used to verify the
+    ///   response correlation. If the echoed request_id doesn't match,
+    ///   returns `MalformedResponse` error.
     fn decode_response(data: &[u8], expected_request_id: u64) -> Result<RemoteSignResponse, RemoteSignError> {
         // Minimum: status(1) + request_id(8) + error_code(1) = 10 bytes
         if data.len() < 10 {

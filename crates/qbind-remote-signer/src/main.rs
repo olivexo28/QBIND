@@ -322,7 +322,7 @@ fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
         offset += 8;
         Some(v)
     } else {
-        offset += 9; // skip flag + empty view bytes
+        offset += 9; // skip present flag (1) + empty view field (8)
         None
     };
 
