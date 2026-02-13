@@ -191,6 +191,8 @@ fn create_test_configs() -> (ClientConnectionConfig, ServerConnectionConfig) {
             local_delegation_cert: cert_bytes,
             local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
             kem_metrics: None,
+            cookie_config: None,
+            local_validator_id: validator_id,
         },
         server_random: [0u8; 32],
     };

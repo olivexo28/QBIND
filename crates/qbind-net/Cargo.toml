@@ -10,4 +10,5 @@ qbind-wire   = { path = "../qbind-wire" }
 
 sha3 = "0.10"
 hmac = "0.12"
+subtle = "2"
 zeroize = { version = "1", features = ["derive"] }

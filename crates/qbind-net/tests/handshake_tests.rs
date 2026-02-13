@@ -273,6 +273,8 @@ fn handshake_roundtrip_succeeds() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     // Client random
@@ -371,6 +373,8 @@ fn handshake_aead_session_works() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let mut client_random = [0u8; 32];
@@ -478,6 +482,8 @@ fn handshake_suite_mismatch_fails() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let client_random = [0u8; 32];
@@ -550,6 +556,8 @@ fn handshake_server_rejects_wrong_kem_suite() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let client_random = [0u8; 32];
@@ -623,6 +631,8 @@ fn handshake_validator_id_mismatch_fails() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id_b,
     };
 
     let client_random = [0u8; 32];

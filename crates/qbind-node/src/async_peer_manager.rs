@@ -1580,6 +1580,12 @@ impl AsyncPeerManagerImpl {
                                     | qbind_net::NetError::NonceOverflow => {
                                         KemtlsHandshakeFailureReason::Protocol
                                     }
+                                    // M6: Cookie errors are protocol-level issues
+                                    qbind_net::NetError::CookieInvalid
+                                    | qbind_net::NetError::CookieExpired
+                                    | qbind_net::NetError::CookieRequired => {
+                                        KemtlsHandshakeFailureReason::Protocol
+                                    }
                                 }
                             }
                         };
@@ -1794,6 +1800,12 @@ impl AsyncPeerManagerImpl {
                                 }
                                 qbind_net::NetError::Protocol(_)
                                 | qbind_net::NetError::NonceOverflow => {
+                                    KemtlsHandshakeFailureReason::Protocol
+                                }
+                                // M6: Cookie errors are protocol-level issues
+                                qbind_net::NetError::CookieInvalid
+                                | qbind_net::NetError::CookieExpired
+                                | qbind_net::NetError::CookieRequired => {
                                     KemtlsHandshakeFailureReason::Protocol
                                 }
                             },

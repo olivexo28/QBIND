@@ -167,6 +167,8 @@ fn ml_kem_768_handshake_roundtrip_succeeds() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     // Client random
@@ -304,6 +306,8 @@ fn ml_kem_768_corrupted_ciphertext_causes_failure() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let client_random = [0u8; 32];
@@ -446,6 +450,8 @@ fn ml_kem_768_configuration_test() {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let client_random = [0u8; 32];

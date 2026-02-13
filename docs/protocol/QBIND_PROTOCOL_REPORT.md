@@ -31,15 +31,14 @@ This report tracks protocol gaps, security assumptions, incomplete components, a
 | Genesis (`qbind-genesis`) | ✅ Implemented | Suite registry, param registry, safety council |
 | Consensus (`qbind-consensus`) | ✅ Implemented | HotStuff BFT core with timeout/view-change (M5) |
 | Node (`qbind-node`) | ⚠️ Partial | P2P networking, mempool, storage; LocalMesh mode stubbed |
-| Networking (`qbind-net`) | ⚠️ Partial | KEMTLS handshake implemented; DoS cookie not enforced |
+| Networking (`qbind-net`) | ✅ Implemented | KEMTLS handshake with DoS cookie protection (M6) |
 | Remote Signer (`qbind-remote-signer`) | ⚠️ Partial | Basic structure; full KEMTLS server not fully wired |
 | Governance (`qbind-gov`) | ✅ Implemented | Envelope parsing, multi-sig verification |
 
 ## Summary of Open Critical Issues
 
 1. **Slashing penalties infrastructure present but not enforced** - No economic deterrent for misbehavior
-2. **DoS cookie protection defined but not enforced** - Connection exhaustion vulnerability
-3. **LocalMesh node operation is a stub** - Limited testing capability
+2. **LocalMesh node operation is a stub** - Limited testing capability
 
 ---
 
@@ -199,10 +198,12 @@ This section lists items marked TODO or partially implemented in the codebase.
 
 | Field | Value |
 |-------|-------|
-| **File Path** | `crates/qbind-net/src/handshake.rs` |
+| **File Path** | `crates/qbind-net/src/handshake.rs`, `crates/qbind-net/src/cookie.rs` |
 | **Description** | Cookie field exists in ClientInit but enforcement not implemented |
 | **Security Impact** | Connection exhaustion attacks possible |
 | **Required Milestone** | Pre-TestNet |
+| **Status** | ✅ Fully Mitigated (M6) |
+| **Note** | **M6**: DoS cookie protection implemented with 2-step handshake. `ServerHandshake.handle_client_init_with_cookie()` enforces: (1) ClientInit without valid cookie → returns `ServerCookie` challenge (no KEM decapsulation), (2) ClientInit with valid cookie → proceeds with KEMTLS accept. Cookie design: stateless HMAC-SHA3-256 MAC using domain tag "QBIND:cookie:v1", bound to client IP + ClientInit fields + timestamp bucket. Features: 30-second expiry buckets with clock skew tolerance, constant-size response, bounded length checks, fail-closed behavior. Implementation in `crates/qbind-net/src/cookie.rs` (CookieConfig) and `crates/qbind-net/src/handshake.rs` (ServerHandshakeResponse). Comprehensive tests in `crates/qbind-net/tests/m6_dos_cookie_protection_tests.rs` (10 tests) covering: no-cookie init, invalid cookie, valid cookie, expired cookie, random cookies never trigger decapsulation, IP binding, client_random binding, oversized cookie rejection, clock skew tolerance, and backward compatibility. |
 
 ## 3.10 Slashing Penalty Application
 
@@ -246,7 +247,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 | No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary via `StakeFilteringEpochStateProvider` + `build_validator_set_with_stake_filter()` + `with_stake_filtering_epoch_state_provider()` + `new_with_stake_filtering()`; fail-closed if all validators excluded | Low (fully mitigated M2.1+M2.2+M2.3+M2.4) | Mitigated |
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
-| Connection exhaustion (DoS) | Networking | Implement DoS cookie enforcement | Medium | High |
+| Connection exhaustion (DoS) | Networking | DoS cookie enforcement via `handle_client_init_with_cookie()`: 2-step handshake, stateless HMAC-SHA3-256 cookie, no KEM decaps until valid cookie (M6) | Low (mitigated M6) | Mitigated |
 | Peer identity spoofing | Networking | Extract NodeId from KEMTLS cert | Medium | High |
 | Key exposure on validator host | Crypto | Enable HSM/PKCS#11 integration | Medium (optional HSM) | High |
 | Nonce overflow | Networking | Session termination at u64::MAX | Low (implemented) | Low |

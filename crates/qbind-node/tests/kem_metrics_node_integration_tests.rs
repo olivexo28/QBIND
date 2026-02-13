@@ -271,6 +271,8 @@ fn create_test_setup() -> (ClientConnectionConfig, ServerConnectionConfig) {
         local_delegation_cert: cert_bytes,
         local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let client_cfg = ClientConnectionConfig {

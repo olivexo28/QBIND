@@ -1,4 +1,5 @@
 pub mod connection;
+pub mod cookie;
 pub mod error;
 pub mod framed_io;
 pub mod handshake;
@@ -10,6 +11,10 @@ pub mod session;
 pub mod transport;
 
 pub use connection::{ClientConnectionConfig, Connection, ServerConnectionConfig};
+pub use cookie::{
+    CookieConfig, CookieValidation, COOKIE_DOMAIN_TAG, COOKIE_SIZE, DEFAULT_BUCKET_DURATION_SECS,
+    DEFAULT_CLOCK_SKEW_BUCKETS, MAX_COOKIE_SIZE,
+};
 pub use error::NetError;
 pub use framed_io::{
     read_handshake_packet, read_transport_frame, write_handshake_packet, write_transport_frame,
@@ -17,7 +22,7 @@ pub use framed_io::{
 };
 pub use handshake::{
     ClientHandshake, ClientHandshakeConfig, ConnectionState, HandshakeResult, HandshakeSide,
-    ServerHandshake, ServerHandshakeConfig,
+    ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse,
 };
 pub use handshake_packet::{
     pack_client_init, pack_server_accept, pack_server_cookie, unpack_client_init,

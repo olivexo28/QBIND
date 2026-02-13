@@ -310,6 +310,8 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
         kem_metrics: None,
     };
 
+    let validator_id = [0u8; 32];
+
     let server_handshake_cfg = ServerHandshakeConfig {
         kem_suite_id,
         aead_suite_id,
@@ -318,6 +320,8 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
         local_delegation_cert: vec![],
         local_kem_sk: Arc::new(KemPrivateKey::new(vec![0u8; 32])),
         kem_metrics: None,
+        cookie_config: None,
+        local_validator_id: validator_id,
     };
 
     let client_cfg = ClientConnectionConfig {
