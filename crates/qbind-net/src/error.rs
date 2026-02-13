@@ -14,4 +14,13 @@ pub enum NetError {
 
     /// Protocol or framing error (e.g., packet parsing).
     Protocol(&'static str),
+
+    /// Cookie is invalid or doesn't match (M6 DoS protection).
+    CookieInvalid,
+
+    /// Cookie has expired (M6 DoS protection).
+    CookieExpired,
+
+    /// Cookie is required but not provided (M6 DoS protection).
+    CookieRequired,
 }

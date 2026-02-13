@@ -8,6 +8,16 @@
 //! - KEM shared secrets are wrapped in `SharedSecret` with `ZeroizeOnDrop`.
 //! - All derived session keys use `AeadKeyMaterial` with `ZeroizeOnDrop`.
 //! - Server-side shared secrets are explicitly zeroized after key derivation.
+//!
+//! # DoS Cookie Protection (M6)
+//!
+//! The server-side handshake implements a 2-step handshake for DoS protection:
+//! - Step A: ClientInit without valid cookie → server replies with ServerCookie challenge
+//!   (no expensive KEM decapsulation or session allocation occurs)
+//! - Step B: ClientInit with valid cookie → proceed with normal KEMTLS accept path
+//!
+//! This prevents connection exhaustion attacks by requiring clients to prove they
+//! received a server challenge before any expensive cryptographic operations.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,10 +25,11 @@ use std::time::Instant;
 use qbind_crypto::CryptoProvider;
 use qbind_hash::net::network_delegation_cert_digest;
 use qbind_wire::io::WireDecode;
-use qbind_wire::net::{ClientInit, NetworkDelegationCert, ServerAccept};
+use qbind_wire::net::{ClientInit, NetworkDelegationCert, ServerAccept, ServerCookie};
 use sha3::{Digest, Sha3_256};
 use zeroize::Zeroize;
 
+use crate::cookie::{CookieConfig, CookieValidation, MAX_COOKIE_SIZE};
 use crate::error::NetError;
 use crate::kem_metrics::KemOpMetrics;
 use crate::keys::{KemPrivateKey, SessionKeys, SharedSecret};
@@ -274,6 +285,14 @@ impl ClientHandshake {
 /// - The `local_kem_sk` field uses `Arc<KemPrivateKey>` which implements `ZeroizeOnDrop`.
 /// - The `Arc` allows cloning the config without duplicating sensitive key material.
 /// - When the last reference to the config is dropped, the KEM private key is zeroized.
+///
+/// # DoS Cookie Protection (M6)
+///
+/// If `cookie_config` is Some, the server enforces cookie-based DoS protection:
+/// - ClientInit without valid cookie → returns ServerCookie challenge (no KEM decap)
+/// - ClientInit with valid cookie → proceeds with full handshake
+///
+/// If `cookie_config` is None, cookies are not enforced (backward compatibility for tests).
 #[derive(Clone)]
 pub struct ServerHandshakeConfig {
     /// KEM suite ID this node supports for validator networking.
@@ -296,6 +315,13 @@ pub struct ServerHandshakeConfig {
     pub local_kem_sk: Arc<KemPrivateKey>,
     /// Optional KEM operation metrics (for observability).
     pub kem_metrics: Option<Arc<KemOpMetrics>>,
+    /// Optional cookie configuration for DoS protection (M6).
+    ///
+    /// If Some, cookie validation is enforced before KEM decapsulation.
+    /// If None, cookies are not validated (for backward compatibility in tests).
+    pub cookie_config: Option<CookieConfig>,
+    /// Server's validator ID (needed for ServerCookie response).
+    pub local_validator_id: [u8; 32],
 }
 
 impl std::fmt::Debug for ServerHandshakeConfig {
@@ -306,6 +332,8 @@ impl std::fmt::Debug for ServerHandshakeConfig {
             .field("local_root_network_pk", &self.local_root_network_pk)
             .field("local_delegation_cert", &self.local_delegation_cert.len())
             .field("local_kem_sk", &"<redacted>")
+            .field("cookie_config", &self.cookie_config.as_ref().map(|_| "<present>"))
+            .field("local_validator_id", &self.local_validator_id)
             .finish()
     }
 }
@@ -326,18 +354,56 @@ impl std::fmt::Debug for ServerHandshake {
     }
 }
 
+/// Result of handling a ClientInit on the server with DoS cookie protection (M6).
+///
+/// This enum represents the two possible outcomes:
+/// - `CookieChallenge`: No valid cookie was provided, send ServerCookie challenge.
+/// - `HandshakeComplete`: Valid cookie was provided, handshake completed.
+#[derive(Debug)]
+pub enum ServerHandshakeResponse<'a> {
+    /// Client must retry with the provided cookie.
+    /// No expensive KEM decapsulation occurred.
+    CookieChallenge(ServerCookie),
+
+    /// Handshake completed successfully.
+    /// KEM decapsulation occurred and session is ready.
+    HandshakeComplete(ServerAccept, HandshakeResult<'a>),
+}
+
 impl ServerHandshake {
     pub fn new(cfg: ServerHandshakeConfig, server_random: [u8; 32]) -> Self {
         ServerHandshake { cfg, server_random }
     }
 
-    /// Handle a ClientInit and produce ServerAccept plus a HandshakeResult.
-    pub fn handle_client_init<'a>(
+    /// Handle a ClientInit with DoS cookie protection (M6).
+    ///
+    /// This is the preferred method for production use. It implements a 2-step handshake:
+    ///
+    /// **Step A**: If `cookie_config` is set and the ClientInit cookie is empty or invalid,
+    /// returns `ServerHandshakeResponse::CookieChallenge`. No KEM decapsulation occurs.
+    ///
+    /// **Step B**: If the cookie is valid (or cookie_config is None), performs KEM
+    /// decapsulation and returns `ServerHandshakeResponse::HandshakeComplete`.
+    ///
+    /// # Arguments
+    ///
+    /// * `crypto` - Crypto provider for AEAD session creation.
+    /// * `init` - The ClientInit message from the client.
+    /// * `client_ip` - Client's IP address bytes (for cookie binding).
+    /// * `current_time_secs` - Current Unix timestamp in seconds.
+    ///
+    /// # Fail-Closed Behavior
+    ///
+    /// - Invalid/expired cookie → only returns cookie challenge
+    /// - Never decapsulates ML-KEM unless cookie is valid
+    pub fn handle_client_init_with_cookie<'a>(
         &mut self,
         crypto: &'a dyn CryptoProvider,
         init: &ClientInit,
-    ) -> Result<(ServerAccept, HandshakeResult<'a>), NetError> {
-        // 1) Ensure suites match what we support.
+        client_ip: &[u8],
+        current_time_secs: u64,
+    ) -> Result<ServerHandshakeResponse<'a>, NetError> {
+        // 1) Validate suites first (cheap check)
         if init.kem_suite_id != self.cfg.kem_suite_id {
             return Err(NetError::UnsupportedSuite(init.kem_suite_id));
         }
@@ -345,7 +411,101 @@ impl ServerHandshake {
             return Err(NetError::UnsupportedSuite(init.aead_suite_id));
         }
 
-        // 2) KEM decapsulation using local secret key.
+        // 2) Check cookie length (bounded parsing - security check)
+        if init.cookie.len() > MAX_COOKIE_SIZE {
+            // Cookie too large - treat as invalid
+            return self.generate_cookie_challenge(init, client_ip, current_time_secs);
+        }
+
+        // 3) If cookie enforcement is enabled, validate the cookie BEFORE KEM decapsulation
+        if let Some(ref cookie_cfg) = self.cfg.cookie_config {
+            let validation = self.validate_cookie(
+                cookie_cfg,
+                init,
+                client_ip,
+                current_time_secs,
+            );
+
+            match validation {
+                CookieValidation::Valid => {
+                    // Cookie is valid, proceed with KEM decapsulation
+                }
+                CookieValidation::NoCookie | CookieValidation::Invalid => {
+                    // No cookie or invalid cookie - return challenge
+                    return self.generate_cookie_challenge(init, client_ip, current_time_secs);
+                }
+            }
+        }
+
+        // 4) Cookie is valid (or not enforced), proceed with KEM decapsulation
+        let (accept, result) = self.handle_client_init_inner(crypto, init)?;
+        Ok(ServerHandshakeResponse::HandshakeComplete(accept, result))
+    }
+
+    /// Validate the cookie in a ClientInit message.
+    fn validate_cookie(
+        &self,
+        cookie_cfg: &CookieConfig,
+        init: &ClientInit,
+        client_ip: &[u8],
+        current_time_secs: u64,
+    ) -> CookieValidation {
+        if init.cookie.is_empty() {
+            return CookieValidation::NoCookie;
+        }
+
+        match cookie_cfg.verify(
+            &init.cookie,
+            client_ip,
+            init.kem_suite_id,
+            init.aead_suite_id,
+            &init.client_random,
+            &init.validator_id,
+            current_time_secs,
+        ) {
+            Ok(()) => CookieValidation::Valid,
+            Err(_) => CookieValidation::Invalid,
+        }
+    }
+
+    /// Generate a ServerCookie challenge response.
+    fn generate_cookie_challenge(
+        &self,
+        init: &ClientInit,
+        client_ip: &[u8],
+        current_time_secs: u64,
+    ) -> Result<ServerHandshakeResponse<'static>, NetError> {
+        let cookie_cfg = self.cfg.cookie_config.as_ref()
+            .ok_or(NetError::Protocol("cookie_config required for challenge"))?;
+
+        let cookie = cookie_cfg.generate(
+            client_ip,
+            init.kem_suite_id,
+            init.aead_suite_id,
+            &init.client_random,
+            &init.validator_id,
+            current_time_secs,
+        );
+
+        let response = ServerCookie {
+            version: 1,
+            kem_suite_id: init.kem_suite_id,
+            aead_suite_id: init.aead_suite_id,
+            validator_id: self.cfg.local_validator_id,
+            client_random: init.client_random,
+            cookie: cookie.to_vec(),
+        };
+
+        Ok(ServerHandshakeResponse::CookieChallenge(response))
+    }
+
+    /// Internal implementation of ClientInit handling (performs KEM decapsulation).
+    fn handle_client_init_inner<'a>(
+        &mut self,
+        crypto: &'a dyn CryptoProvider,
+        init: &ClientInit,
+    ) -> Result<(ServerAccept, HandshakeResult<'a>), NetError> {
+        // KEM decapsulation using local secret key.
         let kem = self
             .cfg
             .crypto
@@ -355,22 +515,18 @@ impl ServerHandshake {
         // Measure KEM decapsulation latency
         let start = Instant::now();
         // Wrap the shared secret in a zeroizing container immediately (T141).
-        // This ensures the KEM shared secret is zeroized when it goes out of scope.
-        // Note: local_kem_sk.as_bytes() provides read-only access to the key (T142).
         let mut shared = SharedSecret::new(
             kem.decaps(self.cfg.local_kem_sk.as_bytes(), &init.kem_ct)
                 .map_err(|_| NetError::KeySchedule("kem decaps failed"))?,
         );
         let duration = start.elapsed();
 
-        // Record metrics (best-effort, never affects handshake behavior)
-        // Note: We record even if decaps fails (where reasonable), but in this case
-        // decaps succeeded, so we record the successful operation.
+        // Record metrics
         if let Some(metrics) = &self.cfg.kem_metrics {
             metrics.record_decaps(duration);
         }
 
-        // 3) Compute transcript hash (same formula as client).
+        // Compute transcript hash (same formula as client).
         let mut h = Sha3_256::new();
         h.update(b"QBIND:KEMTLS");
         h.update(init.client_random);
@@ -378,13 +534,13 @@ impl ServerHandshake {
         h.update(&init.kem_ct);
         let transcript_hash = h.finalize();
 
-        // 4) Get key length from AEAD suite.
+        // Get key length from AEAD suite.
         let aead = crypto
             .aead_suite(init.aead_suite_id)
             .ok_or(NetError::UnsupportedSuite(init.aead_suite_id))?;
         let key_len = aead.key_len();
 
-        // 5) Derive session keys (SharedSecret provides as_bytes() accessor).
+        // Derive session keys.
         let keys = SessionKeys::derive(
             shared.as_bytes(),
             &transcript_hash,
@@ -393,15 +549,13 @@ impl ServerHandshake {
             key_len,
         );
 
-        // Explicitly zeroize the shared secret now that keys are derived (T141).
-        // Note: SharedSecret implements ZeroizeOnDrop, but we zeroize explicitly here
-        // to minimize the window during which the secret is in memory.
+        // Explicitly zeroize the shared secret (T141).
         shared.zeroize();
 
-        // 6) Build AEAD session (takes ownership of keys for secure handling).
+        // Build AEAD session.
         let session = AeadSession::new(crypto, init.aead_suite_id, keys)?;
 
-        // 7) Build ServerAccept.
+        // Build ServerAccept.
         let accept = ServerAccept {
             version: 1,
             kem_suite_id: init.kem_suite_id,
@@ -421,5 +575,28 @@ impl ServerHandshake {
         };
 
         Ok((accept, result))
+    }
+
+    /// Handle a ClientInit and produce ServerAccept plus a HandshakeResult.
+    ///
+    /// **Note**: This method does NOT enforce cookie protection. Use
+    /// `handle_client_init_with_cookie` for production deployments with DoS protection.
+    ///
+    /// This method is preserved for backward compatibility with existing tests.
+    pub fn handle_client_init<'a>(
+        &mut self,
+        crypto: &'a dyn CryptoProvider,
+        init: &ClientInit,
+    ) -> Result<(ServerAccept, HandshakeResult<'a>), NetError> {
+        // 1) Ensure suites match what we support.
+        if init.kem_suite_id != self.cfg.kem_suite_id {
+            return Err(NetError::UnsupportedSuite(init.kem_suite_id));
+        }
+        if init.aead_suite_id != self.cfg.aead_suite_id {
+            return Err(NetError::UnsupportedSuite(init.aead_suite_id));
+        }
+
+        // Delegate to inner implementation
+        self.handle_client_init_inner(crypto, init)
     }
 }
