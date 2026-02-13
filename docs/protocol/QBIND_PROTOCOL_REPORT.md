@@ -32,7 +32,7 @@ This report tracks protocol gaps, security assumptions, incomplete components, a
 | Consensus (`qbind-consensus`) | ✅ Implemented | HotStuff BFT core with timeout/view-change (M5) |
 | Node (`qbind-node`) | ⚠️ Partial | P2P networking, mempool, storage; LocalMesh mode stubbed |
 | Networking (`qbind-net`) | ✅ Implemented | KEMTLS handshake with DoS cookie protection (M6) |
-| Remote Signer (`qbind-remote-signer`) | ⚠️ Partial | Basic structure; full KEMTLS server not fully wired |
+| Remote Signer (`qbind-remote-signer`) | ⚠️ Partial | M10: Domain separation + replay protection + fail-closed; KEMTLS server config pending |
 | Governance (`qbind-gov`) | ✅ Implemented | Envelope parsing, multi-sig verification |
 
 ## Summary of Open Critical Issues
@@ -195,6 +195,8 @@ This section lists items marked TODO or partially implemented in the codebase.
 | **Description** | Full KEMTLS server requires proper key configuration |
 | **Security Impact** | Remote signer channel may not be fully secured |
 | **Required Milestone** | Pre-MainNet |
+| **Status** | ✅ Partially Mitigated (M10) |
+| **Note** | **M10**: Production-grade signer isolation implemented: (1) `QBIND:remote-signer:v1` domain separation tag prevents cross-protocol attacks, (2) Monotonic `request_id` for replay protection within session, (3) Fail-closed behavior: `SignerUnavailable` error returned if signer unreachable (no unsafe local fallback), (4) `MalformedResponse` and `ReplayDetected` error variants for protocol violations, (5) `SignerIsolationMetrics` tracking requests/failures by mode (local/remote/hsm), latency histogram, health status. Implementation in `crates/qbind-node/src/remote_signer.rs` and `crates/qbind-remote-signer/src/main.rs`. KEMTLS server configuration still requires key setup per deployment. |
 
 ## 3.9 DoS Cookie Enforcement
 
@@ -253,7 +255,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
 | Connection exhaustion (DoS) | Networking | DoS cookie enforcement via `handle_client_init_with_cookie()`: 2-step handshake, stateless HMAC-SHA3-256 cookie, no KEM decaps until valid cookie (M6) | Low (mitigated M6) | Mitigated |
 | Peer identity spoofing | Networking | NodeId extraction from KEMTLS via `derive_node_id_from_pubkey()` (M7) + mutual KEMTLS authentication (M8): outbound connections derive NodeId from server's KEM public key; inbound connections derive `client_node_id` from verified client certificate using `derive_node_id_from_cert()`. Cookie validation (M6) preserved before cert parsing. Environment gating: `MutualAuthMode::Required` for MainNet/TestNet. | Low (fully mitigated M7+M8) | Mitigated |
-| Key exposure on validator host | Crypto | Enable HSM/PKCS#11 integration | Medium (optional HSM) | High |
+| Key exposure on validator host | Crypto | M10: Signer isolation via remote signer with domain separation (`QBIND:remote-signer:v1`), replay protection (monotonic `request_id`), fail-closed behavior. Optional HSM/PKCS#11 integration feature-gated. | Low-Medium (mitigated M10; residual: configuration/operational risk) | Mitigated |
 | Nonce overflow | Networking | Session termination at u64::MAX | Low (implemented) | Low |
 | Double-vote attack | Consensus | Double-vote rejection implemented | Low (implemented) | Low |
 | Suite downgrade | Crypto | Downgrade rejection implemented | Low (implemented) | Low |

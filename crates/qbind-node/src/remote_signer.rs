@@ -1,4 +1,4 @@
-//! Remote signer client and transport abstraction for consensus operations (T149).
+//! Remote signer client and transport abstraction for consensus operations (T149, M10).
 //!
 //! This module provides a clean remote signer protocol model and transport abstraction
 //! to enable future integration with HSMs or remote signers without modifying the
@@ -19,6 +19,16 @@
 //! 3. **Client Implementation**: `RemoteSignerClient` implements `ValidatorSigner`
 //!    using a pluggable transport backend
 //!
+//! # Protocol Framing (M10)
+//!
+//! The remote signer protocol uses domain separation and replay protection:
+//!
+//! - **Domain separation tag**: `QBIND:remote-signer:v1` prefixed to all requests
+//! - **Request ID**: Monotonic u64 per session for replay protection
+//! - **Message type**: Identifies the signing operation type
+//! - **Payload length**: 4-byte LE length prefix
+//! - **Payload**: The actual signing preimage
+//!
 //! # Loopback Transport
 //!
 //! The `LoopbackSignerTransport` provides an in-process implementation that exercises
@@ -31,6 +41,8 @@
 //! - All signing happens on the remote side (or in LocalKeySigner for loopback)
 //! - The client only receives back the signature bytes
 //! - Request preimages include domain separators (QBIND_PROPOSAL_V1, etc.)
+//! - **Fail-closed**: If signer is unavailable, node refuses to sign (no unsafe fallback)
+//! - **Replay protection**: Monotonic request_id prevents replay attacks within session
 //!
 //! # Future Extensions
 //!
@@ -50,6 +62,28 @@ use qbind_consensus::timeout::timeout_signing_bytes;
 use crate::validator_signer::{LocalKeySigner, SignError, ValidatorSigner};
 
 // ============================================================================
+// M10: Domain Separation and Protocol Constants
+// ============================================================================
+
+/// Domain separation tag for remote signer protocol (M10).
+///
+/// This tag is prefixed to all remote signer requests to prevent
+/// cross-protocol attacks. The "v1" suffix allows for future versioning.
+pub const REMOTE_SIGNER_DOMAIN_TAG: &str = "QBIND:remote-signer:v1";
+
+/// Message type identifiers for remote signer protocol (M10).
+pub mod message_type {
+    /// Sign proposal request.
+    pub const SIGN_PROPOSAL: u8 = 0x01;
+    /// Sign vote request.
+    pub const SIGN_VOTE: u8 = 0x02;
+    /// Sign timeout request.
+    pub const SIGN_TIMEOUT: u8 = 0x03;
+    /// Health check / ping request.
+    pub const PING: u8 = 0x10;
+}
+
+// ============================================================================
 // Remote Signer RPC Model
 // ============================================================================
 
@@ -67,6 +101,27 @@ pub enum RemoteSignRequestKind {
     Timeout,
 }
 
+impl RemoteSignRequestKind {
+    /// Get the message type byte for this request kind (M10).
+    pub fn message_type(&self) -> u8 {
+        match self {
+            RemoteSignRequestKind::Proposal => message_type::SIGN_PROPOSAL,
+            RemoteSignRequestKind::Vote => message_type::SIGN_VOTE,
+            RemoteSignRequestKind::Timeout => message_type::SIGN_TIMEOUT,
+        }
+    }
+
+    /// Parse message type byte into request kind.
+    pub fn from_message_type(msg_type: u8) -> Option<Self> {
+        match msg_type {
+            message_type::SIGN_PROPOSAL => Some(RemoteSignRequestKind::Proposal),
+            message_type::SIGN_VOTE => Some(RemoteSignRequestKind::Vote),
+            message_type::SIGN_TIMEOUT => Some(RemoteSignRequestKind::Timeout),
+            _ => None,
+        }
+    }
+}
+
 /// Request to sign a consensus message.
 ///
 /// This struct contains all information needed by a remote signer to produce
@@ -75,6 +130,7 @@ pub enum RemoteSignRequestKind {
 /// - The type of message being signed
 /// - The canonical signing preimage (with domain separator)
 /// - Optional view number (for timeout messages)
+/// - Request ID for replay protection (M10)
 ///
 /// # Security Notes
 ///
@@ -83,8 +139,14 @@ pub enum RemoteSignRequestKind {
 /// - Private key material is NEVER included in this request.
 /// - The remote signer must validate that it has authority to sign for the
 ///   given `validator_id` and `suite_id`.
+/// - The `request_id` must be monotonically increasing within a session (M10).
 #[derive(Debug, Clone)]
 pub struct RemoteSignRequest {
+    /// Request ID for replay protection (M10).
+    ///
+    /// Must be monotonically increasing within a session.
+    /// Server rejects requests with request_id <= last_seen_request_id.
+    pub request_id: u64,
     /// The validator ID for which to sign.
     pub validator_id: ValidatorId,
     /// The signature suite ID (100 for ML-DSA-44).
@@ -121,6 +183,18 @@ pub enum RemoteSignError {
     RateLimited,
     /// The server encountered an internal error (T212).
     ServerError,
+    /// Replay attack detected: request_id not monotonically increasing (M10).
+    ///
+    /// This indicates the request_id was <= the last seen request_id in this session.
+    ReplayDetected,
+    /// The signer is unavailable (fail-closed behavior, M10).
+    ///
+    /// The node should NOT attempt to sign locally as a fallback.
+    SignerUnavailable,
+    /// Malformed response from the remote signer (M10).
+    ///
+    /// The response could not be parsed or had invalid structure.
+    MalformedResponse,
 }
 
 impl std::fmt::Display for RemoteSignError {
@@ -133,6 +207,9 @@ impl std::fmt::Display for RemoteSignError {
             RemoteSignError::Timeout => write!(f, "signing request timed out"),
             RemoteSignError::RateLimited => write!(f, "signing request rate limited"),
             RemoteSignError::ServerError => write!(f, "remote signer server error"),
+            RemoteSignError::ReplayDetected => write!(f, "replay detected: request_id not monotonic"),
+            RemoteSignError::SignerUnavailable => write!(f, "signer unavailable (fail-closed)"),
+            RemoteSignError::MalformedResponse => write!(f, "malformed response from signer"),
         }
     }
 }
@@ -145,6 +222,8 @@ impl std::error::Error for RemoteSignError {}
 /// Exactly one of `signature` or `error` must be `Some`.
 #[derive(Debug, Clone)]
 pub struct RemoteSignResponse {
+    /// Request ID echo for correlation (M10).
+    pub request_id: u64,
     /// The signature bytes (on success).
     pub signature: Option<Vec<u8>>,
     /// The error (on failure).
@@ -197,6 +276,17 @@ pub trait RemoteSignerTransport: Send + Sync {
 /// This client uses a pluggable `RemoteSignerTransport` to delegate signing
 /// operations to a remote signer (or loopback for testing).
 ///
+/// # Replay Protection (M10)
+///
+/// The client maintains a monotonic `request_id` counter that is incremented
+/// for each signing request. The server must reject any request with a
+/// `request_id` that is not strictly greater than the last processed request_id.
+///
+/// # Fail-Closed Behavior (M10)
+///
+/// If the signer is unavailable or returns an error, the client returns an error.
+/// The node must NOT fall back to local signing as this would defeat key isolation.
+///
 /// # Usage
 ///
 /// ```ignore
@@ -216,6 +306,8 @@ pub struct RemoteSignerClient {
     validator_id: ValidatorId,
     suite_id: u16,
     transport: Arc<dyn RemoteSignerTransport>,
+    /// Monotonic request ID counter for replay protection (M10).
+    next_request_id: std::sync::atomic::AtomicU64,
 }
 
 impl RemoteSignerClient {
@@ -235,7 +327,16 @@ impl RemoteSignerClient {
             validator_id,
             suite_id,
             transport,
+            next_request_id: std::sync::atomic::AtomicU64::new(1),
         }
+    }
+
+    /// Get and increment the next request ID (M10).
+    ///
+    /// Returns a monotonically increasing ID for each call.
+    fn next_request_id(&self) -> u64 {
+        self.next_request_id
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Common signing logic for all message types.
@@ -245,7 +346,9 @@ impl RemoteSignerClient {
         preimage: &[u8],
         view: Option<u64>,
     ) -> Result<Vec<u8>, SignError> {
+        let request_id = self.next_request_id();
         let req = RemoteSignRequest {
+            request_id,
             validator_id: self.validator_id,
             suite_id: self.suite_id,
             kind,
@@ -253,10 +356,16 @@ impl RemoteSignerClient {
             preimage: preimage.to_vec(),
         };
 
+        // M10: Fail-closed behavior - any transport error is fatal
         let resp = self
             .transport
             .send_sign_request(req)
-            .map_err(|_e| SignError::CryptoError)?;
+            .map_err(|e| match e {
+                RemoteSignError::SignerUnavailable => SignError::HsmError("signer unavailable".to_string()),
+                RemoteSignError::ReplayDetected => SignError::HsmError("replay detected".to_string()),
+                RemoteSignError::MalformedResponse => SignError::HsmError("malformed response".to_string()),
+                _ => SignError::CryptoError,
+            })?;
 
         match (resp.signature, resp.error) {
             (Some(sig), None) => Ok(sig),
@@ -318,6 +427,11 @@ impl ValidatorSigner for RemoteSignerClient {
 /// - Validating that RemoteSignerClient produces identical signatures to LocalKeySigner
 /// - Development and debugging
 ///
+/// # Replay Protection (M10)
+///
+/// The loopback transport tracks the last seen request_id and rejects any
+/// request where request_id <= last_request_id, mimicking production behavior.
+///
 /// # Security Notes
 ///
 /// This is an in-process transport. The signing key remains in the same process
@@ -325,6 +439,8 @@ impl ValidatorSigner for RemoteSignerClient {
 /// transport.
 pub struct LoopbackSignerTransport {
     inner: Arc<LocalKeySigner>,
+    /// Last processed request_id for replay protection (M10).
+    last_request_id: std::sync::atomic::AtomicU64,
 }
 
 impl LoopbackSignerTransport {
@@ -334,7 +450,10 @@ impl LoopbackSignerTransport {
     ///
     /// * `inner` - The local key signer to use for actual signing
     pub fn new(inner: Arc<LocalKeySigner>) -> Self {
-        LoopbackSignerTransport { inner }
+        LoopbackSignerTransport {
+            inner,
+            last_request_id: std::sync::atomic::AtomicU64::new(0),
+        }
     }
 }
 
@@ -343,9 +462,21 @@ impl RemoteSignerTransport for LoopbackSignerTransport {
         &self,
         request: RemoteSignRequest,
     ) -> Result<RemoteSignResponse, RemoteSignError> {
+        // M10: Replay protection - request_id must be strictly greater than last
+        let last_id = self.last_request_id.load(std::sync::atomic::Ordering::SeqCst);
+        if request.request_id <= last_id {
+            return Ok(RemoteSignResponse {
+                request_id: request.request_id,
+                signature: None,
+                error: Some(RemoteSignError::ReplayDetected),
+            });
+        }
+        self.last_request_id.store(request.request_id, std::sync::atomic::Ordering::SeqCst);
+
         // Validate suite_id matches
         if request.suite_id != self.inner.suite_id() {
             return Ok(RemoteSignResponse {
+                request_id: request.request_id,
                 signature: None,
                 error: Some(RemoteSignError::Unauthorized),
             });
@@ -354,6 +485,7 @@ impl RemoteSignerTransport for LoopbackSignerTransport {
         // Validate validator_id matches
         if request.validator_id != *self.inner.validator_id() {
             return Ok(RemoteSignResponse {
+                request_id: request.request_id,
                 signature: None,
                 error: Some(RemoteSignError::Unauthorized),
             });
@@ -373,14 +505,17 @@ impl RemoteSignerTransport for LoopbackSignerTransport {
         // Convert result to response
         match result {
             Ok(sig) => Ok(RemoteSignResponse {
+                request_id: request.request_id,
                 signature: Some(sig),
                 error: None,
             }),
             Err(SignError::InvalidKey) => Ok(RemoteSignResponse {
+                request_id: request.request_id,
                 signature: None,
                 error: Some(RemoteSignError::InvalidKey),
             }),
             Err(SignError::CryptoError) | Err(SignError::HsmError(_)) => Ok(RemoteSignResponse {
+                request_id: request.request_id,
                 signature: None,
                 error: Some(RemoteSignError::CryptoError),
             }),
@@ -668,10 +803,32 @@ impl TcpKemTlsSignerTransport {
         Ok(())
     }
 
-    /// Encode a RemoteSignRequest to bytes for wire transmission.
+    /// Encode a RemoteSignRequest to bytes for wire transmission (M10).
+    ///
+    /// # Wire Format (M10)
+    ///
+    /// ```text
+    /// domain_tag:     "QBIND:remote-signer:v1" (len bytes)
+    /// request_id:     8 bytes LE
+    /// validator_id:   8 bytes LE
+    /// suite_id:       2 bytes LE
+    /// kind:           1 byte (message type)
+    /// view_present:   1 byte flag
+    /// view:           8 bytes LE (if present)
+    /// preimage_len:   4 bytes LE
+    /// preimage:       variable length
+    /// ```
     fn encode_request(request: &RemoteSignRequest) -> Vec<u8> {
-        // Format: validator_id(8) + suite_id(2) + kind(1) + view(9) + preimage_len(4) + preimage
-        let mut buf = Vec::with_capacity(24 + request.preimage.len());
+        // Calculate capacity: domain_tag(len) + request_id(8) + validator_id(8) + suite_id(2)
+        //                   + kind(1) + view(9) + preimage_len(4) + preimage
+        let domain_tag = REMOTE_SIGNER_DOMAIN_TAG.as_bytes();
+        let mut buf = Vec::with_capacity(domain_tag.len() + 32 + request.preimage.len());
+
+        // M10: Domain separation tag
+        buf.extend_from_slice(domain_tag);
+
+        // M10: Request ID for replay protection
+        buf.extend_from_slice(&request.request_id.to_le_bytes());
 
         // validator_id: 8 bytes LE
         buf.extend_from_slice(&request.validator_id.as_u64().to_le_bytes());
@@ -679,13 +836,8 @@ impl TcpKemTlsSignerTransport {
         // suite_id: 2 bytes LE
         buf.extend_from_slice(&request.suite_id.to_le_bytes());
 
-        // kind: 1 byte
-        let kind_byte = match request.kind {
-            RemoteSignRequestKind::Proposal => 0u8,
-            RemoteSignRequestKind::Vote => 1u8,
-            RemoteSignRequestKind::Timeout => 2u8,
-        };
-        buf.push(kind_byte);
+        // kind: 1 byte (using message_type for clarity)
+        buf.push(request.kind.message_type());
 
         // view: 1 byte present flag + 8 bytes LE if present
         if let Some(v) = request.view {
@@ -706,34 +858,65 @@ impl TcpKemTlsSignerTransport {
         buf
     }
 
-    /// Decode a RemoteSignResponse from bytes.
-    fn decode_response(data: &[u8]) -> Result<RemoteSignResponse, RemoteSignError> {
-        // Format: status(1) + [signature_len(4) + signature] OR [error_code(1)]
-        if data.is_empty() {
-            return Err(RemoteSignError::TransportError);
+    /// Decode a RemoteSignResponse from bytes (M10).
+    ///
+    /// # Wire Format (M10)
+    ///
+    /// Success:
+    /// ```text
+    /// status:         1 byte (0 = success)
+    /// request_id:     8 bytes LE (echo)
+    /// signature_len:  4 bytes LE
+    /// signature:      variable length
+    /// ```
+    ///
+    /// Error:
+    /// ```text
+    /// status:         1 byte (non-zero = error)
+    /// request_id:     8 bytes LE (echo)
+    /// error_code:     1 byte
+    /// ```
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The raw response bytes from the remote signer
+    /// * `expected_request_id` - The request_id we sent, used to verify the
+    ///   response correlation. If the echoed request_id doesn't match,
+    ///   returns `MalformedResponse` error.
+    fn decode_response(data: &[u8], expected_request_id: u64) -> Result<RemoteSignResponse, RemoteSignError> {
+        // Minimum: status(1) + request_id(8) + error_code(1) = 10 bytes
+        if data.len() < 10 {
+            return Err(RemoteSignError::MalformedResponse);
         }
 
         let status = data[0];
+        let request_id = u64::from_le_bytes([
+            data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+        ]);
+
+        // Verify request_id echo matches (M10 correlation)
+        if request_id != expected_request_id {
+            return Err(RemoteSignError::MalformedResponse);
+        }
+
         if status == 0 {
             // Success: signature follows
-            if data.len() < 5 {
-                return Err(RemoteSignError::TransportError);
+            if data.len() < 13 {
+                return Err(RemoteSignError::MalformedResponse);
             }
-            let sig_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
-            if data.len() < 5 + sig_len {
-                return Err(RemoteSignError::TransportError);
+            let sig_len = u32::from_le_bytes([data[9], data[10], data[11], data[12]]) as usize;
+            if data.len() < 13 + sig_len {
+                return Err(RemoteSignError::MalformedResponse);
             }
-            let signature = data[5..5 + sig_len].to_vec();
+            let signature = data[13..13 + sig_len].to_vec();
             Ok(RemoteSignResponse {
+                request_id,
                 signature: Some(signature),
                 error: None,
             })
         } else {
-            // Error: error_code follows
-            if data.len() < 2 {
-                return Err(RemoteSignError::TransportError);
-            }
-            let error_code = data[1];
+            // Error: error_code follows request_id
+            let error_code = data[9];
             let error = match error_code {
                 1 => RemoteSignError::InvalidKey,
                 2 => RemoteSignError::CryptoError,
@@ -742,9 +925,13 @@ impl TcpKemTlsSignerTransport {
                 5 => RemoteSignError::Timeout,
                 6 => RemoteSignError::RateLimited,
                 7 => RemoteSignError::ServerError,
-                _ => RemoteSignError::TransportError,
+                8 => RemoteSignError::ReplayDetected,
+                9 => RemoteSignError::SignerUnavailable,
+                10 => RemoteSignError::MalformedResponse,
+                _ => RemoteSignError::MalformedResponse,
             };
             Ok(RemoteSignResponse {
+                request_id,
                 signature: None,
                 error: Some(error),
             })
@@ -763,16 +950,17 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
             RemoteSignRequestKind::Vote => "vote",
             RemoteSignRequestKind::Timeout => "timeout",
         };
+        let expected_request_id = request.request_id;
 
         // Validate preimage size
         if request.preimage.len() > MAX_PREIMAGE_SIZE {
             if let Some(ref m) = self.metrics {
                 m.record_result(kind_str, false, 0, Some("protocol"));
             }
-            return Err(RemoteSignError::TransportError);
+            return Err(RemoteSignError::MalformedResponse);
         }
 
-        // Establish KEMTLS connection
+        // M10: Fail-closed - if we can't connect, return SignerUnavailable
         let mut channel = match SecureChannel::connect(&self.addr, self.kemtls_config.clone()) {
             Ok(ch) => ch,
             Err(_) => {
@@ -780,7 +968,7 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
                 if let Some(ref m) = self.metrics {
                     m.record_result(kind_str, false, latency, Some("transport"));
                 }
-                return Err(RemoteSignError::TransportError);
+                return Err(RemoteSignError::SignerUnavailable);
             }
         };
 
@@ -798,7 +986,7 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
             if let Some(ref m) = self.metrics {
                 m.record_result(kind_str, false, latency, Some("transport"));
             }
-            return Err(RemoteSignError::TransportError);
+            return Err(RemoteSignError::SignerUnavailable);
         }
 
         // Receive response
@@ -819,19 +1007,19 @@ impl RemoteSignerTransport for TcpKemTlsSignerTransport {
                 if let Some(ref m) = self.metrics {
                     m.record_result(kind_str, false, latency, Some("transport"));
                 }
-                return Err(RemoteSignError::TransportError);
+                return Err(RemoteSignError::SignerUnavailable);
             }
         };
 
-        // Decode response
-        let response = match Self::decode_response(&response_bytes) {
+        // Decode response with request_id verification (M10)
+        let response = match Self::decode_response(&response_bytes, expected_request_id) {
             Ok(r) => r,
             Err(_) => {
                 let latency = start.elapsed().as_millis() as u64;
                 if let Some(ref m) = self.metrics {
                     m.record_result(kind_str, false, latency, Some("protocol"));
                 }
-                return Err(RemoteSignError::TransportError);
+                return Err(RemoteSignError::MalformedResponse);
             }
         };
 

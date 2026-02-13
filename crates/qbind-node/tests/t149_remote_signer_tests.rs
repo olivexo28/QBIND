@@ -317,9 +317,10 @@ struct CryptoErrorTransport;
 impl RemoteSignerTransport for CryptoErrorTransport {
     fn send_sign_request(
         &self,
-        _request: RemoteSignRequest,
+        request: RemoteSignRequest,
     ) -> Result<RemoteSignResponse, RemoteSignError> {
         Ok(RemoteSignResponse {
+            request_id: request.request_id,
             signature: None,
             error: Some(RemoteSignError::CryptoError),
         })
@@ -457,6 +458,7 @@ fn remote_sign_error_display() {
 #[test]
 fn remote_sign_request_construction() {
     let request = RemoteSignRequest {
+        request_id: 1,
         validator_id: ValidatorId::new(1),
         suite_id: 100,
         kind: RemoteSignRequestKind::Proposal,
@@ -464,6 +466,7 @@ fn remote_sign_request_construction() {
         preimage: vec![1, 2, 3, 4],
     };
 
+    assert_eq!(request.request_id, 1);
     assert_eq!(request.validator_id, ValidatorId::new(1));
     assert_eq!(request.suite_id, 100);
     assert_eq!(request.kind, RemoteSignRequestKind::Proposal);
@@ -476,17 +479,21 @@ fn remote_sign_request_construction() {
 fn remote_sign_response_construction() {
     // Success case
     let success = RemoteSignResponse {
+        request_id: 1,
         signature: Some(vec![1, 2, 3]),
         error: None,
     };
+    assert_eq!(success.request_id, 1);
     assert!(success.signature.is_some());
     assert!(success.error.is_none());
 
     // Error case
     let error = RemoteSignResponse {
+        request_id: 2,
         signature: None,
         error: Some(RemoteSignError::CryptoError),
     };
+    assert_eq!(error.request_id, 2);
     assert!(error.signature.is_none());
     assert!(error.error.is_some());
 }

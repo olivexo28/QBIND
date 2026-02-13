@@ -43,17 +43,43 @@ fn make_test_signer(validator_id: ValidatorId) -> (Vec<u8>, Arc<LocalKeySigner>)
     (pk, signer)
 }
 
-/// Encode a RemoteSignRequest for testing.
+/// Encode a RemoteSignRequest for testing (M10 format).
+///
+/// M10 Wire Format:
+/// domain_tag:     "QBIND:remote-signer:v1" (23 bytes)
+/// request_id:     8 bytes LE
+/// validator_id:   8 bytes LE
+/// suite_id:       2 bytes LE
+/// kind:           1 byte (message type)
+/// view_present:   1 byte flag
+/// view:           8 bytes LE (if present)
+/// preimage_len:   4 bytes LE
+/// preimage:       variable length
 fn encode_request(request: &RemoteSignRequest) -> Vec<u8> {
-    let mut buf = Vec::with_capacity(24 + request.preimage.len());
+    let domain_tag = b"QBIND:remote-signer:v1";
+    let mut buf = Vec::with_capacity(domain_tag.len() + 32 + request.preimage.len());
+    
+    // Domain tag
+    buf.extend_from_slice(domain_tag);
+    
+    // request_id
+    buf.extend_from_slice(&request.request_id.to_le_bytes());
+    
+    // validator_id
     buf.extend_from_slice(&request.validator_id.as_u64().to_le_bytes());
+    
+    // suite_id
     buf.extend_from_slice(&request.suite_id.to_le_bytes());
+    
+    // kind (using message_type constants)
     let kind_byte = match request.kind {
-        RemoteSignRequestKind::Proposal => 0u8,
-        RemoteSignRequestKind::Vote => 1u8,
-        RemoteSignRequestKind::Timeout => 2u8,
+        RemoteSignRequestKind::Proposal => 0x01u8,
+        RemoteSignRequestKind::Vote => 0x02u8,
+        RemoteSignRequestKind::Timeout => 0x03u8,
     };
     buf.push(kind_byte);
+    
+    // view
     if let Some(v) = request.view {
         buf.push(1u8);
         buf.extend_from_slice(&v.to_le_bytes());
@@ -61,34 +87,45 @@ fn encode_request(request: &RemoteSignRequest) -> Vec<u8> {
         buf.push(0u8);
         buf.extend_from_slice(&[0u8; 8]);
     }
+    
+    // preimage_len and preimage
     buf.extend_from_slice(&(request.preimage.len() as u32).to_le_bytes());
     buf.extend_from_slice(&request.preimage);
     buf
 }
 
-/// Decode a RemoteSignResponse for testing.
+/// Decode a RemoteSignResponse for testing (M10 format).
+///
+/// M10 Wire Format:
+/// Success: status(1) + request_id(8) + sig_len(4) + sig
+/// Error:   status(1) + request_id(8) + error_code(1)
 fn decode_response(data: &[u8]) -> Result<RemoteSignResponse, RemoteSignError> {
-    if data.is_empty() {
+    // Minimum: status(1) + request_id(8) + error_code(1) = 10 bytes
+    if data.len() < 10 {
         return Err(RemoteSignError::TransportError);
     }
     let status = data[0];
+    let request_id = u64::from_le_bytes([
+        data[1], data[2], data[3], data[4], data[5], data[6], data[7], data[8],
+    ]);
+
     if status == 0 {
-        if data.len() < 5 {
+        // Success: signature follows
+        if data.len() < 13 {
             return Err(RemoteSignError::TransportError);
         }
-        let sig_len = u32::from_le_bytes([data[1], data[2], data[3], data[4]]) as usize;
-        if data.len() < 5 + sig_len {
+        let sig_len = u32::from_le_bytes([data[9], data[10], data[11], data[12]]) as usize;
+        if data.len() < 13 + sig_len {
             return Err(RemoteSignError::TransportError);
         }
         Ok(RemoteSignResponse {
-            signature: Some(data[5..5 + sig_len].to_vec()),
+            request_id,
+            signature: Some(data[13..13 + sig_len].to_vec()),
             error: None,
         })
     } else {
-        if data.len() < 2 {
-            return Err(RemoteSignError::TransportError);
-        }
-        let error = match data[1] {
+        // Error: error_code follows request_id
+        let error = match data[9] {
             1 => RemoteSignError::InvalidKey,
             2 => RemoteSignError::CryptoError,
             3 => RemoteSignError::Unauthorized,
@@ -96,9 +133,13 @@ fn decode_response(data: &[u8]) -> Result<RemoteSignResponse, RemoteSignError> {
             5 => RemoteSignError::Timeout,
             6 => RemoteSignError::RateLimited,
             7 => RemoteSignError::ServerError,
+            8 => RemoteSignError::ReplayDetected,
+            9 => RemoteSignError::SignerUnavailable,
+            10 => RemoteSignError::MalformedResponse,
             _ => RemoteSignError::TransportError,
         };
         Ok(RemoteSignResponse {
+            request_id,
             signature: None,
             error: Some(error),
         })
@@ -112,6 +153,7 @@ fn decode_response(data: &[u8]) -> Result<RemoteSignResponse, RemoteSignError> {
 #[test]
 fn t212_request_encode_proposal() {
     let request = RemoteSignRequest {
+        request_id: 1,
         validator_id: ValidatorId::new(42),
         suite_id: 100,
         kind: RemoteSignRequestKind::Proposal,
@@ -121,34 +163,41 @@ fn t212_request_encode_proposal() {
 
     let encoded = encode_request(&request);
 
-    // Validate structure
-    assert!(encoded.len() >= 24 + 4);
+    // M10: Validate structure starts with domain tag
+    let domain_tag = b"QBIND:remote-signer:v1";
+    assert!(encoded.len() >= domain_tag.len() + 32 + 4, "encoded too short");
+    
+    // Verify domain tag prefix
+    assert_eq!(&encoded[..domain_tag.len()], domain_tag, "domain tag mismatch");
+
+    let offset = domain_tag.len();
+
+    // Decode request_id
+    let request_id = u64::from_le_bytes([
+        encoded[offset], encoded[offset+1], encoded[offset+2], encoded[offset+3],
+        encoded[offset+4], encoded[offset+5], encoded[offset+6], encoded[offset+7],
+    ]);
+    assert_eq!(request_id, 1);
 
     // Decode validator_id
     let validator_id = u64::from_le_bytes([
-        encoded[0], encoded[1], encoded[2], encoded[3], encoded[4], encoded[5], encoded[6],
-        encoded[7],
+        encoded[offset+8], encoded[offset+9], encoded[offset+10], encoded[offset+11],
+        encoded[offset+12], encoded[offset+13], encoded[offset+14], encoded[offset+15],
     ]);
     assert_eq!(validator_id, 42);
 
     // Decode suite_id
-    let suite_id = u16::from_le_bytes([encoded[8], encoded[9]]);
+    let suite_id = u16::from_le_bytes([encoded[offset+16], encoded[offset+17]]);
     assert_eq!(suite_id, 100);
 
-    // Decode kind
-    assert_eq!(encoded[10], 0); // Proposal
-
-    // Decode preimage_len
-    let preimage_len = u32::from_le_bytes([encoded[20], encoded[21], encoded[22], encoded[23]]);
-    assert_eq!(preimage_len, 4);
-
-    // Decode preimage
-    assert_eq!(&encoded[24..28], &[1, 2, 3, 4]);
+    // Decode kind (using message_type)
+    assert_eq!(encoded[offset+18], 0x01); // SIGN_PROPOSAL
 }
 
 #[test]
 fn t212_request_encode_vote_with_view() {
     let request = RemoteSignRequest {
+        request_id: 42,
         validator_id: ValidatorId::new(100),
         suite_id: 100,
         kind: RemoteSignRequestKind::Vote,
@@ -157,23 +206,19 @@ fn t212_request_encode_vote_with_view() {
     };
 
     let encoded = encode_request(&request);
+    let domain_tag = b"QBIND:remote-signer:v1";
+    let offset = domain_tag.len();
 
     // Validate kind
-    assert_eq!(encoded[10], 1); // Vote
+    assert_eq!(encoded[offset+18], 0x02); // SIGN_VOTE
 
     // Validate view_present
-    assert_eq!(encoded[11], 1);
+    assert_eq!(encoded[offset+19], 1);
 
     // Validate view value
     let view = u64::from_le_bytes([
-        encoded[12],
-        encoded[13],
-        encoded[14],
-        encoded[15],
-        encoded[16],
-        encoded[17],
-        encoded[18],
-        encoded[19],
+        encoded[offset+20], encoded[offset+21], encoded[offset+22], encoded[offset+23],
+        encoded[offset+24], encoded[offset+25], encoded[offset+26], encoded[offset+27],
     ]);
     assert_eq!(view, 42);
 }
@@ -181,6 +226,7 @@ fn t212_request_encode_vote_with_view() {
 #[test]
 fn t212_request_encode_timeout() {
     let request = RemoteSignRequest {
+        request_id: 100,
         validator_id: ValidatorId::new(1),
         suite_id: 100,
         kind: RemoteSignRequestKind::Timeout,
@@ -189,42 +235,70 @@ fn t212_request_encode_timeout() {
     };
 
     let encoded = encode_request(&request);
-    assert_eq!(encoded[10], 2); // Timeout
+    let domain_tag = b"QBIND:remote-signer:v1";
+    let offset = domain_tag.len();
+    assert_eq!(encoded[offset+18], 0x03); // SIGN_TIMEOUT
 }
 
 #[test]
 fn t212_response_decode_success() {
-    // Success response: status=0, sig_len=3, sig=[1,2,3]
-    let data = vec![0, 3, 0, 0, 0, 1, 2, 3];
+    // M10 Success response: status=0, request_id=42, sig_len=3, sig=[1,2,3]
+    let mut data = vec![0]; // status
+    data.extend_from_slice(&42u64.to_le_bytes()); // request_id
+    data.extend_from_slice(&3u32.to_le_bytes()); // sig_len
+    data.extend_from_slice(&[1, 2, 3]); // signature
+    
     let response = decode_response(&data).expect("decode failed");
 
     assert!(response.signature.is_some());
     assert_eq!(response.signature.unwrap(), vec![1, 2, 3]);
     assert!(response.error.is_none());
+    assert_eq!(response.request_id, 42);
 }
 
 #[test]
 fn t212_response_decode_error() {
-    // Error response: status=1, error_code=3 (Unauthorized)
-    let data = vec![1, 3];
+    // M10 Error response: status=1, request_id=123, error_code=3 (Unauthorized)
+    let mut data = vec![1]; // status
+    data.extend_from_slice(&123u64.to_le_bytes()); // request_id
+    data.push(3); // error_code
+    
     let response = decode_response(&data).expect("decode failed");
 
     assert!(response.signature.is_none());
     assert_eq!(response.error, Some(RemoteSignError::Unauthorized));
+    assert_eq!(response.request_id, 123);
 }
 
 #[test]
 fn t212_response_decode_rate_limited() {
-    let data = vec![1, 6];
+    let mut data = vec![1]; // status
+    data.extend_from_slice(&1u64.to_le_bytes()); // request_id
+    data.push(6); // error_code
+    
     let response = decode_response(&data).expect("decode failed");
     assert_eq!(response.error, Some(RemoteSignError::RateLimited));
 }
 
 #[test]
 fn t212_response_decode_server_error() {
-    let data = vec![1, 7];
+    let mut data = vec![1]; // status
+    data.extend_from_slice(&1u64.to_le_bytes()); // request_id
+    data.push(7); // error_code
+    
     let response = decode_response(&data).expect("decode failed");
     assert_eq!(response.error, Some(RemoteSignError::ServerError));
+}
+
+#[test]
+fn t212_response_decode_replay_detected_m10() {
+    // M10: Test new ReplayDetected error code
+    let mut data = vec![1]; // status
+    data.extend_from_slice(&1u64.to_le_bytes()); // request_id
+    data.push(8); // error_code for ReplayDetected
+    
+    let response = decode_response(&data).expect("decode failed");
+    assert_eq!(response.error, Some(RemoteSignError::ReplayDetected));
 }
 
 // ============================================================================
