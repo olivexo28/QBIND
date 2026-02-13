@@ -86,6 +86,7 @@ use crate::node_config::NetworkTransportConfig;
 use crate::p2p::{NodeId, P2pMessage, P2pService};
 use crate::secure_channel::{accept_kemtls_async, connect_kemtls_async, SecureChannelAsync};
 use qbind_crypto::CryptoProvider;
+use qbind_hash::derive_node_id_from_pubkey;
 use qbind_net::{ClientConnectionConfig, ServerConnectionConfig};
 
 // ============================================================================
@@ -234,6 +235,18 @@ impl PeerConnection {
 /// - Simple length-prefixed framing
 /// - Broadcast and direct messaging
 /// - Subscription to inbound messages
+///
+/// # NodeId Derivation (M7)
+///
+/// **Outbound connections**: NodeId is derived from the peer server's KEM public
+/// key via domain-separated SHA3-256: `node_id = sha3_256("QBIND:nodeid:v1" || peer_kem_pk)`.
+/// This provides cryptographic binding between the NodeId and the KEMTLS identity.
+///
+/// **Inbound connections**: The current KEMTLS-PDK protocol does not include client
+/// certificate exchange, so the connecting client's identity cannot be cryptographically
+/// derived from the handshake alone. Inbound connections use a session-unique temporary
+/// identifier until proper identity is established through application-layer protocols
+/// (e.g., the first consensus message from the peer reveals their validator identity).
 pub struct TcpKemTlsP2pService {
     /// Local NodeId.
     local_node_id: NodeId,
@@ -262,6 +275,8 @@ pub struct TcpKemTlsP2pService {
     bytes_sent: Arc<AtomicU64>,
     /// Bytes received counter.
     bytes_received: Arc<AtomicU64>,
+    /// Inbound session counter for generating unique temporary NodeIds (M7).
+    inbound_session_counter: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -302,6 +317,7 @@ impl TcpKemTlsP2pService {
             connections_current: Arc::new(AtomicU64::new(0)),
             bytes_sent: Arc::new(AtomicU64::new(0)),
             bytes_received: Arc::new(AtomicU64::new(0)),
+            inbound_session_counter: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -338,6 +354,7 @@ impl TcpKemTlsP2pService {
         let server_cfg = self.server_cfg.clone();
         let connections_current = Arc::clone(&self.connections_current);
         let bytes_received = Arc::clone(&self.bytes_received);
+        let inbound_session_counter = Arc::clone(&self.inbound_session_counter);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -357,6 +374,7 @@ impl TcpKemTlsP2pService {
                                 let server_cfg_clone = server_cfg.clone();
                                 let connections_current_clone = Arc::clone(&connections_current);
                                 let bytes_received_clone = Arc::clone(&bytes_received);
+                                let inbound_session_counter_clone = Arc::clone(&inbound_session_counter);
 
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_inbound_connection(
@@ -367,6 +385,7 @@ impl TcpKemTlsP2pService {
                                         inbound_tx_clone,
                                         connections_current_clone,
                                         bytes_received_clone,
+                                        inbound_session_counter_clone,
                                     )
                                     .await
                                     {
@@ -385,25 +404,61 @@ impl TcpKemTlsP2pService {
     }
 
     /// Handle an inbound connection: KEMTLS handshake + spawn read/write loops.
+    ///
+    /// # M7: NodeId for Inbound Connections
+    ///
+    /// The current KEMTLS-PDK protocol does not include client certificate exchange,
+    /// so the connecting client's cryptographic identity cannot be derived from the
+    /// handshake. For inbound connections, we generate a temporary session-unique
+    /// NodeId based on:
+    /// - The server's local validator ID (provides server identity binding)
+    /// - A monotonic session counter (provides uniqueness)
+    /// - The peer's remote address (provides additional context)
+    ///
+    /// The actual peer identity will be established through application-layer
+    /// protocols (e.g., when the peer sends their first consensus message).
+    /// A future protocol enhancement could add mutual KEMTLS authentication.
     async fn handle_inbound_connection(
         stream: TcpStream,
-        _peer_addr: std::net::SocketAddr,
+        peer_addr: std::net::SocketAddr,
         server_cfg: ServerConnectionConfig,
         peers: Arc<RwLock<HashMap<NodeId, PeerConnection>>>,
         inbound_tx: mpsc::Sender<P2pMessage>,
         connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
+        inbound_session_counter: Arc<AtomicU64>,
     ) -> Result<(), P2pTransportError> {
         // Convert Tokio stream to std::net::TcpStream for KEMTLS handshake
         let _std_stream = stream.into_std().map_err(P2pTransportError::Io)?;
 
         // Perform KEMTLS handshake (blocking)
-        let channel = accept_kemtls_async(_std_stream, server_cfg)
+        let channel = accept_kemtls_async(_std_stream, server_cfg.clone())
             .await
             .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
-        // Derive NodeId from peer (for now, use a placeholder; in production, extract from cert)
-        let node_id = NodeId::zero(); // TODO: Extract from KEMTLS cert
+        // M7: Generate a temporary session-unique NodeId for inbound connections.
+        // This is NOT cryptographically bound to the client's identity (protocol limitation).
+        // The NodeId is derived from:
+        // - server's local_validator_id: provides server identity context
+        // - session counter: ensures uniqueness across connections
+        // - peer address: provides additional entropy and debugging context
+        //
+        // Note: True client identity binding requires mutual KEMTLS authentication
+        // (client sends their delegation cert) which is not in the current protocol.
+        let session_id = inbound_session_counter.fetch_add(1, Ordering::Relaxed);
+        let mut preimage = Vec::new();
+        preimage.extend_from_slice(b"QBIND:inbound:session:v1:");
+        preimage.extend_from_slice(&server_cfg.handshake_config.local_validator_id);
+        preimage.extend_from_slice(&session_id.to_be_bytes());
+        preimage.extend_from_slice(peer_addr.to_string().as_bytes());
+        let node_id_bytes = qbind_hash::sha3_256(&preimage);
+        let node_id = NodeId::new(node_id_bytes);
+
+        // Log that this is a temporary session ID (not cryptographically bound to peer)
+        println!(
+            "[P2P] Inbound connection from {} assigned temporary session NodeId {:?}",
+            peer_addr, node_id
+        );
 
         connections_current.fetch_add(1, Ordering::Relaxed);
 
@@ -436,8 +491,11 @@ impl TcpKemTlsP2pService {
             .await
             .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
-        // Derive NodeId from peer (for now, use a placeholder)
-        let node_id = NodeId::zero(); // TODO: Extract from KEMTLS cert
+        // M7: Derive NodeId from peer's KEM public key (cryptographic binding)
+        // The peer_kem_pk in client_cfg is the server's KEM public key that we
+        // are connecting to. NodeId = sha3_256("QBIND:nodeid:v1" || peer_kem_pk)
+        let node_id_bytes = derive_node_id_from_pubkey(&self.client_cfg.peer_kem_pk);
+        let node_id = NodeId::new(node_id_bytes);
 
         self.connections_current.fetch_add(1, Ordering::Relaxed);
 

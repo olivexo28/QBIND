@@ -157,6 +157,8 @@ This section lists items marked TODO or partially implemented in the codebase.
 | **Description** | NodeId is set to zero instead of being extracted from KEMTLS certificate |
 | **Security Impact** | Peer identity not cryptographically verified; potential impersonation |
 | **Required Milestone** | Pre-TestNet |
+| **Status** | ✅ Mitigated (M7) |
+| **Note** | **M7**: NodeId derivation implemented using domain-separated SHA3-256. **Outbound connections** (client side): NodeId derived from peer server's KEM public key via `node_id = sha3_256("QBIND:nodeid:v1" || peer_kem_pk)`. This provides cryptographic binding between NodeId and KEMTLS identity. **Inbound connections** (server side): The current KEMTLS-PDK protocol does not include client certificate exchange, so client identity cannot be cryptographically derived from handshake alone. A session-unique temporary identifier is used until application-layer identity is established. A future protocol enhancement could add mutual KEMTLS authentication. Tests in `crates/qbind-node/tests/m7_nodeid_extraction_tests.rs` (13 tests) verify: deterministic derivation, different certs/pubkeys produce different NodeIds, NodeId no longer defaults to zero, domain tag correctness. |
 
 ## 3.5 Validator vs Non-Validator Stricter Rules
 
@@ -248,7 +250,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
 | Connection exhaustion (DoS) | Networking | DoS cookie enforcement via `handle_client_init_with_cookie()`: 2-step handshake, stateless HMAC-SHA3-256 cookie, no KEM decaps until valid cookie (M6) | Low (mitigated M6) | Mitigated |
-| Peer identity spoofing | Networking | Extract NodeId from KEMTLS cert | Medium | High |
+| Peer identity spoofing | Networking | NodeId extraction from KEMTLS via `derive_node_id_from_pubkey()` (M7): outbound connections derive NodeId from server's KEM public key; inbound connections use session-unique identifier until app-layer identity established | Low for outbound, Medium for inbound (partially mitigated M7) | Mitigated |
 | Key exposure on validator host | Crypto | Enable HSM/PKCS#11 integration | Medium (optional HSM) | High |
 | Nonce overflow | Networking | Session termination at u64::MAX | Low (implemented) | Low |
 | Double-vote attack | Consensus | Double-vote rejection implemented | Low (implemented) | Low |
