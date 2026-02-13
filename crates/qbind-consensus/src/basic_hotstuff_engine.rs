@@ -1327,7 +1327,6 @@ impl BasicHotStuffEngine<[u8; 32]> {
     ///
     /// # Arguments
     ///
-    /// - `block_view`: The view/height of the block to vote on
     /// - `justify_qc_view`: The view of the block's justify QC (optional)
     ///
     /// # Returns

@@ -37,10 +37,9 @@ This report tracks protocol gaps, security assumptions, incomplete components, a
 
 ## Summary of Open Critical Issues
 
-1. ~~**Timeout/view-change mechanics not implemented**~~ - ✅ Mitigated (M5): Production-ready timeout/view-change with fail-closed behavior
-2. **Slashing penalties infrastructure present but not enforced** - No economic deterrent for misbehavior
-3. **DoS cookie protection defined but not enforced** - Connection exhaustion vulnerability
-4. **LocalMesh node operation is a stub** - Limited testing capability
+1. **Slashing penalties infrastructure present but not enforced** - No economic deterrent for misbehavior
+2. **DoS cookie protection defined but not enforced** - Connection exhaustion vulnerability
+3. **LocalMesh node operation is a stub** - Limited testing capability
 
 ---
 
@@ -92,7 +91,7 @@ This section lists items where the whitepaper lacks formal precision.
 | **Status** | ✅ Mitigated (M5) |
 | **Risk Level** | Low (mitigated) |
 | **Action Required** | ~~Implement timeout logic; formalize view-change protocol; provide liveness argument~~ |
-| **Note** | **M5**: Production-ready timeout and view-change mechanism implemented consistent with Section 17 of the QBIND whitepaper. Implementation includes: (1) `TimeoutPacemaker` with exponential backoff for timeout detection, (2) `TimeoutAccumulator` for collecting timeout messages and forming TimeoutCertificates (TC), (3) `BasicHotStuffEngine.on_timeout_msg()` and `on_timeout_certificate()` for TC processing, (4) View monotonicity enforcement via `try_advance_to_view()`, (5) Locked-height safety checks via `is_safe_to_vote_at_height()`, (6) Fail-closed behavior on inconsistent state. Comprehensive tests in `crates/qbind-consensus/tests/m5_timeout_view_change_tests.rs` (24 tests) covering: leader crash recovery, no-proposal timeout, proposal-without-QC timeout, safety preservation across view changes, determinism, partition simulation, double-vote protection, and locked-height safety. |
+| **Note** | **M5**: Production-ready timeout and view-change mechanism implemented consistent with Section 17 of the QBIND whitepaper. Implementation includes: (1) `TimeoutPacemaker` with exponential backoff for timeout detection, (2) `TimeoutAccumulator` for collecting timeout messages and forming TimeoutCertificates (TC), (3) `BasicHotStuffEngine.on_timeout_msg()` and `on_timeout_certificate()` for TC processing, (4) View monotonicity enforcement via `try_advance_to_view()`, (5) Locked-height safety checks via `is_safe_to_vote_at_height()`, (6) Fail-closed behavior on inconsistent state. Comprehensive tests in `crates/qbind-consensus/tests/m5_timeout_view_change_tests.rs` (28 tests) covering: leader crash recovery, no-proposal timeout, proposal-without-QC timeout, safety preservation across view changes, determinism, partition simulation, double-vote protection, and locked-height safety. |
 
 ## 2.5 Slashing Economics Specification
 
