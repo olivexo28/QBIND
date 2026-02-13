@@ -1753,7 +1753,7 @@ impl AtomicSlashingBackend for InMemorySlashingBackend {
         // Apply all changes atomically (in-memory, this is naturally atomic)
         // 1. Update stake
         self.stakes.insert(validator_id, remaining_stake);
-        
+
         // 2. Update validator's total slashed
         *self.validator_total_slashed.entry(validator_id).or_insert(0) += slash_amount;
         self.total_slashed += slash_amount;

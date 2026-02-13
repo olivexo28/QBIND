@@ -335,25 +335,28 @@ impl AtomicSlashingLedger for qbind_ledger::InMemorySlashingLedger {
         &mut self,
         batch: SlashingUpdateBatch,
     ) -> Result<(), SlashingLedgerError> {
-        // In-memory ledger doesn't have atomic batch support, but operations are naturally
-        // atomic for single-threaded use. Apply operations sequentially.
+        // In-memory ledger: apply operations sequentially (naturally atomic for single-threaded use)
+        
+        // 1. Update validator state if present
         if let Some((validator_id, state)) = batch.validator_state {
-            // The InMemorySlashingLedger doesn't have direct state setting,
-            // so we simulate by using slash_stake and jail_validator
-            // This is a simplification - for production we'd need proper state setting
-            let _ = validator_id;
-            let _ = state;
+            self.set_validator_state(validator_id, state);
         }
+        
+        // 2. Mark evidence as seen if present
+        if let Some(evidence_id) = batch.evidence_id {
+            self.mark_evidence_seen(evidence_id);
+        }
+        
+        // 3. Store slashing record if present
         if let Some(record) = batch.slashing_record {
             self.store_slashing_record(record)?;
         }
+        
         Ok(())
     }
 
-    fn is_evidence_seen(&self, _evidence_id: &[u8; 32]) -> bool {
-        // In-memory ledger doesn't track evidence IDs directly
-        // The PenaltySlashingEngine handles dedup at a higher level
-        false
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        qbind_ledger::InMemorySlashingLedger::is_evidence_seen(self, evidence_id)
     }
 }
 
