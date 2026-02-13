@@ -553,6 +553,8 @@ impl P2pNodeBuilder {
             local_delegation_cert: cert_bytes,
             local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
             kem_metrics: None,
+            cookie_config: None, // M6: Cookie protection not enforced in legacy test builder
+            local_validator_id: validator_id_bytes,
         };
 
         // Create connection configs
