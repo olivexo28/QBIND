@@ -256,6 +256,11 @@ pub use node_config::{
     VALID_STATE_RETENTION_MODES,
 };
 
+// M8 Mutual Auth Config exports
+pub use node_config::{
+    parse_mutual_auth_mode, MutualAuthConfig, MutualAuthMode,
+};
+
 // T210 Signer Mode exports
 pub use node_config::{
     is_production_signer_mode, parse_signer_mode, SignerMode, VALID_SIGNER_MODES,

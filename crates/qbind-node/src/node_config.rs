@@ -2783,6 +2783,198 @@ impl NetworkTransportConfig {
 }
 
 // ============================================================================
+// M8: MutualAuthConfig – KEMTLS Mutual Authentication Configuration
+// ============================================================================
+
+/// Mutual authentication mode for KEMTLS handshakes (M8).
+///
+/// This mirrors `qbind_net::MutualAuthMode` for node-level configuration
+/// and environment-specific validation.
+///
+/// # Environments
+///
+/// - **DevNet v0**: `Disabled` (server-auth only for testing flexibility)
+/// - **TestNet Alpha/Beta**: `Required` (enforced; reject if mutual auth not configured)
+/// - **MainNet v0**: `Required` (**mandatory**; `validate_mainnet_invariants()` rejects other modes)
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::{MutualAuthConfig, MutualAuthMode};
+///
+/// // DevNet default (Disabled)
+/// let devnet_config = MutualAuthConfig::devnet_default();
+/// assert_eq!(devnet_config.mode, MutualAuthMode::Disabled);
+///
+/// // TestNet/MainNet default (Required)
+/// let mainnet_config = MutualAuthConfig::mainnet_default();
+/// assert_eq!(mainnet_config.mode, MutualAuthMode::Required);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MutualAuthConfig {
+    /// Mutual authentication mode for server-side handshakes.
+    ///
+    /// - `Required`: Client certificate required (TestNet/MainNet default)
+    /// - `Optional`: Client certificate verified if present but not required
+    /// - `Disabled`: Server-auth only, ignore client cert (DevNet compatibility)
+    pub mode: MutualAuthMode,
+}
+
+/// Mutual authentication mode (mirrors qbind_net::MutualAuthMode).
+///
+/// This enum is duplicated here to avoid circular dependency between
+/// qbind-node and qbind-net crates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MutualAuthMode {
+    /// Client certificate is required (TestNet/MainNet default).
+    ///
+    /// - Server rejects ClientInit v1 (no client cert).
+    /// - Server rejects ClientInit v2 without client_cert.
+    /// - Server rejects ClientInit v2 with invalid client_cert.
+    #[default]
+    Required,
+
+    /// Client certificate is verified if present but not required.
+    ///
+    /// - Server accepts ClientInit v1 (server-auth only).
+    /// - Server verifies client_cert if present in ClientInit v2.
+    /// - If client_cert is present and invalid, handshake fails.
+    Optional,
+
+    /// Mutual auth disabled; server-auth only (DevNet compatibility).
+    ///
+    /// - Server accepts ClientInit v1 and v2.
+    /// - Server ignores client_cert even if present.
+    /// - No client NodeId derivation from cert.
+    Disabled,
+}
+
+impl std::fmt::Display for MutualAuthMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MutualAuthMode::Required => write!(f, "required"),
+            MutualAuthMode::Optional => write!(f, "optional"),
+            MutualAuthMode::Disabled => write!(f, "disabled"),
+        }
+    }
+}
+
+/// Parse a mutual auth mode from a string.
+///
+/// Valid values: "required", "optional", "disabled"
+///
+/// Returns `None` for unrecognized values.
+pub fn parse_mutual_auth_mode(s: &str) -> Option<MutualAuthMode> {
+    match s.to_lowercase().as_str() {
+        "required" | "require" => Some(MutualAuthMode::Required),
+        "optional" | "opt" => Some(MutualAuthMode::Optional),
+        "disabled" | "disable" | "off" | "none" => Some(MutualAuthMode::Disabled),
+        _ => None,
+    }
+}
+
+impl Default for MutualAuthConfig {
+    fn default() -> Self {
+        Self {
+            mode: MutualAuthMode::Required, // Default to Required for safety
+        }
+    }
+}
+
+impl MutualAuthConfig {
+    /// Create a DevNet default configuration.
+    ///
+    /// Uses `Disabled` mode for maximum testing flexibility.
+    pub fn devnet_default() -> Self {
+        Self {
+            mode: MutualAuthMode::Disabled,
+        }
+    }
+
+    /// Create a TestNet Alpha default configuration.
+    ///
+    /// Uses `Required` mode for security.
+    pub fn testnet_alpha_default() -> Self {
+        Self {
+            mode: MutualAuthMode::Required,
+        }
+    }
+
+    /// Create a TestNet Beta default configuration.
+    ///
+    /// Uses `Required` mode for security.
+    pub fn testnet_beta_default() -> Self {
+        Self {
+            mode: MutualAuthMode::Required,
+        }
+    }
+
+    /// Create a MainNet v0 default configuration.
+    ///
+    /// Uses `Required` mode (mandatory).
+    pub fn mainnet_default() -> Self {
+        Self {
+            mode: MutualAuthMode::Required,
+        }
+    }
+
+    /// Validate that the configuration is suitable for MainNet.
+    ///
+    /// Returns `Ok(())` if valid, or an error message if invalid.
+    ///
+    /// MainNet requirements (M8):
+    /// - mode must be `Required` (Optional and Disabled are forbidden)
+    ///
+    /// **M8 Security Requirement**: MainNet must use mutual KEMTLS authentication
+    /// to cryptographically bind inbound NodeId to client identity and prevent
+    /// peer identity spoofing.
+    pub fn validate_for_mainnet(&self) -> Result<(), String> {
+        match self.mode {
+            MutualAuthMode::Required => Ok(()),
+            MutualAuthMode::Optional => {
+                Err("mutual_auth_mode 'optional' is forbidden for MainNet (M8); \
+                     MainNet requires mutual KEMTLS authentication for all connections; \
+                     use 'required'"
+                    .to_string())
+            }
+            MutualAuthMode::Disabled => {
+                Err("mutual_auth_mode 'disabled' is forbidden for MainNet (M8); \
+                     MainNet requires mutual KEMTLS authentication for all connections; \
+                     use 'required'"
+                    .to_string())
+            }
+        }
+    }
+
+    /// Validate that the configuration is suitable for TestNet.
+    ///
+    /// Returns `Ok(())` if valid, or a warning message for suboptimal settings.
+    ///
+    /// TestNet recommendations (M8):
+    /// - mode should be `Required` (preferred)
+    /// - mode `Optional` is allowed but generates a warning
+    /// - mode `Disabled` is forbidden
+    pub fn validate_for_testnet(&self) -> Result<(), String> {
+        match self.mode {
+            MutualAuthMode::Required => Ok(()),
+            MutualAuthMode::Optional => {
+                eprintln!(
+                    "[M8] Warning: mutual_auth_mode 'optional' is not recommended for TestNet; \
+                     consider 'required' for full security"
+                );
+                Ok(())
+            }
+            MutualAuthMode::Disabled => {
+                Err("mutual_auth_mode 'disabled' is forbidden for TestNet (M8); \
+                     TestNet requires mutual KEMTLS authentication; \
+                     use 'required' or 'optional'"
+                    .to_string())
+            }
+        }
+    }
+}
+
+// ============================================================================
 // T173: NetworkMode – Consensus/DAG networking mode selection
 // ============================================================================
 
