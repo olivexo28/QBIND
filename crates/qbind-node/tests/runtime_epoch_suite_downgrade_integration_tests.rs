@@ -169,7 +169,7 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
     // We'll use a simplified approach since we're not actually testing network
     use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
     use qbind_net::{
-        ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, ServerConnectionConfig,
+        ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
         ServerHandshakeConfig,
     };
     use std::sync::Arc;
@@ -308,6 +308,7 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
         crypto: provider.clone(),
         peer_root_network_pk: vec![0u8; 32],
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let validator_id = [0u8; 32];
@@ -322,6 +323,8 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_cfg = ClientConnectionConfig {

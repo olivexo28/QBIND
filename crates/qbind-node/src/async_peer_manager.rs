@@ -1586,6 +1586,13 @@ impl AsyncPeerManagerImpl {
                                     | qbind_net::NetError::CookieRequired => {
                                         KemtlsHandshakeFailureReason::Protocol
                                     }
+                                    // M8: Mutual authentication errors are protocol-level issues
+                                    qbind_net::NetError::ClientCertRequired
+                                    | qbind_net::NetError::ClientCertInvalid(_)
+                                    | qbind_net::NetError::ClientNodeIdMismatch
+                                    | qbind_net::NetError::UnsupportedProtocolVersion(_) => {
+                                        KemtlsHandshakeFailureReason::Protocol
+                                    }
                                 }
                             }
                         };
@@ -1806,6 +1813,13 @@ impl AsyncPeerManagerImpl {
                                 qbind_net::NetError::CookieInvalid
                                 | qbind_net::NetError::CookieExpired
                                 | qbind_net::NetError::CookieRequired => {
+                                    KemtlsHandshakeFailureReason::Protocol
+                                }
+                                // M8: Mutual authentication errors are protocol-level issues
+                                qbind_net::NetError::ClientCertRequired
+                                | qbind_net::NetError::ClientCertInvalid(_)
+                                | qbind_net::NetError::ClientNodeIdMismatch
+                                | qbind_net::NetError::UnsupportedProtocolVersion(_) => {
                                     KemtlsHandshakeFailureReason::Protocol
                                 }
                             },

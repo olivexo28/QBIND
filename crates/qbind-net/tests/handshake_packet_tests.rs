@@ -28,6 +28,7 @@ fn client_init_roundtrip() {
         validator_id,
         cookie: vec![0xAA, 0xBB, 0xCC],
         kem_ct: vec![0x11, 0x22, 0x33, 0x44],
+        client_cert: Vec::new(), // M8: v1 protocol has no client cert
     };
 
     // Pack → encode → decode → unpack

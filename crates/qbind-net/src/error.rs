@@ -23,4 +23,16 @@ pub enum NetError {
 
     /// Cookie is required but not provided (M6 DoS protection).
     CookieRequired,
+
+    /// Client certificate required but not provided (M8 mutual auth).
+    ClientCertRequired,
+
+    /// Client certificate verification failed (M8 mutual auth).
+    ClientCertInvalid(&'static str),
+
+    /// Client NodeId mismatch with derived value (M8 mutual auth).
+    ClientNodeIdMismatch,
+
+    /// Protocol version not supported.
+    UnsupportedProtocolVersion(u8),
 }

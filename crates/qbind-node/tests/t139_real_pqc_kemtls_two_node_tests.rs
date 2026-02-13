@@ -41,7 +41,7 @@ use qbind_crypto::{
 };
 use qbind_net::{
     ClientConnectionConfig, ClientHandshakeConfig, KemOpMetrics, KemPrivateKey,
-    ServerConnectionConfig, ServerHandshakeConfig,
+    MutualAuthMode, ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::secure_channel::{SecureChannel, SecureChannelAsync};
 use qbind_wire::io::WireEncode;
@@ -203,6 +203,7 @@ fn make_mlkem768_server_config(kem_metrics: Option<Arc<KemOpMetrics>>) -> TestNo
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: kem_metrics.clone(),
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     // Server handshake config
@@ -216,6 +217,8 @@ fn make_mlkem768_server_config(kem_metrics: Option<Arc<KemOpMetrics>>) -> TestNo
         kem_metrics,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_cfg = ClientConnectionConfig {
@@ -261,6 +264,7 @@ fn make_mlkem768_client_config(
         crypto: provider,
         peer_root_network_pk: root_network_pk,
         kem_metrics,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     ClientConnectionConfig {

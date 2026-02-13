@@ -70,8 +70,8 @@ use crate::p2p_tcp::{P2pTransportError, TcpKemTlsP2pService};
 use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 
 // ============================================================================
@@ -543,6 +543,7 @@ impl P2pNodeBuilder {
             crypto: crypto.clone(),
             peer_root_network_pk: root_network_pk.clone(),
             kem_metrics: None,
+            local_delegation_cert: None, // M8: No client cert for backward compat tests
         };
 
         let server_handshake_cfg = ServerHandshakeConfig {
@@ -555,6 +556,8 @@ impl P2pNodeBuilder {
             kem_metrics: None,
             cookie_config: None, // M6: Cookie protection not enforced in legacy test builder
             local_validator_id: validator_id_bytes,
+            mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+            trusted_client_roots: None,
         };
 
         // Create connection configs

@@ -12,3 +12,6 @@ pub use consensus::DEFAULT_CONSENSUS_SUITE_ID;
 
 // Re-export payload kind constants for T102.1
 pub use consensus::{PAYLOAD_KIND_NORMAL, PAYLOAD_KIND_RECONFIG};
+
+// Re-export protocol version constants (M8)
+pub use net::{PROTOCOL_VERSION_1, PROTOCOL_VERSION_2};

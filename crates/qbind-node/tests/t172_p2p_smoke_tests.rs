@@ -5,7 +5,7 @@
 
 use qbind_crypto::{CryptoProvider, StaticCryptoProvider};
 use qbind_net::connection::{ClientConnectionConfig, ServerConnectionConfig};
-use qbind_net::handshake::{ClientHandshakeConfig, ServerHandshakeConfig};
+use qbind_net::handshake::{ClientHandshakeConfig, ServerHandshakeConfig, MutualAuthMode};
 use qbind_net::keys::KemPrivateKey;
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::node_config::NetworkTransportConfig;
@@ -39,6 +39,8 @@ fn create_test_connection_configs(
             kem_metrics: None,
             cookie_config: None,
             local_validator_id: validator_id,
+            mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+            trusted_client_roots: None,
         },
         server_random: [0u8; 32],
     };
@@ -50,6 +52,7 @@ fn create_test_connection_configs(
             crypto,
             peer_root_network_pk: vec![0u8; 32],
             kem_metrics: None,
+            local_delegation_cert: None, // M8: No client cert for backward compat tests
         },
         client_random: [0u8; 32],
         validator_id: [0u8; 32],

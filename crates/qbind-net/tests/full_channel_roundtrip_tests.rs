@@ -17,7 +17,7 @@ use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCrypt
 use qbind_net::{
     read_handshake_packet, read_transport_frame, write_handshake_packet, write_transport_frame,
     ClientConnectionConfig, ClientHandshakeConfig, Connection, HandshakePacket, KemPrivateKey,
-    ServerConnectionConfig, ServerHandshakeConfig, TransportFrame,
+    MutualAuthMode, ServerConnectionConfig, ServerHandshakeConfig, TransportFrame,
 };
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -393,6 +393,7 @@ fn create_test_setup() -> TestSetup {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_handshake_cfg = ServerHandshakeConfig {
@@ -405,6 +406,8 @@ fn create_test_setup() -> TestSetup {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_cfg = ClientConnectionConfig {

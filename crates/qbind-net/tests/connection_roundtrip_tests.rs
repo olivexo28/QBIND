@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, Connection, KemPrivateKey, NetError,
-    ServerConnectionConfig, ServerHandshakeConfig, TRANSPORT_TYPE_APP_MESSAGE,
+    ClientConnectionConfig, ClientHandshakeConfig, Connection, KemPrivateKey, MutualAuthMode,
+    NetError, ServerConnectionConfig, ServerHandshakeConfig, TRANSPORT_TYPE_APP_MESSAGE,
 };
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -254,6 +254,7 @@ fn create_test_setup() -> TestSetup {
         crypto: provider.clone(),
         peer_root_network_pk: root_network_pk.clone(),
         kem_metrics: None,
+        local_delegation_cert: None, // M8: No client cert for backward compat tests
     };
 
     let server_handshake_cfg = ServerHandshakeConfig {
@@ -266,6 +267,8 @@ fn create_test_setup() -> TestSetup {
         kem_metrics: None,
         cookie_config: None,
         local_validator_id: validator_id,
+        mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
+        trusted_client_roots: None,
     };
 
     let client_cfg = ClientConnectionConfig {

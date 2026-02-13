@@ -67,6 +67,7 @@ fn roundtrip_client_init() {
         validator_id: [0xDD; 32],
         cookie: vec![0x01, 0x02, 0x03],
         kem_ct: vec![0x11, 0x22, 0x33, 0x44],
+        client_cert: Vec::new(), // M8: v1 protocol has no client cert
     };
 
     let mut encoded = Vec::new();
@@ -92,6 +93,7 @@ fn roundtrip_client_init_empty_cookie_and_kem_ct() {
         validator_id: [0xFF; 32],
         cookie: vec![],
         kem_ct: vec![],
+        client_cert: Vec::new(), // M8: v1 protocol has no client cert
     };
 
     let mut encoded = Vec::new();
@@ -221,7 +223,7 @@ fn roundtrip_server_cookie_empty() {
 
 #[test]
 fn client_init_encoded_length() {
-    // Test ClientInit with known-length fields
+    // Test ClientInit with known-length fields (v1 protocol)
     let client_init = ClientInit {
         version: 1,
         kem_suite_id: 0x01,
@@ -230,12 +232,13 @@ fn client_init_encoded_length() {
         validator_id: [0xDD; 32],
         cookie: vec![0x01, 0x02, 0x03],       // 3 bytes
         kem_ct: vec![0x11, 0x22, 0x33, 0x44], // 4 bytes
+        client_cert: Vec::new(), // M8: v1 protocol has no client cert
     };
 
     let mut encoded = Vec::new();
     client_init.encode(&mut encoded);
 
-    // Expected length:
+    // Expected length (v1, no client_cert field encoded):
     // msg_type: 1 + version: 1 + kem_suite_id: 1 + aead_suite_id: 1 +
     // client_random: 32 + validator_id: 32 + cookie_len: 2 + cookie: 3 +
     // kem_ct_len: 2 + kem_ct: 4 = 79
