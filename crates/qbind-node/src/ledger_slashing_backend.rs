@@ -1,4 +1,4 @@
-//! Ledger-backed slashing backend (T230).
+//! Ledger-backed slashing backend (T230, M9).
 //!
 //! This module provides `LedgerSlashingBackend`, an implementation of
 //! the `SlashingBackend` trait from `qbind-consensus` that uses the
@@ -15,6 +15,12 @@
 //! - `qbind-consensus` to remain independent of ledger implementation details
 //! - `qbind-ledger` to remain independent of consensus-specific types
 //! - `qbind-node` to wire everything together
+//!
+//! # M9: Atomic Penalty Application
+//!
+//! For `RocksDbSlashingLedger`, the `AtomicSlashingBackend` trait is implemented
+//! using `apply_slashing_update_atomic()` to ensure all state changes are committed
+//! in a single RocksDB WriteBatch for crash consistency.
 //!
 //! # Usage
 //!
@@ -36,11 +42,14 @@
 //! let engine = PenaltySlashingEngine::new(backend, PenaltyEngineConfig::devnet());
 //! ```
 
-use qbind_consensus::slashing::{OffenseKind, SlashingBackend, SlashingBackendError};
+use qbind_consensus::slashing::{
+    AtomicPenaltyRequest, AtomicPenaltyResult, AtomicSlashingBackend, OffenseKind, SlashingBackend,
+    SlashingBackendError,
+};
 use qbind_consensus::ValidatorId;
-use qbind_ledger::{SlashingLedger, SlashingLedgerError, SlashingRecord};
+use qbind_ledger::{SlashingLedger, SlashingLedgerError, SlashingRecord, SlashingUpdateBatch};
 
-/// Ledger-backed slashing backend (T230).
+/// Ledger-backed slashing backend (T230, M9).
 ///
 /// Implements `SlashingBackend` using a `SlashingLedger` for persistent
 /// storage of validator stake and jailing state.
@@ -189,6 +198,180 @@ impl<L: SlashingLedger> SlashingBackend for LedgerSlashingBackend<L> {
 
     fn get_stake(&self, validator_id: ValidatorId) -> Option<u64> {
         self.ledger.get_stake(validator_id.0)
+    }
+
+    fn is_jailed_at_epoch(&self, validator_id: ValidatorId, current_epoch: u64) -> bool {
+        self.ledger.is_jailed(validator_id.0, current_epoch)
+    }
+
+    fn get_jailed_until_epoch(&self, validator_id: ValidatorId) -> Option<u64> {
+        self.ledger
+            .get_validator_state(validator_id.0)
+            .and_then(|s| s.jailed_until_epoch)
+    }
+}
+
+// ============================================================================
+// M9: Atomic Slashing Backend Implementation
+// ============================================================================
+
+/// Trait for slashing ledgers that support atomic updates (M9).
+///
+/// This trait is implemented for ledger types that can use `apply_slashing_update_atomic()`.
+pub trait AtomicSlashingLedger: SlashingLedger {
+    /// Apply a slashing update atomically.
+    fn apply_slashing_update_atomic(
+        &mut self,
+        batch: SlashingUpdateBatch,
+    ) -> Result<(), SlashingLedgerError>;
+
+    /// Check if evidence has been seen.
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool;
+}
+
+/// Implementation of `AtomicSlashingBackend` for ledgers that support atomic updates (M9).
+impl<L: AtomicSlashingLedger> AtomicSlashingBackend for LedgerSlashingBackend<L> {
+    fn apply_penalty_atomic(
+        &mut self,
+        request: AtomicPenaltyRequest,
+    ) -> Result<AtomicPenaltyResult, SlashingBackendError> {
+        let validator_id = request.validator_id;
+        let ledger_id = validator_id.0;
+
+        // Check for duplicate evidence
+        if self.ledger.is_evidence_seen(&request.evidence_id) {
+            return Err(SlashingBackendError::Other(
+                "evidence already processed (duplicate)".to_string(),
+            ));
+        }
+
+        // Get current validator state
+        let mut state = self
+            .ledger
+            .get_validator_state(ledger_id)
+            .ok_or(SlashingBackendError::ValidatorNotFound(validator_id))?;
+
+        // Calculate slash amount: stake * slash_bps / 10000
+        let slash_amount = (state.stake as u128 * u128::from(request.slash_bps) / 10000) as u64;
+        let remaining_stake = state.stake.saturating_sub(slash_amount);
+
+        // Calculate jailed_until_epoch
+        let jailed_until_epoch = if request.jail && request.jail_epochs > 0 {
+            let until = request
+                .current_epoch
+                .saturating_add(u64::from(request.jail_epochs));
+            // Only update jail if new epoch is later than current jail
+            let current_jail = state.jailed_until_epoch.unwrap_or(0);
+            if until > current_jail {
+                Some(until)
+            } else {
+                state.jailed_until_epoch
+            }
+        } else {
+            state.jailed_until_epoch
+        };
+
+        // Track if this is a new jail event
+        let is_new_jail = request.jail
+            && request.jail_epochs > 0
+            && (state.jailed_until_epoch.is_none()
+                || jailed_until_epoch > state.jailed_until_epoch);
+
+        // Update state
+        state.stake = remaining_stake;
+        state.total_slashed += slash_amount;
+        state.jailed_until_epoch = jailed_until_epoch;
+        state.last_offense_epoch = Some(request.current_epoch);
+        if is_new_jail {
+            state.jail_count += 1;
+        }
+
+        // Create slashing record for audit
+        let record = SlashingRecord {
+            validator_id: ledger_id,
+            offense_kind: request.offense.as_str().to_string(),
+            slashed_amount: slash_amount,
+            jailed: jailed_until_epoch.is_some(),
+            jailed_until_epoch,
+            height: request.height,
+            view: request.view,
+            epoch: request.current_epoch,
+        };
+
+        // Build atomic update batch
+        let mut batch = SlashingUpdateBatch::new();
+        batch.set_validator_state(ledger_id, state);
+        batch.set_evidence_id(request.evidence_id);
+        batch.set_slashing_record(record);
+
+        // Commit atomically - FAIL CLOSED on error
+        self.ledger
+            .apply_slashing_update_atomic(batch)
+            .map_err(|e| SlashingBackendError::Other(format!("atomic commit failed: {}", e)))?;
+
+        eprintln!(
+            "[SLASHING_BACKEND] M9 Atomic penalty applied: validator={}, offense={}, slashed={}, jailed_until={:?}",
+            validator_id.0,
+            request.offense.as_str(),
+            slash_amount,
+            jailed_until_epoch
+        );
+
+        Ok(AtomicPenaltyResult {
+            slashed_amount: slash_amount,
+            jailed_until_epoch,
+            remaining_stake,
+        })
+    }
+
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        self.ledger.is_evidence_seen(evidence_id)
+    }
+}
+
+// Implement AtomicSlashingLedger for InMemorySlashingLedger
+impl AtomicSlashingLedger for qbind_ledger::InMemorySlashingLedger {
+    fn apply_slashing_update_atomic(
+        &mut self,
+        batch: SlashingUpdateBatch,
+    ) -> Result<(), SlashingLedgerError> {
+        // In-memory ledger: apply operations sequentially (naturally atomic for single-threaded use)
+        
+        // 1. Update validator state if present
+        if let Some((validator_id, state)) = batch.validator_state {
+            self.set_validator_state(validator_id, state);
+        }
+        
+        // 2. Mark evidence as seen if present
+        if let Some(evidence_id) = batch.evidence_id {
+            self.mark_evidence_seen(evidence_id);
+        }
+        
+        // 3. Store slashing record if present
+        if let Some(record) = batch.slashing_record {
+            self.store_slashing_record(record)?;
+        }
+        
+        Ok(())
+    }
+
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        qbind_ledger::InMemorySlashingLedger::is_evidence_seen(self, evidence_id)
+    }
+}
+
+// Implement AtomicSlashingLedger for RocksDbSlashingLedger
+impl AtomicSlashingLedger for qbind_ledger::RocksDbSlashingLedger {
+    fn apply_slashing_update_atomic(
+        &mut self,
+        batch: SlashingUpdateBatch,
+    ) -> Result<(), SlashingLedgerError> {
+        // Use the native RocksDB atomic batch support
+        qbind_ledger::RocksDbSlashingLedger::apply_slashing_update_atomic(self, batch)
+    }
+
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        qbind_ledger::RocksDbSlashingLedger::is_evidence_seen(self, evidence_id)
     }
 }
 

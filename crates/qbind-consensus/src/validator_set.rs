@@ -178,6 +178,169 @@ where
     })
 }
 
+// ============================================================================
+// M9: Jail-Aware Validator Set Filtering
+// ============================================================================
+
+/// Extended validator candidate with jail information for epoch boundary filtering (M9).
+///
+/// This struct extends `ValidatorCandidate` with jail status information to enable
+/// filtering out jailed validators from the active set during epoch transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatorCandidateWithJailStatus {
+    /// The base validator candidate information.
+    pub candidate: ValidatorCandidate,
+    /// Epoch until which the validator is jailed (None = not jailed).
+    pub jailed_until_epoch: Option<u64>,
+}
+
+impl ValidatorCandidateWithJailStatus {
+    /// Create a new validator candidate with jail status.
+    pub fn new(
+        validator_id: ValidatorId,
+        stake: u64,
+        voting_power: u64,
+        jailed_until_epoch: Option<u64>,
+    ) -> Self {
+        Self {
+            candidate: ValidatorCandidate::new(validator_id, stake, voting_power),
+            jailed_until_epoch,
+        }
+    }
+
+    /// Check if the validator is jailed at the given epoch.
+    pub fn is_jailed_at_epoch(&self, current_epoch: u64) -> bool {
+        self.jailed_until_epoch
+            .map(|until| current_epoch < until)
+            .unwrap_or(false)
+    }
+}
+
+/// Result of building a validator set with stake and jail filtering (M9).
+#[derive(Debug, Clone)]
+pub struct ValidatorSetBuildResultWithJail {
+    /// The resulting validator set (validators with stake >= min_validator_stake AND not jailed).
+    pub validator_set: ConsensusValidatorSet,
+    /// Validators that were excluded due to stake < min_validator_stake.
+    pub excluded_low_stake: Vec<ValidatorCandidate>,
+    /// Validators that were excluded due to being jailed.
+    pub excluded_jailed: Vec<ValidatorCandidate>,
+}
+
+/// Build a `ConsensusValidatorSet` from validator candidates with stake AND jail filtering (M9).
+///
+/// This function applies both:
+/// - M2.1: Minimum stake requirement (stake >= min_validator_stake)
+/// - M9: Jail exclusion (jailed_until_epoch > current_epoch means excluded)
+///
+/// # Arguments
+///
+/// * `candidates` - Iterator of validator candidates with stake and jail information
+/// * `min_validator_stake` - Minimum stake required for inclusion (in microQBIND)
+/// * `current_epoch` - Current epoch number for jail status checking
+///
+/// # Returns
+///
+/// * `Ok(ValidatorSetBuildResultWithJail)` - The filtered validator set and excluded validators
+/// * `Err(String)` - If no validators meet the requirements (fail-closed)
+///
+/// # Determinism Guarantees
+///
+/// This function ensures deterministic output:
+/// 1. Candidates are sorted by `validator_id` (ascending)
+/// 2. Filtering is applied uniformly using the same thresholds
+/// 3. The same inputs always produce the same outputs
+///
+/// # Example
+///
+/// ```ignore
+/// use qbind_consensus::validator_set::{ValidatorCandidateWithJailStatus, build_validator_set_with_stake_and_jail_filter};
+///
+/// let candidates = vec![
+///     ValidatorCandidateWithJailStatus::new(ValidatorId::new(1), 1_000_000, 1, None),       // Eligible
+///     ValidatorCandidateWithJailStatus::new(ValidatorId::new(2), 1_000_000, 1, Some(15)),   // Jailed until epoch 15
+///     ValidatorCandidateWithJailStatus::new(ValidatorId::new(3), 500_000, 1, None),         // Low stake
+/// ];
+///
+/// // At epoch 10, with min_stake = 1_000_000
+/// let result = build_validator_set_with_stake_and_jail_filter(candidates, 1_000_000, 10)?;
+///
+/// // Only validator 1 is included (stake ok, not jailed)
+/// // Validator 2 excluded (jailed until 15 > 10)
+/// // Validator 3 excluded (stake too low)
+/// assert_eq!(result.validator_set.len(), 1);
+/// assert_eq!(result.excluded_jailed.len(), 1);
+/// assert_eq!(result.excluded_low_stake.len(), 1);
+/// ```
+pub fn build_validator_set_with_stake_and_jail_filter<I>(
+    candidates: I,
+    min_validator_stake: u64,
+    current_epoch: u64,
+) -> Result<ValidatorSetBuildResultWithJail, String>
+where
+    I: IntoIterator<Item = ValidatorCandidateWithJailStatus>,
+{
+    // Collect and sort candidates by validator_id for deterministic ordering
+    let mut all_candidates: Vec<ValidatorCandidateWithJailStatus> =
+        candidates.into_iter().collect();
+    all_candidates.sort_by_key(|c| c.candidate.validator_id);
+
+    // Partition into included and excluded based on stake AND jail status
+    let mut included = Vec::new();
+    let mut excluded_low_stake = Vec::new();
+    let mut excluded_jailed = Vec::new();
+
+    for candidate_with_jail in all_candidates {
+        let jailed_until = candidate_with_jail.jailed_until_epoch;
+        let is_jailed = candidate_with_jail.is_jailed_at_epoch(current_epoch);
+        let candidate = candidate_with_jail.candidate;
+
+        // Check stake first
+        if candidate.stake < min_validator_stake {
+            excluded_low_stake.push(candidate);
+            continue;
+        }
+
+        // Check jail status
+        if is_jailed {
+            eprintln!(
+                "[M9] Validator {} excluded: jailed until epoch {} (current={})",
+                candidate.validator_id.as_u64(),
+                jailed_until.unwrap_or(0),
+                current_epoch
+            );
+            excluded_jailed.push(candidate);
+            continue;
+        }
+
+        // Validator passes all checks - include in set
+        included.push(ValidatorSetEntry {
+            id: candidate.validator_id,
+            voting_power: candidate.voting_power,
+        });
+    }
+
+    // Log filtering results
+    if !excluded_jailed.is_empty() || !excluded_low_stake.is_empty() {
+        eprintln!(
+            "[M9] Validator set filtering at epoch {}: {} included, {} jailed, {} low stake",
+            current_epoch,
+            included.len(),
+            excluded_jailed.len(),
+            excluded_low_stake.len()
+        );
+    }
+
+    // Create the validator set (will fail if empty - fail closed)
+    let validator_set = ConsensusValidatorSet::new(included)?;
+
+    Ok(ValidatorSetBuildResultWithJail {
+        validator_set,
+        excluded_low_stake,
+        excluded_jailed,
+    })
+}
+
 /// A set of validators that form the consensus committee.
 ///
 /// `ConsensusValidatorSet` provides:

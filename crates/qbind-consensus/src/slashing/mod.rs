@@ -1432,9 +1432,129 @@ pub trait SlashingBackend {
 
     /// Get validator's current stake (for logging/metrics).
     fn get_stake(&self, validator_id: ValidatorId) -> Option<u64>;
+
+    /// Check if a validator is jailed at a specific epoch.
+    ///
+    /// # Arguments
+    ///
+    /// * `validator_id` - The validator to check
+    /// * `current_epoch` - The epoch to check jail status for
+    ///
+    /// # Returns
+    ///
+    /// `true` if the validator is jailed at the given epoch (jailed_until_epoch > current_epoch)
+    fn is_jailed_at_epoch(&self, validator_id: ValidatorId, current_epoch: u64) -> bool {
+        // Default implementation delegates to is_jailed() which doesn't use epoch
+        // Implementations should override for proper epoch-aware checking
+        let _ = current_epoch;
+        self.is_jailed(validator_id)
+    }
+
+    /// Get the epoch until which a validator is jailed.
+    ///
+    /// # Returns
+    ///
+    /// `Some(epoch)` if the validator is jailed, `None` otherwise.
+    fn get_jailed_until_epoch(&self, validator_id: ValidatorId) -> Option<u64> {
+        // Default implementation returns None - override for actual tracking
+        let _ = validator_id;
+        None
+    }
 }
 
-/// In-memory slashing backend for testing (T229).
+// ============================================================================
+// M9: Atomic Penalty Application
+// ============================================================================
+
+/// Atomic penalty application request (M9).
+///
+/// This struct contains all the information needed to apply a slashing penalty
+/// atomically. It is used with `AtomicSlashingBackend` to ensure that all
+/// state changes (stake reduction, jailing, evidence marking, record storage)
+/// are committed in a single atomic operation.
+#[derive(Clone, Debug)]
+pub struct AtomicPenaltyRequest {
+    /// The validator to slash.
+    pub validator_id: ValidatorId,
+    /// Slash percentage in basis points (1 bps = 0.01%).
+    pub slash_bps: u16,
+    /// Whether to jail the validator.
+    pub jail: bool,
+    /// Number of epochs to jail (if jail is true).
+    pub jail_epochs: u32,
+    /// Current epoch (for computing jailed_until_epoch).
+    pub current_epoch: u64,
+    /// The offense type.
+    pub offense: OffenseKind,
+    /// Evidence ID for deduplication (32-byte SHA3-256 hash).
+    pub evidence_id: [u8; 32],
+    /// Block height at which the slashing occurred.
+    pub height: u64,
+    /// View at which the slashing occurred.
+    pub view: u64,
+}
+
+/// Result of applying an atomic penalty (M9).
+#[derive(Clone, Debug)]
+pub struct AtomicPenaltyResult {
+    /// Amount of stake that was burned.
+    pub slashed_amount: u64,
+    /// Epoch until which the validator is jailed (if jailed).
+    pub jailed_until_epoch: Option<u64>,
+    /// Remaining stake after slashing.
+    pub remaining_stake: u64,
+}
+
+/// Extended backend trait for atomic penalty application (M9).
+///
+/// This trait extends `SlashingBackend` to support atomic penalty application
+/// where all state changes (stake, jail, evidence marker, record) are committed
+/// together in a single atomic operation.
+///
+/// # Fail-Closed Behavior
+///
+/// If the atomic write fails, NO state changes should be applied. The system
+/// must not be left in a partially-applied state.
+///
+/// # Implementations
+///
+/// - `InMemorySlashingBackend`: Atomic by nature (single-threaded, in-memory)
+/// - `LedgerSlashingBackend<RocksDbSlashingLedger>`: Uses RocksDB WriteBatch
+pub trait AtomicSlashingBackend: SlashingBackend {
+    /// Apply a slashing penalty atomically (M9).
+    ///
+    /// This method commits all changes in a single atomic operation:
+    /// - Stake reduction (slash)
+    /// - Jailing (if configured)
+    /// - Evidence deduplication marker
+    /// - Slashing record for audit
+    /// - Updated last_offense_epoch
+    ///
+    /// # Fail-Closed Behavior
+    ///
+    /// If any part of the operation fails, the entire operation is rolled back
+    /// and no state changes are persisted.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The atomic penalty request containing all parameters
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(AtomicPenaltyResult)` - The penalty was successfully applied
+    /// * `Err(SlashingBackendError)` - The penalty could not be applied
+    fn apply_penalty_atomic(
+        &mut self,
+        request: AtomicPenaltyRequest,
+    ) -> Result<AtomicPenaltyResult, SlashingBackendError>;
+
+    /// Check if evidence with the given ID has already been processed.
+    ///
+    /// Used for deduplication to prevent double-penalties.
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool;
+}
+
+/// In-memory slashing backend for testing (T229, M9).
 ///
 /// Tracks per-validator stake and jail status in memory.
 /// Used by unit tests and integration harnesses.
@@ -1444,6 +1564,12 @@ pub struct InMemorySlashingBackend {
     stakes: HashMap<ValidatorId, u64>,
     /// Per-validator jail expiration epoch (None = not jailed).
     jailed_until: HashMap<ValidatorId, u64>,
+    /// Per-validator last offense epoch (M9: for repeat offense detection).
+    last_offense_epoch: HashMap<ValidatorId, u64>,
+    /// Per-validator total slashed amount (cumulative).
+    validator_total_slashed: HashMap<ValidatorId, u64>,
+    /// Set of seen evidence IDs for deduplication (M9).
+    seen_evidence: HashSet<[u8; 32]>,
     /// Total amount slashed (for metrics).
     total_slashed: u64,
     /// Total jail events (for metrics).
@@ -1466,6 +1592,9 @@ impl InMemorySlashingBackend {
         Self {
             stakes,
             jailed_until: HashMap::new(),
+            last_offense_epoch: HashMap::new(),
+            validator_total_slashed: HashMap::new(),
+            seen_evidence: HashSet::new(),
             total_slashed: 0,
             total_jail_events: 0,
         }
@@ -1489,6 +1618,19 @@ impl InMemorySlashingBackend {
     /// Clear jail status (for testing).
     pub fn clear_jail(&mut self, validator_id: ValidatorId) {
         self.jailed_until.remove(&validator_id);
+    }
+
+    /// Get a validator's last offense epoch.
+    pub fn get_last_offense_epoch(&self, validator_id: ValidatorId) -> Option<u64> {
+        self.last_offense_epoch.get(&validator_id).copied()
+    }
+
+    /// Get a validator's cumulative slashed amount.
+    pub fn get_validator_total_slashed(&self, validator_id: ValidatorId) -> u64 {
+        self.validator_total_slashed
+            .get(&validator_id)
+            .copied()
+            .unwrap_or(0)
     }
 }
 
@@ -1561,6 +1703,94 @@ impl SlashingBackend for InMemorySlashingBackend {
 
     fn get_stake(&self, validator_id: ValidatorId) -> Option<u64> {
         self.stakes.get(&validator_id).copied()
+    }
+
+    fn is_jailed_at_epoch(&self, validator_id: ValidatorId, current_epoch: u64) -> bool {
+        self.jailed_until
+            .get(&validator_id)
+            .map(|&until| current_epoch < until)
+            .unwrap_or(false)
+    }
+
+    fn get_jailed_until_epoch(&self, validator_id: ValidatorId) -> Option<u64> {
+        self.jailed_until.get(&validator_id).copied()
+    }
+}
+
+/// Implementation of `AtomicSlashingBackend` for `InMemorySlashingBackend` (M9).
+impl AtomicSlashingBackend for InMemorySlashingBackend {
+    fn apply_penalty_atomic(
+        &mut self,
+        request: AtomicPenaltyRequest,
+    ) -> Result<AtomicPenaltyResult, SlashingBackendError> {
+        let validator_id = request.validator_id;
+
+        // Check for duplicate evidence (dedup)
+        if self.seen_evidence.contains(&request.evidence_id) {
+            return Err(SlashingBackendError::Other(
+                "evidence already processed (duplicate)".to_string(),
+            ));
+        }
+
+        // Check validator exists
+        let stake = self
+            .stakes
+            .get(&validator_id)
+            .copied()
+            .ok_or(SlashingBackendError::ValidatorNotFound(validator_id))?;
+
+        // Calculate slash amount: stake * slash_bps / 10000
+        let slash_amount = (stake as u128 * u128::from(request.slash_bps) / 10000) as u64;
+        let remaining_stake = stake.saturating_sub(slash_amount);
+
+        // Calculate jail until epoch if jailing
+        let jailed_until_epoch = if request.jail && request.jail_epochs > 0 {
+            Some(request.current_epoch.saturating_add(u64::from(request.jail_epochs)))
+        } else {
+            None
+        };
+
+        // Apply all changes atomically (in-memory, this is naturally atomic)
+        // 1. Update stake
+        self.stakes.insert(validator_id, remaining_stake);
+
+        // 2. Update validator's total slashed
+        *self.validator_total_slashed.entry(validator_id).or_insert(0) += slash_amount;
+        self.total_slashed += slash_amount;
+
+        // 3. Apply jail if needed
+        if let Some(until) = jailed_until_epoch {
+            let entry = self.jailed_until.entry(validator_id).or_insert(0);
+            if until > *entry {
+                *entry = until;
+                self.total_jail_events += 1;
+            }
+        }
+
+        // 4. Update last offense epoch
+        self.last_offense_epoch
+            .insert(validator_id, request.current_epoch);
+
+        // 5. Mark evidence as seen
+        self.seen_evidence.insert(request.evidence_id);
+
+        eprintln!(
+            "[SLASHING] M9 Atomic penalty applied: validator={}, offense={}, slashed={}, jailed_until={:?}",
+            validator_id.0,
+            request.offense.as_str(),
+            slash_amount,
+            jailed_until_epoch
+        );
+
+        Ok(AtomicPenaltyResult {
+            slashed_amount: slash_amount,
+            jailed_until_epoch,
+            remaining_stake,
+        })
+    }
+
+    fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        self.seen_evidence.contains(evidence_id)
     }
 }
 

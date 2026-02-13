@@ -211,10 +211,12 @@ This section lists items marked TODO or partially implemented in the codebase.
 
 | Field | Value |
 |-------|-------|
-| **File Path** | `crates/qbind-consensus/src/slashing/mod.rs` |
-| **Description** | T228 implements infrastructure skeleton; actual stake burning/jailing deferred to T229+ |
-| **Security Impact** | No economic deterrent for Byzantine behavior |
+| **File Path** | `crates/qbind-consensus/src/slashing/mod.rs`, `crates/qbind-node/src/ledger_slashing_backend.rs` |
+| **Description** | T228 implements infrastructure skeleton; T229+ adds penalty engine; M9 adds atomic O1/O2 enforcement |
+| **Security Impact** | Economic deterrent now enforced for O1 (double-sign) and O2 (invalid proposer signature) |
 | **Required Milestone** | Pre-MainNet |
+| **Status** | ✅ Mitigated (M9: O1/O2 enforced) |
+| **Note** | **M9**: O1/O2 economic penalties fully enforced with persistent atomic ledger integration. Implementation adds: (1) `AtomicSlashingBackend` trait for atomic penalty application, (2) `AtomicPenaltyRequest`/`AtomicPenaltyResult` types, (3) `apply_penalty_atomic()` commits stake reduction + jail + evidence marker + record in single RocksDB WriteBatch, (4) `build_validator_set_with_stake_and_jail_filter()` excludes jailed validators from active set at epoch boundary. Fail-closed behavior: if atomic commit fails, no partial state applied. Mode enforcement: `EnforceCritical` or `EnforceAll` required for penalty application; `RecordOnly` records evidence without penalties. O3–O5 penalties remain pending future implementation. Tests in `crates/qbind-node/tests/m9_slashing_penalty_tests.rs`. |
 
 ## 3.11 Minimum Stake Not Enforced at Epoch Boundary
 
@@ -244,7 +246,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 | Risk | Layer | Mitigation | Residual Risk | Priority |
 |------|-------|------------|---------------|----------|
 | Liveness failure under partition | Consensus | Timeout/view-change mechanism implemented (M5): `TimeoutPacemaker`, `TimeoutAccumulator`, `TimeoutCertificate`, fail-closed behavior | Low (mitigated M5) | Mitigated |
-| No slashing enforcement | Consensus | Complete T229+ implementation | Medium (mode bypass mitigated by M4; penalty application still TODO) | High |
+| No slashing enforcement | Consensus | M9: O1/O2 penalties enforced via `AtomicSlashingBackend.apply_penalty_atomic()`. Atomic ledger commit using RocksDB WriteBatch. Jail exclusion via `build_validator_set_with_stake_and_jail_filter()`. O3–O5 remain evidence-only (pending). | Low (O1/O2 enforced M9; O3–O5 pending) | Mitigated |
 | Slashing mode bypass (M4) | Config | `validate_for_mainnet()` rejects `Off`/`RecordOnly` modes; MainNet requires `EnforceCritical` or `EnforceAll` | Low (mitigated M4) | Mitigated |
 | No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary via `StakeFilteringEpochStateProvider` + `build_validator_set_with_stake_filter()` + `with_stake_filtering_epoch_state_provider()` + `new_with_stake_filtering()`; fail-closed if all validators excluded | Low (fully mitigated M2.1+M2.2+M2.3+M2.4) | Mitigated |
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |

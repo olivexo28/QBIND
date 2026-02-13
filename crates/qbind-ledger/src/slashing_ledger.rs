@@ -214,7 +214,7 @@ pub trait SlashingLedger {
 // In-Memory Implementation
 // ============================================================================
 
-/// In-memory slashing ledger for tests (T230).
+/// In-memory slashing ledger for tests (T230, M9).
 ///
 /// Tracks per-validator stake and jail status in memory.
 /// Used by unit tests and integration harnesses.
@@ -224,6 +224,8 @@ pub struct InMemorySlashingLedger {
     validator_states: HashMap<ValidatorLedgerId, ValidatorSlashingState>,
     /// All slashing records (for audit purposes).
     records: Vec<SlashingRecord>,
+    /// Set of seen evidence IDs for deduplication (M9).
+    seen_evidence: HashSet<[u8; 32]>,
 }
 
 impl InMemorySlashingLedger {
@@ -258,12 +260,34 @@ impl InMemorySlashingLedger {
         Self {
             validator_states,
             records: Vec::new(),
+            seen_evidence: HashSet::new(),
         }
     }
 
     /// Set a validator's stake (for testing).
     pub fn set_stake(&mut self, validator_id: ValidatorLedgerId, stake: StakeAmount) {
         self.validator_states.entry(validator_id).or_default().stake = stake;
+    }
+
+    /// Set a validator's complete state (M9).
+    ///
+    /// This is used for atomic updates where all state fields need to be set together.
+    pub fn set_validator_state(
+        &mut self,
+        validator_id: ValidatorLedgerId,
+        state: ValidatorSlashingState,
+    ) {
+        self.validator_states.insert(validator_id, state);
+    }
+
+    /// Check if evidence has been seen (M9).
+    pub fn is_evidence_seen(&self, evidence_id: &[u8; 32]) -> bool {
+        self.seen_evidence.contains(evidence_id)
+    }
+
+    /// Mark evidence as seen (M9).
+    pub fn mark_evidence_seen(&mut self, evidence_id: [u8; 32]) {
+        self.seen_evidence.insert(evidence_id);
     }
 
     /// Get the number of validators tracked.

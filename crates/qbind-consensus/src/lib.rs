@@ -100,6 +100,13 @@ pub use validator_set::{
     StakeFilterEmptySetError, StakeFilteringEpochStateProvider, StaticEpochStateProvider,
     ValidatorCandidate, ValidatorSetBuildResult, ValidatorSetEntry,
 };
+
+// M9: Jail-aware validator set filtering exports
+pub use validator_set::{
+    build_validator_set_with_stake_and_jail_filter, ValidatorCandidateWithJailStatus,
+    ValidatorSetBuildResultWithJail,
+};
+
 pub use verify::{
     ensure_qc_suite_matches_epoch, ConsensusVerifier, NoopConsensusVerifier, VerificationError,
 };
@@ -119,9 +126,20 @@ pub use slashing::{
     verify_o1_evidence, verify_o2_evidence, EvidenceVerificationError, ML_DSA_44_SUITE_ID,
 };
 
+// T229: Slashing penalty engine exports
+pub use slashing::{
+    InMemorySlashingBackend, PenaltyDecision, PenaltyEngineConfig, PenaltySlashingContext,
+    PenaltySlashingEngine, PenaltySlashingMetrics, PenaltySlashingRecord, SlashingBackend,
+    SlashingBackendError, SlashingMode,
+};
+
+// M9: Atomic slashing penalty application exports
+pub use slashing::{AtomicPenaltyRequest, AtomicPenaltyResult, AtomicSlashingBackend};
+
 use qbind_crypto::CryptoProvider;
 use qbind_hash::vote_digest;
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate as WireQuorumCertificate, Vote};
+
 
 /// Information about a single consensus validator that the verifier needs.
 #[derive(Clone, Debug)]
