@@ -125,6 +125,7 @@ fn test_a1_o1_penalty_applied_stake_reduced() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..Default::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
     let vs = test_validator_set();
@@ -176,6 +177,7 @@ fn test_a2_o1_penalty_applied_jailed_until_epoch_set() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..Default::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
     let vs = test_validator_set();
@@ -259,6 +261,7 @@ fn test_b1_o2_penalty_applied_stake_reduced() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..Default::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
     let vs = test_validator_set();
@@ -300,6 +303,7 @@ fn test_b2_o2_penalty_applied_jailed_until_epoch_set() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..Default::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
     let vs = test_validator_set();
@@ -412,6 +416,7 @@ fn test_d1_record_only_mode_no_penalty() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..Default::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
     let vs = test_validator_set();
@@ -663,6 +668,7 @@ fn test_g3_enforce_all_mode_applies_o1_o2() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..Default::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
     let vs = test_validator_set();
