@@ -678,6 +678,10 @@ impl CliArgs {
                 signer_mode: SignerMode::LoopbackTesting,
                 signer_keystore_path: None,
                 remote_signer_url: None,
+                // M10.1: Remote signer KEMTLS cert paths
+                remote_signer_cert_path: None,
+                remote_signer_client_cert_path: None,
+                remote_signer_client_key_path: None,
                 hsm_config_path: None,
                 // T214: Exit on failure is the default
                 signer_failure_mode: SignerFailureMode::ExitOnFailure,

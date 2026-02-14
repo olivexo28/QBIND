@@ -266,6 +266,12 @@ pub use node_config::{
     is_production_signer_mode, parse_signer_mode, SignerMode, VALID_SIGNER_MODES,
 };
 
+// M10.1 Signer Mode Validation exports
+pub use node_config::{
+    validate_signer_mode_for_devnet, validate_signer_mode_for_mainnet,
+    validate_signer_mode_for_testnet,
+};
+
 // T214 Signer Failure Mode exports
 pub use node_config::{parse_signer_failure_mode, SignerFailureMode, VALID_SIGNER_FAILURE_MODES};
 

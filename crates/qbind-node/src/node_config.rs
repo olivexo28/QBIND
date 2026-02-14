@@ -614,6 +614,126 @@ pub fn is_production_signer_mode(mode: SignerMode) -> bool {
 }
 
 // ============================================================================
+// M10.1: Signer Mode Policy Validation
+// ============================================================================
+
+/// Validate that a signer mode is acceptable for MainNet.
+///
+/// MainNet requirements (M10.1):
+/// - `LoopbackTesting` is **FORBIDDEN** (plaintext keys on validator host)
+/// - `EncryptedFsV1` is allowed with strict constraints (encrypted keystore)
+/// - `RemoteSigner` is **PREFERRED** (key isolation via KEMTLS transport)
+/// - `HsmPkcs11` is **PREFERRED** (key never leaves HSM)
+///
+/// # Returns
+///
+/// `Ok(())` if valid, or an error message if invalid.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{SignerMode, validate_signer_mode_for_mainnet};
+///
+/// // RemoteSigner and HsmPkcs11 are preferred for MainNet
+/// assert!(validate_signer_mode_for_mainnet(SignerMode::RemoteSigner).is_ok());
+/// assert!(validate_signer_mode_for_mainnet(SignerMode::HsmPkcs11).is_ok());
+///
+/// // EncryptedFsV1 is allowed with warning
+/// assert!(validate_signer_mode_for_mainnet(SignerMode::EncryptedFsV1).is_ok());
+///
+/// // LoopbackTesting is FORBIDDEN on MainNet
+/// assert!(validate_signer_mode_for_mainnet(SignerMode::LoopbackTesting).is_err());
+/// ```
+pub fn validate_signer_mode_for_mainnet(mode: SignerMode) -> Result<(), String> {
+    match mode {
+        SignerMode::LoopbackTesting => {
+            Err("signer_mode 'loopback-testing' is FORBIDDEN for MainNet (M10.1); \
+                 MainNet validators must use 'remote-signer', 'hsm-pkcs11', or 'encrypted-fs' \
+                 to protect validator signing keys. LoopbackTesting keys expose the validator \
+                 to key theft if the host is compromised."
+                .to_string())
+        }
+        SignerMode::EncryptedFsV1 => {
+            // Allowed but emit a recommendation for higher security
+            eprintln!(
+                "[M10.1] MainNet: signer_mode='encrypted-fs' is acceptable, but \
+                 'remote-signer' or 'hsm-pkcs11' is RECOMMENDED for maximum key isolation."
+            );
+            Ok(())
+        }
+        SignerMode::RemoteSigner | SignerMode::HsmPkcs11 => {
+            // Preferred modes for MainNet - no warning needed
+            Ok(())
+        }
+    }
+}
+
+/// Validate that a signer mode is acceptable for TestNet.
+///
+/// TestNet requirements (M10.1):
+/// - `LoopbackTesting` is **FORBIDDEN** (same security posture as MainNet)
+/// - `EncryptedFsV1` is allowed (encrypted keystore)
+/// - `RemoteSigner` is **PREFERRED** (key isolation via KEMTLS transport)
+/// - `HsmPkcs11` is **PREFERRED** (key never leaves HSM)
+///
+/// # Returns
+///
+/// `Ok(())` if valid, or an error message if invalid.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{SignerMode, validate_signer_mode_for_testnet};
+///
+/// // All production modes are allowed for TestNet
+/// assert!(validate_signer_mode_for_testnet(SignerMode::RemoteSigner).is_ok());
+/// assert!(validate_signer_mode_for_testnet(SignerMode::HsmPkcs11).is_ok());
+/// assert!(validate_signer_mode_for_testnet(SignerMode::EncryptedFsV1).is_ok());
+///
+/// // LoopbackTesting is FORBIDDEN on TestNet (same as MainNet)
+/// assert!(validate_signer_mode_for_testnet(SignerMode::LoopbackTesting).is_err());
+/// ```
+pub fn validate_signer_mode_for_testnet(mode: SignerMode) -> Result<(), String> {
+    match mode {
+        SignerMode::LoopbackTesting => {
+            Err("signer_mode 'loopback-testing' is FORBIDDEN for TestNet (M10.1); \
+                 TestNet validators must use 'remote-signer', 'hsm-pkcs11', or 'encrypted-fs' \
+                 to protect validator signing keys. Use DevNet for development with plaintext keys."
+                .to_string())
+        }
+        SignerMode::EncryptedFsV1 | SignerMode::RemoteSigner | SignerMode::HsmPkcs11 => {
+            // All production modes are acceptable for TestNet
+            Ok(())
+        }
+    }
+}
+
+/// Validate that a signer mode is acceptable for DevNet.
+///
+/// DevNet requirements (M10.1):
+/// - All modes are allowed, including `LoopbackTesting` for development convenience.
+///
+/// # Returns
+///
+/// `Ok(())` always for DevNet.
+///
+/// # Example
+///
+/// ```rust
+/// use qbind_node::node_config::{SignerMode, validate_signer_mode_for_devnet};
+///
+/// // All modes are allowed for DevNet
+/// assert!(validate_signer_mode_for_devnet(SignerMode::LoopbackTesting).is_ok());
+/// assert!(validate_signer_mode_for_devnet(SignerMode::EncryptedFsV1).is_ok());
+/// assert!(validate_signer_mode_for_devnet(SignerMode::RemoteSigner).is_ok());
+/// assert!(validate_signer_mode_for_devnet(SignerMode::HsmPkcs11).is_ok());
+/// ```
+pub fn validate_signer_mode_for_devnet(_mode: SignerMode) -> Result<(), String> {
+    // DevNet allows all modes for development flexibility, including LoopbackTesting
+    Ok(())
+}
+
+// ============================================================================
 // T214: Signer Failure Mode Configuration
 // ============================================================================
 
@@ -3613,12 +3733,44 @@ pub struct NodeConfig {
     /// URL for the remote signer service (T210).
     ///
     /// Required when `signer_mode == SignerMode::RemoteSigner`.
-    /// Supports `grpc://`, `http://`, or `unix://` schemes.
+    /// Supports `kemtls://`, `grpc://`, `http://`, or `unix://` schemes.
     ///
     /// Examples:
+    /// - `kemtls://signer.local:9443` (recommended for M10.1)
     /// - `grpc://localhost:50051`
     /// - `unix:///var/run/qbind-signer.sock`
     pub remote_signer_url: Option<String>,
+
+    /// Path to the remote signer's expected certificate/public key (M10.1).
+    ///
+    /// Required when `signer_mode == SignerMode::RemoteSigner` and using KEMTLS transport.
+    /// The node verifies the remote signer's identity matches this certificate during
+    /// the KEMTLS handshake. This provides cryptographic binding between the configured
+    /// signer endpoint and the actual signer.
+    ///
+    /// For TestNet/MainNet, mutual authentication is REQUIRED (M10.1):
+    /// - Node presents its certificate to the remote signer
+    /// - Remote signer verifies node identity before signing
+    ///
+    /// Example: `/etc/qbind/remote_signer_cert.pem`
+    pub remote_signer_cert_path: Option<PathBuf>,
+
+    /// Path to the node's certificate for remote signer mutual auth (M10.1).
+    ///
+    /// Required when `signer_mode == SignerMode::RemoteSigner` on TestNet/MainNet.
+    /// The node presents this certificate to the remote signer during KEMTLS handshake.
+    /// The remote signer verifies the node's identity before accepting sign requests.
+    ///
+    /// Example: `/etc/qbind/node_signer_client_cert.pem`
+    pub remote_signer_client_cert_path: Option<PathBuf>,
+
+    /// Path to the node's private key for remote signer mutual auth (M10.1).
+    ///
+    /// Required when `remote_signer_client_cert_path` is set.
+    /// This key is used during the KEMTLS handshake with the remote signer.
+    ///
+    /// Example: `/etc/qbind/node_signer_client_key.pem`
+    pub remote_signer_client_key_path: Option<PathBuf>,
 
     /// Path to the HSM/PKCS#11 configuration file (T210).
     ///
@@ -3794,6 +3946,10 @@ impl Default for NodeConfig {
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths (not needed for loopback)
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -3849,6 +4005,10 @@ impl NodeConfig {
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -3903,6 +4063,10 @@ impl NodeConfig {
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -4005,6 +4169,10 @@ impl NodeConfig {
             signer_mode: SignerMode::LoopbackTesting,
             signer_keystore_path: None,
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -4082,6 +4250,10 @@ impl NodeConfig {
             signer_mode: SignerMode::EncryptedFsV1,
             signer_keystore_path: None, // Operator must provide
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -4172,6 +4344,10 @@ impl NodeConfig {
             signer_mode: SignerMode::EncryptedFsV1,
             signer_keystore_path: None, // Operator must provide
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is the default
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -4274,6 +4450,10 @@ impl NodeConfig {
             signer_mode: SignerMode::EncryptedFsV1,
             signer_keystore_path: None, // Operator must provide
             remote_signer_url: None,
+            // M10.1: Remote signer KEMTLS cert paths (required if using RemoteSigner mode)
+            remote_signer_cert_path: None,
+            remote_signer_client_cert_path: None,
+            remote_signer_client_key_path: None,
             hsm_config_path: None,
             // T214: Exit on failure is required for MainNet
             signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -5455,14 +5635,14 @@ impl NodeConfig {
             }
         }
 
-        // 19. Signer mode must not be LoopbackTesting (T210)
+        // 19. Signer mode must not be LoopbackTesting (T210, M10.1)
         // MainNet requires a production signer (EncryptedFsV1, RemoteSigner, or HsmPkcs11).
         // Loopback mode is only allowed for development/testing.
         if self.signer_mode == SignerMode::LoopbackTesting {
             return Err(MainnetConfigError::SignerModeLoopbackForbidden);
         }
 
-        // 20. Signer mode requires appropriate configuration (T210)
+        // 20. Signer mode requires appropriate configuration (T210, M10.1)
         // Note: LoopbackTesting is already rejected above, so we only check production modes.
         match self.signer_mode {
             SignerMode::EncryptedFsV1 => {
@@ -5473,6 +5653,18 @@ impl NodeConfig {
             SignerMode::RemoteSigner => {
                 if self.remote_signer_url.is_none() {
                     return Err(MainnetConfigError::RemoteSignerUrlMissing);
+                }
+                // M10.1: For KEMTLS mutual auth, require certificate paths
+                // This ensures the node can verify the remote signer's identity
+                // and the remote signer can verify the node's identity.
+                if self.remote_signer_cert_path.is_none() {
+                    return Err(MainnetConfigError::RemoteSignerCertPathMissing);
+                }
+                if self.remote_signer_client_cert_path.is_none() {
+                    return Err(MainnetConfigError::RemoteSignerClientCertPathMissing);
+                }
+                if self.remote_signer_client_key_path.is_none() {
+                    return Err(MainnetConfigError::RemoteSignerClientKeyPathMissing);
                 }
             }
             SignerMode::HsmPkcs11 => {
@@ -5767,6 +5959,25 @@ pub enum MainnetConfigError {
     /// check at startup. This error indicates the remote signer could not
     /// be reached after the configured number of attempts.
     RemoteSignerUnreachable,
+
+    /// Remote signer certificate path is missing when RemoteSigner mode is selected (M10.1).
+    ///
+    /// When signer_mode is RemoteSigner on MainNet/TestNet, remote_signer_cert_path
+    /// must be set to the path of the remote signer's expected certificate for
+    /// KEMTLS identity verification.
+    RemoteSignerCertPathMissing,
+
+    /// Remote signer client certificate path is missing when RemoteSigner mode is selected (M10.1).
+    ///
+    /// When signer_mode is RemoteSigner on MainNet/TestNet, remote_signer_client_cert_path
+    /// must be set to the path of the node's client certificate for KEMTLS mutual auth.
+    RemoteSignerClientCertPathMissing,
+
+    /// Remote signer client key path is missing when RemoteSigner mode is selected (M10.1).
+    ///
+    /// When signer_mode is RemoteSigner on MainNet/TestNet, remote_signer_client_key_path
+    /// must be set to the path of the node's client private key for KEMTLS mutual auth.
+    RemoteSignerClientKeyPathMissing,
 
     /// HSM configuration path is missing when HsmPkcs11 mode is selected (T210).
     ///
@@ -6075,6 +6286,27 @@ impl std::fmt::Display for MainnetConfigError {
                     f,
                     "MainNet invariant violated: remote signer is unreachable at startup. \
                      Verify the remote signer is running and accessible at the configured URL."
+                )
+            }
+            MainnetConfigError::RemoteSignerCertPathMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated (M10.1): remote_signer_cert_path must be set when signer_mode is 'remote-signer' \
+                     for KEMTLS identity verification (--remote-signer-cert-path=/path/to/signer_cert.pem)"
+                )
+            }
+            MainnetConfigError::RemoteSignerClientCertPathMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated (M10.1): remote_signer_client_cert_path must be set when signer_mode is 'remote-signer' \
+                     for KEMTLS mutual auth (--remote-signer-client-cert-path=/path/to/client_cert.pem)"
+                )
+            }
+            MainnetConfigError::RemoteSignerClientKeyPathMissing => {
+                write!(
+                    f,
+                    "MainNet invariant violated (M10.1): remote_signer_client_key_path must be set when signer_mode is 'remote-signer' \
+                     for KEMTLS mutual auth (--remote-signer-client-key-path=/path/to/client_key.pem)"
                 )
             }
             MainnetConfigError::HsmConfigPathMissing => {
