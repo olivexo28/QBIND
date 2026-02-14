@@ -17,6 +17,7 @@ use qbind_node::node_config::{
     NetworkMode, NodeConfig, SignerFailureMode, SignerMode,
 };
 use qbind_types::NetworkEnvironment;
+use std::path::PathBuf;
 
 // ============================================================================
 // Part 1: Preset Correctness Tests
@@ -822,12 +823,18 @@ fn validate_mainnet_invariants_rejects_missing_hsm_config_path() {
 /// Test: Valid MainNet config with RemoteSigner passes validation.
 #[test]
 fn validate_mainnet_invariants_accepts_remote_signer_with_url() {
-    let config = NodeConfig::mainnet_preset()
+    let mut config = NodeConfig::mainnet_preset()
         .with_data_dir("/data/qbind")
         .with_genesis_path("/data/qbind/genesis.json")
         .with_expected_genesis_hash([0u8; 32])
         .with_signer_mode(SignerMode::RemoteSigner)
         .with_remote_signer_url("grpc://localhost:50051");
+
+    config.remote_signer_cert_path = Some(PathBuf::from("/etc/qbind/remote_signer_cert.pem"));
+    config.remote_signer_client_cert_path =
+        Some(PathBuf::from("/etc/qbind/node_signer_client_cert.pem"));
+    config.remote_signer_client_key_path =
+        Some(PathBuf::from("/etc/qbind/node_signer_client_key.pem"));
 
     let result = config.validate_mainnet_invariants();
     assert!(
