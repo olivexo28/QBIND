@@ -649,7 +649,7 @@ pub fn validate_signer_mode_for_mainnet(mode: SignerMode) -> Result<(), String> 
         SignerMode::LoopbackTesting => {
             Err("signer_mode 'loopback-testing' is FORBIDDEN for MainNet (M10.1); \
                  MainNet validators must use 'remote-signer', 'hsm-pkcs11', or 'encrypted-fs' \
-                 to protect validator signing keys. LocalPlaintext keys expose the validator \
+                 to protect validator signing keys. LoopbackTesting keys expose the validator \
                  to key theft if the host is compromised."
                 .to_string())
         }
