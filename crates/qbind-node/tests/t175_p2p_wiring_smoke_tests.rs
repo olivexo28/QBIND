@@ -71,6 +71,10 @@ fn make_test_p2p_config() -> NodeConfig {
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
+        // M10.1: Remote signer KEMTLS cert paths
+        remote_signer_cert_path: None,
+        remote_signer_client_cert_path: None,
+        remote_signer_client_key_path: None,
         hsm_config_path: None,
         // T214: Signer failure mode defaults
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
@@ -119,6 +123,10 @@ fn make_test_local_mesh_config() -> NodeConfig {
         signer_mode: SignerMode::LoopbackTesting,
         signer_keystore_path: None,
         remote_signer_url: None,
+        // M10.1: Remote signer KEMTLS cert paths
+        remote_signer_cert_path: None,
+        remote_signer_client_cert_path: None,
+        remote_signer_client_key_path: None,
         hsm_config_path: None,
         // T214: Signer failure mode defaults
         signer_failure_mode: SignerFailureMode::ExitOnFailure,
