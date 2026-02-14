@@ -936,24 +936,20 @@ pub fn verify_o4_evidence(
             continue;
         }
 
-        // Construct preimage: batch_commitment || dag_round
+        // Construct preimage: batch_commitment || dag_round (little-endian for consistency)
         let mut preimage = Vec::new();
         preimage.extend_from_slice(&cert.batch_commitment);
-        preimage.extend_from_slice(&cert.dag_round.to_be_bytes());
+        preimage.extend_from_slice(&cert.dag_round.to_le_bytes());
 
         // Verify the signature
-        if let Err(e) = verify_ml_dsa_44_signature(
+        if let Err(_e) = verify_ml_dsa_44_signature(
             &signer_info.consensus_pk,
             &preimage,
             &cert.signatures[idx],
             *signer_id,
         ) {
-            eprintln!(
-                "[SLASHING] O4 verification: signer {} has invalid signature in cert: {:?}",
-                signer_id.0, e
-            );
             // Signature verification failure is expected for O4 evidence
-            // (the cert is supposed to be invalid)
+            // (the cert is supposed to be invalid) - no logging needed
         }
     }
 
