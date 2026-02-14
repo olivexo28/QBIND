@@ -37,7 +37,7 @@ This report tracks protocol gaps, security assumptions, incomplete components, a
 
 ## Summary of Open Critical Issues
 
-1. **Slashing penalties infrastructure present but not enforced** - No economic deterrent for misbehavior
+1. **O3–O5 slashing penalties pending** - O1/O2 enforced (M9); O3 (invalid vote), O4 (censorship), O5 (availability) remain evidence-only
 2. **LocalMesh node operation is a stub** - Limited testing capability
 
 ---
