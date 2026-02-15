@@ -825,9 +825,9 @@ fn localmesh_restart_resets_flags() {
 // Summary Test
 // ============================================================================
 
-/// Integration test summary: LocalMesh mode pre-testnet requirements verified.
+/// Integration test summary: LocalMesh mode Pre-TestNet requirements verified.
 ///
-/// This test serves as a documentation marker that all pre-testnet critical
+/// This test serves as a documentation marker that all Pre-TestNet critical
 /// requirements for LocalMesh mode (ref QBIND_PROTOCOL_REPORT.md 3.7) are
 /// covered by the tests in this module.
 #[test]
