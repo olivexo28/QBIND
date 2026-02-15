@@ -2281,10 +2281,12 @@ impl VmV0ExecutionEngine {
             );
         }
 
-        // Step 8: Update sender (decrement balance by amount + fee, increment nonce)
-        // M18: Use checked arithmetic for nonce increment and balance decrement
-        // Note: balance subtraction is safe after the balance check above, but we use
-        // checked_sub for defense-in-depth and fail-closed semantics.
+        // ======================================================================
+        // M18: Pre-validate ALL overflow conditions BEFORE any state changes
+        // This ensures ATOM-1: state changes commit atomically or not at all
+        // ======================================================================
+
+        // Pre-validate nonce increment
         let new_nonce = match sender_state.nonce.checked_add(1) {
             Some(n) => n,
             None => {
@@ -2296,10 +2298,11 @@ impl VmV0ExecutionEngine {
                 );
             }
         };
+
+        // Pre-validate sender balance decrement (defense-in-depth after Step 7 check)
         let new_sender_balance = match sender_state.balance.checked_sub(total_debit) {
             Some(b) => b,
             None => {
-                // This should not happen after balance check, but fail-closed anyway
                 return VmV0TxResult::failure_with_gas(
                     VmV0Error::ArithmeticOverflow {
                         operation: "sender balance decrement",
@@ -2308,22 +2311,12 @@ impl VmV0ExecutionEngine {
                 );
             }
         };
-        let new_sender_state = AccountState {
-            nonce: new_nonce,
-            balance: new_sender_balance,
-        };
-        state.set_account_state(&tx.sender, new_sender_state);
 
-        // Step 9: Update recipient (increment balance, create if absent)
-        // M18: Use checked arithmetic for recipient balance increment
+        // Pre-validate recipient balance increment
         let recipient_state = state.get_account_state(&recipient);
         let new_recipient_balance = match recipient_state.balance.checked_add(amount) {
             Some(b) => b,
             None => {
-                // Overflow: recipient balance would exceed u128::MAX
-                // This is catastrophic - we must reject the transaction
-                // Note: State was already modified (sender deducted), so this is
-                // a partial failure. In production, this should trigger block rejection.
                 return VmV0TxResult::failure_with_gas(
                     VmV0Error::ArithmeticOverflow {
                         operation: "recipient balance increment",
@@ -2332,45 +2325,113 @@ impl VmV0ExecutionEngine {
                 );
             }
         };
-        let new_recipient_state = AccountState {
-            nonce: recipient_state.nonce,
-            balance: new_recipient_balance,
-        };
-        state.set_account_state(&recipient, new_recipient_state);
 
-        // Step 10: Distribute fee according to policy (T193)
+        // Pre-calculate fee distribution
         let (fee_burned, fee_to_proposer) = self
             .gas_config
             .fee_distribution_policy
             .distribute_fee(total_fee);
 
-        // Step 11: Credit proposer if there's a reward and proposer is provided
-        // M18: Use checked arithmetic for proposer balance increment
-        if fee_to_proposer > 0 {
-            if let Some(proposer_id) = proposer {
-                let proposer_state = state.get_account_state(proposer_id);
-                let new_proposer_balance = match proposer_state.balance.checked_add(fee_to_proposer)
-                {
-                    Some(b) => b,
-                    None => {
-                        // Overflow: proposer balance would exceed u128::MAX
-                        return VmV0TxResult::failure_with_gas(
-                            VmV0Error::ArithmeticOverflow {
-                                operation: "proposer balance increment",
-                            },
-                            gas_cost,
-                        );
-                    }
-                };
-                let new_proposer_state = AccountState {
-                    nonce: proposer_state.nonce,
-                    balance: new_proposer_balance,
-                };
-                state.set_account_state(proposer_id, new_proposer_state);
+        // ======================================================================
+        // Handle special cases where proposer overlaps with sender or recipient
+        // M18: Compute final balances correctly for all overlap scenarios
+        // ======================================================================
+
+        // Compute final balances, handling overlap cases:
+        // Case 1: proposer == sender: sender pays (debit) and receives (fee reward)
+        // Case 2: proposer == recipient: recipient receives (transfer) and receives (fee reward)
+        // Case 3: all three are same: sender == recipient == proposer (self-transfer with reward)
+        // Case 4: all different (normal case)
+
+        let proposer_id_opt = proposer;
+        let proposer_is_sender = proposer_id_opt.map_or(false, |p| p == &tx.sender);
+        let proposer_is_recipient = proposer_id_opt.map_or(false, |p| p == &recipient);
+
+        // Calculate final sender balance (may include proposer reward if proposer == sender)
+        let final_sender_balance = if proposer_is_sender && fee_to_proposer > 0 {
+            // Sender loses debit but gains proposer reward
+            match new_sender_balance.checked_add(fee_to_proposer) {
+                Some(b) => b,
+                None => {
+                    return VmV0TxResult::failure_with_gas(
+                        VmV0Error::ArithmeticOverflow {
+                            operation: "sender-proposer combined balance",
+                        },
+                        gas_cost,
+                    );
+                }
             }
-            // If no proposer provided but policy has proposer rewards, the rewards are
-            // effectively burned (this maintains backward compatibility for tests that
-            // don't provide a proposer).
+        } else {
+            new_sender_balance
+        };
+
+        // Calculate final recipient balance (may include proposer reward if proposer == recipient)
+        let final_recipient_balance = if proposer_is_recipient && fee_to_proposer > 0 && !proposer_is_sender {
+            // Recipient gains transfer and proposer reward (unless already handled as sender)
+            match new_recipient_balance.checked_add(fee_to_proposer) {
+                Some(b) => b,
+                None => {
+                    return VmV0TxResult::failure_with_gas(
+                        VmV0Error::ArithmeticOverflow {
+                            operation: "recipient-proposer combined balance",
+                        },
+                        gas_cost,
+                    );
+                }
+            }
+        } else {
+            new_recipient_balance
+        };
+
+        // Calculate final proposer balance (only if proposer is different from sender and recipient)
+        let update_proposer_separately = proposer_id_opt.map_or(false, |p| {
+            p != &tx.sender && p != &recipient
+        }) && fee_to_proposer > 0;
+
+        let separate_proposer_state = if update_proposer_separately {
+            let proposer_id = proposer_id_opt.unwrap(); // Safe: we checked it's Some above
+            let proposer_state = state.get_account_state(proposer_id);
+            match proposer_state.balance.checked_add(fee_to_proposer) {
+                Some(b) => Some((proposer_id, AccountState {
+                    nonce: proposer_state.nonce,
+                    balance: b,
+                })),
+                None => {
+                    return VmV0TxResult::failure_with_gas(
+                        VmV0Error::ArithmeticOverflow {
+                            operation: "proposer balance increment",
+                        },
+                        gas_cost,
+                    );
+                }
+            }
+        } else {
+            None
+        };
+
+        // ======================================================================
+        // All pre-validations passed - now apply state changes atomically
+        // ======================================================================
+
+        // Step 8: Update sender
+        let new_sender_state = AccountState {
+            nonce: new_nonce,
+            balance: final_sender_balance,
+        };
+        state.set_account_state(&tx.sender, new_sender_state);
+
+        // Step 9: Update recipient (if different from sender)
+        if recipient != tx.sender {
+            let new_recipient_state = AccountState {
+                nonce: recipient_state.nonce,
+                balance: final_recipient_balance,
+            };
+            state.set_account_state(&recipient, new_recipient_state);
+        }
+
+        // Step 10: Credit proposer if separate from sender and recipient
+        if let Some((proposer_id, proposer_account)) = separate_proposer_state {
+            state.set_account_state(proposer_id, proposer_account);
         }
 
         // Success with full fee distribution information
