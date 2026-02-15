@@ -126,6 +126,9 @@ pub use slashing::{
     verify_o1_evidence, verify_o2_evidence, EvidenceVerificationError, ML_DSA_44_SUITE_ID,
 };
 
+// M11: O3-O5 evidence verification exports
+pub use slashing::{verify_o3_evidence, verify_o4_evidence, verify_o5_evidence};
+
 // T229: Slashing penalty engine exports
 pub use slashing::{
     InMemorySlashingBackend, PenaltyDecision, PenaltyEngineConfig, PenaltySlashingContext,
