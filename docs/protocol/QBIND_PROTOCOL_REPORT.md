@@ -79,10 +79,12 @@ This section lists items where the whitepaper lacks formal precision.
 | Field | Value |
 |-------|-------|
 | **Description** | Gas model is described at high level (Section 10.4) but lacks formal metering rules per operation type |
-| **Whitepaper Reference** | Section 10.4: Gas Accounting |
-| **Code Reference** | `qbind-ledger/src/`, `qbind-runtime/src/` |
-| **Risk Level** | Medium |
-| **Action Required** | Document gas cost table per instruction/operation; formalize fee calculation |
+| **Whitepaper Reference** | Section 10.4: Gas Accounting, Section 19: Gas Accounting and Deterministic Metering Model |
+| **Code Reference** | `qbind-ledger/src/execution_gas.rs`, `qbind-runtime/src/gas_model.rs`, `qbind-runtime/src/block_apply.rs` |
+| **Status** | ✅ Mitigated (M18) |
+| **Risk Level** | Low (mitigated) |
+| **Action Required** | ~~Document gas cost table per instruction/operation; formalize fee calculation~~ |
+| **Note** | **M18**: Formal gas accounting specification added in Whitepaper Section 19 "Gas Accounting and Deterministic Metering Model". Includes: (1) Gas state variables (gas_limit_tx, gas_used_tx, block_gas_limit, etc.), (2) Formal gas transition function δ_gas with pre-checks, execution, and finalization phases, (3) Gas cost formula for VM v0 transfers, (4) Determinism requirements (no wall clock, no randomness), (5) Crash-safety atomicity requirements referencing M16, (6) Formal invariants (balance non-negativity, supply conservation, overflow protection). Code audit performed: arithmetic hardened with checked operations (no unchecked overflow). Tests: `crates/qbind-node/tests/m18_gas_accounting_tests.rs`. |
 
 ## 2.4 Timeout / View-Change Liveness Formalization
 

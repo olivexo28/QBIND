@@ -1076,6 +1076,10 @@ impl SingleThreadExecutionService {
                                         } => {
                                             m.inc_error(ExecutionErrorReason::Other);
                                         }
+                                        // M18: Arithmetic overflow errors
+                                        qbind_ledger::VmV0Error::ArithmeticOverflow { .. } => {
+                                            m.inc_error(ExecutionErrorReason::Other);
+                                        }
                                     }
                                 }
                             }

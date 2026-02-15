@@ -1835,6 +1835,17 @@ pub enum VmV0Error {
         /// The total amount needed (transfer amount + fee).
         needed: u128,
     },
+
+    // M18: Arithmetic safety error variants
+    /// Arithmetic overflow detected during fee/balance calculation (M18).
+    ///
+    /// This indicates that a gas, fee, or balance calculation would exceed
+    /// the maximum representable value. The transaction is rejected to
+    /// maintain determinism and fail-closed semantics.
+    ArithmeticOverflow {
+        /// Description of which operation overflowed.
+        operation: &'static str,
+    },
 }
 
 impl std::fmt::Display for VmV0Error {
@@ -1860,6 +1871,9 @@ impl std::fmt::Display for VmV0Error {
                     "insufficient balance for fee: have {}, need {}",
                     balance, needed
                 )
+            }
+            VmV0Error::ArithmeticOverflow { operation } => {
+                write!(f, "arithmetic overflow in {}", operation)
             }
         }
     }
@@ -2216,8 +2230,31 @@ impl VmV0ExecutionEngine {
         };
 
         // Step 4: Compute fee (fee = gas_cost * max_fee_per_gas)
-        let total_fee = (gas_cost as u128) * max_fee_per_gas;
-        let total_debit = amount.saturating_add(total_fee);
+        // M18: Use checked arithmetic to prevent overflow
+        let total_fee = match (gas_cost as u128).checked_mul(max_fee_per_gas) {
+            Some(fee) => fee,
+            None => {
+                return VmV0TxResult::failure_with_gas(
+                    VmV0Error::ArithmeticOverflow {
+                        operation: "fee calculation (gas_cost * max_fee_per_gas)",
+                    },
+                    gas_cost,
+                );
+            }
+        };
+
+        // M18: Use checked arithmetic for total_debit
+        let total_debit = match amount.checked_add(total_fee) {
+            Some(debit) => debit,
+            None => {
+                return VmV0TxResult::failure_with_gas(
+                    VmV0Error::ArithmeticOverflow {
+                        operation: "total debit calculation (amount + fee)",
+                    },
+                    gas_cost,
+                );
+            }
+        };
 
         // Step 5: Fetch sender's current state
         let sender_state = state.get_account_state(&tx.sender);
@@ -2244,40 +2281,157 @@ impl VmV0ExecutionEngine {
             );
         }
 
-        // Step 8: Update sender (decrement balance by amount + fee, increment nonce)
-        let new_sender_state = AccountState {
-            nonce: sender_state.nonce + 1,
-            balance: sender_state.balance - total_debit,
-        };
-        state.set_account_state(&tx.sender, new_sender_state);
+        // ======================================================================
+        // M18: Pre-validate ALL overflow conditions BEFORE any state changes
+        // This ensures ATOM-1: state changes commit atomically or not at all
+        // ======================================================================
 
-        // Step 9: Update recipient (increment balance, create if absent)
+        // Pre-validate nonce increment
+        let new_nonce = match sender_state.nonce.checked_add(1) {
+            Some(n) => n,
+            None => {
+                return VmV0TxResult::failure_with_gas(
+                    VmV0Error::ArithmeticOverflow {
+                        operation: "nonce increment",
+                    },
+                    gas_cost,
+                );
+            }
+        };
+
+        // Pre-validate sender balance decrement (defense-in-depth after Step 7 check)
+        let new_sender_balance = match sender_state.balance.checked_sub(total_debit) {
+            Some(b) => b,
+            None => {
+                return VmV0TxResult::failure_with_gas(
+                    VmV0Error::ArithmeticOverflow {
+                        operation: "sender balance decrement",
+                    },
+                    gas_cost,
+                );
+            }
+        };
+
+        // Pre-validate recipient balance increment
         let recipient_state = state.get_account_state(&recipient);
-        let new_recipient_state = AccountState {
-            nonce: recipient_state.nonce,
-            balance: recipient_state.balance + amount,
+        let new_recipient_balance = match recipient_state.balance.checked_add(amount) {
+            Some(b) => b,
+            None => {
+                return VmV0TxResult::failure_with_gas(
+                    VmV0Error::ArithmeticOverflow {
+                        operation: "recipient balance increment",
+                    },
+                    gas_cost,
+                );
+            }
         };
-        state.set_account_state(&recipient, new_recipient_state);
 
-        // Step 10: Distribute fee according to policy (T193)
+        // Pre-calculate fee distribution
         let (fee_burned, fee_to_proposer) = self
             .gas_config
             .fee_distribution_policy
             .distribute_fee(total_fee);
 
-        // Step 11: Credit proposer if there's a reward and proposer is provided
-        if fee_to_proposer > 0 {
-            if let Some(proposer_id) = proposer {
-                let proposer_state = state.get_account_state(proposer_id);
-                let new_proposer_state = AccountState {
-                    nonce: proposer_state.nonce,
-                    balance: proposer_state.balance + fee_to_proposer,
-                };
-                state.set_account_state(proposer_id, new_proposer_state);
+        // ======================================================================
+        // Handle special cases where proposer overlaps with sender or recipient
+        // M18: Compute final balances correctly for all overlap scenarios
+        // ======================================================================
+
+        // Compute final balances, handling overlap cases:
+        // Case 1: proposer == sender: sender pays (debit) and receives (fee reward)
+        // Case 2: proposer == recipient: recipient receives (transfer) and receives (fee reward)
+        // Case 3: all three are same: sender == recipient == proposer (self-transfer with reward)
+        // Case 4: all different (normal case)
+
+        let proposer_id_opt = proposer;
+        let proposer_is_sender = proposer_id_opt.map_or(false, |p| p == &tx.sender);
+        let proposer_is_recipient = proposer_id_opt.map_or(false, |p| p == &recipient);
+
+        // Calculate final sender balance (may include proposer reward if proposer == sender)
+        let final_sender_balance = if proposer_is_sender && fee_to_proposer > 0 {
+            // Sender loses debit but gains proposer reward
+            match new_sender_balance.checked_add(fee_to_proposer) {
+                Some(b) => b,
+                None => {
+                    return VmV0TxResult::failure_with_gas(
+                        VmV0Error::ArithmeticOverflow {
+                            operation: "sender-proposer combined balance",
+                        },
+                        gas_cost,
+                    );
+                }
             }
-            // If no proposer provided but policy has proposer rewards, the rewards are
-            // effectively burned (this maintains backward compatibility for tests that
-            // don't provide a proposer).
+        } else {
+            new_sender_balance
+        };
+
+        // Calculate final recipient balance (may include proposer reward if proposer == recipient)
+        let final_recipient_balance = if proposer_is_recipient && fee_to_proposer > 0 && !proposer_is_sender {
+            // Recipient gains transfer and proposer reward (unless already handled as sender)
+            match new_recipient_balance.checked_add(fee_to_proposer) {
+                Some(b) => b,
+                None => {
+                    return VmV0TxResult::failure_with_gas(
+                        VmV0Error::ArithmeticOverflow {
+                            operation: "recipient-proposer combined balance",
+                        },
+                        gas_cost,
+                    );
+                }
+            }
+        } else {
+            new_recipient_balance
+        };
+
+        // Calculate final proposer balance (only if proposer is different from sender and recipient)
+        let update_proposer_separately = proposer_id_opt.map_or(false, |p| {
+            p != &tx.sender && p != &recipient
+        }) && fee_to_proposer > 0;
+
+        let separate_proposer_state = if update_proposer_separately {
+            let proposer_id = proposer_id_opt.unwrap(); // Safe: we checked it's Some above
+            let proposer_state = state.get_account_state(proposer_id);
+            match proposer_state.balance.checked_add(fee_to_proposer) {
+                Some(b) => Some((proposer_id, AccountState {
+                    nonce: proposer_state.nonce,
+                    balance: b,
+                })),
+                None => {
+                    return VmV0TxResult::failure_with_gas(
+                        VmV0Error::ArithmeticOverflow {
+                            operation: "proposer balance increment",
+                        },
+                        gas_cost,
+                    );
+                }
+            }
+        } else {
+            None
+        };
+
+        // ======================================================================
+        // All pre-validations passed - now apply state changes atomically
+        // ======================================================================
+
+        // Step 8: Update sender
+        let new_sender_state = AccountState {
+            nonce: new_nonce,
+            balance: final_sender_balance,
+        };
+        state.set_account_state(&tx.sender, new_sender_state);
+
+        // Step 9: Update recipient (if different from sender)
+        if recipient != tx.sender {
+            let new_recipient_state = AccountState {
+                nonce: recipient_state.nonce,
+                balance: final_recipient_balance,
+            };
+            state.set_account_state(&recipient, new_recipient_state);
+        }
+
+        // Step 10: Credit proposer if separate from sender and recipient
+        if let Some((proposer_id, proposer_account)) = separate_proposer_state {
+            state.set_account_state(proposer_id, proposer_account);
         }
 
         // Success with full fee distribution information
@@ -2319,6 +2473,11 @@ impl VmV0ExecutionEngine {
     /// - Failed transactions (nonce mismatch, insufficient balance) do NOT consume gas
     ///   (they are rejected before any state changes, similar to pre-flight validation)
     /// - Only successful transactions consume gas from the block limit
+    ///
+    /// # M18: Checked Arithmetic
+    ///
+    /// All block gas accounting uses checked arithmetic. Overflow is not expected
+    /// under normal conditions but triggers fail-closed behavior if it occurs.
     fn execute_block_with_gas<S: AccountStateUpdater>(
         &self,
         state: &mut S,
@@ -2337,8 +2496,17 @@ impl VmV0ExecutionEngine {
                 .map(|r| r.gas_cost)
                 .unwrap_or(MINIMUM_GAS_LIMIT);
 
-            // Check if adding this tx would exceed block gas limit
-            if block_gas_used.saturating_add(gas_cost) > block_gas_limit {
+            // M18: Check if adding this tx would exceed block gas limit
+            // Use checked_add to detect overflow (fail-closed)
+            let projected_gas = match block_gas_used.checked_add(gas_cost) {
+                Some(g) => g,
+                None => {
+                    // Overflow: block is full by definition; stop processing
+                    break;
+                }
+            };
+
+            if projected_gas > block_gas_limit {
                 // Block is full; stop processing further transactions
                 // Remaining transactions are not executed in this block
                 break;
@@ -2350,8 +2518,16 @@ impl VmV0ExecutionEngine {
             // Update block gas used
             // Policy: Only count gas for successful transactions
             // Failed transactions are rejected before state changes (like pre-flight validation)
+            // M18: Use checked_add for determinism
             if result.success {
-                block_gas_used = block_gas_used.saturating_add(result.gas_used);
+                block_gas_used = match block_gas_used.checked_add(result.gas_used) {
+                    Some(g) => g,
+                    None => {
+                        // This should not happen given gas_limit constraints, but fail-closed
+                        // by stopping block processing. No more transactions are executed.
+                        break;
+                    }
+                };
             }
 
             results.push(result);
@@ -2418,16 +2594,26 @@ impl VmV0ExecutionEngine {
                 .map(|r| r.gas_cost)
                 .unwrap_or(MINIMUM_GAS_LIMIT);
 
-            // Check if adding this tx would exceed block gas limit
-            if block_gas_used.saturating_add(gas_cost) > block_gas_limit {
+            // M18: Check if adding this tx would exceed block gas limit
+            // Use checked_add for overflow detection
+            let projected_gas = match block_gas_used.checked_add(gas_cost) {
+                Some(g) => g,
+                None => break, // Overflow: block full
+            };
+
+            if projected_gas > block_gas_limit {
                 break;
             }
 
             // Execute the transaction with proposer rewards
             let result = self.execute_tx_with_gas_and_proposer(state, tx, Some(proposer));
 
+            // M18: Use checked_add for block gas accounting
             if result.success {
-                block_gas_used = block_gas_used.saturating_add(result.gas_used);
+                block_gas_used = match block_gas_used.checked_add(result.gas_used) {
+                    Some(g) => g,
+                    None => break, // Overflow: stop block processing
+                };
             }
 
             results.push(result);
@@ -2525,7 +2711,16 @@ pub struct VmV0BlockStats {
 
 impl VmV0BlockStats {
     /// Get the total fees charged (burned + proposer).
-    pub fn total_fees(&self) -> u128 {
+    ///
+    /// M18: Uses checked arithmetic to prevent overflow. Returns None on overflow.
+    pub fn total_fees(&self) -> Option<u128> {
+        self.total_fees_burned.checked_add(self.total_fees_to_proposer)
+    }
+
+    /// Get the total fees charged (burned + proposer), saturating on overflow.
+    ///
+    /// Use `total_fees()` for checked arithmetic in consensus-critical code.
+    pub fn total_fees_saturating(&self) -> u128 {
         self.total_fees_burned
             .saturating_add(self.total_fees_to_proposer)
     }

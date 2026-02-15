@@ -560,7 +560,7 @@ Non-deterministic execution would violate safety.
 ## 10.7 Known Gaps
 
 - Advanced state pruning not yet implemented
-- Full formal gas model documentation pending
+- ~~Full formal gas model documentation pending~~ → See Section 19: Gas Accounting and Deterministic Metering Model
 - Expanded slashing economics pending
 
 ---
@@ -1754,3 +1754,289 @@ The following invariants must hold for validator set transitions:
 4. **No Dynamic Suite Transitions**: Mid-epoch suite transitions are rejected. Suite changes require full epoch boundary activation.
 
 These limitations are tracked as roadmap items and do not affect core safety properties.
+
+---
+
+# 19. Gas Accounting and Deterministic Metering Model
+
+This section formalizes the QBIND gas accounting model, providing formal definitions for gas state variables, transition functions, and determinism requirements. Gas metering is critical for resource accounting, DoS prevention, and economic sustainability.
+
+---
+
+## 19.1 Gas State Variables
+
+### 19.1.1 Transaction-Level Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `gas_limit_tx` | `u64` | Maximum gas the sender authorizes for transaction execution |
+| `gas_used_tx` | `u64` | Actual gas consumed by transaction execution |
+| `max_fee_per_gas` | `u128` | Maximum fee per gas unit the sender will pay |
+| `max_priority_fee_per_gas` | `u128` | Maximum tip per gas unit (EIP-1559 compatible) |
+
+### 19.1.2 Block-Level Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `block_gas_limit` | `u64` | Maximum gas allowed per block (default: 30,000,000) |
+| `gas_used_block` | `u64` | Cumulative gas consumed by all transactions in the block |
+| `base_fee_per_gas` | `u128` | Current base fee per gas unit |
+
+### 19.1.3 Account-Level Variables
+
+| Variable | Type | Description |
+|----------|------|-------------|
+| `Account.balance` | `u128` | Account balance in native tokens |
+| `Account.nonce` | `u64` | Account transaction counter |
+
+### 19.1.4 Execution Result
+
+The execution result `ExecutionResult` is defined as:
+
+```
+ExecutionResult = (success: bool, gas_used: u64, fee_burned: u128, fee_to_proposer: u128)
+```
+
+### 19.1.5 Fundamental Invariants
+
+The following invariants MUST hold for all valid transactions and blocks:
+
+```
+INV-1: gas_used_tx ≤ gas_limit_tx
+INV-2: gas_used_block ≤ block_gas_limit
+INV-3: ∀ account: Account.balance ≥ 0 (no negative balances)
+INV-4: All arithmetic uses checked operations (no overflow/underflow)
+```
+
+### 19.1.6 Gas Deduction Semantics
+
+- **Upfront Deduction**: The maximum possible fee (`gas_limit_tx × max_fee_per_gas`) is checked against sender balance before execution begins.
+- **Refund Semantics**: Unused gas (`gas_limit_tx - gas_used_tx`) is effectively refunded by only deducting `gas_used_tx × effective_gas_price`.
+- **No Negative Balances**: If `balance < gas_limit_tx × max_fee_per_gas`, the transaction is rejected before execution.
+
+---
+
+## 19.2 Formal Gas Transition Function
+
+### 19.2.1 Extended State Transition
+
+The gas-aware state transition function extends the base transition `δ`:
+
+```
+δ_gas : (S, Tx) → (S', ExecutionResult)
+```
+
+Where:
+- `S` is the pre-state (accounts, storage, etc.)
+- `Tx` is the transaction
+- `S'` is the post-state
+- `ExecutionResult` contains the execution outcome
+
+### 19.2.2 Pre-Execution Checks
+
+Before execution, the following checks MUST pass:
+
+```
+PRE-1: balance(sender) ≥ gas_limit_tx × max_fee_per_gas
+PRE-2: gas_limit_tx ≤ block_remaining_gas
+PRE-3: nonce(sender) == tx.nonce
+PRE-4: max_fee_per_gas ≥ base_fee_per_gas
+```
+
+If any check fails, the transaction is rejected and excluded from the block.
+
+### 19.2.3 Execution Phase
+
+During execution:
+
+```
+1. effective_gas_price = base_fee + min(max_priority_fee, max_fee - base_fee)
+2. Execute transaction logic
+3. Increment gas_used_tx deterministically per opcode/operation
+4. If gas_used_tx > gas_limit_tx: HALT with OutOfGas
+```
+
+### 19.2.4 Gas Cost Formula
+
+For VM v0 transfers:
+
+```
+gas(tx) = GAS_BASE_TX
+        + GAS_PER_ACCOUNT_READ  × num_reads
+        + GAS_PER_ACCOUNT_WRITE × num_writes
+        + GAS_PER_BYTE_PAYLOAD  × payload_len
+```
+
+With constants:
+- `GAS_BASE_TX = 21,000`
+- `GAS_PER_ACCOUNT_READ = 2,600`
+- `GAS_PER_ACCOUNT_WRITE = 5,000`
+- `GAS_PER_BYTE_PAYLOAD = 16`
+
+### 19.2.5 Finalization Phase
+
+Upon successful execution:
+
+```
+1. total_fee = gas_used_tx × effective_gas_price
+2. (fee_burned, fee_to_proposer) = distribute_fee(total_fee, policy)
+3. balance(sender) -= (amount + total_fee)  [checked arithmetic]
+4. balance(recipient) += amount             [checked arithmetic]
+5. balance(proposer) += fee_to_proposer     [checked arithmetic]
+6. nonce(sender) += 1                       [checked arithmetic]
+7. Persist state atomically
+```
+
+### 19.2.6 Failure Semantics
+
+On execution failure (revert, out-of-gas, etc.):
+
+```
+1. State changes are REVERTED (except gas deduction)
+2. Gas is still consumed up to the point of failure
+3. Sender pays: gas_used_tx × effective_gas_price
+4. No state mutations persist except balance/nonce changes for gas payment
+```
+
+### 19.2.7 Fail-Closed Rule
+
+**CRITICAL**: If any of the following occur, the block is INVALID:
+
+- Arithmetic overflow in gas or fee calculations
+- Arithmetic underflow in balance deductions
+- Gas metering inconsistency (`gas_used_tx > gas_limit_tx`)
+- Block gas inconsistency (`gas_used_block > block_gas_limit`)
+
+The node MUST reject such blocks and NOT apply any state changes.
+
+---
+
+## 19.3 Determinism Requirements
+
+### 19.3.1 Gas Cost Determinism
+
+Gas costs MUST depend ONLY on:
+
+1. **Opcode**: The specific operation being executed
+2. **Input Size**: The size of inputs (e.g., payload bytes)
+3. **Deterministic State Access**: The number of reads/writes
+4. **Static Configuration**: Gas constants from protocol parameters
+
+### 19.3.2 Prohibited Dependencies
+
+Gas calculations MUST NOT depend on:
+
+- Wall clock time
+- Random values
+- Environment-dependent values (filesystem, network state)
+- Validator identity
+- Non-deterministic memory allocation
+
+### 19.3.3 Determinism Verification
+
+Two nodes with identical:
+- Pre-state `S`
+- Transaction `Tx`
+- Protocol parameters
+
+MUST produce identical:
+- `gas_used_tx`
+- `S'` (post-state)
+- `ExecutionResult`
+
+---
+
+## 19.4 Crash-Safety and Atomicity
+
+### 19.4.1 Atomic Commit Requirement
+
+Gas accounting MUST be committed atomically with state changes (reference: M16 Epoch Transition Hardening).
+
+```
+ATOM-1: Gas deduction and state changes commit together or not at all
+ATOM-2: No partial gas persistence is permitted
+ATOM-3: On crash, recovery restores a self-consistent state
+```
+
+### 19.4.2 Persistence Order
+
+For each committed block:
+
+1. Compute all transaction results (including gas)
+2. Write state changes + gas accounting in a single atomic batch
+3. Update `last_committed` marker
+4. Only then acknowledge block commit
+
+### 19.4.3 Recovery Behavior
+
+On restart after crash:
+
+- If atomic batch completed: State reflects all gas changes
+- If atomic batch did not complete: State reflects pre-batch state
+- Never: Partial gas accounting (some txs charged, others not)
+
+---
+
+## 19.5 Formal Invariants
+
+### 19.5.1 Balance Invariants
+
+```
+BAL-1: ∀ account, ∀ time: balance(account) ≥ 0
+BAL-2: Gas deduction ≤ sender balance (enforced at PRE-1)
+BAL-3: No balance can become negative through any execution path
+```
+
+### 19.5.2 Supply Conservation
+
+```
+SUP-1: Total supply is conserved except for explicit burn operations
+SUP-2: sum(all_balances) + total_burned = initial_supply + total_minted
+SUP-3: Fee distribution: fee_burned + fee_to_proposer = total_fee (exactly)
+```
+
+### 19.5.3 Consensus Determinism
+
+```
+DET-1: Same block → same gas_used_block across all nodes
+DET-2: Same transaction → same gas_used_tx across all nodes
+DET-3: Same inputs → same ExecutionResult across all nodes
+```
+
+### 19.5.4 Overflow Protection
+
+```
+OVF-1: All u64 gas arithmetic uses checked operations
+OVF-2: All u128 fee arithmetic uses checked operations
+OVF-3: Overflow in any calculation → transaction/block rejection
+```
+
+---
+
+## 19.6 Code Mapping
+
+| Formal Element | File | Location |
+|----------------|------|----------|
+| `gas_limit_tx` | `crates/qbind-runtime/src/qbind_tx.rs` | `QbindTx.gas_limit` |
+| `gas_used_tx` | `crates/qbind-runtime/src/execution_engine.rs` | `TxReceipt.gas_used` |
+| `block_gas_limit` | `crates/qbind-ledger/src/execution_gas.rs` | `BLOCK_GAS_LIMIT_DEFAULT` |
+| `GasModelConfig` | `crates/qbind-runtime/src/gas_model.rs` | `GasModelConfig` struct |
+| `compute_gas_charges` | `crates/qbind-runtime/src/gas_model.rs` | `compute_gas_charges()` |
+| `gas_for_transfer_v0` | `crates/qbind-ledger/src/execution_gas.rs` | `gas_for_transfer_v0()` |
+| `ExecutionGasConfig` | `crates/qbind-ledger/src/execution_gas.rs` | `ExecutionGasConfig` struct |
+| `FeeDistributionPolicy` | `crates/qbind-ledger/src/execution_gas.rs` | `FeeDistributionPolicy` struct |
+| `apply_qbind_block` | `crates/qbind-runtime/src/block_apply.rs` | `apply_qbind_block()` |
+
+---
+
+## 19.7 Known Limitations
+
+1. **EVM Gas Model**: EVM transactions use Revm's internal gas model. The formal model here applies to native QBIND VM v0 transactions. EVM compatibility is maintained through Revm's metering.
+
+2. **Dynamic Base Fee**: The current implementation uses a fixed base fee. EIP-1559 style dynamic base fee adjustment is a future enhancement.
+
+3. **Gas Refunds**: Unlike Ethereum, QBIND v0 does not implement SSTORE gas refunds. All gas spent is final.
+
+4. **Cross-Shard Metering**: Multi-shard execution (future) will require additional metering rules for cross-shard calls.
+
+These limitations do not affect core safety or determinism properties.
