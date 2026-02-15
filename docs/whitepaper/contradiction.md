@@ -129,12 +129,12 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Field | Value |
 |-------|-------|
-| **Status** | ⚠️ **OPEN** |
-| **Implementation** | `crates/qbind-types/src/state_governance.rs:50-52` (`slash_bps_prevote`, `slash_bps_precommit`, `reporter_reward_bps`) |
+| **Status** | ✅ **RESOLVED (M14)** |
+| **Implementation** | `crates/qbind-types/src/state_governance.rs:44-117` (`SlashingPenaltySchedule` struct with O1-O5 parameters), `crates/qbind-consensus/src/slashing/mod.rs:2260-2370` (`PenaltyEngineConfig::from_governance_schedule()`, `GovernanceSlashingSchedule` type) |
 | **Whitepaper Reference** | Section 11 (Governance) |
-| **Description** | `ParamRegistry` contains slashing parameters but these are NOT connected to the slashing engine. The engine uses `PenaltyEngineConfig` from node configuration instead. Governance cannot dynamically adjust slashing parameters at runtime. |
-| **Impact** | Medium - Governance control of slashing is ineffective |
-| **Remaining** | • Wire `ParamRegistry` slashing parameters to `PenaltyEngineConfig` • Add runtime parameter update mechanism |
+| **Description** | `ParamRegistry` now contains a canonical `SlashingPenaltySchedule` with all O1-O5 penalty parameters. `PenaltyEngineConfig::from_governance_schedule()` creates engine configurations directly from governance state. Slashing parameters are governed and upgradeable with epoch-boundary activation semantics. |
+| **Evidence** | M14 implementation: (1) `SlashingPenaltySchedule` stores slash_bps and jail_epochs for O1-O5 plus activation_epoch, (2) `GovernanceSlashingSchedule` provides interface between types crate and consensus crate, (3) `PenaltyEngineConfig::from_governance_schedule()` constructs configs deterministically, (4) DevNet allows fallback defaults; TestNet/MainNet require schedule presence (fail-closed). |
+| **Tests** | `crates/qbind-node/tests/m14_governance_slashing_params_tests.rs` (15 tests): deterministic schedule load (A1-A3), epoch-boundary activation (B1-B3), fail-closed behavior (C1-C5), O1-O5 regression (D1-D4). |
 
 ### 10. Stake Synchronization Gap
 
@@ -152,14 +152,13 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Category | Count | Items |
 |----------|-------|-------|
-| **RESOLVED** | 6 | C1, C2, Item 1, Item 4, Item 8, Item 10 (partial) |
-| **OPEN** | 7 | C3, Item 2, Item 3, Item 5, Item 6, Item 7, Item 9 |
+| **RESOLVED** | 7 | C1, C2, Item 1, Item 4, Item 8, Item 9 (M14), Item 10 (partial) |
+| **OPEN** | 6 | C3, Item 2, Item 3, Item 5, Item 6, Item 7 |
 
 **High-Risk Open Items**: None. All formerly high-risk items (C1: O3-O5 penalties, C2: minimum stake, Item 1: in-memory slashing, Item 8: evidence signature verification) are now resolved.
 
 **Medium-Risk Open Items**:
 - C3 (Reporter Rewards): No economic incentive for evidence reporting
-- Item 9 (Governance Slashing Parameters): Governance cannot adjust penalty parameters at runtime
 
 ---
 
@@ -172,6 +171,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | 2026-02-15 | M12: Added formal validator set transition spec (Section 18). Items 4 (Epoch Transition Write Ordering) now documented in Section 18.4.3. C2 (Minimum Stake) partially addressed by M2 epoch-boundary filtering; registration-time validation still pending. | M12 |
 | 2026-02-15 | M13: Canonical economic state unified. Item 10 (Stake Synchronization Gap) partially mitigated - canonical source defined (`ValidatorRecord.stake`, `ValidatorRecord.jailed_until_epoch`). `ValidatorSlashingState` documented as mirror. 12 restart safety tests added. | M13 |
 | 2026-02-15 | M13.1: Full reconciliation pass. Updated all entries with Status/Evidence fields. Verified: C1 RESOLVED (M9/M11 O3-O5 penalties implemented), C2 RESOLVED (M2 minimum stake enforced), Item 1 RESOLVED (M1 RocksDbSlashingLedger), Item 8 RESOLVED (signature verification implemented). Updated line references and test citations. | M13.1 |
+| 2026-02-15 | M14: Governance slashing parameters wired into penalty engine. Item 9 RESOLVED. `SlashingPenaltySchedule` added to `ParamRegistry` with O1-O5 penalty parameters + activation_epoch. `PenaltyEngineConfig::from_governance_schedule()` provides deterministic config from governance state. DevNet allows fallback; TestNet/MainNet fail-closed on missing schedule. 15 M14 tests added. | M14 |
 
 ---
 
