@@ -1,9 +1,27 @@
-//! Slashing Ledger trait and implementations (T230, M1).
+//! Slashing Ledger trait and implementations (T230, M1, M13).
 //!
 //! This module provides the `SlashingLedger` trait that abstracts validator stake
 //! and jailing state management for the slashing system. It enables the slashing
 //! backend in `qbind-consensus` to apply penalties without knowing implementation
 //! details of the staking/validator registry.
+//!
+//! # M13: Canonical Economic State Unification
+//!
+//! **IMPORTANT**: As of M13, the canonical source of truth for validator economic
+//! state is `ValidatorRecord` in `qbind-types`:
+//!
+//! - `ValidatorRecord.stake`: Canonical stake (reduced by slashing)
+//! - `ValidatorRecord.jailed_until_epoch`: Canonical jail expiration
+//!
+//! The `ValidatorSlashingState.stake` field in this module is maintained for
+//! **operational tracking and backward compatibility**, but eligibility predicates
+//! MUST read from `ValidatorRecord` for consistency.
+//!
+//! `ValidatorSlashingState` continues to track:
+//! - `total_slashed`: Cumulative audit trail of all penalties
+//! - `jail_count`: Number of jail events for repeat offense detection
+//! - `last_offense_epoch`: Timing of most recent offense
+//! - `jailed_until_epoch`: Mirror of canonical state (for slashing-layer queries)
 //!
 //! # Design (T230)
 //!
@@ -49,15 +67,42 @@ pub type StakeAmount = u64;
 pub type EpochNumber = u64;
 
 /// Validator state tracked by the slashing ledger.
+///
+/// # M13: Canonical Economic State Note
+///
+/// As of M13, `ValidatorRecord.stake` and `ValidatorRecord.jailed_until_epoch`
+/// are the canonical sources of truth. This structure tracks:
+///
+/// - `stake`: Mirror of canonical stake (for slashing-layer operations)
+/// - `jailed_until_epoch`: Mirror of canonical jail state
+/// - `total_slashed`: Audit trail (cumulative, not in ValidatorRecord)
+/// - `jail_count`: Repeat offense counter (not in ValidatorRecord)
+/// - `last_offense_epoch`: Timing metadata (not in ValidatorRecord)
+///
+/// Eligibility predicates MUST use `ValidatorRecord::is_eligible_at_epoch()`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ValidatorSlashingState {
-    /// Current stake amount.
+    /// Current stake amount (mirrors ValidatorRecord.stake for slashing operations).
+    ///
+    /// # M13 Note
+    ///
+    /// This field is maintained in sync with `ValidatorRecord.stake` but is NOT
+    /// authoritative. The canonical stake is in ValidatorRecord.
     pub stake: StakeAmount,
     /// Epoch at which the validator will be unjailed (None = not jailed).
+    ///
+    /// # M13 Note
+    ///
+    /// This mirrors `ValidatorRecord.jailed_until_epoch`. Use
+    /// `ValidatorRecord::is_jailed_at_epoch()` for eligibility checks.
     pub jailed_until_epoch: Option<EpochNumber>,
     /// Total stake slashed (cumulative, for audit purposes).
+    ///
+    /// This is NOT in ValidatorRecord - it's maintained only here for auditing.
     pub total_slashed: StakeAmount,
     /// Number of times this validator has been jailed.
+    ///
+    /// This is NOT in ValidatorRecord - it's maintained only here for repeat offense tracking.
     pub jail_count: u32,
     /// Last offense epoch (for repeat offense detection, optional).
     #[serde(default)]
