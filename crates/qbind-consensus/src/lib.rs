@@ -142,6 +142,12 @@ pub use slashing::{AtomicPenaltyRequest, AtomicPenaltyResult, AtomicSlashingBack
 // M14: Governance slashing schedule exports
 pub use slashing::GovernanceSlashingSchedule;
 
+// M15: Evidence ingestion hardening exports
+pub use slashing::{
+    EvidenceIngestionConfig, EvidenceIngestionMetrics, EvidenceRejectionReason,
+    HardenedEvidenceContext, HardenedEvidenceIngestionEngine, HardenedEvidenceResult,
+};
+
 use qbind_crypto::CryptoProvider;
 use qbind_hash::vote_digest;
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate as WireQuorumCertificate, Vote};
