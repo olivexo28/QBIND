@@ -2257,6 +2257,114 @@ impl PenaltyEngineConfig {
             ..Self::default()
         }
     }
+
+    // ========================================================================
+    // M14: Governance-Sourced Configuration
+    // ========================================================================
+
+    /// Create a PenaltyEngineConfig from a governance SlashingPenaltySchedule.
+    ///
+    /// This is the canonical method for constructing engine configuration in
+    /// production environments. It reads all penalty parameters from the
+    /// governance-controlled schedule stored in ParamRegistry.
+    ///
+    /// # Arguments
+    ///
+    /// * `schedule` - The slashing penalty schedule from ParamRegistry
+    /// * `mode` - The slashing mode (EnforceCritical, EnforceAll, etc.)
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use qbind_consensus::slashing::{PenaltyEngineConfig, SlashingMode};
+    /// use qbind_types::SlashingPenaltySchedule;
+    ///
+    /// let schedule = SlashingPenaltySchedule::default();
+    /// let config = PenaltyEngineConfig::from_governance_schedule(&schedule, SlashingMode::EnforceCritical);
+    /// ```
+    pub fn from_governance_schedule(schedule: &GovernanceSlashingSchedule, mode: SlashingMode) -> Self {
+        Self {
+            mode,
+            slash_bps_o1: schedule.slash_bps_o1,
+            slash_bps_o2: schedule.slash_bps_o2,
+            jail_on_o1: schedule.jail_epochs_o1 > 0,
+            jail_epochs_o1: schedule.jail_epochs_o1,
+            jail_on_o2: schedule.jail_epochs_o2 > 0,
+            jail_epochs_o2: schedule.jail_epochs_o2,
+            slash_bps_o3: schedule.slash_bps_o3,
+            jail_on_o3: schedule.jail_epochs_o3 > 0,
+            jail_epochs_o3: schedule.jail_epochs_o3,
+            slash_bps_o4: schedule.slash_bps_o4,
+            jail_on_o4: schedule.jail_epochs_o4 > 0,
+            jail_epochs_o4: schedule.jail_epochs_o4,
+            slash_bps_o5: schedule.slash_bps_o5,
+            jail_on_o5: schedule.jail_epochs_o5 > 0,
+            jail_epochs_o5: schedule.jail_epochs_o5,
+        }
+    }
+
+    /// Convert this config to a GovernanceSlashingSchedule for comparison.
+    ///
+    /// Useful for verifying that a PenaltyEngineConfig matches the expected
+    /// governance parameters.
+    pub fn to_governance_schedule(&self) -> GovernanceSlashingSchedule {
+        GovernanceSlashingSchedule {
+            slash_bps_o1: self.slash_bps_o1,
+            jail_epochs_o1: self.jail_epochs_o1,
+            slash_bps_o2: self.slash_bps_o2,
+            jail_epochs_o2: self.jail_epochs_o2,
+            slash_bps_o3: self.slash_bps_o3,
+            jail_epochs_o3: self.jail_epochs_o3,
+            slash_bps_o4: self.slash_bps_o4,
+            jail_epochs_o4: self.jail_epochs_o4,
+            slash_bps_o5: self.slash_bps_o5,
+            jail_epochs_o5: self.jail_epochs_o5,
+        }
+    }
+}
+
+// ============================================================================
+// M14: Governance Slashing Schedule Interface
+// ============================================================================
+
+/// Interface for governance-sourced slashing penalty parameters.
+///
+/// This trait provides a minimal interface for reading penalty parameters
+/// from the on-chain governance state. It allows the slashing engine to
+/// be configured from ParamRegistry without depending on the full qbind-types
+/// crate.
+///
+/// The trait is implemented for qbind_types::SlashingPenaltySchedule via a
+/// wrapper in qbind-node.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GovernanceSlashingSchedule {
+    pub slash_bps_o1: u16,
+    pub jail_epochs_o1: u32,
+    pub slash_bps_o2: u16,
+    pub jail_epochs_o2: u32,
+    pub slash_bps_o3: u16,
+    pub jail_epochs_o3: u32,
+    pub slash_bps_o4: u16,
+    pub jail_epochs_o4: u32,
+    pub slash_bps_o5: u16,
+    pub jail_epochs_o5: u32,
+}
+
+impl Default for GovernanceSlashingSchedule {
+    fn default() -> Self {
+        Self {
+            slash_bps_o1: 750,  // 7.5%
+            jail_epochs_o1: 10,
+            slash_bps_o2: 500,  // 5%
+            jail_epochs_o2: 5,
+            slash_bps_o3: 300,  // 3%
+            jail_epochs_o3: 3,
+            slash_bps_o4: 200,  // 2%
+            jail_epochs_o4: 2,
+            slash_bps_o5: 100,  // 1%
+            jail_epochs_o5: 1,
+        }
+    }
 }
 
 // ============================================================================

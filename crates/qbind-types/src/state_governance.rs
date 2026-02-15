@@ -41,12 +41,97 @@ pub struct LaunchChecklist {
     pub spec_hash: Hash32,
 }
 
+/// M14: Slashing Penalty Schedule
+///
+/// Defines the penalty parameters for all offense classes (O1-O5).
+/// These parameters are read from governance state and applied by the
+/// PenaltySlashingEngine. Updates activate at epoch boundaries.
+///
+/// | Offense | Description                      | Default Slash (bps) | Default Jail (epochs) |
+/// |---------|----------------------------------|--------------------|-----------------------|
+/// | O1      | Double-signing                   | 750 (7.5%)         | 10                    |
+/// | O2      | Invalid proposer signature       | 500 (5%)           | 5                     |
+/// | O3      | Invalid vote (lazy/malicious)    | 300 (3%)           | 3                     |
+/// | O4      | Censorship (proposal withholding)| 200 (2%)           | 2                     |
+/// | O5      | Availability failure             | 100 (1%)           | 1                     |
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlashingPenaltySchedule {
+    /// Version of this schedule (for future compatibility).
+    pub version: u8,
+    /// Reserved byte for alignment.
+    pub reserved0: u8,
+
+    // O1: Double-signing (critical offense)
+    /// Slash percentage for O1 in basis points (1 bps = 0.01%). Default: 750 (7.5%)
+    pub slash_bps_o1: u16,
+    /// Number of epochs to jail for O1. Default: 10
+    pub jail_epochs_o1: u32,
+
+    // O2: Invalid proposer signature (high severity)
+    /// Slash percentage for O2 in basis points. Default: 500 (5%)
+    pub slash_bps_o2: u16,
+    /// Number of epochs to jail for O2. Default: 5
+    pub jail_epochs_o2: u32,
+
+    // O3: Invalid vote (medium severity)
+    /// Slash percentage for O3 in basis points. Default: 300 (3%)
+    pub slash_bps_o3: u16,
+    /// Number of epochs to jail for O3. Default: 3
+    pub jail_epochs_o3: u32,
+
+    // O4: Censorship (medium-high severity)
+    /// Slash percentage for O4 in basis points. Default: 200 (2%)
+    pub slash_bps_o4: u16,
+    /// Number of epochs to jail for O4. Default: 2
+    pub jail_epochs_o4: u32,
+
+    // O5: Availability failure (medium severity)
+    /// Slash percentage for O5 in basis points. Default: 100 (1%)
+    pub slash_bps_o5: u16,
+    /// Number of epochs to jail for O5. Default: 1
+    pub jail_epochs_o5: u32,
+
+    /// Epoch at which this schedule activates.
+    /// Schedule changes are applied at epoch boundaries.
+    /// A value of 0 means "active from genesis".
+    pub activation_epoch: u64,
+}
+
+impl Default for SlashingPenaltySchedule {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            reserved0: 0,
+            slash_bps_o1: 750,    // 7.5%
+            jail_epochs_o1: 10,
+            slash_bps_o2: 500,    // 5%
+            jail_epochs_o2: 5,
+            slash_bps_o3: 300,    // 3%
+            jail_epochs_o3: 3,
+            slash_bps_o4: 200,    // 2%
+            jail_epochs_o4: 2,
+            slash_bps_o5: 100,    // 1%
+            jail_epochs_o5: 1,
+            activation_epoch: 0, // Active from genesis
+        }
+    }
+}
+
+impl SlashingPenaltySchedule {
+    /// Check if this schedule is active at the given epoch.
+    pub fn is_active_at_epoch(&self, epoch: u64) -> bool {
+        epoch >= self.activation_epoch
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParamRegistry {
     pub version: u8,
     pub mainnet_status: MainnetStatus,
     pub reserved0: [u8; 6],
     // slashing parameters (basis points out of 10_000)
+    // Note: These are legacy fields for backward compatibility.
+    // M14: Use slashing_schedule for production penalty parameters.
     pub slash_bps_prevote: u16,
     pub slash_bps_precommit: u16,
     pub reporter_reward_bps: u16,
@@ -56,6 +141,12 @@ pub struct ParamRegistry {
     // 1. Register as a validator
     // 2. Remain eligible for the validator set at epoch boundaries
     pub min_validator_stake: u64,
+
+    // M14: Slashing penalty schedule (governance-controlled).
+    // This schedule contains all O1-O5 penalty parameters and is
+    // the canonical source for the PenaltySlashingEngine.
+    // If None, TestNet/MainNet must fail-closed; DevNet may use defaults.
+    pub slashing_schedule: Option<SlashingPenaltySchedule>,
 }
 
 /// Canonical SafetyCouncilKeyset for qbind v1 genesis.

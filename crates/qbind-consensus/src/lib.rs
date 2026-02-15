@@ -139,6 +139,9 @@ pub use slashing::{
 // M9: Atomic slashing penalty application exports
 pub use slashing::{AtomicPenaltyRequest, AtomicPenaltyResult, AtomicSlashingBackend};
 
+// M14: Governance slashing schedule exports
+pub use slashing::GovernanceSlashingSchedule;
+
 use qbind_crypto::CryptoProvider;
 use qbind_hash::vote_digest;
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate as WireQuorumCertificate, Vote};

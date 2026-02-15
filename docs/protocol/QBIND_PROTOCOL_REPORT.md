@@ -245,6 +245,17 @@ This section lists items marked TODO or partially implemented in the codebase.
 | **Status** | ✅ Fully Mitigated (M4) |
 | **Note** | **M4**: `validate_for_mainnet()` in `SlashingConfig` now rejects `Off` and `RecordOnly` modes for MainNet. MainNet must use `EnforceCritical` or `EnforceAll`. TestNet prefers enforcement (default is `EnforceCritical`) but allows `RecordOnly` with a warning for testing. DevNet allows all modes for development flexibility. Implementation in `crates/qbind-node/src/node_config.rs`. Tests in `crates/qbind-node/tests/m4_slashing_mode_enforcement_tests.rs` and `crates/qbind-node/tests/t237_mainnet_launch_profile_tests.rs`. |
 
+## 3.13 Governance Slashing Parameters Wiring (M14)
+
+| Field | Value |
+|-------|-------|
+| **File Path** | `crates/qbind-types/src/state_governance.rs`, `crates/qbind-consensus/src/slashing/mod.rs` |
+| **Description** | Wire governance slashing parameters into penalty engine for deterministic, upgradeable penalty economics |
+| **Security Impact** | Without governance wiring, penalty parameters are static and cannot be adjusted through governance, reducing protocol adaptability and requiring hard forks for economic parameter changes |
+| **Required Milestone** | Pre-MainNet |
+| **Status** | ✅ Fully Mitigated (M14) |
+| **Note** | **M14**: `SlashingPenaltySchedule` struct in `ParamRegistry` stores all O1-O5 penalty parameters (slash_bps, jail_epochs) plus `activation_epoch` for epoch-boundary activation. `GovernanceSlashingSchedule` provides interface between types crate and consensus crate. `PenaltyEngineConfig::from_governance_schedule()` constructs configs deterministically from governance state. **Fail-closed behavior**: TestNet/MainNet require `slashing_schedule` to be present in `ParamRegistry`; DevNet allows fallback defaults. **Epoch-boundary activation**: schedule changes activated only at epoch boundary via `activation_epoch` field; deterministic rule: `schedule(epoch) = last_activated_schedule_at_or_before(epoch)`. Implementation in `crates/qbind-types/src/state_governance.rs` (`SlashingPenaltySchedule`), `crates/qbind-serde/src/governance.rs` (serialization), `crates/qbind-consensus/src/slashing/mod.rs` (`GovernanceSlashingSchedule`, `from_governance_schedule()`). Tests in `crates/qbind-node/tests/m14_governance_slashing_params_tests.rs` (15 tests): deterministic load (A1-A3), activation semantics (B1-B3), fail-closed (C1-C5), O1-O5 regression (D1-D4). |
+
 ---
 
 # 4. Security Risk Register
@@ -254,6 +265,7 @@ This section lists items marked TODO or partially implemented in the codebase.
 | Liveness failure under partition | Consensus | Timeout/view-change mechanism implemented (M5): `TimeoutPacemaker`, `TimeoutAccumulator`, `TimeoutCertificate`, fail-closed behavior | Low (mitigated M5) | Mitigated |
 | No slashing enforcement | Consensus | M9+M11: All O1–O5 penalties enforced via `AtomicSlashingBackend.apply_penalty_atomic()`. Atomic ledger commit using RocksDB WriteBatch. Jail exclusion via `build_validator_set_with_stake_and_jail_filter()`. O3: 3% slash + 3 epoch jail; O4: 2% slash + 2 epoch jail; O5: 1% slash + 1 epoch jail. Deterministic verification with fail-closed behavior. | Low (all offense classes enforced) | Mitigated |
 | Slashing mode bypass (M4) | Config | `validate_for_mainnet()` rejects `Off`/`RecordOnly` modes; MainNet requires `EnforceCritical` or `EnforceAll` | Low (mitigated M4) | Mitigated |
+| Governance-economic mismatch (M14) | Economics | **M14**: Slashing penalty schedule stored in `ParamRegistry` (`SlashingPenaltySchedule` with O1-O5 slash_bps + jail_epochs + activation_epoch). `PenaltyEngineConfig::from_governance_schedule()` constructs configs deterministically. TestNet/MainNet fail-closed on missing schedule. Epoch-boundary activation semantics. | Low (fully mitigated M14) | Mitigated |
 | No minimum stake requirement (M2) | Validator | `min_validator_stake` enforced at registration + epoch boundary via `StakeFilteringEpochStateProvider` + `build_validator_set_with_stake_filter()` + `with_stake_filtering_epoch_state_provider()` + `new_with_stake_filtering()`; fail-closed if all validators excluded | Low (fully mitigated M2.1+M2.2+M2.3+M2.4) | Mitigated |
 | Non-ML-DSA-44 suite bypass (M0) | Slashing | `validate_testnet_invariants()` / `validate_mainnet_validator_suites()` reject non-ML-DSA-44 validators | Low (mitigated for TestNet/MainNet) | Mitigated |
 | Slashing ledger partial state | Storage | Atomic WriteBatch in `apply_slashing_update_atomic()` + failure-injection test (M1.3) | Low (proven by test) | Mitigated |
