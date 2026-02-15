@@ -709,7 +709,7 @@ Safety remains intact if ≤ f validators are Byzantine.
 
 ### 12.2.1 Slashing Penalty Schedule
 
-The following table defines the formal penalty schedule for all offense classes (O1–O5). Each offense is objectively verifiable via cryptographic evidence and enforced deterministically.
+The following table defines the formal penalty schedule for all offense classes (O1-O5). Each offense is objectively verifiable via cryptographic evidence and enforced deterministically.
 
 | Offense | Name | Evidence Type | Verification Rule | Slash (bps) | Jail (epochs) |
 |---------|------|---------------|-------------------|-------------|---------------|
@@ -727,7 +727,7 @@ The following table defines the formal penalty schedule for all offense classes 
 
 ### 12.2.2 Governance and Activation Semantics
 
-Slashing penalties are governed via the `SlashingPenaltySchedule` struct stored in `ParamRegistry`. This schedule contains the `slash_bps` (slash rate in basis points) and `jail_epochs` (jail duration) for each offense class O1–O5, plus an `activation_epoch` field that specifies when the schedule takes effect.
+Slashing penalties are governed via the `SlashingPenaltySchedule` struct stored in `ParamRegistry`. This schedule contains the `slash_bps` (slash rate in basis points) and `jail_epochs` (jail duration) for each offense class O1-O5, plus an `activation_epoch` field that specifies when the schedule takes effect.
 
 **Activation Rules:**
 - Schedule changes activate **only at epoch boundaries**, not mid-epoch.
@@ -735,7 +735,7 @@ Slashing penalties are governed via the `SlashingPenaltySchedule` struct stored 
 - This ensures deterministic penalty application across all nodes and prevents mid-epoch economic state divergence.
 
 **Environment Behavior:**
-- **MainNet / TestNet**: Fail-closed if `slashing_schedule` is missing from `ParamRegistry`. The node refuses to start or process blocks without an explicit penalty schedule.
+- **MainNet / TestNet**: Fail-closed if `SlashingPenaltySchedule` is missing from `ParamRegistry`. The node refuses to start or process blocks without an explicit penalty schedule.
 - **DevNet**: May fall back to default schedule values for development convenience, but logs a warning.
 
 ---
