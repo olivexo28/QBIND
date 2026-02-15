@@ -143,9 +143,11 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 |-------|-------|
 | **Implementation** | `qbind-types/src/state_validator.rs:25`, `qbind-ledger/src/slashing_ledger.rs:38` |
 | **Whitepaper Reference** | Not documented |
-| **Description** | Validator stake is tracked in two parallel structures: `ValidatorRecord.stake` (on-chain account data) and `ValidatorSlashingState.stake` (in-memory slashing ledger). These can diverge with no synchronization mechanism. Slashing reduces in-memory stake but may not update on-chain record. |
-| **Impact** | Medium - Stake inconsistency between ledger views |
-| **Recommendation** | Document stake tracking architecture and synchronization requirements |
+| **Description** | Validator stake is tracked in two parallel structures: `ValidatorRecord.stake` (on-chain account data) and `ValidatorSlashingState.stake` (slashing ledger). |
+| **Impact** | ~~Medium - Stake inconsistency between ledger views~~ **Low (M13)** |
+| **Status** | ✅ Partially Mitigated (M13) |
+| **Recommendation** | ~~Document stake tracking architecture and synchronization requirements~~ |
+| **M13 Note** | **M13**: Canonical economic state unified. `ValidatorRecord.stake` and `ValidatorRecord.jailed_until_epoch` are now the single source of truth. `ValidatorSlashingState` mirrors these values for operational tracking but is documented as non-authoritative. Eligibility predicates (`ValidatorRecord::is_eligible_at_epoch()`) read from canonical fields. Validator set builders (`build_validator_set_with_stake_and_jail_filter()`) construct candidates from canonical `ValidatorRecord` fields. Restart safety tested via 12 tests in `m13_economic_state_unification_tests.rs`. Full architectural unification (single-write path for slashing penalties to both `ValidatorRecord` and `ValidatorSlashingState`) is pending but the canonical source is now clearly defined. |
 
 ---
 
@@ -156,6 +158,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | 2026-02-11 | Initial document created during state audit | Audit |
 | 2026-02-11 | Added C1-C3 contradictions, items 8-10 undocumented details from validator economics audit | Audit |
 | 2026-02-15 | M12: Added formal validator set transition spec (Section 18). Items 4 (Epoch Transition Write Ordering) now documented in Section 18.4.3. C2 (Minimum Stake) partially addressed by M2 epoch-boundary filtering; registration-time validation still pending. | M12 |
+| 2026-02-15 | M13: Canonical economic state unified. Item 10 (Stake Synchronization Gap) partially mitigated - canonical source defined (`ValidatorRecord.stake`, `ValidatorRecord.jailed_until_epoch`). `ValidatorSlashingState` documented as mirror. 12 restart safety tests added. | M13 |
 
 ---
 
