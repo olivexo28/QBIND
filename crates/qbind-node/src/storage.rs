@@ -78,6 +78,17 @@ pub enum StorageError {
     /// data from storage, suggesting bit-rot, disk corruption, or tampering.
     /// The node should not continue with corrupted data.
     Corruption(String),
+    /// Incomplete epoch transition detected on startup (M16).
+    ///
+    /// This error indicates that a crash occurred mid-epoch-transition, leaving
+    /// the storage in an inconsistent state. The node must not continue with
+    /// partially committed epoch boundary state.
+    IncompleteEpochTransition {
+        /// The epoch ID at which the incomplete transition was detected.
+        epoch: u64,
+        /// Additional context about what was inconsistent.
+        details: String,
+    },
     /// Other error with a descriptive message.
     Other(String),
 }
@@ -99,6 +110,15 @@ impl fmt::Display for StorageError {
                 )
             }
             StorageError::Corruption(msg) => write!(f, "storage corruption detected: {}", msg),
+            StorageError::IncompleteEpochTransition { epoch, details } => {
+                write!(
+                    f,
+                    "FATAL: incomplete epoch transition detected at epoch {}: {}. \
+                     The node must not continue with partially committed epoch boundary state. \
+                     Manual investigation required.",
+                    epoch, details
+                )
+            }
             StorageError::Other(msg) => write!(f, "storage error: {}", msg),
         }
     }
@@ -203,6 +223,66 @@ pub trait ConsensusStorage: Send + Sync {
     /// Returns `StorageError::Io` if the read fails, or `StorageError::Codec`
     /// if the stored schema version data is malformed.
     fn get_schema_version(&self) -> Result<Option<u32>, StorageError>;
+
+    // ========================================================================
+    // Atomic Epoch Transition Methods (M16)
+    // ========================================================================
+
+    /// Apply an epoch transition atomically (M16).
+    ///
+    /// This method commits all epoch-boundary writes in a single atomic batch:
+    /// 1. The reconfig block (if provided in batch)
+    /// 2. The reconfig block's QC (if provided in batch)
+    /// 3. The last committed block ID (if update_last_committed is set)
+    /// 4. The new epoch number
+    ///
+    /// # Crash Safety
+    ///
+    /// After any crash/restart, the node will load a self-consistent epoch state:
+    /// either fully old epoch or fully new epoch, never a hybrid.
+    ///
+    /// # Arguments
+    ///
+    /// * `batch` - The epoch transition batch containing all writes.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Io` if the write batch fails to commit.
+    fn apply_epoch_transition_atomic(
+        &self,
+        batch: EpochTransitionBatch,
+    ) -> Result<(), StorageError>;
+
+    /// Write an epoch transition marker before starting the transition (M16).
+    ///
+    /// This marker indicates that an epoch transition is in progress. If present
+    /// on startup, the transition was incomplete (crash mid-transition).
+    ///
+    /// # Arguments
+    ///
+    /// * `marker` - The epoch transition marker to write.
+    ///
+    /// # Errors
+    ///
+    /// Returns `StorageError::Io` if the write fails.
+    fn write_epoch_transition_marker(
+        &self,
+        marker: &EpochTransitionMarker,
+    ) -> Result<(), StorageError>;
+
+    /// Check for incomplete epoch transition on startup (M16).
+    ///
+    /// Returns `Ok(None)` if no incomplete transition is detected.
+    /// Returns `Ok(Some(marker))` if an incomplete transition is detected.
+    fn check_for_incomplete_epoch_transition(
+        &self,
+    ) -> Result<Option<EpochTransitionMarker>, StorageError>;
+
+    /// Verify epoch consistency on startup (M16).
+    ///
+    /// Checks that the stored epoch state is consistent. If any inconsistency
+    /// is detected, returns `StorageError::IncompleteEpochTransition`.
+    fn verify_epoch_consistency_on_startup(&self) -> Result<(), StorageError>;
 }
 
 // ============================================================================
@@ -248,6 +328,115 @@ const CURRENT_EPOCH_KEY: &[u8] = b"meta:current_epoch";
 /// For backward compatibility, if this key is missing from an existing
 /// database, it should be treated as schema version 0 (legacy).
 const SCHEMA_VERSION_KEY: &[u8] = b"meta:schema_version";
+
+/// Key for epoch transition marker (M16).
+///
+/// This marker is used to detect incomplete epoch transitions on startup.
+/// The marker is written atomically with the epoch transition batch and cleared
+/// on successful completion. If present on startup, the transition was incomplete.
+///
+/// Format: `meta:epoch_transition_marker` → `EpochTransitionMarker` (JSON)
+const EPOCH_TRANSITION_MARKER_KEY: &[u8] = b"meta:epoch_transition_marker";
+
+// ============================================================================
+// Epoch Transition Batch (M16)
+// ============================================================================
+
+/// Marker indicating epoch transition state (M16).
+///
+/// This marker is written at the START of an epoch transition batch and cleared
+/// at the END of the batch. If present on startup, the node crashed mid-transition.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct EpochTransitionMarker {
+    /// The epoch being transitioned TO.
+    pub target_epoch: u64,
+    /// The previous epoch being transitioned FROM.
+    pub previous_epoch: u64,
+    /// Timestamp when the transition started (Unix millis).
+    pub started_at_ms: u64,
+    /// The reconfig block ID that triggered this transition.
+    pub reconfig_block_id: [u8; 32],
+}
+
+/// Batch of operations for an atomic epoch transition (M16).
+///
+/// This struct collects all the writes that must happen atomically at an epoch
+/// boundary. The writes are committed together in a single RocksDB WriteBatch
+/// to ensure that either all succeed or none succeed.
+///
+/// # Atomic Writes
+///
+/// At epoch boundary, the following MUST be written atomically:
+/// 1. The reconfig block that triggered the transition
+/// 2. The reconfig block's QC (if present)
+/// 3. The last committed block ID (updated to the reconfig block)
+/// 4. The new epoch number
+/// 5. The epoch transition marker (cleared on success)
+///
+/// If a crash occurs mid-transition:
+/// - Marker present on startup → incomplete transition → fail-closed
+/// - No marker → either fully old or fully new epoch → consistent state
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let mut batch = EpochTransitionBatch::new(target_epoch, previous_epoch, block_id);
+/// batch.set_block(block_id, block);
+/// batch.set_qc(block_id, qc);
+/// batch.set_last_committed(block_id);
+///
+/// storage.apply_epoch_transition_atomic(batch)?;
+/// ```
+#[derive(Debug)]
+pub struct EpochTransitionBatch {
+    /// The epoch being transitioned TO.
+    pub target_epoch: u64,
+    /// The epoch being transitioned FROM.
+    pub previous_epoch: u64,
+    /// The reconfig block ID that triggered this transition.
+    pub reconfig_block_id: [u8; 32],
+    /// The reconfig block to persist.
+    pub block: Option<(BlockProposal, [u8; 32])>,
+    /// The QC for the reconfig block (if present).
+    pub qc: Option<(QuorumCertificate, [u8; 32])>,
+    /// Whether to update last_committed to the reconfig block.
+    pub update_last_committed: bool,
+}
+
+impl EpochTransitionBatch {
+    /// Create a new epoch transition batch.
+    ///
+    /// # Arguments
+    ///
+    /// * `target_epoch` - The epoch being transitioned TO.
+    /// * `previous_epoch` - The epoch being transitioned FROM.
+    /// * `reconfig_block_id` - The block ID that triggered this transition.
+    pub fn new(target_epoch: u64, previous_epoch: u64, reconfig_block_id: [u8; 32]) -> Self {
+        Self {
+            target_epoch,
+            previous_epoch,
+            reconfig_block_id,
+            block: None,
+            qc: None,
+            update_last_committed: false,
+        }
+    }
+
+    /// Set the reconfig block to persist.
+    pub fn set_block(&mut self, block_id: [u8; 32], block: BlockProposal) {
+        self.block = Some((block, block_id));
+    }
+
+    /// Set the QC for the reconfig block.
+    pub fn set_qc(&mut self, block_id: [u8; 32], qc: QuorumCertificate) {
+        self.qc = Some((qc, block_id));
+    }
+
+    /// Set whether to update last_committed to the reconfig block.
+    pub fn set_update_last_committed(&mut self, update: bool) {
+        self.update_last_committed = update;
+    }
+}
 
 // ============================================================================
 // CRC32 Checksum Helpers (T119)
@@ -465,6 +654,10 @@ pub struct RocksDbConsensusStorage {
     db: rocksdb::DB,
     /// Optional metrics for tracking operation latency (T107).
     metrics: Option<Arc<crate::metrics::NodeMetrics>>,
+    /// Test-only: When true, forces apply_epoch_transition_atomic() to simulate
+    /// a WriteBatch commit failure (M16 atomicity testing).
+    #[cfg(any(test, feature = "test-utils"))]
+    inject_write_failure: bool,
 }
 
 impl fmt::Debug for RocksDbConsensusStorage {
@@ -492,7 +685,12 @@ impl RocksDbConsensusStorage {
 
         let db = rocksdb::DB::open(&opts, path).map_err(|e| StorageError::Io(e.to_string()))?;
 
-        Ok(RocksDbConsensusStorage { db, metrics: None })
+        Ok(RocksDbConsensusStorage {
+            db,
+            metrics: None,
+            #[cfg(any(test, feature = "test-utils"))]
+            inject_write_failure: false,
+        })
     }
 
     /// Attach metrics to this storage instance (T107).
@@ -795,6 +993,189 @@ impl ConsensusStorage for RocksDbConsensusStorage {
             Err(e) => Err(StorageError::Io(e.to_string())),
         }
     }
+
+    fn apply_epoch_transition_atomic(
+        &self,
+        batch: EpochTransitionBatch,
+    ) -> Result<(), StorageError> {
+        use std::time::Instant;
+        let start = Instant::now();
+
+        // Create RocksDB WriteBatch for atomic commit
+        let mut write_batch = rocksdb::WriteBatch::default();
+
+        // 1. Add block to batch (if provided)
+        if let Some((block, block_id)) = &batch.block {
+            let key = Self::block_key(block_id);
+            let mut payload = Vec::new();
+            block.encode(&mut payload);
+            let value = wrap_checksummed(&payload);
+            write_batch.put(&key, &value);
+        }
+
+        // 2. Add QC to batch (if provided)
+        if let Some((qc, block_id)) = &batch.qc {
+            let key = Self::qc_key(block_id);
+            let mut payload = Vec::new();
+            qc.encode(&mut payload);
+            let value = wrap_checksummed(&payload);
+            write_batch.put(&key, &value);
+        }
+
+        // 3. Add last_committed update to batch (if requested)
+        if batch.update_last_committed {
+            let value = wrap_checksummed(&batch.reconfig_block_id);
+            write_batch.put(LAST_COMMITTED_KEY, &value);
+        }
+
+        // 4. Add new epoch to batch
+        let epoch_bytes = batch.target_epoch.to_be_bytes();
+        let epoch_value = wrap_checksummed(&epoch_bytes);
+        write_batch.put(CURRENT_EPOCH_KEY, &epoch_value);
+
+        // 5. Delete the epoch transition marker (if it exists) as part of the atomic batch
+        //    This ensures the marker is cleared atomically with the transition
+        write_batch.delete(EPOCH_TRANSITION_MARKER_KEY);
+
+        // Test-only: Inject write failure if enabled (M16 atomicity testing)
+        #[cfg(any(test, feature = "test-utils"))]
+        if self.inject_write_failure {
+            return Err(StorageError::Io(
+                "injected write failure for atomicity test (M16)".to_string(),
+            ));
+        }
+
+        // Commit the entire batch atomically
+        self.db
+            .write(write_batch)
+            .map_err(|e| StorageError::Io(e.to_string()))?;
+
+        // Log the atomic transition for debugging
+        eprintln!(
+            "[M16] Atomic epoch transition: {} -> {} (block_id={:?}, elapsed={:?})",
+            batch.previous_epoch,
+            batch.target_epoch,
+            &batch.reconfig_block_id[..8],
+            start.elapsed()
+        );
+
+        Ok(())
+    }
+
+    fn write_epoch_transition_marker(
+        &self,
+        marker: &EpochTransitionMarker,
+    ) -> Result<(), StorageError> {
+        let json = serde_json::to_vec(marker).map_err(|e| {
+            StorageError::Codec(format!("failed to serialize epoch transition marker: {}", e))
+        })?;
+        let value = wrap_checksummed(&json);
+        self.db
+            .put(EPOCH_TRANSITION_MARKER_KEY, &value)
+            .map_err(|e| StorageError::Io(e.to_string()))?;
+
+        eprintln!(
+            "[M16] Wrote epoch transition marker: {} -> {} (block_id={:?})",
+            marker.previous_epoch,
+            marker.target_epoch,
+            &marker.reconfig_block_id[..8]
+        );
+
+        Ok(())
+    }
+
+    fn check_for_incomplete_epoch_transition(
+        &self,
+    ) -> Result<Option<EpochTransitionMarker>, StorageError> {
+        match self.db.get(EPOCH_TRANSITION_MARKER_KEY) {
+            Ok(Some(value)) => {
+                // Unwrap checksummed envelope
+                let payload = unwrap_checksummed_or_legacy(&value, "epoch_transition_marker")?;
+                let marker: EpochTransitionMarker = serde_json::from_slice(&payload).map_err(
+                    |e| {
+                        StorageError::Corruption(format!(
+                            "failed to deserialize epoch transition marker: {}",
+                            e
+                        ))
+                    },
+                )?;
+
+                eprintln!(
+                    "[M16] WARNING: Found incomplete epoch transition marker: {} -> {} (block_id={:?})",
+                    marker.previous_epoch,
+                    marker.target_epoch,
+                    &marker.reconfig_block_id[..8]
+                );
+
+                Ok(Some(marker))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(StorageError::Io(e.to_string())),
+        }
+    }
+
+    fn verify_epoch_consistency_on_startup(&self) -> Result<(), StorageError> {
+        // Check for incomplete epoch transition marker
+        if let Some(marker) = self.check_for_incomplete_epoch_transition()? {
+            return Err(StorageError::IncompleteEpochTransition {
+                epoch: marker.target_epoch,
+                details: format!(
+                    "epoch transition marker found on startup (previous={}, target={}, block_id={:?}). \
+                     This indicates a crash occurred during epoch transition. \
+                     The node cannot safely continue.",
+                    marker.previous_epoch,
+                    marker.target_epoch,
+                    &marker.reconfig_block_id[..8]
+                ),
+            });
+        }
+
+        // Get current epoch (if present)
+        let current_epoch = self.get_current_epoch()?;
+
+        eprintln!(
+            "[M16] Epoch consistency check passed: current_epoch={:?}",
+            current_epoch
+        );
+
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Atomic Epoch Transition Test-Only Methods (M16)
+// ============================================================================
+
+impl RocksDbConsensusStorage {
+    /// Test-only: Enable or disable write failure injection for atomicity testing (M16).
+    ///
+    /// When enabled, `apply_epoch_transition_atomic()` will fail before committing
+    /// the RocksDB WriteBatch, allowing tests to verify that no partial state
+    /// is left behind on failures.
+    ///
+    /// # Warning
+    ///
+    /// This method is for testing purposes only and should not be used in production.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_inject_write_failure(&mut self, inject: bool) {
+        self.inject_write_failure = inject;
+    }
+
+    /// Test-only: Clear the epoch transition marker directly (M16).
+    ///
+    /// This is used by tests to simulate recovery from an incomplete transition.
+    ///
+    /// # Warning
+    ///
+    /// This method is for testing purposes only and should not be used in production.
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn clear_epoch_transition_marker(&self) -> Result<(), StorageError> {
+        self.db
+            .delete(EPOCH_TRANSITION_MARKER_KEY)
+            .map_err(|e| StorageError::Io(e.to_string()))
+    }
 }
 
 // ============================================================================
@@ -815,6 +1196,8 @@ pub struct InMemoryConsensusStorage {
     last_committed: RwLock<Option<[u8; 32]>>,
     current_epoch: RwLock<Option<u64>>,
     schema_version: RwLock<Option<u32>>,
+    /// Epoch transition marker (M16).
+    epoch_transition_marker: RwLock<Option<EpochTransitionMarker>>,
 }
 
 impl InMemoryConsensusStorage {
@@ -930,6 +1313,69 @@ impl ConsensusStorage for InMemoryConsensusStorage {
             .read()
             .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
         Ok(*current)
+    }
+
+    fn apply_epoch_transition_atomic(
+        &self,
+        batch: EpochTransitionBatch,
+    ) -> Result<(), StorageError> {
+        // In-memory implementation: apply all writes "atomically" (single-threaded)
+        if let Some((block, block_id)) = batch.block {
+            self.put_block(&block_id, &block)?;
+        }
+        if let Some((qc, block_id)) = batch.qc {
+            self.put_qc(&block_id, &qc)?;
+        }
+        if batch.update_last_committed {
+            self.put_last_committed(&batch.reconfig_block_id)?;
+        }
+        self.put_current_epoch(batch.target_epoch)?;
+
+        // Clear the marker
+        let mut marker = self
+            .epoch_transition_marker
+            .write()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        *marker = None;
+
+        Ok(())
+    }
+
+    fn write_epoch_transition_marker(
+        &self,
+        marker: &EpochTransitionMarker,
+    ) -> Result<(), StorageError> {
+        let mut current = self
+            .epoch_transition_marker
+            .write()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        *current = Some(marker.clone());
+        Ok(())
+    }
+
+    fn check_for_incomplete_epoch_transition(
+        &self,
+    ) -> Result<Option<EpochTransitionMarker>, StorageError> {
+        let marker = self
+            .epoch_transition_marker
+            .read()
+            .map_err(|e| StorageError::Other(format!("lock poisoned: {}", e)))?;
+        Ok(marker.clone())
+    }
+
+    fn verify_epoch_consistency_on_startup(&self) -> Result<(), StorageError> {
+        if let Some(marker) = self.check_for_incomplete_epoch_transition()? {
+            return Err(StorageError::IncompleteEpochTransition {
+                epoch: marker.target_epoch,
+                details: format!(
+                    "epoch transition marker found on startup (previous={}, target={}, block_id={:?})",
+                    marker.previous_epoch,
+                    marker.target_epoch,
+                    &marker.reconfig_block_id[..8]
+                ),
+            });
+        }
+        Ok(())
     }
 }
 
