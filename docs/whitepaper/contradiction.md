@@ -155,6 +155,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 |------|--------|--------|
 | 2026-02-11 | Initial document created during state audit | Audit |
 | 2026-02-11 | Added C1-C3 contradictions, items 8-10 undocumented details from validator economics audit | Audit |
+| 2026-02-15 | M12: Added formal validator set transition spec (Section 18). Items 4 (Epoch Transition Write Ordering) now documented in Section 18.4.3. C2 (Minimum Stake) partially addressed by M2 epoch-boundary filtering; registration-time validation still pending. | M12 |
 
 ---
 
