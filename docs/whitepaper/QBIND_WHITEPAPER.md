@@ -1320,3 +1320,406 @@ However:
 - View-change optimization remains roadmap item
 
 Until full timeout logic is implemented, liveness under prolonged asynchrony is not guaranteed.
+
+---
+
+# 18. Validator Set Transition and Epoch Boundary Semantics
+
+This section formally specifies the validator set transition model at epoch boundaries. It defines how validators become eligible for inclusion in the active consensus set, how the validator set is constructed deterministically, and the transition rules when moving between epochs.
+
+---
+
+## 18.1 Definitions
+
+### 18.1.1 Epoch and Validator Identifiers
+
+| Term | Type | Definition |
+|------|------|------------|
+| `EpochId` | `u64` | Sequential epoch number, starting from 0 at genesis. |
+| `EpochBoundary` | Event | The commit of a reconfiguration block that triggers epoch transition. |
+| `ValidatorId` | `u64` | Unique canonical identifier for a validator. |
+
+### 18.1.2 ValidatorRecord Fields
+
+The `ValidatorRecord` structure (stored on-chain in account data) contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `stake` | `u64` | Validator's current stake in microQBIND. |
+| `consensus_suite_id` | `u8` | Cryptographic suite ID for consensus signatures. |
+| `status` | `ValidatorStatus` | Enum: `Inactive`, `Active`, `Jailed`, `Exiting`. |
+| `owner_keyset_id` | `AccountId` | Account that owns/controls this validator. |
+| `consensus_pk` | `Vec<u8>` | Public key for consensus signing. |
+| `last_slash_height` | `u64` | Block height of last slashing event. |
+
+### 18.1.3 Jail State (Runtime)
+
+Jailing is tracked in runtime slashing state:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `jailed_until_epoch` | `Option<u64>` | Epoch until which the validator is jailed (exclusive). `None` = not jailed. |
+
+A validator is **jailed at epoch e** if:
+
+```
+jailed_until_epoch.is_some() AND e < jailed_until_epoch.unwrap()
+```
+
+### 18.1.4 Validator Sets
+
+| Set | Definition |
+|-----|------------|
+| `CandidateSet(epoch)` | All validators registered for epoch participation, before filtering. |
+| `ActiveSet(epoch)` | Validators included in the consensus committee after eligibility filtering. Also called `ValidatorSet(epoch)`. |
+| `JailedSet(epoch)` | Validators excluded from `ActiveSet` due to `jailed_until_epoch > epoch`. |
+| `ExcludedLowStake(epoch)` | Validators excluded from `ActiveSet` due to `stake < min_validator_stake`. |
+
+### 18.1.5 Deterministic Ordering Requirements
+
+All validator set operations **must** produce deterministic, identical results across all honest nodes:
+
+1. Validators are sorted by `ValidatorId` (ascending) before filtering.
+2. Filtering predicates use `>=` comparisons (inclusive of threshold).
+3. The same inputs always produce the same outputs.
+4. No randomness, wall-clock time, or node-local state influences ordering.
+
+---
+
+## 18.2 Eligibility Function
+
+### 18.2.1 Formal Predicate
+
+A validator `v` is **eligible** for epoch `e` if:
+
+```
+Eligible(v, e) :=
+    stake(v) >= min_validator_stake(e)
+ ∧  e >= jailed_until_epoch(v)
+ ∧  suite_id(v) ∈ AllowedSuites(e)
+ ∧  status(v) ∈ {Active, Registered}
+```
+
+Where:
+
+- `stake(v)`: The on-chain `ValidatorRecord.stake` value (in microQBIND).
+- `min_validator_stake(e)`: Environment-dependent minimum stake threshold.
+- `jailed_until_epoch(v)`: From runtime slashing state; `0` if not jailed.
+- `suite_id(v)`: The `ValidatorRecord.consensus_suite_id` value.
+- `AllowedSuites(e)`: Set of permitted cryptographic suite IDs for epoch `e`.
+- `status(v)`: The `ValidatorRecord.status` value.
+
+### 18.2.2 Minimum Stake Source
+
+The `min_validator_stake` threshold is configured per environment:
+
+| Environment | Value | Configuration Source |
+|-------------|-------|---------------------|
+| DevNet | 1,000,000 µQBIND (1 QBIND) | `ValidatorStakeConfig::devnet_default()` |
+| TestNet | 10,000,000 µQBIND (10 QBIND) | `ValidatorStakeConfig::testnet_default()` |
+| MainNet | 100,000,000,000 µQBIND (100,000 QBIND) | `ValidatorStakeConfig::mainnet_default()` |
+
+The value is sourced from `NodeConfig.validator_stake.min_validator_stake` at node startup and remains constant for the node's lifetime. Governance-driven changes to minimum stake apply at the next epoch boundary after the governance action commits.
+
+### 18.2.3 Jail Semantics
+
+Jailing provides strict exclusion:
+
+- A jailed validator is **excluded from all consensus participation** until `jailed_until_epoch` is reached.
+- Jail periods are expressed in epochs, not blocks or wall-clock time.
+- Jail durations by offense class (M9/M11):
+  - O1 (Double Vote): 5 epochs
+  - O2 (Equivocation): 5 epochs
+  - O3 (Invalid Vote): 3 epochs
+  - O4 (Censorship): 2 epochs
+  - O5 (Availability Failure): 1 epoch
+
+At epoch boundary `e`, validators with `jailed_until_epoch <= e` are **automatically unjailed** and become eligible candidates.
+
+### 18.2.4 Suite Enforcement Semantics
+
+For TestNet and MainNet, cryptographic suite enforcement is mandatory:
+
+| Environment | Allowed Suites | Enforcement Function |
+|-------------|---------------|---------------------|
+| DevNet | All registered suites | No enforcement |
+| TestNet | `{ML_DSA_44_SUITE_ID}` (100) | `validate_testnet_invariants()` |
+| MainNet | `{ML_DSA_44_SUITE_ID}` (100) | `validate_mainnet_validator_suites()` |
+
+Validators using non-allowed suites are **rejected at startup** rather than filtered at epoch boundary. This fail-fast behavior prevents cryptographic verification ambiguity.
+
+---
+
+## 18.3 Construction of ValidatorSet
+
+### 18.3.1 Formal Definition
+
+The validator set for epoch `e` is constructed as:
+
+```
+ValidatorSet(e) = SortBy(ValidatorId, { v ∈ CandidateSet(e) | Eligible(v, e) })
+```
+
+Where:
+- `SortBy(ValidatorId, S)` returns set `S` sorted by ascending `ValidatorId`.
+- `CandidateSet(e)` is the pre-filtering set of all registered validators.
+- `Eligible(v, e)` is the eligibility predicate from Section 18.2.1.
+
+### 18.3.2 Construction Algorithm
+
+The construction proceeds in two phases:
+
+**Phase 1: Stake Filtering**
+
+```
+StakeFiltered = { v ∈ CandidateSet | stake(v) >= min_validator_stake }
+ExcludedLowStake = CandidateSet \ StakeFiltered
+```
+
+**Phase 2: Jail Filtering**
+
+```
+JailFiltered = { v ∈ StakeFiltered | NOT is_jailed_at_epoch(v, e) }
+ExcludedJailed = StakeFiltered \ JailFiltered
+```
+
+**Output**
+
+```
+ValidatorSet(e) = SortBy(ValidatorId, JailFiltered)
+```
+
+The implementation uses `build_validator_set_with_stake_and_jail_filter()` which combines both phases.
+
+### 18.3.3 Voting Power and Quorum
+
+Each validator in `ValidatorSet(e)` has an associated `voting_power` value.
+
+```
+VotingPowerSum(e) = Σ voting_power(v) for all v ∈ ValidatorSet(e)
+
+QuorumThreshold(e) = ceil(2 * VotingPowerSum(e) / 3)
+```
+
+A quorum is achieved when the sum of voting powers for participating validators is `>= QuorumThreshold(e)`.
+
+### 18.3.4 Leader Schedule
+
+The leader for a view is determined by round-robin:
+
+```
+leader(view, e) = ValidatorSet(e)[ view mod |ValidatorSet(e)| ]
+```
+
+This ensures deterministic leader assignment based on sorted validator order.
+
+---
+
+## 18.4 Transition Function at Epoch Boundary
+
+### 18.4.1 Trigger Condition
+
+An epoch transition is triggered when a reconfiguration block commits. A block is a reconfig block if:
+
+```
+block.payload_type == BlockPayloadType::Reconfig(ReconfigPayload { next_epoch })
+```
+
+### 18.4.2 State Mutation Rules
+
+Upon epoch boundary from epoch `e` to `e + 1`:
+
+```
+S' = S with:
+    Epoch := e + 1
+    ValidatorSet := compute_validator_set(CandidateSet, e + 1, min_validator_stake)
+    SlashingState := process_unjails(S.SlashingState, e + 1)
+    KeyRotationState := advance_key_rotations(S.KeyRotationState, e + 1)
+```
+
+Where:
+
+1. **ValidatorSet Update**:
+   - `CandidateSet` is derived from registered validators in ledger state.
+   - `compute_validator_set` applies stake + jail filtering for epoch `e + 1`.
+   - The new validator set takes effect immediately for view `0` of epoch `e + 1`.
+
+2. **Jail State Processing**:
+   - For each validator `v` with `jailed_until_epoch(v) <= e + 1`:
+     - Clear jail flag (becomes eligible).
+   - Jailed validators persist in `SlashingState` but may now be eligible.
+
+3. **Stake Updates**:
+   - Any slashing applied in epoch `e` reduces `ValidatorRecord.stake`.
+   - Stake reductions are **atomic** with slashing evidence processing.
+   - Reduced stake is reflected in epoch `e + 1` eligibility check.
+
+4. **Suite Changes**:
+   - Governance-driven suite transitions activate at epoch boundary.
+   - `AllowedSuites(e + 1)` may differ from `AllowedSuites(e)`.
+   - Validators using deprecated suites become ineligible.
+
+### 18.4.3 Persistence Order
+
+To ensure crash safety, the epoch transition follows strict persistence ordering:
+
+1. **Persist new epoch number** to `meta:current_epoch`.
+2. **Persist validator set** (or reference to it).
+3. **Update in-memory state** (EpochState, ValidatorSet, etc.).
+4. **Notify consensus engine** of new epoch.
+
+If a crash occurs after step 1 but before step 3, recovery reconstructs in-memory state from persisted epoch.
+
+---
+
+## 18.5 Failure Conditions and Fail-Closed Rules
+
+### 18.5.1 Empty Validator Set
+
+**Condition**: Stake and/or jail filtering excludes all validators.
+
+**Response**: Node halts with `StakeFilterEmptySetError`.
+
+**Rationale**: An empty validator set cannot form quorum. Proceeding would deadlock consensus.
+
+**Implementation**: `ConsensusValidatorSet::new()` returns `Err` if input is empty.
+
+### 18.5.2 Incompatible Suite IDs
+
+**Condition**: At startup, a validator uses a suite not in `AllowedSuites` for the environment.
+
+**Response**: Node rejects configuration and fails to start.
+
+**Rationale**: Cryptographic verification requires a known, verifiable signature suite. Unknown suites cannot be verified, breaking consensus safety.
+
+**Implementation**: `validate_testnet_invariants()`, `validate_mainnet_validator_suites()`.
+
+### 18.5.3 Invalid Epoch State Transition
+
+**Condition**: `EpochStateProvider.get_epoch_state(e + 1)` returns `None`.
+
+**Response**: Epoch transition fails. Reconfig block is rejected.
+
+**Rationale**: Without a valid next-epoch state, the node cannot determine the new validator set.
+
+**Implementation**: `NodeHotstuffHarness.handle_reconfig_block()` fails if provider returns `None`.
+
+### 18.5.4 Duplicate ValidatorId
+
+**Condition**: Two validators in `CandidateSet` have the same `ValidatorId`.
+
+**Response**: Validator set construction fails with `"duplicate ValidatorId"` error.
+
+**Rationale**: `ValidatorId` must be unique for deterministic indexing and leader selection.
+
+**Implementation**: `ConsensusValidatorSet::new()` checks for duplicates.
+
+### 18.5.5 MainNet Minimum Stake Violation
+
+**Condition**: `min_validator_stake < MIN_VALIDATOR_STAKE_MAINNET` on MainNet.
+
+**Response**: Configuration validation fails at startup.
+
+**Rationale**: Economic security requires sufficient stake at risk for slashing to be meaningful.
+
+**Implementation**: `ValidatorStakeConfig::validate_for_mainnet()`.
+
+---
+
+## 18.6 Code Mapping
+
+This section maps formal elements to implementation locations.
+
+### 18.6.1 Core Types
+
+| Formal Element | File | Location |
+|----------------|------|----------|
+| `ValidatorId` | `crates/qbind-consensus/src/ids.rs` | `ValidatorId` struct |
+| `ValidatorRecord` | `crates/qbind-types/src/state_validator.rs` | `ValidatorRecord` struct |
+| `ValidatorStatus` | `crates/qbind-types/src/state_validator.rs` | `ValidatorStatus` enum |
+| `EpochId` | `crates/qbind-consensus/src/validator_set.rs` | `EpochId` newtype |
+| `ValidatorSetEntry` | `crates/qbind-consensus/src/validator_set.rs` | `ValidatorSetEntry` struct |
+| `ConsensusValidatorSet` | `crates/qbind-consensus/src/validator_set.rs` | `ConsensusValidatorSet` struct |
+
+### 18.6.2 Stake Filtering
+
+| Function | File | Line Range | Purpose |
+|----------|------|------------|---------|
+| `build_validator_set_with_stake_filter()` | `crates/qbind-consensus/src/validator_set.rs` | 146-178 | M2.1: Stake-only filtering |
+| `build_validator_set_with_stake_and_jail_filter()` | `crates/qbind-consensus/src/validator_set.rs` | 275-342 | M9: Combined stake + jail filtering |
+| `ValidatorCandidate` | `crates/qbind-consensus/src/validator_set.rs` | 66-86 | Candidate with stake info |
+| `ValidatorCandidateWithJailStatus` | `crates/qbind-consensus/src/validator_set.rs` | 189-217 | Candidate with jail info |
+
+### 18.6.3 Epoch State Provider
+
+| Component | File | Line Range | Purpose |
+|-----------|------|------------|---------|
+| `EpochStateProvider` trait | `crates/qbind-consensus/src/validator_set.rs` | 966-971 | Provider interface |
+| `StaticEpochStateProvider` | `crates/qbind-consensus/src/validator_set.rs` | 995-1044 | Test provider |
+| `StakeFilteringEpochStateProvider` | `crates/qbind-consensus/src/validator_set.rs` | 1078-1242 | M2.2: Production provider |
+| `StakeFilterEmptySetError` | `crates/qbind-consensus/src/validator_set.rs` | 1056-1076 | Fail-closed error |
+
+### 18.6.4 Epoch Transition Wiring
+
+| Component | File | Line Range | Purpose |
+|-----------|------|------------|---------|
+| `with_epoch_state_provider()` | `crates/qbind-node/src/hotstuff_node_sim.rs` | 928-930 | Wire provider to harness |
+| `with_stake_filtering_epoch_state_provider()` | `crates/qbind-node/src/hotstuff_node_sim.rs` | 978-990 | M2.3: Wire filtering provider |
+| `enable_stake_filtering_for_environment()` | `crates/qbind-node/src/hotstuff_node_sim.rs` | 1037-1047 | M2.4: Production wiring |
+| `new_with_stake_filtering()` | `crates/qbind-node/src/hotstuff_node_sim.rs` | 2422-2436 | Production constructor |
+| `transition_to_epoch()` | `crates/qbind-consensus/src/basic_hotstuff_engine.rs` | (called at 3370 in node_sim) | Engine epoch update |
+
+### 18.6.5 Configuration Enforcement
+
+| Component | File | Line Range | Purpose |
+|-----------|------|------------|---------|
+| `ValidatorStakeConfig` | `crates/qbind-node/src/node_config.rs` | 2403-2483 | Stake config struct |
+| `min_validator_stake` constants | `crates/qbind-node/src/node_config.rs` | 2367-2375 | Per-environment defaults |
+| `validate_testnet_invariants()` | `crates/qbind-node/src/node_config.rs` | 6625-6648 | TestNet suite check |
+| `validate_mainnet_validator_suites()` | `crates/qbind-node/src/node_config.rs` | 6680-6684 | MainNet suite check |
+| `ML_DSA_44_SUITE_ID` | `crates/qbind-node/src/node_config.rs` | ~6510 | Suite constant (100) |
+
+### 18.6.6 Quorum and Leader
+
+| Component | File | Line Range | Purpose |
+|-----------|------|------------|---------|
+| `total_voting_power()` | `crates/qbind-consensus/src/validator_set.rs` | 416-419 | Sum of voting powers |
+| `two_thirds_vp()` | `crates/qbind-consensus/src/validator_set.rs` | 469-473 | Quorum threshold |
+| `has_quorum()` | `crates/qbind-consensus/src/validator_set.rs` | 478-491 | Quorum check |
+| `leader_for_view()` | `crates/qbind-consensus/src/basic_hotstuff_engine.rs` | 607-618 | Leader selection |
+
+---
+
+## 18.7 Diagram
+
+<img src="diagrams/validator-set-transition.svg" alt="Validator Set Transition Flow Diagram" />
+
+The diagram shows the flow from `CandidateSet` through stake filtering, jail filtering, to the final `ActiveSet` (ValidatorSet), which is then used for quorum and leader schedule computation.
+
+---
+
+## 18.8 Invariants
+
+The following invariants must hold for validator set transitions:
+
+1. **Non-Empty Set**: `|ValidatorSet(e)| >= 1` for all epochs `e` on TestNet/MainNet.
+2. **Determinism**: Two nodes with identical inputs produce identical `ValidatorSet(e)`.
+3. **Monotonic Epochs**: Epoch numbers are strictly increasing.
+4. **Sorted Order**: `ValidatorSet(e)` is sorted by `ValidatorId` ascending.
+5. **Unique IDs**: No two entries in `ValidatorSet(e)` share a `ValidatorId`.
+6. **Quorum Possible**: `VotingPowerSum(e) > 0` (required for quorum math).
+7. **Suite Compliance**: All validators in `ValidatorSet(e)` use allowed suites.
+
+---
+
+## 18.9 Known Limitations
+
+1. **Voting Power as Stake Proxy**: The current `StakeFilteringEpochStateProvider` uses `voting_power` as a proxy for stake in test configurations. Production deployments must read actual `ValidatorRecord.stake` from ledger.
+
+2. **Slashing State Volatility**: `jailed_until_epoch` is in runtime slashing state, which is not fully persistent (T230). A crash may lose jail state, potentially allowing jailed validators to re-enter the set prematurely.
+
+3. **Governance Stake Changes**: Governance-driven changes to `min_validator_stake` require node restart to take effect. Dynamic reconfiguration is a future enhancement.
+
+4. **No Dynamic Suite Transitions**: Mid-epoch suite transitions are rejected. Suite changes require full epoch boundary activation.
+
+These limitations are tracked as roadmap items and do not affect core safety properties.
