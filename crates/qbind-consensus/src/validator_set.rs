@@ -50,12 +50,21 @@ pub struct ValidatorSetEntry {
 /// At epoch boundaries, candidates with `stake < min_validator_stake` are excluded
 /// from the final `ConsensusValidatorSet`.
 ///
-/// # Design Note (M2.1)
+/// # Design Note (M2.1 + M13)
 ///
 /// The `stake` field is the canonical on-chain stake from `ValidatorRecord.stake`.
 /// This ensures that stake filtering uses the same value as other protocol components
 /// (e.g., slashing, rewards). The stake is NOT an in-memory mirror but should be
 /// read directly from the ledger state.
+///
+/// # M13: Canonical Economic State Unification
+///
+/// Per M13, `ValidatorRecord` is the single source of truth for:
+/// - `stake`: Canonical stake amount (reduced by slashing)
+/// - `jailed_until_epoch`: Canonical jail expiration
+///
+/// When constructing candidates, read these values directly from `ValidatorRecord`.
+/// Do NOT use `ValidatorSlashingState.stake` for eligibility decisions.
 ///
 /// # Determinism
 ///
@@ -68,6 +77,10 @@ pub struct ValidatorCandidate {
     /// The validator's canonical identity.
     pub validator_id: ValidatorId,
     /// The validator's current stake from on-chain `ValidatorRecord.stake` (in microQBIND).
+    ///
+    /// # M13 Note
+    ///
+    /// This MUST be sourced from `ValidatorRecord.stake` (canonical source).
     pub stake: u64,
     /// The voting power to assign if this validator passes stake filtering.
     /// For uniform voting power, this is typically 1.
@@ -182,15 +195,24 @@ where
 // M9: Jail-Aware Validator Set Filtering
 // ============================================================================
 
-/// Extended validator candidate with jail information for epoch boundary filtering (M9).
+/// Extended validator candidate with jail information for epoch boundary filtering (M9, M13).
 ///
 /// This struct extends `ValidatorCandidate` with jail status information to enable
 /// filtering out jailed validators from the active set during epoch transitions.
+///
+/// # M13: Canonical Economic State
+///
+/// The `jailed_until_epoch` field MUST be sourced from `ValidatorRecord.jailed_until_epoch`
+/// (the canonical source). Do NOT use `ValidatorSlashingState.jailed_until_epoch`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatorCandidateWithJailStatus {
     /// The base validator candidate information.
     pub candidate: ValidatorCandidate,
     /// Epoch until which the validator is jailed (None = not jailed).
+    ///
+    /// # M13 Note
+    ///
+    /// This MUST be sourced from `ValidatorRecord.jailed_until_epoch` (canonical source).
     pub jailed_until_epoch: Option<u64>,
 }
 
