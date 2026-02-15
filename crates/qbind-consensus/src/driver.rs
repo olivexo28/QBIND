@@ -13,6 +13,50 @@
 //! - [`ConsensusEngineDriver`]: Trait for driving a consensus engine
 //! - [`HotStuffDriver`]: Thin wrapper around the HotStuff consensus state
 //! - [`ValidatorContext`]: Wrapper around validator set for membership and quorum checks
+//!
+//! # Production vs Test Usage (Pre-TestNet Critical Item Resolution)
+//!
+//! **IMPORTANT**: The driver's [`step()`] method provides basic membership filtering
+//! and signature verification, but does **not** delegate vote/proposal processing
+//! to the underlying engine. This is intentional:
+//!
+//! ## Production Code Path (RECOMMENDED)
+//!
+//! Production code in `qbind-node` uses [`BasicHotStuffEngine`] methods directly:
+//! - [`BasicHotStuffEngine::on_vote_event()`] for vote processing and QC formation
+//! - [`BasicHotStuffEngine::on_proposal_event()`] for proposal validation and voting
+//! - [`BasicHotStuffEngine::try_propose()`] for leader proposal generation
+//!
+//! This is the canonical path used by [`NodeHotstuffHarness`] in production/testnet
+//! deployments. The engine methods handle:
+//! - Epoch validation
+//! - HotStuff locking rules
+//! - QC formation from accumulated votes
+//! - View advancement
+//! - Commit tracking
+//!
+//! ## Driver Step() Method (TESTING/WIRING ONLY)
+//!
+//! The driver's `step()` method is suitable for:
+//! - Unit tests that verify membership filtering
+//! - Signature verification integration tests
+//! - Structural consensus wiring tests
+//!
+//! It returns `ConsensusEngineAction::Noop` after validating and tracking messages,
+//! without performing actual consensus state transitions.
+//!
+//! ## Rationale
+//!
+//! This design separates concerns:
+//! - Driver: message validation, membership checks, signature verification
+//! - Engine: consensus logic, QC formation, locking, commits
+//!
+//! Production deployments call engine methods directly to ensure full consensus
+//! processing. The driver layer remains useful for testing validation logic
+//! in isolation.
+//!
+//! See `docs/protocol/QBIND_PROTOCOL_REPORT.md` sections 3.1 and 3.2 for the
+//! pre-testnet gap analysis that led to this design decision.
 
 use std::sync::Arc;
 
@@ -616,15 +660,22 @@ where
                         actions.push(ConsensusEngineAction::Noop);
                     } else {
                         // Track that we received a vote.
-                        // TODO: Delegate to underlying engine for actual vote processing:
-                        // - Verify vote signature (from: sender ID, vote: vote data)
-                        // - Collect votes for QC formation
-                        // - Emit actions if QC threshold is reached
-                        let _ = vote; // Silence unused warnings until TODO is implemented
+                        //
+                        // DESIGN NOTE (Pre-TestNet Critical - ref QBIND_PROTOCOL_REPORT.md 3.1):
+                        // This method intentionally does NOT delegate to the underlying engine.
+                        // Production code uses BasicHotStuffEngine::on_vote_event() directly
+                        // via NodeHotstuffHarness for full consensus processing including:
+                        // - QC formation from accumulated votes
+                        // - View advancement on QC
+                        // - Commit tracking
+                        //
+                        // This step() method is for testing membership filtering and signature
+                        // verification in isolation. See module-level documentation for details.
+                        let _ = vote; // Vote validated; actual processing done by engine methods
                         self.votes_received += 1;
 
-                        // For now, return Noop to indicate the event was processed
-                        // but no network action is required.
+                        // Return Noop to indicate the event was processed
+                        // but no network action is required from this layer.
                         actions.push(ConsensusEngineAction::Noop);
                     }
                 }
@@ -646,25 +697,39 @@ where
                         actions.push(ConsensusEngineAction::Noop);
                     } else {
                         // Track that we received a proposal.
-                        // TODO: Delegate to underlying engine for actual proposal processing:
-                        // - Verify proposal structure and QC (from: sender ID, proposal: block data)
-                        // - Check HotStuff locking rules
-                        // - Decide whether to vote
-                        // - Emit BroadcastVote or SendVoteTo action if voting
-                        let _ = proposal; // Silence unused warnings until TODO is implemented
+                        //
+                        // DESIGN NOTE (Pre-TestNet Critical - ref QBIND_PROTOCOL_REPORT.md 3.2):
+                        // This method intentionally does NOT delegate to the underlying engine.
+                        // Production code uses BasicHotStuffEngine::on_proposal_event() directly
+                        // via NodeHotstuffHarness for full consensus processing including:
+                        // - Epoch validation
+                        // - HotStuff locking rule enforcement
+                        // - Block registration and voting decision
+                        // - Vote broadcast action emission
+                        //
+                        // This step() method is for testing membership filtering and signature
+                        // verification in isolation. See module-level documentation for details.
+                        let _ = proposal; // Proposal validated; actual processing done by engine methods
                         self.proposals_received += 1;
 
-                        // For now, return Noop to indicate the event was processed
-                        // but no network action is required.
+                        // Return Noop to indicate the event was processed
+                        // but no network action is required from this layer.
                         actions.push(ConsensusEngineAction::Noop);
                     }
                 }
             }
         }
 
-        // TODO: Add timer-based logic for:
-        // - Proposal generation (if we are the leader)
-        // - View change / timeout handling
+        // DESIGN NOTE (Pre-TestNet Critical - ref QBIND_PROTOCOL_REPORT.md 3.3):
+        // Timer-based logic (proposal generation, view change, timeouts) is implemented
+        // in BasicHotStuffEngine and TimeoutPacemaker, used via NodeHotstuffHarness.
+        // Production code calls:
+        // - BasicHotStuffEngine::try_propose() for leader proposal generation
+        // - TimeoutPacemaker::check() for timeout detection
+        // - BasicHotStuffEngine::on_timeout_msg() / on_timeout_certificate() for TC processing
+        //
+        // This driver layer handles message validation only; timing logic is not
+        // duplicated here. See M5 timeout/view-change tests for production behavior.
 
         Ok(actions)
     }
