@@ -97,11 +97,14 @@ This section lists items where the whitepaper lacks formal precision.
 
 | Field | Value |
 |-------|-------|
-| **Description** | Slashing infrastructure exists but penalty amounts, conditions, and economic impact are not specified |
-| **Whitepaper Reference** | Section 8.10: Known Consensus Gaps, Section 12.2: Byzantine Validator Behavior |
-| **Code Reference** | `qbind-consensus/src/slashing/mod.rs` |
-| **Risk Level** | High |
-| **Action Required** | Define slashing conditions (double-vote, equivocation); specify penalty amounts; document jail/unjail mechanics |
+| **Description** | Slashing penalty amounts, conditions, and economic impact |
+| **Whitepaper Reference** | Section 8.10: Known Consensus Gaps, Section 12.2: Byzantine Validator Behavior, Section 18: Validator Set Transition |
+| **Code Reference** | `crates/qbind-consensus/src/slashing/mod.rs:2218-2240` (PenaltyEngineConfig), `crates/qbind-consensus/src/slashing/mod.rs:2476-2596` (apply_penalty_if_needed) |
+| **Status** | ✅ Mitigated by implementation (M9+M11); formal spec in whitepaper pending |
+| **Risk Level** | Medium |
+| **Justification** | All offense classes (O1-O5) now have enforced penalties with deterministic signature verification. Economic deterrent is functional. Whitepaper Section 18 documents jail semantics and validator set exclusion. Formal penalty schedule not yet in whitepaper but implementation is complete and tested. |
+| **Action Required** | Add formal penalty schedule table to whitepaper Section 12.2: O1 (7.5% slash, 10 epoch jail), O2 (5% slash, 5 epoch jail), O3 (3% slash, 3 epoch jail), O4 (2% slash, 2 epoch jail), O5 (1% slash, 1 epoch jail). |
+| **Note** | **M9**: O1/O2 penalties enforced via `AtomicSlashingBackend.apply_penalty_atomic()`. **M11**: O3-O5 penalties enforced with deterministic verification. Jail exclusion via `build_validator_set_with_stake_and_jail_filter()`. Mode enforcement: MainNet requires `EnforceCritical` or `EnforceAll` (M4). Tests: `m9_slashing_penalty_tests.rs`, `m11_slashing_penalty_o3_o5_tests.rs` (21 tests). |
 
 ## 2.6 Epoch Transition Formalization
 
