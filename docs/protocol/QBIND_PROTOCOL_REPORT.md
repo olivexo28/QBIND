@@ -98,13 +98,13 @@ This section lists items where the whitepaper lacks formal precision.
 | Field | Value |
 |-------|-------|
 | **Description** | Slashing penalty amounts, conditions, and economic impact |
-| **Whitepaper Reference** | Section 8.10: Known Consensus Gaps, Section 12.2: Byzantine Validator Behavior, Section 18: Validator Set Transition |
-| **Code Reference** | `crates/qbind-consensus/src/slashing/mod.rs:2218-2240` (PenaltyEngineConfig), `crates/qbind-consensus/src/slashing/mod.rs:2476-2596` (apply_penalty_if_needed) |
-| **Status** | ✅ Mitigated by implementation (M9+M11); formal spec in whitepaper pending |
-| **Risk Level** | Medium |
-| **Justification** | All offense classes (O1-O5) now have enforced penalties with deterministic signature verification. Economic deterrent is functional. Whitepaper Section 18 documents jail semantics and validator set exclusion. Formal penalty schedule not yet in whitepaper but implementation is complete and tested. |
-| **Action Required** | Add formal penalty schedule table to whitepaper Section 12.2: O1 (7.5% slash, 10 epoch jail), O2 (5% slash, 5 epoch jail), O3 (3% slash, 3 epoch jail), O4 (2% slash, 2 epoch jail), O5 (1% slash, 1 epoch jail). |
-| **Note** | **M9**: O1/O2 penalties enforced via `AtomicSlashingBackend.apply_penalty_atomic()`. **M11**: O3-O5 penalties enforced with deterministic verification. Jail exclusion via `build_validator_set_with_stake_and_jail_filter()`. Mode enforcement: MainNet requires `EnforceCritical` or `EnforceAll` (M4). Tests: `m9_slashing_penalty_tests.rs`, `m11_slashing_penalty_o3_o5_tests.rs` (21 tests). |
+| **Whitepaper Reference** | Section 8.10: Known Consensus Gaps, Section 12.2: Byzantine Validator Behavior (incl. 12.2.1 Slashing Penalty Schedule, 12.2.2 Governance and Activation Semantics), Section 18: Validator Set Transition |
+| **Code Reference** | `crates/qbind-consensus/src/slashing/mod.rs:2218-2240` (PenaltyEngineConfig), `crates/qbind-consensus/src/slashing/mod.rs:2476-2596` (apply_penalty_if_needed), `crates/qbind-types/src/state_governance.rs:44-117` (SlashingPenaltySchedule) |
+| **Status** | ✅ Mitigated (spec added M17) |
+| **Risk Level** | Low |
+| **Justification** | All offense classes (O1-O5) now have enforced penalties with deterministic signature verification. Formal penalty schedule table added to whitepaper Section 12.2.1 (M17). Governance and activation semantics documented in Section 12.2.2. Economic deterrent is fully specified and implemented. |
+| **Action Required** | ~~Add formal penalty schedule table to whitepaper Section 12.2~~ |
+| **Note** | **M9**: O1/O2 penalties enforced via `AtomicSlashingBackend.apply_penalty_atomic()`. **M11**: O3-O5 penalties enforced with deterministic verification. **M14**: Governance wiring via `SlashingPenaltySchedule` in `ParamRegistry` with epoch-boundary activation. **M17**: Formal spec added to whitepaper Section 12.2 with O1-O5 penalty table (offense, evidence type, verification rule, slash bps, jail epochs) and governance/activation semantics paragraphs. Tests: `m9_slashing_penalty_tests.rs`, `m11_slashing_penalty_o3_o5_tests.rs` (21 tests), `m14_governance_slashing_params_tests.rs` (15 tests). |
 
 ## 2.6 Epoch Transition Formalization
 
