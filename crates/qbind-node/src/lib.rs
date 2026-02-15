@@ -362,8 +362,8 @@ pub use startup_validation::{
     ConsensusStartupValidator, StartupValidationError, SuitePolicy, ValidatorEnumerator,
 };
 pub use storage::{
-    ensure_compatible_schema, ConsensusStorage, InMemoryConsensusStorage, RocksDbConsensusStorage,
-    StorageError, CURRENT_SCHEMA_VERSION,
+    ensure_compatible_schema, ConsensusStorage, EpochTransitionBatch, EpochTransitionMarker,
+    InMemoryConsensusStorage, RocksDbConsensusStorage, StorageError, CURRENT_SCHEMA_VERSION,
 };
 pub use validator_config::{
     build_net_config_and_id_map_for_tests, derive_validator_public_key,

@@ -13,6 +13,10 @@ async-peer-manager = []
 # When enabled: HsmPkcs11Signer is available for hardware security module signing.
 # When disabled: SignerMode::HsmPkcs11 produces a clear startup error.
 hsm-pkcs11 = []
+# Enable test utilities (M16).
+# When enabled: Test-only methods like set_inject_write_failure() become available.
+# Used by integration tests for failure injection testing.
+test-utils = []
 
 [[bin]]
 name = "qbind-node"
