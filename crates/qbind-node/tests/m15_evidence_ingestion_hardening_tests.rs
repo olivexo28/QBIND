@@ -657,8 +657,13 @@ fn test_f1_valid_evidence_leads_to_penalty() {
             // Note: May be EvidenceOnly or PenaltyApplied depending on mode and verification
             // The key is that it was NOT rejected by hardening
             match record.penalty_decision {
-                PenaltyDecision::PenaltyApplied { slashed_amount, .. } => {
-                    assert!(slashed_amount > 0 || slashed_amount == 0); // Penalty applied (or 0 if already slashed)
+                PenaltyDecision::PenaltyApplied { slashed_amount, jailed_until_epoch } => {
+                    // Penalty was applied - expected for EnforceCritical mode
+                    // slashed_amount should be non-zero for a fresh validator with stake
+                    // jailed_until_epoch should be Some for O1 (critical offense)
+                    // Note: Could be 0 if validator has no stake, but that's acceptable
+                    assert!(jailed_until_epoch.is_some() || slashed_amount == 0,
+                        "O1 should jail the validator or have no stake to slash");
                 }
                 PenaltyDecision::EvidenceOnly => {
                     // Also acceptable for mode RecordOnly

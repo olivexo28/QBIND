@@ -2915,7 +2915,7 @@ impl EvidenceRejectionReason {
 ///
 /// - `require_validator_reporter = true` (strictest, simplest)
 /// - `per_block_evidence_cap = Some(10)` (prevent DoS via evidence spam)
-/// - `max_evidence_age_blocks = Some(10_000)` (1-2 days at 10s blocks)
+/// - `max_evidence_age_blocks = Some(100_000)` (~11.5 days at 10s blocks)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EvidenceIngestionConfig {
     /// Maximum payload size for O1 (double-sign) evidence in bytes.
