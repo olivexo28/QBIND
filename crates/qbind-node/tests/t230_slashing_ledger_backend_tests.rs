@@ -424,6 +424,7 @@ fn test_end_to_end_penalty_workflow() {
         jail_epochs_o1: 10,
         jail_on_o2: true,
         jail_epochs_o2: 5,
+        ..PenaltyEngineConfig::default()
     };
     let mut engine = PenaltySlashingEngine::new(backend, config);
 

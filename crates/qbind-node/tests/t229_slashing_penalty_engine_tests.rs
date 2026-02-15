@@ -5,7 +5,7 @@
 //!
 //! - Slashing modes (Off/RecordOnly/EnforceCritical/EnforceAll) work correctly
 //! - O1 and O2 offenses trigger penalties when mode is EnforceCritical
-//! - O3/O4/O5 remain evidence-only even in EnforceCritical mode
+//! - O3/O4/O5 are enforced in EnforceCritical mode (M11)
 //! - InMemorySlashingBackend correctly applies slashes and jails
 //! - SlashingConfig validation works for MainNet invariants
 //!
@@ -449,7 +449,7 @@ fn test_penalty_engine_enforce_critical_o2() {
 }
 
 #[test]
-fn test_penalty_engine_o3_remains_evidence_only() {
+fn test_penalty_engine_o3_enforced_in_enforce_critical() {
     let vs = test_validator_set();
     let ctx = test_penalty_context(&vs);
 
@@ -457,16 +457,24 @@ fn test_penalty_engine_o3_remains_evidence_only() {
     let config = PenaltyEngineConfig::devnet(); // EnforceCritical mode
     let mut engine = PenaltySlashingEngine::new(backend, config);
 
-    // Submit O3a evidence - should be evidence-only even in EnforceCritical
+    // Submit O3a evidence - should be enforced in EnforceCritical
     let evidence = make_o3a_evidence(1, 100, 5);
     let record = engine.handle_evidence(&ctx, evidence);
 
-    assert!(matches!(
-        record.penalty_decision,
-        PenaltyDecision::EvidenceOnly
-    ));
-    assert_eq!(engine.total_stake_slashed(), 0);
-    assert_eq!(engine.total_jail_events(), 0);
+    match record.penalty_decision {
+        PenaltyDecision::PenaltyApplied {
+            slashed_amount,
+            jailed_until_epoch,
+        } => {
+            // 10_000 * 300 / 10_000 = 300 (3%)
+            assert_eq!(slashed_amount, 300);
+            // Jailed for 3 epochs from epoch 100 = 103
+            assert_eq!(jailed_until_epoch, Some(103));
+        }
+        _ => panic!("Expected PenaltyApplied decision"),
+    }
+    assert_eq!(engine.total_stake_slashed(), 300);
+    assert_eq!(engine.total_jail_events(), 1);
 }
 
 #[test]

@@ -150,6 +150,7 @@ impl ValidatorProgram {
             network_pk: call.network_pk,
             stake: call.stake,
             last_slash_height: 0,
+            jailed_until_epoch: None, // M13: New validators are not jailed
             ext_bytes: Vec::new(),
         };
 

@@ -24,6 +24,7 @@ fn validator_record_roundtrip() {
         network_pk: vec![0x06, 0x07, 0x08, 0x09, 0x0A],
         stake: 1000000,
         last_slash_height: 0,
+        jailed_until_epoch: None, // M13: Not jailed
         ext_bytes: Vec::new(),
     };
 
@@ -59,6 +60,7 @@ fn validator_record_roundtrip_all_statuses() {
             network_pk: vec![0x02; 200],
             stake: 5000000,
             last_slash_height: 12345,
+            jailed_until_epoch: if status == ValidatorStatus::Jailed { Some(100) } else { None }, // M13
             ext_bytes: vec![0xAA, 0xBB, 0xCC],
         };
 
@@ -88,6 +90,7 @@ fn validator_record_large_pk() {
         network_pk: vec![0xBB; 1952],
         stake: 1000000000,
         last_slash_height: 9999999,
+        jailed_until_epoch: Some(500), // M13: Test with jailed state
         ext_bytes: vec![0xCC; 256],
     };
 

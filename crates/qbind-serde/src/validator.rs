@@ -29,6 +29,16 @@ impl StateEncode for ValidatorRecord {
         put_u64(out, self.stake);
         put_u64(out, self.last_slash_height);
 
+        // M13: Encode jailed_until_epoch as Option<u64>
+        // Format: 1 byte flag (0=None, 1=Some) + 8 bytes epoch if Some
+        match self.jailed_until_epoch {
+            None => put_u8(out, 0),
+            Some(epoch) => {
+                put_u8(out, 1);
+                put_u64(out, epoch);
+            }
+        }
+
         let ext_len = self.ext_bytes.len();
         let ext_len_u16 = len_to_u16(ext_len);
         put_u16(out, ext_len_u16);
@@ -71,6 +81,14 @@ impl StateDecode for ValidatorRecord {
         let stake = get_u64(input)?;
         let last_slash_height = get_u64(input)?;
 
+        // M13: Decode jailed_until_epoch as Option<u64>
+        // Format: 1 byte flag (0=None, 1=Some) + 8 bytes epoch if Some
+        let jailed_until_epoch = match get_u8(input)? {
+            0 => None,
+            1 => Some(get_u64(input)?),
+            _ => return Err(StateError::InvalidValue("invalid jailed_until_epoch flag")),
+        };
+
         let ext_len = get_u16(input)? as usize;
         let ext_bytes = get_bytes(input, ext_len)?.to_vec();
 
@@ -87,6 +105,7 @@ impl StateDecode for ValidatorRecord {
             network_pk,
             stake,
             last_slash_height,
+            jailed_until_epoch,
             ext_bytes,
         })
     }
