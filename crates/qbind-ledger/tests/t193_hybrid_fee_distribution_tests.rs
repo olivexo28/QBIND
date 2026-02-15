@@ -109,7 +109,8 @@ fn test_burn_only_stats() {
     assert_eq!(stats.total_fees_to_proposer, 0);
 
     // Total fees should equal burned (conservation)
-    assert_eq!(stats.total_fees(), stats.total_fees_burned);
+    // M18: total_fees() now returns Option<u128>
+    assert_eq!(stats.total_fees().unwrap(), stats.total_fees_burned);
 
     // Individual results should all be burn-only
     for r in &results {
@@ -455,7 +456,8 @@ fn test_mixed_success_failure_fee_distribution() {
 
     assert_eq!(stats.total_fees_to_proposer, successful_proposer);
     assert_eq!(stats.total_fees_burned, successful_burned);
-    assert_eq!(stats.total_fees(), successful_fees);
+    // M18: total_fees() now returns Option<u128>
+    assert_eq!(stats.total_fees().unwrap(), successful_fees);
 
     // Proposer received only from successful txs
     assert_eq!(
