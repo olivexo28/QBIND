@@ -2853,6 +2853,775 @@ impl PenaltySlashingMetrics {
     }
 }
 
+// ============================================================================
+// M15: Evidence Ingestion Hardening (No Rewards / No Tokenomics)
+// ============================================================================
+
+/// Reason why evidence was rejected during ingestion (M15).
+///
+/// These reasons are used for metrics and logging to track rejection patterns.
+/// The order follows the verification pipeline ordering (cheap checks first).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EvidenceRejectionReason {
+    /// Evidence rejected because the reporter is not an active validator (M15).
+    NonValidatorReporter,
+    /// Evidence payload exceeds the maximum allowed size for the offense type (M15).
+    OversizedPayload,
+    /// Per-block evidence cap exceeded (M15).
+    PerBlockCapExceeded,
+    /// Evidence references a height too old (beyond the configured window) (M15).
+    TooOld,
+    /// Duplicate evidence (already processed).
+    Duplicate,
+    /// Evidence structure validation failed.
+    InvalidStructure,
+    /// Unknown validator (offending validator not in set).
+    UnknownValidator,
+    /// Height too far in the future.
+    FutureHeight,
+    /// Cryptographic verification failed.
+    VerificationFailed,
+}
+
+impl EvidenceRejectionReason {
+    /// Returns a string label for metrics and logging.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EvidenceRejectionReason::NonValidatorReporter => "non_validator_reporter",
+            EvidenceRejectionReason::OversizedPayload => "oversized_payload",
+            EvidenceRejectionReason::PerBlockCapExceeded => "per_block_cap_exceeded",
+            EvidenceRejectionReason::TooOld => "too_old",
+            EvidenceRejectionReason::Duplicate => "duplicate",
+            EvidenceRejectionReason::InvalidStructure => "invalid_structure",
+            EvidenceRejectionReason::UnknownValidator => "unknown_validator",
+            EvidenceRejectionReason::FutureHeight => "future_height",
+            EvidenceRejectionReason::VerificationFailed => "verification_failed",
+        }
+    }
+}
+
+/// Configuration for evidence ingestion hardening (M15).
+///
+/// This configuration controls deterministic admission controls for evidence
+/// submission without introducing any tokenomics or rewards.
+///
+/// # Design Principles
+///
+/// - **Deterministic**: All limits are deterministic for consensus safety
+/// - **Fail-Closed**: Invalid or suspicious evidence is rejected
+/// - **No Rewards**: Reporting has no economic incentive; hardening provides abuse resistance
+///
+/// # Recommended Production Settings
+///
+/// - `require_validator_reporter = true` (strictest, simplest)
+/// - `per_block_evidence_cap = Some(10)` (prevent DoS via evidence spam)
+/// - `max_evidence_age_blocks = Some(10_000)` (1-2 days at 10s blocks)
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EvidenceIngestionConfig {
+    /// Maximum payload size for O1 (double-sign) evidence in bytes.
+    /// Default: 64KB (should fit 2 signed block headers comfortably).
+    pub max_o1_payload_bytes: usize,
+
+    /// Maximum payload size for O2 (invalid proposer sig) evidence in bytes.
+    /// Default: 32KB.
+    pub max_o2_payload_bytes: usize,
+
+    /// Maximum payload size for O3 (lazy vote) evidence in bytes.
+    /// Default: 16KB.
+    pub max_o3_payload_bytes: usize,
+
+    /// Maximum payload size for O4 (invalid DAG cert) evidence in bytes.
+    /// Default: 128KB (certificates can be larger).
+    pub max_o4_payload_bytes: usize,
+
+    /// Maximum payload size for O5 (DAG coupling violation) evidence in bytes.
+    /// Default: 64KB.
+    pub max_o5_payload_bytes: usize,
+
+    /// Whether to require the reporter to be an active validator.
+    /// When `true`, only validators in the current validator set can submit evidence.
+    /// This is the strictest and simplest spam resistance mechanism.
+    /// Default: true (recommended for production).
+    pub require_validator_reporter: bool,
+
+    /// Maximum number of evidence submissions per block (global cap).
+    /// When set, evidence beyond this cap is rejected with `PerBlockCapExceeded`.
+    /// This is deterministic and enforced during block validity checks.
+    /// Default: Some(10).
+    pub per_block_evidence_cap: Option<u32>,
+
+    /// Maximum age of evidence in blocks. Evidence referencing heights older
+    /// than `current_height - max_evidence_age_blocks` is rejected.
+    /// When `None`, no age limit is enforced.
+    /// Default: Some(100_000) (~11.5 days at 10s blocks).
+    pub max_evidence_age_blocks: Option<u64>,
+
+    /// Maximum height lookahead for evidence (evidence.height > current_height + max_lookahead).
+    /// Default: 100 (same as existing behavior).
+    pub max_height_lookahead: u64,
+}
+
+impl Default for EvidenceIngestionConfig {
+    fn default() -> Self {
+        Self {
+            // Payload size limits (conservative defaults)
+            max_o1_payload_bytes: 64 * 1024,  // 64 KB
+            max_o2_payload_bytes: 32 * 1024,  // 32 KB
+            max_o3_payload_bytes: 16 * 1024,  // 16 KB
+            max_o4_payload_bytes: 128 * 1024, // 128 KB
+            max_o5_payload_bytes: 64 * 1024,  // 64 KB
+
+            // Spam resistance
+            require_validator_reporter: true,
+            per_block_evidence_cap: Some(10),
+
+            // Age limits
+            max_evidence_age_blocks: Some(100_000),
+            max_height_lookahead: 100,
+        }
+    }
+}
+
+impl EvidenceIngestionConfig {
+    /// Create a DevNet configuration (permissive for testing).
+    pub fn devnet() -> Self {
+        Self {
+            require_validator_reporter: false,
+            per_block_evidence_cap: None,
+            max_evidence_age_blocks: None,
+            ..Self::default()
+        }
+    }
+
+    /// Create a TestNet configuration (moderately strict).
+    pub fn testnet() -> Self {
+        Self {
+            require_validator_reporter: true,
+            per_block_evidence_cap: Some(20),
+            max_evidence_age_blocks: Some(50_000),
+            ..Self::default()
+        }
+    }
+
+    /// Create a MainNet configuration (strict).
+    pub fn mainnet() -> Self {
+        Self {
+            require_validator_reporter: true,
+            per_block_evidence_cap: Some(10),
+            max_evidence_age_blocks: Some(100_000),
+            ..Self::default()
+        }
+    }
+
+    /// Get the maximum payload size for a given offense type.
+    pub fn max_payload_bytes(&self, offense: OffenseKind) -> usize {
+        match offense {
+            OffenseKind::O1DoubleSign => self.max_o1_payload_bytes,
+            OffenseKind::O2InvalidProposerSig => self.max_o2_payload_bytes,
+            OffenseKind::O3aLazyVoteSingle | OffenseKind::O3bLazyVoteRepeated => {
+                self.max_o3_payload_bytes
+            }
+            OffenseKind::O4InvalidDagCert => self.max_o4_payload_bytes,
+            OffenseKind::O5DagCouplingViolation => self.max_o5_payload_bytes,
+        }
+    }
+}
+
+impl SlashingEvidence {
+    /// Compute an estimated byte size of this evidence (M15).
+    ///
+    /// This is used for size validation during evidence ingestion.
+    /// The size is an approximation based on the serialized payload.
+    pub fn estimated_size_bytes(&self) -> usize {
+        // Base size: version (1) + offense (1) + validator_id (8) + height (8) + view (8)
+        let base_size = 26;
+
+        let payload_size = match &self.payload {
+            EvidencePayloadV1::O1DoubleSign { block_a, block_b } => {
+                // Each SignedBlockHeader: height (8) + view (8) + block_id (32) +
+                // proposer_id (8) + signature (variable) + header_preimage (variable)
+                let block_a_size = 56 + block_a.signature.len() + block_a.header_preimage.len();
+                let block_b_size = 56 + block_b.signature.len() + block_b.header_preimage.len();
+                block_a_size + block_b_size
+            }
+            EvidencePayloadV1::O2InvalidProposerSig {
+                header,
+                bad_signature,
+            } => {
+                // BlockHeader: height (8) + view (8) + proposer_id (8) + batch_commitment (32)
+                // + bad_signature (variable)
+                56 + bad_signature.len()
+            }
+            EvidencePayloadV1::O3LazyVote {
+                vote,
+                invalid_reason,
+            } => {
+                // SignedVote: validator_id (8) + height (8) + view (8) + block_id (32) + signature (variable)
+                let vote_size = 56 + vote.signature.len();
+                let reason_size = match invalid_reason {
+                    LazyVoteInvalidReason::InvalidProposerSig => 1,
+                    LazyVoteInvalidReason::InvalidQcSignature => 1,
+                    LazyVoteInvalidReason::Other(s) => 1 + s.len(),
+                };
+                vote_size + reason_size
+            }
+            EvidencePayloadV1::O4InvalidDagCert {
+                cert,
+                failure_reason,
+            } => {
+                // DagCertificate: batch_commitment (32) + dag_round (8) +
+                // signers (variable) + signatures (variable)
+                let signers_size = cert.signers.len() * 8;
+                let sigs_size: usize = cert.signatures.iter().map(|s| s.len() + 4).sum();
+                let reason_size = match failure_reason {
+                    DagValidationFailure::QuorumNotMet { .. } => 8,
+                    DagValidationFailure::InvalidSignature { .. } => 4,
+                    DagValidationFailure::CommitmentMismatch => 1,
+                    DagValidationFailure::Other(s) => 1 + s.len(),
+                };
+                40 + signers_size + sigs_size + reason_size
+            }
+            EvidencePayloadV1::O5DagCouplingViolation {
+                block,
+                dag_state_proof,
+            } => {
+                // BlockHeader: 56 bytes
+                // DagStateProof: dag_round (8) + frontier_commitments (32 each) + merkle_proof (variable)
+                let proof_size = 8
+                    + dag_state_proof.frontier_commitments.len() * 32
+                    + dag_state_proof.merkle_proof.as_ref().map_or(0, |p| p.len());
+                56 + proof_size
+            }
+        };
+
+        base_size + payload_size
+    }
+}
+
+/// Extended context for hardened evidence ingestion (M15).
+pub struct HardenedEvidenceContext<'a> {
+    /// Base penalty context.
+    pub penalty_ctx: PenaltySlashingContext<'a>,
+    /// The reporter's validator ID (the entity submitting the evidence).
+    /// If `None`, the reporter is unknown/external.
+    pub reporter_id: Option<ValidatorId>,
+    /// Current evidence count for this block (for per-block cap enforcement).
+    pub block_evidence_count: u32,
+}
+
+impl<'a> HardenedEvidenceContext<'a> {
+    /// Create a new hardened evidence context.
+    pub fn new(
+        validator_set: &'a ValidatorSet,
+        current_height: u64,
+        current_view: u64,
+        current_epoch: u64,
+        reporter_id: Option<ValidatorId>,
+        block_evidence_count: u32,
+    ) -> Self {
+        Self {
+            penalty_ctx: PenaltySlashingContext {
+                validator_set,
+                current_height,
+                current_view,
+                current_epoch,
+            },
+            reporter_id,
+            block_evidence_count,
+        }
+    }
+
+    /// Check if a validator ID is in the current validator set.
+    pub fn is_active_validator(&self, validator_id: ValidatorId) -> bool {
+        self.penalty_ctx
+            .validator_set
+            .validators
+            .iter()
+            .any(|v| u64::from(v.validator_id) == validator_id.0)
+    }
+}
+
+/// Result of hardened evidence ingestion (M15).
+#[derive(Clone, Debug)]
+pub enum HardenedEvidenceResult {
+    /// Evidence accepted and forwarded to the penalty engine.
+    Accepted(PenaltySlashingRecord),
+    /// Evidence rejected before reaching the penalty engine.
+    Rejected {
+        /// The reason for rejection.
+        reason: EvidenceRejectionReason,
+        /// The offense type (for metrics).
+        offense: OffenseKind,
+    },
+}
+
+/// Metrics for hardened evidence ingestion (M15).
+///
+/// These metrics track the effectiveness of the ingestion hardening.
+/// All counters are non-economic; no rewards are distributed.
+#[derive(Debug, Default)]
+pub struct EvidenceIngestionMetrics {
+    // Evidence received counters (by offense type)
+    evidence_received_o1: AtomicU64,
+    evidence_received_o2: AtomicU64,
+    evidence_received_o3a: AtomicU64,
+    evidence_received_o3b: AtomicU64,
+    evidence_received_o4: AtomicU64,
+    evidence_received_o5: AtomicU64,
+
+    // Rejection counters (by reason)
+    rejected_non_validator_reporter: AtomicU64,
+    rejected_oversized: AtomicU64,
+    rejected_per_block_cap: AtomicU64,
+    rejected_too_old: AtomicU64,
+    rejected_duplicate: AtomicU64,
+    rejected_invalid_structure: AtomicU64,
+    rejected_unknown_validator: AtomicU64,
+    rejected_future_height: AtomicU64,
+    rejected_verification_failed: AtomicU64,
+
+    // Verified (passed all checks, forwarded to penalty engine)
+    verified_total: AtomicU64,
+}
+
+impl EvidenceIngestionMetrics {
+    /// Create new metrics instance.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Increment evidence received counter for the given offense.
+    pub fn inc_received(&self, offense: OffenseKind) {
+        match offense {
+            OffenseKind::O1DoubleSign => {
+                self.evidence_received_o1.fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O2InvalidProposerSig => {
+                self.evidence_received_o2.fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O3aLazyVoteSingle => {
+                self.evidence_received_o3a.fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O3bLazyVoteRepeated => {
+                self.evidence_received_o3b.fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O4InvalidDagCert => {
+                self.evidence_received_o4.fetch_add(1, Ordering::Relaxed);
+            }
+            OffenseKind::O5DagCouplingViolation => {
+                self.evidence_received_o5.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Increment rejection counter for the given reason.
+    pub fn inc_rejected(&self, reason: EvidenceRejectionReason) {
+        match reason {
+            EvidenceRejectionReason::NonValidatorReporter => {
+                self.rejected_non_validator_reporter
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::OversizedPayload => {
+                self.rejected_oversized.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::PerBlockCapExceeded => {
+                self.rejected_per_block_cap.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::TooOld => {
+                self.rejected_too_old.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::Duplicate => {
+                self.rejected_duplicate.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::InvalidStructure => {
+                self.rejected_invalid_structure
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::UnknownValidator => {
+                self.rejected_unknown_validator
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::FutureHeight => {
+                self.rejected_future_height.fetch_add(1, Ordering::Relaxed);
+            }
+            EvidenceRejectionReason::VerificationFailed => {
+                self.rejected_verification_failed
+                    .fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Increment verified counter.
+    pub fn inc_verified(&self) {
+        self.verified_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ========================================================================
+    // Metric Getters
+    // ========================================================================
+
+    /// Get total evidence received.
+    pub fn evidence_received_total(&self) -> u64 {
+        self.evidence_received_o1.load(Ordering::Relaxed)
+            + self.evidence_received_o2.load(Ordering::Relaxed)
+            + self.evidence_received_o3a.load(Ordering::Relaxed)
+            + self.evidence_received_o3b.load(Ordering::Relaxed)
+            + self.evidence_received_o4.load(Ordering::Relaxed)
+            + self.evidence_received_o5.load(Ordering::Relaxed)
+    }
+
+    /// Get evidence received by offense type.
+    pub fn evidence_received_by_offense(&self, offense: OffenseKind) -> u64 {
+        match offense {
+            OffenseKind::O1DoubleSign => self.evidence_received_o1.load(Ordering::Relaxed),
+            OffenseKind::O2InvalidProposerSig => self.evidence_received_o2.load(Ordering::Relaxed),
+            OffenseKind::O3aLazyVoteSingle => self.evidence_received_o3a.load(Ordering::Relaxed),
+            OffenseKind::O3bLazyVoteRepeated => self.evidence_received_o3b.load(Ordering::Relaxed),
+            OffenseKind::O4InvalidDagCert => self.evidence_received_o4.load(Ordering::Relaxed),
+            OffenseKind::O5DagCouplingViolation => self.evidence_received_o5.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Get rejection count by reason.
+    pub fn rejected_by_reason(&self, reason: EvidenceRejectionReason) -> u64 {
+        match reason {
+            EvidenceRejectionReason::NonValidatorReporter => {
+                self.rejected_non_validator_reporter.load(Ordering::Relaxed)
+            }
+            EvidenceRejectionReason::OversizedPayload => {
+                self.rejected_oversized.load(Ordering::Relaxed)
+            }
+            EvidenceRejectionReason::PerBlockCapExceeded => {
+                self.rejected_per_block_cap.load(Ordering::Relaxed)
+            }
+            EvidenceRejectionReason::TooOld => self.rejected_too_old.load(Ordering::Relaxed),
+            EvidenceRejectionReason::Duplicate => self.rejected_duplicate.load(Ordering::Relaxed),
+            EvidenceRejectionReason::InvalidStructure => {
+                self.rejected_invalid_structure.load(Ordering::Relaxed)
+            }
+            EvidenceRejectionReason::UnknownValidator => {
+                self.rejected_unknown_validator.load(Ordering::Relaxed)
+            }
+            EvidenceRejectionReason::FutureHeight => {
+                self.rejected_future_height.load(Ordering::Relaxed)
+            }
+            EvidenceRejectionReason::VerificationFailed => {
+                self.rejected_verification_failed.load(Ordering::Relaxed)
+            }
+        }
+    }
+
+    /// Get total rejections.
+    pub fn rejected_total(&self) -> u64 {
+        self.rejected_non_validator_reporter.load(Ordering::Relaxed)
+            + self.rejected_oversized.load(Ordering::Relaxed)
+            + self.rejected_per_block_cap.load(Ordering::Relaxed)
+            + self.rejected_too_old.load(Ordering::Relaxed)
+            + self.rejected_duplicate.load(Ordering::Relaxed)
+            + self.rejected_invalid_structure.load(Ordering::Relaxed)
+            + self.rejected_unknown_validator.load(Ordering::Relaxed)
+            + self.rejected_future_height.load(Ordering::Relaxed)
+            + self.rejected_verification_failed.load(Ordering::Relaxed)
+    }
+
+    /// Get verified total.
+    pub fn verified_total(&self) -> u64 {
+        self.verified_total.load(Ordering::Relaxed)
+    }
+}
+
+/// Hardened evidence ingestion engine (M15).
+///
+/// This engine wraps the `PenaltySlashingEngine` with additional admission
+/// controls for DoS resistance and abuse prevention. The verification ordering
+/// ensures cheap checks run before expensive cryptographic verification.
+///
+/// # Verification Ordering (M15)
+///
+/// 1. **Reporter validation** (O(1)) - Is reporter an active validator?
+/// 2. **Size bounds** (O(1)) - Is payload within limits?
+/// 3. **Per-block cap** (O(1)) - Is block evidence count within cap?
+/// 4. **Deduplication** (O(1) hash lookup) - Have we seen this evidence?
+/// 5. **Structure validation** (O(n) for payload size) - Is evidence well-formed?
+/// 6. **Age bounds** (O(1)) - Is evidence height within window?
+/// 7. **Validator existence** (O(n) for validator set) - Is offending validator known?
+/// 8. **Cryptographic verification** (EXPENSIVE) - Are signatures valid?
+/// 9. **Penalty application** - Forward to penalty engine
+///
+/// No expensive operations (8) occur until all cheap filters (1-7) pass.
+pub struct HardenedEvidenceIngestionEngine<B: SlashingBackend> {
+    /// Inner penalty engine.
+    inner: PenaltySlashingEngine<B>,
+    /// Ingestion configuration.
+    config: EvidenceIngestionConfig,
+    /// Ingestion metrics.
+    metrics: EvidenceIngestionMetrics,
+    /// Deduplication set for early rejection (before forwarding to inner engine).
+    seen_evidence: HashSet<[u8; 32]>,
+}
+
+impl<B: SlashingBackend> HardenedEvidenceIngestionEngine<B> {
+    /// Create a new hardened evidence ingestion engine.
+    pub fn new(
+        backend: B,
+        penalty_config: PenaltyEngineConfig,
+        ingestion_config: EvidenceIngestionConfig,
+    ) -> Self {
+        Self {
+            inner: PenaltySlashingEngine::new(backend, penalty_config),
+            config: ingestion_config,
+            metrics: EvidenceIngestionMetrics::new(),
+            seen_evidence: HashSet::new(),
+        }
+    }
+
+    /// Get the ingestion configuration.
+    pub fn ingestion_config(&self) -> &EvidenceIngestionConfig {
+        &self.config
+    }
+
+    /// Get a reference to the inner penalty engine.
+    pub fn inner(&self) -> &PenaltySlashingEngine<B> {
+        &self.inner
+    }
+
+    /// Get a mutable reference to the inner penalty engine.
+    pub fn inner_mut(&mut self) -> &mut PenaltySlashingEngine<B> {
+        &mut self.inner
+    }
+
+    /// Get the ingestion metrics.
+    pub fn metrics(&self) -> &EvidenceIngestionMetrics {
+        &self.metrics
+    }
+
+    /// Handle evidence with hardened admission controls (M15).
+    ///
+    /// This method implements the M15 verification ordering:
+    /// 1. Cheap checks first (type, length, dedup)
+    /// 2. Structural parse
+    /// 3. Cryptographic verification (delegated to inner engine)
+    /// 4. Penalty application (delegated to inner engine)
+    ///
+    /// Returns `HardenedEvidenceResult::Rejected` if any check fails before
+    /// reaching the inner penalty engine.
+    pub fn handle_evidence(
+        &mut self,
+        ctx: &HardenedEvidenceContext,
+        evidence: SlashingEvidence,
+    ) -> HardenedEvidenceResult {
+        let offense = evidence.offense;
+
+        // Track received evidence
+        self.metrics.inc_received(offense);
+
+        eprintln!(
+            "[M15] Evidence received: reporter={:?}, validator={}, offense={}, height={}, view={}",
+            ctx.reporter_id,
+            evidence.offending_validator.0,
+            evidence.offense.as_str(),
+            evidence.height,
+            evidence.view
+        );
+
+        // === 1. Reporter validation (cheapest check first) ===
+        if self.config.require_validator_reporter {
+            match ctx.reporter_id {
+                None => {
+                    eprintln!(
+                        "[M15] Evidence rejected: no reporter_id (require_validator_reporter=true)"
+                    );
+                    self.metrics
+                        .inc_rejected(EvidenceRejectionReason::NonValidatorReporter);
+                    return HardenedEvidenceResult::Rejected {
+                        reason: EvidenceRejectionReason::NonValidatorReporter,
+                        offense,
+                    };
+                }
+                Some(reporter_id) => {
+                    if !ctx.is_active_validator(reporter_id) {
+                        eprintln!(
+                            "[M15] Evidence rejected: reporter {} is not an active validator",
+                            reporter_id.0
+                        );
+                        self.metrics
+                            .inc_rejected(EvidenceRejectionReason::NonValidatorReporter);
+                        return HardenedEvidenceResult::Rejected {
+                            reason: EvidenceRejectionReason::NonValidatorReporter,
+                            offense,
+                        };
+                    }
+                }
+            }
+        }
+
+        // === 2. Size bounds check ===
+        let evidence_size = evidence.estimated_size_bytes();
+        let max_size = self.config.max_payload_bytes(offense);
+        if evidence_size > max_size {
+            eprintln!(
+                "[M15] Evidence rejected: size {} exceeds max {} for offense {}",
+                evidence_size,
+                max_size,
+                offense.as_str()
+            );
+            self.metrics
+                .inc_rejected(EvidenceRejectionReason::OversizedPayload);
+            return HardenedEvidenceResult::Rejected {
+                reason: EvidenceRejectionReason::OversizedPayload,
+                offense,
+            };
+        }
+
+        // === 3. Per-block cap check ===
+        if let Some(cap) = self.config.per_block_evidence_cap {
+            if ctx.block_evidence_count >= cap {
+                eprintln!(
+                    "[M15] Evidence rejected: per-block cap {} exceeded (current={})",
+                    cap, ctx.block_evidence_count
+                );
+                self.metrics
+                    .inc_rejected(EvidenceRejectionReason::PerBlockCapExceeded);
+                return HardenedEvidenceResult::Rejected {
+                    reason: EvidenceRejectionReason::PerBlockCapExceeded,
+                    offense,
+                };
+            }
+        }
+
+        // === 4. Deduplication check (before expensive verification) ===
+        let evidence_id = evidence.evidence_id();
+        if self.seen_evidence.contains(&evidence_id) {
+            eprintln!(
+                "[M15] Evidence rejected: duplicate (evidence_id already seen)"
+            );
+            self.metrics
+                .inc_rejected(EvidenceRejectionReason::Duplicate);
+            return HardenedEvidenceResult::Rejected {
+                reason: EvidenceRejectionReason::Duplicate,
+                offense,
+            };
+        }
+
+        // === 5. Structure validation ===
+        if let Err(reason) = evidence.validate_structure() {
+            eprintln!(
+                "[M15] Evidence rejected: invalid structure - {}",
+                reason
+            );
+            self.metrics
+                .inc_rejected(EvidenceRejectionReason::InvalidStructure);
+            return HardenedEvidenceResult::Rejected {
+                reason: EvidenceRejectionReason::InvalidStructure,
+                offense,
+            };
+        }
+
+        // === 6. Age bounds check ===
+        if let Some(max_age) = self.config.max_evidence_age_blocks {
+            if ctx.penalty_ctx.current_height > max_age {
+                let min_height = ctx.penalty_ctx.current_height.saturating_sub(max_age);
+                if evidence.height < min_height {
+                    eprintln!(
+                        "[M15] Evidence rejected: too old (height {} < min_height {})",
+                        evidence.height, min_height
+                    );
+                    self.metrics.inc_rejected(EvidenceRejectionReason::TooOld);
+                    return HardenedEvidenceResult::Rejected {
+                        reason: EvidenceRejectionReason::TooOld,
+                        offense,
+                    };
+                }
+            }
+        }
+
+        // === 7. Future height check ===
+        let max_allowed_height = ctx
+            .penalty_ctx
+            .current_height
+            .saturating_add(self.config.max_height_lookahead);
+        if evidence.height > max_allowed_height {
+            eprintln!(
+                "[M15] Evidence rejected: height {} too far in future (max={})",
+                evidence.height, max_allowed_height
+            );
+            self.metrics
+                .inc_rejected(EvidenceRejectionReason::FutureHeight);
+            return HardenedEvidenceResult::Rejected {
+                reason: EvidenceRejectionReason::FutureHeight,
+                offense,
+            };
+        }
+
+        // === 8. Mark as seen BEFORE expensive verification ===
+        // This prevents replay attacks during verification
+        self.seen_evidence.insert(evidence_id);
+
+        // === 9. Forward to inner penalty engine for cryptographic verification ===
+        // The inner engine handles:
+        // - Validator existence check
+        // - Cryptographic signature verification (EXPENSIVE)
+        // - Penalty application
+        let record = self.inner.handle_evidence(&ctx.penalty_ctx, evidence);
+
+        // Check if inner engine rejected (verification failed, unknown validator, etc.)
+        match &record.penalty_decision {
+            PenaltyDecision::Legacy(SlashingDecisionKind::RejectedInvalid) => {
+                self.metrics
+                    .inc_rejected(EvidenceRejectionReason::VerificationFailed);
+                return HardenedEvidenceResult::Rejected {
+                    reason: EvidenceRejectionReason::VerificationFailed,
+                    offense,
+                };
+            }
+            PenaltyDecision::Legacy(SlashingDecisionKind::RejectedDuplicate) => {
+                // Inner engine also detected duplicate (shouldn't happen, but handle gracefully)
+                self.metrics
+                    .inc_rejected(EvidenceRejectionReason::Duplicate);
+                return HardenedEvidenceResult::Rejected {
+                    reason: EvidenceRejectionReason::Duplicate,
+                    offense,
+                };
+            }
+            _ => {
+                // Accepted (NoOp, EvidenceOnly, or PenaltyApplied)
+                self.metrics.inc_verified();
+                eprintln!(
+                    "[M15] Evidence accepted and verified: offense={}, decision={:?}",
+                    offense.as_str(),
+                    record.penalty_decision.as_str()
+                );
+                HardenedEvidenceResult::Accepted(record)
+            }
+        }
+    }
+
+    /// Check if a specific reporter validation would pass.
+    ///
+    /// This is useful for pre-validation before constructing evidence.
+    pub fn would_accept_reporter(
+        &self,
+        ctx: &HardenedEvidenceContext,
+        reporter_id: Option<ValidatorId>,
+    ) -> bool {
+        if !self.config.require_validator_reporter {
+            return true;
+        }
+        match reporter_id {
+            None => false,
+            Some(id) => ctx.is_active_validator(id),
+        }
+    }
+
+    /// Check if the per-block cap would be exceeded.
+    pub fn would_exceed_block_cap(&self, block_evidence_count: u32) -> bool {
+        match self.config.per_block_evidence_cap {
+            None => false,
+            Some(cap) => block_evidence_count >= cap,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

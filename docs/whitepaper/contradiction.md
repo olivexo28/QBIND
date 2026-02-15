@@ -38,7 +38,8 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | **Whitepaper Reference** | Section 12.2 (Slashing Model) |
 | **Code Location** | `crates/qbind-types/src/state_governance.rs:52` (`reporter_reward_bps` field) |
 | **Description** | `reporter_reward_bps` parameter exists in `ParamRegistry` but no code distributes rewards. Evidence reporting has no incentive mechanism. |
-| **Impact** | Medium - Reduces incentive to report Byzantine behavior |
+| **Impact** | Low-Medium - No monetary incentive; however reporting is hardened and abuse-resistant (M15). |
+| **M15 Mitigation** | Evidence ingestion hardened with: (1) Reporter must be active validator (configurable), (2) Per-block evidence cap (default 10), (3) Evidence age window (default 100K blocks), (4) Size bounds per offense type, (5) Deduplication before expensive verification, (6) Deterministic admission controls for consensus safety. See `crates/qbind-consensus/src/slashing/mod.rs` (`HardenedEvidenceIngestionEngine`). |
 | **Remaining** | • Wire `reporter_reward_bps` to slashing engine reward distribution • Add reward transfer in penalty application path |
 
 ---
