@@ -135,6 +135,7 @@ fn gov_update_param_registry_changes_slash_params() {
         reporter_reward_bps: 5,
         reserved1: 0,
         min_validator_stake: 0,
+        slashing_schedule: None,
     };
 
     let mut data = Vec::new();
@@ -273,6 +274,7 @@ fn gov_set_mainnet_status_changes_status_only() {
         reporter_reward_bps: 5,
         reserved1: 0,
         min_validator_stake: 0,
+        slashing_schedule: None,
     };
     let mut data = Vec::new();
     params.encode_state(&mut data);

@@ -11,7 +11,7 @@ use qbind_system::governance_program::{
 };
 use qbind_types::{
     AccountId, LaunchChecklist, MainnetStatus, ParamRegistry, ProgramId, SafetyCouncilKeyAccount,
-    SafetyCouncilKeyset, SuiteRegistry,
+    SafetyCouncilKeyset, SlashingPenaltySchedule, SuiteRegistry,
 };
 
 const GENESIS_MIN_VALIDATOR_STAKE: u64 = 1_000_000;
@@ -21,12 +21,20 @@ fn build_genesis_suite_registry() -> SuiteRegistry {
     qbind_types::genesis_suite_registry()
 }
 
+/// Build the canonical genesis `SlashingPenaltySchedule` value (M14).
+///
+/// Uses default penalty parameters that can be adjusted via governance.
+fn build_genesis_slashing_schedule() -> SlashingPenaltySchedule {
+    SlashingPenaltySchedule::default()
+}
+
 /// Build the canonical genesis `ParamRegistry` value.
 ///
 /// For now, we choose conservative placeholder parameters:
 /// - mainnet_status = PreGenesis
 /// - slash_bps_prevote, slash_bps_precommit, reporter_reward_bps set
 ///   to simple, non-zero defaults (can be adjusted later via governance).
+/// - M14: slashing_schedule with default penalty parameters
 fn build_genesis_param_registry() -> ParamRegistry {
     ParamRegistry {
         version: 1,
@@ -39,6 +47,8 @@ fn build_genesis_param_registry() -> ParamRegistry {
         reporter_reward_bps: 1_000,  // 10%
         reserved1: 0,
         min_validator_stake: GENESIS_MIN_VALIDATOR_STAKE,
+        // M14: Include canonical slashing penalty schedule
+        slashing_schedule: Some(build_genesis_slashing_schedule()),
     }
 }
 

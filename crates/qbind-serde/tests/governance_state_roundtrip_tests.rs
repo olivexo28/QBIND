@@ -1,7 +1,7 @@
 use qbind_serde::{StateDecode, StateEncode};
 use qbind_types::{
     AccountId, Hash32, LaunchChecklist, MainnetStatus, ParamRegistry, SafetyCouncilKeyAccount,
-    SafetyCouncilKeyset,
+    SafetyCouncilKeyset, SlashingPenaltySchedule,
 };
 
 fn zero_hash() -> Hash32 {
@@ -166,6 +166,7 @@ fn param_registry_roundtrip() {
         reporter_reward_bps: 10,
         reserved1: 0,
         min_validator_stake: 0,
+        slashing_schedule: None,
     };
 
     let mut buf = Vec::new();
@@ -195,6 +196,7 @@ fn param_registry_roundtrip_all_statuses() {
             reporter_reward_bps: 50,
             reserved1: 0,
             min_validator_stake: 0,
+            slashing_schedule: Some(SlashingPenaltySchedule::default()),
         };
 
         let mut buf = Vec::new();
@@ -218,6 +220,21 @@ fn param_registry_max_values() {
         reporter_reward_bps: u16::MAX,
         reserved1: u16::MAX,
         min_validator_stake: u64::MAX,
+        slashing_schedule: Some(SlashingPenaltySchedule {
+            version: 255,
+            reserved0: 255,
+            slash_bps_o1: u16::MAX,
+            jail_epochs_o1: u32::MAX,
+            slash_bps_o2: u16::MAX,
+            jail_epochs_o2: u32::MAX,
+            slash_bps_o3: u16::MAX,
+            jail_epochs_o3: u32::MAX,
+            slash_bps_o4: u16::MAX,
+            jail_epochs_o4: u32::MAX,
+            slash_bps_o5: u16::MAX,
+            jail_epochs_o5: u32::MAX,
+            activation_epoch: u64::MAX,
+        }),
     };
 
     let mut buf = Vec::new();
@@ -271,4 +288,118 @@ fn genesis_safety_council_accounts_roundtrip() {
         assert_eq!(decoded.suite_id, 0x02); // SUITE_ID_LATTICE_L5_MLDSA87_MLKEM1024
         assert!(!decoded.pk_bytes.is_empty());
     }
+}
+
+// ============================================================================
+// M14: SlashingPenaltySchedule roundtrip tests
+// ============================================================================
+
+#[test]
+fn m14_slashing_penalty_schedule_roundtrip() {
+    let schedule = SlashingPenaltySchedule {
+        version: 1,
+        reserved0: 0,
+        slash_bps_o1: 750,
+        jail_epochs_o1: 10,
+        slash_bps_o2: 500,
+        jail_epochs_o2: 5,
+        slash_bps_o3: 300,
+        jail_epochs_o3: 3,
+        slash_bps_o4: 200,
+        jail_epochs_o4: 2,
+        slash_bps_o5: 100,
+        jail_epochs_o5: 1,
+        activation_epoch: 42,
+    };
+
+    let mut buf = Vec::new();
+    schedule.encode_state(&mut buf);
+
+    let mut slice: &[u8] = &buf;
+    let decoded = SlashingPenaltySchedule::decode_state(&mut slice).expect("decode");
+    assert_eq!(decoded, schedule);
+    assert!(slice.is_empty());
+}
+
+#[test]
+fn m14_slashing_penalty_schedule_default_roundtrip() {
+    let schedule = SlashingPenaltySchedule::default();
+
+    let mut buf = Vec::new();
+    schedule.encode_state(&mut buf);
+
+    let mut slice: &[u8] = &buf;
+    let decoded = SlashingPenaltySchedule::decode_state(&mut slice).expect("decode");
+    assert_eq!(decoded, schedule);
+
+    // Verify default values
+    assert_eq!(decoded.slash_bps_o1, 750);
+    assert_eq!(decoded.jail_epochs_o1, 10);
+    assert_eq!(decoded.slash_bps_o5, 100);
+    assert_eq!(decoded.jail_epochs_o5, 1);
+    assert_eq!(decoded.activation_epoch, 0);
+}
+
+#[test]
+fn m14_param_registry_with_slashing_schedule_roundtrip() {
+    let registry = ParamRegistry {
+        version: 1,
+        mainnet_status: MainnetStatus::Ready,
+        reserved0: [0u8; 6],
+        slash_bps_prevote: 100,
+        slash_bps_precommit: 200,
+        reporter_reward_bps: 10,
+        reserved1: 0,
+        min_validator_stake: 1_000_000,
+        slashing_schedule: Some(SlashingPenaltySchedule::default()),
+    };
+
+    let mut buf = Vec::new();
+    registry.encode_state(&mut buf);
+
+    let mut slice: &[u8] = &buf;
+    let decoded = ParamRegistry::decode_state(&mut slice).expect("decode");
+    assert_eq!(decoded, registry);
+    assert!(slice.is_empty());
+
+    // Verify slashing schedule is present
+    assert!(decoded.slashing_schedule.is_some());
+    let schedule = decoded.slashing_schedule.unwrap();
+    assert_eq!(schedule.slash_bps_o1, 750);
+    assert_eq!(schedule.jail_epochs_o1, 10);
+}
+
+#[test]
+fn m14_param_registry_backward_compatibility() {
+    // Test that old data without slashing_schedule decodes correctly (with None)
+    let old_registry = ParamRegistry {
+        version: 1,
+        mainnet_status: MainnetStatus::PreGenesis,
+        reserved0: [0u8; 6],
+        slash_bps_prevote: 100,
+        slash_bps_precommit: 200,
+        reporter_reward_bps: 10,
+        reserved1: 0,
+        min_validator_stake: 1_000_000,
+        slashing_schedule: None,
+    };
+
+    // Manually encode the old format (without slashing_schedule presence flag)
+    let mut old_buf = Vec::new();
+    old_buf.push(old_registry.version);
+    old_buf.push(old_registry.mainnet_status as u8);
+    old_buf.extend_from_slice(&old_registry.reserved0);
+    old_buf.extend_from_slice(&old_registry.slash_bps_prevote.to_le_bytes());
+    old_buf.extend_from_slice(&old_registry.slash_bps_precommit.to_le_bytes());
+    old_buf.extend_from_slice(&old_registry.reporter_reward_bps.to_le_bytes());
+    old_buf.extend_from_slice(&old_registry.reserved1.to_le_bytes());
+    old_buf.extend_from_slice(&old_registry.min_validator_stake.to_le_bytes());
+    // No slashing_schedule presence flag - old format
+
+    let mut slice: &[u8] = &old_buf;
+    let decoded = ParamRegistry::decode_state(&mut slice).expect("decode");
+
+    // Should decode with slashing_schedule = None
+    assert_eq!(decoded.slashing_schedule, None);
+    assert!(slice.is_empty());
 }

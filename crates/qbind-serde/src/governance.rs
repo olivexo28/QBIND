@@ -1,11 +1,11 @@
 use crate::error::StateError;
 use crate::io::{
-    get_bytes, get_u16, get_u64, get_u8, len_to_u16, put_bytes, put_u16, put_u64, put_u8,
-    StateDecode, StateEncode,
+    get_bytes, get_u16, get_u32, get_u64, get_u8, len_to_u16, put_bytes, put_u16, put_u32,
+    put_u64, put_u8, StateDecode, StateEncode,
 };
 use qbind_types::{
     Hash32, LaunchChecklist, MainnetStatus, ParamRegistry, SafetyCouncilKeyAccount,
-    SafetyCouncilKeyset,
+    SafetyCouncilKeyset, SlashingPenaltySchedule,
 };
 
 impl StateEncode for SafetyCouncilKeyAccount {
@@ -151,6 +151,62 @@ impl StateDecode for LaunchChecklist {
     }
 }
 
+// ============================================================================
+// M14: SlashingPenaltySchedule Serialization
+// ============================================================================
+
+impl StateEncode for SlashingPenaltySchedule {
+    fn encode_state(&self, out: &mut Vec<u8>) {
+        put_u8(out, self.version);
+        put_u8(out, self.reserved0);
+        put_u16(out, self.slash_bps_o1);
+        put_u32(out, self.jail_epochs_o1);
+        put_u16(out, self.slash_bps_o2);
+        put_u32(out, self.jail_epochs_o2);
+        put_u16(out, self.slash_bps_o3);
+        put_u32(out, self.jail_epochs_o3);
+        put_u16(out, self.slash_bps_o4);
+        put_u32(out, self.jail_epochs_o4);
+        put_u16(out, self.slash_bps_o5);
+        put_u32(out, self.jail_epochs_o5);
+        put_u64(out, self.activation_epoch);
+    }
+}
+
+impl StateDecode for SlashingPenaltySchedule {
+    fn decode_state(input: &mut &[u8]) -> Result<Self, StateError> {
+        let version = get_u8(input)?;
+        let reserved0 = get_u8(input)?;
+        let slash_bps_o1 = get_u16(input)?;
+        let jail_epochs_o1 = get_u32(input)?;
+        let slash_bps_o2 = get_u16(input)?;
+        let jail_epochs_o2 = get_u32(input)?;
+        let slash_bps_o3 = get_u16(input)?;
+        let jail_epochs_o3 = get_u32(input)?;
+        let slash_bps_o4 = get_u16(input)?;
+        let jail_epochs_o4 = get_u32(input)?;
+        let slash_bps_o5 = get_u16(input)?;
+        let jail_epochs_o5 = get_u32(input)?;
+        let activation_epoch = get_u64(input)?;
+
+        Ok(SlashingPenaltySchedule {
+            version,
+            reserved0,
+            slash_bps_o1,
+            jail_epochs_o1,
+            slash_bps_o2,
+            jail_epochs_o2,
+            slash_bps_o3,
+            jail_epochs_o3,
+            slash_bps_o4,
+            jail_epochs_o4,
+            slash_bps_o5,
+            jail_epochs_o5,
+            activation_epoch,
+        })
+    }
+}
+
 impl StateEncode for ParamRegistry {
     fn encode_state(&self, out: &mut Vec<u8>) {
         put_u8(out, self.version);
@@ -161,6 +217,18 @@ impl StateEncode for ParamRegistry {
         put_u16(out, self.reporter_reward_bps);
         put_u16(out, self.reserved1);
         put_u64(out, self.min_validator_stake); // M2: Minimum validator stake
+
+        // M14: Slashing penalty schedule (Optional<SlashingPenaltySchedule>)
+        // Encoded as: 1 byte presence flag + (if present) SlashingPenaltySchedule
+        match &self.slashing_schedule {
+            Some(schedule) => {
+                put_u8(out, 1); // Present
+                schedule.encode_state(out);
+            }
+            None => {
+                put_u8(out, 0); // Not present
+            }
+        }
     }
 }
 
@@ -182,6 +250,21 @@ impl StateDecode for ParamRegistry {
         let reserved1 = get_u16(input)?;
         let min_validator_stake = get_u64(input)?; // M2: Minimum validator stake
 
+        // M14: Slashing penalty schedule (Optional<SlashingPenaltySchedule>)
+        // For backward compatibility: if no more bytes, assume None.
+        // Otherwise, read presence flag and decode if present.
+        let slashing_schedule = if input.is_empty() {
+            // Backward compatibility: old data without slashing_schedule
+            None
+        } else {
+            let presence = get_u8(input)?;
+            if presence == 0 {
+                None
+            } else {
+                Some(SlashingPenaltySchedule::decode_state(input)?)
+            }
+        };
+
         Ok(ParamRegistry {
             version,
             mainnet_status: status,
@@ -191,6 +274,7 @@ impl StateDecode for ParamRegistry {
             reporter_reward_bps,
             reserved1,
             min_validator_stake,
+            slashing_schedule,
         })
     }
 }
