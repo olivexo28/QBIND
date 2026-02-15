@@ -64,10 +64,12 @@ This section lists items where the whitepaper lacks formal precision.
 | Field | Value |
 |-------|-------|
 | **Description** | Validator set changes (join/leave/rotation) are not formally specified in the whitepaper |
-| **Whitepaper Reference** | Section 8: Consensus Protocol Specification (implicit reference only) |
-| **Code Reference** | `qbind-types/src/` (ValidatorState), `qbind-consensus/src/` |
-| **Risk Level** | High |
-| **Action Required** | Add formal specification for epoch-based validator transitions; define entry/exit conditions |
+| **Whitepaper Reference** | Section 8: Consensus Protocol Specification (implicit reference only); Section 18: Validator Set Transition and Epoch Boundary Semantics |
+| **Code Reference** | `qbind-types/src/` (ValidatorState), `qbind-consensus/src/validator_set.rs` |
+| **Status** | ✅ Mitigated (M12) |
+| **Risk Level** | Low (mitigated) |
+| **Action Required** | ~~Add formal specification for epoch-based validator transitions; define entry/exit conditions~~ |
+| **Note** | **M12**: Formal specification added in Whitepaper Section 18 "Validator Set Transition and Epoch Boundary Semantics". Includes: (1) Definitions for EpochId, ValidatorId, ValidatorRecord fields, and set classifications (CandidateSet, ActiveSet, JailedSet), (2) Formal eligibility predicate `Eligible(v, e)` with stake, jail, suite, and status conditions, (3) ValidatorSet construction algorithm with stake + jail filtering, (4) Epoch transition state mutation rules with persistence ordering, (5) Fail-closed conditions (empty set, invalid suite, invalid epoch state), (6) Complete code mapping to implementation files. Diagram added: `docs/whitepaper/diagrams/validator-set-transition.svg`. Spec matches current implementation (M2/M9/M11); any future code changes must preserve this transition function. |
 
 ## 2.3 Gas Accounting Formal Definition
 
