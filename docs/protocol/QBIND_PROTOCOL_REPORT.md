@@ -112,11 +112,11 @@ This section lists items where the whitepaper lacks formal precision.
 |-------|-------|
 | **Description** | Epoch boundary semantics insufficiently formalized; activation rules need explicit state mutation description |
 | **Whitepaper Reference** | Section 8, Section 11 |
-| **Code Reference** | `qbind-consensus/`, `qbind-ledger/` |
-| **Status** | Partially Mitigated |
-| **Risk Level** | High |
-| **Action Required** | Define epoch transition function and validator set update semantics |
-| **Note** | Epoch transition formally defined in Whitepaper Section 16. Implementation hardening (crash-window elimination, persistence ordering guarantees) pending before TestNet. |
+| **Code Reference** | `qbind-consensus/`, `qbind-ledger/`, `qbind-node/src/storage.rs` |
+| **Status** | ✅ Mitigated (M16) |
+| **Risk Level** | Low (mitigated) |
+| **Action Required** | ~~Define epoch transition function and validator set update semantics~~ |
+| **Note** | **M16**: Epoch transition hardening completed. Crash-window elimination implemented via atomic RocksDB WriteBatch for all epoch-boundary writes. Implementation: (1) `EpochTransitionBatch` collects all epoch-boundary writes (block, QC, last_committed, epoch), (2) `apply_epoch_transition_atomic()` commits all writes in a single atomic batch, (3) `EpochTransitionMarker` detects incomplete transitions on startup, (4) `verify_epoch_consistency_on_startup()` provides fail-closed behavior on inconsistent state. Tests: `crates/qbind-node/tests/m16_epoch_transition_hardening_tests.rs` (14 tests) with failure injection via `set_inject_write_failure()`. After any crash/restart, node loads self-consistent epoch state (either fully old epoch or fully new epoch, never hybrid). |
 
 ---
 

@@ -81,9 +81,9 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Field | Value |
 |-------|-------|
-| **Status** | ✅ **RESOLVED (M12)** |
+| **Status** | ✅ **RESOLVED (M12, M16)** |
 | **Implementation** | `crates/qbind-node/src/storage.rs`, Whitepaper Section 18.4.3 |
-| **Evidence** | Epoch transition write ordering and persistence semantics formally specified in Whitepaper Section 18 "Validator Set Transition and Epoch Boundary Semantics" (M12). Section 18.4.3 defines persistence ordering: storage commits before in-memory state update. |
+| **Evidence** | Epoch transition write ordering and persistence semantics formally specified in Whitepaper Section 18 "Validator Set Transition and Epoch Boundary Semantics" (M12). Section 18.4.3 defines persistence ordering: storage commits before in-memory state update. **M16**: Crash-window elimination now proven by 14 tests with failure injection. All epoch-boundary writes (block, QC, last_committed, epoch) commit atomically via RocksDB WriteBatch. `EpochTransitionMarker` detects incomplete transitions on startup with fail-closed behavior. |
 
 ### 5. Key Rotation Grace Period Semantics
 
@@ -173,6 +173,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | 2026-02-15 | M13: Canonical economic state unified. Item 10 (Stake Synchronization Gap) partially mitigated - canonical source defined (`ValidatorRecord.stake`, `ValidatorRecord.jailed_until_epoch`). `ValidatorSlashingState` documented as mirror. 12 restart safety tests added. | M13 |
 | 2026-02-15 | M13.1: Full reconciliation pass. Updated all entries with Status/Evidence fields. Verified: C1 RESOLVED (M9/M11 O3-O5 penalties implemented), C2 RESOLVED (M2 minimum stake enforced), Item 1 RESOLVED (M1 RocksDbSlashingLedger), Item 8 RESOLVED (signature verification implemented). Updated line references and test citations. | M13.1 |
 | 2026-02-15 | M14: Governance slashing parameters wired into penalty engine. Item 9 RESOLVED. `SlashingPenaltySchedule` added to `ParamRegistry` with O1-O5 penalty parameters + activation_epoch. `PenaltyEngineConfig::from_governance_schedule()` provides deterministic config from governance state. DevNet allows fallback; TestNet/MainNet fail-closed on missing schedule. 15 M14 tests added. | M14 |
+| 2026-02-15 | M16: Epoch transition hardening completed. Item 4 updated with crash-window elimination. `EpochTransitionBatch` and `apply_epoch_transition_atomic()` implement atomic RocksDB WriteBatch for all epoch-boundary writes. `EpochTransitionMarker` detects incomplete transitions on startup. 14 M16 tests added with failure injection. Spec Gap 2.6 in QBIND_PROTOCOL_REPORT.md now Mitigated. | M16 |
 
 ---
 
