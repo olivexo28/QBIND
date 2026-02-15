@@ -1723,5 +1723,3 @@ The following invariants must hold for validator set transitions:
 4. **No Dynamic Suite Transitions**: Mid-epoch suite transitions are rejected. Suite changes require full epoch boundary activation.
 
 These limitations are tracked as roadmap items and do not affect core safety properties.
-
-Until full timeout logic is implemented, liveness under prolonged asynchrony is not guaranteed.
