@@ -50,10 +50,10 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Field | Value |
 |-------|-------|
-| **Status** | ✅ **RESOLVED (M1)** |
-| **Implementation** | `crates/qbind-ledger/src/slashing_ledger.rs:572-628` (`RocksDbSlashingLedger`) |
-| **Evidence** | Persistent slashing ledger implemented via `RocksDbSlashingLedger`. Provides restart-safe persistence for validator slashing state, evidence records, and penalty history. Atomic updates via `apply_slashing_update_atomic()` using RocksDB `WriteBatch` (M1.2). Failure injection tests verify atomicity (M1.3). |
-| **Tests** | `crates/qbind-node/tests/m1_slashing_persistence_tests.rs`, `crates/qbind-ledger/tests/slashing_ledger_tests.rs` |
+| **Status** | ✅ **RESOLVED (M1/M19)** |
+| **Implementation** | `crates/qbind-ledger/src/slashing_ledger.rs:713-1466` (`RocksDbSlashingLedger`) |
+| **Evidence** | Persistent slashing ledger implemented via `RocksDbSlashingLedger`. Provides restart-safe persistence for validator slashing state, evidence records, and penalty history. Atomic updates via `apply_slashing_update_atomic()` using RocksDB `WriteBatch` (M1.2). Failure injection tests verify atomicity (M1.3). **M19**: Added `verify_slashing_consistency_on_startup()` for fail-closed corruption detection, explicit consensus-critical vs non-critical classification in docs, and comprehensive M19 test suite. Whitepaper Section 16.8 updated with full persistence model. |
+| **Tests** | `crates/qbind-node/tests/m1_slashing_persistence_tests.rs`, `crates/qbind-ledger/tests/slashing_ledger_tests.rs`, `crates/qbind-node/tests/m19_slashing_persistence_canonicalization_tests.rs` |
 
 ### 2. Vote History Memory Limits
 
@@ -175,6 +175,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | 2026-02-15 | M14: Governance slashing parameters wired into penalty engine. Item 9 RESOLVED. `SlashingPenaltySchedule` added to `ParamRegistry` with O1-O5 penalty parameters + activation_epoch. `PenaltyEngineConfig::from_governance_schedule()` provides deterministic config from governance state. DevNet allows fallback; TestNet/MainNet fail-closed on missing schedule. 15 M14 tests added. | M14 |
 | 2026-02-15 | M16: Epoch transition hardening completed. Item 4 updated with crash-window elimination. `EpochTransitionBatch` and `apply_epoch_transition_atomic()` implement atomic RocksDB WriteBatch for all epoch-boundary writes. `EpochTransitionMarker` detects incomplete transitions on startup. 14 M16 tests added with failure injection. Spec Gap 2.6 in QBIND_PROTOCOL_REPORT.md now Mitigated. | M16 |
 | 2026-02-15 | M17: Formal slashing penalty schedule added to whitepaper. Section 12.2 updated with: (1) O1-O5 penalty table (offense, evidence type, verification rule, slash bps, jail epochs), (2) governance/activation semantics paragraphs (SlashingPenaltySchedule in ParamRegistry, epoch-boundary activation, fail-closed behavior). Protocol Report Spec Gap 2.5 status changed to "✅ Mitigated (spec added M17)", risk level reduced from Medium to Low. C3 (Reporter Rewards) remains OPEN unchanged. | M17 |
+| 2026-02-16 | M19: Slashing state persistence and canonicalization hardening. Item 1 updated to M1/M19 RESOLVED with `verify_slashing_consistency_on_startup()` for fail-closed corruption detection. Whitepaper Section 16.8 updated with full persistence model (consensus-critical vs non-critical classification, atomic update guarantees, fail-closed behavior). `SlashingStateCorrupt` error variant added. `ValidatorSlashingState` documentation enhanced with M19 NON-AUTHORITATIVE warnings. Protocol Report section 3.15 added. 8 M19 tests added. | M19 |
 
 ---
 

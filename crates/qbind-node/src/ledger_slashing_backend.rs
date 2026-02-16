@@ -142,6 +142,9 @@ fn convert_ledger_error(
         },
         SlashingLedgerError::AlreadyJailed(_) => SlashingBackendError::AlreadyJailed(validator_id),
         SlashingLedgerError::StorageError(msg) => SlashingBackendError::Other(msg),
+        SlashingLedgerError::SlashingStateCorrupt { details } => {
+            SlashingBackendError::Other(format!("slashing state corrupt: {}", details))
+        }
         SlashingLedgerError::Other(msg) => SlashingBackendError::Other(msg),
     }
 }
