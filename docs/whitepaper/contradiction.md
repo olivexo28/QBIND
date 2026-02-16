@@ -35,12 +35,13 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | Field | Value |
 |-------|-------|
 | **Status** | ⚠️ **OPEN** |
-| **Whitepaper Reference** | Section 12.2 (Slashing Model) |
+| **Whitepaper Reference** | Section 12.2 (Slashing Model), Section 12.2.3 (Reporter Incentives) |
 | **Code Location** | `crates/qbind-types/src/state_governance.rs:52` (`reporter_reward_bps` field) |
-| **Description** | `reporter_reward_bps` parameter exists in `ParamRegistry` but no code distributes rewards. Evidence reporting has no incentive mechanism. |
+| **Description** | `reporter_reward_bps` parameter exists in `ParamRegistry` but no code distributes rewards. Evidence reporting has no incentive mechanism. Whitepaper Section 12.2.3 now explicitly documents this as future work. |
 | **Impact** | Low-Medium - No monetary incentive; however reporting is hardened and abuse-resistant (M15). |
 | **M15 Mitigation** | Evidence ingestion hardened with 8-step verification ordering: (1) Reporter validation, (2) Size bounds, (3) Per-block cap, (4) Deduplication, (5) Structure validation, (6) Age bounds, (7) Future height check, (8) Cryptographic verification (expensive - last). Config: `require_validator_reporter=true`, `per_block_evidence_cap=10`, `max_evidence_age_blocks=100K`, size limits per offense type. See `crates/qbind-consensus/src/slashing/mod.rs` (`HardenedEvidenceIngestionEngine`). |
-| **Remaining** | • Wire `reporter_reward_bps` to slashing engine reward distribution • Add reward transfer in penalty application path |
+| **M20 Documentation** | Whitepaper Section 12.2.3 "Reporter Incentives (Future Work)" added. Explicitly states: no on-chain reporter rewards currently; slashing is purely punitive; any future reward model must build on M15 hardened evidence pipeline. |
+| **Remaining** | • Wire `reporter_reward_bps` to slashing engine reward distribution • Add reward transfer in penalty application path • Design and implement tokenomics for reporter incentives |
 
 ---
 
@@ -59,23 +60,20 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Field | Value |
 |-------|-------|
-| **Status** | ⚠️ **OPEN** (Documentation gap) |
+| **Status** | ✅ **RESOLVED (M20)** |
 | **Implementation** | `crates/qbind-consensus/src/hotstuff_state_engine.rs:107-122` (`votes_by_view`, eviction tracking) |
-| **Whitepaper Reference** | Section 8.4 (Voting Rule) |
-| **Description** | The vote history (`votes_by_view` HashMap) is subject to memory limits and eviction (`evict_votes_by_view_if_needed()`). Old views can be evicted, potentially missing equivocations in those views. |
-| **Impact** | Medium - Equivocation detection may miss old misbehavior |
-| **Remaining** | • Document memory management policy in whitepaper or operator guide |
+| **Whitepaper Reference** | Section 8.4.1 (Vote History Retention) |
+| **Description** | The vote history (`votes_by_view` HashMap) is bounded with memory limits and eviction (`evict_votes_by_view_if_needed()`). Whitepaper Section 8.4.1 now documents that equivocation detection is best-effort over a sliding window and very old views may no longer be checked. |
+| **Security Impact** | Protocol safety unchanged (locking rule and QC formation guarantee safety independent of historical vote tracking). Very old double-votes may not be slashable if their view has been evicted—acceptable trade-off to prevent unbounded memory growth. |
 
 ### 3. CRC-32 Checksum for Storage Integrity
 
 | Field | Value |
 |-------|-------|
-| **Status** | ⚠️ **OPEN** (Documentation gap - Low priority) |
+| **Status** | ✅ **RESOLVED (M20)** |
 | **Implementation** | `crates/qbind-node/src/storage.rs:256-336` (`compute_crc32()`, `wrap_checksummed()`, `unwrap_checksummed()`) |
-| **Whitepaper Reference** | Section 10.5 (Persistence Guarantees) |
-| **Description** | Storage uses CRC-32 checksums (IEEE 802.3 polynomial) for integrity detection. Sufficient for bit-rot but not for malicious tampering. |
-| **Impact** | Low - Adequate for intended use case |
-| **Remaining** | • Mention checksum mechanism in Section 10.5 (optional) |
+| **Whitepaper Reference** | Section 10.5.1 (Storage Integrity Checksums) |
+| **Description** | Storage uses CRC-32 checksums (IEEE 802.3 polynomial) for integrity detection. Whitepaper Section 10.5.1 now documents that checksums detect bit-rot and accidental corruption but are non-cryptographic; adversarial tampering must be handled at higher layers (signatures, QCs, consensus verification). |
 
 ### 4. Epoch Transition Write Ordering
 
@@ -89,34 +87,28 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Field | Value |
 |-------|-------|
-| **Status** | ⚠️ **OPEN** (Documentation gap - Low priority) |
+| **Status** | ✅ **RESOLVED (M20)** |
 | **Implementation** | `crates/qbind-consensus/src/key_rotation.rs:238-298` |
-| **Whitepaper Reference** | Not mentioned |
-| **Description** | Key rotation uses a grace period mechanism where both old and new keys are valid during transition. The grace period spans full epochs; partial-epoch rotations are not supported. |
-| **Impact** | Low - Implementation constraint |
-| **Remaining** | • Document key rotation mechanics in whitepaper Section 9 |
+| **Whitepaper Reference** | Section 9.8 (Key Rotation Semantics) |
+| **Description** | Key rotation uses an epoch-aligned grace period where both old and new keys are valid during transition. Whitepaper Section 9.8 now documents: (1) partial-epoch rotations not supported, (2) both keys valid for grace epoch, (3) security trade-off of simpler reasoning vs. slower key turnover. |
 
 ### 6. DAG Mempool Batch Priority
 
 | Field | Value |
 |-------|-------|
-| **Status** | ⚠️ **OPEN** (Documentation gap - Low priority) |
+| **Status** | ✅ **RESOLVED (M20)** |
 | **Implementation** | `crates/qbind-node/src/dag_mempool.rs`, `crates/qbind-node/src/mempool.rs` |
-| **Whitepaper Reference** | Section 7.1 (Async Runtime Model) |
-| **Description** | Mempool priority scoring uses `arrival_id` which differs per node, meaning transaction ordering in blocks may vary between proposers. Deterministic per-node but not globally deterministic. |
-| **Impact** | Low - Expected behavior for mempool |
-| **Remaining** | • Clarify in whitepaper that transaction ordering within blocks is proposer-determined |
+| **Whitepaper Reference** | Section 7.1.1 (Mempool Ordering Semantics) |
+| **Description** | Mempool priority uses `arrival_id` which differs per node. Whitepaper Section 7.1.1 now documents: (1) batch selection deterministic per node but depends on local arrival order, (2) transaction ordering within blocks is proposer-determined, not globally canonical, (3) consensus safety unaffected—economic fairness (block inclusion) is proposer-local. |
 
 ### 7. Timeout Exponential Backoff Parameters
 
 | Field | Value |
 |-------|-------|
-| **Status** | ⚠️ **OPEN** (Documentation gap - Low priority) |
+| **Status** | ✅ **RESOLVED (M20)** |
 | **Implementation** | `crates/qbind-consensus/src/pacemaker.rs:74-109` (`TimeoutPacemakerConfig` with `timeout_multiplier: 2.0`, `max_timeout: 30s`) |
-| **Whitepaper Reference** | Section 8.9 (Liveness Assumptions), Section 17 (Timeout/View-Change) |
-| **Description** | The timeout pacemaker uses configurable exponential backoff (default multiplier 2.0, max 30s). Implementation complete via M5 but parameter documentation not in whitepaper. |
-| **Impact** | Low - Configuration choice |
-| **Remaining** | • Document timeout parameters in whitepaper or operator guide |
+| **Whitepaper Reference** | Section 17.3.1 (Exponential Backoff Parameters) |
+| **Description** | The timeout pacemaker uses configurable exponential backoff. Whitepaper Section 17.3.1 now documents: (1) default multiplier 2.0× and max timeout 30 seconds, (2) parameters are environment-tunable, (3) must remain bounded and deterministic for safety and cross-node consistency. |
 
 ### 8. Evidence Signature Verification Not Performed
 
@@ -153,13 +145,13 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 | Category | Count | Items |
 |----------|-------|-------|
-| **RESOLVED** | 7 | C1, C2, Item 1, Item 4, Item 8, Item 9 (M14), Item 10 (partial) |
-| **OPEN** | 6 | C3, Item 2, Item 3, Item 5, Item 6, Item 7 |
+| **RESOLVED** | 12 | C1, C2, Item 1, Item 2 (M20), Item 3 (M20), Item 4, Item 5 (M20), Item 6 (M20), Item 7 (M20), Item 8, Item 9 (M14), Item 10 (partial) |
+| **OPEN** | 1 | C3 |
 
 **High-Risk Open Items**: None. All formerly high-risk items (C1: O3-O5 penalties, C2: minimum stake, Item 1: in-memory slashing, Item 8: evidence signature verification) are now resolved.
 
 **Medium-Risk Open Items**:
-- C3 (Reporter Rewards): No economic incentive for evidence reporting
+- C3 (Reporter Rewards): No economic incentive for evidence reporting. Whitepaper Section 12.2.3 documents this as future work; M15 hardened evidence pipeline is the baseline for any future reward implementation.
 
 ---
 
@@ -176,6 +168,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | 2026-02-15 | M16: Epoch transition hardening completed. Item 4 updated with crash-window elimination. `EpochTransitionBatch` and `apply_epoch_transition_atomic()` implement atomic RocksDB WriteBatch for all epoch-boundary writes. `EpochTransitionMarker` detects incomplete transitions on startup. 14 M16 tests added with failure injection. Spec Gap 2.6 in QBIND_PROTOCOL_REPORT.md now Mitigated. | M16 |
 | 2026-02-15 | M17: Formal slashing penalty schedule added to whitepaper. Section 12.2 updated with: (1) O1-O5 penalty table (offense, evidence type, verification rule, slash bps, jail epochs), (2) governance/activation semantics paragraphs (SlashingPenaltySchedule in ParamRegistry, epoch-boundary activation, fail-closed behavior). Protocol Report Spec Gap 2.5 status changed to "✅ Mitigated (spec added M17)", risk level reduced from Medium to Low. C3 (Reporter Rewards) remains OPEN unchanged. | M17 |
 | 2026-02-16 | M19: Slashing state persistence and canonicalization hardening. Item 1 updated to M1/M19 RESOLVED with `verify_slashing_consistency_on_startup()` for fail-closed corruption detection. Whitepaper Section 16.8 updated with full persistence model (consensus-critical vs non-critical classification, atomic update guarantees, fail-closed behavior). `SlashingStateCorrupt` error variant added. `ValidatorSlashingState` documentation enhanced with M19 NON-AUTHORITATIVE warnings. Protocol Report section 3.15 added. 8 M19 tests added. | M19 |
+| 2026-02-16 | M20: Documentation hardening milestone (no Rust changes). Closed Items 2, 3, 5, 6, 7. Whitepaper updates: Section 8.4.1 (vote history retention), Section 10.5.1 (CRC-32 checksums), Section 9.8 (key rotation semantics), Section 7.1.1 (mempool ordering), Section 17.3.1 (timeout backoff parameters), Section 12.2.3 (reporter incentives - future work). C3 remains OPEN by design—no tokenomics yet; updated with M15 hardening reference and new whitepaper note. | M20 |
 
 ---
 

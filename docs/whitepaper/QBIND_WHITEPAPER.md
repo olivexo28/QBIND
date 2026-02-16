@@ -180,6 +180,14 @@ Service communication follows an event-driven architecture.
 2. Shared State with Locking  
    - Mempool uses Arc<RwLock<...>> for concurrent access
 
+### 7.1.1 Mempool Ordering Semantics
+
+Batch selection from the mempool is **deterministic per node** but depends on local arrival order (`arrival_id`). Transactions are assigned arrival IDs based on when they are received by each node's mempool, meaning the same transaction may have different priorities at different nodes.
+
+Within a block, **transaction ordering is proposer-determined**: the proposer selects and orders transactions from its local mempool view. This ordering is not globally canonical across all nodes' mempools—each proposer may produce a different transaction sequence for the same set of pending transactions.
+
+**Consensus Safety**: Consensus operates on full, signed blocks. Once a block is proposed and achieves a QC, all honest nodes execute the exact same transaction sequence. Safety is unaffected by mempool-level ordering differences. However, economic fairness (which transactions are included in which block) is proposer-local and may vary based on network topology and transaction propagation.
+
 ---
 
 # 8. Consensus Protocol Specification
@@ -241,6 +249,12 @@ A validator votes for proposal P in view v if:
 3. The validator has not voted for another proposal at (height, view)
 
 Double-vote attempts are rejected.
+
+### 8.4.1 Vote History Retention
+
+The vote history (`votes_by_view`) is maintained in a bounded data structure subject to memory limits. Older views are evicted via `evict_votes_by_view_if_needed()` when the history exceeds a configurable threshold. This means equivocation detection is **best-effort over a sliding window**: very old views may no longer have their vote history available for double-vote checks.
+
+**Security Impact**: Protocol safety is unchanged because the locking rule and QC formation guarantee safety independent of historical vote tracking. However, very old double-votes may not be detectable or slashable if their view has been evicted from history. This is an acceptable trade-off to prevent unbounded memory growth in long-running validators.
 
 ---
 
@@ -444,6 +458,19 @@ These are roadmap items.
 
 ---
 
+## 9.8 Key Rotation Semantics
+
+Validator key rotation follows an **epoch-aligned** model: when a validator rotates its consensus signing key, both the old and new keys are valid during a **grace epoch**. This ensures that votes and proposals signed with either key are accepted across the transition boundary.
+
+**Constraints:**
+- Partial-epoch rotations are **not supported**; key changes take effect at epoch boundaries only.
+- During the grace epoch, messages signed with either the old or new key are valid.
+- After the grace epoch ends, only the new key is accepted.
+
+**Security Trade-offs:** The epoch-aligned grace period provides simpler reasoning and deterministic behavior (all nodes agree on which keys are valid at any point), at the cost of slower key turnover. In the event of key compromise, the compromised key remains valid until the current epoch completes and the grace period expires.
+
+---
+
 # 10. Transaction and State Model
 
 QBIND uses an account-based state model with deterministic transaction execution.
@@ -541,6 +568,10 @@ Upon commit:
 Restart safety is guaranteed via durable RocksDB writes.
 
 Schema version mismatches prevent startup.
+
+### 10.5.1 Storage Integrity Checksums
+
+All RocksDB records are wrapped with CRC-32 checksums (IEEE 802.3 polynomial) via `wrap_checksummed()` and validated on read via `unwrap_checksummed()`. This provides detection of bit-rot and accidental corruption at the storage layer. The checksum is **non-cryptographic** and not intended to protect against adversarial tampering; malicious modifications must be handled at higher layers through cryptographic signatures, QC validation, and consensus verification.
 
 ---
 
@@ -737,6 +768,14 @@ Slashing penalties are governed via the `SlashingPenaltySchedule` struct stored 
 **Environment Behavior:**
 - **MainNet / TestNet**: Fail-closed if `SlashingPenaltySchedule` is missing from `ParamRegistry`. The node refuses to start or process blocks without an explicit penalty schedule.
 - **DevNet**: May fall back to default schedule values for development convenience, but logs a warning.
+
+### 12.2.3 Reporter Incentives (Future Work)
+
+The current slashing model does **not** distribute on-chain rewards to evidence reporters. Slashing is purely punitive: offending validators have stake slashed and are jailed, but reporters receive no direct economic compensation for submitting evidence.
+
+Reporter rewards are a **future governance/economics extension**. When implemented, any reward model must build upon the hardened evidence ingestion pipeline (M15), which provides: validator-only reporter gating (`require_validator_reporter`), per-block evidence caps, age bounds, size limits, and an 8-step DoS-resistant verification ordering. This infrastructure ensures that reward mechanisms cannot be abused for spam or resource exhaustion.
+
+Until reporter incentives are implemented, evidence reporting relies on validators' altruistic interest in network security and their indirect stake in maintaining a healthy consensus environment.
 
 ---
 
@@ -1345,6 +1384,16 @@ A timeout event occurs if:
 Timeout duration may increase exponentially under repeated failures.
 
 Timeout mechanics are partially implemented and remain a pre-TestNet requirement.
+
+### 17.3.1 Exponential Backoff Parameters
+
+The timeout pacemaker uses **configurable exponential backoff** via `TimeoutPacemakerConfig`. The current defaults are:
+
+- **Base timeout**: Initial timeout duration for the first attempt
+- **Timeout multiplier**: 2.0× (doubles on each consecutive timeout)
+- **Maximum timeout**: 30 seconds (cap to prevent unbounded growth)
+
+Upon successful QC formation or view advancement, the timeout resets to the base value. These parameters are **environment-tunable** via configuration, allowing operators to adjust liveness behavior for their deployment conditions. All parameters must remain bounded and deterministic to preserve protocol safety and cross-node consistency.
 
 ---
 
