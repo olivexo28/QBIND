@@ -1228,20 +1228,74 @@ Upon restart, state is recovered as follows:
 | CurrentView | Start from committed view + 1 |
 | LastVoted | Reset (conservative: may re-vote) |
 | Mempool | Empty (clients resubmit) |
-| SlashingState | Lost (T230 limitation) |
+| SlashingState | Persisted via `RocksDbSlashingLedger` (M1/M19) |
 
 Recovery invariant: A restarted node MUST NOT commit a block that conflicts with its pre-crash commits.
 
 ---
 
-## 16.8 Known Limitations
+## 16.8 Slashing State Persistence Model (M19)
 
-- Slashing state is in-memory only; evidence lost on restart (T230)
+### 16.8.1 Consensus-Critical vs Non-Critical Classification
+
+The slashing subsystem distinguishes between consensus-critical state (affects eligibility/penalties/validity) and non-critical state (telemetry only):
+
+**Consensus-Critical (Persisted, Affects Consensus):**
+
+| Component | Storage | Purpose |
+|-----------|---------|---------|
+| `ValidatorRecord.stake` | ValidatorRecord in state | Canonical stake for quorum/eligibility |
+| `ValidatorRecord.jailed_until_epoch` | ValidatorRecord in state | Canonical jail status for eligibility |
+| `EvidenceSeenSet` | `slash:evidence:<hash>` in RocksDB | Prevents double-penalty (deduplication) |
+| `SlashingRecordLog` | `slash:record:<id>:<seq>` in RocksDB | Audit trail proving penalties applied |
+| `RecordSequenceCounter` | `slash:meta:record_seq` in RocksDB | Monotonic counter for record ordering |
+
+**Non-Critical (Telemetry/Cache Only, Does NOT Affect Consensus):**
+
+| Component | Storage | Purpose |
+|-----------|---------|---------|
+| `ValidatorSlashingState.stake` | Slashing ledger | Mirror (DO NOT use for eligibility) |
+| `ValidatorSlashingState.jailed_until_epoch` | Slashing ledger | Mirror (DO NOT use for eligibility) |
+| `ValidatorSlashingState.total_slashed` | Slashing ledger | Audit tracking only |
+| `ValidatorSlashingState.jail_count` | Slashing ledger | Repeat offense tracking |
+| `ValidatorSlashingState.last_offense_epoch` | Slashing ledger | Timing metadata |
+
+### 16.8.2 Canonical Economic State
+
+Per M13/M19, `ValidatorRecord` is the single source of truth for validator economic state:
+
+- **Stake**: `ValidatorRecord.stake` is authoritative
+- **Jail Status**: `ValidatorRecord.jailed_until_epoch` is authoritative
+- **Eligibility**: `ValidatorRecord::is_eligible_at_epoch()` is the canonical predicate
+
+The slashing ledger (`ValidatorSlashingState`) mirrors these values for internal slashing-layer operations but MUST NOT be used for consensus eligibility, quorum calculations, or validator set membership decisions.
+
+### 16.8.3 Atomic Update Guarantees
+
+All slashing state mutations are committed atomically via RocksDB `WriteBatch`:
+
+1. Evidence deduplication marker
+2. Validator slashing state update
+3. Slashing record for audit trail
+4. Record sequence counter update
+
+Either all succeed or all fail, preventing partial state corruption on crashes.
+
+### 16.8.4 Fail-Closed Corruption Detection
+
+On startup, `verify_slashing_consistency_on_startup()` performs integrity checks:
+
+1. **Evidence Seen Set**: Cache matches storage exactly
+2. **Record Sequence Counter**: Counter equals actual record count
+3. **Validator State Integrity**: All metadata fields are valid (non-negative, reasonable bounds)
+
+If any inconsistency is detected, the node halts with `SlashingStateCorrupt` error. No automatic repair is attempted—manual investigation is required.
+
+### 16.8.5 Remaining Limitations
+
 - Vote history subject to memory eviction
 - Key rotation state not persisted until epoch advance
-- Epoch transition has narrow crash-vulnerability window: a crash between epoch key persistence and in-memory update may cause inconsistent state
-
-These are tracked as roadmap items.
+- Epoch transition crash-window eliminated by M16 atomic batch commits
 
 ---
 
