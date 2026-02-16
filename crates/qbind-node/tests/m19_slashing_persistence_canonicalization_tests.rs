@@ -307,7 +307,7 @@ fn test_corruption_detection_fails_closed() {
 
         let record = SlashingRecord {
             validator_id: 1,
-            offense_kind: "O1DoubleSign".to_string(),
+            offense_kind: "O1_double_sign".to_string(),
             slashed_amount: 75_000,
             jailed: true,
             jailed_until_epoch: Some(15),
