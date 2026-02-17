@@ -1,0 +1,86 @@
+% -----------------------------------------------------------------
+% QBIND whitepaper v2 – execution and state model
+% Page 3 – VM v0, state representation, and execution pipeline
+% Content must stay consistent with current code and design docs.
+% -----------------------------------------------------------------
+
+\section{Execution and State Model}
+
+This section describes how QBIND represents state, how transactions are executed, and what determinism and safety guarantees the execution layer provides. The execution model is designed for correctness first, with determinism as a hard requirement across all validators. The current implementation (VM v0) supports value transfers with mandatory gas accounting, and is engineered to support future expansion to richer transaction types.
+
+\subsection{State Representation}
+
+QBIND uses an \textbf{account-based state model} where each account is identified by a unique address derived from the owner's ML-DSA-44 public key. Every account maintains at minimum two fields: a \emph{balance} (the quantity of QBIND tokens held) and a \emph{nonce} (a strictly increasing counter that prevents transaction replay). This account model is conceptually similar to Ethereum's but operates exclusively with post-quantum cryptographic identities.
+
+The global state is stored in a \textbf{RocksDB-backed key--value store} with write-ahead logging for durability. Keys are account addresses (or derivative identifiers), and values are serialized account structures. The storage layer is designed for efficient random access and atomic batch writes, which are critical for applying blocks containing hundreds of transactions. State updates from a committed block are written atomically, ensuring that the database always reflects a consistent post-block state.
+
+To support fast synchronization for new or recovering nodes, the execution layer produces \textbf{periodic state snapshots}. These snapshots capture the complete account state at specific block heights, allowing a joining node to download a recent snapshot and replay only subsequent blocks rather than the entire chain history. Snapshots also serve as recovery checkpoints: if a node crashes mid-execution, it can restore from the most recent snapshot and replay committed blocks to return to the current state. The snapshot mechanism is integrated with the consensus layer, ensuring that snapshots are taken at deterministic heights agreed upon by the validator set.
+
+\subsection{Transaction Semantics and VM v0}
+
+The current execution engine is \textbf{VM v0}, a minimal transfer-focused virtual machine designed for MainNet v0 launch. VM v0 supports a single transaction type: balance transfers between accounts. Each transaction specifies a sender, recipient, transfer amount, gas limit, and maximum fee per gas unit. The transaction is signed with the sender's ML-DSA-44 private key, and the signature is verified before execution.
+
+\textbf{Gas accounting} is mandatory in VM v0. Every transaction must specify a gas limit, and execution consumes gas proportional to the work performed. For simple transfers, the gas cost is fixed and minimal, but the gas model is designed to accommodate future transaction types with variable execution costs. If a transaction exhausts its gas limit, it fails with an out-of-gas error; the sender is still charged for consumed gas, but the state changes (other than fee deduction) are reverted. Transactions must include a maximum fee per gas that meets or exceeds the current base fee, ensuring that senders commit to paying for network resources.
+
+The \textbf{state transition function} defines how the execution engine transforms pre-state into post-state given a block of transactions. For each block, the engine:
+
+\begin{enumerate}
+    \item Verifies that all transactions have valid ML-DSA-44 signatures with correct domain separation tags.
+    \item Checks that each sender's nonce matches the expected next nonce for that account.
+    \item Validates that each sender has sufficient balance to cover the transfer amount plus the maximum possible fee.
+    \item Executes transfers by debiting senders and crediting recipients.
+    \item Deducts fees from senders: 50\% is burned (removed from circulation) and 50\% is credited to the block proposer.
+    \item Increments sender nonces to prevent replay.
+\end{enumerate}
+
+\textbf{Determinism} is a core invariant: all honest validators running the same code and processing the same block inputs must produce identical post-state. The execution engine avoids any source of non-determinism---no reliance on wall-clock time, no unseeded randomness, no floating-point arithmetic in consensus-critical paths. This guarantee is verified through extensive soak testing (T223), which runs randomized workloads over hundreds of blocks and confirms that parallel and sequential execution modes produce bit-identical state roots.
+
+Invalid transactions are handled in well-defined ways. Transactions with invalid signatures or malformed payloads are rejected during precheck (before block inclusion). Transactions that pass precheck but fail during execution (e.g., insufficient balance discovered at execution time, out-of-gas) are marked as failed in the block receipt; the sender pays for consumed gas, but no other state changes from that transaction persist.
+
+\subsection{Execution Pipeline and Parallelism}
+
+The execution pipeline connects the consensus layer to the state database. When the consensus engine commits a block via the 3-chain rule, the committed block (containing certified DAG batch references) is delivered to the execution engine for processing.
+
+QBIND implements a \textbf{two-stage parallel execution model}:
+
+\begin{itemize}
+    \item \textbf{Stage A (Sequencing and Conflict Analysis)}: A single-threaded pass extracts the read/write sets for each transaction. The read/write set identifies which accounts a transaction will read from (for balance checks) and write to (for balance updates and nonce increments). Based on these sets, a conflict graph is constructed where edges connect transactions that access overlapping accounts.
+
+    \item \textbf{Stage B (Parallel Execution)}: The conflict graph is analyzed to identify sets of non-conflicting transactions that can execute concurrently. Transactions are grouped into parallel layers via topological sorting, and each layer is executed using work-stealing parallelism. Results are merged deterministically, ensuring that the final state is identical to what sequential execution would produce.
+\end{itemize}
+
+Stage B parallel execution is enabled by default for MainNet v0. The T223 soak harness validates that Stage B produces identical state roots, receipts, and gas accounting compared to fully sequential execution over sustained workloads. The determinism guarantee ensures that parallel execution is purely a performance optimization---it does not alter the semantics of block processing.
+
+Conflict detection in VM v0 is \textbf{account-level}: two transactions conflict if they share any sender or recipient address. This conservative rule is simple to implement and verify. Future VM versions may refine conflict detection to enable finer-grained parallelism (e.g., distinguishing read-only accesses from writes).
+
+\subsection{Determinism, Safety, and Failure Modes}
+
+The execution layer enforces strict \textbf{determinism requirements} to ensure consensus consistency. The following practices are mandated:
+
+\begin{itemize}
+    \item No reliance on local wall-clock time in execution logic; block timestamps are consensus-derived.
+    \item No use of unseeded or system-provided randomness; any protocol-required randomness uses deterministic derivation from block data.
+    \item No floating-point arithmetic in fee calculations, balance updates, or state root computation.
+    \item All serialization formats are canonical and version-tagged.
+\end{itemize}
+
+\textbf{Execution failures} are categorized into two classes:
+
+\begin{itemize}
+    \item \emph{Transaction-level failures}: Individual transactions may fail due to invalid signatures, incorrect nonces, insufficient balances, or gas exhaustion. These failures are contained---the transaction is marked as failed in the receipt, fees are charged for consumed gas, and other transactions in the block proceed normally.
+
+    \item \emph{Node-level failures}: If a validator node crashes (hardware failure, power loss, software panic), it recovers by loading the most recent state snapshot and replaying committed blocks from consensus. Because consensus inputs (committed blocks) are deterministic and the execution engine is deterministic, replay produces identical state. The node can then rejoin consensus at the current view.
+\end{itemize}
+
+The execution layer maintains the following \textbf{key invariants}:
+
+\begin{itemize}
+    \item \textbf{Total supply accounting}: The sum of all account balances plus cumulative burned fees equals genesis supply plus cumulative inflation issuance. This invariant is checked after every block.
+    \item \textbf{No negative balances}: Account balances are unsigned; any transaction that would result in a negative balance fails precheck or execution.
+    \item \textbf{Nonces strictly increasing}: Each account's nonce increments by exactly one per successful transaction from that account, preventing replay and ensuring transaction ordering.
+    \item \textbf{Fee distribution correctness}: Collected fees are split exactly 50\% to burn and 50\% to the block proposer, with no rounding errors that could accumulate over time.
+\end{itemize}
+
+These invariants are verified by the T236 fee market adversarial harness under stress conditions, and by the T237 MainNet launch profile tests as part of pre-release validation.
+
+% TODO: add an execution pipeline diagram (Stage A/B and state updates).
