@@ -1,0 +1,96 @@
+<mxfile host="app.diagrams.net" modified="2026-02-11T15:16:00.000Z" agent="Mozilla/5.0" version="21.0.0" type="device">
+  <diagram id="qbind-runtime-flow" name="Node Runtime Flow">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="550" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        
+        <!-- Title -->
+        <mxCell id="title" value="QBIND Node Runtime and Execution Flow" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontStyle=1;fontSize=18;" parent="1" vertex="1">
+          <mxGeometry x="275" y="10" width="400" height="30" as="geometry"/>
+        </mxCell>
+        
+        <!-- Tokio Runtime Container -->
+        <mxCell id="tokio-runtime" value="Tokio Runtime (multi-threaded)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f4f8;strokeColor=#4a90a4;strokeWidth=2;verticalAlign=top;fontStyle=1;" parent="1" vertex="1">
+          <mxGeometry x="50" y="50" width="750" height="200" as="geometry"/>
+        </mxCell>
+        
+        <!-- P2P Service -->
+        <mxCell id="p2p-service" value="P2P Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="70" y="100" width="100" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- Consensus Runner -->
+        <mxCell id="consensus-runner" value="Consensus Runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="200" y="100" width="110" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- Mempool Service -->
+        <mxCell id="mempool-service" value="Mempool Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="340" y="100" width="100" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- Execution Worker -->
+        <mxCell id="execution-worker" value="Execution Worker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="470" y="100" width="110" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- Verification Pool -->
+        <mxCell id="verification-pool" value="Verification Pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="610" y="100" width="100" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- Metrics Server -->
+        <mxCell id="metrics-server" value="Metrics Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="70" y="180" width="100" height="50" as="geometry"/>
+        </mxCell>
+        
+        <!-- RocksDB -->
+        <mxCell id="rocksdb" value="RocksDB" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;strokeWidth=2;" parent="1" vertex="1">
+          <mxGeometry x="420" y="320" width="210" height="60" as="geometry"/>
+        </mxCell>
+        
+        <!-- Arrow: P2P → Consensus (mpsc) -->
+        <mxCell id="arrow-p2p-consensus" value="mpsc" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="p2p-service" target="consensus-runner" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- Arrow: Consensus → P2P (broadcast) -->
+        <mxCell id="arrow-consensus-p2p" value="broadcast" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitY=0.75;entryY=0.75;" parent="1" source="consensus-runner" target="p2p-service" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- Arrow: Consensus ⇄ Mempool (Arc shared state) -->
+        <mxCell id="arrow-consensus-mempool" value="Arc shared state" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;dashed=1;startArrow=classic;endArrow=classic;" parent="1" source="consensus-runner" target="mempool-service" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- Arrow: Consensus → Execution (mpsc channel) -->
+        <mxCell id="arrow-consensus-execution" value="mpsc channel" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;exitY=0.75;entryY=0.75;" parent="1" source="consensus-runner" target="execution-worker" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- Arrow: Execution → RocksDB -->
+        <mxCell id="arrow-execution-rocksdb" value="Persist block / QC / last_committed" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeWidth=2;" parent="1" source="execution-worker" target="rocksdb" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- Callout 1: Bounded channel capacity -->
+        <mxCell id="callout-1" value="Bounded channel capacity: 1024 (backpressure)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffde7;strokeColor=#fbc02d;strokeWidth=1;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="730" y="90" width="200" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- Callout 2: Fatal errors -->
+        <mxCell id="callout-2" value="Fatal errors terminate process" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffebee;strokeColor=#ef5350;strokeWidth=1;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="730" y="145" width="200" height="30" as="geometry"/>
+        </mxCell>
+        
+        <!-- Callout 3: Commit order -->
+        <mxCell id="callout-3" value="Commit order:&#xa;Execute → Block → QC → LastCommitted" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#66bb6a;strokeWidth=1;fontSize=9;" parent="1" vertex="1">
+          <mxGeometry x="730" y="190" width="200" height="45" as="geometry"/>
+        </mxCell>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
