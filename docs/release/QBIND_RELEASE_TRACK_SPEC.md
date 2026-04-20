@@ -207,7 +207,7 @@ This section summarizes the current project readiness based on canonical documen
 
 | Feature | Status |
 |---------|--------|
-| Slashing | `EnforceCritical` (O1/O2 enforced, O3–O5 may be recorded only) |
+| Slashing | `EnforceCritical` (O1/O2 enforced, O3–O5 may be recorded only). Note: These slashing settings are release-stage policy choices, not protocol implementation limitations; the protocol implementation supports full O1–O5 enforcement. |
 | Gas/Fees | Enabled with test tokens (no economic value) |
 | Execution | VM v0 with gas metering |
 | Persistence | RocksDB (mandatory) |
@@ -252,7 +252,7 @@ This section summarizes the current project readiness based on canonical documen
 
 | Feature | Status |
 |---------|--------|
-| Slashing | `EnforceAll` (all O1–O5 enforced) |
+| Slashing | `EnforceAll` (all O1–O5 enforced). Note: Slashing mode is a release-stage policy choice; the protocol implementation supports configurable enforcement from `RecordOnly` through `EnforceAll`. |
 | Gas/Fees | Enabled with hybrid model (burn + proposer reward) using test tokens |
 | Execution | VM v0 with Stage A parallelism |
 | Persistence | RocksDB (mandatory) |
@@ -300,7 +300,7 @@ This section summarizes the current project readiness based on canonical documen
 | Gas/Fees | Enforced hybrid model with finalized economic parameters |
 | Execution | VM v0 + Stage B parallelism |
 | Persistence | RocksDB (mandatory) |
-| Keys | HSM-ready (remote signer required for validators) |
+| Keys | HSM-ready (remote signer strongly recommended for validators; may be made mandatory by final MainNet launch policy) |
 
 **E) Stability Expectations**
 - Production-grade stability required
@@ -333,7 +333,7 @@ This section summarizes the current project readiness based on canonical documen
 | **Observability** | Basic (metrics, logs) | Full (metrics, logs, alerts) | Full + public dashboards | Full + public + SLA |
 | **Restart Tolerance** | Full reset permitted | Reset with 48h notice | Reset with 7d notice (exceptional) | No resets permitted |
 | **Release Messaging** | Internal only | "Expect breakage" | "Rehearsal for MainNet" | "Production network" |
-| **Key Management** | EncryptedFs | EncryptedFs (HSM optional) | EncryptedFs (HSM recommended) | HSM-ready (required) |
+| **Key Management** | EncryptedFs | EncryptedFs (HSM optional) | EncryptedFs (HSM recommended) | HSM-ready (remote signer strongly recommended) |
 | **Economic Value** | None | None (test tokens) | None (test tokens) | Real value |
 | **Uptime Target** | None | 80%+ | 95%+ | 99%+ |
 
