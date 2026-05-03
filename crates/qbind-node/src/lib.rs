@@ -131,6 +131,7 @@ pub mod peer_manager;
 pub mod peer_rate_limiter;
 pub mod remote_signer;
 pub mod secure_channel;
+pub mod snapshot_restore;
 pub mod startup_validation;
 pub mod storage;
 pub mod validator_config;

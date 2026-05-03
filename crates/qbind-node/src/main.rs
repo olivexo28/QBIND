@@ -106,6 +106,38 @@ async fn main() {
         }
     }
 
+    // ------------------------------------------------------------------
+    // B3: Restore-from-snapshot startup path.
+    //
+    // If `--restore-from-snapshot <path>` was passed, the node validates
+    // and materializes the snapshot into the configured data dir before
+    // doing anything else. Failures here are non-zero exits with a clear
+    // reason — we never silently degrade to "no restore".
+    // See `crates/qbind-node/src/snapshot_restore.rs` and
+    // `docs/whitepaper/contradiction.md` C4 (B3).
+    // ------------------------------------------------------------------
+    match qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config) {
+        Ok(None) => {
+            eprintln!("[restore] no --restore-from-snapshot requested; normal startup.");
+        }
+        Ok(Some(outcome)) => {
+            eprintln!(
+                "[restore] OK: restored from snapshot height={} chain_id=0x{:016x}",
+                outcome.meta.height, outcome.meta.chain_id,
+            );
+        }
+        Err(e) => {
+            eprintln!("[restore] ERROR: {}", e);
+            eprintln!(
+                "[restore] qbind-node refuses to start because the requested snapshot \
+                 restore could not be honestly applied. See \
+                 docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md and \
+                 docs/whitepaper/contradiction.md C4 (B3)."
+            );
+            std::process::exit(1);
+        }
+    }
+
     // Validate P2P configuration (may modify config)
     let p2p_enabled = config.validate_p2p_config();
 

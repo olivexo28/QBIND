@@ -230,6 +230,22 @@ pub struct CliArgs {
     #[arg(long = "data-dir", short = 'd')]
     pub data_dir: Option<PathBuf>,
 
+    /// B3: Restore-from-snapshot startup path.
+    ///
+    /// When specified, the node will validate the snapshot directory at
+    /// `<PATH>` (expected to contain `meta.json` + `state/` per the
+    /// `StateSnapshotter` format) and materialize its `state/` checkpoint
+    /// into `<data-dir>/state_vm_v0` before starting consensus.
+    ///
+    /// Requires `--data-dir` to be set. Fails clearly and loudly (non-zero
+    /// exit) if the snapshot is missing, has the wrong chain id, has the
+    /// wrong layout, or if the target state directory is already populated.
+    ///
+    /// See `crates/qbind-node/src/snapshot_restore.rs` and
+    /// `docs/whitepaper/contradiction.md` C4 (B3).
+    #[arg(long = "restore-from-snapshot")]
+    pub restore_from_snapshot: Option<PathBuf>,
+
     // ========================================================================
     // P2P Tuning
     // ========================================================================
@@ -946,6 +962,15 @@ impl CliArgs {
         // Apply data_dir if specified
         if let Some(ref data_dir) = self.data_dir {
             config.data_dir = Some(data_dir.clone());
+        }
+
+        // B3: Apply --restore-from-snapshot. We model this as a
+        // `FastSyncConfig::from_snapshot(...)` so the existing config shape
+        // is reused (no second config surface invented). The actual restore
+        // is performed at startup by `snapshot_restore::apply_snapshot_restore_if_requested`.
+        if let Some(ref snap_path) = self.restore_from_snapshot {
+            config.fast_sync_config =
+                crate::node_config::FastSyncConfig::from_snapshot(snap_path.clone());
         }
 
         // If not using a profile, network flags apply directly.
