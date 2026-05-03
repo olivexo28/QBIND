@@ -36,8 +36,13 @@
 //!
 //! # MainNet Audit Reference
 //!
-//! This harness provides "chaos test coverage" for MN-R1 (Consensus Safety & Fork Risk)
-//! in the MainNet audit skeleton. See [QBIND_MAINNET_AUDIT_SKELETON.md].
+//! This harness provides "chaos test coverage" for MN-R1
+//! (Consensus Safety & Fork Risk). The legacy
+//! `QBIND_MAINNET_AUDIT_SKELETON.md` reference was retired by EXE-1 (B4 in
+//! `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md`); the current
+//! authoritative MainNet readiness gates live in
+//! `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md` and the protocol
+//! safety claims in `docs/protocol/QBIND_PROTOCOL_REPORT.md`.
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};

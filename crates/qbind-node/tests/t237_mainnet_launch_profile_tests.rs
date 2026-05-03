@@ -38,9 +38,13 @@
 //!
 //! ## Related Documents
 //!
-//! - [QBIND_MAINNET_V0_SPEC.md](../../docs/mainnet/QBIND_MAINNET_V0_SPEC.md)
-//! - [QBIND_MAINNET_AUDIT_SKELETON.md](../../docs/mainnet/QBIND_MAINNET_AUDIT_SKELETON.md)
-//! - [QBIND_MAINNET_RUNBOOK.md](../../docs/ops/QBIND_MAINNET_RUNBOOK.md)
+//! Legacy `docs/mainnet/QBIND_MAINNET_V0_SPEC.md`, `QBIND_MAINNET_AUDIT_SKELETON.md` and `docs/ops/QBIND_MAINNET_RUNBOOK.md` were retired by EXE-1 (B4 in
+//! `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md`). Current canonical
+//! sources:
+//!
+//! - [QBIND_MAINNET_READINESS_CHECKLIST.md](../../docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md)
+//! - [QBIND_MAINNET_CUTOVER_RUNBOOK.md](../../docs/ops/QBIND_MAINNET_CUTOVER_RUNBOOK.md)
+//! - [QBIND_PROTOCOL_REPORT.md](../../docs/protocol/QBIND_PROTOCOL_REPORT.md)
 
 use qbind_ledger::MonetaryMode;
 use qbind_node::node_config::{

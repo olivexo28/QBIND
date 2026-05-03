@@ -31,7 +31,10 @@
 #
 # Reference:
 #   - docs/release/QBIND_MAINNET_V0_RELEASE_MANIFEST.md
-#   - docs/mainnet/QBIND_MAINNET_V0_SPEC.md
+#   - docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md
+#   - docs/protocol/QBIND_PROTOCOL_REPORT.md
+# (Legacy docs/mainnet/QBIND_MAINNET_V0_SPEC.md was retired by EXE-1 — see
+# docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md §9 B4.)
 #
 
 set -euo pipefail

@@ -23,8 +23,12 @@
 //!
 //! # MainNet Audit Reference
 //!
-//! This harness provides "Fee market analysis under adversarial conditions" evidence
-//! for MN-R2 in the MainNet audit skeleton. See [QBIND_MAINNET_AUDIT_SKELETON.md].
+//! This harness provides "Fee market analysis under adversarial conditions"
+//! evidence for MN-R2. The legacy `QBIND_MAINNET_AUDIT_SKELETON.md` reference
+//! was retired by EXE-1 (B4 in
+//! `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md`); the current
+//! authoritative MainNet readiness gates live in
+//! `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md`.
 //!
 //! # Related Tasks
 //!

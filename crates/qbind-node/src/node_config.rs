@@ -3504,7 +3504,10 @@ pub enum ConfigProfile {
     /// - DAG Availability: Enabled (**required**)
     /// - Data Dir: **Required** (no in-memory validators)
     ///
-    /// See QBIND_MAINNET_V0_SPEC.md for full specification.
+    /// See `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md` and
+    /// `docs/protocol/QBIND_PROTOCOL_REPORT.md` for the canonical MainNet
+    /// requirements (legacy `QBIND_MAINNET_V0_SPEC.md` was retired; B4 in
+    /// `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md` §9).
     MainNet,
 }
 
@@ -4373,8 +4376,13 @@ impl NodeConfig {
 
     /// Create a MainNet v0 preset configuration (T185).
     ///
-    /// This is the canonical MainNet configuration as defined in
-    /// QBIND_MAINNET_V0_SPEC.md:
+    /// This is the canonical MainNet configuration. The legacy
+    /// `QBIND_MAINNET_V0_SPEC.md` reference was retired by EXE-1 (see
+    /// `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md` §9, B4); the
+    /// authoritative requirements now live in
+    /// `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md`,
+    /// `docs/ops/QBIND_MAINNET_CUTOVER_RUNBOOK.md` and
+    /// `docs/protocol/QBIND_PROTOCOL_REPORT.md`:
     ///
     /// - Environment: MainNet (QBIND_MAINNET_CHAIN_ID)
     /// - Execution: VmV0

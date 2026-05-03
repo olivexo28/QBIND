@@ -75,6 +75,7 @@
 
 pub mod async_peer_manager;
 pub mod async_runner;
+pub mod binary_consensus_loop;
 pub mod block_store;
 pub mod channel_config;
 pub mod cli;

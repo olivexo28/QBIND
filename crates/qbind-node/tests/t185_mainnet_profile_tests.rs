@@ -25,7 +25,10 @@ use std::path::PathBuf;
 
 /// Test that mainnet_preset() produces configuration matching the spec defaults.
 ///
-/// See QBIND_MAINNET_V0_SPEC.md Section 7.2 for the canonical defaults.
+/// See `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md` and
+/// `docs/protocol/QBIND_PROTOCOL_REPORT.md` for the canonical MainNet
+/// configuration defaults (legacy `QBIND_MAINNET_V0_SPEC.md` retired —
+/// B4 in `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md`).
 #[test]
 fn mainnet_preset_matches_spec_defaults() {
     let config = NodeConfig::mainnet_preset();

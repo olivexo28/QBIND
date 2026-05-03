@@ -26,9 +26,13 @@
 //!
 //! # MainNet Audit Reference
 //!
-//! This harness provides "E2E PQC performance evidence" for MN-R7 and addresses
-//! the need for repeatable performance measurements under realistic conditions.
-//! See [QBIND_MAINNET_AUDIT_SKELETON.md] for MainNet risk mitigation details.
+//! This harness provides "E2E PQC performance evidence" for MN-R7 and
+//! addresses the need for repeatable performance measurements under
+//! realistic conditions. The legacy `QBIND_MAINNET_AUDIT_SKELETON.md`
+//! reference was retired by EXE-1 (B4 in
+//! `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md`); current MainNet
+//! risk mitigation is tracked in
+//! `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md`.
 
 use std::time::Instant;
 
