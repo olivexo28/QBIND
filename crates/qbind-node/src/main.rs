@@ -61,7 +61,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 use qbind_node::binary_consensus_loop::{
-    spawn_binary_consensus_loop, BinaryConsensusLoopConfig,
+    spawn_binary_consensus_loop, BinaryConsensusLoopConfig, RestoreBaseline,
 };
 use qbind_node::cli::CliArgs;
 use qbind_node::metrics::NodeMetrics;
@@ -70,6 +70,7 @@ use qbind_node::metrics_http::{
 };
 use qbind_node::node_config::{ConfigProfile, NetworkMode};
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
+use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_consensus::ids::ValidatorId;
 
 /// Main entry point for qbind-node binary.
@@ -115,27 +116,54 @@ async fn main() {
     // reason — we never silently degrade to "no restore".
     // See `crates/qbind-node/src/snapshot_restore.rs` and
     // `docs/whitepaper/contradiction.md` C4 (B3).
+    //
+    // B5: the resulting `RestoreOutcome` (when present) is threaded into
+    // the binary-path consensus startup so the engine begins from the
+    // restored height/view baseline rather than from view 0. See
+    // `binary_consensus_loop::RestoreBaseline`.
     // ------------------------------------------------------------------
-    match qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config) {
-        Ok(None) => {
-            eprintln!("[restore] no --restore-from-snapshot requested; normal startup.");
-        }
-        Ok(Some(outcome)) => {
-            eprintln!(
-                "[restore] OK: restored from snapshot height={} chain_id=0x{:016x}",
-                outcome.meta.height, outcome.meta.chain_id,
-            );
-        }
-        Err(e) => {
-            eprintln!("[restore] ERROR: {}", e);
-            eprintln!(
-                "[restore] qbind-node refuses to start because the requested snapshot \
-                 restore could not be honestly applied. See \
-                 docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md and \
-                 docs/whitepaper/contradiction.md C4 (B3)."
-            );
-            std::process::exit(1);
-        }
+    let restore_outcome: Option<RestoreOutcome> =
+        match qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config) {
+            Ok(None) => {
+                eprintln!("[restore] no --restore-from-snapshot requested; normal startup.");
+                None
+            }
+            Ok(Some(outcome)) => {
+                eprintln!(
+                    "[restore] OK: restored from snapshot height={} chain_id=0x{:016x}",
+                    outcome.meta.height, outcome.meta.chain_id,
+                );
+                Some(outcome)
+            }
+            Err(e) => {
+                eprintln!("[restore] ERROR: {}", e);
+                eprintln!(
+                    "[restore] qbind-node refuses to start because the requested snapshot \
+                     restore could not be honestly applied. See \
+                     docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md and \
+                     docs/whitepaper/contradiction.md C4 (B3)."
+                );
+                std::process::exit(1);
+            }
+        };
+
+    // Translate the (optional) restore outcome into a consensus baseline.
+    // Today this uses only `meta.height` (as the consensus monotonicity
+    // anchor) and `meta.block_hash` (as an opaque parent identifier in the
+    // engine's block tree). It does NOT claim to reconstruct any
+    // pre-snapshot consensus QC / vote history.
+    let restore_baseline: Option<RestoreBaseline> =
+        restore_outcome.as_ref().map(|o| RestoreBaseline {
+            snapshot_height: o.meta.height,
+            snapshot_block_id: o.meta.block_hash,
+        });
+    if let Some(b) = restore_baseline {
+        eprintln!(
+            "[binary] B5: restore-aware consensus start enabled \
+             (snapshot_height={}, starting_view={})",
+            b.snapshot_height,
+            b.snapshot_height.saturating_add(1),
+        );
     }
 
     // Validate P2P configuration (may modify config)
@@ -177,11 +205,11 @@ async fn main() {
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
-            run_local_mesh_node(&config, &args, Arc::clone(&node_metrics)).await;
+            run_local_mesh_node(&config, &args, Arc::clone(&node_metrics), restore_baseline).await;
         }
         NetworkMode::P2p => {
             if p2p_enabled {
-                run_p2p_node(&config, &args, Arc::clone(&node_metrics)).await;
+                run_p2p_node(&config, &args, Arc::clone(&node_metrics), restore_baseline).await;
             } else {
                 // P2P mode requested but not enabled by config.
                 // Fail clearly rather than silently degrading: an operator
@@ -218,6 +246,7 @@ async fn run_local_mesh_node(
     config: &qbind_node::node_config::NodeConfig,
     args: &CliArgs,
     node_metrics: Arc<NodeMetrics>,
+    restore_baseline: Option<RestoreBaseline>,
 ) {
     eprintln!(
         "[binary] LocalMesh mode: starting consensus loop. environment={} profile={}",
@@ -231,10 +260,15 @@ async fn run_local_mesh_node(
     // (for the local node) when peers are configured, else 1 (single-node).
     let num_validators = (config.network.static_peers.len() as u64).saturating_add(1);
 
-    let cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
+    let mut cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
+    if let Some(b) = restore_baseline {
+        cfg = cfg.with_restore_baseline(b);
+    }
     eprintln!(
-        "[binary] Consensus loop config: local_validator_id={:?} num_validators={}",
-        local_validator_id, num_validators
+        "[binary] Consensus loop config: local_validator_id={:?} num_validators={} restore_baseline={}",
+        local_validator_id,
+        num_validators,
+        restore_baseline.is_some(),
     );
     if num_validators == 1 {
         eprintln!(
@@ -271,6 +305,7 @@ async fn run_p2p_node(
     config: &qbind_node::node_config::NodeConfig,
     args: &CliArgs,
     node_metrics: Arc<NodeMetrics>,
+    restore_baseline: Option<RestoreBaseline>,
 ) {
     eprintln!(
         "[binary] P2P mode: starting transport + consensus loop. environment={} profile={}",
@@ -298,10 +333,15 @@ async fn run_p2p_node(
 
     // Validator-set size: peers + self.
     let num_validators = (config.network.static_peers.len() as u64).saturating_add(1);
-    let consensus_cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
+    let mut consensus_cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
+    if let Some(b) = restore_baseline {
+        consensus_cfg = consensus_cfg.with_restore_baseline(b);
+    }
     eprintln!(
-        "[binary] Consensus loop config: local_validator_id={:?} num_validators={}",
-        local_validator_id, num_validators
+        "[binary] Consensus loop config: local_validator_id={:?} num_validators={} restore_baseline={}",
+        local_validator_id,
+        num_validators,
+        restore_baseline.is_some(),
     );
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());

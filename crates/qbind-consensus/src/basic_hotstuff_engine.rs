@@ -820,6 +820,76 @@ where
         // The first view duration will include time since this call
         self.last_view_start_instant = Some(Instant::now());
     }
+
+    /// Initialize the engine from a restored *state snapshot* baseline (B5).
+    ///
+    /// This is the binary-path restore-aware consensus start hook. Unlike
+    /// [`Self::initialize_from_restart`], which assumes we have a full
+    /// committed-block view (including the consensus-side QC and view
+    /// history), this method only needs what a `StateSnapshotMeta`
+    /// actually carries today: the snapshot's `height` and a `block_hash`
+    /// that we reuse as an opaque parent identifier.
+    ///
+    /// # Effect
+    ///
+    /// After this call:
+    ///
+    /// 1. `committed_height()` returns `Some(snapshot_height)`.
+    /// 2. The snapshot anchor block is registered in the block tree at
+    ///    `height = snapshot_height` (so the next leader proposal —
+    ///    parented by [`HotStuffStateEngine::committed_block()`] — gets
+    ///    height `snapshot_height + 1`, not `0`).
+    /// 3. `current_view` is set to `snapshot_height + 1`.
+    ///
+    /// # Why `view = height + 1`
+    ///
+    /// In `BasicHotStuffEngine`'s binary path, a leader proposal at the
+    /// current view encodes both `header.height = current_view` and
+    /// `header.round = current_view`, and the resulting committed entry
+    /// records `height = view`. The 3-chain commit monotonicity check
+    /// (`g_height > committed_height`) therefore requires the next
+    /// proposal — and thus the next view — to be at least
+    /// `snapshot_height + 1`. Setting `current_view = snapshot_height + 1`
+    /// is the smallest rule that (a) avoids re-proposing at a height
+    /// already covered by the snapshot and (b) immediately satisfies the
+    /// monotonicity precondition for new commits. This matches the
+    /// established convention used by [`Self::initialize_from_restart`]
+    /// (`current_view = committed_height + 1`).
+    ///
+    /// # Bounds and honesty
+    ///
+    /// - This does **not** restore consensus QCs, vote history, or block
+    ///   tree above the snapshot anchor. We do not invent data the
+    ///   snapshot does not carry.
+    /// - This is a *single-validator-safe* baseline; multi-validator
+    ///   restore semantics (P2P chain catchup) are not solved here.
+    /// - This is startup-only. Calling it during steady-state operation
+    ///   could violate liveness; the binary calls it exactly once, before
+    ///   the consensus loop ticks.
+    pub fn initialize_from_snapshot_baseline(
+        &mut self,
+        snapshot_block_id: BlockIdT,
+        snapshot_height: u64,
+    ) {
+        // Seed the underlying state engine: committed prefix + tree entry.
+        // We pass `committed_view = snapshot_height` because the binary
+        // engine conflates view and height (proposals carry
+        // `header.height = current_view`).
+        self.state.initialize_from_snapshot_baseline(
+            snapshot_block_id,
+            snapshot_height,
+            snapshot_height,
+        );
+
+        // Resume consensus from the next view. The first proposal after
+        // this call will be at view = snapshot_height + 1, parented by the
+        // snapshot anchor, and will register at height = snapshot_height + 1.
+        self.current_view = snapshot_height.saturating_add(1);
+        self.proposed_in_view = false;
+        self.voted_in_view = false;
+        self.timeout_emitted_in_view = false;
+        self.last_view_start_instant = Some(Instant::now());
+    }
 }
 
 // ============================================================================
@@ -1743,5 +1813,92 @@ mod tests {
         assert_eq!(recorder.call_count(), 1);
         assert_eq!(recorder.last_from_view(), 11);
         assert_eq!(recorder.last_to_view(), 12);
+    }
+
+    // ========================================================================
+    // B5: restore-aware consensus start (initialize_from_snapshot_baseline)
+    // ========================================================================
+
+    /// B5: After `initialize_from_snapshot_baseline(H)`:
+    /// - committed_height == Some(H)
+    /// - current_view == H + 1
+    /// - committed block id is what we passed in
+    #[test]
+    fn b5_initialize_from_snapshot_baseline_seeds_state() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+
+        // Sanity: fresh engine has no commits and view 0.
+        assert_eq!(engine.committed_height(), None);
+        assert_eq!(engine.current_view(), 0);
+
+        let snapshot_block_id: [u8; 32] = [0xAB; 32];
+        let snapshot_height: u64 = 42;
+
+        engine.initialize_from_snapshot_baseline(snapshot_block_id, snapshot_height);
+
+        assert_eq!(engine.committed_height(), Some(snapshot_height));
+        assert_eq!(engine.current_view(), snapshot_height + 1);
+        assert_eq!(engine.commit_log().len(), 0); // we did not fabricate a commit log entry
+    }
+
+    /// B5: With a baseline applied, single-validator self-quorum produces
+    /// commits whose heights are strictly above the snapshot height — i.e.
+    /// the engine resumes above the restored prefix rather than from zero.
+    #[test]
+    fn b5_post_baseline_commits_advance_above_snapshot_height() {
+        let validators = make_validator_set(1);
+        // make_validator_set numbers from 1, so the only validator id is 1.
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+
+        let snapshot_height: u64 = 100;
+        let snapshot_block_id: [u8; 32] = [0x42; 32];
+        engine.initialize_from_snapshot_baseline(snapshot_block_id, snapshot_height);
+
+        // Drive the engine for enough ticks that the 3-chain commit rule
+        // is satisfied (B → P → G with own_qc on each ancestor, all above
+        // the synthetic baseline anchor). 10 leader steps is comfortably
+        // more than enough.
+        for _ in 0..10 {
+            let _ = engine.on_leader_step();
+        }
+
+        // committed_height must be strictly greater than snapshot_height.
+        let ch = engine
+            .committed_height()
+            .expect("expected at least one commit after baseline + 10 ticks");
+        assert!(
+            ch > snapshot_height,
+            "committed_height ({}) must advance above snapshot_height ({}) after restore",
+            ch,
+            snapshot_height
+        );
+
+        // Every committed entry past the baseline must record a height
+        // strictly above the snapshot height.
+        for entry in engine.commit_log() {
+            assert!(
+                entry.height > snapshot_height,
+                "commit_log entry has height {} <= snapshot_height {} — \
+                 baseline did not seed the height monotonicity floor",
+                entry.height,
+                snapshot_height
+            );
+        }
+    }
+
+    /// B5: A no-baseline engine (existing behavior) still starts from view 0
+    /// with no committed prefix — the new hook must not regress the
+    /// non-restore startup path.
+    #[test]
+    fn b5_no_baseline_path_unchanged() {
+        let validators = make_validator_set(1);
+        let engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+
+        assert_eq!(engine.committed_height(), None);
+        assert_eq!(engine.current_view(), 0);
     }
 }

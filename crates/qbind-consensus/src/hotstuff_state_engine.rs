@@ -765,6 +765,79 @@ where
         // which is safe because we restart from a committed state.
     }
 
+    /// Initialize the engine from a restored *state snapshot* baseline.
+    ///
+    /// This is the smallest honest hook for the B5 restore-aware consensus
+    /// start (see `crates/qbind-node/src/snapshot_restore.rs` and
+    /// `docs/whitepaper/contradiction.md` C4 — B5 sub-item).
+    ///
+    /// Compared to [`Self::initialize_from_restart`] this method *also*
+    /// inserts the committed block into the local block tree at the supplied
+    /// `committed_height`. This matters because [`Self::register_block`]
+    /// computes a child's height as `parent.height + 1`, and falls back to
+    /// `0` when the parent is not present. Without this, the very first
+    /// proposal after restore would be registered at height `0`, never
+    /// satisfying the `g_height > committed_height` monotonicity check in
+    /// the 3-chain commit rule, and the engine would silently fail to
+    /// advance commits past the restored height.
+    ///
+    /// # Arguments
+    ///
+    /// - `committed_block_id`: The block ID of the snapshot's anchor block
+    ///   (in QBIND's binary path, the canonical type is `[u8; 32]` and we
+    ///   reuse the `block_hash` field of `StateSnapshotMeta` directly as an
+    ///   opaque parent identifier — we do **not** claim it is identical to
+    ///   any pre-snapshot consensus block id).
+    /// - `committed_view`: The view to record on the synthetic baseline
+    ///   block. Callers (e.g. `BasicHotStuffEngine::initialize_from_snapshot_baseline`)
+    ///   pass `committed_height` here so that, given the binary engine's
+    ///   height/view conflation (a block proposed at view V has height V),
+    ///   the 3-chain rule sees strictly increasing views above the baseline.
+    /// - `committed_height`: Height of the snapshot anchor. After this call
+    ///   `committed_height()` returns `Some(committed_height)` and any new
+    ///   child registered with this block as parent gets height
+    ///   `committed_height + 1`.
+    ///
+    /// # Safety
+    ///
+    /// Like [`Self::initialize_from_restart`], this is a startup-only path.
+    /// Calling it during steady-state operation could violate liveness or
+    /// safety. The synthetic baseline block has no `own_qc` and is therefore
+    /// never used as the grandparent (G) of a 3-chain commit (the commit
+    /// rule requires `g.own_qc.is_some()`), so this method cannot itself
+    /// cause a re-commit of the snapshot height. It only seeds the
+    /// monotonicity floor for *future* commits.
+    pub fn initialize_from_snapshot_baseline(
+        &mut self,
+        committed_block_id: BlockIdT,
+        committed_view: u64,
+        committed_height: u64,
+    ) {
+        // Record the committed prefix (same as initialize_from_restart).
+        self.committed_block = Some(committed_block_id.clone());
+        self.committed_height = Some(committed_height);
+
+        // Insert the snapshot anchor block into the tree at the recorded
+        // height. parent_id = None and justify_qc = None — we do not invent
+        // QC / chain history we don't have. own_qc remains None, which
+        // means this block can never be the G of a 3-chain (the commit
+        // rule requires g.own_qc.is_some()), preserving safety.
+        let node = BlockNode::new(
+            committed_block_id.clone(),
+            committed_view,
+            None,
+            None,
+            committed_height,
+        );
+        let is_new = !self.blocks.contains_key(&committed_block_id);
+        self.blocks.insert(committed_block_id.clone(), node);
+        if is_new {
+            // Track for eviction order, though `is_block_safe_to_evict`
+            // refuses to evict any block whose height ≤ committed_height.
+            self.pending_block_order.push_back(committed_block_id);
+        }
+    }
+
     /// Get the current vote count for a (view, block_id) pair.
     ///
     /// Returns 0 if no votes have been received for this pair.
