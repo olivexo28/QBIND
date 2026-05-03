@@ -116,11 +116,11 @@ async fn main() {
     // ------------------------------------------------------------------
     // B2: Metrics HTTP endpoint (gated by QBIND_METRICS_HTTP_ADDR)
     //
-    // `node_metrics` is shared with the metrics HTTP server. Hooking it
-    // through to the consensus loop driver (so that view advances, QC
-    // formations and commits update Prometheus counters) is part of the
-    // wider observability pass and not in scope for this batch — see
-    // `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md` §9 (B1/B2).
+    // `node_metrics` is shared with the metrics HTTP server *and* with the
+    // binary-path consensus loop (DevNet Run 002 enabler): consensus-class
+    // counters (ticks, proposals, commits, current view, view changes) are
+    // updated from the loop directly so `/metrics` reflects live progress.
+    // See `binary_consensus_loop::run_binary_consensus_loop`.
     // ------------------------------------------------------------------
     let node_metrics = Arc::new(NodeMetrics::new());
     let metrics_cfg = MetricsHttpConfig::from_env();
@@ -145,11 +145,11 @@ async fn main() {
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
-            run_local_mesh_node(&config, &args).await;
+            run_local_mesh_node(&config, &args, Arc::clone(&node_metrics)).await;
         }
         NetworkMode::P2p => {
             if p2p_enabled {
-                run_p2p_node(&config, &args).await;
+                run_p2p_node(&config, &args, Arc::clone(&node_metrics)).await;
             } else {
                 // P2P mode requested but not enabled by config.
                 // Fail clearly rather than silently degrading: an operator
@@ -182,7 +182,11 @@ async fn main() {
 /// multi-validator LocalMesh the loop still proposes when leader; full
 /// multi-node consensus interconnect over the in-process LocalMesh remains
 /// covered by `NodeHotstuffHarness`-based integration tests.
-async fn run_local_mesh_node(config: &qbind_node::node_config::NodeConfig, args: &CliArgs) {
+async fn run_local_mesh_node(
+    config: &qbind_node::node_config::NodeConfig,
+    args: &CliArgs,
+    node_metrics: Arc<NodeMetrics>,
+) {
     eprintln!(
         "[binary] LocalMesh mode: starting consensus loop. environment={} profile={}",
         config.environment, config.execution_profile
@@ -214,7 +218,7 @@ async fn run_local_mesh_node(config: &qbind_node::node_config::NodeConfig, args:
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
-    let (consensus_handle, _progress) = spawn_binary_consensus_loop(cfg, shutdown_rx);
+    let (consensus_handle, _progress) = spawn_binary_consensus_loop(cfg, shutdown_rx, node_metrics);
 
     eprintln!("[binary] Consensus loop running. Press Ctrl+C to exit.");
     let _ = tokio::signal::ctrl_c().await;
@@ -231,7 +235,11 @@ async fn run_local_mesh_node(config: &qbind_node::node_config::NodeConfig, args:
 /// side; routing inbound P2P consensus messages back into the engine's
 /// `on_proposal_event`/`on_vote_event` is part of the audit's outstanding
 /// "wire P2P → consensus" work and is not silently claimed here.
-async fn run_p2p_node(config: &qbind_node::node_config::NodeConfig, args: &CliArgs) {
+async fn run_p2p_node(
+    config: &qbind_node::node_config::NodeConfig,
+    args: &CliArgs,
+    node_metrics: Arc<NodeMetrics>,
+) {
     eprintln!(
         "[binary] P2P mode: starting transport + consensus loop. environment={} profile={}",
         config.environment, config.execution_profile
@@ -265,7 +273,8 @@ async fn run_p2p_node(config: &qbind_node::node_config::NodeConfig, args: &CliAr
     );
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
-    let (consensus_handle, _progress) = spawn_binary_consensus_loop(consensus_cfg, shutdown_rx);
+    let (consensus_handle, _progress) =
+        spawn_binary_consensus_loop(consensus_cfg, shutdown_rx, node_metrics);
 
     eprintln!("[binary] P2P node started. Press Ctrl+C to exit.");
     let _ = tokio::signal::ctrl_c().await;

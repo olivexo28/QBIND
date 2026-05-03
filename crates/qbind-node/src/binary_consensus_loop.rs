@@ -44,8 +44,40 @@
 //! path is honest about *what it can do* without silently pretending to make
 //! commits it cannot make.
 
+//! # Live `/metrics` integration (DevNet Run 002 enabler)
+//!
+//! The loop also accepts a shared [`Arc<NodeMetrics>`] and updates the
+//! existing consensus-related metric families in lock-step with real engine
+//! events. No new metric families are introduced; we deliberately reuse:
+//!
+//! - `runtime().inc_events_tick()` — incremented once per executed tick.
+//! - `consensus_t154().inc_proposal_accepted()` — incremented per
+//!   `ConsensusEngineAction::BroadcastProposal` emitted on a tick. In
+//!   single-validator mode the local engine is also the acceptor of its own
+//!   proposal (it self-votes and the proposal is consumed by the QC path),
+//!   so "accepted" is honest here. We do not invent a separate
+//!   "proposals_emitted" counter.
+//! - `commit().record_commit(tick_elapsed)` — once per *new* committed entry
+//!   observed in `commit_log()` after a tick. `tick_elapsed` is the wall
+//!   time spent driving the engine in that tick (best available proxy for a
+//!   single-validator commit's "duration"; not a network round-trip).
+//! - `consensus_t154().set_view_number(view)`,
+//!   `view_lag().set_current_view(view)`,
+//!   `view_lag().update_highest_seen_view(view)` — current view gauges.
+//! - `progress().inc_view_changes()` — once per actual view advance.
+//!
+//! Counters are only updated from observed engine state mutations on real
+//! ticks. When the loop is not running, no metric is touched. This keeps
+//! `/metrics` honest: zeros mean "the binary path is not running"; non-zero
+//! means "the binary path is actually progressing".
+//!
+//! Note: this is an observability integration only. It does **not** wire
+//! P2P inbound consensus messages (which would justify
+//! `consensus_t154.inc_vote_accepted()` etc.) and it does **not** speak to
+//! restore-from-snapshot (B3). Both remain out of scope.
+
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -54,6 +86,8 @@ use qbind_consensus::basic_hotstuff_engine::BasicHotStuffEngine;
 use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
+
+use crate::metrics::NodeMetrics;
 
 /// Default tick interval for the binary consensus loop.
 ///
@@ -147,6 +181,7 @@ pub async fn run_binary_consensus_loop(
     cfg: BinaryConsensusLoopConfig,
     mut shutdown_rx: watch::Receiver<()>,
     progress: Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
+    metrics: Arc<NodeMetrics>,
 ) -> BinaryConsensusLoopProgress {
     let validators = build_uniform_validator_set(cfg.num_validators);
     let mut engine: BasicHotStuffEngine<[u8; 32]> =
@@ -164,6 +199,10 @@ pub async fn run_binary_consensus_loop(
 
     let mut ticks: u64 = 0;
     let mut proposals_emitted: u64 = 0;
+    // Last-observed engine state, used to compute deltas for metrics so we
+    // only ever record real progress observed live (no fake counters).
+    let mut last_commits: u64 = 0;
+    let mut last_view: u64 = engine.current_view();
 
     loop {
         tokio::select! {
@@ -173,25 +212,57 @@ pub async fn run_binary_consensus_loop(
             }
             _ = ticker.tick() => {
                 ticks = ticks.saturating_add(1);
+                let tick_started = Instant::now();
 
                 // Drive the engine. In single-validator mode, on_leader_step
                 // self-votes and forms a QC, advancing the view and (after
                 // the locking-rule prefix is satisfied) committing blocks.
                 let actions = engine.try_propose();
+                let mut tick_proposals: u64 = 0;
                 for action in &actions {
                     if matches!(action, ConsensusEngineAction::BroadcastProposal(_)) {
                         proposals_emitted = proposals_emitted.saturating_add(1);
+                        tick_proposals = tick_proposals.saturating_add(1);
                     }
                 }
 
-                // Update progress snapshot.
                 let committed_height = engine.committed_height();
+                let new_commits_total = engine.commit_log().len() as u64;
+                let new_view = engine.current_view();
+                let tick_elapsed = tick_started.elapsed();
+
+                // ----------------------------------------------------------
+                // Live metrics update (binary-path → /metrics).
+                //
+                // All updates are derived from observed engine state on this
+                // very tick — never from final summaries, never speculative.
+                // ----------------------------------------------------------
+                metrics.runtime().inc_events_tick();
+                for _ in 0..tick_proposals {
+                    metrics.consensus_t154().inc_proposal_accepted();
+                }
+                let commits_delta = new_commits_total.saturating_sub(last_commits);
+                for _ in 0..commits_delta {
+                    metrics.commit().record_commit(tick_elapsed);
+                }
+                let view_delta = new_view.saturating_sub(last_view);
+                for _ in 0..view_delta {
+                    metrics.progress().inc_view_changes();
+                }
+                metrics.consensus_t154().set_view_number(new_view);
+                metrics.view_lag().set_current_view(new_view);
+                metrics.view_lag().update_highest_seen_view(new_view);
+
+                last_commits = new_commits_total;
+                last_view = new_view;
+
+                // Update progress snapshot.
                 let mut p = progress.lock();
                 p.ticks = ticks;
                 p.proposals_emitted = proposals_emitted;
-                p.commits = engine.commit_log().len() as u64;
+                p.commits = new_commits_total;
                 p.committed_height = committed_height;
-                p.current_view = engine.current_view();
+                p.current_view = new_view;
                 drop(p);
 
                 if let Some(cap) = cfg.max_ticks {
@@ -222,6 +293,7 @@ pub async fn run_binary_consensus_loop(
 pub fn spawn_binary_consensus_loop(
     cfg: BinaryConsensusLoopConfig,
     shutdown_rx: watch::Receiver<()>,
+    metrics: Arc<NodeMetrics>,
 ) -> (
     JoinHandle<BinaryConsensusLoopProgress>,
     Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
@@ -229,7 +301,7 @@ pub fn spawn_binary_consensus_loop(
     let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
     let progress_for_task = progress.clone();
     let handle = tokio::spawn(async move {
-        run_binary_consensus_loop(cfg, shutdown_rx, progress_for_task).await
+        run_binary_consensus_loop(cfg, shutdown_rx, progress_for_task, metrics).await
     });
     (handle, progress)
 }
@@ -247,8 +319,9 @@ mod tests {
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
         let progress =
             Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let metrics = Arc::new(NodeMetrics::new());
         let final_progress =
-            run_binary_consensus_loop(cfg, shutdown_rx, progress.clone()).await;
+            run_binary_consensus_loop(cfg, shutdown_rx, progress.clone(), metrics).await;
 
         assert_eq!(final_progress.ticks, 50, "loop should run 50 ticks");
         assert!(
@@ -270,10 +343,11 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = watch::channel(());
         let progress =
             Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let metrics = Arc::new(NodeMetrics::new());
 
         let handle = tokio::spawn({
             let progress = progress.clone();
-            async move { run_binary_consensus_loop(cfg, shutdown_rx, progress).await }
+            async move { run_binary_consensus_loop(cfg, shutdown_rx, progress, metrics).await }
         });
 
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -293,5 +367,146 @@ mod tests {
     fn build_validator_set_works_for_n() {
         let vs = build_uniform_validator_set(4);
         assert_eq!(vs.len(), 4);
+    }
+
+    /// DevNet Run 002 enabler: prove `/metrics`-backing counters move when the
+    /// binary-path consensus loop runs live, using only existing
+    /// `NodeMetrics` families.
+    #[tokio::test]
+    async fn binary_path_metrics_move_during_live_loop() {
+        let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1)
+            .with_tick_interval(Duration::from_millis(2))
+            .with_max_ticks(50);
+
+        let (_shutdown_tx, shutdown_rx) = watch::channel(());
+        let progress =
+            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let metrics = Arc::new(NodeMetrics::new());
+
+        // Sanity: pre-run all consensus-relevant counters/gauges are zero.
+        assert_eq!(metrics.runtime().events_tick_total(), 0);
+        assert_eq!(metrics.consensus_t154().proposals_accepted(), 0);
+        assert_eq!(metrics.consensus_t154().view_number(), 0);
+        assert_eq!(metrics.commit().commit_count(), 0);
+        assert_eq!(metrics.view_lag().current_view(), 0);
+        assert_eq!(metrics.view_lag().highest_seen_view(), 0);
+        assert_eq!(metrics.progress().view_changes_total(), 0);
+
+        let final_progress = run_binary_consensus_loop(
+            cfg,
+            shutdown_rx,
+            progress.clone(),
+            Arc::clone(&metrics),
+        )
+        .await;
+
+        // Ticks must be reflected.
+        assert_eq!(
+            metrics.runtime().events_tick_total(),
+            final_progress.ticks,
+            "every executed tick must increment runtime events_tick_total"
+        );
+
+        // Proposals must be reflected (single-validator leader emits proposals).
+        assert!(
+            metrics.consensus_t154().proposals_accepted() > 0,
+            "consensus_t154.proposals_accepted should track proposals emitted; got 0"
+        );
+        assert_eq!(
+            metrics.consensus_t154().proposals_accepted(),
+            final_progress.proposals_emitted,
+            "proposals_accepted must equal proposals_emitted observed by the loop"
+        );
+
+        // Current view gauges must reflect engine view.
+        assert_eq!(
+            metrics.consensus_t154().view_number(),
+            final_progress.current_view
+        );
+        assert_eq!(
+            metrics.view_lag().current_view(),
+            final_progress.current_view
+        );
+        assert!(
+            metrics.view_lag().highest_seen_view() >= final_progress.current_view,
+            "highest_seen_view must be monotonic and at least the current view"
+        );
+
+        // View advanced from 0 → there must be at least one view change.
+        assert!(
+            metrics.progress().view_changes_total() > 0,
+            "progress.view_changes_total must be > 0 when current_view advanced"
+        );
+
+        // Single-validator self-quorum must produce commits, and commit
+        // metrics must reflect them.
+        assert!(
+            final_progress.commits > 0,
+            "single-validator self-quorum should commit at least once"
+        );
+        assert_eq!(
+            metrics.commit().commit_count(),
+            final_progress.commits,
+            "commit().commit_count must equal commit_log length"
+        );
+    }
+
+    /// No counters move when the loop is constructed but never executes.
+    /// Guards against accidental "fake" updates on construction or shutdown.
+    #[tokio::test]
+    async fn binary_path_metrics_stay_zero_when_loop_never_ticks() {
+        // Tick interval longer than the test wait so no tick fires before
+        // shutdown.
+        let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1)
+            .with_tick_interval(Duration::from_secs(60));
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(());
+        let progress =
+            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let metrics = Arc::new(NodeMetrics::new());
+
+        let handle = {
+            let metrics = Arc::clone(&metrics);
+            tokio::spawn(async move {
+                run_binary_consensus_loop(cfg, shutdown_rx, progress, metrics).await
+            })
+        };
+
+        // The first `tokio::time::interval` tick fires immediately. To
+        // guarantee "loop never executed a tick body", shut down before
+        // yielding to the spawned task. `drop(shutdown_tx)` schedules the
+        // shutdown branch, which must be selected before the next ticker
+        // tick (which is 60s away).
+        drop(shutdown_tx);
+        let final_progress = tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("loop did not exit on shutdown")
+            .expect("task panicked");
+
+        // If the immediate first tick raced ahead of shutdown, we have at
+        // most that one tick; everything beyond it must still be zero. We
+        // assert that no commits / view-changes / proposals were fabricated
+        // on shutdown.
+        assert!(
+            final_progress.ticks <= 1,
+            "expected at most the immediate first tick, got {}",
+            final_progress.ticks
+        );
+        assert_eq!(
+            metrics.runtime().events_tick_total(),
+            final_progress.ticks,
+            "tick metric must match observed ticks exactly (no fabrication)"
+        );
+        // After at most one tick at view 0, the engine has not advanced
+        // views. No view-change increments should have occurred.
+        if final_progress.current_view == 0 {
+            assert_eq!(
+                metrics.progress().view_changes_total(),
+                0,
+                "no view changes should be recorded when view did not advance"
+            );
+            assert_eq!(metrics.view_lag().current_view(), 0);
+            assert_eq!(metrics.consensus_t154().view_number(), 0);
+        }
     }
 }

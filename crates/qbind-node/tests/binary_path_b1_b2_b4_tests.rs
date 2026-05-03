@@ -50,7 +50,8 @@ async fn b1_binary_consensus_loop_actually_drives_consensus() {
         .with_max_ticks(40);
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
-    let (handle, progress) = spawn_binary_consensus_loop(cfg, shutdown_rx);
+    let metrics = Arc::new(NodeMetrics::new());
+    let (handle, progress) = spawn_binary_consensus_loop(cfg, shutdown_rx, metrics);
 
     let final_progress = timeout(Duration::from_secs(5), handle)
         .await
