@@ -1,7 +1,7 @@
 # QBIND Whitepaper Contradictions and Undocumented Behaviors
 
-**Version**: 1.1  
-**Date**: 2026-02-15  
+**Version**: 1.2  
+**Date**: 2026-05-03  
 **Status**: Active Tracking Document
 
 This document tracks contradictions between the whitepaper (`docs/whitepaper/QBIND_WHITEPAPER.md`) and the actual implementation, as well as behaviors that are implemented but not documented.
@@ -29,6 +29,18 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | **Code Location** | `crates/qbind-system/src/validator_program.rs:130-132` (registration-time enforcement), `crates/qbind-consensus/src/validator_set.rs:116-178` (epoch-boundary filtering via `build_validator_set_with_stake_filter()`), `crates/qbind-node/src/hotstuff_node_sim.rs:936-987` (`with_stake_filtering_epoch_state_provider()`) |
 | **Evidence** | Minimum stake is now enforced at both registration and epoch boundary. `min_validator_stake` enforced via `ExecutionContext.min_validator_stake` at registration. `StakeFilteringEpochStateProvider` excludes validators with `stake < min_validator_stake` at epoch transitions. Fail-closed: if all validators excluded, epoch transition fails. |
 | **Tests** | `crates/qbind-consensus/tests/validator_set_tests.rs`, `crates/qbind-consensus/tests/m2_2_stake_filter_epoch_transition_tests.rs`, `crates/qbind-node/tests/m2_3_stake_filtering_node_integration_tests.rs`, `crates/qbind-node/tests/m2_4_production_stake_filtering_tests.rs` |
+
+### C4. Production `qbind-node` Binary Does Not Boot a Fully Operating Node
+
+| Field | Value |
+|-------|-------|
+| **Status** | ⚠️ **OPEN** |
+| **Whitepaper / Doc Reference** | `docs/devnet/QBIND_DEVNET_OPERATIONAL_GUIDE.md` §7–§8 (node bring-up, observability), `docs/ops/QBIND_MONITORING_AND_ALERTING_BASELINE.md` §4 (signal classes A/C/D/E/F), `docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md` §C1–C5 (recoverability, restore proofs), `docs/release/QBIND_MAINNET_READINESS_CHECKLIST.md` (operability and observability gates) |
+| **Code Location** | `crates/qbind-node/src/main.rs` (`run_local_mesh_node` lines 111–124 is a print-and-idle stub; `run_p2p_node` lines 130–171 builds transport via `P2pNodeBuilder` but never starts a HotStuff/pacemaker driver, so no proposals/votes/commits happen from the binary), `crates/qbind-node/src/p2p_node_builder.rs` (no `consensus_engine`/`drive_consensus` invocation), `crates/qbind-node/src/metrics_http.rs` (`spawn_metrics_http_server` is exported but is **not** called from the binary path), `crates/qbind-ledger/src/state_snapshot.rs` (snapshot creation only — no `restore_from_snapshot`/`load_snapshot`/`apply_snapshot` path in `qbind-node`'s startup) |
+| **Description** | The canonical operations docs presume an operable validator binary that, on startup: (a) runs the consensus loop and produces/commits blocks, (b) exposes a Prometheus-compatible `/metrics` endpoint, and (c) supports recovery from a state snapshot. End-to-end consensus operation is exercised in tests (`NodeHotstuffHarness`, `t132`/`t138`/`t139`/`t154`/`t160`/`t166`/`three_node_*` suites), but the production binary entry point is a stub that does not start the consensus driver, does not spawn the metrics HTTP server, and has no boot-from-snapshot path. As a result, DevNet/TestNet/MainNet operational and observability claims are properties of test harnesses today, not properties of `qbind-node` as a runnable artifact. |
+| **Impact** | High — blocks honest DevNet readiness assessment (EXE-2), Beta observability evidence, backup/recovery drills, and MainNet readiness on the operability and observability gates. Does not affect protocol-correctness claims (those remain test-evidenced). |
+| **Remaining (EXE-1 → EXE-2 follow-up)** | • Wire `BasicHotStuffEngine`/`NodeHotstuffHarness` driver into `run_p2p_node` (and a minimal LocalMesh path), gated by `--validator-id`. • Spawn `metrics_http::spawn_metrics_http_server` from the binary path, gated on `QBIND_METRICS_HTTP_ADDR`. • Implement `--restore-from-snapshot <path>` ingestion at startup using existing `StateSnapshotter` checkpoint format and pair with a drill script that produces template-shaped restore evidence. |
+| **Tracking** | Recorded by `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md` §6.1–§6.3, §9 (B1, B2, B3) as the top three execution blockers exposed by EXE-1. |
 
 ### C3. Reporter Rewards Not Implemented
 
@@ -146,9 +158,9 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | Category | Count | Items |
 |----------|-------|-------|
 | **RESOLVED** | 12 | C1, C2, Item 1, Item 2 (M20), Item 3 (M20), Item 4, Item 5 (M20), Item 6 (M20), Item 7 (M20), Item 8, Item 9 (M14), Item 10 (partial) |
-| **OPEN** | 1 | C3 |
+| **OPEN** | 2 | C3, C4 |
 
-**High-Risk Open Items**: None. All formerly high-risk items (C1: O3-O5 penalties, C2: minimum stake, Item 1: in-memory slashing, Item 8: evidence signature verification) are now resolved.
+**High-Risk Open Items**: C4 (Production binary does not yet boot a fully operating node) — blocks EXE-2/DevNet readiness, Beta observability evidence, and backup/recovery drills until B1/B2/B3 land. Protocol-correctness claims remain unaffected (those are test-evidenced).
 
 **Medium-Risk Open Items**:
 - C3 (Reporter Rewards): No economic incentive for evidence reporting. Whitepaper Section 12.2.3 documents this as future work; M15 hardened evidence pipeline is the baseline for any future reward implementation.
@@ -169,6 +181,7 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 | 2026-02-15 | M17: Formal slashing penalty schedule added to whitepaper. Section 12.2 updated with: (1) O1-O5 penalty table (offense, evidence type, verification rule, slash bps, jail epochs), (2) governance/activation semantics paragraphs (SlashingPenaltySchedule in ParamRegistry, epoch-boundary activation, fail-closed behavior). Protocol Report Spec Gap 2.5 status changed to "✅ Mitigated (spec added M17)", risk level reduced from Medium to Low. C3 (Reporter Rewards) remains OPEN unchanged. | M17 |
 | 2026-02-16 | M19: Slashing state persistence and canonicalization hardening. Item 1 updated to M1/M19 RESOLVED with `verify_slashing_consistency_on_startup()` for fail-closed corruption detection. Whitepaper Section 16.8 updated with full persistence model (consensus-critical vs non-critical classification, atomic update guarantees, fail-closed behavior). `SlashingStateCorrupt` error variant added. `ValidatorSlashingState` documentation enhanced with M19 NON-AUTHORITATIVE warnings. Protocol Report section 3.15 added. 8 M19 tests added. | M19 |
 | 2026-02-16 | M20: Documentation hardening milestone (no Rust changes). Closed Items 2, 3, 5, 6, 7. Whitepaper updates: Section 8.4.1 (vote history retention), Section 10.5.1 (CRC-32 checksums), Section 9.8 (key rotation semantics), Section 7.1.1 (mempool ordering), Section 17.3.1 (timeout backoff parameters), Section 12.2.3 (reporter incentives - future work). C3 remains OPEN by design—no tokenomics yet; updated with M15 hardening reference and new whitepaper note. | M20 |
+| 2026-05-03 | EXE-1: Repo/code↔doc alignment audit. Added C4 (Production `qbind-node` binary does not boot a fully operating node) — covers binary lacking consensus driver, `/metrics` HTTP not spawned by binary, and missing restore-from-snapshot path. Recorded as the top three execution blockers (B1/B2/B3) in `docs/protocol/QBIND_REPO_CODE_DOC_ALIGNMENT_AUDIT.md`. Protocol-correctness items remain unchanged; gap is at the binary/operability layer. | EXE-1 |
 
 ---
 
