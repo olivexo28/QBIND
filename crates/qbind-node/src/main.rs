@@ -61,14 +61,17 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 use qbind_node::binary_consensus_loop::{
-    spawn_binary_consensus_loop, BinaryConsensusLoopConfig, RestoreBaseline,
+    spawn_binary_consensus_loop, spawn_binary_consensus_loop_with_io, BinaryConsensusLoopConfig,
+    BinaryConsensusLoopIo, RestoreBaseline,
 };
 use qbind_node::cli::CliArgs;
+use qbind_node::consensus_net_p2p::P2pConsensusNetwork;
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::metrics_http::{
     spawn_metrics_http_server_with_crypto, CryptoMetricsRefs, MetricsHttpConfig,
 };
 use qbind_node::node_config::{ConfigProfile, NetworkMode};
+use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_consensus::ids::ValidatorId;
@@ -296,11 +299,21 @@ async fn run_local_mesh_node(
 
 /// Run a node in P2P mode.
 ///
-/// Builds the P2P transport via `P2pNodeBuilder` *and* spawns the binary
-/// consensus loop. The P2P transport and the consensus driver run side by
-/// side; routing inbound P2P consensus messages back into the engine's
-/// `on_proposal_event`/`on_vote_event` is part of the audit's outstanding
-/// "wire P2P → consensus" work and is not silently claimed here.
+/// Builds the P2P transport via `P2pNodeBuilder` and wires the binary
+/// consensus loop to it via [`BinaryConsensusLoopIo`] (C4/B6):
+///
+/// - inbound `ConsensusNetMsg` frames are forwarded by a
+///   [`ChannelConsensusHandler`] (registered with the P2P inbound demuxer)
+///   into the consensus loop, where they are decoded and routed into the
+///   running engine via `on_proposal_event` / `on_vote_event`;
+/// - the engine's `ConsensusEngineAction`s flow back out through the
+///   real `P2pConsensusNetwork` (which wraps the same `TcpKemTlsP2pService`).
+///
+/// Multi-validator P2P binary-path interconnect is now real: peers can
+/// actually move each other's engines forward without `NodeHotstuffHarness`
+/// scaffolding. Caveats and remaining gaps (validator/node-id mapping,
+/// real PQC handshake, multi-validator restore catchup) are tracked in
+/// `docs/whitepaper/contradiction.md` C4.
 async fn run_p2p_node(
     config: &qbind_node::node_config::NodeConfig,
     args: &CliArgs,
@@ -315,8 +328,20 @@ async fn run_p2p_node(
     let validator_id = args.validator_id.unwrap_or(0);
     let local_validator_id = ValidatorId::new(validator_id);
 
-    // Build the P2P transport.
-    let builder = P2pNodeBuilder::new();
+    // Validator-set size: peers + self.
+    let num_validators = (config.network.static_peers.len() as u64).saturating_add(1);
+
+    // C4/B6: build the inbound P2P → engine event channel. The handler is
+    // registered with the demuxer via `with_consensus_handler(...)`; the
+    // receiver is threaded into the binary consensus loop. Capacity 256 is
+    // the same default used by the underlying transport's inbound queue,
+    // so we don't introduce a tighter bottleneck here.
+    let (consensus_handler, consensus_inbound_rx) = ChannelConsensusHandler::new(256);
+
+    // Build the P2P transport with the inbound consensus handler installed.
+    let builder = P2pNodeBuilder::new()
+        .with_num_validators(num_validators as usize)
+        .with_consensus_handler(Arc::new(consensus_handler));
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {
@@ -331,22 +356,50 @@ async fn run_p2p_node(
         config.network.static_peers.len()
     );
 
-    // Validator-set size: peers + self.
-    let num_validators = (config.network.static_peers.len() as u64).saturating_add(1);
+    // C4/B6: outbound consensus path. Reuse the existing
+    // `P2pConsensusNetwork` already created by the builder so that
+    // outbound proposals/votes leave through the same `TcpKemTlsP2pService`
+    // instance the inbound side is reading from. We do not introduce a
+    // second parallel networking architecture.
+    let outbound_facade: Arc<dyn qbind_node::consensus_network_facade::ConsensusNetworkFacade> =
+        Arc::new(P2pConsensusNetwork::new(
+            node_context.p2p_service.clone(),
+            num_validators as usize,
+        )
+        .with_local_validator(local_validator_id));
+
     let mut consensus_cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
     if let Some(b) = restore_baseline {
         consensus_cfg = consensus_cfg.with_restore_baseline(b);
     }
     eprintln!(
-        "[binary] Consensus loop config: local_validator_id={:?} num_validators={} restore_baseline={}",
+        "[binary] Consensus loop config: local_validator_id={:?} num_validators={} \
+         restore_baseline={} interconnect=p2p",
         local_validator_id,
         num_validators,
         restore_baseline.is_some(),
     );
+    if num_validators == 1 {
+        eprintln!(
+            "[binary] Single-validator P2P: leader self-quorum will commit a block per tick. \
+             Inbound P2P → engine routing is wired but no peers will exercise it."
+        );
+    } else {
+        eprintln!(
+            "[binary] Multi-validator P2P ({} validators): inbound P2P consensus messages \
+             are routed into BasicHotStuffEngine via on_proposal_event / on_vote_event; \
+             engine actions flow back out through P2pConsensusNetwork.",
+            num_validators
+        );
+    }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+    let io = BinaryConsensusLoopIo {
+        inbound_rx: consensus_inbound_rx,
+        outbound: outbound_facade,
+    };
     let (consensus_handle, _progress) =
-        spawn_binary_consensus_loop(consensus_cfg, shutdown_rx, node_metrics);
+        spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);
 
     eprintln!("[binary] P2P node started. Press Ctrl+C to exit.");
     let _ = tokio::signal::ctrl_c().await;

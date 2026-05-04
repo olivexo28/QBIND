@@ -79,7 +79,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 use qbind_consensus::basic_hotstuff_engine::BasicHotStuffEngine;
@@ -87,7 +87,9 @@ use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 
+use crate::consensus_network_facade::ConsensusNetworkFacade;
 use crate::metrics::NodeMetrics;
+use crate::p2p::ConsensusNetMsg;
 
 /// Default tick interval for the binary consensus loop.
 ///
@@ -190,6 +192,9 @@ pub struct BinaryConsensusLoopProgress {
     pub committed_height: Option<u64>,
     /// Current view.
     pub current_view: u64,
+    /// Inbound P2P → engine routing stats (C4/B6). Always present; zero
+    /// when the loop runs without I/O wiring (single-validator / LocalMesh).
+    pub inbound: BinaryConsensusLoopInboundStats,
 }
 
 /// Build a `ConsensusValidatorSet` containing `num_validators` validators
@@ -205,7 +210,76 @@ fn build_uniform_validator_set(num_validators: u64) -> ConsensusValidatorSet {
         .expect("uniform validator set with unique ids is always valid")
 }
 
-/// Run the binary-path consensus loop synchronously to completion.
+/// I/O surface for the multi-validator binary-path consensus loop (C4/B6).
+///
+/// When supplied, the loop:
+///
+/// - consumes inbound `ConsensusNetMsg` events (decoded P2P consensus
+///   frames, as forwarded by [`crate::p2p_inbound::ChannelConsensusHandler`])
+///   and feeds them into the running [`BasicHotStuffEngine`] via the same
+///   `on_proposal_event` / `on_vote_event` / `on_timeout_msg` entry points
+///   that the existing test harnesses already exercise;
+/// - publishes the engine's resulting [`ConsensusEngineAction`]s back out
+///   through an existing [`ConsensusNetworkFacade`] (typically the real
+///   `P2pConsensusNetwork`) — never via a parallel networking layer.
+///
+/// When `None` (the default), the loop runs single-validator-only behaviour
+/// exactly as before. This keeps the LocalMesh / single-node DevNet path
+/// unchanged.
+pub struct BinaryConsensusLoopIo {
+    /// Inbound consensus messages received from the P2P transport.
+    ///
+    /// The node binary builds this end via
+    /// [`crate::p2p_inbound::ChannelConsensusHandler`], which is registered
+    /// with `P2pNodeBuilder.with_consensus_handler(...)`. The demuxer
+    /// forwards every `P2pMessage::Consensus(_)` frame into this channel.
+    pub inbound_rx: mpsc::Receiver<ConsensusNetMsg>,
+
+    /// Outbound consensus network surface used to send the engine's
+    /// `ConsensusEngineAction`s back over the wire.
+    ///
+    /// In the binary this is the real `P2pConsensusNetwork` (which wraps
+    /// the same `TcpKemTlsP2pService` the inbound side reads from). Tests
+    /// can substitute any `ConsensusNetworkFacade` implementation
+    /// (including a recording facade) without rewiring transport.
+    pub outbound: Arc<dyn ConsensusNetworkFacade>,
+}
+
+impl std::fmt::Debug for BinaryConsensusLoopIo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinaryConsensusLoopIo")
+            .field("inbound_rx", &"<mpsc::Receiver<ConsensusNetMsg>>")
+            .field("outbound", &"<Arc<dyn ConsensusNetworkFacade>>")
+            .finish()
+    }
+}
+
+/// Counters describing what the C4/B6 inbound→engine path actually did,
+/// independent of single-validator self-quorum activity. Useful for tests
+/// that need to prove "inbound P2P bytes really did affect engine state".
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BinaryConsensusLoopInboundStats {
+    /// `ConsensusNetMsg` frames received from the inbound channel.
+    pub inbound_msgs_received: u64,
+    /// Inbound `Proposal` frames that decoded successfully and were
+    /// delivered to `engine.on_proposal_event`.
+    pub inbound_proposals_delivered: u64,
+    /// Inbound `Vote` frames that decoded successfully and were delivered
+    /// to `engine.on_vote_event`.
+    pub inbound_votes_delivered: u64,
+    /// Inbound frames whose wire decode failed.
+    pub inbound_decode_failures: u64,
+    /// Inbound votes the engine rejected (e.g. wrong epoch, no block).
+    pub inbound_vote_engine_rejects: u64,
+    /// Outbound `BroadcastProposal` actions emitted to the facade.
+    pub outbound_proposals_sent: u64,
+    /// Outbound `BroadcastVote` actions emitted to the facade.
+    pub outbound_votes_sent: u64,
+    /// Outbound `SendVoteTo` actions emitted to the facade.
+    pub outbound_send_vote_to: u64,
+}
+
+
 ///
 /// Used directly by tests; the binary's `tokio::main` calls
 /// `spawn_binary_consensus_loop` which delegates here.
@@ -220,9 +294,37 @@ fn build_uniform_validator_set(num_validators: u64) -> ConsensusValidatorSet {
 /// Returns the final `BinaryConsensusLoopProgress`.
 pub async fn run_binary_consensus_loop(
     cfg: BinaryConsensusLoopConfig,
+    shutdown_rx: watch::Receiver<()>,
+    progress: Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
+    metrics: Arc<NodeMetrics>,
+) -> BinaryConsensusLoopProgress {
+    // Single-validator / LocalMesh path: no inbound P2P → engine wiring,
+    // no outbound facade. Equivalent to the pre-C4/B6 behaviour.
+    run_binary_consensus_loop_with_io(cfg, shutdown_rx, progress, metrics, None).await
+}
+
+/// Run the binary-path consensus loop with an optional inbound→engine /
+/// engine→outbound I/O surface (C4/B6).
+///
+/// When `io` is `Some`, every inbound `ConsensusNetMsg` received on
+/// `io.inbound_rx` is decoded and routed into the running engine via the
+/// real `on_proposal_event` / `on_vote_event` / `on_timeout_msg` entry
+/// points; engine-emitted `ConsensusEngineAction`s (from both inbound
+/// processing and the leader-step tick) are forwarded out through
+/// `io.outbound`. This is the smallest honest binary-path interconnect
+/// that lets multi-node `qbind-node` processes feed real consensus
+/// messages into each other's engines without `NodeHotstuffHarness`
+/// scaffolding.
+///
+/// When `io` is `None`, behaviour is identical to the pre-C4/B6 loop:
+/// the engine is driven only by leader-step ticks. This is the path
+/// the LocalMesh and single-validator DevNet runs continue to use.
+pub async fn run_binary_consensus_loop_with_io(
+    cfg: BinaryConsensusLoopConfig,
     mut shutdown_rx: watch::Receiver<()>,
     progress: Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
     metrics: Arc<NodeMetrics>,
+    io: Option<BinaryConsensusLoopIo>,
 ) -> BinaryConsensusLoopProgress {
     let validators = build_uniform_validator_set(cfg.num_validators);
     let mut engine: BasicHotStuffEngine<[u8; 32]> =
@@ -230,13 +332,6 @@ pub async fn run_binary_consensus_loop(
 
     // ----------------------------------------------------------------------
     // B5: restore-aware consensus start.
-    //
-    // If the binary handed us a restore baseline (derived from a successful
-    // `snapshot_restore::apply_snapshot_restore_if_requested`), seed the
-    // engine's committed prefix and view *before* the first tick. Without
-    // this, the loop would start from view 0 / no committed prefix and the
-    // first commit's height would be a small integer unrelated to (and
-    // typically far below) the snapshot's height.
     // ----------------------------------------------------------------------
     if let Some(baseline) = cfg.restore_baseline {
         engine.initialize_from_snapshot_baseline(
@@ -252,13 +347,22 @@ pub async fn run_binary_consensus_loop(
         );
     }
 
+    let (mut inbound_rx, outbound_facade): (
+        Option<mpsc::Receiver<ConsensusNetMsg>>,
+        Option<Arc<dyn ConsensusNetworkFacade>>,
+    ) = match io {
+        Some(io) => (Some(io.inbound_rx), Some(io.outbound)),
+        None => (None, None),
+    };
+
     eprintln!(
         "[binary-consensus] Starting consensus loop: local_id={:?} num_validators={} tick={}ms \
-         restore_baseline={}",
+         restore_baseline={} interconnect={}",
         cfg.local_validator_id,
         cfg.num_validators,
         cfg.tick_interval.as_millis(),
         cfg.restore_baseline.is_some(),
+        if outbound_facade.is_some() { "p2p" } else { "none" },
     );
 
     let mut ticker = tokio::time::interval(cfg.tick_interval);
@@ -266,76 +370,143 @@ pub async fn run_binary_consensus_loop(
 
     let mut ticks: u64 = 0;
     let mut proposals_emitted: u64 = 0;
-    // Last-observed engine state, used to compute deltas for metrics so we
-    // only ever record real progress observed live (no fake counters).
     let mut last_commits: u64 = 0;
     let mut last_view: u64 = engine.current_view();
+    let mut inbound_stats = BinaryConsensusLoopInboundStats::default();
 
     loop {
-        tokio::select! {
-            _ = shutdown_rx.changed() => {
-                eprintln!("[binary-consensus] Shutdown signal received after {} ticks.", ticks);
-                break;
-            }
-            _ = ticker.tick() => {
-                ticks = ticks.saturating_add(1);
-                let tick_started = Instant::now();
-
-                // Drive the engine. In single-validator mode, on_leader_step
-                // self-votes and forms a QC, advancing the view and (after
-                // the locking-rule prefix is satisfied) committing blocks.
-                let actions = engine.try_propose();
-                let mut tick_proposals: u64 = 0;
-                for action in &actions {
-                    if matches!(action, ConsensusEngineAction::BroadcastProposal(_)) {
-                        proposals_emitted = proposals_emitted.saturating_add(1);
-                        tick_proposals = tick_proposals.saturating_add(1);
+        // We always select on shutdown + ticker. When inbound I/O is wired
+        // we additionally select on inbound_rx so an inbound proposal/vote
+        // can wake the loop and drive engine state immediately, instead of
+        // waiting for the next tick. This is what makes the binary path
+        // reactive to peers rather than "transport up, engine isolated".
+        if let Some(rx) = inbound_rx.as_mut() {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    eprintln!(
+                        "[binary-consensus] Shutdown signal received after {} ticks.",
+                        ticks
+                    );
+                    break;
+                }
+                maybe_msg = rx.recv() => {
+                    match maybe_msg {
+                        Some(msg) => {
+                            handle_inbound_consensus_msg(
+                                &mut engine,
+                                msg,
+                                &mut inbound_stats,
+                                outbound_facade.as_deref(),
+                            );
+                            // Reflect engine state changes (view / commits)
+                            // immediately so /metrics never stalls behind
+                            // inbound progress.
+                            update_state_metrics(
+                                &engine,
+                                &metrics,
+                                &mut last_commits,
+                                &mut last_view,
+                                Duration::ZERO,
+                            );
+                            // Refresh progress snapshot.
+                            {
+                                let mut p = progress.lock();
+                                p.commits = engine.commit_log().len() as u64;
+                                p.committed_height = engine.committed_height();
+                                p.current_view = engine.current_view();
+                                p.inbound = inbound_stats;
+                            }
+                        }
+                        None => {
+                            // Inbound channel closed: stop reacting to
+                            // inbound events but keep ticking so the loop
+                            // can still shut down cleanly. We drop the
+                            // receiver to fall through to the no-io branch
+                            // on subsequent iterations.
+                            inbound_rx = None;
+                        }
                     }
                 }
-
-                let committed_height = engine.committed_height();
-                let new_commits_total = engine.commit_log().len() as u64;
-                let new_view = engine.current_view();
-                let tick_elapsed = tick_started.elapsed();
-
-                // ----------------------------------------------------------
-                // Live metrics update (binary-path → /metrics).
-                //
-                // All updates are derived from observed engine state on this
-                // very tick — never from final summaries, never speculative.
-                // ----------------------------------------------------------
-                metrics.runtime().inc_events_tick();
-                for _ in 0..tick_proposals {
-                    metrics.consensus_t154().inc_proposal_accepted();
+                _ = ticker.tick() => {
+                    ticks = ticks.saturating_add(1);
+                    let tick_started = Instant::now();
+                    do_leader_tick(
+                        &mut engine,
+                        &mut proposals_emitted,
+                        &metrics,
+                        &mut inbound_stats,
+                        outbound_facade.as_deref(),
+                    );
+                    update_state_metrics(
+                        &engine,
+                        &metrics,
+                        &mut last_commits,
+                        &mut last_view,
+                        tick_started.elapsed(),
+                    );
+                    {
+                        let mut p = progress.lock();
+                        p.ticks = ticks;
+                        p.proposals_emitted = proposals_emitted;
+                        p.commits = engine.commit_log().len() as u64;
+                        p.committed_height = engine.committed_height();
+                        p.current_view = engine.current_view();
+                        p.inbound = inbound_stats;
+                    }
+                    if let Some(cap) = cfg.max_ticks {
+                        if ticks >= cap {
+                            eprintln!(
+                                "[binary-consensus] Reached max_ticks={}, stopping.",
+                                cap
+                            );
+                            break;
+                        }
+                    }
                 }
-                let commits_delta = new_commits_total.saturating_sub(last_commits);
-                for _ in 0..commits_delta {
-                    metrics.commit().record_commit(tick_elapsed);
+            }
+        } else {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    eprintln!(
+                        "[binary-consensus] Shutdown signal received after {} ticks.",
+                        ticks
+                    );
+                    break;
                 }
-                let view_delta = new_view.saturating_sub(last_view);
-                for _ in 0..view_delta {
-                    metrics.progress().inc_view_changes();
-                }
-                metrics.consensus_t154().set_view_number(new_view);
-                metrics.view_lag().set_current_view(new_view);
-                metrics.view_lag().update_highest_seen_view(new_view);
-
-                last_commits = new_commits_total;
-                last_view = new_view;
-
-                // Update progress snapshot.
-                let mut p = progress.lock();
-                p.ticks = ticks;
-                p.proposals_emitted = proposals_emitted;
-                p.commits = new_commits_total;
-                p.committed_height = committed_height;
-                p.current_view = new_view;
-                drop(p);
-
-                if let Some(cap) = cfg.max_ticks {
-                    if ticks >= cap {
-                        eprintln!("[binary-consensus] Reached max_ticks={}, stopping.", cap);
-                        break;
+                _ = ticker.tick() => {
+                    ticks = ticks.saturating_add(1);
+                    let tick_started = Instant::now();
+                    do_leader_tick(
+                        &mut engine,
+                        &mut proposals_emitted,
+                        &metrics,
+                        &mut inbound_stats,
+                        outbound_facade.as_deref(),
+                    );
+                    update_state_metrics(
+                        &engine,
+                        &metrics,
+                        &mut last_commits,
+                        &mut last_view,
+                        tick_started.elapsed(),
+                    );
+                    {
+                        let mut p = progress.lock();
+                        p.ticks = ticks;
+                        p.proposals_emitted = proposals_emitted;
+                        p.commits = engine.commit_log().len() as u64;
+                        p.committed_height = engine.committed_height();
+                        p.current_view = engine.current_view();
+                        p.inbound = inbound_stats;
+                    }
+                    if let Some(cap) = cfg.max_ticks {
+                        if ticks >= cap {
+                            eprintln!(
+                                "[binary-consensus] Reached max_ticks={}, stopping.",
+                                cap
+                            );
+                            break;
+                        }
                     }
                 }
             }
@@ -344,14 +515,222 @@ pub async fn run_binary_consensus_loop(
 
     let final_progress = progress.lock().clone();
     eprintln!(
-        "[binary-consensus] Loop exit: ticks={} proposals={} commits={} committed_height={:?} view={}",
+        "[binary-consensus] Loop exit: ticks={} proposals={} commits={} committed_height={:?} \
+         view={} inbound_msgs={} inbound_proposals={} inbound_votes={} \
+         outbound_proposals={} outbound_votes={}",
         final_progress.ticks,
         final_progress.proposals_emitted,
         final_progress.commits,
         final_progress.committed_height,
         final_progress.current_view,
+        final_progress.inbound.inbound_msgs_received,
+        final_progress.inbound.inbound_proposals_delivered,
+        final_progress.inbound.inbound_votes_delivered,
+        final_progress.inbound.outbound_proposals_sent,
+        final_progress.inbound.outbound_votes_sent,
     );
     final_progress
+}
+
+/// Drive a single leader-step tick of the engine and forward any resulting
+/// network actions through the (optional) outbound facade.
+fn do_leader_tick(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    proposals_emitted: &mut u64,
+    metrics: &Arc<NodeMetrics>,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+) {
+    let actions = engine.try_propose();
+    let mut tick_proposals: u64 = 0;
+    for action in &actions {
+        if matches!(action, ConsensusEngineAction::BroadcastProposal(_)) {
+            *proposals_emitted = proposals_emitted.saturating_add(1);
+            tick_proposals = tick_proposals.saturating_add(1);
+        }
+    }
+    metrics.runtime().inc_events_tick();
+    for _ in 0..tick_proposals {
+        metrics.consensus_t154().inc_proposal_accepted();
+    }
+    if let Some(facade) = outbound {
+        forward_actions_to_facade(actions, facade, inbound_stats);
+    }
+}
+
+/// Forward a list of `ConsensusEngineAction`s through a
+/// [`ConsensusNetworkFacade`]. Errors are logged but do not stop the loop;
+/// per-action delivery is best-effort and the engine itself remains the
+/// source of truth for protocol progress.
+fn forward_actions_to_facade(
+    actions: Vec<ConsensusEngineAction<ValidatorId>>,
+    facade: &dyn ConsensusNetworkFacade,
+    inbound_stats: &mut BinaryConsensusLoopInboundStats,
+) {
+    for action in actions {
+        match action {
+            ConsensusEngineAction::BroadcastProposal(proposal) => {
+                if let Err(e) = facade.broadcast_proposal(&proposal) {
+                    eprintln!(
+                        "[binary-consensus] outbound broadcast_proposal failed: {:?}",
+                        e
+                    );
+                } else {
+                    inbound_stats.outbound_proposals_sent =
+                        inbound_stats.outbound_proposals_sent.saturating_add(1);
+                }
+            }
+            ConsensusEngineAction::BroadcastVote(vote) => {
+                if let Err(e) = facade.broadcast_vote(&vote) {
+                    eprintln!(
+                        "[binary-consensus] outbound broadcast_vote failed: {:?}",
+                        e
+                    );
+                } else {
+                    inbound_stats.outbound_votes_sent =
+                        inbound_stats.outbound_votes_sent.saturating_add(1);
+                }
+            }
+            ConsensusEngineAction::SendVoteTo { to, vote } => {
+                if let Err(e) = facade.send_vote_to(to, &vote) {
+                    eprintln!(
+                        "[binary-consensus] outbound send_vote_to({:?}) failed: {:?}",
+                        to, e
+                    );
+                } else {
+                    inbound_stats.outbound_send_vote_to =
+                        inbound_stats.outbound_send_vote_to.saturating_add(1);
+                }
+            }
+            ConsensusEngineAction::Noop => {}
+        }
+    }
+}
+
+/// Decode an inbound `ConsensusNetMsg` and feed it into the engine through
+/// the same `on_proposal_event` / `on_vote_event` entry points the existing
+/// HotStuff harnesses already exercise. Resulting engine actions are
+/// forwarded through `outbound` so the upstream node sees the response.
+///
+/// The wire-encoded `BlockProposal::header.proposer_index` and
+/// `Vote::validator_index` carry the sender's `ValidatorId`. We do not
+/// invent any peer-identity layer here: it is the same convention the
+/// `qbind-wire` consensus types expose to the rest of the codebase.
+///
+/// Decode failures and engine-level rejections (e.g. wrong epoch) are
+/// counted in `stats` but never panic — they are exactly the kinds of
+/// peer-induced failures the binary path must tolerate.
+fn handle_inbound_consensus_msg(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    msg: ConsensusNetMsg,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+) {
+    use qbind_wire::consensus::{BlockProposal, Vote};
+    use qbind_wire::io::WireDecode;
+
+    stats.inbound_msgs_received = stats.inbound_msgs_received.saturating_add(1);
+
+    match msg {
+        ConsensusNetMsg::Proposal(bytes) => {
+            let mut slice: &[u8] = &bytes;
+            match BlockProposal::decode(&mut slice) {
+                Ok(proposal) => {
+                    let from = ValidatorId::new(proposal.header.proposer_index as u64);
+                    stats.inbound_proposals_delivered =
+                        stats.inbound_proposals_delivered.saturating_add(1);
+                    if let Some(action) = engine.on_proposal_event(from, &proposal) {
+                        if let Some(facade) = outbound {
+                            forward_actions_to_facade(vec![action], facade, stats);
+                        }
+                    }
+                }
+                Err(e) => {
+                    stats.inbound_decode_failures =
+                        stats.inbound_decode_failures.saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] inbound proposal decode failed: {:?}",
+                        e
+                    );
+                }
+            }
+        }
+        ConsensusNetMsg::Vote(bytes) => {
+            let mut slice: &[u8] = &bytes;
+            match Vote::decode(&mut slice) {
+                Ok(vote) => {
+                    let from = ValidatorId::new(vote.validator_index as u64);
+                    match engine.on_vote_event(from, &vote) {
+                        Ok(_) => {
+                            stats.inbound_votes_delivered =
+                                stats.inbound_votes_delivered.saturating_add(1);
+                        }
+                        Err(e) => {
+                            stats.inbound_vote_engine_rejects =
+                                stats.inbound_vote_engine_rejects.saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] inbound vote rejected by engine: {:?}",
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    stats.inbound_decode_failures =
+                        stats.inbound_decode_failures.saturating_add(1);
+                    eprintln!("[binary-consensus] inbound vote decode failed: {:?}", e);
+                }
+            }
+        }
+        ConsensusNetMsg::Timeout(_bytes) => {
+            // Timeout / view-change ingestion on the binary path is
+            // intentionally deferred: the existing
+            // `BasicHotStuffEngine::on_timeout_msg` API takes a typed
+            // `TimeoutMsg`, but `ConsensusNetMsg::Timeout` carries opaque
+            // bytes whose canonical decoder is not yet exposed by
+            // `qbind-wire` for general-purpose deserialization. Counting it
+            // as "received but unhandled" keeps the binary path honest:
+            // we don't silently drop it as if it were a NoOp.
+            stats.inbound_decode_failures =
+                stats.inbound_decode_failures.saturating_add(1);
+        }
+        ConsensusNetMsg::NewView(_bytes) => {
+            // NewView is reserved for a future view-change protocol
+            // extension (see `ConsensusNetMsg::NewView` doc). The current
+            // engine does not consume it; we record it as
+            // received-but-not-routable rather than fake a Noop.
+            stats.inbound_decode_failures =
+                stats.inbound_decode_failures.saturating_add(1);
+        }
+    }
+}
+
+/// Refresh `/metrics` and progress-tracking variables based on the current
+/// engine state. Called from both leader-step ticks and inbound-message
+/// branches so /metrics reflects live progress regardless of which
+/// codepath last advanced the engine.
+fn update_state_metrics(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    metrics: &Arc<NodeMetrics>,
+    last_commits: &mut u64,
+    last_view: &mut u64,
+    tick_elapsed: Duration,
+) {
+    let new_commits_total = engine.commit_log().len() as u64;
+    let new_view = engine.current_view();
+    let commits_delta = new_commits_total.saturating_sub(*last_commits);
+    for _ in 0..commits_delta {
+        metrics.commit().record_commit(tick_elapsed);
+    }
+    let view_delta = new_view.saturating_sub(*last_view);
+    for _ in 0..view_delta {
+        metrics.progress().inc_view_changes();
+    }
+    metrics.consensus_t154().set_view_number(new_view);
+    metrics.view_lag().set_current_view(new_view);
+    metrics.view_lag().update_highest_seen_view(new_view);
+    *last_commits = new_commits_total;
+    *last_view = new_view;
 }
 
 /// Spawn `run_binary_consensus_loop` on the current tokio runtime. Returns a
@@ -369,6 +748,39 @@ pub fn spawn_binary_consensus_loop(
     let progress_for_task = progress.clone();
     let handle = tokio::spawn(async move {
         run_binary_consensus_loop(cfg, shutdown_rx, progress_for_task, metrics).await
+    });
+    (handle, progress)
+}
+
+/// Spawn the binary-path consensus loop with C4/B6 inbound→engine
+/// interconnect wiring (multi-validator P2P).
+///
+/// This is the variant `qbind-node`'s P2P main path uses: it threads a
+/// `ChannelConsensusHandler`-backed `mpsc::Receiver<ConsensusNetMsg>` plus
+/// a `P2pConsensusNetwork` outbound facade into the loop, so inbound
+/// proposals/votes from peers are decoded and fed into
+/// `BasicHotStuffEngine::on_proposal_event` / `on_vote_event`, and the
+/// engine's resulting actions are sent back out the existing P2P path.
+pub fn spawn_binary_consensus_loop_with_io(
+    cfg: BinaryConsensusLoopConfig,
+    shutdown_rx: watch::Receiver<()>,
+    metrics: Arc<NodeMetrics>,
+    io: BinaryConsensusLoopIo,
+) -> (
+    JoinHandle<BinaryConsensusLoopProgress>,
+    Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
+) {
+    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress_for_task = progress.clone();
+    let handle = tokio::spawn(async move {
+        run_binary_consensus_loop_with_io(
+            cfg,
+            shutdown_rx,
+            progress_for_task,
+            metrics,
+            Some(io),
+        )
+        .await
     });
     (handle, progress)
 }

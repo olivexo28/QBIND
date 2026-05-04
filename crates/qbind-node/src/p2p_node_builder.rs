@@ -54,13 +54,12 @@
 
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::consensus_net_p2p::{P2pConsensusNetwork, SimpleValidatorNodeMapping};
 use crate::metrics::P2pMetrics;
 use crate::node_config::NodeConfig;
-use crate::p2p::{NodeId, P2pMessage, P2pService};
+use crate::p2p::{NodeId, P2pService};
 use crate::p2p_inbound::{
     ConsensusInboundHandler, ControlInboundHandler, DagInboundHandler, NullConsensusHandler,
     NullControlHandler, NullDagHandler, P2pInboundDemuxer,
@@ -436,10 +435,18 @@ impl P2pNodeBuilder {
         // Create metrics
         let metrics = Arc::new(P2pMetrics::new());
 
-        // Get inbound receiver from P2P service
-        // Note: TcpKemTlsP2pService uses an internal channel; for T175 we use
-        // a simple channel-based approach
-        let (_inbound_tx, inbound_rx) = mpsc::channel::<P2pMessage>(256);
+        // Get inbound receiver from P2P service.
+        //
+        // C4/B6 fix: previously this code created a fresh, immediately-dropped
+        // mpsc channel and plugged its receiver into the demuxer, which meant
+        // every frame the transport actually delivered (via its internal
+        // `inbound_tx`) was silently lost — the demuxer received nothing,
+        // regardless of which `ConsensusInboundHandler` was wired in. We now
+        // call `p2p_service.subscribe().await`, which is the real fan-out
+        // surface exposed by `TcpKemTlsP2pService` over its shared inbound
+        // queue, so inbound consensus / DAG / control frames actually reach
+        // the demuxer (and from there, whatever handler the caller installed).
+        let inbound_rx = p2p_service.subscribe().await;
 
         // Create handlers (use provided or default null handlers)
         let consensus_handler: Arc<dyn ConsensusInboundHandler> = self
