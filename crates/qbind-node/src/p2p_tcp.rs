@@ -277,6 +277,35 @@ pub struct TcpKemTlsP2pService {
     bytes_received: Arc<AtomicU64>,
     /// Inbound session counter for generating unique temporary NodeIds (M7).
     inbound_session_counter: Arc<AtomicU64>,
+    /// B7: per-peer KEM public key overrides keyed by static-peer address.
+    ///
+    /// When `dial_peer(addr)` finds an entry here, it clones `client_cfg`
+    /// and replaces `peer_kem_pk` with the per-peer value before handing
+    /// the config to `connect_kemtls_async`. This is the smallest honest
+    /// fix to the Run 005 KEMTLS bring-up failure: each side now dials
+    /// with the *peer's* KEM public key rather than its own. The dialer's
+    /// resulting `NodeId = sha3_256_tagged("QBIND:nodeid:v1", peer_kem_pk)`
+    /// then matches the deterministic NodeId every other layer derives for
+    /// that validator (see `consensus_net_p2p::SimpleValidatorNodeMapping`
+    /// and `p2p_node_builder::derive_test_node_id_from_validator_id`).
+    ///
+    /// Empty by default — the no-static-peers / single-validator path is
+    /// unaffected. Set via `set_peer_kem_pk_overrides`.
+    peer_kem_pk_overrides: Arc<RwLock<HashMap<String, Vec<u8>>>>,
+    /// B7: per-peer expected validator id overrides keyed by static-peer
+    /// address.
+    ///
+    /// The KEMTLS-PDK protocol verifies that the server's delegation
+    /// cert's `validator_id` equals the value the client put in its
+    /// `ClientInit.validator_id` (i.e., "the validator I expect to be
+    /// connecting to" — see `qbind_net::connection::ClientConnectionConfig`
+    /// docs and `qbind_net::handshake::handle_server_accept`). When
+    /// `dial_peer(addr)` finds an entry here, it also overrides
+    /// `client_cfg.validator_id` so this check passes. Without it the
+    /// dialer always sends its own local validator id and the handshake
+    /// fails with `client handle_server_accept failed` even after
+    /// `peer_kem_pk` is correct.
+    peer_validator_id_overrides: Arc<RwLock<HashMap<String, [u8; 32]>>>,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -318,7 +347,44 @@ impl TcpKemTlsP2pService {
             bytes_sent: Arc::new(AtomicU64::new(0)),
             bytes_received: Arc::new(AtomicU64::new(0)),
             inbound_session_counter: Arc::new(AtomicU64::new(0)),
+            peer_kem_pk_overrides: Arc::new(RwLock::new(HashMap::new())),
+            peer_validator_id_overrides: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// B7: install per-peer KEM public key overrides used by `dial_peer`.
+    ///
+    /// Each entry maps a static-peer address (the same string from
+    /// `NetworkTransportConfig::static_peers`, after stripping any
+    /// `vid@` prefix) to the *peer's* test-grade KEM public key. When
+    /// `start()` walks `static_peers` and dials each address, the dial
+    /// path consults this map and uses the per-peer pk as
+    /// `client_cfg.peer_kem_pk` so the KEMTLS handshake actually
+    /// encapsulates to the correct peer. See
+    /// `crates/qbind-node/src/p2p_node_builder.rs::P2pNodeBuilder::build`
+    /// (the only current caller) and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_005.md` §13.
+    pub fn set_peer_kem_pk_overrides(&mut self, overrides: HashMap<String, Vec<u8>>) {
+        let mut guard = self.peer_kem_pk_overrides.write();
+        *guard = overrides;
+    }
+
+    /// B7: install per-peer expected-validator-id overrides used by `dial_peer`.
+    ///
+    /// Each entry maps a static-peer address (after `vid@` stripping)
+    /// to the 32-byte `validator_id` field that the dialer should put
+    /// in its `ClientInit` so the protocol-level check
+    /// `delegation_cert.validator_id == client_init.validator_id`
+    /// (`qbind_net::handshake::handle_server_accept`) passes. The
+    /// dialer otherwise defaults to its own local validator id which
+    /// would fail this check the moment two distinct binaries try to
+    /// connect to each other.
+    pub fn set_peer_validator_id_overrides(
+        &mut self,
+        overrides: HashMap<String, [u8; 32]>,
+    ) {
+        let mut guard = self.peer_validator_id_overrides.write();
+        *guard = overrides;
     }
 
     /// Start the P2P service: listen on configured address and dial static peers.
@@ -428,11 +494,27 @@ impl TcpKemTlsP2pService {
         bytes_received: Arc<AtomicU64>,
         inbound_session_counter: Arc<AtomicU64>,
     ) -> Result<(), P2pTransportError> {
-        // Convert Tokio stream to std::net::TcpStream for KEMTLS handshake
-        let _std_stream = stream.into_std().map_err(P2pTransportError::Io)?;
+        // Convert Tokio stream to std::net::TcpStream for KEMTLS handshake.
+        //
+        // B7: a tokio `TcpStream` returned from `into_std()` keeps the
+        // underlying socket in non-blocking mode. The KEMTLS handshake
+        // performed by `accept_kemtls_async` -> `SecureChannel::from_accepted`
+        // does *blocking* reads, so without flipping the mode back to
+        // blocking we observe `Io { kind: WouldBlock, "Resource
+        // temporarily unavailable" }` on the very first handshake read
+        // and the inbound session is dropped — which is the second
+        // half of the Run 005 negative finding (handshake never
+        // completes between two real binaries). Setting blocking mode
+        // here is the smallest honest fix; the post-handshake async
+        // wrapper (`SecureChannelAsync::try_new`) is the one that flips
+        // the socket back to non-blocking for the worker loop.
+        let std_stream = stream.into_std().map_err(P2pTransportError::Io)?;
+        std_stream
+            .set_nonblocking(false)
+            .map_err(P2pTransportError::Io)?;
 
         // Perform KEMTLS handshake (blocking)
-        let channel = accept_kemtls_async(_std_stream, server_cfg.clone())
+        let channel = accept_kemtls_async(std_stream, server_cfg.clone())
             .await
             .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
@@ -489,15 +571,61 @@ impl TcpKemTlsP2pService {
         // Convert to std::net::TcpStream for KEMTLS handshake
         let _std_stream = stream.into_std().map_err(P2pTransportError::Io)?;
 
+        // B7: clone the template `client_cfg` and, if a per-peer override
+        // exists for this address, replace `peer_kem_pk` (so the KEMTLS
+        // KEM ciphertext actually encapsulates to the peer's static
+        // KEM key) AND `validator_id` (so the protocol-level check
+        // `delegation_cert.validator_id == client_init.validator_id`
+        // in `handle_server_accept` passes). This is the concrete fix
+        // for the Run 005 failure mode where the dialer was both
+        // encapsulating to its own KEM pk and sending its own validator
+        // id as the expected-server identity.
+        let client_cfg = {
+            let mut cfg = self.client_cfg.clone();
+            let pk_opt = self.peer_kem_pk_overrides.read().get(&peer_addr).cloned();
+            let vid_opt = self
+                .peer_validator_id_overrides
+                .read()
+                .get(&peer_addr)
+                .cloned();
+            if let Some(pk) = pk_opt {
+                cfg.peer_kem_pk = pk;
+                if let Some(vid) = vid_opt {
+                    cfg.validator_id = vid;
+                }
+                println!(
+                    "[P2P] Dial {}: using per-peer KEM pk + validator-id override (pk_len={}, has_vid={})",
+                    peer_addr,
+                    cfg.peer_kem_pk.len(),
+                    vid_opt.is_some(),
+                );
+            } else {
+                eprintln!(
+                    "[P2P] WARN: dialing {} without a per-peer KEM pk override; \
+                     handshake will only succeed if the peer happens to share \
+                     this node's KEM keypair (single-validator / smoke only). \
+                     Multi-validator binary-path runs must use --p2p-peer \
+                     'vid@addr' so the dialer can derive the peer's KEM pk.",
+                    peer_addr
+                );
+            }
+            cfg
+        };
+
         // Perform KEMTLS handshake (blocking)
-        let channel = connect_kemtls_async(peer_addr.clone(), self.client_cfg.clone())
+        let channel = connect_kemtls_async(peer_addr.clone(), client_cfg.clone())
             .await
             .map_err(|e| P2pTransportError::Handshake(e.to_string()))?;
 
         // M7: Derive NodeId from peer's KEM public key (cryptographic binding)
         // The peer_kem_pk in client_cfg is the server's KEM public key that we
         // are connecting to. NodeId = sha3_256("QBIND:nodeid:v1" || peer_kem_pk)
-        let node_id_bytes = derive_node_id_from_pubkey(&self.client_cfg.peer_kem_pk);
+        //
+        // B7: with the override applied above, this NodeId is now the
+        // deterministic test-grade NodeId of the peer's validator (matching
+        // `SimpleValidatorNodeMapping`), which is what closes peer-validator
+        // identity for `send_to(ValidatorId)` on the dialer side.
+        let node_id_bytes = derive_node_id_from_pubkey(&client_cfg.peer_kem_pk);
         let node_id = NodeId::new(node_id_bytes);
 
         self.connections_current.fetch_add(1, Ordering::Relaxed);

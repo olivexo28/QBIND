@@ -113,11 +113,25 @@ impl SimpleValidatorNodeMapping {
     }
 
     /// Derive a NodeId from a validator index (for testing/simple deployments).
+    ///
+    /// **B7**: this rule MUST agree with the dialer's NodeId derivation
+    /// in `TcpKemTlsP2pService::dial_peer` (which uses
+    /// `qbind_hash::derive_node_id_from_pubkey(client_cfg.peer_kem_pk)`)
+    /// and with the local-NodeId derivation in `P2pNodeBuilder::build`.
+    /// All three converge on `sha3_256_tagged("QBIND:nodeid:v1",
+    /// test_kem_pk(vid))` so that `send_to(ValidatorId)` resolves to
+    /// the same `NodeId` the transport actually registered for that
+    /// peer's connection. See
+    /// `crates/qbind-node/src/p2p_node_builder.rs::derive_test_node_id_from_validator_id`.
     fn node_id_from_validator_index(index: usize) -> NodeId {
-        let mut bytes = [0u8; 32];
-        let index_bytes = (index as u64).to_le_bytes();
-        bytes[..8].copy_from_slice(&index_bytes);
-        NodeId::new(bytes)
+        // Build the same deterministic test-grade KEM public key the
+        // listener for `index` uses (see `derive_test_kem_keypair_from_validator_id`)
+        // and then derive the NodeId from it via the network nodeid
+        // derivation rule.
+        let pk: Vec<u8> = (0u8..32u8)
+            .map(|i| i.wrapping_add(index as u8))
+            .collect();
+        NodeId::new(qbind_hash::derive_node_id_from_pubkey(&pk))
     }
 
     /// Add a specific validator-node mapping.
