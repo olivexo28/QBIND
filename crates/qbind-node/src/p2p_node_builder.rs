@@ -383,6 +383,59 @@ pub fn derive_test_node_id_from_validator_id(vid: u64) -> NodeId {
     NodeId::new(qbind_hash::derive_node_id_from_pubkey(&pk))
 }
 
+/// Recover the dialer's local validator id from the `client_random`
+/// field of a server-accepted `ClientInit` (B8 — listener-side identity
+/// closure, test-grade).
+///
+/// `P2pNodeBuilder::create_connection_configs` deterministically embeds
+/// the ASCII prefix `"qbind-client-<N>"` (zero-padded to 32 bytes) in
+/// the dialer's `client_random` (see the `client_random` construction
+/// there). This helper inverts that rule: given a 32-byte
+/// `client_random`, it returns `Some(N)` if the prefix matches the
+/// expected `"qbind-client-"` literal followed by an ASCII decimal
+/// integer, and `None` otherwise.
+///
+/// # Security semantics
+///
+/// This is **test-grade only**. The `client_random` field is NOT
+/// authenticated by the test-grade KEMTLS handshake under
+/// `MutualAuthMode::Disabled` — a malicious dialer could spoof any vid
+/// here. Production-grade peer identity binding requires mutual KEMTLS
+/// auth (`MutualAuthMode::Required` in `qbind-net`), which is tracked
+/// under C4 in `docs/whitepaper/contradiction.md`. B8 deliberately does
+/// NOT change that.
+///
+/// What B8 does provide is enough determinism for two cooperating
+/// `qbind-node` binaries on the test-grade DevNet path to register
+/// inbound sessions under the same NodeId the dialer side already uses
+/// — closing the listener-side "temporary session NodeId" gap observed
+/// in DevNet Evidence Run 006 — without inventing a new identity
+/// system.
+pub fn parse_test_validator_id_from_client_random(client_random: &[u8; 32]) -> Option<u64> {
+    const PREFIX: &[u8] = b"qbind-client-";
+    if !client_random.starts_with(PREFIX) {
+        return None;
+    }
+    // Take the digits after the prefix, stopping at the first non-ASCII-digit
+    // byte (which will typically be the trailing zero-padding).
+    let tail = &client_random[PREFIX.len()..];
+    let mut end = 0usize;
+    while end < tail.len() && tail[end].is_ascii_digit() {
+        end += 1;
+    }
+    if end == 0 {
+        return None;
+    }
+    // Bound the number of digits we accept to avoid surprises (a `u64`
+    // fits in 20 ASCII decimal digits).
+    if end > 20 {
+        return None;
+    }
+    // SAFETY: tail[..end] is by construction all ASCII digits.
+    let s = std::str::from_utf8(&tail[..end]).ok()?;
+    s.parse::<u64>().ok()
+}
+
 /// Parse a `--p2p-peer` spec which may be either `addr` or `vid@addr`.
 ///
 /// Returns `Ok((Some(vid), addr))` when the spec is `vid@addr` (e.g.
@@ -615,6 +668,42 @@ impl P2pNodeBuilder {
             p2p_service.set_peer_kem_pk_overrides(peer_kem_pk_overrides);
             p2p_service.set_peer_validator_id_overrides(peer_vid_overrides);
         }
+
+        // B8: install the test-grade listener-side identity resolver.
+        //
+        // The resolver inspects the dialer's already-on-the-wire
+        // `client_random` (deterministically prefixed by
+        // `qbind-client-<N>` in `create_connection_configs` below) to
+        // recover the dialer's local validator id `N`, then derives the
+        // SAME deterministic NodeId the dialer side already registers
+        // its own connection under (via
+        // `derive_test_node_id_from_validator_id`). This closes the
+        // listener-side gap that DevNet Evidence Run 006 documented:
+        // accepted inbound sessions are now bound to the validator-
+        // derived deterministic NodeId rather than to a temporary
+        // session NodeId, so `send_to(ValidatorId)` resolves to a
+        // registered transport session in BOTH directions.
+        //
+        // **Security semantics:** test-grade only. Under the current
+        // `MutualAuthMode::Disabled` configuration the dialer's
+        // `client_random` is self-asserted; production-grade peer
+        // identity binding still requires mutual KEMTLS auth and is
+        // tracked under C4 in `docs/whitepaper/contradiction.md`. This
+        // is strictly no weaker than the pre-B8 temporary-NodeId path
+        // — it just gives that NodeId a deterministic, routable shape
+        // when the dialer cooperates.
+        //
+        // If the resolver returns `None` (e.g. an unrelated tool
+        // connects with a non-`qbind-client-N` `client_random`), the
+        // transport falls back to the legacy temporary-session-NodeId
+        // path automatically. No silent override.
+        p2p_service.set_inbound_identity_resolver(Arc::new(
+            |peer_init: &crate::secure_channel::AcceptedPeerInit| -> Option<NodeId> {
+                let vid =
+                    parse_test_validator_id_from_client_random(&peer_init.client_random)?;
+                Some(derive_test_node_id_from_validator_id(vid))
+            },
+        ));
 
         // Start the service
         p2p_service.start().await?;

@@ -67,10 +67,58 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use qbind_net::{
-    read_handshake_packet, read_transport_frame, write_handshake_packet, write_transport_frame,
-    ClientConnectionConfig, Connection, HandshakePacket, NetError, ServerConnectionConfig,
-    TransportFrame,
+    read_handshake_packet, read_transport_frame, unpack_client_init, write_handshake_packet,
+    write_transport_frame, ClientConnectionConfig, Connection, HandshakePacket, NetError,
+    ServerConnectionConfig, TransportFrame,
 };
+
+/// Snapshot of the dialer-supplied fields surfaced from a server-side
+/// KEMTLS handshake (B8 — listener-side identity closure).
+///
+/// These fields come from the dialer's `ClientInit` and are exposed
+/// from the server-side accept path so that the transport can register
+/// the accepted session under a NodeId derived from the dialer's
+/// already-on-the-wire identity hints, rather than only a temporary
+/// session-unique NodeId.
+///
+/// # Security semantics (test-grade)
+///
+/// - In the current test-grade DevNet bring-up
+///   (`MutualAuthMode::Disabled` in `p2p_node_builder::create_connection_configs`),
+///   the dialer does NOT send a client cert, so these fields are
+///   *self-asserted*: the dialer is trusted (or not) the same way it is
+///   under the legacy temporary-session-NodeId path. This is strictly
+///   no weaker than the pre-B8 behaviour.
+/// - `validator_id` here is the value the dialer put in
+///   `ClientInit.validator_id`; per `qbind_net::handshake::handle_server_accept`
+///   the dialer sets that to the *server's* expected validator id (so
+///   the cert check `delegation_cert.validator_id == client_init.validator_id`
+///   passes). It is NOT the dialer's own validator id.
+/// - `client_random` is the dialer's random contribution to the
+///   handshake. The QBIND test-grade `P2pNodeBuilder::create_connection_configs`
+///   deterministically embeds the ASCII prefix `"qbind-client-<N>"` at
+///   the start of `client_random`, where `<N>` is the dialer's local
+///   validator id. The transport can therefore extract the dialer's vid
+///   from `client_random` for test-grade routing — see
+///   `p2p_node_builder::parse_test_validator_id_from_client_random`.
+/// - Production-grade peer identity binding is mutual KEMTLS auth
+///   (`MutualAuthMode::Required`), tracked under C4 in
+///   `docs/whitepaper/contradiction.md`. B8 does NOT change that.
+#[derive(Clone, Copy, Debug)]
+pub struct AcceptedPeerInit {
+    /// The dialer's `ClientInit.client_random` field (32 bytes).
+    pub client_random: [u8; 32],
+    /// The dialer's `ClientInit.validator_id` field (32 bytes).
+    ///
+    /// **Note:** this is the *server's* expected validator id from the
+    /// dialer's perspective (see type-level docs), NOT the dialer's
+    /// own identity. The dialer's identity hint is recovered from
+    /// `client_random`, not from this field. We surface it here only
+    /// for completeness / future use; current consumers (e.g. the
+    /// `InboundIdentityResolver` installed by `P2pNodeBuilder`) parse
+    /// `client_random`.
+    pub validator_id: [u8; 32],
+}
 
 /// Default timeout for socket read/write operations (in seconds).
 const DEFAULT_SOCKET_TIMEOUT_SECS: u64 = 10;
@@ -218,6 +266,61 @@ impl SecureChannel {
         }
 
         Ok(SecureChannel { stream, conn })
+    }
+
+    /// Like [`SecureChannel::from_accepted`], but additionally surfaces
+    /// the dialer-supplied `client_random` and `validator_id` fields
+    /// from the parsed `ClientInit` so the caller can register the
+    /// accepted session under a non-temporary, deterministic NodeId
+    /// (B8 — listener-side identity closure).
+    ///
+    /// The handshake itself is identical: `ClientInit` → `ServerAccept`
+    /// is processed by `Connection::handle_handshake_frame` exactly as
+    /// `from_accepted` does. The only difference is that this method
+    /// also runs `unpack_client_init` on the same incoming packet so it
+    /// can return the relevant dialer-supplied fields alongside the
+    /// established channel. The cost is one extra parse of bytes the
+    /// server already had to read.
+    ///
+    /// See [`AcceptedPeerInit`] for the semantics (test-grade,
+    /// self-asserted; not stronger than the pre-B8 behaviour).
+    pub fn from_accepted_with_peer_init(
+        mut stream: TcpStream,
+        cfg: ServerConnectionConfig,
+    ) -> Result<(Self, AcceptedPeerInit), ChannelError> {
+        configure_socket(&stream);
+
+        // 1. Create server Connection
+        let mut conn = Connection::new_server(cfg);
+
+        // 2. Read client's ClientInit packet
+        let client_pkt = read_handshake_packet(&mut stream)?;
+
+        // 2b. Parse the dialer's ClientInit so we can surface the
+        //     `client_random` and `validator_id` fields. The fully
+        //     authoritative cert/cookie/KEM checks still happen below
+        //     inside `Connection::handle_handshake_frame`.
+        let client_init = unpack_client_init(&client_pkt)?;
+        let peer_init = AcceptedPeerInit {
+            client_random: client_init.client_random,
+            validator_id: client_init.validator_id,
+        };
+
+        // 3. Let Connection process and produce ServerAccept
+        let reply_bytes_opt = conn.handle_handshake_frame(&client_pkt.encode())?;
+        let reply_bytes = reply_bytes_opt.ok_or(ChannelError::Net(NetError::Protocol(
+            "server did not produce reply",
+        )))?;
+
+        // 4. Send ServerAccept
+        let reply_pkt = HandshakePacket::decode(&reply_bytes)?;
+        write_handshake_packet(&mut stream, &reply_pkt)?;
+
+        if !conn.is_established() {
+            return Err(NetError::Protocol("server handshake not established").into());
+        }
+
+        Ok((SecureChannel { stream, conn }, peer_init))
     }
 
     /// Encrypt and send an application message.
@@ -810,4 +913,34 @@ pub async fn accept_kemtls_async(
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     Ok(async_channel)
+}
+
+/// Like [`accept_kemtls_async`], but additionally returns the
+/// dialer-supplied `client_random` and `validator_id` fields from the
+/// parsed `ClientInit` so the caller can register the accepted session
+/// under a non-temporary, deterministic NodeId (B8 — listener-side
+/// identity closure).
+///
+/// See [`AcceptedPeerInit`] for the semantics (test-grade,
+/// self-asserted; not stronger than the pre-B8 behaviour).
+pub async fn accept_kemtls_async_with_peer_init(
+    stream: TcpStream,
+    cfg: ServerConnectionConfig,
+) -> Result<(SecureChannelAsync, AcceptedPeerInit), AsyncChannelError> {
+    // Perform the blocking handshake in spawn_blocking. This variant
+    // also produces the parsed `AcceptedPeerInit`.
+    let (channel, peer_init) = tokio::task::spawn_blocking(move || {
+        SecureChannel::from_accepted_with_peer_init(stream, cfg)
+    })
+    .await
+    .map_err(|e| AsyncChannelError::TaskJoin(e.to_string()))?
+    .map_err(AsyncChannelError::Channel)?;
+
+    // Create the async wrapper outside the blocking context
+    let async_channel = SecureChannelAsync::try_new(channel)?;
+
+    // Give workers a moment to start
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    Ok((async_channel, peer_init))
 }
