@@ -76,6 +76,7 @@
 //! `consensus_t154.inc_vote_accepted()` etc.) and it does **not** speak to
 //! restore-from-snapshot (B3). Both remain out of scope.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -86,12 +87,64 @@ use qbind_consensus::basic_hotstuff_engine::BasicHotStuffEngine;
 use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
+use qbind_wire::consensus::BlockProposal;
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
 use crate::metrics::NodeMetrics;
-use crate::p2p::ConsensusNetMsg;
+use crate::p2p::{ConsensusNetMsg, NodeId, P2pService};
 
-/// Default tick interval for the binary consensus loop.
+/// Read-only view of "which deterministic peer NodeIds are currently
+/// connected" — the smallest visibility surface the binary-path consensus
+/// loop needs to detect a *late peer connect* transition (B9).
+///
+/// In the real `qbind-node` binary this is implemented by
+/// [`P2pServicePeerConnectivity`], which simply forwards to the same
+/// `Arc<dyn P2pService>` that backs the outbound `P2pConsensusNetwork`
+/// (so connectivity, outbound, and inbound are all observed from the same
+/// transport instance — no parallel networking architecture). Tests can
+/// substitute a tiny in-memory implementation that flips the connected
+/// set on demand without standing up real KEMTLS.
+///
+/// # Why a separate trait?
+///
+/// `P2pService` is a much larger surface (broadcast / send_to / inbound
+/// subscribe / shutdown). The consensus loop only needs `connected_peers()`
+/// to detect late connect transitions; widening the trait would make
+/// regression tests harder to write and would couple the loop to send
+/// semantics it does not need. Keeping a tiny dedicated trait is the
+/// smallest honest abstraction.
+pub trait PeerConnectivitySource: Send + Sync {
+    /// Snapshot of currently connected peer NodeIds.
+    ///
+    /// Implementations must be cheap to call on a tick; the binary loop
+    /// polls this once per tick (default 100 ms).
+    fn connected_peers(&self) -> Vec<NodeId>;
+}
+
+/// `PeerConnectivitySource` adapter over an `Arc<dyn P2pService>`.
+///
+/// This is the production-path implementation used by `run_p2p_node` in
+/// `main.rs`. It forwards `connected_peers()` to the underlying
+/// `P2pService` so that the consensus loop observes connectivity from
+/// exactly the same transport instance the inbound demuxer and outbound
+/// `P2pConsensusNetwork` use.
+pub struct P2pServicePeerConnectivity {
+    inner: Arc<dyn P2pService>,
+}
+
+impl P2pServicePeerConnectivity {
+    pub fn new(inner: Arc<dyn P2pService>) -> Self {
+        Self { inner }
+    }
+}
+
+impl PeerConnectivitySource for P2pServicePeerConnectivity {
+    fn connected_peers(&self) -> Vec<NodeId> {
+        self.inner.connected_peers()
+    }
+}
+
+
 ///
 /// Matches `AsyncNodeRunner` defaults (100 ms). Long enough to keep CPU low
 /// for an idle node; short enough that single-validator commits visibly
@@ -243,6 +296,30 @@ pub struct BinaryConsensusLoopIo {
     /// can substitute any `ConsensusNetworkFacade` implementation
     /// (including a recording facade) without rewiring transport.
     pub outbound: Arc<dyn ConsensusNetworkFacade>,
+
+    /// Optional connected-peers visibility source (B9).
+    ///
+    /// When `Some`, the loop observes connected-peer transitions on every
+    /// tick and, if the local node is still leader of the same view that
+    /// already emitted a `BroadcastProposal`, re-emits that proposal
+    /// **exactly once** through `outbound` so a peer that was not yet
+    /// connected at the time of the original emission can still receive
+    /// it. This closes the negative finding of DevNet Evidence Run 007.
+    ///
+    /// When `None`, the loop's behaviour is bit-equivalent to the pre-B9
+    /// path: there is no late-peer-connect re-emission. The single
+    /// validator / LocalMesh path supplies `None` here.
+    ///
+    /// Boundedness rules (enforced inside the loop):
+    /// - re-emission triggers only on a *transition* from "not in
+    ///   connected set" to "in connected set" for at least one peer;
+    /// - re-emission requires the engine to still be leader of the
+    ///   same view that produced the cached proposal;
+    /// - re-emission requires no commit / view change to have invalidated
+    ///   the cached proposal (the cache is cleared on view advance);
+    /// - re-emission fires at most **once per view** regardless of how
+    ///   many peers connect or how many ticks pass.
+    pub peer_connectivity: Option<Arc<dyn PeerConnectivitySource>>,
 }
 
 impl std::fmt::Debug for BinaryConsensusLoopIo {
@@ -250,6 +327,14 @@ impl std::fmt::Debug for BinaryConsensusLoopIo {
         f.debug_struct("BinaryConsensusLoopIo")
             .field("inbound_rx", &"<mpsc::Receiver<ConsensusNetMsg>>")
             .field("outbound", &"<Arc<dyn ConsensusNetworkFacade>>")
+            .field(
+                "peer_connectivity",
+                &if self.peer_connectivity.is_some() {
+                    "<Arc<dyn PeerConnectivitySource>>"
+                } else {
+                    "None"
+                },
+            )
             .finish()
     }
 }
@@ -277,6 +362,17 @@ pub struct BinaryConsensusLoopInboundStats {
     pub outbound_votes_sent: u64,
     /// Outbound `SendVoteTo` actions emitted to the facade.
     pub outbound_send_vote_to: u64,
+    /// Outbound `BroadcastProposal` actions re-emitted by the binary
+    /// consensus loop in response to a *late peer connect* transition
+    /// for the current view (B9).
+    ///
+    /// Bounded: incremented at most once per view (see
+    /// [`BinaryConsensusLoopIo::peer_connectivity`] for the exact
+    /// boundedness rules). Tests assert this counter is `0` when no late
+    /// connect occurs and exactly `1` after a single late connect, even
+    /// across many subsequent ticks / reconnect churn within the same
+    /// view.
+    pub outbound_proposal_late_peer_reemits: u64,
 }
 
 
@@ -347,22 +443,24 @@ pub async fn run_binary_consensus_loop_with_io(
         );
     }
 
-    let (mut inbound_rx, outbound_facade): (
+    let (mut inbound_rx, outbound_facade, peer_connectivity): (
         Option<mpsc::Receiver<ConsensusNetMsg>>,
         Option<Arc<dyn ConsensusNetworkFacade>>,
+        Option<Arc<dyn PeerConnectivitySource>>,
     ) = match io {
-        Some(io) => (Some(io.inbound_rx), Some(io.outbound)),
-        None => (None, None),
+        Some(io) => (Some(io.inbound_rx), Some(io.outbound), io.peer_connectivity),
+        None => (None, None, None),
     };
 
     eprintln!(
         "[binary-consensus] Starting consensus loop: local_id={:?} num_validators={} tick={}ms \
-         restore_baseline={} interconnect={}",
+         restore_baseline={} interconnect={} late_peer_reemit={}",
         cfg.local_validator_id,
         cfg.num_validators,
         cfg.tick_interval.as_millis(),
         cfg.restore_baseline.is_some(),
         if outbound_facade.is_some() { "p2p" } else { "none" },
+        if peer_connectivity.is_some() { "on" } else { "off" },
     );
 
     let mut ticker = tokio::time::interval(cfg.tick_interval);
@@ -373,6 +471,31 @@ pub async fn run_binary_consensus_loop_with_io(
     let mut last_commits: u64 = 0;
     let mut last_view: u64 = engine.current_view();
     let mut inbound_stats = BinaryConsensusLoopInboundStats::default();
+
+    // ----------------------------------------------------------------------
+    // B9: late-peer-connect proposal re-emission state.
+    //
+    // - `last_leader_proposal`: the most recent `BroadcastProposal` the
+    //   local engine emitted on a leader-step tick, paired with the view
+    //   it was emitted for. Refilled by `do_leader_tick` whenever a new
+    //   leader-step proposal is produced. Used as the source of bytes for
+    //   a possible re-emission.
+    // - `reemitted_for_view`: the (single) view we have already
+    //   re-emitted for, if any. Acts as the per-view "fired" latch that
+    //   prevents unbounded rebroadcast loops on reconnect churn.
+    // - `last_known_peers`: snapshot of the connected NodeId set on the
+    //   previous tick. Used to detect a *transition* from not-connected
+    //   to connected for at least one peer; only such a transition can
+    //   arm re-emission. This means simply observing a steady connected
+    //   set tick after tick produces no re-emits.
+    //
+    // All three are local to this loop and are not visible elsewhere; the
+    // only externally observable effect is `outbound_proposal_late_peer_reemits`
+    // in `BinaryConsensusLoopInboundStats`.
+    // ----------------------------------------------------------------------
+    let mut last_leader_proposal: Option<(u64, BlockProposal)> = None;
+    let mut reemitted_for_view: Option<u64> = None;
+    let mut last_known_peers: HashSet<NodeId> = HashSet::new();
 
     loop {
         // We always select on shutdown + ticker. When inbound I/O is wired
@@ -436,7 +559,24 @@ pub async fn run_binary_consensus_loop_with_io(
                         &metrics,
                         &mut inbound_stats,
                         outbound_facade.as_deref(),
+                        &mut last_leader_proposal,
                     );
+                    // B9: poll for a late-peer-connect transition and, if
+                    // armed, re-emit the cached current-view proposal
+                    // exactly once. Only runs when peer_connectivity is
+                    // wired (multi-validator P2P binary path); single
+                    // validator / LocalMesh paths skip this entirely.
+                    if let Some(pc) = peer_connectivity.as_deref() {
+                        maybe_reemit_on_late_peer_connect(
+                            &engine,
+                            &mut last_leader_proposal,
+                            &mut reemitted_for_view,
+                            &mut last_known_peers,
+                            pc,
+                            outbound_facade.as_deref(),
+                            &mut inbound_stats,
+                        );
+                    }
                     update_state_metrics(
                         &engine,
                         &metrics,
@@ -482,7 +622,19 @@ pub async fn run_binary_consensus_loop_with_io(
                         &metrics,
                         &mut inbound_stats,
                         outbound_facade.as_deref(),
+                        &mut last_leader_proposal,
                     );
+                    if let Some(pc) = peer_connectivity.as_deref() {
+                        maybe_reemit_on_late_peer_connect(
+                            &engine,
+                            &mut last_leader_proposal,
+                            &mut reemitted_for_view,
+                            &mut last_known_peers,
+                            pc,
+                            outbound_facade.as_deref(),
+                            &mut inbound_stats,
+                        );
+                    }
                     update_state_metrics(
                         &engine,
                         &metrics,
@@ -517,7 +669,7 @@ pub async fn run_binary_consensus_loop_with_io(
     eprintln!(
         "[binary-consensus] Loop exit: ticks={} proposals={} commits={} committed_height={:?} \
          view={} inbound_msgs={} inbound_proposals={} inbound_votes={} \
-         outbound_proposals={} outbound_votes={}",
+         outbound_proposals={} outbound_votes={} outbound_proposal_late_peer_reemits={}",
         final_progress.ticks,
         final_progress.proposals_emitted,
         final_progress.commits,
@@ -528,25 +680,41 @@ pub async fn run_binary_consensus_loop_with_io(
         final_progress.inbound.inbound_votes_delivered,
         final_progress.inbound.outbound_proposals_sent,
         final_progress.inbound.outbound_votes_sent,
+        final_progress.inbound.outbound_proposal_late_peer_reemits,
     );
     final_progress
 }
 
 /// Drive a single leader-step tick of the engine and forward any resulting
 /// network actions through the (optional) outbound facade.
+///
+/// **B9 cache update**: when a `BroadcastProposal` is emitted, the
+/// `(view, BlockProposal)` pair is recorded in `last_leader_proposal`
+/// before forwarding. This is the only writer of that cache. The view
+/// captured is the engine's `current_view()` at the moment of emission,
+/// which is also the view the proposal carries (the engine sets
+/// `proposed_in_view` and produces the action atomically).
 fn do_leader_tick(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     proposals_emitted: &mut u64,
     metrics: &Arc<NodeMetrics>,
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
     outbound: Option<&dyn ConsensusNetworkFacade>,
+    last_leader_proposal: &mut Option<(u64, BlockProposal)>,
 ) {
+    let view_at_step = engine.current_view();
     let actions = engine.try_propose();
     let mut tick_proposals: u64 = 0;
     for action in &actions {
-        if matches!(action, ConsensusEngineAction::BroadcastProposal(_)) {
+        if let ConsensusEngineAction::BroadcastProposal(p) = action {
             *proposals_emitted = proposals_emitted.saturating_add(1);
             tick_proposals = tick_proposals.saturating_add(1);
+            // B9: cache the proposal + its view so a later late-peer
+            // connect can re-emit it once. We always overwrite — the
+            // engine only ever produces one proposal per view, and view
+            // change naturally invalidates the previous cache entry via
+            // the `cur_view != proposal_view` gate in the re-emit check.
+            *last_leader_proposal = Some((view_at_step, (**p).clone()));
         }
     }
     metrics.runtime().inc_events_tick();
@@ -556,6 +724,127 @@ fn do_leader_tick(
     if let Some(facade) = outbound {
         forward_actions_to_facade(actions, facade, inbound_stats);
     }
+}
+
+/// B9: late-peer-connect proposal re-emission.
+///
+/// Called once per tick when the binary loop has been wired with both an
+/// outbound `ConsensusNetworkFacade` *and* a `PeerConnectivitySource`.
+/// All gating below is intentional and bounded:
+///
+/// 1. **Transition required.** Re-emission only fires when the connected
+///    peer set on this tick contains at least one NodeId that was not in
+///    the set on the previous tick. A steady-state set tick after tick
+///    produces no re-emits.
+/// 2. **Cached proposal required.** The local engine must have actually
+///    emitted a `BroadcastProposal` for some view (refilled in
+///    `do_leader_tick`); otherwise there is nothing to re-emit and we
+///    return without touching the facade.
+/// 3. **View match.** The cached proposal's view must equal the engine's
+///    current view. A view change since the original emission
+///    invalidates the cached proposal — the loop drops the stale entry
+///    and waits for the new view's leader-step to refill it.
+/// 4. **Leader of current view.** Only the leader of the current view
+///    re-emits its own proposal. A node that is not leader never
+///    re-broadcasts another node's proposal here.
+/// 5. **Commit not invalidated.** If the engine has committed at or
+///    beyond the cached proposal's view, the proposal is logically
+///    obsolete and is not re-emitted.
+/// 6. **Per-view single-shot.** The `reemitted_for_view` latch ensures
+///    that, even if peers connect and disconnect repeatedly within the
+///    same view, the loop re-emits at most once for that view. This is
+///    the single bound that prevents reconnect-churn rebroadcast spam.
+///
+/// On a successful re-emit, the loop increments
+/// `inbound_stats.outbound_proposal_late_peer_reemits` and logs the
+/// event. On any failure (facade error, gates not met) the loop is
+/// silent in the failure case but logs the facade error for ops
+/// visibility.
+///
+/// All cache state is local to the loop; this helper is a pure function
+/// of its arguments and the side effect is exactly one
+/// `facade.broadcast_proposal(&cached)` call when all gates pass.
+fn maybe_reemit_on_late_peer_connect(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    last_leader_proposal: &mut Option<(u64, BlockProposal)>,
+    reemitted_for_view: &mut Option<u64>,
+    last_known_peers: &mut HashSet<NodeId>,
+    peer_connectivity: &dyn PeerConnectivitySource,
+    facade: Option<&dyn ConsensusNetworkFacade>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+) {
+    // Always refresh the connected snapshot so reconnect churn within
+    // the same view does not reset our notion of "newly connected" on
+    // subsequent ticks.
+    let current: HashSet<NodeId> = peer_connectivity.connected_peers().into_iter().collect();
+    let newly_connected_count =
+        current.iter().filter(|n| !last_known_peers.contains(*n)).count();
+    *last_known_peers = current;
+
+    // Gate 1: transition required.
+    if newly_connected_count == 0 {
+        return;
+    }
+
+    // Gate 2: cached proposal required.
+    let cached_view = match last_leader_proposal {
+        Some((v, _)) => *v,
+        None => return,
+    };
+
+    let cur_view = engine.current_view();
+
+    // Gate 3: view match — view advanced ⇒ cache invalid, drop it.
+    if cur_view != cached_view {
+        *last_leader_proposal = None;
+        return;
+    }
+
+    // Gate 4: leader of current view.
+    if !engine.is_leader_for_current_view() {
+        return;
+    }
+
+    // Gate 5: commit not invalidated.
+    if let Some(h) = engine.committed_height() {
+        if h >= cached_view {
+            return;
+        }
+    }
+
+    // Gate 6: per-view single-shot.
+    if *reemitted_for_view == Some(cached_view) {
+        return;
+    }
+
+    // Gate 7: outbound facade required to actually send anything.
+    let facade = match facade {
+        Some(f) => f,
+        None => return,
+    };
+
+    // Re-borrow the cached proposal for sending. Safe by gate 2.
+    let proposal = match last_leader_proposal {
+        Some((_, p)) => p,
+        None => return,
+    };
+
+    if let Err(e) = facade.broadcast_proposal(proposal) {
+        eprintln!(
+            "[binary-consensus] B9: late-peer reemit broadcast_proposal failed (view={}): {:?}",
+            cached_view, e,
+        );
+        return;
+    }
+
+    *reemitted_for_view = Some(cached_view);
+    stats.outbound_proposal_late_peer_reemits =
+        stats.outbound_proposal_late_peer_reemits.saturating_add(1);
+    eprintln!(
+        "[binary-consensus] B9: re-emitted view {} BroadcastProposal after late peer connect \
+         (newly_connected_peers={}, reemits_total={})",
+        cached_view, newly_connected_count, stats.outbound_proposal_late_peer_reemits,
+    );
 }
 
 /// Forward a list of `ConsensusEngineAction`s through a

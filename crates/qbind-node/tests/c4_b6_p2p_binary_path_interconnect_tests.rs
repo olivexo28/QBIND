@@ -280,6 +280,7 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
     let io = BinaryConsensusLoopIo {
         inbound_rx,
         outbound: outbound_dyn,
+        peer_connectivity: None,
     };
 
     // Pre-feed the inbound channel before the loop starts so the very first
@@ -405,10 +406,12 @@ async fn b6_two_engine_cross_wired_binary_path_progression() {
     let io_a = BinaryConsensusLoopIo {
         inbound_rx: inbound_a_rx,
         outbound: facade_a as Arc<dyn ConsensusNetworkFacade>,
+        peer_connectivity: None,
     };
     let io_b = BinaryConsensusLoopIo {
         inbound_rx: inbound_b_rx,
         outbound: facade_b as Arc<dyn ConsensusNetworkFacade>,
+        peer_connectivity: None,
     };
 
     let (_shutdown_tx_a, shutdown_rx_a) = watch::channel(());
@@ -546,6 +549,7 @@ async fn b6_loop_survives_inbound_close() {
     let io = BinaryConsensusLoopIo {
         inbound_rx,
         outbound,
+        peer_connectivity: None,
     };
 
     let final_progress = timeout(
@@ -596,6 +600,7 @@ async fn b6_inbound_non_leader_proposal_does_not_silently_drop() {
     let io = BinaryConsensusLoopIo {
         inbound_rx,
         outbound: outbound_dyn,
+        peer_connectivity: None,
     };
 
     // Proposal from a non-leader (validator 1).

@@ -394,9 +394,29 @@ async fn run_p2p_node(
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+    // B9: late-peer-connect proposal re-emission.
+    //
+    // The same `Arc<dyn P2pService>` that backs both the inbound demuxer
+    // and the outbound `P2pConsensusNetwork` also serves as the
+    // `PeerConnectivitySource`, so connectivity, outbound, and inbound
+    // observations all come from the same transport instance — no
+    // parallel networking architecture, no harness-only glue. The loop
+    // uses this only to detect a `not-connected → connected` transition
+    // for an expected static peer and re-emit the current view's
+    // already-emitted leader proposal exactly once (boundedness rules
+    // documented on `BinaryConsensusLoopIo::peer_connectivity`).
+    //
+    // Single-validator P2P (num_validators == 1) still wires this — it's
+    // harmless because there are no other expected peers, so the
+    // newly-connected set stays empty and re-emission never fires.
+    let peer_connectivity: Arc<dyn qbind_node::binary_consensus_loop::PeerConnectivitySource> =
+        Arc::new(qbind_node::binary_consensus_loop::P2pServicePeerConnectivity::new(
+            node_context.p2p_service.clone(),
+        ));
     let io = BinaryConsensusLoopIo {
         inbound_rx: consensus_inbound_rx,
         outbound: outbound_facade,
+        peer_connectivity: Some(peer_connectivity),
     };
     let (consensus_handle, _progress) =
         spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);
