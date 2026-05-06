@@ -87,11 +87,61 @@ use qbind_consensus::basic_hotstuff_engine::BasicHotStuffEngine;
 use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
-use qbind_wire::consensus::BlockProposal;
+use qbind_wire::consensus::{BlockProposal, Vote};
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
 use crate::metrics::NodeMetrics;
 use crate::p2p::{ConsensusNetMsg, NodeId, P2pService};
+
+/// Adapter that exposes `Arc<NodeMetrics>` as a
+/// `qbind_consensus::ConsensusProgressRecorder`.
+///
+/// `NodeMetrics::progress()` returns a borrowed `&ConsensusProgressMetrics`
+/// (which already implements `ConsensusProgressRecorder`), but the engine
+/// requires `Arc<dyn ConsensusProgressRecorder>` ownership — `&` cannot
+/// be stored. Rather than restructure `NodeMetrics`, we hand the engine
+/// a tiny adapter that holds an `Arc<NodeMetrics>` and forwards each
+/// recorder method to the inner `ConsensusProgressMetrics` impl. This
+/// keeps the change strictly additive (no public-API changes to
+/// `NodeMetrics`) and ensures every recorder callback the engine fires
+/// is observed by the same `/metrics`-backing counters the rest of the
+/// binary already exposes.
+#[derive(Debug)]
+struct NodeMetricsProgressRecorder {
+    metrics: Arc<NodeMetrics>,
+}
+
+impl NodeMetricsProgressRecorder {
+    fn new(metrics: Arc<NodeMetrics>) -> Self {
+        Self { metrics }
+    }
+}
+
+impl qbind_consensus::ConsensusProgressRecorder for NodeMetricsProgressRecorder {
+    fn record_qc_formed(&self) {
+        self.metrics.progress().record_qc_formed();
+    }
+
+    fn record_qc_formed_with_latency(&self, latency: Duration) {
+        self.metrics.progress().record_qc_formed_with_latency(latency);
+    }
+
+    fn record_vote_observed(&self, is_for_current_view: bool) {
+        self.metrics.progress().record_vote_observed(is_for_current_view);
+    }
+
+    fn record_view_change(&self, from_view: u64, to_view: u64) {
+        self.metrics.progress().record_view_change(from_view, to_view);
+    }
+
+    fn record_leader_change(&self) {
+        self.metrics.progress().record_leader_change();
+    }
+
+    fn reset_current_view_votes(&self) {
+        self.metrics.progress().reset_current_view_votes();
+    }
+}
 
 /// Read-only view of "which deterministic peer NodeIds are currently
 /// connected" — the smallest visibility surface the binary-path consensus
@@ -373,6 +423,31 @@ pub struct BinaryConsensusLoopInboundStats {
     /// across many subsequent ticks / reconnect churn within the same
     /// view.
     pub outbound_proposal_late_peer_reemits: u64,
+    /// Outbound `BroadcastVote` actions re-emitted by the binary
+    /// consensus loop alongside a B9 proposal re-emission, so that a
+    /// peer that connected after the leader's first emission of the
+    /// current view can also receive the leader's same-view vote and
+    /// reach the 2/3 quorum threshold (B10).
+    ///
+    /// Shares the exact same per-view single-shot latch as
+    /// [`Self::outbound_proposal_late_peer_reemits`]: incremented at
+    /// most once per view, only when the cached leader vote exists and
+    /// matches the current view. With no cached vote (e.g., view 0 is
+    /// only the proposal-no-leader-vote shape) this counter stays at 0.
+    pub outbound_vote_late_peer_reemits: u64,
+    /// Inbound `Proposal` frames the engine actually accepted (i.e.,
+    /// produced a vote action in response). Strictly `<=
+    /// inbound_proposals_delivered`. (B10 observability.)
+    pub inbound_proposals_engine_accepted: u64,
+    /// Inbound `Vote` frames the engine actually accepted (i.e.,
+    /// `on_vote_event` returned `Ok(_)`). Strictly `<=
+    /// inbound_votes_delivered`. (B10 observability.)
+    pub inbound_votes_engine_accepted: u64,
+    /// Quorum certificates the binary loop observed forming inside the
+    /// engine since startup. Mirrors `qbind_consensus_qcs_formed_total`
+    /// and is derived from the same `ConsensusProgressRecorder` callback
+    /// the engine already drives. (B10 observability.)
+    pub qcs_formed_total: u64,
 }
 
 
@@ -427,6 +502,25 @@ pub async fn run_binary_consensus_loop_with_io(
         BasicHotStuffEngine::new(cfg.local_validator_id, validators);
 
     // ----------------------------------------------------------------------
+    // B10: wire the existing `ConsensusProgressRecorder` adapter into the
+    // engine.
+    //
+    // `NodeMetrics::progress()` already implements
+    // `qbind_consensus::ConsensusProgressRecorder` (see
+    // `metrics::ConsensusProgressMetrics`). Before B10 the binary-path
+    // loop never installed any progress recorder on its engine, so even
+    // when the engine genuinely formed a QC and advanced its view (as
+    // V0 actually did in Run 008), the `qbind_consensus_qcs_formed_total`
+    // counter on `/metrics` stayed at 0. That is a metric-coverage gap,
+    // not a fabrication: the engine's existing `record_qc_formed` /
+    // `record_qc_formed_with_latency` callbacks fire only on actually
+    // formed QCs. Wiring them here makes `/metrics` honestly reflect
+    // engine progress without changing any consensus logic.
+    let progress_recorder: Arc<dyn qbind_consensus::ConsensusProgressRecorder> =
+        Arc::new(NodeMetricsProgressRecorder::new(Arc::clone(&metrics)));
+    engine.set_progress_recorder(progress_recorder);
+
+    // ----------------------------------------------------------------------
     // B5: restore-aware consensus start.
     // ----------------------------------------------------------------------
     if let Some(baseline) = cfg.restore_baseline {
@@ -473,27 +567,43 @@ pub async fn run_binary_consensus_loop_with_io(
     let mut inbound_stats = BinaryConsensusLoopInboundStats::default();
 
     // ----------------------------------------------------------------------
-    // B9: late-peer-connect proposal re-emission state.
+    // B9 + B10: late-peer-connect proposal/vote re-emission state.
     //
     // - `last_leader_proposal`: the most recent `BroadcastProposal` the
     //   local engine emitted on a leader-step tick, paired with the view
     //   it was emitted for. Refilled by `do_leader_tick` whenever a new
     //   leader-step proposal is produced. Used as the source of bytes for
     //   a possible re-emission.
+    // - `last_leader_vote` (B10): the leader's *own* `BroadcastVote`
+    //   produced by the same leader-step tick that produced the cached
+    //   proposal. The engine's `on_leader_step` always emits a
+    //   `BroadcastProposal` immediately followed by a `BroadcastVote`
+    //   for the leader's self-vote on its own proposal (see
+    //   `BasicHotStuffEngine::on_leader_step`). Without this cache,
+    //   B9's late-peer re-emit would replay only the proposal — the
+    //   late-connecting peer would still be missing the leader's vote
+    //   for that view and would never reach the 2/3 quorum. This
+    //   matches Run 008's observed boundary exactly: the proposal
+    //   crossed, the peer voted, the leader formed a QC, but the peer
+    //   stayed at view 0 because it never saw the leader's vote.
     // - `reemitted_for_view`: the (single) view we have already
     //   re-emitted for, if any. Acts as the per-view "fired" latch that
-    //   prevents unbounded rebroadcast loops on reconnect churn.
+    //   prevents unbounded rebroadcast loops on reconnect churn. The
+    //   latch covers BOTH the proposal and the vote re-emit; we never
+    //   re-emit just one of them on a separate tick.
     // - `last_known_peers`: snapshot of the connected NodeId set on the
     //   previous tick. Used to detect a *transition* from not-connected
     //   to connected for at least one peer; only such a transition can
     //   arm re-emission. This means simply observing a steady connected
     //   set tick after tick produces no re-emits.
     //
-    // All three are local to this loop and are not visible elsewhere; the
-    // only externally observable effect is `outbound_proposal_late_peer_reemits`
-    // in `BinaryConsensusLoopInboundStats`.
+    // All four are local to this loop and are not visible elsewhere; the
+    // only externally observable effects are
+    // `outbound_proposal_late_peer_reemits` and
+    // `outbound_vote_late_peer_reemits` in `BinaryConsensusLoopInboundStats`.
     // ----------------------------------------------------------------------
     let mut last_leader_proposal: Option<(u64, BlockProposal)> = None;
+    let mut last_leader_vote: Option<(u64, Vote)> = None;
     let mut reemitted_for_view: Option<u64> = None;
     let mut last_known_peers: HashSet<NodeId> = HashSet::new();
 
@@ -520,6 +630,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 msg,
                                 &mut inbound_stats,
                                 outbound_facade.as_deref(),
+                                &metrics,
                             );
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
@@ -533,6 +644,8 @@ pub async fn run_binary_consensus_loop_with_io(
                             );
                             // Refresh progress snapshot.
                             {
+                                inbound_stats.qcs_formed_total =
+                                    metrics.progress().qcs_formed_total();
                                 let mut p = progress.lock();
                                 p.commits = engine.commit_log().len() as u64;
                                 p.committed_height = engine.committed_height();
@@ -560,9 +673,11 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut inbound_stats,
                         outbound_facade.as_deref(),
                         &mut last_leader_proposal,
+                        &mut last_leader_vote,
                     );
-                    // B9: poll for a late-peer-connect transition and, if
-                    // armed, re-emit the cached current-view proposal
+                    // B9 + B10: poll for a late-peer-connect transition
+                    // and, if armed, re-emit the cached current-view
+                    // proposal AND the cached current-view leader vote
                     // exactly once. Only runs when peer_connectivity is
                     // wired (multi-validator P2P binary path); single
                     // validator / LocalMesh paths skip this entirely.
@@ -570,6 +685,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         maybe_reemit_on_late_peer_connect(
                             &engine,
                             &mut last_leader_proposal,
+                            &mut last_leader_vote,
                             &mut reemitted_for_view,
                             &mut last_known_peers,
                             pc,
@@ -585,6 +701,8 @@ pub async fn run_binary_consensus_loop_with_io(
                         tick_started.elapsed(),
                     );
                     {
+                        inbound_stats.qcs_formed_total =
+                            metrics.progress().qcs_formed_total();
                         let mut p = progress.lock();
                         p.ticks = ticks;
                         p.proposals_emitted = proposals_emitted;
@@ -623,11 +741,13 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut inbound_stats,
                         outbound_facade.as_deref(),
                         &mut last_leader_proposal,
+                        &mut last_leader_vote,
                     );
                     if let Some(pc) = peer_connectivity.as_deref() {
                         maybe_reemit_on_late_peer_connect(
                             &engine,
                             &mut last_leader_proposal,
+                            &mut last_leader_vote,
                             &mut reemitted_for_view,
                             &mut last_known_peers,
                             pc,
@@ -643,6 +763,8 @@ pub async fn run_binary_consensus_loop_with_io(
                         tick_started.elapsed(),
                     );
                     {
+                        inbound_stats.qcs_formed_total =
+                            metrics.progress().qcs_formed_total();
                         let mut p = progress.lock();
                         p.ticks = ticks;
                         p.proposals_emitted = proposals_emitted;
@@ -694,6 +816,17 @@ pub async fn run_binary_consensus_loop_with_io(
 /// captured is the engine's `current_view()` at the moment of emission,
 /// which is also the view the proposal carries (the engine sets
 /// `proposed_in_view` and produces the action atomically).
+///
+/// **B10 cache update**: when the same leader-step tick also emits the
+/// leader's own `BroadcastVote` (which `BasicHotStuffEngine::on_leader_step`
+/// always does immediately after the proposal — that is the leader's
+/// self-vote on its own proposal), the `(view, Vote)` pair is recorded in
+/// `last_leader_vote`. The view captured is the same `view_at_step` used
+/// for the proposal, which by construction matches `vote.height` because
+/// the engine builds the vote with `height = current_view`. Without this
+/// cache, the B9 late-peer-connect re-emit would replay only the proposal
+/// — the late-connecting peer would still be missing the leader's vote
+/// for that view and would never reach the 2/3 quorum threshold.
 fn do_leader_tick(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     proposals_emitted: &mut u64,
@@ -701,20 +834,55 @@ fn do_leader_tick(
     inbound_stats: &mut BinaryConsensusLoopInboundStats,
     outbound: Option<&dyn ConsensusNetworkFacade>,
     last_leader_proposal: &mut Option<(u64, BlockProposal)>,
+    last_leader_vote: &mut Option<(u64, Vote)>,
 ) {
     let view_at_step = engine.current_view();
     let actions = engine.try_propose();
     let mut tick_proposals: u64 = 0;
+    let mut emitted_proposal_in_this_tick = false;
     for action in &actions {
-        if let ConsensusEngineAction::BroadcastProposal(p) = action {
-            *proposals_emitted = proposals_emitted.saturating_add(1);
-            tick_proposals = tick_proposals.saturating_add(1);
-            // B9: cache the proposal + its view so a later late-peer
-            // connect can re-emit it once. We always overwrite — the
-            // engine only ever produces one proposal per view, and view
-            // change naturally invalidates the previous cache entry via
-            // the `cur_view != proposal_view` gate in the re-emit check.
-            *last_leader_proposal = Some((view_at_step, (**p).clone()));
+        match action {
+            ConsensusEngineAction::BroadcastProposal(p) => {
+                *proposals_emitted = proposals_emitted.saturating_add(1);
+                tick_proposals = tick_proposals.saturating_add(1);
+                // B9: cache the proposal + its view so a later late-peer
+                // connect can re-emit it once. We always overwrite — the
+                // engine only ever produces one proposal per view, and view
+                // change naturally invalidates the previous cache entry via
+                // the `cur_view != proposal_view` gate in the re-emit check.
+                *last_leader_proposal = Some((view_at_step, (**p).clone()));
+                emitted_proposal_in_this_tick = true;
+                // B9 + B10: a fresh leader-step proposal supersedes any
+                // previous cache. Drop the prior cached vote so we never
+                // pair a stale view's vote with a new proposal.
+                *last_leader_vote = None;
+            }
+            ConsensusEngineAction::BroadcastVote(v) => {
+                // B10: only cache the leader's self-vote produced *as
+                // part of the same leader-step tick that just emitted a
+                // proposal*. `BasicHotStuffEngine::on_leader_step`
+                // always emits these as a paired pair, in this order:
+                // proposal first, then leader vote. We rely on that
+                // ordering here — the `emitted_proposal_in_this_tick`
+                // flag is `true` if and only if a `BroadcastProposal`
+                // appeared earlier in the same `actions` vector. If
+                // the engine's leader-step ever changes to emit the
+                // vote before (or without) the proposal, this branch
+                // simply does not cache, the B10 vote re-emit
+                // counter stays at 0, and the `outbound_vote_late_peer_reemits
+                // <= outbound_proposal_late_peer_reemits` invariant
+                // (asserted in `b10_d_late_peer_reconnect_churn_stays_single_shot`)
+                // continues to hold — i.e. this is fail-safe under
+                // any future ordering change. We also defensively
+                // require `v.height == view_at_step` so a vote with
+                // a height that doesn't match the current view (which
+                // would not be valid for late-peer re-emission
+                // anyway) is never cached.
+                if emitted_proposal_in_this_tick && v.height == view_at_step {
+                    *last_leader_vote = Some((view_at_step, v.clone()));
+                }
+            }
+            ConsensusEngineAction::SendVoteTo { .. } | ConsensusEngineAction::Noop => {}
         }
     }
     metrics.runtime().inc_events_tick();
@@ -726,7 +894,7 @@ fn do_leader_tick(
     }
 }
 
-/// B9: late-peer-connect proposal re-emission.
+/// B9 + B10: late-peer-connect proposal/vote re-emission.
 ///
 /// Called once per tick when the binary loop has been wired with both an
 /// outbound `ConsensusNetworkFacade` *and* a `PeerConnectivitySource`.
@@ -754,19 +922,34 @@ fn do_leader_tick(
 ///    that, even if peers connect and disconnect repeatedly within the
 ///    same view, the loop re-emits at most once for that view. This is
 ///    the single bound that prevents reconnect-churn rebroadcast spam.
+///    The latch covers BOTH the proposal and the leader vote re-emit;
+///    we never re-emit just one of them on a separate tick.
+///
+/// **B10 vote re-emit (paired):** If the cache also contains a
+/// `last_leader_vote` for the same view as the cached proposal, the
+/// loop re-broadcasts that leader vote on the same tick the proposal is
+/// re-emitted. This is the smallest honest fix for the Run-008 boundary:
+/// without it, a late-connecting peer can receive the proposal, vote on
+/// it, and have its vote reach the leader (so the leader forms a QC and
+/// advances), but the peer itself can never reach 2/3 because it never
+/// saw the leader's own same-view vote — leaving the peer stuck at the
+/// proposal's view and stalling the round-robin once the leader advances
+/// past it. Vote re-emission is gated on the same view-match /
+/// commit-invalidated / per-view single-shot rules as the proposal; if
+/// no cached vote exists (e.g., a future engine variant that emits the
+/// proposal without a leader self-vote), only the proposal is re-emitted
+/// and the vote-reemit counter stays at 0.
 ///
 /// On a successful re-emit, the loop increments
-/// `inbound_stats.outbound_proposal_late_peer_reemits` and logs the
-/// event. On any failure (facade error, gates not met) the loop is
-/// silent in the failure case but logs the facade error for ops
+/// `inbound_stats.outbound_proposal_late_peer_reemits` (and, if a vote
+/// was re-emitted too, `inbound_stats.outbound_vote_late_peer_reemits`)
+/// and logs the event. On any failure (facade error, gates not met) the
+/// loop is silent in the failure case but logs the facade error for ops
 /// visibility.
-///
-/// All cache state is local to the loop; this helper is a pure function
-/// of its arguments and the side effect is exactly one
-/// `facade.broadcast_proposal(&cached)` call when all gates pass.
 fn maybe_reemit_on_late_peer_connect(
     engine: &BasicHotStuffEngine<[u8; 32]>,
     last_leader_proposal: &mut Option<(u64, BlockProposal)>,
+    last_leader_vote: &mut Option<(u64, Vote)>,
     reemitted_for_view: &mut Option<u64>,
     last_known_peers: &mut HashSet<NodeId>,
     peer_connectivity: &dyn PeerConnectivitySource,
@@ -797,6 +980,7 @@ fn maybe_reemit_on_late_peer_connect(
     // Gate 3: view match — view advanced ⇒ cache invalid, drop it.
     if cur_view != cached_view {
         *last_leader_proposal = None;
+        *last_leader_vote = None;
         return;
     }
 
@@ -840,10 +1024,35 @@ fn maybe_reemit_on_late_peer_connect(
     *reemitted_for_view = Some(cached_view);
     stats.outbound_proposal_late_peer_reemits =
         stats.outbound_proposal_late_peer_reemits.saturating_add(1);
+
+    // B10: paired vote re-emit. Only re-emit the leader vote if its
+    // cached view matches the cached proposal's view. If no cached vote
+    // exists, leave the vote-reemit counter alone — this is the
+    // strictest "no fabricated metrics" semantics.
+    let mut vote_reemitted = false;
+    if let Some((vote_view, vote)) = last_leader_vote.as_ref() {
+        if *vote_view == cached_view {
+            if let Err(e) = facade.broadcast_vote(vote) {
+                eprintln!(
+                    "[binary-consensus] B10: late-peer reemit broadcast_vote failed (view={}): {:?}",
+                    cached_view, e,
+                );
+            } else {
+                stats.outbound_vote_late_peer_reemits =
+                    stats.outbound_vote_late_peer_reemits.saturating_add(1);
+                vote_reemitted = true;
+            }
+        }
+    }
+
     eprintln!(
-        "[binary-consensus] B9: re-emitted view {} BroadcastProposal after late peer connect \
-         (newly_connected_peers={}, reemits_total={})",
-        cached_view, newly_connected_count, stats.outbound_proposal_late_peer_reemits,
+        "[binary-consensus] B9+B10: re-emitted view {} BroadcastProposal{} after late peer connect \
+         (newly_connected_peers={}, proposal_reemits_total={}, vote_reemits_total={})",
+        cached_view,
+        if vote_reemitted { " + BroadcastVote" } else { "" },
+        newly_connected_count,
+        stats.outbound_proposal_late_peer_reemits,
+        stats.outbound_vote_late_peer_reemits,
     );
 }
 
@@ -914,6 +1123,7 @@ fn handle_inbound_consensus_msg(
     msg: ConsensusNetMsg,
     stats: &mut BinaryConsensusLoopInboundStats,
     outbound: Option<&dyn ConsensusNetworkFacade>,
+    metrics: &Arc<NodeMetrics>,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
     use qbind_wire::io::WireDecode;
@@ -929,6 +1139,18 @@ fn handle_inbound_consensus_msg(
                     stats.inbound_proposals_delivered =
                         stats.inbound_proposals_delivered.saturating_add(1);
                     if let Some(action) = engine.on_proposal_event(from, &proposal) {
+                        // B10: an action returned from `on_proposal_event`
+                        // means the engine performed the full accept path
+                        // (epoch ok, view ok, leader ok, safe-to-vote ok)
+                        // and produced a vote. Reflect that in both the
+                        // loop's structured stats and the public
+                        // `consensus_t154.proposals_accepted` counter on
+                        // `/metrics`. Without this, the counter could
+                        // never increment for inbound traffic on the
+                        // multi-validator binary path.
+                        stats.inbound_proposals_engine_accepted =
+                            stats.inbound_proposals_engine_accepted.saturating_add(1);
+                        metrics.consensus_t154().inc_proposal_accepted();
                         if let Some(facade) = outbound {
                             forward_actions_to_facade(vec![action], facade, stats);
                         }
@@ -953,6 +1175,16 @@ fn handle_inbound_consensus_msg(
                         Ok(_) => {
                             stats.inbound_votes_delivered =
                                 stats.inbound_votes_delivered.saturating_add(1);
+                            // B10: same observability rationale as for
+                            // proposals — `Ok(_)` from `on_vote_event`
+                            // is the canonical "engine accepted this
+                            // vote" signal (the `Ok(Some(qc))` branch
+                            // additionally formed a QC, which the
+                            // engine's progress recorder reports
+                            // separately via `record_qc_formed`).
+                            stats.inbound_votes_engine_accepted =
+                                stats.inbound_votes_engine_accepted.saturating_add(1);
+                            metrics.consensus_t154().inc_vote_accepted();
                         }
                         Err(e) => {
                             stats.inbound_vote_engine_rejects =
