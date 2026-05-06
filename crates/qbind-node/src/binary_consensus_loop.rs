@@ -1130,6 +1130,33 @@ fn handle_inbound_consensus_msg(
 
     stats.inbound_msgs_received = stats.inbound_msgs_received.saturating_add(1);
 
+    // B11: count every inbound `ConsensusNetMsg` that arrives at the
+    // binary path before any decode/accept gating, so the
+    // `consensus_net_inbound_total{kind="..."}` Prometheus family
+    // honestly reflects the same traffic the loop-level
+    // `inbound_msgs_received` / `inbound_proposals_delivered` /
+    // `inbound_votes_delivered` counters already observe. We count one
+    // per inbound frame and never fabricate increments:
+    //   - `Proposal(...)` → `inbound_total{kind="proposal"}`
+    //   - `Vote(...)`     → `inbound_total{kind="vote"}`
+    //   - `Timeout(...)` / `NewView(...)` → `inbound_total{kind="other"}`
+    //     (these frames are received-but-unhandled on the binary path,
+    //     see the match arms below; counting them under "other" is
+    //     honest and avoids silently hiding the fact that real bytes
+    //     arrived).
+    // The matching outbound counters are incremented by the
+    // `P2pConsensusNetwork` facade itself (see
+    // `crates/qbind-node/src/consensus_net_p2p.rs`); the engine ↔
+    // facade boundary in `forward_actions_to_facade` deliberately does
+    // not count there to avoid double counting.
+    match &msg {
+        ConsensusNetMsg::Proposal(_) => metrics.network().inc_inbound_proposal(),
+        ConsensusNetMsg::Vote(_) => metrics.network().inc_inbound_vote(),
+        ConsensusNetMsg::Timeout(_) | ConsensusNetMsg::NewView(_) => {
+            metrics.network().inc_inbound_other()
+        }
+    }
+
     match msg {
         ConsensusNetMsg::Proposal(bytes) => {
             let mut slice: &[u8] = &bytes;

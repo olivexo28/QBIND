@@ -43,6 +43,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
+use crate::metrics::NodeMetrics;
 use crate::p2p::{ConsensusNetMsg, NodeId, P2pMessage, P2pService};
 use crate::peer::PeerId;
 use qbind_consensus::ids::ValidatorId;
@@ -183,6 +184,20 @@ pub struct P2pConsensusNetwork {
     mapping: Arc<RwLock<Box<dyn ValidatorNodeMapping>>>,
     /// Local validator ID (if this node is a validator).
     local_validator_id: Option<ValidatorId>,
+    /// Optional `NodeMetrics` wired by the binary so the
+    /// `consensus_net_outbound_total{kind="..."}` Prometheus family
+    /// reflects the actual `P2pConsensusNetwork` traffic path (B11).
+    ///
+    /// When `None`, `P2pConsensusNetwork` is bit-equivalent to its
+    /// pre-B11 behaviour (no counter increments). When `Some`, every
+    /// successful `broadcast_proposal` / `broadcast_vote` / `send_vote_to`
+    /// call increments the matching `NetworkMetrics` counter exactly once.
+    /// We intentionally only count after the underlying `P2pService`
+    /// call returns (`P2pService::broadcast` / `send_to` are infallible
+    /// from this layer's perspective); this keeps the counter aligned
+    /// with what was actually pushed to the transport, not with what was
+    /// merely attempted.
+    metrics: Option<Arc<NodeMetrics>>,
 }
 
 impl std::fmt::Debug for P2pConsensusNetwork {
@@ -210,6 +225,7 @@ impl P2pConsensusNetwork {
                 num_validators,
             )))),
             local_validator_id: None,
+            metrics: None,
         }
     }
 
@@ -224,6 +240,7 @@ impl P2pConsensusNetwork {
             p2p,
             mapping: Arc::new(RwLock::new(mapping)),
             local_validator_id: None,
+            metrics: None,
         }
     }
 
@@ -232,6 +249,19 @@ impl P2pConsensusNetwork {
     /// This is used to filter out messages sent to self.
     pub fn with_local_validator(mut self, validator_id: ValidatorId) -> Self {
         self.local_validator_id = Some(validator_id);
+        self
+    }
+
+    /// Wire `NodeMetrics` so that successful outbound `broadcast_proposal`
+    /// / `broadcast_vote` / `send_vote_to` calls increment the matching
+    /// `consensus_net_outbound_total{kind="..."}` Prometheus counter (B11).
+    ///
+    /// Without this call, `P2pConsensusNetwork` does not touch any
+    /// Prometheus counter — the legacy/pre-B11 behaviour is preserved
+    /// exactly so single-validator / LocalMesh / harness-only paths that
+    /// don't construct a real `NodeMetrics` are not regressed.
+    pub fn with_metrics(mut self, metrics: Arc<NodeMetrics>) -> Self {
+        self.metrics = Some(metrics);
         self
     }
 
@@ -276,6 +306,13 @@ impl ConsensusNetworkFacade for P2pConsensusNetwork {
 
         self.p2p.send_to(node_id, msg);
 
+        // B11: count after the transport call so the Prometheus family
+        // reflects what was actually pushed to `P2pService`. Skipped if
+        // metrics are not wired (e.g. tests / single-validator paths).
+        if let Some(m) = self.metrics.as_ref() {
+            m.network().inc_outbound_vote_send_to();
+        }
+
         Ok(())
     }
 
@@ -284,6 +321,10 @@ impl ConsensusNetworkFacade for P2pConsensusNetwork {
         let msg = P2pMessage::Consensus(ConsensusNetMsg::Vote(encoded));
 
         self.p2p.broadcast(msg);
+
+        if let Some(m) = self.metrics.as_ref() {
+            m.network().inc_outbound_vote_broadcast();
+        }
 
         Ok(())
     }
@@ -294,6 +335,10 @@ impl ConsensusNetworkFacade for P2pConsensusNetwork {
 
         self.p2p.broadcast(msg);
 
+        if let Some(m) = self.metrics.as_ref() {
+            m.network().inc_outbound_proposal_broadcast();
+        }
+
         Ok(())
     }
 
@@ -303,6 +348,13 @@ impl ConsensusNetworkFacade for P2pConsensusNetwork {
         let msg = P2pMessage::Consensus(ConsensusNetMsg::Timeout(msg_bytes));
 
         self.p2p.broadcast(msg);
+
+        // B11: timeout traffic is not part of the proposal/vote
+        // outbound family the gap report tracks; we intentionally do
+        // not count it under any `consensus_net_outbound_total{kind=...}`
+        // bucket here. The existing `consensus_net_worker.rs` codepath
+        // is the only place that counts timeouts and it is not
+        // exercised on the binary path, so no double-counting risk.
 
         Ok(())
     }

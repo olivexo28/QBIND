@@ -361,12 +361,21 @@ async fn run_p2p_node(
     // outbound proposals/votes leave through the same `TcpKemTlsP2pService`
     // instance the inbound side is reading from. We do not introduce a
     // second parallel networking architecture.
+    //
+    // B11: wire `node_metrics` so the `consensus_net_outbound_total`
+    // Prometheus family on `/metrics` honestly reflects the outbound
+    // proposal / vote traffic this facade actually pushes to the
+    // transport. Without this, the family stays at 0 on the real
+    // binary path even when the loop-level `outbound_*` counters and
+    // engine-acceptance counters report real progress (the gap
+    // surfaced by DevNet Evidence Run 008/009).
     let outbound_facade: Arc<dyn qbind_node::consensus_network_facade::ConsensusNetworkFacade> =
         Arc::new(P2pConsensusNetwork::new(
             node_context.p2p_service.clone(),
             num_validators as usize,
         )
-        .with_local_validator(local_validator_id));
+        .with_local_validator(local_validator_id)
+        .with_metrics(Arc::clone(&node_metrics)));
 
     let mut consensus_cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
     if let Some(b) = restore_baseline {
