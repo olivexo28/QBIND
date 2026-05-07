@@ -214,6 +214,22 @@ pub struct CliArgs {
     #[arg(long = "p2p-peer", action = clap::ArgAction::Append)]
     pub p2p_peers: Vec<String>,
 
+    /// B12 — mutual KEMTLS authentication mode for the binary path.
+    ///
+    /// Accepts `required`, `optional`, `disabled` (and aliases handled
+    /// by `parse_mutual_auth_mode`). When set to `required`, the
+    /// listener requires a v2 `ClientInit` carrying a verified client
+    /// `NetworkDelegationCert`, and accepted-session identity is
+    /// derived from the cert's `validator_id` field rather than from
+    /// the dialer's self-asserted `client_random`. Defaults to
+    /// `disabled` to preserve pre-B12 test-grade DevNet behaviour.
+    ///
+    /// Also readable from `QBIND_MUTUAL_AUTH` (the env var only takes
+    /// effect when this flag is left unset). See
+    /// `docs/whitepaper/contradiction.md` C4 / B12.
+    #[arg(long = "p2p-mutual-auth")]
+    pub p2p_mutual_auth: Option<String>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

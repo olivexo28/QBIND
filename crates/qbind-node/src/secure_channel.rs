@@ -118,6 +118,32 @@ pub struct AcceptedPeerInit {
     /// `InboundIdentityResolver` installed by `P2pNodeBuilder`) parse
     /// `client_random`.
     pub validator_id: [u8; 32],
+    /// B12 — peer's validator id derived from the *verified* client
+    /// `NetworkDelegationCert` (`MutualAuthMode::Required` only).
+    ///
+    /// `Some(vid)` iff the server-side `Connection` reported
+    /// `mutual_auth_complete() == true`, in which case `vid` is the
+    /// `validator_id` field of the client cert. Under
+    /// `MutualAuthMode::Disabled` this is `None` — the listener-side
+    /// session identity must then be sourced from the legacy
+    /// self-asserted `client_random`/`validator_id` fields above.
+    pub verified_peer_validator_id: Option<[u8; 32]>,
+    /// B12 — peer's NodeId derived from the *verified* client
+    /// `NetworkDelegationCert` via `derive_node_id_from_cert`
+    /// (`MutualAuthMode::Required` only). `None` otherwise.
+    pub verified_client_node_id: Option<[u8; 32]>,
+    /// B12 — whether the listener completed mutual KEMTLS authentication
+    /// for this session.
+    ///
+    /// True iff the client presented a v2 `ClientInit` with a
+    /// `NetworkDelegationCert` AND the server's `MutualAuthMode` was
+    /// not `Disabled` (so the cert went through
+    /// `parse_and_verify_client_cert`). When this is `true`, both
+    /// `verified_peer_validator_id` and `verified_client_node_id` are
+    /// `Some`, and the transport SHOULD prefer them as the source of
+    /// truth for accepted-session identity registration over the
+    /// self-asserted `client_random`-derived path.
+    pub mutual_auth_complete: bool,
 }
 
 /// Default timeout for socket read/write operations (in seconds).
@@ -301,10 +327,6 @@ impl SecureChannel {
         //     authoritative cert/cookie/KEM checks still happen below
         //     inside `Connection::handle_handshake_frame`.
         let client_init = unpack_client_init(&client_pkt)?;
-        let peer_init = AcceptedPeerInit {
-            client_random: client_init.client_random,
-            validator_id: client_init.validator_id,
-        };
 
         // 3. Let Connection process and produce ServerAccept
         let reply_bytes_opt = conn.handle_handshake_frame(&client_pkt.encode())?;
@@ -319,6 +341,34 @@ impl SecureChannel {
         if !conn.is_established() {
             return Err(NetError::Protocol("server handshake not established").into());
         }
+
+        // B12 — once the handshake is established, surface the verified
+        // peer identity captured by `Connection` from its underlying
+        // `HandshakeResult`. `Connection::peer_validator_id` /
+        // `peer_node_id` are already gated internally on
+        // `mutual_auth_complete` for the server-cert-bound NodeId
+        // (`peer_node_id`) — we only additionally gate
+        // `verified_peer_validator_id` on `mutual_auth_complete` here
+        // because the server side ALWAYS captures
+        // `peer_validator_id` (even under `Disabled`, from the
+        // server's own cert path), and consumers of `AcceptedPeerInit`
+        // expect `verified_peer_validator_id = Some(_)` to imply that
+        // the bytes came from the *verified client cert*, not from
+        // the server's reflection.
+        let mutual_auth_complete = conn.mutual_auth_complete();
+        let verified_peer_validator_id = if mutual_auth_complete {
+            conn.peer_validator_id()
+        } else {
+            None
+        };
+        let verified_client_node_id = conn.peer_node_id();
+        let peer_init = AcceptedPeerInit {
+            client_random: client_init.client_random,
+            validator_id: client_init.validator_id,
+            verified_peer_validator_id,
+            verified_client_node_id,
+            mutual_auth_complete,
+        };
 
         Ok((SecureChannel { stream, conn }, peer_init))
     }

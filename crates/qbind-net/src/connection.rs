@@ -96,6 +96,28 @@ pub struct Connection {
     validator_id: Option<[u8; 32]>,
     /// For client: the peer's KEM public key.
     peer_kem_pk: Option<Vec<u8>>,
+    /// B12 — peer identity surfaced from the completed handshake's
+    /// `HandshakeResult` (otherwise discarded). Populated on both sides
+    /// at the `Established` transition.
+    ///
+    /// - On the **server side** under `MutualAuthMode::Required`,
+    ///   `peer_validator_id` is the validator id field of the
+    ///   *verified* client `NetworkDelegationCert` (cryptographically
+    ///   bound to the client's leaf KEM pk that participated in the
+    ///   transcript-bound key schedule), `peer_node_id` is
+    ///   `derive_node_id_from_cert(client_cert)`, and
+    ///   `mutual_auth_complete` is `true`.
+    /// - On the **client side**, `peer_validator_id` is the server's
+    ///   validator id from the verified server cert,
+    ///   `peer_node_id` is `None` (the client doesn't bind a NodeId
+    ///   for itself from the handshake), and `mutual_auth_complete`
+    ///   reflects whether the client opted into the v2 mutual-auth
+    ///   protocol.
+    /// - Under `MutualAuthMode::Disabled`, `peer_node_id` is `None`
+    ///   and `mutual_auth_complete` is `false`.
+    peer_validator_id: Option<[u8; 32]>,
+    peer_node_id: Option<[u8; 32]>,
+    mutual_auth_complete: bool,
 }
 
 impl std::fmt::Debug for Connection {
@@ -127,6 +149,9 @@ impl Connection {
             client_init: None,
             validator_id: Some(cfg.validator_id),
             peer_kem_pk: Some(cfg.peer_kem_pk),
+            peer_validator_id: None,
+            peer_node_id: None,
+            mutual_auth_complete: false,
         }
     }
 
@@ -142,12 +167,54 @@ impl Connection {
             client_init: None,
             validator_id: None,
             peer_kem_pk: None,
+            peer_validator_id: None,
+            peer_node_id: None,
+            mutual_auth_complete: false,
         }
     }
 
     /// Check if the connection is established and ready for app data.
     pub fn is_established(&self) -> bool {
         matches!(self.state, ConnectionState::Established(_))
+    }
+
+    /// B12 — peer's validator id surfaced from the completed handshake
+    /// (server side: from verified client cert under
+    /// `MutualAuthMode::Required`; client side: from the verified
+    /// server cert).
+    ///
+    /// Returns `None` while the handshake is still in progress, or in
+    /// `MutualAuthMode::Disabled`/`Optional` (server side, no client
+    /// cert presented) where no client-cert-bound peer id is available.
+    pub fn peer_validator_id(&self) -> Option<[u8; 32]> {
+        self.peer_validator_id
+    }
+
+    /// B12 — peer's NodeId derived from the verified client delegation
+    /// cert (server side, `MutualAuthMode::Required` only).
+    ///
+    /// Returns `None` on the client side (the client doesn't bind a
+    /// NodeId for itself from the handshake) and on the server side
+    /// when mutual auth was not performed.
+    ///
+    /// When this returns `Some(node_id)`, the server has cryptographically
+    /// bound the inbound session to the validator identity claimed by
+    /// the client cert: a transport peer cannot have completed the
+    /// handshake without holding the leaf KEM secret matching the
+    /// cert's `leaf_kem_pk`, and the cert's `validator_id` was bundled
+    /// into the transcript hash that derived the AEAD session keys.
+    pub fn peer_node_id(&self) -> Option<[u8; 32]> {
+        self.peer_node_id
+    }
+
+    /// B12 — whether mutual auth was performed and verified during the
+    /// handshake.
+    ///
+    /// True iff a client `NetworkDelegationCert` was presented in v2
+    /// `ClientInit` and the server's `MutualAuthMode` was not
+    /// `Disabled` (so the cert went through `parse_and_verify_client_cert`).
+    pub fn mutual_auth_complete(&self) -> bool {
+        self.mutual_auth_complete
     }
 
     /// For clients: start the KEMTLS handshake and produce the first frame to send.
@@ -222,6 +289,21 @@ impl Connection {
                 let reply_pkt = pack_server_accept(&server_accept)?;
                 let reply_bytes = reply_pkt.encode();
 
+                // B12 — capture verified peer identity from the
+                // completed `HandshakeResult` before we drop it. On the
+                // server side this is what makes the cryptographically
+                // bound peer identity visible to the transport layer:
+                // `result.peer_validator_id` is the validator id field
+                // of the verified cert (client cert under mutual auth,
+                // otherwise the server's own cert reflected back),
+                // `result.client_node_id` is the cert-bound NodeId set
+                // only when `MutualAuthMode::Required` and the client
+                // cert verified, and `result.mutual_auth_complete`
+                // mirrors the same condition.
+                self.peer_validator_id = Some(result.peer_validator_id);
+                self.peer_node_id = result.client_node_id;
+                self.mutual_auth_complete = result.mutual_auth_complete;
+
                 // Transition to Established state
                 self.handshake = None;
                 self.state = ConnectionState::Established(result.session);
@@ -253,6 +335,14 @@ impl Connection {
                 let result = hs
                     .handle_server_accept(crypto_ref, client_init, &server_accept)
                     .map_err(|_| NetError::Protocol("client handle_server_accept failed"))?;
+
+                // B12 — capture verified peer identity from the
+                // client-side `HandshakeResult` (the server's
+                // validator id from the verified server cert, and the
+                // mutual-auth flag).
+                self.peer_validator_id = Some(result.peer_validator_id);
+                self.peer_node_id = result.client_node_id;
+                self.mutual_auth_complete = result.mutual_auth_complete;
 
                 // Transition to Established state
                 self.handshake = None;

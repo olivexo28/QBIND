@@ -338,10 +338,94 @@ async fn run_p2p_node(
     // so we don't introduce a tighter bottleneck here.
     let (consensus_handler, consensus_inbound_rx) = ChannelConsensusHandler::new(256);
 
+    // B12 — opt-in to mutual-auth hardened mode. CLI flag wins; if
+    // absent, fall back to the QBIND_MUTUAL_AUTH env var; if still
+    // absent or unparseable, default to `Disabled` to preserve
+    // pre-B12 test-grade behaviour bit-for-bit.
+    let mutual_auth_mode = {
+        use qbind_node::node_config::{parse_mutual_auth_mode, MutualAuthMode as NodeMam};
+        let raw = args
+            .p2p_mutual_auth
+            .clone()
+            .or_else(|| std::env::var("QBIND_MUTUAL_AUTH").ok());
+        let node_mode = raw
+            .as_deref()
+            .and_then(parse_mutual_auth_mode)
+            .unwrap_or(NodeMam::Disabled);
+        // Map the node-config-level enum to the qbind-net-level enum.
+        match node_mode {
+            NodeMam::Required => qbind_net::MutualAuthMode::Required,
+            NodeMam::Optional => qbind_net::MutualAuthMode::Optional,
+            NodeMam::Disabled => qbind_net::MutualAuthMode::Disabled,
+        }
+    };
+    eprintln!(
+        "[binary] B12: mutual_auth_mode={:?} (source: {})",
+        mutual_auth_mode,
+        if args.p2p_mutual_auth.is_some() {
+            "--p2p-mutual-auth"
+        } else if std::env::var("QBIND_MUTUAL_AUTH").is_ok() {
+            "QBIND_MUTUAL_AUTH"
+        } else {
+            "default"
+        }
+    );
+
+    // B12 — fail-loud guard: the cert-verified identity binding
+    // installed by `P2pNodeBuilder` under `Required`/`Optional` mode
+    // is wired through a deterministic *test-grade* `TrustedClientRoots`
+    // resolver and the test-grade DummySig signature suite, so it is
+    // explicitly NOT a substitute for production PQC root-key
+    // distribution and per-validator cert lifecycle (see
+    // `docs/whitepaper/contradiction.md` C4 — production PQC remains
+    // out of scope for B12). We refuse to silently allow this stub
+    // wiring to be enabled on MainNet, where the operator's intent
+    // is unambiguously production-grade. TestNet is treated as a
+    // pre-production environment and only generates a warning.
+    use qbind_node::node_config::MutualAuthMode as NodeMam;
+    use qbind_types::NetworkEnvironment;
+    let configured_mode = match mutual_auth_mode {
+        qbind_net::MutualAuthMode::Required => NodeMam::Required,
+        qbind_net::MutualAuthMode::Optional => NodeMam::Optional,
+        qbind_net::MutualAuthMode::Disabled => NodeMam::Disabled,
+    };
+    if matches!(
+        configured_mode,
+        NodeMam::Required | NodeMam::Optional
+    ) {
+        match config.environment {
+            NetworkEnvironment::Mainnet => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-mutual-auth={} is wired through B12's test-grade \
+                     TrustedClientRoots/DummySig stack and is not a substitute for production PQC \
+                     root-key distribution; refusing to start on environment=mainnet. \
+                     See docs/whitepaper/contradiction.md C4.",
+                    configured_mode
+                );
+                std::process::exit(1);
+            }
+            NetworkEnvironment::Testnet => {
+                eprintln!(
+                    "[binary] WARNING: --p2p-mutual-auth={} is enabled with the B12 test-grade \
+                     TrustedClientRoots/DummySig stack. The cert verification path is exercised \
+                     structurally but production PQC root-key distribution is not. \
+                     See docs/whitepaper/contradiction.md C4.",
+                    configured_mode
+                );
+            }
+            NetworkEnvironment::Devnet => {
+                // DevNet is the intended target for the first
+                // mutual-auth binary-path evidence run; no extra
+                // warning beyond the banner above.
+            }
+        }
+    }
+
     // Build the P2P transport with the inbound consensus handler installed.
     let builder = P2pNodeBuilder::new()
         .with_num_validators(num_validators as usize)
-        .with_consensus_handler(Arc::new(consensus_handler));
+        .with_consensus_handler(Arc::new(consensus_handler))
+        .with_mutual_auth_mode(mutual_auth_mode);
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {

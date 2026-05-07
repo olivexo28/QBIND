@@ -73,7 +73,7 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
     ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
-    ServerConnectionConfig, ServerHandshakeConfig,
+    ServerConnectionConfig, ServerHandshakeConfig, TrustedClientRoots,
 };
 
 // ============================================================================
@@ -436,6 +436,58 @@ pub fn parse_test_validator_id_from_client_random(client_random: &[u8; 32]) -> O
     s.parse::<u64>().ok()
 }
 
+/// B12 — recover a test-grade validator id from the 32-byte
+/// `validator_id` field of a verified client `NetworkDelegationCert`.
+///
+/// `P2pNodeBuilder::create_connection_configs` deterministically
+/// embeds the ASCII string `"qbind-val-<N>"` (zero-padded to 32
+/// bytes) in the cert's `validator_id` field (this is the same
+/// `qbind-val-<N>` byte pattern used everywhere for the test-grade
+/// validator identity, including by the per-peer
+/// `peer_validator_id_overrides` installed by `build()`). This
+/// helper inverts that rule: given a 32-byte `validator_id`, it
+/// returns `Some(N)` if the prefix matches the literal
+/// `"qbind-val-"` followed by an ASCII decimal integer, and `None`
+/// otherwise.
+///
+/// # Security semantics
+///
+/// Unlike [`parse_test_validator_id_from_client_random`], the
+/// `validator_id` bytes consumed here come from a
+/// `NetworkDelegationCert` whose signature is parsed and (when
+/// `trusted_client_roots` is configured) verified by the
+/// listener's `qbind_net::handshake::parse_and_verify_client_cert`
+/// path BEFORE the resolver fires, and whose `leaf_kem_pk` is the
+/// same field the AEAD transcript binds — so completion of the
+/// mutual-auth handshake cryptographically constrains *which* peer
+/// could have produced this cert.
+///
+/// Caller-side responsibility: this helper is only consulted by
+/// the B12 resolver when
+/// `AcceptedPeerInit::mutual_auth_complete == true` and only on the
+/// `verified_peer_validator_id` bytes (never on the self-asserted
+/// `ClientInit.validator_id`).
+pub fn parse_test_validator_id_from_cert_validator_id(
+    validator_id: &[u8; 32],
+) -> Option<u64> {
+    const PREFIX: &[u8] = b"qbind-val-";
+    if !validator_id.starts_with(PREFIX) {
+        return None;
+    }
+    let tail = &validator_id[PREFIX.len()..];
+    let mut end = 0usize;
+    while end < tail.len() && tail[end].is_ascii_digit() {
+        end += 1;
+    }
+    // u64::MAX is 20 decimal digits, so any longer prefix cannot
+    // fit in a `u64` — reject without attempting to parse.
+    if end == 0 || end > 20 {
+        return None;
+    }
+    let s = std::str::from_utf8(&tail[..end]).ok()?;
+    s.parse::<u64>().ok()
+}
+
 /// Parse a `--p2p-peer` spec which may be either `addr` or `vid@addr`.
 ///
 /// Returns `Ok((Some(vid), addr))` when the spec is `vid@addr` (e.g.
@@ -477,6 +529,21 @@ pub struct P2pNodeBuilder {
     dag_handler: Option<Arc<dyn DagInboundHandler>>,
     /// Control inbound handler (optional override).
     control_handler: Option<Arc<dyn ControlInboundHandler>>,
+    /// B12 — mutual KEMTLS authentication mode for the binary path.
+    ///
+    /// Defaults to `MutualAuthMode::Disabled` to preserve the
+    /// pre-B12 test-grade `qbind-node` behaviour bit-for-bit when no
+    /// explicit selection is made (so all existing
+    /// `b1`/`b3`/`b5`/`b6`/`b7`/`b8`/`b9`/`b10`/`b11`/c4_b6/t172/t175
+    /// regression tests continue to exercise the same Disabled-mode
+    /// path). When set to `Required`, the listener turns on the
+    /// `qbind_net::handshake::handle_client_init` mutual-auth code
+    /// path (which already exists), the dialer attaches a client
+    /// `NetworkDelegationCert`, and the listener-side
+    /// `InboundIdentityResolver` is replaced with one that consults
+    /// the *verified* `AcceptedPeerInit.verified_peer_validator_id`
+    /// instead of the dialer's self-asserted `client_random`.
+    mutual_auth_mode: MutualAuthMode,
 }
 
 impl Default for P2pNodeBuilder {
@@ -493,6 +560,11 @@ impl P2pNodeBuilder {
             consensus_handler: None,
             dag_handler: None,
             control_handler: None,
+            // Preserve the pre-B12 default for full backward
+            // compatibility with existing DevNet test-grade evidence
+            // runs and harnesses. The hardened `Required` path is
+            // explicitly opted into via `with_mutual_auth_mode`.
+            mutual_auth_mode: MutualAuthMode::Disabled,
         }
     }
 
@@ -517,6 +589,34 @@ impl P2pNodeBuilder {
     /// Set a custom control inbound handler.
     pub fn with_control_handler(mut self, handler: Arc<dyn ControlInboundHandler>) -> Self {
         self.control_handler = Some(handler);
+        self
+    }
+
+    /// B12 — opt into mutual KEMTLS authentication on the binary
+    /// path.
+    ///
+    /// `MutualAuthMode::Required` makes the listener:
+    /// 1. require a v2 `ClientInit` carrying a client
+    ///    `NetworkDelegationCert`,
+    /// 2. parse + verify the client cert (signature path is exercised
+    ///    when `trusted_client_roots` is configured),
+    /// 3. transcript-bind the client cert into the AEAD key schedule,
+    /// 4. surface the cert-bound peer validator id and NodeId via
+    ///    [`AcceptedPeerInit::verified_peer_validator_id`] /
+    ///    [`AcceptedPeerInit::verified_client_node_id`] /
+    ///    [`AcceptedPeerInit::mutual_auth_complete`].
+    ///
+    /// The dialer side of the same builder also attaches a client
+    /// cert, so two `qbind-node` binaries running with this mode set
+    /// to `Required` complete a full mutual-auth handshake.
+    ///
+    /// `Disabled` (the default) preserves the pre-B12 test-grade
+    /// behaviour where the listener-side resolver consumes the
+    /// self-asserted `client_random` (see B8). `Optional` is supported
+    /// by the underlying handshake but not directly exercised by the
+    /// binary path; it falls back to the `Disabled`-shaped resolver.
+    pub fn with_mutual_auth_mode(mut self, mode: MutualAuthMode) -> Self {
+        self.mutual_auth_mode = mode;
         self
     }
 
@@ -567,6 +667,7 @@ impl P2pNodeBuilder {
             kem_suite_id,
             aead_suite_id,
             sig_suite_id,
+            self.mutual_auth_mode,
         );
 
         // B7: parse `static_peers` for the optional `vid@addr` syntax and
@@ -669,39 +770,88 @@ impl P2pNodeBuilder {
             p2p_service.set_peer_validator_id_overrides(peer_vid_overrides);
         }
 
-        // B8: install the test-grade listener-side identity resolver.
+        // B8/B12: install the listener-side identity resolver.
         //
-        // The resolver inspects the dialer's already-on-the-wire
-        // `client_random` (deterministically prefixed by
-        // `qbind-client-<N>` in `create_connection_configs` below) to
-        // recover the dialer's local validator id `N`, then derives the
-        // SAME deterministic NodeId the dialer side already registers
-        // its own connection under (via
-        // `derive_test_node_id_from_validator_id`). This closes the
-        // listener-side gap that DevNet Evidence Run 006 documented:
-        // accepted inbound sessions are now bound to the validator-
-        // derived deterministic NodeId rather than to a temporary
-        // session NodeId, so `send_to(ValidatorId)` resolves to a
-        // registered transport session in BOTH directions.
+        // The resolver is responsible for binding an accepted inbound
+        // session to a deterministic, routable NodeId so that
+        // `send_to(ValidatorId)` resolves to a registered transport
+        // session in BOTH directions. There are two shapes:
         //
-        // **Security semantics:** test-grade only. Under the current
-        // `MutualAuthMode::Disabled` configuration the dialer's
-        // `client_random` is self-asserted; production-grade peer
-        // identity binding still requires mutual KEMTLS auth and is
-        // tracked under C4 in `docs/whitepaper/contradiction.md`. This
-        // is strictly no weaker than the pre-B8 temporary-NodeId path
-        // — it just gives that NodeId a deterministic, routable shape
-        // when the dialer cooperates.
+        //   1. **B12 (mutual-auth, hardened)** — when
+        //      `mutual_auth_mode == MutualAuthMode::Required`, the
+        //      `qbind_net::handshake::parse_and_verify_client_cert`
+        //      path on the listener has already parsed the dialer's
+        //      client `NetworkDelegationCert`, transcript-bound it
+        //      into the AEAD key schedule, and (when
+        //      `trusted_client_roots` is configured) verified its
+        //      signature against the configured root. The resolver
+        //      consumes the cert-derived
+        //      `AcceptedPeerInit.verified_peer_validator_id` and maps
+        //      it through `parse_test_validator_id_from_cert_validator_id`
+        //      → `derive_test_node_id_from_validator_id(vid)` to
+        //      produce the SAME deterministic NodeId the dialer side
+        //      registers under (so the resulting NodeId on both ends
+        //      is byte-identical to the B7/B8 deterministic-NodeId
+        //      shape, but is now sourced from a cryptographically
+        //      bound cert field rather than from the dialer's
+        //      self-asserted `client_random`).
         //
-        // If the resolver returns `None` (e.g. an unrelated tool
-        // connects with a non-`qbind-client-N` `client_random`), the
+        //      In Required mode, the resolver fails closed: if the
+        //      handshake completed but `mutual_auth_complete == false`
+        //      (impossible under Required mode by design, but
+        //      defensive), or if the verified validator id bytes do
+        //      not parse, the resolver returns `None` and the
+        //      transport falls back to the legacy temporary-NodeId
+        //      path. The transport itself does not silently accept
+        //      sessions under temporary NodeIds when the validator
+        //      identity cannot be derived; downstream
+        //      `send_to(ValidatorId)` simply fails to resolve.
+        //
+        //   2. **B8 (test-grade, default)** — when
+        //      `mutual_auth_mode == MutualAuthMode::Disabled` (the
+        //      pre-B12 default), the resolver consumes the dialer's
+        //      already-on-the-wire `client_random` (deterministically
+        //      prefixed by `qbind-client-<N>` in
+        //      `create_connection_configs` below) to recover the
+        //      dialer's local validator id `N`, then derives the SAME
+        //      deterministic NodeId via
+        //      `derive_test_node_id_from_validator_id`. This is
+        //      strictly self-asserted and is documented as such; B12
+        //      did not change it.
+        //
+        // No silent override of prior behaviour: when the resolver
+        // returns `None` (e.g. an unrelated tool connects with a
+        // non-`qbind-client-N` `client_random`, or the cert's
+        // `validator_id` field doesn't parse to a known shape), the
         // transport falls back to the legacy temporary-session-NodeId
-        // path automatically. No silent override.
+        // path automatically.
+        let resolver_mode = self.mutual_auth_mode;
         p2p_service.set_inbound_identity_resolver(Arc::new(
-            |peer_init: &crate::secure_channel::AcceptedPeerInit| -> Option<NodeId> {
-                let vid =
-                    parse_test_validator_id_from_client_random(&peer_init.client_random)?;
-                Some(derive_test_node_id_from_validator_id(vid))
+            move |peer_init: &crate::secure_channel::AcceptedPeerInit| -> Option<NodeId> {
+                match resolver_mode {
+                    MutualAuthMode::Required | MutualAuthMode::Optional => {
+                        // B12 — hardened path: only accept identity
+                        // sourced from the *verified* cert. If the
+                        // peer did not actually complete mutual auth,
+                        // do NOT fall back to the self-asserted
+                        // `client_random` path — that would silently
+                        // weaken the hardened guarantee.
+                        if !peer_init.mutual_auth_complete {
+                            return None;
+                        }
+                        let vid_bytes = peer_init.verified_peer_validator_id?;
+                        let vid =
+                            parse_test_validator_id_from_cert_validator_id(&vid_bytes)?;
+                        Some(derive_test_node_id_from_validator_id(vid))
+                    }
+                    MutualAuthMode::Disabled => {
+                        // B8 — test-grade self-asserted path.
+                        let vid = parse_test_validator_id_from_client_random(
+                            &peer_init.client_random,
+                        )?;
+                        Some(derive_test_node_id_from_validator_id(vid))
+                    }
+                }
             },
         ));
 
@@ -759,11 +909,12 @@ impl P2pNodeBuilder {
 
         println!(
             "[T175] P2P node builder: validator={:?} node_id={:?} num_validators={} \
-             peer_kem_overrides={}",
+             peer_kem_overrides={} mutual_auth={:?}",
             validator_id,
             node_id,
             self.num_validators,
             peer_validator_map.len(),
+            self.mutual_auth_mode,
         );
 
         Ok(P2pNodeContext {
@@ -784,6 +935,7 @@ impl P2pNodeBuilder {
         kem_suite_id: u8,
         aead_suite_id: u8,
         sig_suite_id: u8,
+        mutual_auth_mode: MutualAuthMode,
     ) -> (ServerConnectionConfig, ClientConnectionConfig) {
         // Create validator identity bytes
         let mut validator_id_bytes = [0u8; 32];
@@ -828,6 +980,47 @@ impl P2pNodeBuilder {
         let server_name = format!("qbind-server-{}", validator_id.as_u64());
         server_random[..server_name.len().min(32)].copy_from_slice(server_name.as_bytes());
 
+        // B12 — under `MutualAuthMode::Required` the dialer must
+        // present a v2 `ClientInit` carrying a `NetworkDelegationCert`
+        // for its OWN validator identity. We reuse the same dummy
+        // delegation cert this node uses on its server side (which
+        // binds `cert.validator_id = qbind-val-<N>` and
+        // `cert.leaf_kem_pk = test_kem_pk(N)`), so when this node
+        // dials a peer, the peer's listener parses our cert and binds
+        // the inbound session to `qbind-val-<N>` →
+        // `derive_test_node_id_from_validator_id(N)`. The cert bytes
+        // are byte-identical on both server and client sides, which
+        // is intentional: this is a self-issued test-grade delegation
+        // cert (a real production-grade flow would rotate the leaf
+        // cert independently from the long-term root). Under
+        // `Disabled` we keep the pre-B12 behaviour and present no
+        // client cert (protocol v1).
+        let local_client_cert = match mutual_auth_mode {
+            MutualAuthMode::Required | MutualAuthMode::Optional => Some(cert_bytes.clone()),
+            MutualAuthMode::Disabled => None,
+        };
+
+        // B12 — under hardened mode, install a trusted-client-roots
+        // resolver so the listener actually exercises the
+        // `verify_delegation_cert` signature path on the dialer's
+        // cert (rather than returning `Vec::new()` from
+        // `parse_and_verify_client_cert` and skipping signature
+        // verification). The resolver maps any `root_key_id` to a
+        // deterministic 32-byte dummy root key — the actual
+        // signature byte pattern that passes `DummySig::verify` is
+        // owned by the cert's `sig_bytes` field below. A dialer that
+        // produces a cert whose `sig_bytes` does not satisfy the
+        // configured signature suite (e.g. a non-test-grade or
+        // tampered cert) is rejected with `NetError::KeySchedule`
+        // before the AEAD session is established. Production PQC
+        // root key distribution is tracked separately under C4.
+        let trusted_client_roots = match mutual_auth_mode {
+            MutualAuthMode::Required | MutualAuthMode::Optional => Some(
+                TrustedClientRoots::new(|_root_key_id: &[u8; 32]| Some(vec![0x01u8; 32])),
+            ),
+            MutualAuthMode::Disabled => None,
+        };
+
         // Create handshake configs
         let client_handshake_cfg = ClientHandshakeConfig {
             kem_suite_id,
@@ -835,7 +1028,7 @@ impl P2pNodeBuilder {
             crypto: crypto.clone(),
             peer_root_network_pk: root_network_pk.clone(),
             kem_metrics: None,
-            local_delegation_cert: None, // M8: No client cert for backward compat tests
+            local_delegation_cert: local_client_cert,
         };
 
         let server_handshake_cfg = ServerHandshakeConfig {
@@ -846,10 +1039,10 @@ impl P2pNodeBuilder {
             local_delegation_cert: cert_bytes,
             local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
             kem_metrics: None,
-            cookie_config: None, // M6: Cookie protection not enforced in legacy test builder
+            cookie_config: None,
             local_validator_id: validator_id_bytes,
-            mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
-            trusted_client_roots: None,
+            mutual_auth_mode,
+            trusted_client_roots,
         };
 
         // Create connection configs
