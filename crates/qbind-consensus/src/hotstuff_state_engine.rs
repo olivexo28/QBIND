@@ -248,6 +248,15 @@ where
         self.blocks.get(id)
     }
 
+    /// Iterate over known block-tree nodes.
+    ///
+    /// This is read-only by design and is used by the binary restore-catchup
+    /// path to export an already-known certified suffix to a restored peer
+    /// without exposing mutation of the block tree.
+    pub fn blocks_iter(&self) -> impl Iterator<Item = &BlockNode<BlockIdT>> {
+        self.blocks.values()
+    }
+
     /// Returns the number of known blocks.
     pub fn block_count(&self) -> usize {
         self.blocks.len()

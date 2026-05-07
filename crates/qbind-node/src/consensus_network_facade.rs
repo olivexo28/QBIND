@@ -41,6 +41,7 @@
 //!     .with_net_facade(Box::new(BlockingNetworkFacade::new(peer_manager)));
 //! ```
 
+use crate::p2p::ConsensusNetMsg;
 use crate::peer::PeerId;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::network::NetworkError;
@@ -132,6 +133,18 @@ pub trait ConsensusNetworkFacade: Send + Sync {
         // Implementations that support timeout messages should override this
         eprintln!(
             "[T146] Warning: send_timeout_msg not implemented for this facade, message dropped"
+        );
+        Ok(())
+    }
+
+    /// Broadcast a raw consensus-network message.
+    ///
+    /// Used only for binary-path restore-catchup request/response frames,
+    /// which intentionally do not masquerade as proposals, votes, or
+    /// timeouts. Existing facades keep this default no-op.
+    fn broadcast_consensus_msg(&self, _msg: &ConsensusNetMsg) -> Result<(), NetworkError> {
+        eprintln!(
+            "[restore-catchup] Warning: broadcast_consensus_msg not overridden by this facade implementation; message dropped"
         );
         Ok(())
     }

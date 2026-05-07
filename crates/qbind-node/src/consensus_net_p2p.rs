@@ -358,6 +358,11 @@ impl ConsensusNetworkFacade for P2pConsensusNetwork {
 
         Ok(())
     }
+
+    fn broadcast_consensus_msg(&self, msg: &ConsensusNetMsg) -> Result<(), NetworkError> {
+        self.p2p.broadcast(P2pMessage::Consensus(msg.clone()));
+        Ok(())
+    }
 }
 
 // ============================================================================

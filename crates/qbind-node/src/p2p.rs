@@ -177,6 +177,45 @@ pub enum ConsensusNetMsg {
     /// support is added to `ConsensusNetworkFacade`, this variant will carry
     /// those messages.
     NewView(Vec<u8>),
+
+    /// Restore-catchup request from a node that honestly restored a snapshot
+    /// prefix and needs certified blocks above that prefix from peers.
+    RestoreCatchupRequest(RestoreCatchupRequest),
+
+    /// Restore-catchup response carrying a bounded certified suffix above the
+    /// request anchor. Receivers validate it before applying.
+    RestoreCatchupResponse(RestoreCatchupResponse),
+}
+
+/// Request for peer-learned restore-catchup material above a committed anchor.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RestoreCatchupRequest {
+    pub requester_validator_index: u16,
+    pub from_height: u64,
+    pub from_block_id: [u8; 32],
+}
+
+/// One certified block in a restore-catchup suffix.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RestoreCatchupBlock {
+    pub height: u64,
+    pub view: u64,
+    pub parent_block_id: [u8; 32],
+    pub block_id: [u8; 32],
+    pub proposer_index: u16,
+    /// Logical QC signer validator indices carried for receiver-side
+    /// membership/quorum validation.
+    pub qc_signer_indices: Vec<u16>,
+}
+
+/// Bounded restore-catchup response.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct RestoreCatchupResponse {
+    pub responder_validator_index: u16,
+    pub request_from_height: u64,
+    pub request_from_block_id: [u8; 32],
+    pub responder_committed_height: Option<u64>,
+    pub blocks: Vec<RestoreCatchupBlock>,
 }
 
 /// DAG mempool network messages for P2P transport (T170, T173, T182).
@@ -648,6 +687,50 @@ mod tests {
             let encoded = bincode::serialize(&variant).expect("all variants should serialize");
             let _decoded: DagNetMsg =
                 bincode::deserialize(&encoded).expect("all variants should deserialize");
+        }
+    }
+
+    #[test]
+    fn test_restore_catchup_consensus_variants_serialize() {
+        let req = ConsensusNetMsg::RestoreCatchupRequest(RestoreCatchupRequest {
+            requester_validator_index: 1,
+            from_height: 42,
+            from_block_id: [0xAA; 32],
+        });
+        let encoded = bincode::serialize(&req).expect("request serializes");
+        let decoded: ConsensusNetMsg = bincode::deserialize(&encoded).expect("request decodes");
+        assert!(matches!(
+            decoded,
+            ConsensusNetMsg::RestoreCatchupRequest(RestoreCatchupRequest {
+                requester_validator_index: 1,
+                from_height: 42,
+                ..
+            })
+        ));
+
+        let resp = ConsensusNetMsg::RestoreCatchupResponse(RestoreCatchupResponse {
+            responder_validator_index: 2,
+            request_from_height: 42,
+            request_from_block_id: [0xAA; 32],
+            responder_committed_height: Some(45),
+            blocks: vec![RestoreCatchupBlock {
+                height: 43,
+                view: 43,
+                parent_block_id: [0xAA; 32],
+                block_id: [0xBB; 32],
+                proposer_index: 1,
+                qc_signer_indices: vec![0, 1, 2],
+            }],
+        });
+        let encoded = bincode::serialize(&resp).expect("response serializes");
+        let decoded: ConsensusNetMsg = bincode::deserialize(&encoded).expect("response decodes");
+        match decoded {
+            ConsensusNetMsg::RestoreCatchupResponse(r) => {
+                assert_eq!(r.responder_validator_index, 2);
+                assert_eq!(r.blocks.len(), 1);
+                assert_eq!(r.blocks[0].qc_signer_indices, vec![0, 1, 2]);
+            }
+            _ => panic!("expected RestoreCatchupResponse"),
         }
     }
 }

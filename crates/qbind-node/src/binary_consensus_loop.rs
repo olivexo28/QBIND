@@ -83,7 +83,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use qbind_consensus::basic_hotstuff_engine::BasicHotStuffEngine;
+use qbind_consensus::basic_hotstuff_engine::{
+    BasicHotStuffEngine, RestoreCatchupBlock as EngineRestoreCatchupBlock,
+};
 use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
@@ -91,7 +93,10 @@ use qbind_wire::consensus::{BlockProposal, Vote};
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
 use crate::metrics::NodeMetrics;
-use crate::p2p::{ConsensusNetMsg, NodeId, P2pService};
+use crate::p2p::{
+    ConsensusNetMsg, NodeId, P2pService, RestoreCatchupBlock, RestoreCatchupRequest,
+    RestoreCatchupResponse,
+};
 
 /// Adapter that exposes `Arc<NodeMetrics>` as a
 /// `qbind_consensus::ConsensusProgressRecorder`.
@@ -200,6 +205,9 @@ impl PeerConnectivitySource for P2pServicePeerConnectivity {
 /// for an idle node; short enough that single-validator commits visibly
 /// advance during smoke tests.
 pub const DEFAULT_BINARY_CONSENSUS_TICK_INTERVAL: Duration = Duration::from_millis(100);
+
+const RESTORE_CATCHUP_REQUEST_EVERY_TICKS: u64 = 10;
+const RESTORE_CATCHUP_MAX_BLOCKS_PER_RESPONSE: usize = 128;
 
 /// Configuration for the binary consensus loop.
 #[derive(Debug, Clone)]
@@ -448,6 +456,20 @@ pub struct BinaryConsensusLoopInboundStats {
     /// and is derived from the same `ConsensusProgressRecorder` callback
     /// the engine already drives. (B10 observability.)
     pub qcs_formed_total: u64,
+    /// Restore-catchup requests broadcast by a restored binary-path node.
+    pub restore_catchup_requests_sent: u64,
+    /// Restore-catchup requests received from peers.
+    pub restore_catchup_requests_received: u64,
+    /// Restore-catchup responses sent to peers.
+    pub restore_catchup_responses_sent: u64,
+    /// Restore-catchup responses received from peers.
+    pub restore_catchup_responses_received: u64,
+    /// Peer-learned catchup blocks accepted and applied.
+    pub restore_catchup_blocks_applied: u64,
+    /// Malformed or inconsistent catchup responses rejected fail-closed.
+    pub restore_catchup_responses_rejected: u64,
+    /// Future proposals deferred while a restored node is behind its peers.
+    pub restore_catchup_proposals_deferred: u64,
 }
 
 
@@ -631,6 +653,8 @@ pub async fn run_binary_consensus_loop_with_io(
                                 &mut inbound_stats,
                                 outbound_facade.as_deref(),
                                 &metrics,
+                                cfg.local_validator_id,
+                                cfg.restore_baseline.is_some(),
                             );
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
@@ -693,6 +717,14 @@ pub async fn run_binary_consensus_loop_with_io(
                             &mut inbound_stats,
                         );
                     }
+                    maybe_broadcast_restore_catchup_request(
+                        &engine,
+                        ticks,
+                        cfg.local_validator_id,
+                        cfg.restore_baseline.is_some(),
+                        outbound_facade.as_deref(),
+                        &mut inbound_stats,
+                    );
                     update_state_metrics(
                         &engine,
                         &metrics,
@@ -755,6 +787,14 @@ pub async fn run_binary_consensus_loop_with_io(
                             &mut inbound_stats,
                         );
                     }
+                    maybe_broadcast_restore_catchup_request(
+                        &engine,
+                        ticks,
+                        cfg.local_validator_id,
+                        cfg.restore_baseline.is_some(),
+                        outbound_facade.as_deref(),
+                        &mut inbound_stats,
+                    );
                     update_state_metrics(
                         &engine,
                         &metrics,
@@ -1124,6 +1164,8 @@ fn handle_inbound_consensus_msg(
     stats: &mut BinaryConsensusLoopInboundStats,
     outbound: Option<&dyn ConsensusNetworkFacade>,
     metrics: &Arc<NodeMetrics>,
+    local_validator_id: ValidatorId,
+    restore_catchup_enabled: bool,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
     use qbind_wire::io::WireDecode;
@@ -1152,7 +1194,10 @@ fn handle_inbound_consensus_msg(
     match &msg {
         ConsensusNetMsg::Proposal(_) => metrics.network().inc_inbound_proposal(),
         ConsensusNetMsg::Vote(_) => metrics.network().inc_inbound_vote(),
-        ConsensusNetMsg::Timeout(_) | ConsensusNetMsg::NewView(_) => {
+        ConsensusNetMsg::Timeout(_)
+        | ConsensusNetMsg::NewView(_)
+        | ConsensusNetMsg::RestoreCatchupRequest(_)
+        | ConsensusNetMsg::RestoreCatchupResponse(_) => {
             metrics.network().inc_inbound_other()
         }
     }
@@ -1162,6 +1207,18 @@ fn handle_inbound_consensus_msg(
             let mut slice: &[u8] = &bytes;
             match BlockProposal::decode(&mut slice) {
                 Ok(proposal) => {
+                    if restore_catchup_enabled
+                        && should_defer_restore_proposal_for_catchup(engine, &proposal)
+                    {
+                        stats.restore_catchup_proposals_deferred =
+                            stats.restore_catchup_proposals_deferred.saturating_add(1);
+                        eprintln!(
+                            "[restore-catchup] deferred proposal at height={} while local committed_height={:?}",
+                            proposal.header.height,
+                            engine.committed_height(),
+                        );
+                        return;
+                    }
                     let from = ValidatorId::new(proposal.header.proposer_index as u64);
                     stats.inbound_proposals_delivered =
                         stats.inbound_proposals_delivered.saturating_add(1);
@@ -1249,6 +1306,171 @@ fn handle_inbound_consensus_msg(
             // received-but-not-routable rather than fake a Noop.
             stats.inbound_decode_failures =
                 stats.inbound_decode_failures.saturating_add(1);
+        }
+        ConsensusNetMsg::RestoreCatchupRequest(req) => {
+            stats.restore_catchup_requests_received =
+                stats.restore_catchup_requests_received.saturating_add(1);
+            handle_restore_catchup_request(engine, req, stats, outbound, local_validator_id);
+        }
+        ConsensusNetMsg::RestoreCatchupResponse(resp) => {
+            stats.restore_catchup_responses_received =
+                stats.restore_catchup_responses_received.saturating_add(1);
+            handle_restore_catchup_response(engine, resp, stats, local_validator_id);
+        }
+    }
+}
+
+fn maybe_broadcast_restore_catchup_request(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    ticks: u64,
+    local_validator_id: ValidatorId,
+    restore_catchup_enabled: bool,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+) {
+    if !restore_catchup_enabled || ticks % RESTORE_CATCHUP_REQUEST_EVERY_TICKS != 1 {
+        return;
+    }
+    let (Some(from_height), Some(from_block_id), Some(facade)) = (
+        engine.committed_height(),
+        engine.committed_block().copied(),
+        outbound,
+    ) else {
+        return;
+    };
+    let req = RestoreCatchupRequest {
+        requester_validator_index: local_validator_id.0 as u16,
+        from_height,
+        from_block_id,
+    };
+    if let Err(e) = facade.broadcast_consensus_msg(&ConsensusNetMsg::RestoreCatchupRequest(req)) {
+        eprintln!("[restore-catchup] request broadcast failed: {:?}", e);
+        return;
+    }
+    stats.restore_catchup_requests_sent = stats.restore_catchup_requests_sent.saturating_add(1);
+}
+
+fn should_defer_restore_proposal_for_catchup(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    proposal: &BlockProposal,
+) -> bool {
+    let Some(committed_height) = engine.committed_height() else {
+        return false;
+    };
+    if proposal.header.height > committed_height.saturating_add(1) {
+        return true;
+    }
+    if proposal.header.height == committed_height.saturating_add(1) {
+        if let Some(committed_block) = engine.committed_block() {
+            return proposal.header.parent_block_id != *committed_block;
+        }
+    }
+    false
+}
+
+fn handle_restore_catchup_request(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    req: RestoreCatchupRequest,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+    local_validator_id: ValidatorId,
+) {
+    if req.requester_validator_index as u64 == local_validator_id.0 {
+        return;
+    }
+    let Some(facade) = outbound else {
+        return;
+    };
+    let blocks = engine.export_restore_catchup_blocks(
+        req.from_height,
+        req.from_block_id,
+        RESTORE_CATCHUP_MAX_BLOCKS_PER_RESPONSE,
+    );
+    if blocks.is_empty() {
+        return;
+    }
+    let resp = RestoreCatchupResponse {
+        responder_validator_index: local_validator_id.0 as u16,
+        request_from_height: req.from_height,
+        request_from_block_id: req.from_block_id,
+        responder_committed_height: engine.committed_height(),
+        blocks: blocks
+            .into_iter()
+            .map(|b| RestoreCatchupBlock {
+                height: b.height,
+                view: b.view,
+                parent_block_id: b.parent_block_id,
+                block_id: b.block_id,
+                proposer_index: b.proposer.0 as u16,
+                qc_signer_indices: b.qc_signers.into_iter().map(|v| v.0 as u16).collect(),
+            })
+            .collect(),
+    };
+    if let Err(e) = facade.broadcast_consensus_msg(&ConsensusNetMsg::RestoreCatchupResponse(resp)) {
+        eprintln!("[restore-catchup] response broadcast failed: {:?}", e);
+        return;
+    }
+    stats.restore_catchup_responses_sent = stats.restore_catchup_responses_sent.saturating_add(1);
+}
+
+fn handle_restore_catchup_response(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    resp: RestoreCatchupResponse,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    local_validator_id: ValidatorId,
+) {
+    if resp.responder_validator_index as u64 == local_validator_id.0 {
+        return;
+    }
+    if resp.blocks.is_empty() {
+        return;
+    }
+    if engine.committed_height() != Some(resp.request_from_height)
+        || engine.committed_block().copied() != Some(resp.request_from_block_id)
+    {
+        stats.restore_catchup_responses_rejected =
+            stats.restore_catchup_responses_rejected.saturating_add(1);
+        eprintln!(
+            "[restore-catchup] rejected stale/mismatched response anchor: response_height={} local_height={:?}",
+            resp.request_from_height,
+            engine.committed_height()
+        );
+        return;
+    }
+
+    let blocks: Vec<EngineRestoreCatchupBlock<[u8; 32]>> = resp
+        .blocks
+        .into_iter()
+        .map(|b| EngineRestoreCatchupBlock {
+            height: b.height,
+            view: b.view,
+            parent_block_id: b.parent_block_id,
+            block_id: b.block_id,
+            proposer: ValidatorId::new(b.proposer_index as u64),
+            qc_signers: b
+                .qc_signer_indices
+                .into_iter()
+                .map(|v| ValidatorId::new(v as u64))
+                .collect(),
+        })
+        .collect();
+
+    match engine.apply_restore_catchup_blocks(&blocks) {
+        Ok(applied) => {
+            stats.restore_catchup_blocks_applied = stats
+                .restore_catchup_blocks_applied
+                .saturating_add(applied as u64);
+            eprintln!(
+                "[restore-catchup] applied {} peer-learned certified blocks; committed_height={:?} view={}",
+                applied,
+                engine.committed_height(),
+                engine.current_view()
+            );
+        }
+        Err(e) => {
+            stats.restore_catchup_responses_rejected =
+                stats.restore_catchup_responses_rejected.saturating_add(1);
+            eprintln!("[restore-catchup] rejected response: {:?}", e);
         }
     }
 }

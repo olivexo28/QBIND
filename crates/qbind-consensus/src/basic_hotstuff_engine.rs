@@ -351,6 +351,55 @@ where
     timeout_emitted_in_view: bool,
 }
 
+/// Peer-learned certified block material used by restore catchup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreCatchupBlock<BlockIdT> {
+    /// Block height in QBIND's current binary path (height == view).
+    pub height: u64,
+    /// View/round at which the block was proposed.
+    pub view: u64,
+    /// Parent block id the restored node must already know or have just learned.
+    pub parent_block_id: BlockIdT,
+    /// Block id being certified.
+    pub block_id: BlockIdT,
+    /// Proposer for `view`; must match the deterministic leader schedule.
+    pub proposer: ValidatorId,
+    /// Logical QC signers learned from the peer.
+    pub qc_signers: Vec<ValidatorId>,
+}
+
+/// Fail-closed restore-catchup validation errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreCatchupError<BlockIdT> {
+    /// Local engine has no committed anchor to extend.
+    MissingLocalAnchor,
+    /// Catchup material does not extend the local committed anchor.
+    AnchorMismatch {
+        expected_height: u64,
+        actual_height: u64,
+        expected_block_id: BlockIdT,
+        actual_parent_block_id: BlockIdT,
+    },
+    /// Heights must be contiguous and strictly above the current committed height.
+    NonContiguousHeight { expected: u64, actual: u64 },
+    /// Current binary path requires height == view.
+    HeightViewMismatch { height: u64, view: u64 },
+    /// Proposer must match deterministic leader for the view.
+    WrongProposer {
+        view: u64,
+        expected: ValidatorId,
+        actual: ValidatorId,
+    },
+    /// Block id must match deterministic binary-path derivation.
+    BlockIdMismatch {
+        height: u64,
+        expected: BlockIdT,
+        actual: BlockIdT,
+    },
+    /// Learned QC did not satisfy logical quorum validation.
+    InvalidQc(QcValidationError),
+}
+
 // Manual Debug implementation because Arc<dyn ViewDurationRecorder> uses Debug
 impl<BlockIdT> std::fmt::Debug for BasicHotStuffEngine<BlockIdT>
 where
@@ -934,6 +983,155 @@ impl BasicHotStuffEngine<[u8; 32]> {
     /// Generate a block id for the current view (as leader).
     fn make_block_id(&mut self, parent_block_id: &[u8; 32]) -> [u8; 32] {
         Self::derive_block_id_from_header(self.local_id, self.current_view, parent_block_id)
+    }
+
+    /// Export a contiguous certified suffix above `from_height/from_block_id`
+    /// for a restored peer.
+    ///
+    /// Only blocks already present in this engine's block tree with an
+    /// `own_qc` are exported. The suffix is anchored at the caller-provided
+    /// block id and follows child links one height at a time. If no certified
+    /// child is known, an empty suffix is returned.
+    pub fn export_restore_catchup_blocks(
+        &self,
+        from_height: u64,
+        from_block_id: [u8; 32],
+        max_blocks: usize,
+    ) -> Vec<RestoreCatchupBlock<[u8; 32]>> {
+        let mut out = Vec::new();
+        let mut parent = from_block_id;
+        let mut expected_height = from_height.saturating_add(1);
+
+        while out.len() < max_blocks {
+            let candidate = self
+                .state
+                .blocks_iter()
+                .filter(|node| {
+                    node.height == expected_height
+                        && node.parent_id.as_ref() == Some(&parent)
+                        && node.own_qc.is_some()
+                })
+                .min_by_key(|node| node.view);
+            let Some(node) = candidate else {
+                break;
+            };
+            let Some(qc) = node.own_qc.as_ref() else {
+                break;
+            };
+            let proposer = self.leader_for_view(node.view);
+            out.push(RestoreCatchupBlock {
+                height: node.height,
+                view: node.view,
+                parent_block_id: parent,
+                block_id: node.id,
+                proposer,
+                qc_signers: qc.signers.clone(),
+            });
+            parent = node.id;
+            expected_height = expected_height.saturating_add(1);
+        }
+
+        out
+    }
+
+    /// Validate and apply peer-learned restore-catchup material above the
+    /// current committed anchor.
+    ///
+    /// The method does not fabricate commits: each learned block is inserted
+    /// into the normal block tree, then the provided logical QC signers are
+    /// replayed through `HotStuffStateEngine::on_vote`, causing the existing
+    /// QC and 3-chain commit logic to advance state if and only if the suffix
+    /// is structurally valid and has quorum.
+    pub fn apply_restore_catchup_blocks(
+        &mut self,
+        blocks: &[RestoreCatchupBlock<[u8; 32]>],
+    ) -> Result<usize, RestoreCatchupError<[u8; 32]>> {
+        if blocks.is_empty() {
+            return Ok(0);
+        }
+
+        let mut expected_height = self
+            .committed_height()
+            .ok_or(RestoreCatchupError::MissingLocalAnchor)?
+            .saturating_add(1);
+        let mut expected_parent = *self
+            .committed_block()
+            .ok_or(RestoreCatchupError::MissingLocalAnchor)?;
+        let mut previous_qc: Option<QuorumCertificate<[u8; 32]>> = self.locked_qc().cloned();
+        let mut applied = 0usize;
+
+        for block in blocks {
+            if block.height != expected_height {
+                return Err(RestoreCatchupError::NonContiguousHeight {
+                    expected: expected_height,
+                    actual: block.height,
+                });
+            }
+            if block.parent_block_id != expected_parent {
+                return Err(RestoreCatchupError::AnchorMismatch {
+                    expected_height,
+                    actual_height: block.height,
+                    expected_block_id: expected_parent,
+                    actual_parent_block_id: block.parent_block_id,
+                });
+            }
+            if block.height != block.view {
+                return Err(RestoreCatchupError::HeightViewMismatch {
+                    height: block.height,
+                    view: block.view,
+                });
+            }
+            let expected_proposer = self.leader_for_view(block.view);
+            if block.proposer != expected_proposer {
+                return Err(RestoreCatchupError::WrongProposer {
+                    view: block.view,
+                    expected: expected_proposer,
+                    actual: block.proposer,
+                });
+            }
+            let expected_block_id = Self::derive_block_id_from_header(
+                block.proposer,
+                block.view,
+                &block.parent_block_id,
+            );
+            if block.block_id != expected_block_id {
+                return Err(RestoreCatchupError::BlockIdMismatch {
+                    height: block.height,
+                    expected: expected_block_id,
+                    actual: block.block_id,
+                });
+            }
+
+            let qc = QuorumCertificate::new(block.block_id, block.view, block.qc_signers.clone());
+            qc.validate(self.validators())
+                .map_err(RestoreCatchupError::InvalidQc)?;
+
+            self.state.register_block(
+                block.block_id,
+                block.view,
+                Some(block.parent_block_id),
+                previous_qc.clone(),
+            );
+            for signer in &block.qc_signers {
+                self.state
+                    .on_vote(*signer, block.view, &block.block_id)
+                    .map_err(RestoreCatchupError::InvalidQc)?;
+            }
+
+            previous_qc = Some(qc);
+            expected_parent = block.block_id;
+            expected_height = expected_height.saturating_add(1);
+            applied = applied.saturating_add(1);
+        }
+
+        // After replaying a valid certified suffix, resume at the first
+        // height/view not covered by the learned material so the restored
+        // node does not re-propose or re-vote below its new committed floor.
+        if self.current_view < expected_height {
+            self.set_view(expected_height);
+        }
+
+        Ok(applied)
     }
 
     /// Called when this node is leader for the current view.
@@ -1900,5 +2098,100 @@ mod tests {
 
         assert_eq!(engine.committed_height(), None);
         assert_eq!(engine.current_view(), 0);
+    }
+
+    fn make_zero_based_validator_set(num: u64) -> ConsensusValidatorSet {
+        let entries: Vec<ValidatorSetEntry> = (0..num)
+            .map(|i| ValidatorSetEntry {
+                id: ValidatorId(i),
+                voting_power: 1,
+            })
+            .collect();
+        ConsensusValidatorSet::new(entries).expect("valid set")
+    }
+
+    fn catchup_block_for(
+        engine: &BasicHotStuffEngine<[u8; 32]>,
+        height: u64,
+        parent: [u8; 32],
+    ) -> RestoreCatchupBlock<[u8; 32]> {
+        let proposer = engine.leader_for_view(height);
+        let block_id = BasicHotStuffEngine::<[u8; 32]>::derive_block_id_from_header(
+            proposer, height, &parent,
+        );
+        RestoreCatchupBlock {
+            height,
+            view: height,
+            parent_block_id: parent,
+            block_id,
+            proposer,
+            qc_signers: vec![ValidatorId(0), ValidatorId(1), ValidatorId(2)],
+        }
+    }
+
+    #[test]
+    fn restore_catchup_applies_valid_peer_learned_suffix_above_snapshot() {
+        let validators = make_zero_based_validator_set(3);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(2), validators);
+        let snapshot_id = [0x44; 32];
+        let snapshot_height = 10;
+        engine.initialize_from_snapshot_baseline(snapshot_id, snapshot_height);
+
+        let b11 = catchup_block_for(&engine, 11, snapshot_id);
+        let b12 = catchup_block_for(&engine, 12, b11.block_id);
+        let b13 = catchup_block_for(&engine, 13, b12.block_id);
+        let b14 = catchup_block_for(&engine, 14, b13.block_id);
+
+        let applied = engine
+            .apply_restore_catchup_blocks(&[b11, b12, b13, b14])
+            .expect("valid catchup suffix applies");
+
+        assert_eq!(applied, 4);
+        assert!(
+            engine.committed_height().unwrap() > snapshot_height,
+            "catchup must advance committed height above restored prefix"
+        );
+        assert!(engine.commit_log().iter().all(|e| e.height > snapshot_height));
+    }
+
+    #[test]
+    fn restore_catchup_rejects_malformed_parent_fail_closed() {
+        let validators = make_zero_based_validator_set(3);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(2), validators);
+        let snapshot_id = [0x55; 32];
+        let snapshot_height = 7;
+        engine.initialize_from_snapshot_baseline(snapshot_id, snapshot_height);
+
+        let mut bad = catchup_block_for(&engine, 8, snapshot_id);
+        bad.parent_block_id = [0x99; 32];
+
+        let err = engine
+            .apply_restore_catchup_blocks(&[bad])
+            .expect_err("bad parent must be rejected");
+        assert!(matches!(
+            err,
+            RestoreCatchupError::AnchorMismatch { .. }
+        ));
+        assert_eq!(engine.committed_height(), Some(snapshot_height));
+        assert!(engine.commit_log().is_empty());
+    }
+
+    #[test]
+    fn restore_baseline_does_not_fabricate_post_snapshot_history() {
+        let validators = make_zero_based_validator_set(3);
+        let mut engine = BasicHotStuffEngine::new(ValidatorId(0), validators);
+        engine.initialize_from_snapshot_baseline([0x66; 32], 5);
+
+        assert_eq!(engine.committed_height(), Some(5));
+        assert_eq!(engine.current_view(), 6);
+        assert!(
+            engine.commit_log().is_empty(),
+            "snapshot baseline must not invent post-snapshot commit log"
+        );
+        assert_eq!(
+            engine.export_restore_catchup_blocks(5, [0x66; 32], 128),
+            Vec::new(),
+            "freshly restored engine has no certified peer-learned suffix to export"
+        );
     }
 }

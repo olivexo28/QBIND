@@ -321,6 +321,8 @@ fn msg_type(msg: &ConsensusNetMsg) -> &'static str {
         ConsensusNetMsg::Vote(_) => "Vote",
         ConsensusNetMsg::Timeout(_) => "Timeout",
         ConsensusNetMsg::NewView(_) => "NewView",
+        ConsensusNetMsg::RestoreCatchupRequest(_) => "RestoreCatchupRequest",
+        ConsensusNetMsg::RestoreCatchupResponse(_) => "RestoreCatchupResponse",
     }
 }
 
