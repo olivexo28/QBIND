@@ -666,6 +666,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 &mut last_view,
                                 Duration::ZERO,
                             );
+                            update_restore_catchup_metrics(&metrics, &inbound_stats);
                             // Refresh progress snapshot.
                             {
                                 inbound_stats.qcs_formed_total =
@@ -732,6 +733,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_view,
                         tick_started.elapsed(),
                     );
+                    update_restore_catchup_metrics(&metrics, &inbound_stats);
                     {
                         inbound_stats.qcs_formed_total =
                             metrics.progress().qcs_formed_total();
@@ -802,6 +804,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut last_view,
                         tick_started.elapsed(),
                     );
+                    update_restore_catchup_metrics(&metrics, &inbound_stats);
                     {
                         inbound_stats.qcs_formed_total =
                             metrics.progress().qcs_formed_total();
@@ -1499,8 +1502,33 @@ fn update_state_metrics(
     metrics.consensus_t154().set_view_number(new_view);
     metrics.view_lag().set_current_view(new_view);
     metrics.view_lag().update_highest_seen_view(new_view);
+    if let (Some(height), Some(block_id)) = (engine.committed_height(), engine.committed_block()) {
+        metrics.committed_anchor().set_anchor(height, *block_id);
+        if commits_delta > 0 {
+            eprintln!(
+                "[binary-consensus] committed_anchor height={} block_id={}",
+                height,
+                hex::encode(block_id)
+            );
+        }
+    }
     *last_commits = new_commits_total;
     *last_view = new_view;
+}
+
+fn update_restore_catchup_metrics(
+    metrics: &Arc<NodeMetrics>,
+    stats: &BinaryConsensusLoopInboundStats,
+) {
+    metrics.restore_catchup().set(
+        stats.restore_catchup_requests_sent,
+        stats.restore_catchup_requests_received,
+        stats.restore_catchup_responses_sent,
+        stats.restore_catchup_responses_received,
+        stats.restore_catchup_blocks_applied,
+        stats.restore_catchup_responses_rejected,
+        stats.restore_catchup_proposals_deferred,
+    );
 }
 
 /// Spawn `run_binary_consensus_loop` on the current tokio runtime. Returns a

@@ -2016,6 +2016,121 @@ pub struct ConsensusProgressMetrics {
     qc_formation_latency_bucket_inf: AtomicU64,
 }
 
+/// Binary restore-catchup counters surfaced on `/metrics`.
+#[derive(Debug, Default)]
+pub struct RestoreCatchupMetrics {
+    requests_sent: AtomicU64,
+    requests_received: AtomicU64,
+    responses_sent: AtomicU64,
+    responses_received: AtomicU64,
+    blocks_applied: AtomicU64,
+    responses_rejected: AtomicU64,
+    proposals_deferred: AtomicU64,
+}
+
+impl RestoreCatchupMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set(
+        &self,
+        requests_sent: u64,
+        requests_received: u64,
+        responses_sent: u64,
+        responses_received: u64,
+        blocks_applied: u64,
+        responses_rejected: u64,
+        proposals_deferred: u64,
+    ) {
+        self.requests_sent.store(requests_sent, Ordering::Relaxed);
+        self.requests_received.store(requests_received, Ordering::Relaxed);
+        self.responses_sent.store(responses_sent, Ordering::Relaxed);
+        self.responses_received.store(responses_received, Ordering::Relaxed);
+        self.blocks_applied.store(blocks_applied, Ordering::Relaxed);
+        self.responses_rejected.store(responses_rejected, Ordering::Relaxed);
+        self.proposals_deferred.store(proposals_deferred, Ordering::Relaxed);
+    }
+
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Restore catchup metrics\n");
+        output.push_str(&format!(
+            "qbind_restore_catchup_requests_sent_total {}\n",
+            self.requests_sent.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_requests_received_total {}\n",
+            self.requests_received.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_responses_sent_total {}\n",
+            self.responses_sent.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_responses_received_total {}\n",
+            self.responses_received.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_blocks_applied_total {}\n",
+            self.blocks_applied.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_responses_rejected_total {}\n",
+            self.responses_rejected.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_proposals_deferred_total {}\n",
+            self.proposals_deferred.load(Ordering::Relaxed)
+        ));
+        output
+    }
+}
+
+/// Live committed consensus anchor surfaced on `/metrics`.
+#[derive(Debug, Default)]
+pub struct ConsensusCommittedAnchorMetrics {
+    height: AtomicU64,
+    block_id: RwLock<Option<[u8; 32]>>,
+}
+
+impl ConsensusCommittedAnchorMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_anchor(&self, height: u64, block_id: [u8; 32]) {
+        self.height.store(height, Ordering::Relaxed);
+        *self
+            .block_id
+            .write()
+            .expect("committed anchor metrics RwLock poisoned") = Some(block_id);
+    }
+
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Consensus committed anchor metrics\n");
+        output.push_str(&format!(
+            "qbind_consensus_committed_height {}\n",
+            self.height.load(Ordering::Relaxed)
+        ));
+        if let Some(block_id) = *self
+            .block_id
+            .read()
+            .expect("committed anchor metrics RwLock poisoned")
+        {
+            output.push_str(&format!(
+                "qbind_consensus_committed_block_info{{block_id=\"{}\"}} 1\n",
+                hex::encode(block_id)
+            ));
+        } else {
+            output.push_str("qbind_consensus_committed_block_info{block_id=\"none\"} 0\n");
+        }
+        output
+    }
+}
+
 impl ConsensusProgressMetrics {
     /// Create a new metrics instance with all counters at zero.
     pub fn new() -> Self {
@@ -6931,6 +7046,10 @@ pub struct NodeMetrics {
     suite_transition: SuiteTransitionMetrics,
     /// Consensus progress metrics (T127).
     progress: ConsensusProgressMetrics,
+    /// Binary restore-catchup counters.
+    restore_catchup: RestoreCatchupMetrics,
+    /// Live committed consensus anchor.
+    committed_anchor: ConsensusCommittedAnchorMetrics,
     /// Per-validator vote metrics (T128).
     validator_votes: ValidatorVoteMetrics,
     /// View lag gauge metrics (T128).
@@ -6990,6 +7109,8 @@ impl NodeMetrics {
             commit: CommitMetrics::new(),
             suite_transition: SuiteTransitionMetrics::new(),
             progress: ConsensusProgressMetrics::new(),
+            restore_catchup: RestoreCatchupMetrics::new(),
+            committed_anchor: ConsensusCommittedAnchorMetrics::new(),
             validator_votes: ValidatorVoteMetrics::new(),
             view_lag: ViewLagMetrics::new(),
             validator_equivocations: ValidatorEquivocationMetrics::new(),
@@ -7059,6 +7180,16 @@ impl NodeMetrics {
     /// Get consensus progress metrics (T127).
     pub fn progress(&self) -> &ConsensusProgressMetrics {
         &self.progress
+    }
+
+    /// Get binary restore-catchup metrics.
+    pub fn restore_catchup(&self) -> &RestoreCatchupMetrics {
+        &self.restore_catchup
+    }
+
+    /// Get live committed anchor metrics.
+    pub fn committed_anchor(&self) -> &ConsensusCommittedAnchorMetrics {
+        &self.committed_anchor
     }
 
     /// Get per-validator vote metrics (T128).
@@ -7559,6 +7690,8 @@ impl NodeMetrics {
 
         // Consensus progress metrics (T127)
         output.push_str(&self.progress.format_metrics());
+        output.push_str(&self.restore_catchup.format_metrics());
+        output.push_str(&self.committed_anchor.format_metrics());
 
         // Per-validator vote metrics with view lag (T128, T129)
         // Uses highest_seen_view from ViewLagMetrics to compute per-validator lag
