@@ -25,7 +25,7 @@ use crate::validator_set::ConsensusValidatorSet;
 /// - The set of validators whose votes are included
 ///
 /// The `BlockIdT` generic allows this to work with different block identifier types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct QuorumCertificate<BlockIdT> {
     /// Identifier of the block/proposal this QC attests to.
     pub block_id: BlockIdT,

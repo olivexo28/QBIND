@@ -88,6 +88,7 @@ use qbind_consensus::basic_hotstuff_engine::{
 };
 use qbind_consensus::driver::ConsensusEngineAction;
 use qbind_consensus::ids::ValidatorId;
+use qbind_consensus::timeout::{TimeoutCertificate, TimeoutMsg};
 use qbind_consensus::validator_set::{ConsensusValidatorSet, ValidatorSetEntry};
 use qbind_wire::consensus::{BlockProposal, Vote};
 
@@ -209,6 +210,39 @@ pub const DEFAULT_BINARY_CONSENSUS_TICK_INTERVAL: Duration = Duration::from_mill
 const RESTORE_CATCHUP_REQUEST_EVERY_TICKS: u64 = 10;
 const RESTORE_CATCHUP_MAX_BLOCKS_PER_RESPONSE: usize = 128;
 
+/// B14: default number of ticks of zero forward view-progress that elapse
+/// before the binary-path view-timeout primitive emits a `TimeoutMsg`.
+///
+/// At the default `DEFAULT_BINARY_CONSENSUS_TICK_INTERVAL` of 100ms this
+/// is ~5s — comfortably above normal proposal/vote/QC round-trip times
+/// in the existing N=4 binary-path topology, so an honest live leader
+/// is never timed out by accident, while still bounded enough to recover
+/// from an absent leader within seconds.
+///
+/// "Forward view-progress" here means `engine.current_view()` strictly
+/// increasing OR a new commit landing — both observed at the loop level
+/// from engine state. This deliberately does not depend on wall-clock
+/// time so single-validator and bounded-tick test paths stay
+/// deterministic.
+pub const DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS: u64 = 50;
+
+/// B14: maximum accepted byte length for an inbound bincode-encoded
+/// `TimeoutMsg` / `TimeoutCertificate` payload before we even attempt
+/// deserialization.
+///
+/// A `TimeoutMsg<[u8; 32]>` is a 32-byte block-id (optional) plus a
+/// `u64` view, a `u64` validator id, and a small QC structure
+/// (`view + block_id + Vec<ValidatorId>`); a `TimeoutCertificate` is
+/// the same plus a `Vec<ValidatorId>` of signers. With validator-set
+/// sizes today bounded at small N, a few-hundred-byte payload is the
+/// real upper bound; 64 KiB is several orders of magnitude above that
+/// and is *only* a defense-in-depth ceiling against a hostile peer
+/// trying to drive memory exhaustion via an oversized length prefix
+/// in a bincode frame. We fail closed (decode-failure counters
+/// increment, no engine state mutation) on any payload above this
+/// limit.
+const MAX_INBOUND_TIMEOUT_FRAME_BYTES: usize = 64 * 1024;
+
 /// Configuration for the binary consensus loop.
 #[derive(Debug, Clone)]
 pub struct BinaryConsensusLoopConfig {
@@ -234,6 +268,19 @@ pub struct BinaryConsensusLoopConfig {
     /// When `None`, startup behavior is unchanged (engine begins at
     /// view 0 with no committed prefix).
     pub restore_baseline: Option<RestoreBaseline>,
+    /// B14: number of ticks of zero forward view-progress before the
+    /// binary path emits a `TimeoutMsg` for the current view.
+    ///
+    /// `None` disables the view-timeout primitive entirely (preserves
+    /// pre-B14 behaviour: a parked view never auto-advances). The
+    /// default constructor [`BinaryConsensusLoopConfig::new`] sets this
+    /// to `Some(DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS)`.
+    ///
+    /// View-timeout emission is suppressed while bounded restore-catchup
+    /// mode is active (`RestoreCatchupModeState::active=true`) so a
+    /// restored node never times out a live view it is still catching
+    /// up to.
+    pub view_timeout_ticks: Option<u64>,
 }
 
 /// Restore-aware consensus baseline derived from a successful snapshot
@@ -264,6 +311,7 @@ impl BinaryConsensusLoopConfig {
             tick_interval: DEFAULT_BINARY_CONSENSUS_TICK_INTERVAL,
             max_ticks: None,
             restore_baseline: None,
+            view_timeout_ticks: Some(DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS),
         }
     }
 
@@ -285,6 +333,17 @@ impl BinaryConsensusLoopConfig {
     /// [`run_binary_consensus_loop`] for the semantics.
     pub fn with_restore_baseline(mut self, baseline: RestoreBaseline) -> Self {
         self.restore_baseline = Some(baseline);
+        self
+    }
+
+    /// B14: override the view-timeout tick threshold.
+    ///
+    /// Pass `None` to disable the binary-path view-timeout primitive
+    /// entirely (the pre-B14 behaviour: a parked view never
+    /// auto-advances). Tests use small values to deterministically
+    /// trigger timeouts within a bounded `max_ticks` window.
+    pub fn with_view_timeout_ticks(mut self, n: Option<u64>) -> Self {
+        self.view_timeout_ticks = n;
         self
     }
 }
@@ -493,6 +552,60 @@ pub struct BinaryConsensusLoopInboundStats {
     /// condition). This is observability only — set exactly once on the
     /// transition tick — and never decreases.
     pub restore_catchup_mode_exited_at_height: u64,
+
+    // ----------------------------------------------------------------------
+    // B14: binary-path view-timeout / view-change observability.
+    //
+    // All four counters are strict accounts of what the timeout primitive
+    // actually did on real ticks/inbound frames. They never increment
+    // speculatively. With `view_timeout_ticks = None` (the primitive
+    // disabled) all four stay at zero for the life of the loop.
+    // ----------------------------------------------------------------------
+    /// `TimeoutMsg` frames emitted by this validator after the
+    /// configured `view_timeout_ticks` window of zero forward
+    /// view-progress elapsed in the current view. Bounded: incremented
+    /// at most once per view by `engine.timeout_emitted_in_view()`
+    /// gating; cleared on every successful view advance.
+    pub view_timeouts_emitted: u64,
+    /// Inbound `Timeout(bytes)` frames that decoded as a typed
+    /// `TimeoutMsg` and were delivered to `engine.on_timeout_msg`.
+    pub inbound_timeouts_delivered: u64,
+    /// Inbound `Timeout(bytes)` frames the engine accepted (i.e.
+    /// `on_timeout_msg` returned `Ok(_)` — either a fresh ingestion or
+    /// a duplicate accepted). Strictly `<= inbound_timeouts_delivered`.
+    pub inbound_timeouts_engine_accepted: u64,
+    /// `TimeoutCertificate`s actually formed at this validator, either
+    /// by ingesting our own emitted timeout or after a peer's inbound
+    /// timeout pushed the accumulator past the 2/3 threshold.
+    pub timeout_certificates_formed: u64,
+    /// `NewView(bytes)` frames broadcast by this validator after a TC
+    /// was formed locally. Strictly `<= timeout_certificates_formed`.
+    pub outbound_new_views_sent: u64,
+    /// Inbound `NewView(bytes)` frames that decoded as a typed
+    /// `TimeoutCertificate` and were delivered to
+    /// `engine.on_timeout_certificate`.
+    pub inbound_new_views_delivered: u64,
+    /// Inbound `NewView` frames the engine accepted to advance the
+    /// view (i.e. `on_timeout_certificate` returned `Ok(view)` with
+    /// `view > previous_view`). Strictly `<= inbound_new_views_delivered`.
+    pub inbound_new_views_engine_accepted: u64,
+    /// Total view advances driven by a `TimeoutCertificate` (locally
+    /// formed OR received via `NewView`). This is a subset of
+    /// `progress.view_changes_total` — the rest are normal QC-driven
+    /// advances. Bounded: at most one per TC application.
+    pub view_timeout_advances: u64,
+    /// Inbound `Timeout(bytes)` / `NewView(bytes)` frames whose typed
+    /// decode failed (malformed bincode payload). Counted under the
+    /// existing `inbound_decode_failures` family for consistency with
+    /// proposal/vote decode failures, and additionally surfaced here
+    /// for B14-specific test assertions. Fail-closed: no engine state
+    /// change occurs on such frames.
+    pub view_timeout_decode_failures: u64,
+    /// Inbound `Timeout` / `NewView` frames the engine rejected after
+    /// successful decode (e.g. `TimeoutValidationError::NonMemberSigner`,
+    /// `InsufficientQuorum`, `ViewMismatch`). Fail-closed: engine state
+    /// is unchanged.
+    pub view_timeout_engine_rejects: u64,
 }
 
 /// Transition state for the bounded "restore-catchup mode → normal
@@ -615,6 +728,86 @@ impl RestoreCatchupModeState {
         self.active = false;
         self.exited_at_height = Some(local_height);
         Some(local_height)
+    }
+}
+
+/// B14: per-loop view-timeout state for the binary path.
+///
+/// Tracks the tick of the last observed forward view-progress
+/// (`engine.current_view()` strictly increasing OR a new commit). The
+/// loop emits a `TimeoutMsg` for the current view exactly when:
+///
+/// 1. `view_timeout_ticks` is configured (`Some(n)`), AND
+/// 2. `restore_mode.is_active() == false` (we never time out a view
+///    we are still catching up to from a snapshot), AND
+/// 3. `engine.timeout_emitted_in_view() == false` (single-shot per
+///    view; cleared by the engine on every successful view advance), AND
+/// 4. an outbound `ConsensusNetworkFacade` is wired (single-validator
+///    / LocalMesh paths cannot broadcast and stay zero), AND
+/// 5. `ticks_since_last_view_progress >= n`.
+///
+/// All five gates are explicit. There is no implicit retry, no silent
+/// heuristic, no "absent-leader detection" beyond the standard
+/// HotStuff "no progress for N ticks". This naturally handles the
+/// Run-015 N=4 absent-leader plateau (leader for `view_v` is
+/// permanently absent ⇒ no QC ⇒ view does not advance ⇒ after `n`
+/// ticks the present validators emit a timeout for `view_v` and a
+/// `TimeoutCertificate` advances them to `view_v + 1`, which has a
+/// different leader under round-robin).
+#[derive(Debug, Clone, Copy)]
+struct ViewTimeoutState {
+    /// The view number observed on the most recent tick where forward
+    /// progress was detected. Used to decide whether the view has
+    /// changed since the last tick.
+    last_observed_view: u64,
+    /// The total commit count observed on the most recent tick where
+    /// forward progress was detected. A new commit also counts as
+    /// progress (pipelined HotStuff can commit at view `v-2` while
+    /// view advances to `v+1`); both reset the timeout window.
+    last_observed_commits: u64,
+    /// The tick number on which forward progress was last observed.
+    /// The timeout fires when `current_tick - last_progress_tick >=
+    /// view_timeout_ticks`.
+    last_progress_tick: u64,
+}
+
+impl ViewTimeoutState {
+    fn new(initial_view: u64, initial_commits: u64) -> Self {
+        Self {
+            last_observed_view: initial_view,
+            last_observed_commits: initial_commits,
+            last_progress_tick: 0,
+        }
+    }
+
+    /// Update progress tracking from current engine state. Returns
+    /// `true` if forward progress was observed on this call (view
+    /// strictly increased OR commits strictly increased), in which
+    /// case `last_progress_tick` is updated.
+    fn observe(&mut self, current_view: u64, current_commits: u64, current_tick: u64) -> bool {
+        let progressed =
+            current_view > self.last_observed_view || current_commits > self.last_observed_commits;
+        if progressed {
+            self.last_observed_view = current_view;
+            self.last_observed_commits = current_commits;
+            self.last_progress_tick = current_tick;
+        }
+        progressed
+    }
+
+    /// Whether the timeout window has elapsed for the current tick.
+    /// Pure function of `current_tick`, `last_progress_tick`, and
+    /// `view_timeout_ticks`. Returns `false` when the primitive is
+    /// disabled (`view_timeout_ticks = None`).
+    fn timeout_window_elapsed(
+        &self,
+        current_tick: u64,
+        view_timeout_ticks: Option<u64>,
+    ) -> bool {
+        match view_timeout_ticks {
+            None => false,
+            Some(n) => current_tick.saturating_sub(self.last_progress_tick) >= n,
+        }
     }
 }
 
@@ -786,6 +979,15 @@ pub async fn run_binary_consensus_loop_with_io(
     inbound_stats.restore_catchup_mode_active = if restore_mode.is_active() { 1 } else { 0 };
     update_restore_catchup_metrics(&metrics, &inbound_stats);
 
+    // B14: per-loop view-timeout state. Seeded with the engine's
+    // current view (which already reflects any restore baseline) and
+    // commit count so the very first tick after restore does not
+    // trip the timeout window.
+    let mut view_timeout_state = ViewTimeoutState::new(
+        engine.current_view(),
+        engine.commit_log().len() as u64,
+    );
+
     loop {
         // We always select on shutdown + ticker. When inbound I/O is wired
         // we additionally select on inbound_rx so an inbound proposal/vote
@@ -883,6 +1085,21 @@ pub async fn run_binary_consensus_loop_with_io(
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
                     );
+                    // B14: emit a `TimeoutMsg` if the current view has
+                    // been parked for more than `view_timeout_ticks`
+                    // ticks without forward progress, then locally
+                    // ingest it, broadcast it, and apply any resulting
+                    // `TimeoutCertificate` so a present quorum can
+                    // leave an absent-leader view.
+                    maybe_emit_view_timeout(
+                        &mut engine,
+                        &mut view_timeout_state,
+                        ticks,
+                        cfg.view_timeout_ticks,
+                        restore_mode.is_active(),
+                        outbound_facade.as_deref(),
+                        &mut inbound_stats,
+                    );
                     update_state_metrics(
                         &engine,
                         &metrics,
@@ -950,6 +1167,20 @@ pub async fn run_binary_consensus_loop_with_io(
                         &engine,
                         ticks,
                         cfg.local_validator_id,
+                        restore_mode.is_active(),
+                        outbound_facade.as_deref(),
+                        &mut inbound_stats,
+                    );
+                    // B14: see other branch — same view-timeout
+                    // emission gating applies on the no-inbound-IO
+                    // path so a single-validator loop with an
+                    // outbound facade can still record timeout
+                    // emissions for testing.
+                    maybe_emit_view_timeout(
+                        &mut engine,
+                        &mut view_timeout_state,
+                        ticks,
+                        cfg.view_timeout_ticks,
                         restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
@@ -1447,25 +1678,163 @@ fn handle_inbound_consensus_msg(
                 }
             }
         }
-        ConsensusNetMsg::Timeout(_bytes) => {
-            // Timeout / view-change ingestion on the binary path is
-            // intentionally deferred: the existing
-            // `BasicHotStuffEngine::on_timeout_msg` API takes a typed
-            // `TimeoutMsg`, but `ConsensusNetMsg::Timeout` carries opaque
-            // bytes whose canonical decoder is not yet exposed by
-            // `qbind-wire` for general-purpose deserialization. Counting it
-            // as "received but unhandled" keeps the binary path honest:
-            // we don't silently drop it as if it were a NoOp.
-            stats.inbound_decode_failures =
-                stats.inbound_decode_failures.saturating_add(1);
+        ConsensusNetMsg::Timeout(bytes) => {
+            // B14: typed binary-path ingestion of `TimeoutMsg`.
+            //
+            // We deserialize the bincode payload, route it through
+            // `engine.on_timeout_msg`, and — if a `TimeoutCertificate`
+            // is formed as a result — broadcast it as a `NewView` and
+            // locally apply it via `engine.on_timeout_certificate` so
+            // the engine actually advances out of the parked view.
+            //
+            // Fail-closed:
+            //   - bincode decode failure  → `inbound_decode_failures`
+            //     and `view_timeout_decode_failures` incremented; no
+            //     engine state change.
+            //   - engine validation error → `view_timeout_engine_rejects`
+            //     incremented; no engine state change.
+            //
+            // We do NOT verify the timeout's signature here. This is
+            // consistent with the existing binary-path inbound handlers
+            // for `Proposal` and `Vote`, which today also flow through
+            // `engine.on_proposal_event` / `engine.on_vote_event`
+            // without independent signature verification at the loop
+            // level (see `BasicHotStuffEngine::on_vote_event`, which
+            // does no per-vote crypto). Production crypto verification
+            // for timeout messages is a separate hardening step that
+            // the engine surface (`on_timeout_msg` doc) explicitly
+            // defers to its caller.
+            // Defense-in-depth: bound bincode's allocation budget via
+            // `bincode::config().limit(N)` and additionally short-circuit
+            // any frame whose byte length already exceeds the cap, so a
+            // hostile peer cannot drive memory exhaustion via an
+            // oversized length prefix or oversized payload. The cap is
+            // several orders of magnitude above the true upper bound
+            // for these messages; see `MAX_INBOUND_TIMEOUT_FRAME_BYTES`.
+            if bytes.len() > MAX_INBOUND_TIMEOUT_FRAME_BYTES {
+                stats.inbound_decode_failures =
+                    stats.inbound_decode_failures.saturating_add(1);
+                stats.view_timeout_decode_failures =
+                    stats.view_timeout_decode_failures.saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] B14: inbound timeout exceeds {} byte cap (got {}); dropping",
+                    MAX_INBOUND_TIMEOUT_FRAME_BYTES,
+                    bytes.len()
+                );
+                return;
+            }
+            match bincode::config()
+                .limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES as u64)
+                .deserialize::<TimeoutMsg<[u8; 32]>>(&bytes)
+            {
+                Ok(timeout) => {
+                    stats.inbound_timeouts_delivered =
+                        stats.inbound_timeouts_delivered.saturating_add(1);
+                    let from = timeout.validator_id;
+                    match engine.on_timeout_msg(from, timeout) {
+                        Ok(maybe_tc) => {
+                            stats.inbound_timeouts_engine_accepted =
+                                stats.inbound_timeouts_engine_accepted.saturating_add(1);
+                            if let Some(tc) = maybe_tc {
+                                apply_local_tc_and_broadcast_new_view(
+                                    engine,
+                                    &tc,
+                                    stats,
+                                    outbound,
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            stats.view_timeout_engine_rejects =
+                                stats.view_timeout_engine_rejects.saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] B14: inbound timeout rejected by engine: {:?}",
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    stats.inbound_decode_failures =
+                        stats.inbound_decode_failures.saturating_add(1);
+                    stats.view_timeout_decode_failures =
+                        stats.view_timeout_decode_failures.saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] B14: inbound timeout decode failed: {:?}",
+                        e
+                    );
+                }
+            }
         }
-        ConsensusNetMsg::NewView(_bytes) => {
-            // NewView is reserved for a future view-change protocol
-            // extension (see `ConsensusNetMsg::NewView` doc). The current
-            // engine does not consume it; we record it as
-            // received-but-not-routable rather than fake a Noop.
-            stats.inbound_decode_failures =
-                stats.inbound_decode_failures.saturating_add(1);
+        ConsensusNetMsg::NewView(bytes) => {
+            // B14: typed binary-path ingestion of `TimeoutCertificate`.
+            //
+            // The wire payload is a bincode-encoded
+            // `TimeoutCertificate<[u8; 32]>`. After decode we route it
+            // through `engine.on_timeout_certificate`, which (a)
+            // validates that the signers are validator-set members
+            // with sufficient combined voting power (≥ 2/3),
+            // (b) updates `locked_qc` if the TC carries a higher
+            // high_qc than ours, and (c) advances `current_view` to
+            // `tc.view`. Engine validation failure is the fail-closed
+            // path.
+            // Defense-in-depth size cap (see Timeout arm above). Same
+            // ceiling for `TimeoutCertificate` payloads.
+            if bytes.len() > MAX_INBOUND_TIMEOUT_FRAME_BYTES {
+                stats.inbound_decode_failures =
+                    stats.inbound_decode_failures.saturating_add(1);
+                stats.view_timeout_decode_failures =
+                    stats.view_timeout_decode_failures.saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] B14: inbound NewView exceeds {} byte cap (got {}); dropping",
+                    MAX_INBOUND_TIMEOUT_FRAME_BYTES,
+                    bytes.len()
+                );
+                return;
+            }
+            match bincode::config()
+                .limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES as u64)
+                .deserialize::<TimeoutCertificate<[u8; 32]>>(&bytes)
+            {
+                Ok(tc) => {
+                    stats.inbound_new_views_delivered =
+                        stats.inbound_new_views_delivered.saturating_add(1);
+                    let from_view = engine.current_view();
+                    match engine.on_timeout_certificate(&tc) {
+                        Ok(to_view) => {
+                            if to_view > from_view {
+                                stats.inbound_new_views_engine_accepted = stats
+                                    .inbound_new_views_engine_accepted
+                                    .saturating_add(1);
+                                stats.view_timeout_advances =
+                                    stats.view_timeout_advances.saturating_add(1);
+                                eprintln!(
+                                    "[binary-consensus] B14: NewView advanced view {} -> {}",
+                                    from_view, to_view
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            stats.view_timeout_engine_rejects =
+                                stats.view_timeout_engine_rejects.saturating_add(1);
+                            eprintln!(
+                                "[binary-consensus] B14: NewView rejected by engine: {:?}",
+                                e
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    stats.inbound_decode_failures =
+                        stats.inbound_decode_failures.saturating_add(1);
+                    stats.view_timeout_decode_failures =
+                        stats.view_timeout_decode_failures.saturating_add(1);
+                    eprintln!(
+                        "[binary-consensus] B14: inbound NewView decode failed: {:?}",
+                        e
+                    );
+                }
+            }
         }
         ConsensusNetMsg::RestoreCatchupRequest(req) => {
             stats.restore_catchup_requests_received =
@@ -1476,6 +1845,222 @@ fn handle_inbound_consensus_msg(
             stats.restore_catchup_responses_received =
                 stats.restore_catchup_responses_received.saturating_add(1);
             handle_restore_catchup_response(engine, resp, stats, local_validator_id, restore_mode);
+        }
+    }
+}
+
+/// B14: per-tick view-timeout emission on the binary path.
+///
+/// Called from the loop's tick handler after the leader-step
+/// (`do_leader_tick`) and after `restore_mode` evaluation, but before
+/// `update_state_metrics`. Emits at most one `TimeoutMsg` per view per
+/// validator per loop instance:
+///
+/// 1. Snapshots the current `(view, commits)` state and asks
+///    `view_state.observe(...)` whether forward progress occurred since
+///    the last tick. Forward progress resets the timeout window — this
+///    is the same liveness criterion as HotStuff's pacemaker
+///    (proposal/QC/commit). When the leader is genuinely live the
+///    window keeps resetting and no timeout ever fires.
+///
+/// 2. If `view_timeout_ticks` is `None` (primitive disabled), or
+///    restore-catchup mode is still active (we never time out a view
+///    we are still catching up to), or no outbound facade is wired
+///    (single-validator / LocalMesh), or the engine has already
+///    emitted a timeout for the current view, the function returns
+///    without side-effects.
+///
+/// 3. Otherwise, when the configured tick window has elapsed, the
+///    function builds a `TimeoutMsg` via `engine.create_timeout_msg()`,
+///    marks the engine as "timeout emitted in this view" so the same
+///    view never fires twice, locally ingests the timeout (so a single
+///    validator that is itself one of the 2/3 quorum is not
+///    permanently waiting for its own bytes to round-trip back), and
+///    broadcasts the bincode-encoded payload as
+///    `ConsensusNetMsg::Timeout(bytes)`.
+///
+/// 4. If local ingestion already crosses the 2/3 threshold (e.g. in a
+///    bounded test where this validator drives the timeout-accumulator
+///    past quorum on its own ingestion), the resulting
+///    `TimeoutCertificate` is also broadcast as
+///    `ConsensusNetMsg::NewView(bytes)` and applied to the engine via
+///    `engine.on_timeout_certificate`, advancing the view immediately.
+///
+/// All counter updates are strict accounts of what the function
+/// actually did. Encode failures (which should never happen for these
+/// plain-data structs) are logged and bounce out without engine
+/// effect.
+fn maybe_emit_view_timeout(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    view_state: &mut ViewTimeoutState,
+    ticks: u64,
+    view_timeout_ticks: Option<u64>,
+    restore_mode_active: bool,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+) {
+    // Always observe progress, even if the primitive is disabled — so
+    // re-enabling later starts from a current baseline.
+    let progressed = view_state.observe(
+        engine.current_view(),
+        engine.commit_log().len() as u64,
+        ticks,
+    );
+    if progressed {
+        // Forward progress resets the engine's per-view timeout-emitted
+        // flag indirectly via `try_advance_to_view` / `advance_view` /
+        // `on_timeout_certificate` — those are the only paths that
+        // mutate `current_view`. There is nothing to do here besides
+        // observe.
+        return;
+    }
+    // Gate 1: primitive enabled?
+    let Some(_) = view_timeout_ticks else {
+        return;
+    };
+    // Gate 2: restore-catchup mode must not be active.
+    if restore_mode_active {
+        return;
+    }
+    // Gate 3: outbound facade required for broadcast.
+    let Some(facade) = outbound else {
+        return;
+    };
+    // Gate 4: engine must not have already emitted a timeout for this view.
+    if engine.timeout_emitted_in_view() {
+        return;
+    }
+    // Gate 5: the configured tick window must have elapsed.
+    if !view_state.timeout_window_elapsed(ticks, view_timeout_ticks) {
+        return;
+    }
+
+    let timed_out_view = engine.current_view();
+    let timeout_msg = engine.create_timeout_msg();
+    let local_id = timeout_msg.validator_id;
+
+    // Encode first so a serialization error fails closed before we
+    // mutate engine state.
+    let bytes = match bincode::serialize(&timeout_msg) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!(
+                "[binary-consensus] B14: timeout encode failed (view={}): {:?} — skipping emit",
+                timed_out_view, e
+            );
+            return;
+        }
+    };
+
+    // Mark before locally ingesting so a self-fire that produces a TC
+    // does not re-enter this branch.
+    engine.mark_timeout_emitted();
+    stats.view_timeouts_emitted = stats.view_timeouts_emitted.saturating_add(1);
+
+    // Locally ingest. In a 2/3 quorum where this validator is the
+    // first to time out, no TC forms yet; in a small (e.g. f=0,
+    // n=1) topology this single timeout already crosses 2/3 and the
+    // engine returns a TC immediately. In both cases we then
+    // broadcast.
+    let mut formed_tc: Option<TimeoutCertificate<[u8; 32]>> = None;
+    match engine.on_timeout_msg(local_id, timeout_msg) {
+        Ok(maybe_tc) => {
+            // Note: the local self-ingest does NOT increment
+            // `inbound_timeouts_engine_accepted` — that counter is
+            // strictly the "from the wire" view (see the `Timeout`
+            // arm of `handle_inbound_consensus_msg`). Any TC formed
+            // here is captured below via `timeout_certificates_formed`
+            // in `apply_local_tc_and_broadcast_new_view`.
+            formed_tc = maybe_tc;
+        }
+        Err(e) => {
+            stats.view_timeout_engine_rejects =
+                stats.view_timeout_engine_rejects.saturating_add(1);
+            eprintln!(
+                "[binary-consensus] B14: local timeout ingest rejected by engine: {:?}",
+                e
+            );
+        }
+    }
+
+    if let Err(e) = facade.broadcast_consensus_msg(&ConsensusNetMsg::Timeout(bytes)) {
+        eprintln!(
+            "[binary-consensus] B14: timeout broadcast failed (view={}): {:?}",
+            timed_out_view, e
+        );
+    } else {
+        eprintln!(
+            "[binary-consensus] B14: emitted TimeoutMsg for view={} after {} ticks of no progress",
+            timed_out_view,
+            ticks.saturating_sub(view_state.last_progress_tick),
+        );
+    }
+
+    if let Some(tc) = formed_tc {
+        apply_local_tc_and_broadcast_new_view(engine, &tc, stats, outbound);
+    }
+}
+
+/// B14: apply a locally-formed or just-received `TimeoutCertificate`
+/// to the engine and broadcast it to peers as a `NewView(bytes)`.
+///
+/// This is shared between (a) the path where a local
+/// `engine.on_timeout_msg` ingestion crossed the 2/3 quorum and
+/// produced a TC, and (b) the path where an inbound peer's
+/// `Timeout(bytes)` was the one that crossed the threshold. In both
+/// cases we want to publish the TC so the rest of the cluster can
+/// jump views without each peer having to independently re-derive it.
+///
+/// Engine apply is the source of truth: if
+/// `engine.on_timeout_certificate` rejects (insufficient quorum,
+/// non-member signers, view mismatch, …), no view advance is
+/// recorded and no broadcast occurs.
+fn apply_local_tc_and_broadcast_new_view(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    tc: &TimeoutCertificate<[u8; 32]>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+) {
+    stats.timeout_certificates_formed =
+        stats.timeout_certificates_formed.saturating_add(1);
+    let from_view = engine.current_view();
+    match engine.on_timeout_certificate(tc) {
+        Ok(to_view) => {
+            if to_view > from_view {
+                stats.view_timeout_advances =
+                    stats.view_timeout_advances.saturating_add(1);
+                eprintln!(
+                    "[binary-consensus] B14: TimeoutCertificate advanced view {} -> {}",
+                    from_view, to_view
+                );
+            }
+        }
+        Err(e) => {
+            stats.view_timeout_engine_rejects =
+                stats.view_timeout_engine_rejects.saturating_add(1);
+            eprintln!(
+                "[binary-consensus] B14: local TC apply rejected by engine: {:?}",
+                e
+            );
+            return;
+        }
+    }
+    let Some(facade) = outbound else {
+        return;
+    };
+    match bincode::serialize(tc) {
+        Ok(bytes) => {
+            if let Err(e) =
+                facade.broadcast_consensus_msg(&ConsensusNetMsg::NewView(bytes))
+            {
+                eprintln!("[binary-consensus] B14: NewView broadcast failed: {:?}", e);
+            } else {
+                stats.outbound_new_views_sent =
+                    stats.outbound_new_views_sent.saturating_add(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("[binary-consensus] B14: TC encode failed: {:?}", e);
         }
     }
 }
@@ -2469,5 +3054,592 @@ mod tests {
             "inactive mode must suppress new RestoreCatchupRequest broadcasts"
         );
         assert_eq!(stats.restore_catchup_requests_sent, 1);
+    }
+
+    // ========================================================================
+    // B14: binary-path view-timeout / view-change primitive tests.
+    //
+    // These tests exercise `maybe_emit_view_timeout` and the inbound
+    // `ConsensusNetMsg::Timeout` / `NewView` handlers in
+    // `handle_inbound_consensus_msg` directly. They prove:
+    //
+    //   A. After `view_timeout_ticks` ticks of no forward progress, a
+    //      `TimeoutMsg` is emitted and broadcast.
+    //   B. Restore-catchup mode suppresses emission (B13 invariant).
+    //   C. Disabling the primitive (`view_timeout_ticks = None`)
+    //      preserves pre-B14 behaviour: no emission ever.
+    //   D. Forward progress (commit OR view advance) resets the window.
+    //   E. The 2/3-quorum threshold actually advances the view: in a
+    //      bounded N=1 topology the local timeout itself crosses the
+    //      threshold, forms a TC, and `current_view` advances by 1.
+    //   F. Inbound malformed `Timeout` / `NewView` bytes are
+    //      fail-closed: counters increment, engine state unchanged.
+    //   G. Inbound `NewView` carrying a structurally valid TC advances
+    //      the view at the receiver.
+    //   H. Run-015 absent-leader N=4 shape: local + two peer timeouts
+    //      cross 2/3 quorum, the engine forms a TC, the loop applies
+    //      it, and the parked view advances to one whose leader is
+    //      different.
+    // ========================================================================
+
+    /// Tiny recording facade reused by B14 tests. Counts every
+    /// `broadcast_consensus_msg` invocation by `ConsensusNetMsg` variant
+    /// so tests can assert exact send shapes (Timeout vs NewView).
+    #[derive(Default)]
+    struct B14RecordingFacade {
+        timeouts_sent: std::sync::Mutex<u64>,
+        new_views_sent: std::sync::Mutex<u64>,
+        last_timeout_bytes: std::sync::Mutex<Option<Vec<u8>>>,
+        last_new_view_bytes: std::sync::Mutex<Option<Vec<u8>>>,
+    }
+
+    impl crate::consensus_network_facade::ConsensusNetworkFacade for B14RecordingFacade {
+        fn broadcast_proposal(
+            &self,
+            _p: &qbind_wire::consensus::BlockProposal,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            Ok(())
+        }
+        fn broadcast_vote(
+            &self,
+            _v: &qbind_wire::consensus::Vote,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            Ok(())
+        }
+        fn send_vote_to(
+            &self,
+            _to: ValidatorId,
+            _v: &qbind_wire::consensus::Vote,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            Ok(())
+        }
+        fn broadcast_consensus_msg(
+            &self,
+            m: &ConsensusNetMsg,
+        ) -> Result<(), qbind_consensus::network::NetworkError> {
+            match m {
+                ConsensusNetMsg::Timeout(b) => {
+                    *self.timeouts_sent.lock().unwrap() += 1;
+                    *self.last_timeout_bytes.lock().unwrap() = Some(b.clone());
+                }
+                ConsensusNetMsg::NewView(b) => {
+                    *self.new_views_sent.lock().unwrap() += 1;
+                    *self.last_new_view_bytes.lock().unwrap() = Some(b.clone());
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+    }
+
+    fn b14_make_engine(n: u64, local_id: u64) -> BasicHotStuffEngine<[u8; 32]> {
+        let validators = build_uniform_validator_set(n);
+        BasicHotStuffEngine::new(ValidatorId::new(local_id), validators)
+    }
+
+    /// Test A (boundary the Run-015 plateau hit): with the primitive
+    /// enabled and a wired outbound facade, after `view_timeout_ticks`
+    /// ticks of zero forward progress, exactly one `TimeoutMsg` is
+    /// emitted and broadcast for the parked view.
+    #[test]
+    fn b14_view_timeout_emits_after_window_elapses_no_progress() {
+        // N=4, local is V0, current_view=15 ⇒ leader = view % n = 15 %
+        // 4 = 3, which is "absent" in the Run-015 shape.
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        assert_eq!(engine.current_view(), 15);
+        assert_eq!(engine.leader_for_view(15), ValidatorId::new(3));
+        assert!(!engine.is_leader_for_current_view());
+
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+
+        // Ticks below threshold ⇒ no emission.
+        for tick in 1..=4 {
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                Some(5), // small window for test determinism
+                /* restore_mode_active */ false,
+                Some(&facade),
+                &mut stats,
+            );
+            assert_eq!(*facade.timeouts_sent.lock().unwrap(), 0);
+            assert_eq!(stats.view_timeouts_emitted, 0);
+        }
+
+        // First tick at which window has elapsed ⇒ emit exactly once.
+        maybe_emit_view_timeout(
+            &mut engine,
+            &mut view_state,
+            5,
+            Some(5),
+            false,
+            Some(&facade),
+            &mut stats,
+        );
+        assert_eq!(*facade.timeouts_sent.lock().unwrap(), 1);
+        assert_eq!(stats.view_timeouts_emitted, 1);
+        assert!(engine.timeout_emitted_in_view());
+
+        // Subsequent ticks must NOT re-emit (engine flag prevents
+        // duplicate emission for the same view).
+        for tick in 6..=20 {
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                Some(5),
+                false,
+                Some(&facade),
+                &mut stats,
+            );
+        }
+        assert_eq!(
+            *facade.timeouts_sent.lock().unwrap(),
+            1,
+            "TimeoutMsg must be emitted at most once per view"
+        );
+        assert_eq!(stats.view_timeouts_emitted, 1);
+
+        // The bytes broadcast must round-trip back to a valid
+        // TimeoutMsg for the parked view (proves no fake/garbage
+        // payload was sent).
+        let bytes = facade.last_timeout_bytes.lock().unwrap().clone().unwrap();
+        let decoded: TimeoutMsg<[u8; 32]> = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(decoded.view, 15);
+        assert_eq!(decoded.validator_id, ValidatorId::new(0));
+    }
+
+    /// Test B: a restored node still in bounded restore-catchup mode
+    /// must NOT time out a live view it is still catching up to.
+    /// This preserves B13's safe restore-exit invariant.
+    #[test]
+    fn b14_view_timeout_suppressed_in_restore_catchup_mode() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+
+        for tick in 1..=200 {
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                Some(5),
+                /* restore_mode_active */ true,
+                Some(&facade),
+                &mut stats,
+            );
+        }
+        assert_eq!(*facade.timeouts_sent.lock().unwrap(), 0);
+        assert_eq!(stats.view_timeouts_emitted, 0);
+        assert!(!engine.timeout_emitted_in_view());
+    }
+
+    /// Test C: `view_timeout_ticks = None` disables the primitive
+    /// entirely (preserves pre-B14 behaviour). No emission ever.
+    #[test]
+    fn b14_view_timeout_disabled_via_none_emits_nothing() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+
+        for tick in 1..=1000 {
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                /* view_timeout_ticks */ None,
+                false,
+                Some(&facade),
+                &mut stats,
+            );
+        }
+        assert_eq!(*facade.timeouts_sent.lock().unwrap(), 0);
+        assert_eq!(stats.view_timeouts_emitted, 0);
+    }
+
+    /// Test D: forward view-progress resets the timeout window. We
+    /// simulate this by having the engine's current_view advance in
+    /// the middle of the tick stream, and assert no emission fires
+    /// because the window keeps resetting.
+    #[test]
+    fn b14_view_timeout_progress_resets_window() {
+        let mut engine = b14_make_engine(4, 0);
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+
+        // Advance the view between ticks so observe() always sees
+        // forward progress and resets the window. Window threshold = 3.
+        for tick in 1..=20 {
+            assert!(engine.try_advance_to_view(engine.current_view() + 1));
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                Some(3),
+                false,
+                Some(&facade),
+                &mut stats,
+            );
+        }
+        assert_eq!(*facade.timeouts_sent.lock().unwrap(), 0);
+        assert_eq!(stats.view_timeouts_emitted, 0);
+    }
+
+    /// Test E: in a bounded N=1 topology the local timeout itself is
+    /// the entire 2/3 quorum, so emission immediately forms a TC, the
+    /// loop applies it locally, and `current_view` advances. This is
+    /// the smallest end-to-end exercise of the full primitive.
+    #[test]
+    fn b14_n1_self_quorum_forms_tc_advances_view_and_broadcasts_new_view() {
+        let mut engine = b14_make_engine(1, 0);
+        assert!(engine.try_advance_to_view(7));
+        let from_view = engine.current_view();
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+
+        // Below window: no emission.
+        maybe_emit_view_timeout(
+            &mut engine, &mut view_state, 1, Some(2), false, Some(&facade), &mut stats,
+        );
+        assert_eq!(stats.view_timeouts_emitted, 0);
+
+        // At window: emit, self-ingest, TC forms (1 ≥ 2/3 of 1 = 1),
+        // engine advances view, NewView broadcast.
+        maybe_emit_view_timeout(
+            &mut engine, &mut view_state, 2, Some(2), false, Some(&facade), &mut stats,
+        );
+        assert_eq!(stats.view_timeouts_emitted, 1);
+        assert_eq!(*facade.timeouts_sent.lock().unwrap(), 1);
+        assert_eq!(stats.timeout_certificates_formed, 1);
+        assert_eq!(stats.view_timeout_advances, 1);
+        assert_eq!(stats.outbound_new_views_sent, 1);
+        assert_eq!(*facade.new_views_sent.lock().unwrap(), 1);
+        assert!(
+            engine.current_view() > from_view,
+            "TC application must advance current_view (was {}, now {})",
+            from_view,
+            engine.current_view()
+        );
+
+        // The NewView bytes round-trip to a valid TC for the timed-out view.
+        let bytes = facade.last_new_view_bytes.lock().unwrap().clone().unwrap();
+        let decoded: TimeoutCertificate<[u8; 32]> = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(decoded.timeout_view, from_view);
+        assert_eq!(decoded.view, from_view + 1);
+    }
+
+    /// Test F (fail-closed): malformed `Timeout(bytes)` bytes ingested
+    /// via the inbound handler do NOT mutate engine state; the
+    /// `view_timeout_decode_failures` counter increments.
+    #[test]
+    fn b14_inbound_malformed_timeout_fails_closed() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        let view_before = engine.current_view();
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut restore_mode = RestoreCatchupModeState::from_config(None);
+        let metrics = Arc::new(NodeMetrics::new());
+
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::Timeout(vec![0xff, 0xfe, 0xfd]),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(engine.current_view(), view_before);
+        assert_eq!(stats.inbound_timeouts_delivered, 0);
+        assert_eq!(stats.inbound_timeouts_engine_accepted, 0);
+        assert_eq!(stats.view_timeout_decode_failures, 1);
+        assert_eq!(stats.inbound_decode_failures, 1);
+        assert_eq!(*facade.new_views_sent.lock().unwrap(), 0);
+
+        // Malformed NewView same shape.
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::NewView(vec![0xaa, 0xbb]),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(engine.current_view(), view_before);
+        assert_eq!(stats.inbound_new_views_delivered, 0);
+        assert_eq!(stats.view_timeout_decode_failures, 2);
+        assert_eq!(stats.inbound_decode_failures, 2);
+    }
+
+    /// Test G: inbound `NewView(bytes)` carrying a structurally valid
+    /// TC advances the receiver's view. We construct the TC by having
+    /// 3 of 4 validators sign locally (≥ 2/3 quorum for N=4) — this
+    /// is what Test H also relies on, but here we synthesize the TC
+    /// directly to isolate the NewView ingestion path.
+    #[test]
+    fn b14_inbound_new_view_with_valid_tc_advances_view() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        let view_before = engine.current_view();
+
+        // Hand-built TC: timed_out_view=15, signers={V1,V2,V3}.
+        let tc: TimeoutCertificate<[u8; 32]> = TimeoutCertificate::new(
+            15,
+            None,
+            vec![ValidatorId::new(1), ValidatorId::new(2), ValidatorId::new(3)],
+        );
+        let bytes = bincode::serialize(&tc).unwrap();
+
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut restore_mode = RestoreCatchupModeState::from_config(None);
+        let metrics = Arc::new(NodeMetrics::new());
+
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::NewView(bytes),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(stats.inbound_new_views_delivered, 1);
+        assert_eq!(stats.inbound_new_views_engine_accepted, 1);
+        assert_eq!(stats.view_timeout_advances, 1);
+        assert!(
+            engine.current_view() > view_before,
+            "valid NewView TC must advance view (was {}, now {})",
+            view_before,
+            engine.current_view()
+        );
+        // The new view should equal `tc.view` = 16.
+        assert_eq!(engine.current_view(), 16);
+    }
+
+    /// Test G2 (fail-closed quorum): a structurally decodable TC with
+    /// fewer than 2/3 signers must be rejected by the engine; the
+    /// view stays put.
+    #[test]
+    fn b14_inbound_new_view_insufficient_quorum_fails_closed() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        let view_before = engine.current_view();
+        // Only 1 signer in N=4 — well below 2/3.
+        let tc: TimeoutCertificate<[u8; 32]> =
+            TimeoutCertificate::new(15, None, vec![ValidatorId::new(1)]);
+        let bytes = bincode::serialize(&tc).unwrap();
+
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut restore_mode = RestoreCatchupModeState::from_config(None);
+        let metrics = Arc::new(NodeMetrics::new());
+
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::NewView(bytes),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(stats.inbound_new_views_delivered, 1);
+        assert_eq!(stats.inbound_new_views_engine_accepted, 0);
+        assert_eq!(stats.view_timeout_engine_rejects, 1);
+        assert_eq!(engine.current_view(), view_before);
+    }
+
+    /// Test H (Run-015 absent-leader N=4 shape, end-to-end): local V0
+    /// emits its own TimeoutMsg via the loop's primitive, then two
+    /// peer Timeouts arrive over the inbound channel. After the third
+    /// (≥ 2f+1 = 3 out of 4), the engine forms a TC, the loop applies
+    /// it, broadcasts NewView, and the parked view 15 advances to 16.
+    /// Round-robin leader for view 16 = 16 % 4 = 0 — i.e. V0 itself,
+    /// which is present. The cluster has left the absent-leader view.
+    #[test]
+    fn b14_run_015_n4_absent_leader_shape_advances_via_tc() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        assert_eq!(engine.leader_for_view(15), ValidatorId::new(3));
+
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut restore_mode = RestoreCatchupModeState::from_config(None);
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+        let metrics = Arc::new(NodeMetrics::new());
+
+        // 1) Local V0 times out (window=2, tick=2 ⇒ emit).
+        maybe_emit_view_timeout(
+            &mut engine,
+            &mut view_state,
+            1,
+            Some(2),
+            false,
+            Some(&facade),
+            &mut stats,
+        );
+        maybe_emit_view_timeout(
+            &mut engine,
+            &mut view_state,
+            2,
+            Some(2),
+            false,
+            Some(&facade),
+            &mut stats,
+        );
+        assert_eq!(stats.view_timeouts_emitted, 1);
+        assert_eq!(*facade.timeouts_sent.lock().unwrap(), 1);
+        // Only 1/4 timeouts so far (own) ⇒ no TC, no advance.
+        assert_eq!(stats.timeout_certificates_formed, 0);
+        assert_eq!(engine.current_view(), 15);
+
+        // 2) Inbound timeout from V1.
+        let v1_timeout: qbind_consensus::timeout::TimeoutMsg<[u8; 32]> =
+            qbind_consensus::timeout::TimeoutMsg::new(15, None, ValidatorId::new(1));
+        let v1_bytes = bincode::serialize(&v1_timeout).unwrap();
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::Timeout(v1_bytes),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        // 2/4 timeouts ⇒ still no TC, view still 15.
+        assert_eq!(stats.inbound_timeouts_delivered, 1);
+        assert_eq!(stats.inbound_timeouts_engine_accepted, 1);
+        assert_eq!(stats.timeout_certificates_formed, 0);
+        assert_eq!(engine.current_view(), 15);
+
+        // 3) Inbound timeout from V2 — third timeout = 2f+1 = 3
+        // crosses threshold, TC forms inside the engine, the
+        // inbound handler applies it locally and broadcasts NewView.
+        let v2_timeout: qbind_consensus::timeout::TimeoutMsg<[u8; 32]> =
+            qbind_consensus::timeout::TimeoutMsg::new(15, None, ValidatorId::new(2));
+        let v2_bytes = bincode::serialize(&v2_timeout).unwrap();
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::Timeout(v2_bytes),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(stats.inbound_timeouts_delivered, 2);
+        assert_eq!(stats.inbound_timeouts_engine_accepted, 2);
+        assert_eq!(stats.timeout_certificates_formed, 1);
+        assert_eq!(stats.view_timeout_advances, 1);
+        assert_eq!(stats.outbound_new_views_sent, 1);
+        assert_eq!(*facade.new_views_sent.lock().unwrap(), 1);
+        assert_eq!(engine.current_view(), 16);
+        // Run-015 boundary cleared: the new view's leader is no
+        // longer the absent V3.
+        assert_ne!(engine.leader_for_view(16), ValidatorId::new(3));
+        assert_eq!(engine.leader_for_view(16), ValidatorId::new(0));
+    }
+
+    /// Test F2 (defense-in-depth): an oversized `Timeout(bytes)` payload
+    /// (above `MAX_INBOUND_TIMEOUT_FRAME_BYTES`) is rejected without
+    /// invoking bincode at all and counts under the same fail-closed
+    /// counters. This protects against a hostile peer driving memory
+    /// exhaustion via an oversized length prefix.
+    #[test]
+    fn b14_inbound_oversized_timeout_fails_closed() {
+        let mut engine = b14_make_engine(4, 0);
+        assert!(engine.try_advance_to_view(15));
+        let view_before = engine.current_view();
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut restore_mode = RestoreCatchupModeState::from_config(None);
+        let metrics = Arc::new(NodeMetrics::new());
+
+        // Build a payload one byte over the cap.
+        let oversized = vec![0u8; MAX_INBOUND_TIMEOUT_FRAME_BYTES + 1];
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::Timeout(oversized),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(engine.current_view(), view_before);
+        assert_eq!(stats.inbound_timeouts_delivered, 0);
+        assert_eq!(stats.view_timeout_decode_failures, 1);
+        assert_eq!(stats.inbound_decode_failures, 1);
+
+        // Same shape for NewView.
+        let oversized2 = vec![0u8; MAX_INBOUND_TIMEOUT_FRAME_BYTES + 1];
+        handle_inbound_consensus_msg(
+            &mut engine,
+            ConsensusNetMsg::NewView(oversized2),
+            &mut stats,
+            Some(&facade),
+            &metrics,
+            ValidatorId::new(0),
+            &mut restore_mode,
+        );
+        assert_eq!(engine.current_view(), view_before);
+        assert_eq!(stats.inbound_new_views_delivered, 0);
+        assert_eq!(stats.view_timeout_decode_failures, 2);
+        assert_eq!(stats.inbound_decode_failures, 2);
+    }
+
+    /// Test I: B14 must not regress the non-restore single-validator
+    /// binary path. This is identical in shape to the long-standing
+    /// `single_validator_loop_advances_views_and_commits` test, but
+    /// runs with the default config (which now has
+    /// `view_timeout_ticks = Some(50)` enabled). The single-validator
+    /// loop drives QC-based view advances on every tick, so the
+    /// timeout window never elapses and no `TimeoutMsg` is ever
+    /// emitted. The point of this test is to assert exactly that.
+    #[tokio::test]
+    async fn b14_single_validator_loop_does_not_emit_timeouts() {
+        let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1)
+            .with_tick_interval(Duration::from_millis(2))
+            .with_max_ticks(60); // > default view_timeout_ticks (50)
+        let (_shutdown_tx, shutdown_rx) = watch::channel(());
+        let progress =
+            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let metrics = Arc::new(NodeMetrics::new());
+        let final_progress = run_binary_consensus_loop(
+            cfg,
+            shutdown_rx,
+            progress.clone(),
+            Arc::clone(&metrics),
+        )
+        .await;
+        // QC-driven progression must have occurred.
+        assert!(final_progress.proposals_emitted > 0);
+        assert!(final_progress.current_view > 0);
+        // No timeout fired (every tick had forward progress).
+        assert_eq!(
+            final_progress.inbound.view_timeouts_emitted, 0,
+            "single-validator loop has constant forward progress; no timeout should ever fire"
+        );
+        assert_eq!(final_progress.inbound.timeout_certificates_formed, 0);
+        assert_eq!(final_progress.inbound.view_timeout_advances, 0);
     }
 }

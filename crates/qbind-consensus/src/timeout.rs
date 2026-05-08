@@ -69,7 +69,7 @@ const TIMEOUT_DOMAIN_SEPARATOR: &[u8] = b"QBIND_TIMEOUT_V1";
 /// - View number
 /// - High QC's block_id and view
 /// - Validator ID
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimeoutMsg<BlockIdT> {
     /// The view being timed out.
     pub view: u64,
@@ -228,7 +228,7 @@ pub fn timeout_signing_bytes<BlockIdT: Clone + AsRef<[u8]>>(
 /// The TC carries the highest high_qc from the included timeouts. New proposals
 /// in the next view must be justified by a QC at least as recent as this high_qc,
 /// maintaining HotStuff safety.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimeoutCertificate<BlockIdT> {
     /// The view this TC enables transition to.
     /// Typically this is timeout_view + 1.
