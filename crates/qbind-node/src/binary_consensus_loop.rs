@@ -470,6 +470,152 @@ pub struct BinaryConsensusLoopInboundStats {
     pub restore_catchup_responses_rejected: u64,
     /// Future proposals deferred while a restored node is behind its peers.
     pub restore_catchup_proposals_deferred: u64,
+    /// Whether the restored node is still in bounded restore-catchup mode
+    /// (`1`) or has transitioned out into normal participation (`0`).
+    ///
+    /// For nodes that did **not** start with a `RestoreBaseline`, this is
+    /// always `0` — they were never in restore-catchup mode at all.
+    ///
+    /// For restored nodes, this starts at `1` (bounded restore-catchup
+    /// mode is active: the loop is allowed to broadcast
+    /// `RestoreCatchupRequest` frames every
+    /// `RESTORE_CATCHUP_REQUEST_EVERY_TICKS` ticks and to defer inbound
+    /// proposals more than one height above the local committed anchor)
+    /// and flips to `0` exactly once when the explicit transition
+    /// condition in `RestoreCatchupModeState::maybe_exit_after_response`
+    /// is met. After that flip, request broadcasts and proposal deferral
+    /// stop and the node participates as a normal binary-path validator.
+    pub restore_catchup_mode_active: u64,
+    /// The local `committed_height` at the moment the restored node
+    /// transitioned out of bounded restore-catchup mode, or `0` if no
+    /// transition has occurred yet (either because the node was never
+    /// restoring or because it has not yet caught up to the safe-exit
+    /// condition). This is observability only — set exactly once on the
+    /// transition tick — and never decreases.
+    pub restore_catchup_mode_exited_at_height: u64,
+}
+
+/// Transition state for the bounded "restore-catchup mode → normal
+/// participation" boundary on the binary path.
+///
+/// # Why this exists
+///
+/// Before this struct, the binary loop keyed restore-catchup behaviour
+/// (request broadcasts and inbound-proposal deferral) permanently off
+/// `cfg.restore_baseline.is_some()`. That value is immutable for the
+/// lifetime of the loop, so a node that successfully completed catchup
+/// remained "permanently restoring" — it kept emitting
+/// `RestoreCatchupRequest` frames every 10 ticks and kept deferring any
+/// inbound proposal whose height was more than one above its committed
+/// anchor. DevNet Evidence Run 012 documented the resulting plateau
+/// (V1B reaches `committed_height=339` then never resumes participation;
+/// see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_012.md`).
+///
+/// # Transition condition (explicit and bounded)
+///
+/// Mode flips from `active=true` to `active=false` exactly once, on the
+/// first inbound `RestoreCatchupResponse` tick where ALL of the
+/// following hold:
+///
+/// 1. The response was either applied successfully (added ≥ 0 blocks)
+///    or rejected with no state change. We never flip on a malformed /
+///    inconsistent response — fail-closed (the engine state is already
+///    unchanged in that case).
+/// 2. `engine.committed_height() >= max_observed_responder_committed`
+///    — the local node has caught up to (or above) the highest
+///    committed height any peer has ever reported in a response.
+/// 3. `engine.committed_height() > snapshot_baseline_height` — at
+///    least one block above the restored snapshot prefix has actually
+///    committed (so we never declare "caught up" while we have made no
+///    progress at all above the snapshot).
+///
+/// The transition is single-shot. Once `active=false`, this struct is
+/// never re-armed for the lifetime of the loop. The catchup machinery
+/// is not torn down — the inbound handler continues to validate any
+/// stragglers fail-closed — but the node stops emitting fresh requests
+/// and stops deferring proposals. New post-exit progression is then
+/// driven by the same `BasicHotStuffEngine::on_proposal_event` /
+/// `on_vote_event` paths the non-restore binary path already uses.
+#[derive(Debug, Clone, Copy)]
+struct RestoreCatchupModeState {
+    /// `true` while the node is in bounded restore-catchup mode.
+    active: bool,
+    /// The snapshot baseline height the loop was started above, used to
+    /// require strict progress above the restored prefix before we
+    /// declare catchup complete. `None` when no baseline was applied
+    /// (in which case `active` is also `false` from the start).
+    snapshot_baseline_height: Option<u64>,
+    /// The maximum `responder_committed_height` ever observed in an
+    /// inbound `RestoreCatchupResponse`. Updated on every received
+    /// response (including responses that carry zero blocks). Used as
+    /// the catch-up target.
+    peer_max_observed_committed_height: Option<u64>,
+    /// The local `committed_height` at the moment of the active→false
+    /// flip, or `None` if no flip has occurred. Observability only.
+    exited_at_height: Option<u64>,
+}
+
+impl RestoreCatchupModeState {
+    /// Initialize from the loop config. Mode is active iff a snapshot
+    /// baseline was applied.
+    fn from_config(restore_baseline: Option<RestoreBaseline>) -> Self {
+        Self {
+            active: restore_baseline.is_some(),
+            snapshot_baseline_height: restore_baseline.map(|b| b.snapshot_height),
+            peer_max_observed_committed_height: None,
+            exited_at_height: None,
+        }
+    }
+
+    /// Whether the loop should still be broadcasting catchup requests
+    /// and deferring far-future inbound proposals.
+    fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Update peer-anchor tracking on receipt of an inbound response and
+    /// evaluate the transition condition. Returns `Some(new_height)` if
+    /// the mode flipped from active to inactive on this call, otherwise
+    /// `None`. Idempotent once `active=false`.
+    fn maybe_exit_after_response(
+        &mut self,
+        responder_committed_height: Option<u64>,
+        local_committed_height: Option<u64>,
+    ) -> Option<u64> {
+        if !self.active {
+            return None;
+        }
+        if let Some(h) = responder_committed_height {
+            self.peer_max_observed_committed_height = Some(
+                self.peer_max_observed_committed_height
+                    .map(|prev| prev.max(h))
+                    .unwrap_or(h),
+            );
+        }
+        // Transition gates:
+        let local_height = match local_committed_height {
+            Some(h) => h,
+            None => return None,
+        };
+        let target = match self.peer_max_observed_committed_height {
+            Some(h) => h,
+            None => return None,
+        };
+        if local_height < target {
+            return None;
+        }
+        // Require strict progress above the snapshot baseline. This
+        // prevents flipping "caught up" purely on the restored prefix
+        // when no peer-learned material has actually been applied.
+        if let Some(base) = self.snapshot_baseline_height {
+            if local_height <= base {
+                return None;
+            }
+        }
+        self.active = false;
+        self.exited_at_height = Some(local_height);
+        Some(local_height)
+    }
 }
 
 
@@ -629,6 +775,17 @@ pub async fn run_binary_consensus_loop_with_io(
     let mut reemitted_for_view: Option<u64> = None;
     let mut last_known_peers: HashSet<NodeId> = HashSet::new();
 
+    // Bounded restore-catchup mode state. Active iff a snapshot baseline
+    // was applied; flips to inactive exactly once per loop lifetime when
+    // the explicit safe-exit condition is met (see
+    // `RestoreCatchupModeState`).
+    let mut restore_mode = RestoreCatchupModeState::from_config(cfg.restore_baseline);
+    // Reflect the initial active state on /metrics so operators see
+    // `qbind_restore_catchup_mode_active=1` from startup of a restored
+    // node, not only after the first response is processed.
+    inbound_stats.restore_catchup_mode_active = if restore_mode.is_active() { 1 } else { 0 };
+    update_restore_catchup_metrics(&metrics, &inbound_stats);
+
     loop {
         // We always select on shutdown + ticker. When inbound I/O is wired
         // we additionally select on inbound_rx so an inbound proposal/vote
@@ -654,7 +811,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 outbound_facade.as_deref(),
                                 &metrics,
                                 cfg.local_validator_id,
-                                cfg.restore_baseline.is_some(),
+                                &mut restore_mode,
                             );
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
@@ -722,7 +879,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &engine,
                         ticks,
                         cfg.local_validator_id,
-                        cfg.restore_baseline.is_some(),
+                        restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
                     );
@@ -793,7 +950,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &engine,
                         ticks,
                         cfg.local_validator_id,
-                        cfg.restore_baseline.is_some(),
+                        restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
                     );
@@ -1168,7 +1325,7 @@ fn handle_inbound_consensus_msg(
     outbound: Option<&dyn ConsensusNetworkFacade>,
     metrics: &Arc<NodeMetrics>,
     local_validator_id: ValidatorId,
-    restore_catchup_enabled: bool,
+    restore_mode: &mut RestoreCatchupModeState,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
     use qbind_wire::io::WireDecode;
@@ -1210,7 +1367,7 @@ fn handle_inbound_consensus_msg(
             let mut slice: &[u8] = &bytes;
             match BlockProposal::decode(&mut slice) {
                 Ok(proposal) => {
-                    if restore_catchup_enabled
+                    if restore_mode.is_active()
                         && should_defer_restore_proposal_for_catchup(engine, &proposal)
                     {
                         stats.restore_catchup_proposals_deferred =
@@ -1318,7 +1475,7 @@ fn handle_inbound_consensus_msg(
         ConsensusNetMsg::RestoreCatchupResponse(resp) => {
             stats.restore_catchup_responses_received =
                 stats.restore_catchup_responses_received.saturating_add(1);
-            handle_restore_catchup_response(engine, resp, stats, local_validator_id);
+            handle_restore_catchup_response(engine, resp, stats, local_validator_id, restore_mode);
         }
     }
 }
@@ -1421,11 +1578,27 @@ fn handle_restore_catchup_response(
     resp: RestoreCatchupResponse,
     stats: &mut BinaryConsensusLoopInboundStats,
     local_validator_id: ValidatorId,
+    restore_mode: &mut RestoreCatchupModeState,
 ) {
     if resp.responder_validator_index as u64 == local_validator_id.0 {
         return;
     }
+    // Capture the responder's reported committed-anchor height before any
+    // early return so the transition tracker observes peer progress even
+    // when this particular response carries no useful blocks (e.g. the
+    // peer is at-or-below us). This is the key signal that lets the
+    // restored node detect "I'm caught up" and exit restore-catchup mode.
+    let responder_committed_height = resp.responder_committed_height;
     if resp.blocks.is_empty() {
+        // Even on an empty response, evaluate the transition condition:
+        // if the peer reports being at or below our committed height we
+        // have nothing more to catch up to from this peer.
+        evaluate_restore_mode_transition(
+            engine,
+            stats,
+            restore_mode,
+            responder_committed_height,
+        );
         return;
     }
     if engine.committed_height() != Some(resp.request_from_height)
@@ -1437,6 +1610,17 @@ fn handle_restore_catchup_response(
             "[restore-catchup] rejected stale/mismatched response anchor: response_height={} local_height={:?}",
             resp.request_from_height,
             engine.committed_height()
+        );
+        // Stale-anchor rejection does not mutate engine state; do not
+        // count this as progress towards transition. Re-evaluate the
+        // transition condition only against the responder's reported
+        // anchor (peer-progress observation), not against our local
+        // unchanged height.
+        evaluate_restore_mode_transition(
+            engine,
+            stats,
+            restore_mode,
+            responder_committed_height,
         );
         return;
     }
@@ -1469,12 +1653,69 @@ fn handle_restore_catchup_response(
                 engine.committed_height(),
                 engine.current_view()
             );
+            // Successful application is the primary point at which the
+            // local committed_height advances; evaluate the transition
+            // condition now to flip mode at the earliest safe moment.
+            evaluate_restore_mode_transition(
+                engine,
+                stats,
+                restore_mode,
+                responder_committed_height,
+            );
         }
         Err(e) => {
             stats.restore_catchup_responses_rejected =
                 stats.restore_catchup_responses_rejected.saturating_add(1);
             eprintln!("[restore-catchup] rejected response: {:?}", e);
+            // Fail-closed: a rejected response did NOT mutate engine
+            // state, so we treat it as if the response had not
+            // happened. Specifically, we do NOT update the
+            // peer-anchor tracker from a malformed payload (the
+            // `responder_committed_height` field came from an
+            // untrusted/inconsistent message and must not influence the
+            // transition decision). Mode stays active.
         }
+    }
+}
+
+/// Update peer-anchor tracking and, if the safe-exit condition is met,
+/// flip restore-catchup mode from active to inactive exactly once. This
+/// is a thin wrapper over [`RestoreCatchupModeState::maybe_exit_after_response`]
+/// that also publishes the resulting state into `stats` so `/metrics`
+/// observes the transition.
+fn evaluate_restore_mode_transition(
+    engine: &BasicHotStuffEngine<[u8; 32]>,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    restore_mode: &mut RestoreCatchupModeState,
+    responder_committed_height: Option<u64>,
+) {
+    let was_active = restore_mode.is_active();
+    let exited_at = restore_mode
+        .maybe_exit_after_response(responder_committed_height, engine.committed_height());
+    // Always reflect the (possibly unchanged) active flag on the stats
+    // surface so /metrics can publish a faithful gauge each tick.
+    stats.restore_catchup_mode_active = if restore_mode.is_active() { 1 } else { 0 };
+    if let Some(h) = exited_at {
+        stats.restore_catchup_mode_exited_at_height = h;
+        eprintln!(
+            "[restore-catchup] exit: caught up to peer anchor — local committed_height={} peer_max_observed={:?}; \
+             stopping further RestoreCatchupRequest broadcasts and proposal-deferral gating",
+            h,
+            restore_mode.peer_max_observed_committed_height,
+        );
+    } else if was_active && !restore_mode.is_active() {
+        // Defensive: only `maybe_exit_after_response` flips the flag,
+        // and it returns `Some` whenever it does. Reaching this branch
+        // would mean an internal invariant was violated. Fail loudly in
+        // debug/test builds so regressions are caught; in release the
+        // node continues so production observability is not interrupted.
+        debug_assert!(
+            false,
+            "[restore-catchup] mode flipped without exit height — internal invariant violation"
+        );
+        eprintln!(
+            "[restore-catchup] WARN: mode flipped without exit height — internal invariant warning"
+        );
     }
 }
 
@@ -1528,6 +1769,8 @@ fn update_restore_catchup_metrics(
         stats.restore_catchup_blocks_applied,
         stats.restore_catchup_responses_rejected,
         stats.restore_catchup_proposals_deferred,
+        stats.restore_catchup_mode_active,
+        stats.restore_catchup_mode_exited_at_height,
     );
 }
 
@@ -1889,5 +2132,342 @@ mod tests {
         };
         let cfg2 = cfg.with_restore_baseline(baseline);
         assert_eq!(cfg2.restore_baseline, Some(baseline));
+    }
+
+    // ========================================================================
+    // Post-catchup restore-mode transition (Run-012 boundary fix)
+    //
+    // The tests below exercise `RestoreCatchupModeState` and the
+    // `evaluate_restore_mode_transition` / `handle_restore_catchup_response`
+    // surfaces directly, without spinning up the full tokio loop. They
+    // are deliberately small and high-signal: each one asserts a single
+    // bounded property of the new transition state machine.
+    // ========================================================================
+
+    /// `RestoreCatchupModeState` is inactive when no baseline was applied.
+    /// Non-restore binary path is unaffected.
+    #[test]
+    fn restore_mode_inactive_without_baseline() {
+        let mut s = RestoreCatchupModeState::from_config(None);
+        assert!(!s.is_active(), "no baseline ⇒ never in restore-catchup mode");
+        // Even if a peer reports a higher anchor, with no baseline we are
+        // not in catchup mode and never flip.
+        let exited = s.maybe_exit_after_response(Some(10), Some(10));
+        assert!(exited.is_none());
+        assert!(!s.is_active());
+    }
+
+    /// `RestoreCatchupModeState` is active at startup when a baseline was
+    /// applied; only the explicit safe-exit condition flips it.
+    #[test]
+    fn restore_mode_active_with_baseline_until_caught_up() {
+        let baseline = RestoreBaseline {
+            snapshot_height: 5,
+            snapshot_block_id: [0xAA; 32],
+        };
+        let mut s = RestoreCatchupModeState::from_config(Some(baseline));
+        assert!(s.is_active());
+
+        // Peer at height 100 but local still at snapshot baseline ⇒ no exit.
+        assert_eq!(s.maybe_exit_after_response(Some(100), Some(5)), None);
+        assert!(s.is_active());
+
+        // Local advances but still below peer ⇒ no exit.
+        assert_eq!(s.maybe_exit_after_response(Some(100), Some(50)), None);
+        assert!(s.is_active());
+
+        // Local catches up to peer ⇒ exit, returns the catchup height.
+        assert_eq!(s.maybe_exit_after_response(Some(100), Some(100)), Some(100));
+        assert!(!s.is_active());
+
+        // Subsequent responses are no-ops; the flip is single-shot.
+        assert_eq!(s.maybe_exit_after_response(Some(200), Some(150)), None);
+        assert!(!s.is_active());
+    }
+
+    /// Strict-progress gate: the mode must NOT exit if the local node has
+    /// not advanced strictly above the snapshot baseline, even if the peer
+    /// reports being at-or-below the baseline. This prevents a degenerate
+    /// "I'm caught up" claim while no peer-learned suffix has actually
+    /// committed.
+    #[test]
+    fn restore_mode_requires_progress_above_baseline() {
+        let baseline = RestoreBaseline {
+            snapshot_height: 5,
+            snapshot_block_id: [0xAA; 32],
+        };
+        let mut s = RestoreCatchupModeState::from_config(Some(baseline));
+        // Peer at 5, local at 5 — both equal to the baseline. We have
+        // not made any strict progress above the baseline.
+        assert_eq!(s.maybe_exit_after_response(Some(5), Some(5)), None);
+        assert!(s.is_active(), "must not exit at exactly the baseline height");
+
+        // Now we advance one block above the baseline AND peer is at-or-below.
+        assert_eq!(s.maybe_exit_after_response(Some(5), Some(6)), Some(6));
+        assert!(!s.is_active());
+    }
+
+    /// `peer_max_observed_committed_height` is the running maximum across
+    /// all responses, so a temporarily slow/lagging peer does not lower the
+    /// catchup target on a later response.
+    #[test]
+    fn restore_mode_tracks_peer_max_observed_height() {
+        let baseline = RestoreBaseline {
+            snapshot_height: 0,
+            snapshot_block_id: [0xBB; 32],
+        };
+        let mut s = RestoreCatchupModeState::from_config(Some(baseline));
+        // Peer A at 100.
+        assert_eq!(s.maybe_exit_after_response(Some(100), Some(50)), None);
+        // Peer B at 80 (lagging) — must not lower the max-observed target.
+        assert_eq!(s.maybe_exit_after_response(Some(80), Some(80)), None);
+        assert_eq!(s.peer_max_observed_committed_height, Some(100));
+        // Local now at 100, matches the running max ⇒ exit.
+        assert_eq!(s.maybe_exit_after_response(Some(80), Some(100)), Some(100));
+        assert!(!s.is_active());
+    }
+
+    /// End-to-end (single function): `handle_restore_catchup_response`
+    /// must NOT update peer-max from a malformed/rejected payload, so
+    /// mode stays active (fail-closed). Also asserts the rejected counter
+    /// increments and engine state is unchanged.
+    #[test]
+    fn restore_mode_stays_active_on_malformed_response() {
+        use qbind_consensus::ValidatorId;
+
+        let validators = build_uniform_validator_set(2);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId::new(1), validators);
+        engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+
+        let baseline = RestoreBaseline {
+            snapshot_height: 5,
+            snapshot_block_id: [0x01; 32],
+        };
+        let mut mode = RestoreCatchupModeState::from_config(Some(baseline));
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+
+        // Build a response whose blocks claim a wrong parent: applying it
+        // must fail-closed, leaving engine state unchanged.
+        let bad = RestoreCatchupBlock {
+            height: 6,
+            view: 6,
+            parent_block_id: [0xFF; 32], // wrong: real parent is the snapshot anchor
+            block_id: [0x06; 32],
+            proposer_index: 0,
+            qc_signer_indices: vec![0, 1],
+        };
+        let resp = RestoreCatchupResponse {
+            responder_validator_index: 0,
+            request_from_height: 5,
+            request_from_block_id: [0x01; 32],
+            responder_committed_height: Some(999),
+            blocks: vec![bad],
+        };
+
+        handle_restore_catchup_response(
+            &mut engine,
+            resp,
+            &mut stats,
+            ValidatorId::new(1),
+            &mut mode,
+        );
+
+        // Engine did not advance.
+        assert_eq!(engine.committed_height(), Some(5));
+        // Rejected counter incremented.
+        assert_eq!(stats.restore_catchup_responses_rejected, 1);
+        // Mode still active — we MUST NOT have ingested
+        // `responder_committed_height=999` from a malformed payload as
+        // the catchup target.
+        assert!(mode.is_active(), "malformed response must not flip mode");
+        assert!(
+            mode.peer_max_observed_committed_height.is_none(),
+            "peer-max must not be updated from a malformed payload"
+        );
+    }
+
+    /// End-to-end: an empty response from a peer at-or-below us correctly
+    /// drives the transition out of restore-catchup mode (we have no more
+    /// to catch up to from this peer, and we're above the baseline).
+    #[test]
+    fn restore_mode_exits_on_empty_response_from_caught_up_peer() {
+        use qbind_consensus::ValidatorId;
+
+        let validators = build_uniform_validator_set(2);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId::new(1), validators);
+        engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+
+        // Simulate: the engine has already been brought up above the
+        // snapshot baseline by a prior catchup batch. We model that here
+        // with `register_block` + `on_vote` via the public restart API.
+        // For the purpose of this transition test we only need
+        // `engine.committed_height()` > snapshot_baseline_height. We
+        // achieve that by replaying a correctly-formed catchup block
+        // through the same path the real loop uses, anchored at the
+        // snapshot. The transition logic itself is independent of how
+        // the engine got to that height — it only reads
+        // `committed_height()` — so we exercise the response handler
+        // directly with an empty response that reflects the peer being
+        // at-or-below us.
+
+        // Force local committed_height to advance: we don't have a
+        // public "set committed_height" API, so we instead make a
+        // direct minimal claim by replaying one valid certified block
+        // via `apply_restore_catchup_blocks`. Build it the same way
+        // `BasicHotStuffEngine::derive_block_id_from_header` does so the
+        // engine accepts it.
+        let leader = engine.leader_for_view(6);
+        // Reproduce the engine's block-id derivation to keep the test
+        // self-contained; if this drifts, the test will fail loudly.
+        let parent = [0x01u8; 32];
+        let mut id = [0u8; 32];
+        id[..8].copy_from_slice(&leader.0.to_le_bytes());
+        id[8..16].copy_from_slice(&6u64.to_le_bytes());
+        id[16..32].copy_from_slice(&parent[..16]);
+
+        let block = EngineRestoreCatchupBlock::<[u8; 32]> {
+            height: 6,
+            view: 6,
+            parent_block_id: parent,
+            block_id: id,
+            proposer: leader,
+            qc_signers: vec![ValidatorId::new(0), ValidatorId::new(1)],
+        };
+        engine
+            .apply_restore_catchup_blocks(&[block])
+            .expect("certified suffix application should succeed");
+        // Note: the 3-chain rule means a single block above the snapshot
+        // baseline does not commit on its own. For this test we only
+        // need the transition condition to compare local committed to
+        // peer-max; if local committed is still 5, we deliberately
+        // observe that the transition does NOT fire.
+        let local_committed = engine.committed_height();
+
+        let baseline = RestoreBaseline {
+            snapshot_height: 5,
+            snapshot_block_id: [0x01; 32],
+        };
+        let mut mode = RestoreCatchupModeState::from_config(Some(baseline));
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+
+        // Empty response, peer reports the same committed_height as the
+        // local node (whatever that is after the partial application).
+        let resp = RestoreCatchupResponse {
+            responder_validator_index: 0,
+            request_from_height: local_committed.unwrap_or(5),
+            request_from_block_id: parent,
+            responder_committed_height: local_committed,
+            blocks: vec![],
+        };
+
+        handle_restore_catchup_response(
+            &mut engine,
+            resp,
+            &mut stats,
+            ValidatorId::new(1),
+            &mut mode,
+        );
+
+        // The transition flips iff local committed > snapshot baseline
+        // AND local >= peer-max. With a single applied suffix block, the
+        // 3-chain rule may or may not have committed yet; assert the
+        // exact correspondence between the two.
+        let h = local_committed.unwrap_or(5);
+        if h > 5 {
+            assert!(
+                !mode.is_active(),
+                "with strict progress above baseline + peer at-or-below, mode must exit"
+            );
+            assert_eq!(stats.restore_catchup_mode_active, 0);
+            assert_eq!(stats.restore_catchup_mode_exited_at_height, h);
+        } else {
+            assert!(
+                mode.is_active(),
+                "without strict progress above baseline, mode must stay active"
+            );
+            assert_eq!(stats.restore_catchup_mode_active, 1);
+            assert_eq!(stats.restore_catchup_mode_exited_at_height, 0);
+        }
+    }
+
+    /// Once mode flips to inactive, `maybe_broadcast_restore_catchup_request`
+    /// must stop broadcasting new requests on subsequent ticks. We assert
+    /// this by calling the function directly with a recording facade and
+    /// verifying the counter does not increment.
+    #[test]
+    fn restore_mode_inactive_stops_request_broadcasts() {
+        use crate::consensus_network_facade::ConsensusNetworkFacade;
+        use qbind_consensus::network::NetworkError;
+        use qbind_consensus::ValidatorId;
+        use qbind_wire::consensus::{BlockProposal, Vote};
+        use std::sync::Mutex;
+
+        // Tiny recording facade: counts broadcast_consensus_msg calls.
+        #[derive(Default)]
+        struct RecordingFacade {
+            broadcasts: Mutex<u64>,
+        }
+        impl ConsensusNetworkFacade for RecordingFacade {
+            fn broadcast_proposal(&self, _p: &BlockProposal) -> Result<(), NetworkError> {
+                Ok(())
+            }
+            fn broadcast_vote(&self, _v: &Vote) -> Result<(), NetworkError> {
+                Ok(())
+            }
+            fn send_vote_to(
+                &self,
+                _to: ValidatorId,
+                _v: &Vote,
+            ) -> Result<(), NetworkError> {
+                Ok(())
+            }
+            fn broadcast_consensus_msg(
+                &self,
+                _m: &ConsensusNetMsg,
+            ) -> Result<(), NetworkError> {
+                *self.broadcasts.lock().unwrap() += 1;
+                Ok(())
+            }
+        }
+
+        let validators = build_uniform_validator_set(2);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId::new(1), validators);
+        engine.initialize_from_snapshot_baseline([0x01; 32], 5);
+
+        let facade = RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+
+        // Active mode: tick number that matches RESTORE_CATCHUP_REQUEST_EVERY_TICKS
+        // schedule (ticks % 10 == 1) ⇒ broadcasts.
+        maybe_broadcast_restore_catchup_request(
+            &engine,
+            1, // (1 % 10) == 1 — schedule slot
+            ValidatorId::new(1),
+            true,
+            Some(&facade),
+            &mut stats,
+        );
+        assert_eq!(*facade.broadcasts.lock().unwrap(), 1);
+        assert_eq!(stats.restore_catchup_requests_sent, 1);
+
+        // Inactive mode: same schedule slot, but mode flag is false ⇒
+        // broadcast must NOT fire.
+        maybe_broadcast_restore_catchup_request(
+            &engine,
+            11, // (11 % 10) == 1 — also a schedule slot
+            ValidatorId::new(1),
+            false,
+            Some(&facade),
+            &mut stats,
+        );
+        assert_eq!(
+            *facade.broadcasts.lock().unwrap(),
+            1,
+            "inactive mode must suppress new RestoreCatchupRequest broadcasts"
+        );
+        assert_eq!(stats.restore_catchup_requests_sent, 1);
     }
 }

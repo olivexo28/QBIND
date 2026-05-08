@@ -2026,6 +2026,16 @@ pub struct RestoreCatchupMetrics {
     blocks_applied: AtomicU64,
     responses_rejected: AtomicU64,
     proposals_deferred: AtomicU64,
+    /// Gauge: 1 while the restored node is in bounded restore-catchup
+    /// mode, 0 otherwise (including for nodes that never restored).
+    /// Flips at most once per node lifetime, on the post-catchup
+    /// transition. Provides a direct "this node has resumed normal
+    /// participation" signal for evidence runs.
+    mode_active: AtomicU64,
+    /// Gauge: the local committed height at which the post-catchup
+    /// transition happened, or 0 if it has not happened (yet, or this
+    /// node never restored). Set exactly once; never decreases.
+    mode_exited_at_height: AtomicU64,
 }
 
 impl RestoreCatchupMetrics {
@@ -2043,6 +2053,8 @@ impl RestoreCatchupMetrics {
         blocks_applied: u64,
         responses_rejected: u64,
         proposals_deferred: u64,
+        mode_active: u64,
+        mode_exited_at_height: u64,
     ) {
         self.requests_sent.store(requests_sent, Ordering::Relaxed);
         self.requests_received.store(requests_received, Ordering::Relaxed);
@@ -2051,6 +2063,9 @@ impl RestoreCatchupMetrics {
         self.blocks_applied.store(blocks_applied, Ordering::Relaxed);
         self.responses_rejected.store(responses_rejected, Ordering::Relaxed);
         self.proposals_deferred.store(proposals_deferred, Ordering::Relaxed);
+        self.mode_active.store(mode_active, Ordering::Relaxed);
+        self.mode_exited_at_height
+            .store(mode_exited_at_height, Ordering::Relaxed);
     }
 
     pub fn format_metrics(&self) -> String {
@@ -2083,6 +2098,14 @@ impl RestoreCatchupMetrics {
         output.push_str(&format!(
             "qbind_restore_catchup_proposals_deferred_total {}\n",
             self.proposals_deferred.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_mode_active {}\n",
+            self.mode_active.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_restore_catchup_mode_exited_at_height {}\n",
+            self.mode_exited_at_height.load(Ordering::Relaxed)
         ));
         output
     }
