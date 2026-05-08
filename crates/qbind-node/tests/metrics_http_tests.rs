@@ -142,6 +142,14 @@ async fn test_metrics_endpoint_returns_200_with_metrics_body() {
             || body.contains("consensus_events_total"),
         "Expected at least one known metric in body"
     );
+    assert!(
+        body.contains("qbind_consensus_view_timeouts_emitted_total 0"),
+        "Expected B14 view-timeout metrics in /metrics body"
+    );
+    assert!(
+        body.contains("qbind_consensus_view_timeout_decode_failures_total 0"),
+        "Expected B14 failure metrics in /metrics body"
+    );
 
     // Shutdown the server
     drop(shutdown_tx);

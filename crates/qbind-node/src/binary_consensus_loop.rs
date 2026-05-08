@@ -978,6 +978,7 @@ pub async fn run_binary_consensus_loop_with_io(
     // node, not only after the first response is processed.
     inbound_stats.restore_catchup_mode_active = if restore_mode.is_active() { 1 } else { 0 };
     update_restore_catchup_metrics(&metrics, &inbound_stats);
+    update_binary_view_timeout_metrics(&metrics, &inbound_stats);
 
     // B14: per-loop view-timeout state. Seeded with the engine's
     // current view (which already reflects any restore baseline) and
@@ -1026,6 +1027,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 Duration::ZERO,
                             );
                             update_restore_catchup_metrics(&metrics, &inbound_stats);
+                            update_binary_view_timeout_metrics(&metrics, &inbound_stats);
                             // Refresh progress snapshot.
                             {
                                 inbound_stats.qcs_formed_total =
@@ -1108,6 +1110,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         tick_started.elapsed(),
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
+                    update_binary_view_timeout_metrics(&metrics, &inbound_stats);
                     {
                         inbound_stats.qcs_formed_total =
                             metrics.progress().qcs_formed_total();
@@ -1193,6 +1196,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         tick_started.elapsed(),
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
+                    update_binary_view_timeout_metrics(&metrics, &inbound_stats);
                     {
                         inbound_stats.qcs_formed_total =
                             metrics.progress().qcs_formed_total();
@@ -1721,6 +1725,7 @@ fn handle_inbound_consensus_msg(
                     MAX_INBOUND_TIMEOUT_FRAME_BYTES,
                     bytes.len()
                 );
+                update_binary_view_timeout_metrics(metrics, stats);
                 return;
             }
             match bincode::config()
@@ -1765,6 +1770,7 @@ fn handle_inbound_consensus_msg(
                     );
                 }
             }
+            update_binary_view_timeout_metrics(metrics, stats);
         }
         ConsensusNetMsg::NewView(bytes) => {
             // B14: typed binary-path ingestion of `TimeoutCertificate`.
@@ -1790,6 +1796,7 @@ fn handle_inbound_consensus_msg(
                     MAX_INBOUND_TIMEOUT_FRAME_BYTES,
                     bytes.len()
                 );
+                update_binary_view_timeout_metrics(metrics, stats);
                 return;
             }
             match bincode::config()
@@ -1835,6 +1842,7 @@ fn handle_inbound_consensus_msg(
                     );
                 }
             }
+            update_binary_view_timeout_metrics(metrics, stats);
         }
         ConsensusNetMsg::RestoreCatchupRequest(req) => {
             stats.restore_catchup_requests_received =
@@ -2356,6 +2364,24 @@ fn update_restore_catchup_metrics(
         stats.restore_catchup_proposals_deferred,
         stats.restore_catchup_mode_active,
         stats.restore_catchup_mode_exited_at_height,
+    );
+}
+
+fn update_binary_view_timeout_metrics(
+    metrics: &Arc<NodeMetrics>,
+    stats: &BinaryConsensusLoopInboundStats,
+) {
+    metrics.binary_view_timeout().set(
+        stats.view_timeouts_emitted,
+        stats.inbound_timeouts_delivered,
+        stats.inbound_timeouts_engine_accepted,
+        stats.timeout_certificates_formed,
+        stats.outbound_new_views_sent,
+        stats.inbound_new_views_delivered,
+        stats.inbound_new_views_engine_accepted,
+        stats.view_timeout_advances,
+        stats.view_timeout_decode_failures,
+        stats.view_timeout_engine_rejects,
     );
 }
 
@@ -3343,6 +3369,36 @@ mod tests {
         assert_eq!(decoded.view, from_view + 1);
     }
 
+    /// Export check for the same real B14 activity as Test E: the
+    /// `/metrics` family mirrors the already-maintained in-process stats.
+    #[test]
+    fn b14_metrics_export_matches_self_quorum_activity_stats() {
+        let mut engine = b14_make_engine(1, 0);
+        assert!(engine.try_advance_to_view(7));
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+        let metrics = Arc::new(NodeMetrics::new());
+
+        maybe_emit_view_timeout(
+            &mut engine, &mut view_state, 2, Some(2), false, Some(&facade), &mut stats,
+        );
+        update_binary_view_timeout_metrics(&metrics, &stats);
+
+        assert_eq!(stats.view_timeouts_emitted, 1);
+        assert_eq!(stats.timeout_certificates_formed, 1);
+        assert_eq!(stats.outbound_new_views_sent, 1);
+        assert_eq!(stats.view_timeout_advances, 1);
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_consensus_view_timeouts_emitted_total 1"));
+        assert!(output.contains("qbind_consensus_timeout_certificates_formed_total 1"));
+        assert!(output.contains("qbind_consensus_outbound_new_views_sent_total 1"));
+        assert!(output.contains("qbind_consensus_view_timeout_advances_total 1"));
+        assert!(output.contains("qbind_consensus_inbound_timeouts_delivered_total 0"));
+        assert!(output.contains("consensus_net_inbound_total{kind=\"vote\"} 0"));
+    }
+
     /// Test F (fail-closed): malformed `Timeout(bytes)` bytes ingested
     /// via the inbound handler do NOT mutate engine state; the
     /// `view_timeout_decode_failures` counter increments.
@@ -3371,6 +3427,10 @@ mod tests {
         assert_eq!(stats.view_timeout_decode_failures, 1);
         assert_eq!(stats.inbound_decode_failures, 1);
         assert_eq!(*facade.new_views_sent.lock().unwrap(), 0);
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_consensus_view_timeout_decode_failures_total 1"));
+        assert!(output.contains("qbind_consensus_inbound_timeouts_delivered_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_engine_rejects_total 0"));
 
         // Malformed NewView same shape.
         handle_inbound_consensus_msg(
@@ -3386,6 +3446,9 @@ mod tests {
         assert_eq!(stats.inbound_new_views_delivered, 0);
         assert_eq!(stats.view_timeout_decode_failures, 2);
         assert_eq!(stats.inbound_decode_failures, 2);
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_consensus_view_timeout_decode_failures_total 2"));
+        assert!(output.contains("qbind_consensus_inbound_new_views_delivered_total 0"));
     }
 
     /// Test G: inbound `NewView(bytes)` carrying a structurally valid
@@ -3465,6 +3528,10 @@ mod tests {
         assert_eq!(stats.inbound_new_views_engine_accepted, 0);
         assert_eq!(stats.view_timeout_engine_rejects, 1);
         assert_eq!(engine.current_view(), view_before);
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_consensus_inbound_new_views_delivered_total 1"));
+        assert!(output.contains("qbind_consensus_inbound_new_views_engine_accepted_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_engine_rejects_total 1"));
     }
 
     /// Test H (Run-015 absent-leader N=4 shape, end-to-end): local V0
@@ -3641,5 +3708,10 @@ mod tests {
         );
         assert_eq!(final_progress.inbound.timeout_certificates_formed, 0);
         assert_eq!(final_progress.inbound.view_timeout_advances, 0);
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_consensus_view_timeouts_emitted_total 0"));
+        assert!(output.contains("qbind_consensus_timeout_certificates_formed_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_advances_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_decode_failures_total 0"));
     }
 }

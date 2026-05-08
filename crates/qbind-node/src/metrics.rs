@@ -2038,6 +2038,111 @@ pub struct RestoreCatchupMetrics {
     mode_exited_at_height: AtomicU64,
 }
 
+/// Binary-path B14 view-timeout / view-change counters surfaced on `/metrics`.
+#[derive(Debug, Default)]
+pub struct BinaryViewTimeoutMetrics {
+    view_timeouts_emitted: AtomicU64,
+    inbound_timeouts_delivered: AtomicU64,
+    inbound_timeouts_engine_accepted: AtomicU64,
+    timeout_certificates_formed: AtomicU64,
+    outbound_new_views_sent: AtomicU64,
+    inbound_new_views_delivered: AtomicU64,
+    inbound_new_views_engine_accepted: AtomicU64,
+    view_timeout_advances: AtomicU64,
+    view_timeout_decode_failures: AtomicU64,
+    view_timeout_engine_rejects: AtomicU64,
+}
+
+impl BinaryViewTimeoutMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set(
+        &self,
+        view_timeouts_emitted: u64,
+        inbound_timeouts_delivered: u64,
+        inbound_timeouts_engine_accepted: u64,
+        timeout_certificates_formed: u64,
+        outbound_new_views_sent: u64,
+        inbound_new_views_delivered: u64,
+        inbound_new_views_engine_accepted: u64,
+        view_timeout_advances: u64,
+        view_timeout_decode_failures: u64,
+        view_timeout_engine_rejects: u64,
+    ) {
+        self.view_timeouts_emitted
+            .store(view_timeouts_emitted, Ordering::Relaxed);
+        self.inbound_timeouts_delivered
+            .store(inbound_timeouts_delivered, Ordering::Relaxed);
+        self.inbound_timeouts_engine_accepted
+            .store(inbound_timeouts_engine_accepted, Ordering::Relaxed);
+        self.timeout_certificates_formed
+            .store(timeout_certificates_formed, Ordering::Relaxed);
+        self.outbound_new_views_sent
+            .store(outbound_new_views_sent, Ordering::Relaxed);
+        self.inbound_new_views_delivered
+            .store(inbound_new_views_delivered, Ordering::Relaxed);
+        self.inbound_new_views_engine_accepted
+            .store(inbound_new_views_engine_accepted, Ordering::Relaxed);
+        self.view_timeout_advances
+            .store(view_timeout_advances, Ordering::Relaxed);
+        self.view_timeout_decode_failures
+            .store(view_timeout_decode_failures, Ordering::Relaxed);
+        self.view_timeout_engine_rejects
+            .store(view_timeout_engine_rejects, Ordering::Relaxed);
+    }
+
+    pub fn format_metrics(&self) -> String {
+        let mut output = String::new();
+        output.push_str("\n# Binary view-timeout metrics (B14)\n");
+        output.push_str(&format!(
+            "qbind_consensus_view_timeouts_emitted_total {}\n",
+            self.view_timeouts_emitted.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeouts_delivered_total {}\n",
+            self.inbound_timeouts_delivered.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeouts_engine_accepted_total {}\n",
+            self.inbound_timeouts_engine_accepted
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_timeout_certificates_formed_total {}\n",
+            self.timeout_certificates_formed.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_new_views_sent_total {}\n",
+            self.outbound_new_views_sent.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_new_views_delivered_total {}\n",
+            self.inbound_new_views_delivered.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_new_views_engine_accepted_total {}\n",
+            self.inbound_new_views_engine_accepted
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_advances_total {}\n",
+            self.view_timeout_advances.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_decode_failures_total {}\n",
+            self.view_timeout_decode_failures.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_engine_rejects_total {}\n",
+            self.view_timeout_engine_rejects.load(Ordering::Relaxed)
+        ));
+        output
+    }
+}
+
 impl RestoreCatchupMetrics {
     pub fn new() -> Self {
         Self::default()
@@ -7071,6 +7176,8 @@ pub struct NodeMetrics {
     progress: ConsensusProgressMetrics,
     /// Binary restore-catchup counters.
     restore_catchup: RestoreCatchupMetrics,
+    /// Binary B14 view-timeout/view-change counters.
+    binary_view_timeout: BinaryViewTimeoutMetrics,
     /// Live committed consensus anchor.
     committed_anchor: ConsensusCommittedAnchorMetrics,
     /// Per-validator vote metrics (T128).
@@ -7133,6 +7240,7 @@ impl NodeMetrics {
             suite_transition: SuiteTransitionMetrics::new(),
             progress: ConsensusProgressMetrics::new(),
             restore_catchup: RestoreCatchupMetrics::new(),
+            binary_view_timeout: BinaryViewTimeoutMetrics::new(),
             committed_anchor: ConsensusCommittedAnchorMetrics::new(),
             validator_votes: ValidatorVoteMetrics::new(),
             view_lag: ViewLagMetrics::new(),
@@ -7208,6 +7316,11 @@ impl NodeMetrics {
     /// Get binary restore-catchup metrics.
     pub fn restore_catchup(&self) -> &RestoreCatchupMetrics {
         &self.restore_catchup
+    }
+
+    /// Get binary B14 view-timeout/view-change metrics.
+    pub fn binary_view_timeout(&self) -> &BinaryViewTimeoutMetrics {
+        &self.binary_view_timeout
     }
 
     /// Get live committed anchor metrics.
@@ -7714,6 +7827,7 @@ impl NodeMetrics {
         // Consensus progress metrics (T127)
         output.push_str(&self.progress.format_metrics());
         output.push_str(&self.restore_catchup.format_metrics());
+        output.push_str(&self.binary_view_timeout.format_metrics());
         output.push_str(&self.committed_anchor.format_metrics());
 
         // Per-validator vote metrics with view lag (T128, T129)
@@ -8779,6 +8893,45 @@ mod tests {
         let output = metrics.format_metrics();
         assert!(output.contains("# Commit latency metrics (T107)"));
         assert!(output.contains("eezo_commit_latency_ms_count 1"));
+    }
+
+    #[test]
+    fn node_metrics_includes_b14_view_timeout_metrics_at_zero() {
+        let metrics = NodeMetrics::new();
+
+        let output = metrics.format_metrics();
+
+        assert!(output.contains("# Binary view-timeout metrics (B14)"));
+        assert!(output.contains("qbind_consensus_view_timeouts_emitted_total 0"));
+        assert!(output.contains("qbind_consensus_inbound_timeouts_delivered_total 0"));
+        assert!(output.contains("qbind_consensus_inbound_timeouts_engine_accepted_total 0"));
+        assert!(output.contains("qbind_consensus_timeout_certificates_formed_total 0"));
+        assert!(output.contains("qbind_consensus_outbound_new_views_sent_total 0"));
+        assert!(output.contains("qbind_consensus_inbound_new_views_delivered_total 0"));
+        assert!(output.contains("qbind_consensus_inbound_new_views_engine_accepted_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_advances_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_decode_failures_total 0"));
+        assert!(output.contains("qbind_consensus_view_timeout_engine_rejects_total 0"));
+        assert!(output.contains("consensus_net_inbound_total{kind=\"vote\"} 0"));
+    }
+
+    #[test]
+    fn binary_view_timeout_metrics_format_exact_values() {
+        let metrics = BinaryViewTimeoutMetrics::new();
+
+        metrics.set(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+        let output = metrics.format_metrics();
+
+        assert!(output.contains("qbind_consensus_view_timeouts_emitted_total 1"));
+        assert!(output.contains("qbind_consensus_inbound_timeouts_delivered_total 2"));
+        assert!(output.contains("qbind_consensus_inbound_timeouts_engine_accepted_total 3"));
+        assert!(output.contains("qbind_consensus_timeout_certificates_formed_total 4"));
+        assert!(output.contains("qbind_consensus_outbound_new_views_sent_total 5"));
+        assert!(output.contains("qbind_consensus_inbound_new_views_delivered_total 6"));
+        assert!(output.contains("qbind_consensus_inbound_new_views_engine_accepted_total 7"));
+        assert!(output.contains("qbind_consensus_view_timeout_advances_total 8"));
+        assert!(output.contains("qbind_consensus_view_timeout_decode_failures_total 9"));
+        assert!(output.contains("qbind_consensus_view_timeout_engine_rejects_total 10"));
     }
 
     // ========================================================================
