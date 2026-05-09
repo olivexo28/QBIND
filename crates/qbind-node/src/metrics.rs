@@ -2162,12 +2162,16 @@ impl RestoreCatchupMetrics {
         mode_exited_at_height: u64,
     ) {
         self.requests_sent.store(requests_sent, Ordering::Relaxed);
-        self.requests_received.store(requests_received, Ordering::Relaxed);
+        self.requests_received
+            .store(requests_received, Ordering::Relaxed);
         self.responses_sent.store(responses_sent, Ordering::Relaxed);
-        self.responses_received.store(responses_received, Ordering::Relaxed);
+        self.responses_received
+            .store(responses_received, Ordering::Relaxed);
         self.blocks_applied.store(blocks_applied, Ordering::Relaxed);
-        self.responses_rejected.store(responses_rejected, Ordering::Relaxed);
-        self.proposals_deferred.store(proposals_deferred, Ordering::Relaxed);
+        self.responses_rejected
+            .store(responses_rejected, Ordering::Relaxed);
+        self.proposals_deferred
+            .store(proposals_deferred, Ordering::Relaxed);
         self.mode_active.store(mode_active, Ordering::Relaxed);
         self.mode_exited_at_height
             .store(mode_exited_at_height, Ordering::Relaxed);
@@ -2236,18 +2240,25 @@ impl ConsensusCommittedAnchorMetrics {
             .expect("committed anchor metrics RwLock poisoned") = Some(block_id);
     }
 
+    pub fn height(&self) -> u64 {
+        self.height.load(Ordering::Relaxed)
+    }
+
+    pub fn block_id(&self) -> Option<[u8; 32]> {
+        *self
+            .block_id
+            .read()
+            .expect("committed anchor metrics RwLock poisoned")
+    }
+
     pub fn format_metrics(&self) -> String {
         let mut output = String::new();
         output.push_str("\n# Consensus committed anchor metrics\n");
         output.push_str(&format!(
             "qbind_consensus_committed_height {}\n",
-            self.height.load(Ordering::Relaxed)
+            self.height()
         ));
-        if let Some(block_id) = *self
-            .block_id
-            .read()
-            .expect("committed anchor metrics RwLock poisoned")
-        {
+        if let Some(block_id) = self.block_id() {
             output.push_str(&format!(
                 "qbind_consensus_committed_block_info{{block_id=\"{}\"}} 1\n",
                 hex::encode(block_id)
@@ -4498,17 +4509,27 @@ impl SignerIsolationMetrics {
     /// Record a signer request.
     pub fn inc_request(&self, mode: SignerModeKind, kind: SignRequestKind) {
         match (mode, kind) {
-            (SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1, SignRequestKind::Proposal) => {
+            (
+                SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1,
+                SignRequestKind::Proposal,
+            ) => {
                 self.requests_local_proposal.fetch_add(1, Ordering::Relaxed);
             }
-            (SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1, SignRequestKind::Vote) => {
+            (
+                SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1,
+                SignRequestKind::Vote,
+            ) => {
                 self.requests_local_vote.fetch_add(1, Ordering::Relaxed);
             }
-            (SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1, SignRequestKind::Timeout) => {
+            (
+                SignerModeKind::LoopbackTesting | SignerModeKind::EncryptedFsV1,
+                SignRequestKind::Timeout,
+            ) => {
                 self.requests_local_timeout.fetch_add(1, Ordering::Relaxed);
             }
             (SignerModeKind::RemoteSigner, SignRequestKind::Proposal) => {
-                self.requests_remote_proposal.fetch_add(1, Ordering::Relaxed);
+                self.requests_remote_proposal
+                    .fetch_add(1, Ordering::Relaxed);
             }
             (SignerModeKind::RemoteSigner, SignRequestKind::Vote) => {
                 self.requests_remote_vote.fetch_add(1, Ordering::Relaxed);
@@ -4569,12 +4590,14 @@ impl SignerIsolationMetrics {
 
     /// Record a local invalid key failure.
     pub fn inc_failure_local_invalid_key(&self) {
-        self.failures_local_invalid_key.fetch_add(1, Ordering::Relaxed);
+        self.failures_local_invalid_key
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record a remote signer unavailable failure.
     pub fn inc_failure_remote_unavailable(&self) {
-        self.failures_remote_unavailable.fetch_add(1, Ordering::Relaxed);
+        self.failures_remote_unavailable
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record a remote signer timeout failure.
@@ -4590,12 +4613,14 @@ impl SignerIsolationMetrics {
 
     /// Record a remote signer malformed response.
     pub fn inc_failure_remote_malformed(&self) {
-        self.failures_remote_malformed.fetch_add(1, Ordering::Relaxed);
+        self.failures_remote_malformed
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record an HSM unavailable failure.
     pub fn inc_failure_hsm_unavailable(&self) {
-        self.failures_hsm_unavailable.fetch_add(1, Ordering::Relaxed);
+        self.failures_hsm_unavailable
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record an HSM session error.
@@ -4664,7 +4689,7 @@ impl SignerIsolationMetrics {
     /// Set the health status.
     pub fn set_health(&self, health: SignerHealth) {
         let value = match health {
-            SignerHealth::Failed => 0,   // Failed = unavailable/fail-closed
+            SignerHealth::Failed => 0, // Failed = unavailable/fail-closed
             SignerHealth::Degraded => 1,
             SignerHealth::Healthy => 2,
         };

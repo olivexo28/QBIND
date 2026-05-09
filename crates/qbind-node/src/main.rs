@@ -60,6 +60,7 @@ use std::sync::Arc;
 
 use tokio::sync::watch;
 
+use qbind_consensus::ids::ValidatorId;
 use qbind_node::binary_consensus_loop::{
     spawn_binary_consensus_loop, spawn_binary_consensus_loop_with_io, BinaryConsensusLoopConfig,
     BinaryConsensusLoopIo, RestoreBaseline,
@@ -74,7 +75,7 @@ use qbind_node::node_config::{ConfigProfile, NetworkMode};
 use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 use qbind_node::snapshot_restore::RestoreOutcome;
-use qbind_consensus::ids::ValidatorId;
+use qbind_node::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeState};
 
 /// Main entry point for qbind-node binary.
 #[tokio::main]
@@ -205,22 +206,46 @@ async fn main() {
         metrics_shutdown_rx,
     );
 
+    let vm_v0_runtime = match VmV0RuntimeState::open_from_config(&config) {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("[T164] ERROR: {}", e);
+            eprintln!(
+                "[T164] qbind-node refuses to start because VM-v0 persistent state \
+                 could not be honestly opened."
+            );
+            std::process::exit(1);
+        }
+    };
+
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
-            run_local_mesh_node(&config, &args, Arc::clone(&node_metrics), restore_baseline).await;
+            run_local_mesh_node(
+                &config,
+                &args,
+                Arc::clone(&node_metrics),
+                restore_baseline,
+                vm_v0_runtime.clone(),
+            )
+            .await;
         }
         NetworkMode::P2p => {
             if p2p_enabled {
-                run_p2p_node(&config, &args, Arc::clone(&node_metrics), restore_baseline).await;
+                run_p2p_node(
+                    &config,
+                    &args,
+                    Arc::clone(&node_metrics),
+                    restore_baseline,
+                    vm_v0_runtime.clone(),
+                )
+                .await;
             } else {
                 // P2P mode requested but not enabled by config.
                 // Fail clearly rather than silently degrading: an operator
                 // who asked for P2P should not be running on a LocalMesh
                 // pretending to be P2P.
-                eprintln!(
-                    "[binary] ERROR: --network-mode p2p was requested but enable_p2p=false."
-                );
+                eprintln!("[binary] ERROR: --network-mode p2p was requested but enable_p2p=false.");
                 eprintln!(
                     "[binary] Pass --enable-p2p (or set network.enable_p2p=true) to actually \
                      start P2P, or use --network-mode local-mesh for single-host devnet."
@@ -250,6 +275,7 @@ async fn run_local_mesh_node(
     args: &CliArgs,
     node_metrics: Arc<NodeMetrics>,
     restore_baseline: Option<RestoreBaseline>,
+    vm_v0_runtime: Option<Arc<VmV0RuntimeState>>,
 ) {
     eprintln!(
         "[binary] LocalMesh mode: starting consensus loop. environment={} profile={}",
@@ -287,6 +313,12 @@ async fn run_local_mesh_node(
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+    let snapshot_handle = spawn_vm_v0_snapshot_signal_task(
+        vm_v0_runtime,
+        Arc::clone(&node_metrics),
+        config.chain_id().as_u64(),
+        shutdown_rx.clone(),
+    );
     let (consensus_handle, _progress) = spawn_binary_consensus_loop(cfg, shutdown_rx, node_metrics);
 
     eprintln!("[binary] Consensus loop running. Press Ctrl+C to exit.");
@@ -294,6 +326,9 @@ async fn run_local_mesh_node(
     eprintln!("[binary] Shutdown signal received, stopping consensus loop...");
     drop(shutdown_tx);
     let _ = consensus_handle.await;
+    if let Some(handle) = snapshot_handle {
+        let _ = handle.await;
+    }
     eprintln!("[binary] LocalMesh node stopped.");
 }
 
@@ -319,6 +354,7 @@ async fn run_p2p_node(
     args: &CliArgs,
     node_metrics: Arc<NodeMetrics>,
     restore_baseline: Option<RestoreBaseline>,
+    vm_v0_runtime: Option<Arc<VmV0RuntimeState>>,
 ) {
     eprintln!(
         "[binary] P2P mode: starting transport + consensus loop. environment={} profile={}",
@@ -389,10 +425,7 @@ async fn run_p2p_node(
         qbind_net::MutualAuthMode::Optional => NodeMam::Optional,
         qbind_net::MutualAuthMode::Disabled => NodeMam::Disabled,
     };
-    if matches!(
-        configured_mode,
-        NodeMam::Required | NodeMam::Optional
-    ) {
+    if matches!(configured_mode, NodeMam::Required | NodeMam::Optional) {
         match config.environment {
             NetworkEnvironment::Mainnet => {
                 eprintln!(
@@ -454,12 +487,11 @@ async fn run_p2p_node(
     // engine-acceptance counters report real progress (the gap
     // surfaced by DevNet Evidence Run 008/009).
     let outbound_facade: Arc<dyn qbind_node::consensus_network_facade::ConsensusNetworkFacade> =
-        Arc::new(P2pConsensusNetwork::new(
-            node_context.p2p_service.clone(),
-            num_validators as usize,
-        )
-        .with_local_validator(local_validator_id)
-        .with_metrics(Arc::clone(&node_metrics)));
+        Arc::new(
+            P2pConsensusNetwork::new(node_context.p2p_service.clone(), num_validators as usize)
+                .with_local_validator(local_validator_id)
+                .with_metrics(Arc::clone(&node_metrics)),
+        );
 
     let mut consensus_cfg = BinaryConsensusLoopConfig::new(local_validator_id, num_validators);
     if let Some(b) = restore_baseline {
@@ -487,6 +519,12 @@ async fn run_p2p_node(
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+    let snapshot_handle = spawn_vm_v0_snapshot_signal_task(
+        vm_v0_runtime,
+        Arc::clone(&node_metrics),
+        config.chain_id().as_u64(),
+        shutdown_rx.clone(),
+    );
     // B9: late-peer-connect proposal re-emission.
     //
     // The same `Arc<dyn P2pService>` that backs both the inbound demuxer
@@ -503,9 +541,11 @@ async fn run_p2p_node(
     // harmless because there are no other expected peers, so the
     // newly-connected set stays empty and re-emission never fires.
     let peer_connectivity: Arc<dyn qbind_node::binary_consensus_loop::PeerConnectivitySource> =
-        Arc::new(qbind_node::binary_consensus_loop::P2pServicePeerConnectivity::new(
-            node_context.p2p_service.clone(),
-        ));
+        Arc::new(
+            qbind_node::binary_consensus_loop::P2pServicePeerConnectivity::new(
+                node_context.p2p_service.clone(),
+            ),
+        );
     let io = BinaryConsensusLoopIo {
         inbound_rx: consensus_inbound_rx,
         outbound: outbound_facade,
@@ -520,9 +560,107 @@ async fn run_p2p_node(
 
     drop(shutdown_tx);
     let _ = consensus_handle.await;
+    if let Some(handle) = snapshot_handle {
+        let _ = handle.await;
+    }
 
     if let Err(e) = P2pNodeBuilder::shutdown(node_context).await {
         eprintln!("[binary] Error during P2P shutdown: {:?}", e);
     }
     eprintln!("[binary] P2P node shutdown complete.");
+}
+
+#[cfg(unix)]
+fn spawn_vm_v0_snapshot_signal_task(
+    runtime: Option<Arc<VmV0RuntimeState>>,
+    metrics: Arc<NodeMetrics>,
+    chain_id: u64,
+    mut shutdown_rx: watch::Receiver<()>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let runtime = runtime?;
+    if runtime.snapshot_dir().is_none() {
+        eprintln!(
+            "[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured"
+        );
+        return None;
+    }
+
+    let mut sigusr1 =
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
+            Ok(signal) => signal,
+            Err(e) => {
+                eprintln!(
+                    "[snapshot] ERROR: failed to install SIGUSR1 snapshot trigger: {}",
+                    e
+                );
+                metrics.snapshot().record_failure();
+                return None;
+            }
+        };
+
+    eprintln!("[snapshot] VM-v0 in-process snapshot trigger enabled: send SIGUSR1 to this process");
+
+    Some(tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    eprintln!("[snapshot] VM-v0 snapshot trigger stopped.");
+                    break;
+                }
+                _ = sigusr1.recv() => {
+                    let height = metrics.committed_anchor().height();
+                    let Some(block_hash) = metrics.committed_anchor().block_id() else {
+                        eprintln!(
+                            "[snapshot] ERROR: SIGUSR1 snapshot requested before a committed anchor was available"
+                        );
+                        metrics.snapshot().record_failure();
+                        continue;
+                    };
+                    let runtime = Arc::clone(&runtime);
+                    let metrics_for_task = Arc::clone(&metrics);
+                    let result = tokio::task::spawn_blocking(move || {
+                        runtime.create_snapshot(
+                            SnapshotAnchor { height, block_hash },
+                            chain_id,
+                            &metrics_for_task,
+                        )
+                    })
+                    .await;
+                    match result {
+                        Ok(Ok(stats)) => {
+                            eprintln!(
+                                "[snapshot] OK: created VM-v0 snapshot height={} size_bytes={} duration_ms={}",
+                                stats.height,
+                                stats.size_bytes,
+                                stats.duration_ms
+                            );
+                        }
+                        Ok(Err(e)) => {
+                            eprintln!("[snapshot] ERROR: {}", e);
+                        }
+                        Err(e) => {
+                            eprintln!("[snapshot] ERROR: snapshot task join failed: {}", e);
+                            metrics.snapshot().record_failure();
+                        }
+                    }
+                }
+            }
+        }
+    }))
+}
+
+#[cfg(not(unix))]
+fn spawn_vm_v0_snapshot_signal_task(
+    runtime: Option<Arc<VmV0RuntimeState>>,
+    metrics: Arc<NodeMetrics>,
+    _unsupported_chain_id: u64,
+    _unsupported_shutdown_rx: watch::Receiver<()>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    if runtime.and_then(|r| r.snapshot_dir().map(|_| ())).is_some() {
+        eprintln!(
+            "[snapshot] ERROR: VM-v0 SIGUSR1 snapshot trigger is unsupported on this platform"
+        );
+        metrics.snapshot().record_failure();
+    }
+    None
 }

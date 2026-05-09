@@ -137,6 +137,7 @@ pub mod storage;
 pub mod validator_config;
 pub mod validator_signer;
 pub mod verify_pool;
+pub mod vm_v0_runtime;
 
 pub use async_runner::{
     AsyncNodeError, AsyncNodeRunner, ConsensusEvent, ConsensusEventReceiver, ConsensusEventSender,
@@ -259,9 +260,7 @@ pub use node_config::{
 };
 
 // M8 Mutual Auth Config exports
-pub use node_config::{
-    parse_mutual_auth_mode, MutualAuthConfig, MutualAuthMode,
-};
+pub use node_config::{parse_mutual_auth_mode, MutualAuthConfig, MutualAuthMode};
 
 // T210 Signer Mode exports
 pub use node_config::{
@@ -304,8 +303,8 @@ pub use qbind_ledger::{
 // T230 Slashing Ledger exports (re-exported from qbind-ledger)
 // M1: Persistent RocksDB-backed slashing ledger
 pub use qbind_ledger::{
-    EpochNumber, InMemorySlashingLedger, RocksDbSlashingLedger, SlashingLedger, SlashingLedgerError,
-    SlashingRecord, StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
+    EpochNumber, InMemorySlashingLedger, RocksDbSlashingLedger, SlashingLedger,
+    SlashingLedgerError, SlashingRecord, StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
 };
 
 // T170 P2P Service exports
@@ -384,10 +383,10 @@ pub use validator_signer::{
 
 // Remote signer exports (T149, T212, M10)
 pub use remote_signer::{
-    LoopbackSignerTransport, RemoteSignError, RemoteSignRequest, RemoteSignRequestKind,
-    RemoteSignResponse, RemoteSignerClient, RemoteSignerMetrics, RemoteSignerTransport,
-    TcpKemTlsSignerTransport, DEFAULT_REMOTE_SIGNER_TIMEOUT_MS, MAX_PREIMAGE_SIZE,
-    REMOTE_SIGNER_DOMAIN_TAG, message_type,
+    message_type, LoopbackSignerTransport, RemoteSignError, RemoteSignRequest,
+    RemoteSignRequestKind, RemoteSignResponse, RemoteSignerClient, RemoteSignerMetrics,
+    RemoteSignerTransport, TcpKemTlsSignerTransport, DEFAULT_REMOTE_SIGNER_TIMEOUT_MS,
+    MAX_PREIMAGE_SIZE, REMOTE_SIGNER_DOMAIN_TAG,
 };
 
 // Verification pool exports (T147)

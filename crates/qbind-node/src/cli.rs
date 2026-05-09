@@ -330,6 +330,29 @@ pub struct CliArgs {
     pub state_prune_interval: Option<u64>,
 
     // ========================================================================
+    // T215/B15: State Snapshot Configuration
+    // ========================================================================
+    /// Directory where in-process VM-v0 snapshots are written.
+    ///
+    /// When set with `--execution-profile vm-v0 --data-dir <DIR>`, the running
+    /// validator installs the bounded SIGUSR1 snapshot trigger. A trigger writes
+    /// a snapshot to `<PATH>/<committed_height>/` using the opened
+    /// `<data-dir>/state_vm_v0` RocksDB handle.
+    #[arg(long = "snapshot-dir")]
+    pub snapshot_dir: Option<PathBuf>,
+
+    /// Committed-block interval for snapshot configuration.
+    ///
+    /// This preserves the existing SnapshotConfig field for profile overrides;
+    /// the current production binary operator trigger is SIGUSR1-based.
+    #[arg(long = "snapshot-interval-blocks")]
+    pub snapshot_interval_blocks: Option<u64>,
+
+    /// Maximum number of numeric snapshot directories to retain.
+    #[arg(long = "snapshot-max-snapshots")]
+    pub snapshot_max_snapshots: Option<u32>,
+
+    // ========================================================================
     // T210: Signer Mode Configuration
     // ========================================================================
     /// Signer mode for validator key management (T210).
@@ -866,6 +889,36 @@ impl CliArgs {
             config.state_retention.prune_interval_blocks = prune_interval;
         }
 
+        // T215/B15: Apply snapshot trigger/output configuration.
+        if let Some(ref snapshot_dir) = self.snapshot_dir {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T215] CLI override: snapshot_config.snapshot_dir = {}",
+                    snapshot_dir.display()
+                );
+            }
+            config.snapshot_config.enabled = true;
+            config.snapshot_config.snapshot_dir = Some(snapshot_dir.clone());
+        }
+        if let Some(interval) = self.snapshot_interval_blocks {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T215] CLI override: snapshot_config.snapshot_interval_blocks = {}",
+                    interval
+                );
+            }
+            config.snapshot_config.snapshot_interval_blocks = interval;
+        }
+        if let Some(max_snapshots) = self.snapshot_max_snapshots {
+            if self.profile.is_some() {
+                eprintln!(
+                    "[T215] CLI override: snapshot_config.max_snapshots = {}",
+                    max_snapshots
+                );
+            }
+            config.snapshot_config.max_snapshots = max_snapshots.max(1);
+        }
+
         // T210: Apply signer mode override
         if let Some(ref signer_mode_str) = self.signer_mode {
             match parse_signer_mode(signer_mode_str) {
@@ -1063,6 +1116,9 @@ mod tests {
         assert!(args.p2p_peers.is_empty());
         assert!(args.validator_id.is_none());
         assert!(args.data_dir.is_none());
+        assert!(args.snapshot_dir.is_none());
+        assert!(args.snapshot_interval_blocks.is_none());
+        assert!(args.snapshot_max_snapshots.is_none());
     }
 
     #[test]
@@ -1128,6 +1184,36 @@ mod tests {
             Some("127.0.0.1:19000".to_string())
         );
         assert_eq!(config.network.static_peers, vec!["127.0.0.1:19001"]);
+    }
+
+    #[test]
+    fn test_cli_snapshot_dir_enables_snapshot_config() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--execution-profile",
+            "vm-v0",
+            "--data-dir",
+            temp.path().join("data").to_str().unwrap(),
+            "--snapshot-dir",
+            temp.path().join("snapshots").to_str().unwrap(),
+            "--snapshot-interval-blocks",
+            "123",
+            "--snapshot-max-snapshots",
+            "2",
+        ])
+        .unwrap();
+
+        let config = args.to_node_config().unwrap();
+
+        assert_eq!(
+            config.execution_profile,
+            crate::node_config::ExecutionProfile::VmV0
+        );
+        assert_eq!(config.snapshot_config.snapshot_dir, args.snapshot_dir);
+        assert!(config.snapshot_config.enabled);
+        assert_eq!(config.snapshot_config.snapshot_interval_blocks, 123);
+        assert_eq!(config.snapshot_config.max_snapshots, 2);
     }
 
     #[test]
