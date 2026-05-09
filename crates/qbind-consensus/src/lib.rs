@@ -50,6 +50,7 @@ pub mod qc;
 pub mod sim;
 pub mod slashing;
 pub mod timeout;
+pub mod timeout_verify;
 pub mod validator_set;
 pub mod verify;
 pub mod verify_job;
@@ -93,6 +94,10 @@ pub use sim::SingleNodeSim;
 pub use timeout::{
     select_max_high_qc, timeout_signing_bytes, TimeoutAccumulator, TimeoutCertificate, TimeoutMsg,
     TimeoutValidationError, TIMEOUT_SUITE_ID,
+};
+pub use timeout_verify::{
+    verify_timeout_certificate_with_evidence, verify_timeout_msg, TimeoutVerifyError,
+    TimeoutVerifyOutcome,
 };
 pub use validator_set::{
     build_validator_set_with_stake_filter, BlockPayloadType, ConsensusValidatorSet, EpochId,

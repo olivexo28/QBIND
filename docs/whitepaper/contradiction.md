@@ -1,6 +1,6 @@
 # QBIND Whitepaper Contradictions and Undocumented Behaviors
 
-**Version**: 1.7  
+**Version**: 1.8  
 **Date**: 2026-05-09  
 **Status**: Active Tracking Document
 
@@ -67,6 +67,18 @@ DevNet Evidence Run 022 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_022.md`) positiv
 | **M15 Mitigation** | Evidence ingestion hardened with 8-step verification ordering: (1) Reporter validation, (2) Size bounds, (3) Per-block cap, (4) Deduplication, (5) Structure validation, (6) Age bounds, (7) Future height check, (8) Cryptographic verification (expensive - last). Config: `require_validator_reporter=true`, `per_block_evidence_cap=10`, `max_evidence_age_blocks=100K`, size limits per offense type. See `crates/qbind-consensus/src/slashing/mod.rs` (`HardenedEvidenceIngestionEngine`). |
 | **M20 Documentation** | Whitepaper Section 12.2.3 "Reporter Incentives (Future Work)" added. Explicitly states: no on-chain reporter rewards currently; slashing is purely punitive; any future reward model must build on M15 hardened evidence pipeline. |
 | **Remaining** | • Wire `reporter_reward_bps` to slashing engine reward distribution • Add reward transfer in penalty application path • Design and implement tokenomics for reporter incentives |
+
+### C5. `TimeoutCertificate` Wire Shape Carries No Per-Signer Signature Evidence
+
+| Field | Value |
+|-------|-------|
+| **Status** | ⚠️ **OPEN — narrow** (surfaced and bounded by DevNet Evidence Run 028) |
+| **Whitepaper / Doc Reference** | `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_028.md` §7.2 |
+| **Code Location** | `crates/qbind-consensus/src/timeout.rs` (`TimeoutCertificate` struct: `signers: Vec<ValidatorId>`, `high_qc: Option<QuorumCertificate<BlockIdT>>`, no per-signer signature/suite_id field); `crates/qbind-consensus/src/timeout_verify.rs` (Run 028 verification primitive, takes evidence as a separate `&[TimeoutMsg]` argument). |
+| **Description** | Run 028 lands the smallest honest cryptographic verification primitive for HotStuff timeout traffic. `verify_timeout_msg` is end-to-end usable on the binary path. `verify_timeout_certificate_with_evidence` is sound for **locally-formed** TCs (where the engine's `TimeoutAccumulator` still has the per-signer signed `TimeoutMsg` entries available) but cannot be applied to **inbound** `NewView` payloads because `TimeoutCertificate` on the wire carries only `signers: Vec<ValidatorId>` — no per-signer signatures. As a result, even with the Run 028 primitive in place, the binary path cannot today reject a `NewView` whose `signers` list is a forgery against the active validator set unless the per-signer evidence is added to the wire shape. |
+| **Impact** | Narrow. Does not weaken proposal/vote/QC verification (already enforced) or `TimeoutMsg`-level verification (Run 028 covers that fully at the engine boundary). Affects only inbound `NewView` payloads. |
+| **Resolution path** | Add a `signed_timeouts: Vec<TimeoutMsg<BlockIdT>>` field to `TimeoutCertificate`; populate it in `TimeoutAccumulator::maybe_tc_for`; wire `verify_timeout_certificate_with_evidence(&tc, &tc.signed_timeouts, ...)` into `binary_consensus_loop.rs::process_inbound_msg` `NewView` arm; mirror the existing `validator_signer.rs` path to sign locally-emitted `TimeoutMsg`s on the outbound side; add the corresponding per-reason rejection counters; produce `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_029.md`. Until that lands, C4's "signature verification of `TimeoutMsg` / `TimeoutCertificate`" sub-item remains explicitly open. |
+| **Tests** | `crates/qbind-consensus/src/timeout_verify.rs` `tests::*` (19 tests, including `verify_tc_with_unknown_signer_is_rejected`, `verify_tc_with_one_bad_signature_is_rejected`, `verify_tc_with_evidence_mismatch_is_rejected`, `verify_tc_high_qc_mismatch_is_rejected` — all covering the primitive's correctness when evidence IS supplied). |
 
 ---
 
