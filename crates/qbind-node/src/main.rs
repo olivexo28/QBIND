@@ -569,53 +569,136 @@ async fn run_p2p_node(
             ),
         );
     // ------------------------------------------------------------------
-    // Run 031: TimeoutVerificationContext activation bridge.
+    // Run 031 + Run 032: TimeoutVerificationContext activation bridge.
     //
     // The Run 030 binary loop honours an `Arc<TimeoutVerificationContext>`
     // end-to-end. Production activation requires a real
     // `SuiteAwareValidatorKeyProvider` covering every active validator,
     // a `ConsensusSigBackendRegistry` with a backend for every governed
     // suite (today: ML-DSA-44 / suite_id 100), and an
-    // `Arc<dyn ValidatorSigner>` over the local signing key. The
-    // current `qbind-node` binary path does not yet load any of those
-    // honestly:
-    //  * `signer_keystore_path` flows into `NodeConfig` but is not read
-    //    in `main.rs` to materialise an `Arc<ValidatorSigningKey>`;
+    // `Arc<dyn ValidatorSigner>` over the local signing key.
+    //
+    // Run 032 lands the **signer half** honestly:
+    //  * `signer_loader::load_validator_signer_from_config` reads
+    //    `config.signer_keystore_path` and constructs an
+    //    `Arc<dyn ValidatorSigner>` via the existing keystore
+    //    primitives (no new key format, no fake keys, no key
+    //    material in logs).
+    //
+    // The peer-side blockers remain:
     //  * `NodeConfig.network.static_peers` carries no per-peer
     //    `(suite_id, pk_bytes)`, so no `SuiteAwareValidatorKeyProvider`
     //    can be honestly constructed for the active validator set;
     //  * `--p2p-mutual-auth` itself runs on B12's test-grade
     //    `TrustedClientRoots`/`DummySig` stack (see lines 427-472).
     //
-    // The probe below fails closed with that exact precise reason. It
-    // does NOT silently substitute test-grade roots, dummy keys, or a
-    // parallel verifier path. When the production blockers in
-    // `docs/whitepaper/contradiction.md` C4/C5 are resolved, this site
-    // is the single place that needs to be replaced with the real
-    // construction call into `try_build_timeout_verification_context`.
+    // The Run 032 probe below therefore returns `Disabled` with the
+    // narrowed reason `SignerPresentKeyProviderUnavailable` whenever
+    // the signer load succeeded, and the original Run 031
+    // `ProductionPiecesUnavailable` whenever it did not. Activation
+    // never happens in this run — `try_build_timeout_verification_context`
+    // is **not** called with empty / fake key-provider input.
     //
     // Policy:
     //  * `--require-timeout-verification` ⇒ `RequireOrFail` (refuse
-    //    to start if the probe is `Disabled`);
-    //  * `--p2p-mutual-auth required` and not `--require-...` ⇒
-    //    `OptionalActivate` (log precise reason, fall back to `None`);
-    //  * otherwise ⇒ `OptionalActivate`.
+    //    to start under any `Disabled` outcome — including
+    //    "signer loaded but key-provider missing");
+    //  * otherwise ⇒ `OptionalActivate` (log the precise reason,
+    //    fall back to `verification_ctx: None`).
     // ------------------------------------------------------------------
+    use qbind_node::signer_loader::{load_validator_signer_from_config, SignerLoadError};
     use qbind_node::timeout_verification_bridge::{
-        enforce_policy, run_031_probe_production_pieces_for_run_p2p_node,
-        TimeoutVerificationPolicy,
+        enforce_policy, run_032_probe_with_signer, TimeoutVerificationPolicy,
     };
+
     let timeout_verification_policy = if args.require_timeout_verification {
         TimeoutVerificationPolicy::RequireOrFail
     } else {
         TimeoutVerificationPolicy::OptionalActivate
     };
-    let timeout_verification_outcome = run_031_probe_production_pieces_for_run_p2p_node();
+
+    // Attempt signer load. Honest "no" is reportable but does NOT
+    // by itself fail closed — the `RequireOrFail` policy only
+    // triggers below when the bridge outcome stays `Disabled`.
+    let signer_load_result =
+        load_validator_signer_from_config(config, local_validator_id);
+    let (signer_for_bridge, signer_log_summary): (
+        Option<std::sync::Arc<dyn qbind_node::validator_signer::ValidatorSigner>>,
+        String,
+    ) = match &signer_load_result {
+        Ok(loaded) => {
+            eprintln!(
+                "[binary] Run 032: validator signer loaded — backend={} validator_id={:?} \
+                 suite_id={} pk_fingerprint={} keystore_path={}",
+                loaded.backend,
+                loaded.validator_id,
+                loaded.suite_id,
+                loaded.public_key_fingerprint,
+                config
+                    .signer_keystore_path
+                    .as_deref()
+                    .map(qbind_node::signer_loader::safe_keystore_path_log)
+                    .unwrap_or_else(|| "<unset>".to_string()),
+            );
+            (
+                Some(loaded.signer.clone()),
+                format!(
+                    "loaded(backend={},validator={:?},suite={})",
+                    loaded.backend, loaded.validator_id, loaded.suite_id
+                ),
+            )
+        }
+        Err(SignerLoadError::KeystorePathNotConfigured) => {
+            eprintln!(
+                "[binary] Run 032: validator signer not loaded — \
+                 config.signer_keystore_path is not set; Run 030 bit-equivalent path \
+                 (no outbound timeout signing). See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md."
+            );
+            (None, "absent(keystore_path_not_configured)".to_string())
+        }
+        Err(e) => {
+            eprintln!(
+                "[binary] Run 032: validator signer load FAILED — {} (no key material in this \
+                 message). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
+                e
+            );
+            (None, format!("load_failed({})", e))
+        }
+    };
+
+    node_metrics
+        .set_timeout_verification_signer_loaded(signer_for_bridge.is_some());
+
+    // If the operator declared `--require-timeout-verification` and
+    // the signer half was not even loaded, fail closed *before* we
+    // ask the bridge anything: the operator's intent is unambiguous,
+    // and the bridge's `SignerPresentKeyProviderUnavailable` /
+    // `ProductionPiecesUnavailable` narrowing is informational. We
+    // surface a precise, signer-specific error here.
+    if matches!(
+        timeout_verification_policy,
+        TimeoutVerificationPolicy::RequireOrFail
+    ) {
+        if let Err(err) = &signer_load_result {
+            eprintln!(
+                "[binary] FATAL: --require-timeout-verification was set but the local validator \
+                 signer could not be loaded: {}. qbind-node refuses to start. See \
+                 docs/whitepaper/contradiction.md C5 and \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.",
+                err
+            );
+            std::process::exit(1);
+        }
+    }
+
+    let timeout_verification_outcome =
+        run_032_probe_with_signer(signer_for_bridge.clone(), local_validator_id);
     let supported_suite_ids: &[u16] = &[100]; // ML-DSA-44 (SUITE_PQ_RESERVED_1)
     eprintln!(
-        "[binary] Run 031: timeout-verification probe: active={} reason={} \
+        "[binary] Run 032: timeout-verification probe: active={} reason={} \
          policy={:?} validators={} chain_id={} supported_suite_ids={:?} \
-         local_signer=<absent in main.rs — keystore not loaded>",
+         local_signer={}",
         timeout_verification_outcome.is_active(),
         match timeout_verification_outcome.disabled_reason() {
             Some(r) => format!("{}", r),
@@ -625,6 +708,7 @@ async fn run_p2p_node(
         num_validators,
         config.chain_id(),
         supported_suite_ids,
+        signer_log_summary,
     );
     let verification_ctx = match enforce_policy(
         timeout_verification_policy,
@@ -639,7 +723,9 @@ async fn run_p2p_node(
             );
             eprintln!(
                 "[binary] qbind-node refuses to start under RequireOrFail policy with no \
-                 production-safe context. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md \
+                 production-safe context. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md, \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md, \
                  and docs/whitepaper/contradiction.md C5/C4."
             );
             std::process::exit(1);
@@ -648,14 +734,21 @@ async fn run_p2p_node(
     node_metrics.set_timeout_verification_active(verification_ctx.is_some());
     if verification_ctx.is_some() {
         eprintln!(
-            "[binary] Run 031: timeout verification ACTIVE — Arc<TimeoutVerificationContext> \
+            "[binary] Run 032: timeout verification ACTIVE — Arc<TimeoutVerificationContext> \
              threaded into BinaryConsensusLoopIo::verification_ctx. Inbound TimeoutMsg / \
              NewView / TC traffic will be verified before engine ingestion; locally-emitted \
              timeouts will be signed before broadcast."
         );
+    } else if signer_for_bridge.is_some() {
+        eprintln!(
+            "[binary] Run 032: timeout verification DISABLED — signer half wired honestly, \
+             but BinaryConsensusLoopIo::verification_ctx=None because the peer-side \
+             SuiteAwareValidatorKeyProvider over NodeConfig.network.static_peers is still \
+             missing. See docs/whitepaper/contradiction.md C5."
+        );
     } else {
         eprintln!(
-            "[binary] Run 031: timeout verification DISABLED — \
+            "[binary] Run 032: timeout verification DISABLED — \
              BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). \
              Inbound timeout/new-view crypto verification and outbound timeout signing \
              remain off until production pieces land. See \

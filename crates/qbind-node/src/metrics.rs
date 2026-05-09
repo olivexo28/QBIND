@@ -7595,6 +7595,14 @@ pub struct NodeMetrics {
     /// 0 = `BinaryConsensusLoopIo::verification_ctx` is `None`
     ///     (verification not active), 1 = active.
     timeout_verification_active: std::sync::atomic::AtomicU8,
+    /// Run 032: timeout verification signer-loaded gauge.
+    /// 0 = no `Arc<dyn ValidatorSigner>` was loaded by
+    ///     `run_p2p_node` from `config.signer_keystore_path`,
+    /// 1 = signer half of the bridge inputs is honestly populated.
+    /// This is independent of `timeout_verification_active`: it
+    /// will be 1 even when verification stays disabled because the
+    /// peer key-provider half is still missing.
+    timeout_verification_signer_loaded: std::sync::atomic::AtomicU8,
 }
 
 impl Default for NodeMetrics {
@@ -7639,6 +7647,7 @@ impl NodeMetrics {
             slashing: SlashingMetrics::new(),
             mainnet_invariants_ok: std::sync::atomic::AtomicU8::new(0),
             timeout_verification_active: std::sync::atomic::AtomicU8::new(0),
+            timeout_verification_signer_loaded: std::sync::atomic::AtomicU8::new(0),
         }
     }
 
@@ -7976,6 +7985,25 @@ impl NodeMetrics {
     /// Run 031: get the timeout verification activation gauge.
     pub fn timeout_verification_active(&self) -> u8 {
         self.timeout_verification_active
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Run 032: record whether the local validator signer was
+    /// successfully loaded from `config.signer_keystore_path`.
+    ///
+    /// Sets the gauge `qbind_timeout_verification_signer_loaded`
+    /// to 1 when an `Arc<dyn ValidatorSigner>` is now available
+    /// to feed into `TimeoutVerificationBridgeInputs::signer`,
+    /// 0 otherwise. The setter is idempotent and does not store
+    /// any key material.
+    pub fn set_timeout_verification_signer_loaded(&self, loaded: bool) {
+        self.timeout_verification_signer_loaded
+            .store(loaded as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Run 032: get the timeout verification signer-loaded gauge.
+    pub fn timeout_verification_signer_loaded(&self) -> u8 {
+        self.timeout_verification_signer_loaded
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -8345,6 +8373,13 @@ impl NodeMetrics {
         output.push_str(&format!(
             "qbind_timeout_verification_active {}\n",
             self.timeout_verification_active()
+        ));
+
+        // Run 032: timeout verification signer-loaded gauge.
+        output.push_str("# Timeout verification signer loaded (Run 032, C5)\n");
+        output.push_str(&format!(
+            "qbind_timeout_verification_signer_loaded {}\n",
+            self.timeout_verification_signer_loaded()
         ));
 
         // DAG coupling validation metrics (T191)

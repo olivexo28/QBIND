@@ -202,6 +202,27 @@ pub enum TimeoutVerificationDisabledReason {
         /// enough to test against.
         detail: &'static str,
     },
+    /// Run 032: signer half is now wired honestly (a real
+    /// `Arc<dyn ValidatorSigner>` was loaded from
+    /// `config.signer_keystore_path` and its
+    /// `validator_id() / suite_id()` cross-checks pass), but the
+    /// peer key-provider half is still missing because
+    /// `NodeConfig.network.static_peers` carries no per-peer
+    /// `(suite_id, pk_bytes)` distribution. Activating without a
+    /// real `SuiteAwareValidatorKeyProvider` covering the active
+    /// validator set would silently break inbound timeout / TC
+    /// verification for every non-local validator. The signer half
+    /// is held in memory only — it is **not** logged or serialised
+    /// in this reason.
+    SignerPresentKeyProviderUnavailable {
+        /// Local validator id (already public; safe to log).
+        local_validator_id: ValidatorId,
+        /// Local signer's declared suite (already public; safe).
+        signer_suite_id: ConsensusSigSuiteId,
+        /// Short, structured detail of the remaining peer-side
+        /// blocker (no key bytes, no PII). Stable enough to test.
+        detail: &'static str,
+    },
 }
 
 impl std::fmt::Display for TimeoutVerificationDisabledReason {
@@ -267,6 +288,15 @@ impl std::fmt::Display for TimeoutVerificationDisabledReason {
                 f,
                 "production pieces unavailable in current qbind-node binary path: {}",
                 detail
+            ),
+            Self::SignerPresentKeyProviderUnavailable {
+                local_validator_id,
+                signer_suite_id,
+                detail,
+            } => write!(
+                f,
+                "signer present (validator {:?}, suite {:?}), peer key-provider unavailable: {}",
+                local_validator_id, signer_suite_id, detail
             ),
         }
     }
@@ -523,6 +553,95 @@ pub fn run_031_probe_production_pieces_for_run_p2p_node(
                  unread on startup), NodeConfig.network.static_peers carries no per-peer \
                  (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade \
                  TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5",
+        },
+    }
+}
+
+/// Run 032 production probe — signer-aware narrowing.
+///
+/// Run 032 wires the signer half of [`TimeoutVerificationBridgeInputs`]
+/// honestly: `main.rs::run_p2p_node` now reads
+/// `config.signer_keystore_path` and constructs an
+/// `Arc<dyn ValidatorSigner>` via the existing keystore primitives. The
+/// peer-side `SuiteAwareValidatorKeyProvider` half remains unlanded
+/// (per-peer `(suite_id, pk_bytes)` distribution in
+/// `NodeConfig.network.static_peers` is still missing) and the
+/// production PQC KEMTLS root-key distribution from C4 is still open.
+///
+/// This probe accepts an optional already-loaded local signer and
+/// returns the **narrowest honest disabled reason** for today's
+/// binary path:
+///
+/// - If `signer.is_none()`: returns the same
+///   [`TimeoutVerificationDisabledReason::ProductionPiecesUnavailable`]
+///   as `run_031_probe_production_pieces_for_run_p2p_node` — signer is
+///   not loaded *and* peer keys are not distributed.
+/// - If `signer.is_some()` and its `validator_id()` matches
+///   `local_validator_id` and its `suite_id()` matches the supported
+///   timeout suite: returns
+///   [`TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable`]
+///   — signer half is wired, peer key-provider is the only remaining
+///   blocker.
+/// - If `signer.is_some()` but the signer's declared identity disagrees
+///   with `local_validator_id` or the supported suite: returns the
+///   matching `Signer*Mismatch` refusal class, as
+///   [`try_build_timeout_verification_context`] would. This is the
+///   fail-closed identity self-check at the bridge layer; honest
+///   pieces never disagree.
+///
+/// This function is **not** a path to an `Active` outcome — it is the
+/// narrowing of the same honest "no" the bridge would produce if a
+/// caller tried to build a context with empty peer-side pieces. It
+/// never invents a key provider, never substitutes a placeholder
+/// backend, and never copies key material out of the signer.
+///
+/// Once the peer-side key-provider lands in `NodeConfig`, the
+/// caller can replace this site with a real
+/// [`try_build_timeout_verification_context`] call passing all five
+/// pieces — including the signer this probe already accepted.
+pub fn run_032_probe_with_signer(
+    signer: Option<Arc<dyn ValidatorSigner>>,
+    local_validator_id: ValidatorId,
+) -> TimeoutVerificationActivation {
+    // No signer ⇒ Run 031 honest "no" (signer + peer keys both unavailable).
+    let signer = match signer {
+        Some(s) => s,
+        None => return run_031_probe_production_pieces_for_run_p2p_node(),
+    };
+
+    // Signer-side cross-checks — same checks as
+    // `try_build_timeout_verification_context` would perform if it
+    // got this signer alongside a real key provider. We run them
+    // here so a malformed signer fails closed at the probe site
+    // even when the peer-side pieces have not yet landed.
+    if signer.validator_id() != &local_validator_id {
+        return TimeoutVerificationActivation::Disabled {
+            reason: TimeoutVerificationDisabledReason::SignerValidatorIdMismatch {
+                signer_validator_id: *signer.validator_id(),
+                local_validator_id,
+            },
+        };
+    }
+    let signer_suite = ConsensusSigSuiteId::new(signer.suite_id());
+    if signer_suite != SUPPORTED_TIMEOUT_SUITE_ID {
+        return TimeoutVerificationActivation::Disabled {
+            reason: TimeoutVerificationDisabledReason::SignerSuiteMismatch {
+                signer_suite_id: signer_suite,
+                supported_suite_id: SUPPORTED_TIMEOUT_SUITE_ID,
+            },
+        };
+    }
+
+    // Signer half is honest. Peer-side key-provider remains missing.
+    TimeoutVerificationActivation::Disabled {
+        reason: TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable {
+            local_validator_id,
+            signer_suite_id: signer_suite,
+            detail:
+                "NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes); \
+                 a SuiteAwareValidatorKeyProvider over the active validator set cannot be \
+                 honestly constructed from current config — see \
+                 docs/whitepaper/contradiction.md C5",
         },
     }
 }
@@ -852,5 +971,118 @@ mod tests {
         // the constructor shape we depend on for future production
         // wiring (no behaviour added).
         let _ = ValidatorPublicKey(vec![0u8; 8]);
+    }
+
+    // ========================================================================
+    // Run 032 probe tests
+    // ========================================================================
+
+    /// Run 032: with no signer, the probe must collapse to the same
+    /// honest "no" the Run 031 probe returns — signer half is
+    /// equally absent.
+    #[test]
+    fn run_032_probe_with_no_signer_returns_run_031_disabled() {
+        let outcome = run_032_probe_with_signer(None, ValidatorId::new(0));
+        match outcome.disabled_reason() {
+            Some(TimeoutVerificationDisabledReason::ProductionPiecesUnavailable {
+                detail,
+            }) => {
+                assert!(detail.contains("signer_keystore_path"));
+                assert!(detail.contains("static_peers"));
+            }
+            other => panic!(
+                "expected ProductionPiecesUnavailable, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Run 032: with a real signer whose validator id and suite id
+    /// match, the probe narrows the honest "no" to
+    /// `SignerPresentKeyProviderUnavailable`. This is the precise
+    /// contract for the binary path today: signer half wired,
+    /// peer-side key-provider still missing.
+    #[test]
+    fn run_032_probe_with_matching_signer_narrows_to_keyprovider_missing() {
+        let local_id = ValidatorId::new(0);
+        let (_pk, sk) = make_keypair();
+        let signer = make_signer(local_id, Arc::new(sk));
+        let outcome = run_032_probe_with_signer(Some(signer), local_id);
+        assert!(!outcome.is_active());
+        match outcome.disabled_reason() {
+            Some(TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable {
+                local_validator_id,
+                signer_suite_id,
+                detail,
+            }) => {
+                assert_eq!(*local_validator_id, local_id);
+                assert_eq!(*signer_suite_id, SUPPORTED_TIMEOUT_SUITE_ID);
+                assert!(detail.contains("static_peers"));
+                assert!(detail.contains("contradiction.md"));
+            }
+            other => panic!(
+                "expected SignerPresentKeyProviderUnavailable, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// Run 032: a signer whose declared validator_id disagrees with
+    /// the operator-declared local id MUST fail closed at the probe
+    /// site, even before we reach the (still-absent) peer key
+    /// provider.
+    #[test]
+    fn run_032_probe_with_signer_id_mismatch_fails_closed() {
+        let local_id = ValidatorId::new(0);
+        let (_pk, sk) = make_keypair();
+        // Build a signer with id=1 but pass local=0.
+        let signer = make_signer(ValidatorId::new(1), Arc::new(sk));
+        let outcome = run_032_probe_with_signer(Some(signer), local_id);
+        assert!(!outcome.is_active());
+        assert!(matches!(
+            outcome.disabled_reason(),
+            Some(TimeoutVerificationDisabledReason::SignerValidatorIdMismatch { .. })
+        ));
+    }
+
+    /// Run 032: under `RequireOrFail`, the narrowed
+    /// `SignerPresentKeyProviderUnavailable` outcome MUST still
+    /// surface as `Err(...)` — peer-side blocker is still a hard
+    /// fail-closed under the operator's declared
+    /// `--require-timeout-verification` intent.
+    #[test]
+    fn run_032_required_mode_fails_closed_when_only_signer_present() {
+        let local_id = ValidatorId::new(0);
+        let (_pk, sk) = make_keypair();
+        let signer = make_signer(local_id, Arc::new(sk));
+        let outcome = run_032_probe_with_signer(Some(signer), local_id);
+        let err = enforce_policy(TimeoutVerificationPolicy::RequireOrFail, outcome)
+            .expect_err("RequireOrFail must reject SignerPresent...");
+        assert_eq!(err.policy, TimeoutVerificationPolicy::RequireOrFail);
+        assert!(matches!(
+            err.reason,
+            TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable {
+                ..
+            }
+        ));
+        // Display must mention the local validator id and signer
+        // suite id but never any private key bytes.
+        let msg = format!("{}", err.reason);
+        assert!(msg.contains("signer present"));
+        assert!(!msg.contains("private_key"));
+    }
+
+    /// Run 032: under `OptionalActivate`, the narrowed reason
+    /// surfaces as `Ok(None)` — verification stays disabled, log
+    /// the reason, fall back to `verification_ctx: None`.
+    #[test]
+    fn run_032_optional_mode_returns_none_when_only_signer_present() {
+        let local_id = ValidatorId::new(0);
+        let (_pk, sk) = make_keypair();
+        let signer = make_signer(local_id, Arc::new(sk));
+        let outcome = run_032_probe_with_signer(Some(signer), local_id);
+        let result = enforce_policy(TimeoutVerificationPolicy::OptionalActivate, outcome)
+            .expect("Optional must succeed");
+        assert!(result.is_none());
     }
 }
