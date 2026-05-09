@@ -577,14 +577,6 @@ fn spawn_vm_v0_snapshot_signal_task(
     chain_id: u64,
     mut shutdown_rx: watch::Receiver<()>,
 ) -> Option<tokio::task::JoinHandle<()>> {
-    let runtime = runtime?;
-    if runtime.snapshot_dir().is_none() {
-        eprintln!(
-            "[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured"
-        );
-        return None;
-    }
-
     let mut sigusr1 =
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1()) {
             Ok(signal) => signal,
@@ -598,7 +590,16 @@ fn spawn_vm_v0_snapshot_signal_task(
             }
         };
 
-    eprintln!("[snapshot] VM-v0 in-process snapshot trigger enabled: send SIGUSR1 to this process");
+    if let Some(path) = runtime.as_ref().and_then(|runtime| runtime.snapshot_dir()) {
+        eprintln!(
+            "[snapshot] VM-v0 in-process snapshot trigger enabled: send SIGUSR1 to this process; snapshot_dir={}",
+            path.display()
+        );
+    } else {
+        eprintln!(
+            "[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured"
+        );
+    }
 
     Some(tokio::spawn(async move {
         loop {
@@ -608,6 +609,19 @@ fn spawn_vm_v0_snapshot_signal_task(
                     break;
                 }
                 _ = sigusr1.recv() => {
+                    eprintln!("[snapshot] signal received: SIGUSR1");
+                    let Some(runtime) = runtime.as_ref().cloned() else {
+                        eprintln!(
+                            "[snapshot] SIGUSR1 ignored: VM-v0 runtime not active"
+                        );
+                        continue;
+                    };
+                    if runtime.snapshot_dir().is_none() {
+                        eprintln!(
+                            "[snapshot] SIGUSR1 ignored: VM-v0 snapshot trigger disabled (--snapshot-dir not configured)"
+                        );
+                        continue;
+                    }
                     let height = metrics.committed_anchor().height();
                     let Some(block_hash) = metrics.committed_anchor().block_id() else {
                         eprintln!(
@@ -616,7 +630,6 @@ fn spawn_vm_v0_snapshot_signal_task(
                         metrics.snapshot().record_failure();
                         continue;
                     };
-                    let runtime = Arc::clone(&runtime);
                     let metrics_for_task = Arc::clone(&metrics);
                     let result = tokio::task::spawn_blocking(move || {
                         runtime.create_snapshot(
@@ -629,7 +642,7 @@ fn spawn_vm_v0_snapshot_signal_task(
                     match result {
                         Ok(Ok(stats)) => {
                             eprintln!(
-                                "[snapshot] OK: created VM-v0 snapshot height={} size_bytes={} duration_ms={}",
+                                "[snapshot] success: height={} size_bytes={} duration_ms={}",
                                 stats.height,
                                 stats.size_bytes,
                                 stats.duration_ms

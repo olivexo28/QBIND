@@ -69,7 +69,7 @@ impl VmV0RuntimeState {
                 source,
             }
         })?;
-        eprintln!("[T164] VM v0 using persistent state at {:?}", state_dir);
+        eprintln!("[vm-v0] opened persistent state at {}", state_dir.display());
 
         Ok(Some(Arc::new(Self {
             state_dir,
@@ -109,6 +109,16 @@ impl VmV0RuntimeState {
             chain_id,
         };
 
+        eprintln!(
+            "[snapshot] start: height={} path={}",
+            anchor.height,
+            target.display()
+        );
+        eprintln!(
+            "[snapshot] invoking StateSnapshotter::create_snapshot height={} path={}",
+            anchor.height,
+            target.display()
+        );
         metrics.snapshot().set_in_progress(true);
         let result = self
             .state
@@ -122,17 +132,18 @@ impl VmV0RuntimeState {
 
         match result {
             Ok(stats) => {
+                if let Err(source) = prune_old_snapshots(snapshot_dir, self.max_snapshots) {
+                    metrics.snapshot().record_failure();
+                    return Err(VmV0RuntimeError::SnapshotPrune {
+                        path: snapshot_dir.clone(),
+                        source,
+                    });
+                }
                 metrics.snapshot().record_success(
                     stats.height,
                     stats.duration_ms,
                     stats.size_bytes,
                 );
-                prune_old_snapshots(snapshot_dir, self.max_snapshots).map_err(|source| {
-                    VmV0RuntimeError::SnapshotPrune {
-                        path: snapshot_dir.clone(),
-                        source,
-                    }
-                })?;
                 Ok(stats)
             }
             Err(e) => {
@@ -167,6 +178,7 @@ fn prune_old_snapshots(snapshot_dir: &Path, max_snapshots: u32) -> Result<(), st
     }
     numeric_dirs.sort_by(|a, b| b.0.cmp(&a.0));
     for (_, path) in numeric_dirs.into_iter().skip(max_snapshots as usize) {
+        eprintln!("[snapshot] pruning old numeric snapshot {}", path.display());
         fs::remove_dir_all(path)?;
     }
     Ok(())
@@ -243,6 +255,19 @@ mod tests {
         let runtime = VmV0RuntimeState::open_from_config(&config)
             .unwrap()
             .unwrap();
+        let account = [0x24; 32];
+        runtime
+            .state
+            .lock()
+            .expect("VM-v0 runtime state mutex poisoned")
+            .put_account_state(
+                &account,
+                &AccountState {
+                    nonce: 1,
+                    balance: 42,
+                },
+            )
+            .unwrap();
 
         let metrics = NodeMetrics::new();
         let stats = runtime
@@ -258,8 +283,54 @@ mod tests {
 
         assert_eq!(stats.height, 7);
         assert!(snapshots.path().join("7/meta.json").is_file());
-        assert!(snapshots.path().join("7/state").is_dir());
+        let checkpoint = snapshots.path().join("7/state");
+        assert!(checkpoint.is_dir());
+        assert!(checkpoint.join("CURRENT").is_file());
+        let checkpoint_files: Vec<String> = fs::read_dir(&checkpoint)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(checkpoint_files
+            .iter()
+            .any(|name| name.starts_with("MANIFEST-")));
+        assert!(checkpoint_files.iter().any(|name| name.ends_with(".sst")));
+        assert!(checkpoint_files
+            .iter()
+            .any(|name| name.starts_with("OPTIONS-")));
         assert_eq!(metrics.snapshot().success_total(), 1);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+    }
+
+    #[test]
+    fn vm_v0_snapshot_trigger_prunes_only_old_numeric_dirs() {
+        let data = TempDir::new().unwrap();
+        let snapshots = TempDir::new().unwrap();
+        let mut config = vm_v0_config(data.path(), Some(snapshots.path()));
+        config.snapshot_config.max_snapshots = 2;
+        let runtime = VmV0RuntimeState::open_from_config(&config)
+            .unwrap()
+            .unwrap();
+        let metrics = NodeMetrics::new();
+        fs::create_dir_all(snapshots.path().join("operator-notes")).unwrap();
+
+        for height in 1..=3 {
+            runtime
+                .create_snapshot(
+                    SnapshotAnchor {
+                        height,
+                        block_hash: [height as u8; 32],
+                    },
+                    config.chain_id().as_u64(),
+                    &metrics,
+                )
+                .unwrap();
+        }
+
+        assert!(!snapshots.path().join("1").exists());
+        assert!(snapshots.path().join("2").is_dir());
+        assert!(snapshots.path().join("3").is_dir());
+        assert!(snapshots.path().join("operator-notes").is_dir());
+        assert_eq!(metrics.snapshot().success_total(), 3);
         assert_eq!(metrics.snapshot().failure_total(), 0);
     }
 

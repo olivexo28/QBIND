@@ -47,6 +47,10 @@ This document tracks contradictions between the whitepaper (`docs/whitepaper/QBI
 
 DevNet Evidence Run 021 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_021.md`) materially reopens the latest claimed VM-v0 runtime-open / SIGUSR1 snapshot-trigger closure on real binaries. The tested `qbind-node` at commit `950ce2b5e925b2162b1df3da840fa0b35e05dd36` (sha256 `69223f70ff05ebc0030633c84d0a2c77e8d4052cee2325a7a62262f13c18199f`, BuildID `97fd927c08c5a3eb64ac01f93e20b318f00f30ea`) rejected `--snapshot-dir` as an unexpected argument, exposed no `--snapshot-max-snapshots` help surface, did not create/open `<data_dir>/state_vm_v0` during a secondary vm-v0 live run, and terminated on SIGUSR1 (`wait_status=-10`) rather than logging signal receipt or invoking `StateSnapshotter::create_snapshot`. No SIGUSR1-created snapshot existed, so B3/B5/B13/B14 preservation from that snapshot remains unproven. C4 therefore remains open for real-binary VM-v0 runtime-open and in-process snapshot-trigger operability.
 
+#### C4 Run 022 evidence update (2026-05-09)
+
+DevNet Evidence Run 022 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_022.md`) positively closes the specific Run 021 regression on the tested real binary: `qbind-node --help` exposes `--snapshot-dir`, `--snapshot-interval-blocks`, and `--snapshot-max-snapshots`; `--execution-profile vm-v0 --data-dir <dir>` opens `<data_dir>/state_vm_v0` at startup; SIGUSR1 is handled without process termination; configured SIGUSR1 invokes `StateSnapshotter::create_snapshot` in-process on the opened VM-v0 RocksDB handle; and B3/B5 restore from that SIGUSR1-created snapshot succeeds. C4 remains open overall for the broader production items already listed (including production fast-sync/consensus-storage restore and production PQC root-key distribution), and Run 022 did not repeat the full N=4 Required-mode B13/B14 continuation shape.
+
 ### C3. Reporter Rewards Not Implemented
 
 | Field | Value |

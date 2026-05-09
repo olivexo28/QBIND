@@ -1217,6 +1217,19 @@ mod tests {
     }
 
     #[test]
+    fn test_cli_help_exposes_snapshot_flags() {
+        use clap::CommandFactory;
+
+        let mut help = Vec::new();
+        CliArgs::command().write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+
+        assert!(help.contains("--snapshot-dir"));
+        assert!(help.contains("--snapshot-interval-blocks"));
+        assert!(help.contains("--snapshot-max-snapshots"));
+    }
+
+    #[test]
     fn test_cli_args_parse_addr_valid() {
         let addr = CliArgs::parse_addr("127.0.0.1:8080", "test").unwrap();
         assert_eq!(addr.port(), 8080);
