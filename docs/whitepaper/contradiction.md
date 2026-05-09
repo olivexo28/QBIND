@@ -214,3 +214,6 @@ DevNet Evidence Run 022 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_022.md`) positiv
 ---
 
 *This document should be updated whenever a contradiction is discovered between the whitepaper and implementation, or when significant undocumented behaviors are identified.*
+#### C4 Run 025 evidence update (2026-05-09)
+
+Run 024 remains the negative N=4 Required-mode baseline for the periodic `--snapshot-interval-blocks` trigger. The current implementation narrows that gap by wiring a committed-height periodic VM-v0 trigger into the real binary consensus progress path, reusing the same `StateSnapshotter::create_snapshot` runtime path and serialization guard as SIGUSR1. Local seeded Run 025 evidence (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_025.md`) proves a real binary creates a periodic snapshot at committed height 4 without SIGUSR1, with `meta.json`, `CURRENT`, `MANIFEST-*`, `OPTIONS-*`, and `*.sst`, and restores from it. This does not claim full C4 closure or a completed N=4 Required-mode Run 024 repeat; full multi-validator periodic-snapshot continuation evidence remains open.

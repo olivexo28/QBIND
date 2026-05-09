@@ -63,7 +63,7 @@ use tokio::sync::watch;
 use qbind_consensus::ids::ValidatorId;
 use qbind_node::binary_consensus_loop::{
     spawn_binary_consensus_loop, spawn_binary_consensus_loop_with_io, BinaryConsensusLoopConfig,
-    BinaryConsensusLoopIo, RestoreBaseline,
+    BinaryConsensusLoopIo, BinaryPeriodicSnapshotConfig, RestoreBaseline,
 };
 use qbind_node::cli::CliArgs;
 use qbind_node::consensus_net_p2p::P2pConsensusNetwork;
@@ -76,6 +76,18 @@ use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_node::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeState};
+
+fn binary_periodic_snapshot_config(
+    config: &qbind_node::node_config::NodeConfig,
+    args: &CliArgs,
+    runtime: Option<Arc<VmV0RuntimeState>>,
+) -> BinaryPeriodicSnapshotConfig {
+    let mut snapshot_config = config.snapshot_config.clone();
+    if args.snapshot_interval_blocks.unwrap_or(0) == 0 {
+        snapshot_config.snapshot_interval_blocks = 0;
+    }
+    BinaryPeriodicSnapshotConfig::new(snapshot_config, runtime, config.chain_id().as_u64())
+}
 
 /// Main entry point for qbind-node binary.
 #[tokio::main]
@@ -293,6 +305,11 @@ async fn run_local_mesh_node(
     if let Some(b) = restore_baseline {
         cfg = cfg.with_restore_baseline(b);
     }
+    cfg = cfg.with_periodic_snapshot(binary_periodic_snapshot_config(
+        config,
+        args,
+        vm_v0_runtime.clone(),
+    ));
     eprintln!(
         "[binary] Consensus loop config: local_validator_id={:?} num_validators={} restore_baseline={}",
         local_validator_id,
@@ -497,6 +514,11 @@ async fn run_p2p_node(
     if let Some(b) = restore_baseline {
         consensus_cfg = consensus_cfg.with_restore_baseline(b);
     }
+    consensus_cfg = consensus_cfg.with_periodic_snapshot(binary_periodic_snapshot_config(
+        config,
+        args,
+        vm_v0_runtime.clone(),
+    ));
     eprintln!(
         "[binary] Consensus loop config: local_validator_id={:?} num_validators={} \
          restore_baseline={} interconnect=p2p",
@@ -646,6 +668,11 @@ fn spawn_vm_v0_snapshot_signal_task(
                                 stats.height,
                                 stats.size_bytes,
                                 stats.duration_ms
+                            );
+                        }
+                        Ok(Err(qbind_node::vm_v0_runtime::VmV0RuntimeError::SnapshotAlreadyInProgress)) => {
+                            eprintln!(
+                                "[snapshot] SIGUSR1 skipped: another snapshot is already in progress"
                             );
                         }
                         Ok(Err(e)) => {

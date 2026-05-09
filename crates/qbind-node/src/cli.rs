@@ -335,16 +335,17 @@ pub struct CliArgs {
     /// Directory where in-process VM-v0 snapshots are written.
     ///
     /// When set with `--execution-profile vm-v0 --data-dir <DIR>`, the running
-    /// validator installs the bounded SIGUSR1 snapshot trigger. A trigger writes
-    /// a snapshot to `<PATH>/<committed_height>/` using the opened
-    /// `<data-dir>/state_vm_v0` RocksDB handle.
+    /// validator installs the bounded SIGUSR1 snapshot trigger and, when
+    /// `--snapshot-interval-blocks` is non-zero, the committed-height periodic
+    /// trigger. Both write snapshots to `<PATH>/<committed_height>/` using the
+    /// opened `<data-dir>/state_vm_v0` RocksDB handle.
     #[arg(long = "snapshot-dir")]
     pub snapshot_dir: Option<PathBuf>,
 
     /// Committed-block interval for snapshot configuration.
     ///
-    /// This preserves the existing SnapshotConfig field for profile overrides;
-    /// the current production binary operator trigger is SIGUSR1-based.
+    /// When paired with `--snapshot-dir`, the binary checks committed anchors
+    /// and creates a VM-v0 snapshot at positive interval heights.
     #[arg(long = "snapshot-interval-blocks")]
     pub snapshot_interval_blocks: Option<u64>,
 

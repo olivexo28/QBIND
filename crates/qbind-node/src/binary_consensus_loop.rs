@@ -94,10 +94,12 @@ use qbind_wire::consensus::{BlockProposal, Vote};
 
 use crate::consensus_network_facade::ConsensusNetworkFacade;
 use crate::metrics::NodeMetrics;
+use crate::node_config::SnapshotConfig;
 use crate::p2p::{
     ConsensusNetMsg, NodeId, P2pService, RestoreCatchupBlock, RestoreCatchupRequest,
     RestoreCatchupResponse,
 };
+use crate::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeError, VmV0RuntimeState};
 
 /// Adapter that exposes `Arc<NodeMetrics>` as a
 /// `qbind_consensus::ConsensusProgressRecorder`.
@@ -281,6 +283,8 @@ pub struct BinaryConsensusLoopConfig {
     /// restored node never times out a live view it is still catching
     /// up to.
     pub view_timeout_ticks: Option<u64>,
+    /// Optional committed-height periodic VM-v0 snapshot trigger.
+    pub periodic_snapshot: Option<BinaryPeriodicSnapshotConfig>,
 }
 
 /// Restore-aware consensus baseline derived from a successful snapshot
@@ -302,6 +306,27 @@ pub struct RestoreBaseline {
     pub snapshot_block_id: [u8; 32],
 }
 
+#[derive(Debug, Clone)]
+pub struct BinaryPeriodicSnapshotConfig {
+    pub snapshot_config: SnapshotConfig,
+    pub runtime: Option<Arc<VmV0RuntimeState>>,
+    pub chain_id: u64,
+}
+
+impl BinaryPeriodicSnapshotConfig {
+    pub fn new(
+        snapshot_config: SnapshotConfig,
+        runtime: Option<Arc<VmV0RuntimeState>>,
+        chain_id: u64,
+    ) -> Self {
+        Self {
+            snapshot_config,
+            runtime,
+            chain_id,
+        }
+    }
+}
+
 impl BinaryConsensusLoopConfig {
     /// Build a config with sensible defaults from a validator id and validator count.
     pub fn new(local_validator_id: ValidatorId, num_validators: u64) -> Self {
@@ -312,6 +337,7 @@ impl BinaryConsensusLoopConfig {
             max_ticks: None,
             restore_baseline: None,
             view_timeout_ticks: Some(DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS),
+            periodic_snapshot: None,
         }
     }
 
@@ -344,6 +370,11 @@ impl BinaryConsensusLoopConfig {
     /// trigger timeouts within a bounded `max_ticks` window.
     pub fn with_view_timeout_ticks(mut self, n: Option<u64>) -> Self {
         self.view_timeout_ticks = n;
+        self
+    }
+
+    pub fn with_periodic_snapshot(mut self, periodic: BinaryPeriodicSnapshotConfig) -> Self {
+        self.periodic_snapshot = Some(periodic);
         self
     }
 }
@@ -988,6 +1019,8 @@ pub async fn run_binary_consensus_loop_with_io(
         engine.current_view(),
         engine.commit_log().len() as u64,
     );
+    let mut last_periodic_snapshot_height: Option<u64> = None;
+    log_periodic_snapshot_config(cfg.periodic_snapshot.as_ref());
 
     loop {
         // We always select on shutdown + ticker. When inbound I/O is wired
@@ -1019,12 +1052,18 @@ pub async fn run_binary_consensus_loop_with_io(
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
                             // inbound progress.
-                            update_state_metrics(
+                            let committed_anchor = update_state_metrics(
                                 &engine,
                                 &metrics,
                                 &mut last_commits,
                                 &mut last_view,
                                 Duration::ZERO,
+                            );
+                            maybe_trigger_periodic_snapshot(
+                                cfg.periodic_snapshot.as_ref(),
+                                committed_anchor,
+                                &mut last_periodic_snapshot_height,
+                                Arc::clone(&metrics),
                             );
                             update_restore_catchup_metrics(&metrics, &inbound_stats);
                             update_binary_view_timeout_metrics(&metrics, &inbound_stats);
@@ -1102,12 +1141,18 @@ pub async fn run_binary_consensus_loop_with_io(
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
                     );
-                    update_state_metrics(
+                    let committed_anchor = update_state_metrics(
                         &engine,
                         &metrics,
                         &mut last_commits,
                         &mut last_view,
                         tick_started.elapsed(),
+                    );
+                    maybe_trigger_periodic_snapshot(
+                        cfg.periodic_snapshot.as_ref(),
+                        committed_anchor,
+                        &mut last_periodic_snapshot_height,
+                        Arc::clone(&metrics),
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
                     update_binary_view_timeout_metrics(&metrics, &inbound_stats);
@@ -1188,12 +1233,18 @@ pub async fn run_binary_consensus_loop_with_io(
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
                     );
-                    update_state_metrics(
+                    let committed_anchor = update_state_metrics(
                         &engine,
                         &metrics,
                         &mut last_commits,
                         &mut last_view,
                         tick_started.elapsed(),
+                    );
+                    maybe_trigger_periodic_snapshot(
+                        cfg.periodic_snapshot.as_ref(),
+                        committed_anchor,
+                        &mut last_periodic_snapshot_height,
+                        Arc::clone(&metrics),
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
                     update_binary_view_timeout_metrics(&metrics, &inbound_stats);
@@ -2322,10 +2373,11 @@ fn update_state_metrics(
     last_commits: &mut u64,
     last_view: &mut u64,
     tick_elapsed: Duration,
-) {
+) -> Option<SnapshotAnchor> {
     let new_commits_total = engine.commit_log().len() as u64;
     let new_view = engine.current_view();
     let commits_delta = new_commits_total.saturating_sub(*last_commits);
+    let mut new_committed_anchor = None;
     for _ in 0..commits_delta {
         metrics.commit().record_commit(tick_elapsed);
     }
@@ -2344,10 +2396,127 @@ fn update_state_metrics(
                 height,
                 hex::encode(block_id)
             );
+            new_committed_anchor = Some(SnapshotAnchor {
+                height,
+                block_hash: *block_id,
+            });
         }
     }
     *last_commits = new_commits_total;
     *last_view = new_view;
+    new_committed_anchor
+}
+
+fn log_periodic_snapshot_config(periodic: Option<&BinaryPeriodicSnapshotConfig>) {
+    let Some(periodic) = periodic else {
+        eprintln!("[snapshot] periodic snapshot trigger disabled: no snapshot config wired");
+        return;
+    };
+    if !periodic.snapshot_config.enabled {
+        eprintln!("[snapshot] periodic snapshot trigger disabled: snapshot config disabled");
+    } else if periodic.snapshot_config.snapshot_dir.is_none() {
+        eprintln!("[snapshot] periodic snapshot trigger disabled: --snapshot-dir not configured");
+    } else if periodic.snapshot_config.snapshot_interval_blocks == 0 {
+        eprintln!(
+            "[snapshot] periodic snapshot trigger disabled: --snapshot-interval-blocks is zero"
+        );
+    } else if periodic.runtime.is_none() {
+        eprintln!("[snapshot] periodic snapshot trigger disabled: VM-v0 runtime not active");
+    } else {
+        eprintln!(
+            "[snapshot] periodic snapshot trigger enabled: interval_blocks={} snapshot_dir={}",
+            periodic.snapshot_config.snapshot_interval_blocks,
+            periodic
+                .snapshot_config
+                .snapshot_dir
+                .as_ref()
+                .expect("checked")
+                .display()
+        );
+    }
+}
+
+fn maybe_trigger_periodic_snapshot(
+    periodic: Option<&BinaryPeriodicSnapshotConfig>,
+    committed_anchor: Option<SnapshotAnchor>,
+    last_periodic_snapshot_height: &mut Option<u64>,
+    metrics: Arc<NodeMetrics>,
+) {
+    let Some(anchor) = committed_anchor else {
+        return;
+    };
+    if anchor.height == 0 {
+        eprintln!("[snapshot] periodic snapshot skipped: committed height is zero");
+        return;
+    }
+    let Some(periodic) = periodic else {
+        return;
+    };
+    if !periodic
+        .snapshot_config
+        .should_snapshot_at_height(anchor.height)
+    {
+        return;
+    }
+    eprintln!(
+        "[snapshot] periodic condition detected: height={} interval_blocks={}",
+        anchor.height, periodic.snapshot_config.snapshot_interval_blocks
+    );
+    if *last_periodic_snapshot_height == Some(anchor.height) {
+        eprintln!(
+            "[snapshot] periodic snapshot skipped: already created for height={}",
+            anchor.height
+        );
+        return;
+    }
+    let Some(runtime) = periodic.runtime.as_ref().cloned() else {
+        eprintln!(
+            "[snapshot] periodic snapshot skipped: VM-v0 runtime unavailable at height={}",
+            anchor.height
+        );
+        return;
+    };
+    let chain_id = periodic.chain_id;
+    *last_periodic_snapshot_height = Some(anchor.height);
+    // Fire-and-forget is deliberate here: periodic snapshots must not block the
+    // consensus tick path. The inner spawn_blocking result is logged and metrics
+    // are updated; shutdown may abandon an in-flight periodic request rather
+    // than extending node termination.
+    tokio::spawn(async move {
+        let snapshot_height = anchor.height;
+        let metrics_for_task = Arc::clone(&metrics);
+        let result = tokio::task::spawn_blocking(move || {
+            runtime.create_snapshot(anchor, chain_id, &metrics_for_task)
+        })
+        .await;
+        match result {
+            Ok(Ok(stats)) => {
+                eprintln!(
+                    "[snapshot] periodic success: height={} size_bytes={} duration_ms={}",
+                    stats.height, stats.size_bytes, stats.duration_ms
+                );
+            }
+            Ok(Err(VmV0RuntimeError::SnapshotAlreadyInProgress)) => {
+                eprintln!(
+                    "[snapshot] periodic snapshot skipped: another snapshot is already in progress at height={}",
+                    snapshot_height
+                );
+            }
+            Ok(Err(e)) => {
+                eprintln!(
+                    "[snapshot] periodic ERROR: height={} error={}",
+                    snapshot_height, e
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[snapshot] periodic ERROR: snapshot task join failed at height={}: {}",
+                    snapshot_height, e
+                );
+                metrics.snapshot().record_failure();
+            }
+        }
+    });
 }
 
 fn update_restore_catchup_metrics(
@@ -2440,6 +2609,197 @@ pub fn spawn_binary_consensus_loop_with_io(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node_config::{ExecutionProfile, NodeConfig};
+    use crate::vm_v0_runtime::VmV0RuntimeState;
+    use tempfile::TempDir;
+
+    fn vm_v0_periodic_runtime(
+        data_dir: &std::path::Path,
+        snapshot_dir: Option<&std::path::Path>,
+        interval_blocks: u64,
+        max_snapshots: u32,
+    ) -> (SnapshotConfig, Arc<VmV0RuntimeState>, u64) {
+        let mut config = NodeConfig::devnet_v0_preset();
+        config.execution_profile = ExecutionProfile::VmV0;
+        config.data_dir = Some(data_dir.to_path_buf());
+        config.snapshot_config = SnapshotConfig {
+            enabled: snapshot_dir.is_some(),
+            snapshot_dir: snapshot_dir.map(std::path::Path::to_path_buf),
+            snapshot_interval_blocks: interval_blocks,
+            max_snapshots,
+        };
+        let chain_id = config.chain_id().as_u64();
+        let runtime = VmV0RuntimeState::open_from_config(&config)
+            .unwrap()
+            .unwrap();
+        (config.snapshot_config, runtime, chain_id)
+    }
+
+    async fn wait_for_snapshot_success(metrics: &NodeMetrics, expected: u64) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            if metrics.snapshot().success_total() >= expected {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "timed out waiting for snapshot success_total >= {}, got {}",
+            expected,
+            metrics.snapshot().success_total()
+        );
+    }
+
+    async fn short_settle() {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    #[tokio::test]
+    async fn periodic_snapshot_trigger_does_not_fire_without_snapshot_dir() {
+        let data = TempDir::new().unwrap();
+        let (snapshot_config, runtime, chain_id) =
+            vm_v0_periodic_runtime(data.path(), None, 4, 3);
+        let periodic = BinaryPeriodicSnapshotConfig::new(snapshot_config, Some(runtime), chain_id);
+        let metrics = Arc::new(NodeMetrics::new());
+        let mut last_height = None;
+
+        maybe_trigger_periodic_snapshot(
+            Some(&periodic),
+            Some(SnapshotAnchor {
+                height: 4,
+                block_hash: [4; 32],
+            }),
+            &mut last_height,
+            Arc::clone(&metrics),
+        );
+        short_settle().await;
+
+        assert_eq!(metrics.snapshot().success_total(), 0);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+        assert_eq!(last_height, None);
+    }
+
+    #[tokio::test]
+    async fn periodic_snapshot_trigger_does_not_fire_without_interval() {
+        let data = TempDir::new().unwrap();
+        let snapshots = TempDir::new().unwrap();
+        let (snapshot_config, runtime, chain_id) =
+            vm_v0_periodic_runtime(data.path(), Some(snapshots.path()), 0, 3);
+        let periodic = BinaryPeriodicSnapshotConfig::new(snapshot_config, Some(runtime), chain_id);
+        let metrics = Arc::new(NodeMetrics::new());
+        let mut last_height = None;
+
+        maybe_trigger_periodic_snapshot(
+            Some(&periodic),
+            Some(SnapshotAnchor {
+                height: 4,
+                block_hash: [4; 32],
+            }),
+            &mut last_height,
+            Arc::clone(&metrics),
+        );
+        short_settle().await;
+
+        assert_eq!(metrics.snapshot().success_total(), 0);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+        assert!(!snapshots.path().join("4").exists());
+        assert_eq!(last_height, None);
+    }
+
+    #[tokio::test]
+    async fn periodic_snapshot_trigger_does_not_fire_at_height_zero() {
+        let data = TempDir::new().unwrap();
+        let snapshots = TempDir::new().unwrap();
+        let (snapshot_config, runtime, chain_id) =
+            vm_v0_periodic_runtime(data.path(), Some(snapshots.path()), 4, 3);
+        let periodic = BinaryPeriodicSnapshotConfig::new(snapshot_config, Some(runtime), chain_id);
+        let metrics = Arc::new(NodeMetrics::new());
+        let mut last_height = None;
+
+        maybe_trigger_periodic_snapshot(
+            Some(&periodic),
+            Some(SnapshotAnchor {
+                height: 0,
+                block_hash: [0; 32],
+            }),
+            &mut last_height,
+            Arc::clone(&metrics),
+        );
+        short_settle().await;
+
+        assert_eq!(metrics.snapshot().success_total(), 0);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+        assert!(!snapshots.path().join("0").exists());
+        assert_eq!(last_height, None);
+    }
+
+    #[tokio::test]
+    async fn periodic_snapshot_trigger_fires_once_for_same_committed_height() {
+        let data = TempDir::new().unwrap();
+        let snapshots = TempDir::new().unwrap();
+        let (snapshot_config, runtime, chain_id) =
+            vm_v0_periodic_runtime(data.path(), Some(snapshots.path()), 4, 3);
+        let periodic = BinaryPeriodicSnapshotConfig::new(snapshot_config, Some(runtime), chain_id);
+        let metrics = Arc::new(NodeMetrics::new());
+        let mut last_height = None;
+        let anchor = SnapshotAnchor {
+            height: 4,
+            block_hash: [4; 32],
+        };
+
+        maybe_trigger_periodic_snapshot(
+            Some(&periodic),
+            Some(anchor),
+            &mut last_height,
+            Arc::clone(&metrics),
+        );
+        wait_for_snapshot_success(&metrics, 1).await;
+        maybe_trigger_periodic_snapshot(
+            Some(&periodic),
+            Some(anchor),
+            &mut last_height,
+            Arc::clone(&metrics),
+        );
+        short_settle().await;
+
+        assert_eq!(metrics.snapshot().success_total(), 1);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+        assert_eq!(metrics.snapshot().last_height(), 4);
+        assert!(snapshots.path().join("4/meta.json").is_file());
+    }
+
+    #[tokio::test]
+    async fn periodic_snapshot_trigger_uses_runtime_snapshot_path_and_prunes_numeric_dirs() {
+        let data = TempDir::new().unwrap();
+        let snapshots = TempDir::new().unwrap();
+        let (snapshot_config, runtime, chain_id) =
+            vm_v0_periodic_runtime(data.path(), Some(snapshots.path()), 4, 2);
+        let periodic = BinaryPeriodicSnapshotConfig::new(snapshot_config, Some(runtime), chain_id);
+        let metrics = Arc::new(NodeMetrics::new());
+        let mut last_height = None;
+        std::fs::create_dir_all(snapshots.path().join("operator-notes")).unwrap();
+
+        for height in [4_u64, 8, 12] {
+            maybe_trigger_periodic_snapshot(
+                Some(&periodic),
+                Some(SnapshotAnchor {
+                    height,
+                    block_hash: [height as u8; 32],
+                }),
+                &mut last_height,
+                Arc::clone(&metrics),
+            );
+            wait_for_snapshot_success(&metrics, height / 4).await;
+        }
+
+        assert_eq!(metrics.snapshot().success_total(), 3);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+        assert_eq!(metrics.snapshot().last_height(), 12);
+        assert!(!snapshots.path().join("4").exists());
+        assert!(snapshots.path().join("8/meta.json").is_file());
+        assert!(snapshots.path().join("12/meta.json").is_file());
+        assert!(snapshots.path().join("operator-notes").is_dir());
+    }
 
     #[tokio::test]
     async fn single_validator_loop_advances_views_and_commits() {

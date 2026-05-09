@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use qbind_ledger::{
@@ -32,6 +33,8 @@ pub enum VmV0RuntimeError {
     SnapshotDirMissing,
     #[error("snapshot anchor is not available yet; no committed block has been observed")]
     MissingSnapshotAnchor,
+    #[error("snapshot creation skipped because another snapshot is already in progress")]
+    SnapshotAlreadyInProgress,
     #[error("snapshot creation failed at {path}: {source}")]
     SnapshotCreate {
         path: PathBuf,
@@ -50,6 +53,7 @@ pub struct VmV0RuntimeState {
     snapshot_dir: Option<PathBuf>,
     max_snapshots: u32,
     state: Mutex<RocksDbAccountState>,
+    snapshot_in_progress: AtomicBool,
 }
 
 impl VmV0RuntimeState {
@@ -76,6 +80,7 @@ impl VmV0RuntimeState {
             snapshot_dir: config.snapshot_config.snapshot_dir.clone(),
             max_snapshots: config.snapshot_config.max_snapshots.max(1),
             state: Mutex::new(state),
+            snapshot_in_progress: AtomicBool::new(false),
         })))
     }
 
@@ -100,6 +105,27 @@ impl VmV0RuntimeState {
         if anchor.height == 0 {
             return Err(VmV0RuntimeError::MissingSnapshotAnchor);
         }
+        if self
+            .snapshot_in_progress
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            return Err(VmV0RuntimeError::SnapshotAlreadyInProgress);
+        }
+        struct SnapshotProgressGuard<'a> {
+            runtime_in_progress: &'a AtomicBool,
+            metrics: &'a NodeMetrics,
+        }
+        impl Drop for SnapshotProgressGuard<'_> {
+            fn drop(&mut self) {
+                self.runtime_in_progress.store(false, Ordering::Release);
+                self.metrics.snapshot().set_in_progress(false);
+            }
+        }
+        let _guard = SnapshotProgressGuard {
+            runtime_in_progress: &self.snapshot_in_progress,
+            metrics,
+        };
 
         let target = snapshot_dir.join(anchor.height.to_string());
         let meta = StateSnapshotMeta {
@@ -132,7 +158,9 @@ impl VmV0RuntimeState {
 
         match result {
             Ok(stats) => {
-                if let Err(source) = prune_old_snapshots(snapshot_dir, self.max_snapshots) {
+                if let Err(source) =
+                    prune_old_snapshots(snapshot_dir, self.max_snapshots, Some(anchor.height))
+                {
                     metrics.snapshot().record_failure();
                     return Err(VmV0RuntimeError::SnapshotPrune {
                         path: snapshot_dir.clone(),
@@ -158,7 +186,11 @@ pub fn vm_v0_state_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(VM_V0_STATE_DIR_NAME)
 }
 
-fn prune_old_snapshots(snapshot_dir: &Path, max_snapshots: u32) -> Result<(), std::io::Error> {
+fn prune_old_snapshots(
+    snapshot_dir: &Path,
+    max_snapshots: u32,
+    keep_height: Option<u64>,
+) -> Result<(), std::io::Error> {
     let mut numeric_dirs = Vec::new();
     if !snapshot_dir.exists() {
         return Ok(());
@@ -177,7 +209,10 @@ fn prune_old_snapshots(snapshot_dir: &Path, max_snapshots: u32) -> Result<(), st
         }
     }
     numeric_dirs.sort_by(|a, b| b.0.cmp(&a.0));
-    for (_, path) in numeric_dirs.into_iter().skip(max_snapshots as usize) {
+    for (height, path) in numeric_dirs.into_iter().skip(max_snapshots as usize) {
+        if keep_height == Some(height) {
+            continue;
+        }
         eprintln!("[snapshot] pruning old numeric snapshot {}", path.display());
         fs::remove_dir_all(path)?;
     }
@@ -357,6 +392,39 @@ mod tests {
         assert!(matches!(err, VmV0RuntimeError::SnapshotDirMissing));
         assert_eq!(metrics.snapshot().success_total(), 0);
         assert_eq!(metrics.snapshot().failure_total(), 0);
+    }
+
+    #[test]
+    fn vm_v0_snapshot_trigger_rejects_overlap_without_metric_failure() {
+        let data = TempDir::new().unwrap();
+        let snapshots = TempDir::new().unwrap();
+        let config = vm_v0_config(data.path(), Some(snapshots.path()));
+        let runtime = VmV0RuntimeState::open_from_config(&config)
+            .unwrap()
+            .unwrap();
+        let metrics = NodeMetrics::new();
+        runtime
+            .snapshot_in_progress
+            .store(true, std::sync::atomic::Ordering::Release);
+
+        let err = runtime
+            .create_snapshot(
+                SnapshotAnchor {
+                    height: 7,
+                    block_hash: [0xAB; 32],
+                },
+                config.chain_id().as_u64(),
+                &metrics,
+            )
+            .unwrap_err();
+
+        runtime
+            .snapshot_in_progress
+            .store(false, std::sync::atomic::Ordering::Release);
+        assert!(matches!(err, VmV0RuntimeError::SnapshotAlreadyInProgress));
+        assert_eq!(metrics.snapshot().success_total(), 0);
+        assert_eq!(metrics.snapshot().failure_total(), 0);
+        assert_eq!(metrics.snapshot().last_height(), 0);
     }
 
     #[test]
