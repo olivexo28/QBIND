@@ -344,6 +344,7 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
         inbound_rx,
         outbound: facade,
         peer_connectivity: None,
+        verification_ctx: None,
     };
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
@@ -463,6 +464,7 @@ async fn b11_d_b9_late_peer_reemit_does_not_double_count() {
         inbound_rx: inbound_v0_rx,
         outbound: facade_v0,
         peer_connectivity: Some(conn_v0_dyn),
+        verification_ctx: None,
     };
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());

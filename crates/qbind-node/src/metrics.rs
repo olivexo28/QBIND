@@ -2039,6 +2039,16 @@ pub struct RestoreCatchupMetrics {
 }
 
 /// Binary-path B14 view-timeout / view-change counters surfaced on `/metrics`.
+///
+/// Run 030 extends this family with per-reason crypto-verification counters
+/// for inbound `TimeoutMsg` / `NewView` traffic and outbound-signing counters
+/// for locally-emitted timeouts. Every new counter is a strict account of a
+/// real loop event — they only increment after the corresponding action
+/// occurred (verification accepted, verification rejected for the named
+/// reason, signing succeeded, signing failed, view advanced because of a
+/// verified TC). When the binary loop runs without a verification context
+/// (single-validator / LocalMesh path), all Run 030 counters stay at zero
+/// for the life of the loop, exactly as the existing B14 counters do.
 #[derive(Debug, Default)]
 pub struct BinaryViewTimeoutMetrics {
     view_timeouts_emitted: AtomicU64,
@@ -2051,6 +2061,50 @@ pub struct BinaryViewTimeoutMetrics {
     view_timeout_advances: AtomicU64,
     view_timeout_decode_failures: AtomicU64,
     view_timeout_engine_rejects: AtomicU64,
+
+    // -------------------------------------------------------------------
+    // Run 030: timeout/new-view crypto verification + outbound signing.
+    // -------------------------------------------------------------------
+    // Inbound TimeoutMsg verification (after successful decode, before
+    // `engine.on_timeout_msg`).
+    inbound_timeout_verify_accepted: AtomicU64,
+    inbound_timeout_verify_rejected_total: AtomicU64,
+    inbound_timeout_rejected_unknown_validator: AtomicU64,
+    inbound_timeout_rejected_missing_key: AtomicU64,
+    inbound_timeout_rejected_wrong_suite: AtomicU64,
+    inbound_timeout_rejected_unsupported_suite: AtomicU64,
+    inbound_timeout_rejected_bad_signature: AtomicU64,
+    inbound_timeout_rejected_duplicate: AtomicU64,
+    inbound_timeout_engine_accepted: AtomicU64,
+    inbound_timeout_engine_rejected: AtomicU64,
+    // Inbound NewView / TimeoutCertificate verification.
+    inbound_newview_verify_accepted: AtomicU64,
+    inbound_newview_verify_rejected_total: AtomicU64,
+    inbound_newview_rejected_missing_evidence: AtomicU64,
+    inbound_newview_rejected_evidence_mismatch: AtomicU64,
+    inbound_newview_rejected_duplicate_signer: AtomicU64,
+    inbound_newview_rejected_mixed_view: AtomicU64,
+    inbound_newview_rejected_insufficient_quorum: AtomicU64,
+    inbound_newview_rejected_unknown_validator: AtomicU64,
+    inbound_newview_rejected_missing_key: AtomicU64,
+    inbound_newview_rejected_wrong_suite: AtomicU64,
+    inbound_newview_rejected_unsupported_suite: AtomicU64,
+    inbound_newview_rejected_bad_signature: AtomicU64,
+    inbound_newview_rejected_high_qc_mismatch: AtomicU64,
+    inbound_newview_engine_accepted: AtomicU64,
+    inbound_newview_engine_rejected: AtomicU64,
+    // Outbound signing.
+    outbound_timeout_signing_success: AtomicU64,
+    outbound_timeout_signing_failure: AtomicU64,
+    // View-advance attribution: views advanced because a verified TC
+    // was applied (locally formed or inbound). Subset of
+    // `view_timeout_advances`.
+    view_advances_due_to_verified_tc: AtomicU64,
+    // Crypto verification latency (cumulative nanoseconds, plus
+    // observation count) — pattern parallels `consensus_t154`'s
+    // existing latency families (see `/metrics` exposition below).
+    timeout_crypto_verify_latency_ns_total: AtomicU64,
+    timeout_crypto_verify_latency_observations_total: AtomicU64,
 }
 
 impl BinaryViewTimeoutMetrics {
@@ -2092,6 +2146,117 @@ impl BinaryViewTimeoutMetrics {
             .store(view_timeout_decode_failures, Ordering::Relaxed);
         self.view_timeout_engine_rejects
             .store(view_timeout_engine_rejects, Ordering::Relaxed);
+    }
+
+    /// Run 030: store the per-reason verification + signing counters.
+    ///
+    /// Kept as a separate setter (rather than extending `set`) so that
+    /// callers in unrelated modules / tests that only need the original
+    /// B14 counter family don't have to thread the new arguments. The
+    /// binary-path loop calls both setters every time it pushes stats
+    /// into `/metrics`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_run030(&self, stats: &BinaryViewTimeoutRun030Snapshot) {
+        self.inbound_timeout_verify_accepted
+            .store(stats.inbound_timeout_verify_accepted, Ordering::Relaxed);
+        self.inbound_timeout_verify_rejected_total.store(
+            stats.inbound_timeout_verify_rejected_total,
+            Ordering::Relaxed,
+        );
+        self.inbound_timeout_rejected_unknown_validator.store(
+            stats.inbound_timeout_rejected_unknown_validator,
+            Ordering::Relaxed,
+        );
+        self.inbound_timeout_rejected_missing_key.store(
+            stats.inbound_timeout_rejected_missing_key,
+            Ordering::Relaxed,
+        );
+        self.inbound_timeout_rejected_wrong_suite.store(
+            stats.inbound_timeout_rejected_wrong_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_timeout_rejected_unsupported_suite.store(
+            stats.inbound_timeout_rejected_unsupported_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_timeout_rejected_bad_signature.store(
+            stats.inbound_timeout_rejected_bad_signature,
+            Ordering::Relaxed,
+        );
+        self.inbound_timeout_rejected_duplicate
+            .store(stats.inbound_timeout_rejected_duplicate, Ordering::Relaxed);
+        self.inbound_timeout_engine_accepted
+            .store(stats.inbound_timeout_engine_accepted, Ordering::Relaxed);
+        self.inbound_timeout_engine_rejected
+            .store(stats.inbound_timeout_engine_rejected, Ordering::Relaxed);
+        self.inbound_newview_verify_accepted
+            .store(stats.inbound_newview_verify_accepted, Ordering::Relaxed);
+        self.inbound_newview_verify_rejected_total.store(
+            stats.inbound_newview_verify_rejected_total,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_missing_evidence.store(
+            stats.inbound_newview_rejected_missing_evidence,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_evidence_mismatch.store(
+            stats.inbound_newview_rejected_evidence_mismatch,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_duplicate_signer.store(
+            stats.inbound_newview_rejected_duplicate_signer,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_mixed_view.store(
+            stats.inbound_newview_rejected_mixed_view,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_insufficient_quorum.store(
+            stats.inbound_newview_rejected_insufficient_quorum,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_unknown_validator.store(
+            stats.inbound_newview_rejected_unknown_validator,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_missing_key.store(
+            stats.inbound_newview_rejected_missing_key,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_wrong_suite.store(
+            stats.inbound_newview_rejected_wrong_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_unsupported_suite.store(
+            stats.inbound_newview_rejected_unsupported_suite,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_bad_signature.store(
+            stats.inbound_newview_rejected_bad_signature,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_rejected_high_qc_mismatch.store(
+            stats.inbound_newview_rejected_high_qc_mismatch,
+            Ordering::Relaxed,
+        );
+        self.inbound_newview_engine_accepted
+            .store(stats.inbound_newview_engine_accepted, Ordering::Relaxed);
+        self.inbound_newview_engine_rejected
+            .store(stats.inbound_newview_engine_rejected, Ordering::Relaxed);
+        self.outbound_timeout_signing_success
+            .store(stats.outbound_timeout_signing_success, Ordering::Relaxed);
+        self.outbound_timeout_signing_failure
+            .store(stats.outbound_timeout_signing_failure, Ordering::Relaxed);
+        self.view_advances_due_to_verified_tc
+            .store(stats.view_advances_due_to_verified_tc, Ordering::Relaxed);
+        self.timeout_crypto_verify_latency_ns_total.store(
+            stats.timeout_crypto_verify_latency_ns_total,
+            Ordering::Relaxed,
+        );
+        self.timeout_crypto_verify_latency_observations_total.store(
+            stats.timeout_crypto_verify_latency_observations_total,
+            Ordering::Relaxed,
+        );
     }
 
     pub fn format_metrics(&self) -> String {
@@ -2139,8 +2304,192 @@ impl BinaryViewTimeoutMetrics {
             "qbind_consensus_view_timeout_engine_rejects_total {}\n",
             self.view_timeout_engine_rejects.load(Ordering::Relaxed)
         ));
+        // Run 030: per-reason verification + outbound-signing exposition.
+        output.push_str("\n# Binary timeout/new-view crypto verification (Run 030)\n");
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_verify_accepted_total {}\n",
+            self.inbound_timeout_verify_accepted.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_verify_rejected_total {}\n",
+            self.inbound_timeout_verify_rejected_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_rejected_unknown_validator_total {}\n",
+            self.inbound_timeout_rejected_unknown_validator
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_rejected_missing_key_total {}\n",
+            self.inbound_timeout_rejected_missing_key
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_rejected_wrong_suite_total {}\n",
+            self.inbound_timeout_rejected_wrong_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_rejected_unsupported_suite_total {}\n",
+            self.inbound_timeout_rejected_unsupported_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_rejected_bad_signature_total {}\n",
+            self.inbound_timeout_rejected_bad_signature
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_rejected_duplicate_total {}\n",
+            self.inbound_timeout_rejected_duplicate.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_engine_accepted_total {}\n",
+            self.inbound_timeout_engine_accepted.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_timeout_engine_rejected_total {}\n",
+            self.inbound_timeout_engine_rejected.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_verify_accepted_total {}\n",
+            self.inbound_newview_verify_accepted.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_verify_rejected_total {}\n",
+            self.inbound_newview_verify_rejected_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_missing_evidence_total {}\n",
+            self.inbound_newview_rejected_missing_evidence
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_evidence_mismatch_total {}\n",
+            self.inbound_newview_rejected_evidence_mismatch
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_duplicate_signer_total {}\n",
+            self.inbound_newview_rejected_duplicate_signer
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_mixed_view_total {}\n",
+            self.inbound_newview_rejected_mixed_view
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_insufficient_quorum_total {}\n",
+            self.inbound_newview_rejected_insufficient_quorum
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_unknown_validator_total {}\n",
+            self.inbound_newview_rejected_unknown_validator
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_missing_key_total {}\n",
+            self.inbound_newview_rejected_missing_key
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_wrong_suite_total {}\n",
+            self.inbound_newview_rejected_wrong_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_unsupported_suite_total {}\n",
+            self.inbound_newview_rejected_unsupported_suite
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_bad_signature_total {}\n",
+            self.inbound_newview_rejected_bad_signature
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_rejected_high_qc_mismatch_total {}\n",
+            self.inbound_newview_rejected_high_qc_mismatch
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_engine_accepted_total {}\n",
+            self.inbound_newview_engine_accepted.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_inbound_newview_engine_rejected_total {}\n",
+            self.inbound_newview_engine_rejected.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_timeout_signing_success_total {}\n",
+            self.outbound_timeout_signing_success.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_outbound_timeout_signing_failure_total {}\n",
+            self.outbound_timeout_signing_failure.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_advances_due_to_verified_tc_total {}\n",
+            self.view_advances_due_to_verified_tc
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_timeout_crypto_verify_latency_ns_total {}\n",
+            self.timeout_crypto_verify_latency_ns_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_timeout_crypto_verify_latency_observations_total {}\n",
+            self.timeout_crypto_verify_latency_observations_total
+                .load(Ordering::Relaxed)
+        ));
         output
     }
+}
+
+/// Snapshot bag for [`BinaryViewTimeoutMetrics::set_run030`].
+///
+/// The binary-path consensus loop maintains these counters in
+/// `BinaryConsensusLoopInboundStats` and pushes them through to
+/// `/metrics` on every tick / inbound event. Using a struct rather
+/// than a 25-arg setter keeps the call site readable and makes new
+/// counters strictly additive.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BinaryViewTimeoutRun030Snapshot {
+    pub inbound_timeout_verify_accepted: u64,
+    pub inbound_timeout_verify_rejected_total: u64,
+    pub inbound_timeout_rejected_unknown_validator: u64,
+    pub inbound_timeout_rejected_missing_key: u64,
+    pub inbound_timeout_rejected_wrong_suite: u64,
+    pub inbound_timeout_rejected_unsupported_suite: u64,
+    pub inbound_timeout_rejected_bad_signature: u64,
+    pub inbound_timeout_rejected_duplicate: u64,
+    pub inbound_timeout_engine_accepted: u64,
+    pub inbound_timeout_engine_rejected: u64,
+    pub inbound_newview_verify_accepted: u64,
+    pub inbound_newview_verify_rejected_total: u64,
+    pub inbound_newview_rejected_missing_evidence: u64,
+    pub inbound_newview_rejected_evidence_mismatch: u64,
+    pub inbound_newview_rejected_duplicate_signer: u64,
+    pub inbound_newview_rejected_mixed_view: u64,
+    pub inbound_newview_rejected_insufficient_quorum: u64,
+    pub inbound_newview_rejected_unknown_validator: u64,
+    pub inbound_newview_rejected_missing_key: u64,
+    pub inbound_newview_rejected_wrong_suite: u64,
+    pub inbound_newview_rejected_unsupported_suite: u64,
+    pub inbound_newview_rejected_bad_signature: u64,
+    pub inbound_newview_rejected_high_qc_mismatch: u64,
+    pub inbound_newview_engine_accepted: u64,
+    pub inbound_newview_engine_rejected: u64,
+    pub outbound_timeout_signing_success: u64,
+    pub outbound_timeout_signing_failure: u64,
+    pub view_advances_due_to_verified_tc: u64,
+    pub timeout_crypto_verify_latency_ns_total: u64,
+    pub timeout_crypto_verify_latency_observations_total: u64,
 }
 
 impl RestoreCatchupMetrics {

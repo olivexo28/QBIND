@@ -572,6 +572,7 @@ async fn run_p2p_node(
         inbound_rx: consensus_inbound_rx,
         outbound: outbound_facade,
         peer_connectivity: Some(peer_connectivity),
+        verification_ctx: None,
     };
     let (consensus_handle, _progress) =
         spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);
