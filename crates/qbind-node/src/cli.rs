@@ -230,6 +230,24 @@ pub struct CliArgs {
     #[arg(long = "p2p-mutual-auth")]
     pub p2p_mutual_auth: Option<String>,
 
+    /// Run 031: require timeout-verification activation under
+    /// `--p2p-mutual-auth required` multi-validator deployments.
+    ///
+    /// When set, `qbind-node` refuses to start if a real
+    /// `TimeoutVerificationContext` cannot be honestly built from
+    /// existing production components (validator keystore, peer
+    /// pubkey distribution, suite-aware key provider, backend
+    /// registry, local signer). When unset, activation is
+    /// best-effort: if production pieces are missing, the binary
+    /// logs a precise reason and continues with
+    /// `verification_ctx: None` (Run 030 semantics, bit-equivalent
+    /// to today's path).
+    ///
+    /// See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md` and
+    /// `docs/whitepaper/contradiction.md` C5.
+    #[arg(long = "require-timeout-verification", default_value_t = false)]
+    pub require_timeout_verification: bool,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

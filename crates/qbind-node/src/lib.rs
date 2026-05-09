@@ -134,6 +134,7 @@ pub mod secure_channel;
 pub mod snapshot_restore;
 pub mod startup_validation;
 pub mod storage;
+pub mod timeout_verification_bridge;
 pub mod validator_config;
 pub mod validator_signer;
 pub mod verify_pool;

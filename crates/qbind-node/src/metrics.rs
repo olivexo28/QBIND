@@ -7591,6 +7591,10 @@ pub struct NodeMetrics {
     /// MainNet profile invariants validation result (T237).
     /// 0 = not checked / failed, 1 = passed once.
     mainnet_invariants_ok: std::sync::atomic::AtomicU8,
+    /// Run 031: timeout verification activation gauge.
+    /// 0 = `BinaryConsensusLoopIo::verification_ctx` is `None`
+    ///     (verification not active), 1 = active.
+    timeout_verification_active: std::sync::atomic::AtomicU8,
 }
 
 impl Default for NodeMetrics {
@@ -7634,6 +7638,7 @@ impl NodeMetrics {
             snapshot: SnapshotMetrics::new(),
             slashing: SlashingMetrics::new(),
             mainnet_invariants_ok: std::sync::atomic::AtomicU8::new(0),
+            timeout_verification_active: std::sync::atomic::AtomicU8::new(0),
         }
     }
 
@@ -7953,6 +7958,24 @@ impl NodeMetrics {
     /// Returns 1 if `validate_mainnet_invariants()` passed, 0 otherwise.
     pub fn mainnet_invariants_ok(&self) -> u8 {
         self.mainnet_invariants_ok
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Run 031: record whether timeout verification is active in the
+    /// binary consensus loop.
+    ///
+    /// Sets the gauge `qbind_timeout_verification_active` to 1 when
+    /// `BinaryConsensusLoopIo::verification_ctx` will be `Some(_)`,
+    /// 0 otherwise. The setter is idempotent and does not store
+    /// any key material.
+    pub fn set_timeout_verification_active(&self, active: bool) {
+        self.timeout_verification_active
+            .store(active as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Run 031: get the timeout verification activation gauge.
+    pub fn timeout_verification_active(&self) -> u8 {
+        self.timeout_verification_active
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -8315,6 +8338,13 @@ impl NodeMetrics {
         output.push_str(&format!(
             "qbind_mainnet_profile_invariants_ok {}\n",
             self.mainnet_invariants_ok()
+        ));
+
+        // Run 031: timeout verification activation gauge.
+        output.push_str("\n# Timeout verification activation (Run 031, C5)\n");
+        output.push_str(&format!(
+            "qbind_timeout_verification_active {}\n",
+            self.timeout_verification_active()
         ));
 
         // DAG coupling validation metrics (T191)

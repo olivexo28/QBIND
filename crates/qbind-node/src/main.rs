@@ -568,11 +568,106 @@ async fn run_p2p_node(
                 node_context.p2p_service.clone(),
             ),
         );
+    // ------------------------------------------------------------------
+    // Run 031: TimeoutVerificationContext activation bridge.
+    //
+    // The Run 030 binary loop honours an `Arc<TimeoutVerificationContext>`
+    // end-to-end. Production activation requires a real
+    // `SuiteAwareValidatorKeyProvider` covering every active validator,
+    // a `ConsensusSigBackendRegistry` with a backend for every governed
+    // suite (today: ML-DSA-44 / suite_id 100), and an
+    // `Arc<dyn ValidatorSigner>` over the local signing key. The
+    // current `qbind-node` binary path does not yet load any of those
+    // honestly:
+    //  * `signer_keystore_path` flows into `NodeConfig` but is not read
+    //    in `main.rs` to materialise an `Arc<ValidatorSigningKey>`;
+    //  * `NodeConfig.network.static_peers` carries no per-peer
+    //    `(suite_id, pk_bytes)`, so no `SuiteAwareValidatorKeyProvider`
+    //    can be honestly constructed for the active validator set;
+    //  * `--p2p-mutual-auth` itself runs on B12's test-grade
+    //    `TrustedClientRoots`/`DummySig` stack (see lines 427-472).
+    //
+    // The probe below fails closed with that exact precise reason. It
+    // does NOT silently substitute test-grade roots, dummy keys, or a
+    // parallel verifier path. When the production blockers in
+    // `docs/whitepaper/contradiction.md` C4/C5 are resolved, this site
+    // is the single place that needs to be replaced with the real
+    // construction call into `try_build_timeout_verification_context`.
+    //
+    // Policy:
+    //  * `--require-timeout-verification` ⇒ `RequireOrFail` (refuse
+    //    to start if the probe is `Disabled`);
+    //  * `--p2p-mutual-auth required` and not `--require-...` ⇒
+    //    `OptionalActivate` (log precise reason, fall back to `None`);
+    //  * otherwise ⇒ `OptionalActivate`.
+    // ------------------------------------------------------------------
+    use qbind_node::timeout_verification_bridge::{
+        enforce_policy, run_031_probe_production_pieces_for_run_p2p_node,
+        TimeoutVerificationPolicy,
+    };
+    let timeout_verification_policy = if args.require_timeout_verification {
+        TimeoutVerificationPolicy::RequireOrFail
+    } else {
+        TimeoutVerificationPolicy::OptionalActivate
+    };
+    let timeout_verification_outcome = run_031_probe_production_pieces_for_run_p2p_node();
+    let supported_suite_ids: &[u16] = &[100]; // ML-DSA-44 (SUITE_PQ_RESERVED_1)
+    eprintln!(
+        "[binary] Run 031: timeout-verification probe: active={} reason={} \
+         policy={:?} validators={} chain_id={} supported_suite_ids={:?} \
+         local_signer=<absent in main.rs — keystore not loaded>",
+        timeout_verification_outcome.is_active(),
+        match timeout_verification_outcome.disabled_reason() {
+            Some(r) => format!("{}", r),
+            None => "n/a".to_string(),
+        },
+        timeout_verification_policy,
+        num_validators,
+        config.chain_id(),
+        supported_suite_ids,
+    );
+    let verification_ctx = match enforce_policy(
+        timeout_verification_policy,
+        timeout_verification_outcome,
+    ) {
+        Ok(opt) => opt,
+        Err(e) => {
+            eprintln!(
+                "[binary] FATAL: --require-timeout-verification was set but timeout \
+                 verification cannot be activated honestly: {}",
+                e
+            );
+            eprintln!(
+                "[binary] qbind-node refuses to start under RequireOrFail policy with no \
+                 production-safe context. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md \
+                 and docs/whitepaper/contradiction.md C5/C4."
+            );
+            std::process::exit(1);
+        }
+    };
+    node_metrics.set_timeout_verification_active(verification_ctx.is_some());
+    if verification_ctx.is_some() {
+        eprintln!(
+            "[binary] Run 031: timeout verification ACTIVE — Arc<TimeoutVerificationContext> \
+             threaded into BinaryConsensusLoopIo::verification_ctx. Inbound TimeoutMsg / \
+             NewView / TC traffic will be verified before engine ingestion; locally-emitted \
+             timeouts will be signed before broadcast."
+        );
+    } else {
+        eprintln!(
+            "[binary] Run 031: timeout verification DISABLED — \
+             BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). \
+             Inbound timeout/new-view crypto verification and outbound timeout signing \
+             remain off until production pieces land. See \
+             docs/whitepaper/contradiction.md C5."
+        );
+    }
+
     let io = BinaryConsensusLoopIo {
         inbound_rx: consensus_inbound_rx,
         outbound: outbound_facade,
         peer_connectivity: Some(peer_connectivity),
-        verification_ctx: None,
+        verification_ctx,
     };
     let (consensus_handle, _progress) =
         spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);
