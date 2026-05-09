@@ -57,7 +57,8 @@ use std::sync::Arc;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::qc::QuorumCertificate;
-use qbind_consensus::timeout::timeout_signing_bytes;
+use qbind_consensus::timeout::{timeout_signing_bytes, timeout_signing_bytes_with_chain_id};
+use qbind_types::ChainId;
 
 use crate::validator_signer::{LocalKeySigner, SignError, ValidatorSigner};
 
@@ -207,7 +208,9 @@ impl std::fmt::Display for RemoteSignError {
             RemoteSignError::Timeout => write!(f, "signing request timed out"),
             RemoteSignError::RateLimited => write!(f, "signing request rate limited"),
             RemoteSignError::ServerError => write!(f, "remote signer server error"),
-            RemoteSignError::ReplayDetected => write!(f, "replay detected: request_id not monotonic"),
+            RemoteSignError::ReplayDetected => {
+                write!(f, "replay detected: request_id not monotonic")
+            }
             RemoteSignError::SignerUnavailable => write!(f, "signer unavailable (fail-closed)"),
             RemoteSignError::MalformedResponse => write!(f, "malformed response from signer"),
         }
@@ -357,15 +360,16 @@ impl RemoteSignerClient {
         };
 
         // M10: Fail-closed behavior - any transport error is fatal
-        let resp = self
-            .transport
-            .send_sign_request(req)
-            .map_err(|e| match e {
-                RemoteSignError::SignerUnavailable => SignError::HsmError("signer unavailable".to_string()),
-                RemoteSignError::ReplayDetected => SignError::HsmError("replay detected".to_string()),
-                RemoteSignError::MalformedResponse => SignError::HsmError("malformed response".to_string()),
-                _ => SignError::CryptoError,
-            })?;
+        let resp = self.transport.send_sign_request(req).map_err(|e| match e {
+            RemoteSignError::SignerUnavailable => {
+                SignError::HsmError("signer unavailable".to_string())
+            }
+            RemoteSignError::ReplayDetected => SignError::HsmError("replay detected".to_string()),
+            RemoteSignError::MalformedResponse => {
+                SignError::HsmError("malformed response".to_string())
+            }
+            _ => SignError::CryptoError,
+        })?;
 
         match (resp.signature, resp.error) {
             (Some(sig), None) => Ok(sig),
@@ -411,6 +415,17 @@ impl ValidatorSigner for RemoteSignerClient {
     ) -> Result<Vec<u8>, SignError> {
         // Compute the canonical timeout signing preimage
         let preimage = timeout_signing_bytes(view, high_qc, self.validator_id);
+        self.sign_common(RemoteSignRequestKind::Timeout, &preimage, Some(view))
+    }
+
+    fn sign_timeout_with_chain_id(
+        &self,
+        chain_id: ChainId,
+        view: u64,
+        high_qc: Option<&QuorumCertificate<[u8; 32]>>,
+    ) -> Result<Vec<u8>, SignError> {
+        let preimage =
+            timeout_signing_bytes_with_chain_id(chain_id, view, high_qc, self.validator_id);
         self.sign_common(RemoteSignRequestKind::Timeout, &preimage, Some(view))
     }
 }
@@ -463,7 +478,9 @@ impl RemoteSignerTransport for LoopbackSignerTransport {
         request: RemoteSignRequest,
     ) -> Result<RemoteSignResponse, RemoteSignError> {
         // M10: Replay protection - request_id must be strictly greater than last
-        let last_id = self.last_request_id.load(std::sync::atomic::Ordering::SeqCst);
+        let last_id = self
+            .last_request_id
+            .load(std::sync::atomic::Ordering::SeqCst);
         if request.request_id <= last_id {
             return Ok(RemoteSignResponse {
                 request_id: request.request_id,
@@ -471,7 +488,8 @@ impl RemoteSignerTransport for LoopbackSignerTransport {
                 error: Some(RemoteSignError::ReplayDetected),
             });
         }
-        self.last_request_id.store(request.request_id, std::sync::atomic::Ordering::SeqCst);
+        self.last_request_id
+            .store(request.request_id, std::sync::atomic::Ordering::SeqCst);
 
         // Validate suite_id matches
         if request.suite_id != self.inner.suite_id() {
@@ -883,7 +901,10 @@ impl TcpKemTlsSignerTransport {
     /// * `expected_request_id` - The request_id we sent, used to verify the
     ///   response correlation. If the echoed request_id doesn't match,
     ///   returns `MalformedResponse` error.
-    fn decode_response(data: &[u8], expected_request_id: u64) -> Result<RemoteSignResponse, RemoteSignError> {
+    fn decode_response(
+        data: &[u8],
+        expected_request_id: u64,
+    ) -> Result<RemoteSignResponse, RemoteSignError> {
         // Minimum: status(1) + request_id(8) + error_code(1) = 10 bytes
         if data.len() < 10 {
             return Err(RemoteSignError::MalformedResponse);

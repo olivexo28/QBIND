@@ -239,6 +239,9 @@ pub struct TimeoutCertificate<BlockIdT> {
     /// The set of validators who signed timeout messages.
     /// Size must be >= 2f+1.
     pub signers: Vec<ValidatorId>,
+    /// The exact signed timeout messages that justify this certificate.
+    /// Inbound certificates with missing or empty evidence must fail closed.
+    pub signed_timeouts: Vec<TimeoutMsg<BlockIdT>>,
     /// The view that was timed out.
     pub timeout_view: u64,
 }
@@ -302,6 +305,10 @@ impl<BlockIdT: Clone + Eq> TimeoutCertificate<BlockIdT> {
     /// - `timeout_view`: The view that was timed out
     /// - `high_qc`: The maximum high_qc from all timeout messages
     /// - `signers`: The validators who sent timeout messages
+    ///
+    /// This constructor preserves the pre-Run-029 logical/test shape and leaves
+    /// `signed_timeouts` empty. Inbound/wire certificates must be constructed
+    /// with [`Self::new_with_evidence`] and must fail closed if evidence is empty.
     pub fn new(
         timeout_view: u64,
         high_qc: Option<QuorumCertificate<BlockIdT>>,
@@ -311,6 +318,23 @@ impl<BlockIdT: Clone + Eq> TimeoutCertificate<BlockIdT> {
             view: timeout_view.saturating_add(1), // TC enables transition to next view
             high_qc,
             signers,
+            signed_timeouts: Vec::new(),
+            timeout_view,
+        }
+    }
+
+    /// Create a new timeout certificate with signed timeout evidence.
+    pub fn new_with_evidence(
+        timeout_view: u64,
+        high_qc: Option<QuorumCertificate<BlockIdT>>,
+        signers: Vec<ValidatorId>,
+        signed_timeouts: Vec<TimeoutMsg<BlockIdT>>,
+    ) -> Self {
+        TimeoutCertificate {
+            view: timeout_view.saturating_add(1),
+            high_qc,
+            signers,
+            signed_timeouts,
             timeout_view,
         }
     }
@@ -574,14 +598,12 @@ where
     ) -> Option<TimeoutCertificate<BlockIdT>> {
         let view_entries = self.entries.get(&view)?;
 
-        // Collect signers and their voting power
-        let mut signers = Vec::new();
+        // Accumulate voting power for validator-set members represented in this view.
         let mut acc_vp: u64 = 0;
 
         for validator_id in view_entries.keys() {
             if let Some(idx) = validators.index_of(*validator_id) {
                 if let Some(entry) = validators.get(idx) {
-                    signers.push(*validator_id);
                     acc_vp = acc_vp.saturating_add(entry.voting_power);
                 }
             }
@@ -593,10 +615,21 @@ where
             return None;
         }
 
-        // Select max high_qc from all timeouts
+        // Select max high_qc from all timeouts and carry exact signed evidence.
         let high_qc = select_max_high_qc(view_entries.values());
+        let mut signed_timeouts: Vec<_> = view_entries.values().cloned().collect();
+        signed_timeouts.sort_by_key(|timeout| timeout.validator_id);
+        let signers: Vec<_> = signed_timeouts
+            .iter()
+            .map(|timeout| timeout.validator_id)
+            .collect();
 
-        Some(TimeoutCertificate::new(view, high_qc, signers))
+        Some(TimeoutCertificate::new_with_evidence(
+            view,
+            high_qc,
+            signers,
+            signed_timeouts,
+        ))
     }
 
     /// Get the number of timeout messages collected for a view.
@@ -960,5 +993,48 @@ mod tests {
         assert_eq!(acc.evicted_views(), 1);
         assert_eq!(acc.timeout_count(1), 0); // View 1 was evicted
         assert_eq!(acc.timeout_count(4), 1); // View 4 is present
+    }
+    #[test]
+    fn timeout_certificate_serializes_signed_timeouts() {
+        let timeout: TimeoutMsg<[u8; 32]> = TimeoutMsg::new(7, None, ValidatorId::new(1));
+        let tc = TimeoutCertificate::new_with_evidence(
+            7,
+            None,
+            vec![ValidatorId::new(1)],
+            vec![timeout.clone()],
+        );
+
+        let bytes = bincode::serialize(&tc).expect("serialize TC");
+        let decoded: TimeoutCertificate<[u8; 32]> =
+            bincode::deserialize(&bytes).expect("deserialize TC");
+
+        assert_eq!(decoded.signed_timeouts, vec![timeout]);
+        assert_eq!(decoded.signers, vec![ValidatorId::new(1)]);
+    }
+
+    #[test]
+    fn timeout_accumulator_tc_carries_exact_signed_evidence() {
+        let validators = make_validator_set(4);
+        let mut acc: TimeoutAccumulator<[u8; 32]> = TimeoutAccumulator::new();
+        for id in 1..=3 {
+            let mut timeout: TimeoutMsg<[u8; 32]> = TimeoutMsg::new(9, None, ValidatorId::new(id));
+            timeout.set_signature(vec![id as u8 + 1]);
+            acc.on_timeout(&validators, timeout).unwrap();
+        }
+
+        let tc = acc.maybe_tc_for(&validators, 9).expect("tc forms");
+        let signer_set: std::collections::HashSet<_> = tc.signers.iter().copied().collect();
+        let evidence_set: std::collections::HashSet<_> = tc
+            .signed_timeouts
+            .iter()
+            .map(|timeout| timeout.validator_id)
+            .collect();
+
+        assert_eq!(signer_set, evidence_set);
+        assert_eq!(tc.signed_timeouts.len(), tc.signers.len());
+        for timeout in &tc.signed_timeouts {
+            assert_eq!(timeout.view, 9);
+            assert!(!timeout.signature.is_empty());
+        }
     }
 }

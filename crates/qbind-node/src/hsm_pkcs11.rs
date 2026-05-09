@@ -32,7 +32,8 @@ use std::sync::Arc;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::qc::QuorumCertificate;
-use qbind_consensus::timeout::timeout_signing_bytes;
+use qbind_consensus::timeout::{timeout_signing_bytes, timeout_signing_bytes_with_chain_id};
+use qbind_types::ChainId;
 
 use crate::validator_signer::{SignError, ValidatorSigner};
 
@@ -566,6 +567,17 @@ impl ValidatorSigner for HsmPkcs11Signer {
         high_qc: Option<&QuorumCertificate<[u8; 32]>>,
     ) -> Result<Vec<u8>, SignError> {
         let sign_bytes = timeout_signing_bytes(view, high_qc, self.validator_id);
+        self.pkcs11_sign(&sign_bytes)
+    }
+
+    fn sign_timeout_with_chain_id(
+        &self,
+        chain_id: ChainId,
+        view: u64,
+        high_qc: Option<&QuorumCertificate<[u8; 32]>>,
+    ) -> Result<Vec<u8>, SignError> {
+        let sign_bytes =
+            timeout_signing_bytes_with_chain_id(chain_id, view, high_qc, self.validator_id);
         self.pkcs11_sign(&sign_bytes)
     }
 }

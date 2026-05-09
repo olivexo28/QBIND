@@ -31,8 +31,9 @@ use std::sync::Arc;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_consensus::qc::QuorumCertificate;
-use qbind_consensus::timeout::timeout_signing_bytes;
+use qbind_consensus::timeout::{timeout_signing_bytes, timeout_signing_bytes_with_chain_id};
 use qbind_crypto::ValidatorSigningKey;
+use qbind_types::ChainId;
 
 /// Error type for signing operations.
 ///
@@ -140,6 +141,14 @@ pub trait ValidatorSigner: Send + Sync {
     /// The consensus layer uses `[u8; 32]` as the canonical block ID type.
     fn sign_timeout(
         &self,
+        view: u64,
+        high_qc: Option<&QuorumCertificate<[u8; 32]>>,
+    ) -> Result<Vec<u8>, SignError>;
+
+    /// Sign a timeout message for an explicit chain ID.
+    fn sign_timeout_with_chain_id(
+        &self,
+        chain_id: ChainId,
         view: u64,
         high_qc: Option<&QuorumCertificate<[u8; 32]>>,
     ) -> Result<Vec<u8>, SignError>;
@@ -286,8 +295,20 @@ impl ValidatorSigner for LocalKeySigner {
         view: u64,
         high_qc: Option<&QuorumCertificate<[u8; 32]>>,
     ) -> Result<Vec<u8>, SignError> {
-        // Compute signing bytes using the existing helper
         let sign_bytes = timeout_signing_bytes(view, high_qc, self.validator_id);
+        self.signing_key
+            .sign(&sign_bytes)
+            .map_err(|_| SignError::CryptoError)
+    }
+
+    fn sign_timeout_with_chain_id(
+        &self,
+        chain_id: ChainId,
+        view: u64,
+        high_qc: Option<&QuorumCertificate<[u8; 32]>>,
+    ) -> Result<Vec<u8>, SignError> {
+        let sign_bytes =
+            timeout_signing_bytes_with_chain_id(chain_id, view, high_qc, self.validator_id);
         self.signing_key
             .sign(&sign_bytes)
             .map_err(|_| SignError::CryptoError)

@@ -2157,6 +2157,7 @@ dependencies = [
 name = "qbind-consensus"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "qbind-crypto",
  "qbind-hash",
  "qbind-types",
