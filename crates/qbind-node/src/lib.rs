@@ -105,6 +105,7 @@ pub mod p2p;
 pub mod p2p_inbound;
 pub mod p2p_node_builder;
 pub mod p2p_tcp;
+pub mod peer_key_provider;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;

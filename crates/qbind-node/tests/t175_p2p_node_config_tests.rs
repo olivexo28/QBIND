@@ -35,7 +35,7 @@ fn make_network_config(
         listen_addr,
         advertised_addr,
         static_peers,
-        // T205: Discovery and liveness defaults
+        static_peer_consensus_keys: Vec::new(),
         discovery_enabled: false,
         discovery_interval_secs: 30,
         max_known_peers: 200,

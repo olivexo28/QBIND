@@ -7603,6 +7603,20 @@ pub struct NodeMetrics {
     /// will be 1 even when verification stays disabled because the
     /// peer key-provider half is still missing.
     timeout_verification_signer_loaded: std::sync::atomic::AtomicU8,
+    /// Run 033: timeout verification key-provider-loaded gauge.
+    /// 0 = no `SuiteAwareValidatorKeyProvider` was honestly built
+    ///     from `network.static_peer_consensus_keys`,
+    /// 1 = peer-side key-provider half of the bridge inputs is
+    ///     honestly populated. Independent of
+    ///     `timeout_verification_active`: it will be 1 even when
+    ///     verification stays disabled because some other piece
+    ///     (e.g. signer) is still missing.
+    timeout_verification_key_provider_loaded: std::sync::atomic::AtomicU8,
+    /// Run 033: number of validators in the active set used by the
+    /// `TimeoutVerificationContext` (or 0 when verification is
+    /// disabled). Surfaces honest scope of the configured validator
+    /// set without exposing key material.
+    timeout_verification_validator_count: std::sync::atomic::AtomicU64,
 }
 
 impl Default for NodeMetrics {
@@ -7648,6 +7662,8 @@ impl NodeMetrics {
             mainnet_invariants_ok: std::sync::atomic::AtomicU8::new(0),
             timeout_verification_active: std::sync::atomic::AtomicU8::new(0),
             timeout_verification_signer_loaded: std::sync::atomic::AtomicU8::new(0),
+            timeout_verification_key_provider_loaded: std::sync::atomic::AtomicU8::new(0),
+            timeout_verification_validator_count: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -8004,6 +8020,38 @@ impl NodeMetrics {
     /// Run 032: get the timeout verification signer-loaded gauge.
     pub fn timeout_verification_signer_loaded(&self) -> u8 {
         self.timeout_verification_signer_loaded
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Run 033: record whether a `SuiteAwareValidatorKeyProvider`
+    /// was honestly built from `network.static_peer_consensus_keys`.
+    ///
+    /// Sets `qbind_timeout_verification_key_provider_loaded` to 1
+    /// when the peer-side key-provider half of the bridge inputs is
+    /// honestly populated, 0 otherwise. The setter is idempotent
+    /// and does not store any key material.
+    pub fn set_timeout_verification_key_provider_loaded(&self, loaded: bool) {
+        self.timeout_verification_key_provider_loaded
+            .store(loaded as u8, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Run 033: get the timeout verification key-provider-loaded gauge.
+    pub fn timeout_verification_key_provider_loaded(&self) -> u8 {
+        self.timeout_verification_key_provider_loaded
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Run 033: record the active validator-set size used by the
+    /// `TimeoutVerificationContext`. Set to 0 when verification is
+    /// disabled.
+    pub fn set_timeout_verification_validator_count(&self, count: u64) {
+        self.timeout_verification_validator_count
+            .store(count, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Run 033: get the active validator-set size gauge.
+    pub fn timeout_verification_validator_count(&self) -> u64 {
+        self.timeout_verification_validator_count
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
@@ -8380,6 +8428,17 @@ impl NodeMetrics {
         output.push_str(&format!(
             "qbind_timeout_verification_signer_loaded {}\n",
             self.timeout_verification_signer_loaded()
+        ));
+
+        // Run 033: timeout verification key-provider gauges.
+        output.push_str("# Timeout verification key provider (Run 033, C5)\n");
+        output.push_str(&format!(
+            "qbind_timeout_verification_key_provider_loaded {}\n",
+            self.timeout_verification_key_provider_loaded()
+        ));
+        output.push_str(&format!(
+            "qbind_timeout_verification_validator_count {}\n",
+            self.timeout_verification_validator_count()
         ));
 
         // DAG coupling validation metrics (T191)

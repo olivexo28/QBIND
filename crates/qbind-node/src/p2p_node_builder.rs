@@ -1169,6 +1169,7 @@ mod tests {
                 listen_addr: Some("127.0.0.1:0".to_string()),
                 advertised_addr: None,
                 static_peers: vec![],
+                static_peer_consensus_keys: Vec::new(),
                 // T205: Discovery and liveness defaults for test
                 discovery_enabled: false,
                 discovery_interval_secs: 30,

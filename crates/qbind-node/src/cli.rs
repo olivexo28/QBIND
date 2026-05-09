@@ -42,7 +42,7 @@ use crate::node_config::{
     MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig,
     NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, ParseEnvironmentError,
     SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig, StateRetentionConfig,
-    ValidatorStakeConfig,
+    StaticPeerConsensusKey, ValidatorStakeConfig,
 };
 use crate::p2p_diversity::parse_diversity_mode;
 use qbind_ledger::{
@@ -247,6 +247,32 @@ pub struct CliArgs {
     /// `docs/whitepaper/contradiction.md` C5.
     #[arg(long = "require-timeout-verification", default_value_t = false)]
     pub require_timeout_verification: bool,
+
+    /// Run 033: explicit per-validator consensus public key for
+    /// timeout-verification activation.
+    ///
+    /// Format: `VID:SUITE:HEXPK` where
+    /// - `VID` is the validator id (decimal `u64`),
+    /// - `SUITE` is the signature suite id (decimal `u16`; today
+    ///   only `100` = ML-DSA-44),
+    /// - `HEXPK` is the lowercase hex-encoded public key bytes
+    ///   (no `0x` prefix, even length).
+    ///
+    /// Can be specified multiple times; one entry per active
+    /// validator (local + every `--p2p-peer vid@addr` peer).
+    /// Required for `--require-timeout-verification` to honestly
+    /// activate `TimeoutVerificationContext`. Without these
+    /// entries, the binary path keeps the Run 032 disabled
+    /// behaviour with `SignerPresentKeyProviderUnavailable`.
+    ///
+    /// This is **consensus** timeout-verification key
+    /// distribution, not transport-level KEMTLS root-key
+    /// distribution. See `docs/whitepaper/contradiction.md` C4/C5.
+    ///
+    /// Example:
+    /// `--validator-consensus-key 0:100:abcd... --validator-consensus-key 1:100:1234...`
+    #[arg(long = "validator-consensus-key", action = clap::ArgAction::Append)]
+    pub validator_consensus_keys: Vec<String>,
 
     // ========================================================================
     // Node Identity & Storage
@@ -537,6 +563,8 @@ pub enum CliError {
     InvalidGenesisHash(String),
     /// Genesis path required but not provided (T233).
     GenesisPathRequired(String),
+    /// Run 033: invalid `--validator-consensus-key` spec.
+    InvalidValidatorConsensusKey(String),
 }
 
 impl std::fmt::Display for CliError {
@@ -608,6 +636,13 @@ impl std::fmt::Display for CliError {
             }
             CliError::GenesisPathRequired(msg) => {
                 write!(f, "genesis path required: {}", msg)
+            }
+            CliError::InvalidValidatorConsensusKey(msg) => {
+                write!(
+                    f,
+                    "invalid --validator-consensus-key: {} (expected 'VID:SUITE:HEXPK')",
+                    msg
+                )
             }
         }
     }
@@ -709,6 +744,7 @@ impl CliArgs {
                 listen_addr,
                 advertised_addr,
                 static_peers,
+                static_peer_consensus_keys: Vec::new(),
                 // T205: Discovery defaults (disabled for legacy path)
                 discovery_enabled: false,
                 discovery_interval_secs: 30,
@@ -1100,6 +1136,18 @@ impl CliArgs {
             }
         }
 
+        // Run 033: parse `--validator-consensus-key` entries into
+        // `network.static_peer_consensus_keys`. This is the smallest
+        // additive shape the binary path needs to honestly construct
+        // a `SuiteAwareValidatorKeyProvider`. Backward-compatible:
+        // when no flag is supplied, the field stays empty and Run 032
+        // disabled behaviour is preserved.
+        if !self.validator_consensus_keys.is_empty() {
+            let parsed = parse_validator_consensus_keys(&self.validator_consensus_keys)?;
+            // Merge: CLI overrides any prior profile/file value.
+            config.network.static_peer_consensus_keys = parsed;
+        }
+
         // Validate P2P configuration
         config.validate_p2p_config();
 
@@ -1115,6 +1163,69 @@ impl CliArgs {
 }
 
 // ============================================================================
+// Run 033: --validator-consensus-key parsing
+// ============================================================================
+
+/// Parse a single `VID:SUITE:HEXPK` spec into a
+/// [`StaticPeerConsensusKey`].
+///
+/// Strict parsing:
+/// - exactly two `:` separators (HEXPK is forbidden from containing
+///   `:` because it must be hex anyway);
+/// - VID parses as `u64`;
+/// - SUITE parses as `u16`;
+/// - HEXPK is non-empty hex (validated by `decode_strict_hex_pk` at
+///   activation time; here we only assert non-empty + length parity
+///   so malformed flags fail at CLI parse rather than activation).
+fn parse_validator_consensus_key_spec(spec: &str) -> Result<StaticPeerConsensusKey, String> {
+    let parts: Vec<&str> = spec.splitn(3, ':').collect();
+    if parts.len() != 3 {
+        return Err(format!(
+            "spec '{}' does not match VID:SUITE:HEXPK",
+            spec
+        ));
+    }
+    let vid: u64 = parts[0]
+        .parse()
+        .map_err(|e| format!("invalid validator id '{}': {}", parts[0], e))?;
+    let suite: u16 = parts[1]
+        .parse()
+        .map_err(|e| format!("invalid suite id '{}': {}", parts[1], e))?;
+    let hex = parts[2].to_string();
+    if hex.is_empty() {
+        return Err(format!(
+            "empty public_key_hex in spec '{}'",
+            spec
+        ));
+    }
+    if hex.len() % 2 != 0 {
+        return Err(format!(
+            "public_key_hex in spec '{}' must have even length",
+            spec
+        ));
+    }
+    Ok(StaticPeerConsensusKey {
+        validator_id: vid,
+        suite_id: suite,
+        public_key_hex: hex,
+    })
+}
+
+/// Parse all `--validator-consensus-key` specs into a vector. Bubbles
+/// the first error up as [`CliError::InvalidValidatorConsensusKey`].
+fn parse_validator_consensus_keys(
+    specs: &[String],
+) -> Result<Vec<StaticPeerConsensusKey>, CliError> {
+    let mut out = Vec::with_capacity(specs.len());
+    for spec in specs {
+        let parsed = parse_validator_consensus_key_spec(spec)
+            .map_err(CliError::InvalidValidatorConsensusKey)?;
+        out.push(parsed);
+    }
+    Ok(out)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1122,6 +1233,106 @@ impl CliArgs {
 mod tests {
     use super::*;
     use qbind_types::NetworkEnvironment;
+
+    // ------------------------------------------------------------------
+    // Run 033: --validator-consensus-key parser tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn run_033_parse_consensus_key_valid() {
+        let parsed =
+            parse_validator_consensus_key_spec("1:100:abcd0102").expect("valid");
+        assert_eq!(parsed.validator_id, 1);
+        assert_eq!(parsed.suite_id, 100);
+        assert_eq!(parsed.public_key_hex, "abcd0102");
+    }
+
+    #[test]
+    fn run_033_parse_consensus_key_rejects_missing_parts() {
+        assert!(parse_validator_consensus_key_spec("1:100").is_err());
+        assert!(parse_validator_consensus_key_spec("1").is_err());
+        assert!(parse_validator_consensus_key_spec("").is_err());
+    }
+
+    #[test]
+    fn run_033_parse_consensus_key_rejects_bad_vid() {
+        assert!(parse_validator_consensus_key_spec("notanid:100:abcd").is_err());
+    }
+
+    #[test]
+    fn run_033_parse_consensus_key_rejects_bad_suite() {
+        assert!(parse_validator_consensus_key_spec("1:notasuite:abcd").is_err());
+    }
+
+    #[test]
+    fn run_033_parse_consensus_key_rejects_empty_hex() {
+        assert!(parse_validator_consensus_key_spec("1:100:").is_err());
+    }
+
+    #[test]
+    fn run_033_parse_consensus_key_rejects_odd_length_hex() {
+        assert!(parse_validator_consensus_key_spec("1:100:abc").is_err());
+    }
+
+    #[test]
+    fn run_033_consensus_key_propagates_into_config() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--validator-consensus-key",
+            "0:100:aabb",
+            "--validator-consensus-key",
+            "1:100:ccdd",
+        ])
+        .expect("parse");
+        let cfg = args.to_node_config().expect("to_node_config");
+        assert_eq!(cfg.network.static_peer_consensus_keys.len(), 2);
+        assert_eq!(cfg.network.static_peer_consensus_keys[0].validator_id, 0);
+        assert_eq!(
+            cfg.network.static_peer_consensus_keys[0].public_key_hex,
+            "aabb"
+        );
+    }
+
+    #[test]
+    fn run_033_consensus_key_invalid_hex_is_caller_error() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--validator-consensus-key",
+            "0:100:abc",
+        ])
+        .expect("clap-level parse ok");
+        let res = args.to_node_config();
+        assert!(res.is_err(), "must error on odd hex");
+        match res.unwrap_err() {
+            CliError::InvalidValidatorConsensusKey(_) => {}
+            other => panic!("unexpected error: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run_033_consensus_key_default_is_empty() {
+        let args = CliArgs::try_parse_from(["qbind-node"]).expect("parse");
+        assert!(args.validator_consensus_keys.is_empty());
+        let cfg = args.to_node_config().expect("config");
+        assert!(cfg.network.static_peer_consensus_keys.is_empty());
+    }
+
+    #[test]
+    fn run_033_existing_p2p_peer_vid_at_addr_unchanged() {
+        // Regression: the new flag must not affect existing
+        // `--p2p-peer vid@addr` parsing.
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--enable-p2p",
+            "--network-mode",
+            "p2p",
+            "--p2p-peer",
+            "1@127.0.0.1:19001",
+        ])
+        .expect("parse");
+        assert_eq!(args.p2p_peers, vec!["1@127.0.0.1:19001".to_string()]);
+        assert!(args.validator_consensus_keys.is_empty());
+    }
 
     #[test]
     fn test_cli_args_default_values() {

@@ -104,6 +104,15 @@ pub struct LoadedValidatorSigner {
     /// (first four hex bytes). Already public from the validator
     /// set; safe to log.
     pub public_key_fingerprint: String,
+    /// Raw public-key bytes derived from the loaded signing key.
+    ///
+    /// This is *public* information (the same bytes that any peer
+    /// would see in the validator set) and is exposed so the binary
+    /// path can cross-check it against an operator-configured local
+    /// validator consensus key (Run 033). It is **not** secret
+    /// material and is only used for comparison; it is never logged
+    /// in full.
+    pub public_key_bytes: Vec<u8>,
 }
 
 impl std::fmt::Debug for LoadedValidatorSigner {
@@ -360,6 +369,7 @@ pub fn load_validator_signer_from_config(
         suite_id: EXPECTED_SUITE_ID,
         backend: backend_kind,
         public_key_fingerprint: public_key_fingerprint(&pk.0),
+        public_key_bytes: pk.0,
     })
 }
 

@@ -2648,6 +2648,54 @@ impl GenesisSourceConfig {
 /// let testnet_beta = NetworkTransportConfig::testnet_beta();
 /// assert!(testnet_beta.enable_p2p);
 /// ```
+/// Run 033: explicit per-validator consensus public key configuration
+/// entry.
+///
+/// This is the smallest additive shape the binary path needs to
+/// build a real `SuiteAwareValidatorKeyProvider` over the active
+/// validator set. It binds a consensus-level `validator_id` to a
+/// `(suite_id, public_key)` pair where the public key is supplied
+/// as a hex-encoded string for human-readability and strict decoding.
+///
+/// # Scope
+///
+/// This is **consensus** timeout-signing/verification key
+/// distribution, NOT transport-level KEMTLS root-key distribution.
+/// The two are separate concerns; see `docs/whitepaper/contradiction.md`
+/// C4 (transport PKI, still open) and C5 (consensus timeout
+/// verification, narrowed by this run).
+///
+/// # Strict decoding
+///
+/// `public_key_hex` MUST be lowercase hex (no `0x` prefix), even
+/// length, and decode without errors. Any malformed value fails
+/// closed at config-resolution time.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use qbind_node::node_config::StaticPeerConsensusKey;
+///
+/// let entry = StaticPeerConsensusKey {
+///     validator_id: 1,
+///     suite_id: 100, // ML-DSA-44
+///     public_key_hex: "abcd1234...".to_string(),
+/// };
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaticPeerConsensusKey {
+    /// Consensus-level validator ID this key belongs to. Must be
+    /// unique across the configured set.
+    pub validator_id: u64,
+    /// Signature suite ID (today: 100 = ML-DSA-44 /
+    /// `SUITE_PQ_RESERVED_1`). Other values fail closed at the
+    /// activation bridge.
+    pub suite_id: u16,
+    /// Hex-encoded public key bytes. Lowercase hex, no `0x`
+    /// prefix, even length. Strictly decoded.
+    pub public_key_hex: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NetworkTransportConfig {
     /// Whether the P2P overlay is enabled.
@@ -2681,6 +2729,27 @@ pub struct NetworkTransportConfig {
     /// List of static peers to dial at startup (T172).
     /// Format: "host:port"
     pub static_peers: Vec<String>,
+
+    /// Run 033: explicit per-validator consensus public keys for
+    /// timeout-verification activation.
+    ///
+    /// Each entry binds a `validator_id` to a `(suite_id, public_key)`
+    /// pair so `run_p2p_node` can construct a real
+    /// `SuiteAwareValidatorKeyProvider` over the active validator
+    /// set (local + configured peers) without solving production
+    /// PQC KEMTLS root-key distribution (which remains an open C4
+    /// item).
+    ///
+    /// **Backward-compatible**: defaults to empty. When empty,
+    /// timeout-verification activation behaves exactly as Run 032
+    /// (`SignerPresentKeyProviderUnavailable`). When non-empty and
+    /// covering local + every `--p2p-peer vid@addr` peer, the
+    /// bridge can produce `verification_ctx: Some(...)`.
+    ///
+    /// **Not** a substitute for production transport PKI: this
+    /// configures *consensus* timeout signing/verification keys, not
+    /// KEMTLS root keys. See `docs/whitepaper/contradiction.md` C4/C5.
+    pub static_peer_consensus_keys: Vec<StaticPeerConsensusKey>,
 
     // ========================================================================
     // T205: Dynamic Discovery Configuration
@@ -2804,6 +2873,7 @@ impl Default for NetworkTransportConfig {
             listen_addr: None,
             advertised_addr: None,
             static_peers: Vec::new(),
+            static_peer_consensus_keys: Vec::new(),
             // T205: Discovery defaults (disabled for DevNet/TestNet Alpha)
             discovery_enabled: false,
             discovery_interval_secs: 30,
@@ -2843,6 +2913,7 @@ impl NetworkTransportConfig {
             listen_addr: Some("0.0.0.0:9000".to_string()),
             advertised_addr: None,
             static_peers: Vec::new(),
+            static_peer_consensus_keys: Vec::new(),
             // T205: Discovery enabled for TestNet Beta
             discovery_enabled: true,
             discovery_interval_secs: 30,
@@ -2873,6 +2944,7 @@ impl NetworkTransportConfig {
             listen_addr: Some("0.0.0.0:9000".to_string()),
             advertised_addr: None,
             static_peers: Vec::new(),
+            static_peer_consensus_keys: Vec::new(),
             // T205: Discovery enabled and required for MainNet
             discovery_enabled: true,
             discovery_interval_secs: 30,
