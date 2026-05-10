@@ -71,8 +71,9 @@ use crate::p2p_tcp::{P2pTransportError, TcpKemTlsP2pService};
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::{
-    AeadSuite, CryptoError, KemSuite, MlDsa44SignatureSuite, MlKem768Backend, SignatureSuite,
-    StaticCryptoProvider, KEM_SUITE_ML_KEM_768,
+    AeadSuite, ChaCha20Poly1305Backend, CryptoError, KemSuite, MlDsa44SignatureSuite,
+    MlKem768Backend, SignatureSuite, StaticCryptoProvider, AEAD_SUITE_CHACHA20_POLY1305,
+    KEM_SUITE_ML_KEM_768,
 };
 use qbind_net::{
     ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
@@ -349,19 +350,31 @@ fn make_test_crypto_provider(
 ///   204 ML-DSA-44, reusing the same backend as validator vote /
 ///   proposal / timeout signing — no parallel crypto path);
 /// - the registered `sig_suite_id` is the canonical PQC transport
-///   suite ID (`100` = ML-DSA-44).
+///   suite ID (`100` = ML-DSA-44);
+/// - **Run 039:** the registered KEM suite is the **real**
+///   `MlKem768Backend` at suite_id=`KEM_SUITE_ML_KEM_768` (=100), not
+///   `DummyKem`;
+/// - **Run 040:** the registered AEAD suite is the **real**
+///   `ChaCha20Poly1305Backend` at suite_id=`AEAD_SUITE_CHACHA20_POLY1305`
+///   (=101), not `DummyAead`. The 32-byte AEAD key length matches the
+///   key length used in the existing `qbind_net::keys::SessionKeys`
+///   key schedule, the 12-byte nonce matches the existing
+///   `flag(1) || session_id(3) || counter(8)` nonce layout in
+///   `qbind_net::session::AeadSession`, and the 16-byte Poly1305 tag
+///   replaces the 1-byte `DummyAead` marker tag — fail-closed on bad
+///   tag / wrong key / wrong nonce / wrong AAD / malformed ciphertext.
 ///
-/// Run 039 replaces the test-grade KEM with real ML-KEM-768 on this
-/// provider. AEAD is still the test-grade `DummyAead`; this run does
-/// not claim full production transport security.
+/// This provider does NOT claim CA / cert rotation / cert revocation /
+/// signed root-distribution lifecycle is solved; those remain operator-
+/// out-of-band and are tracked under C4 in
+/// `docs/whitepaper/contradiction.md`.
 fn make_pqc_static_root_crypto_provider(
-    aead_suite_id: u8,
     sig_suite_id: u8,
 ) -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
             .with_kem_suite(Arc::new(MlKem768Backend::new()))
-            .with_aead_suite(Arc::new(DummyAead::new(aead_suite_id)))
+            .with_aead_suite(Arc::new(ChaCha20Poly1305Backend::new()))
             .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(sig_suite_id))),
     )
 }
@@ -810,20 +823,36 @@ impl P2pNodeBuilder {
         // AEAD wiring on this binary surface is a separate C4 piece
         // (NOT C4(c)), tracked in `docs/whitepaper/contradiction.md`.
         let kem_suite_id: u8 = if pqc_active { KEM_SUITE_ML_KEM_768 } else { 1 };
-        let aead_suite_id: u8 = 2;
+        // Run 040: when pqc-static-root is active on this binary path,
+        // the AEAD suite is the real ChaCha20-Poly1305 backend at
+        // suite_id=101 (`AEAD_SUITE_CHACHA20_POLY1305`). The pre-Run-040
+        // test-grade default keeps suite_id=2 + DummyAead so existing
+        // B7/B8/B12 / T138 / T143 / T144 / T160 / T222 etc. tests
+        // remain bit-for-bit. Both ends agree because (a) the same
+        // `pqc_active` decision is taken from
+        // `with_pqc_root_config(...)` on each side, and (b)
+        // `aead_suite_id` is mixed into the HKDF info parameter inside
+        // `qbind_net::keys::SessionKeys::derive`, so a mismatched suite
+        // id between dialer and listener fails closed at handshake.
+        let aead_suite_id: u8 = if pqc_active {
+            AEAD_SUITE_CHACHA20_POLY1305
+        } else {
+            2
+        };
         let sig_suite_id: u8 = if pqc_active {
             PQC_TRANSPORT_SUITE_ML_DSA_44
         } else {
             3
         };
         let crypto = if pqc_active {
-            make_pqc_static_root_crypto_provider(aead_suite_id, sig_suite_id)
+            make_pqc_static_root_crypto_provider(sig_suite_id)
         } else {
             make_test_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id)
         };
         eprintln!(
-            "[Run039] P2pNodeBuilder: pqc_root_mode={} sig_suite_id={} \
+            "[Run040] P2pNodeBuilder: pqc_root_mode={} sig_suite_id={} \
              transport_kem_suite_id={} transport_kem_suite_name={} dummy_kem_registered={} \
+             transport_aead_suite_id={} transport_aead_suite_name={} dummy_aead_registered={} \
              configured_roots={} leaf_credentials_present={}",
             self.pqc_root_config
                 .as_ref()
@@ -835,6 +864,13 @@ impl P2pNodeBuilder {
                 "ml-kem-768"
             } else {
                 "dummy-kem"
+            },
+            !pqc_active,
+            aead_suite_id,
+            if pqc_active {
+                "chacha20-poly1305"
+            } else {
+                "dummy-aead"
             },
             !pqc_active,
             self.pqc_root_config
