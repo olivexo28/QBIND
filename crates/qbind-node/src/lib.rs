@@ -107,6 +107,10 @@ pub mod p2p_inbound;
 pub mod p2p_node_builder;
 pub mod p2p_tcp;
 pub mod peer_key_provider;
+// Run 037 — production-honest PQC KEMTLS root-key distribution config.
+pub mod pqc_root_config;
+// Run 037 — DevNet-only helper to mint real ML-DSA-44-signed delegation certs.
+pub mod pqc_devnet_helper;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;

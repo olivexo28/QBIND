@@ -70,11 +70,13 @@ use crate::p2p_inbound::{
 use crate::p2p_tcp::{P2pTransportError, TcpKemTlsP2pService};
 
 use qbind_consensus::ids::ValidatorId;
-use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
+use qbind_crypto::{AeadSuite, CryptoError, KemSuite, MlDsa44SignatureSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
     ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
     ServerConnectionConfig, ServerHandshakeConfig, TrustedClientRoots,
 };
+
+use crate::pqc_root_config::{PqcRootMode, PqcStaticRootConfig, PQC_TRANSPORT_SUITE_ML_DSA_44};
 
 // ============================================================================
 // Error Types
@@ -332,6 +334,35 @@ fn make_test_crypto_provider(
     )
 }
 
+/// Run 037: production-honest crypto provider for the
+/// `PqcRootMode::PqcStaticRoot` path.
+///
+/// Differences from `make_test_crypto_provider`:
+/// - the signature suite is the **real** `MlDsa44SignatureSuite` (FIPS
+///   204 ML-DSA-44, reusing the same backend as validator vote /
+///   proposal / timeout signing — no parallel crypto path);
+/// - the registered `sig_suite_id` is the canonical PQC transport
+///   suite ID (`100` = ML-DSA-44).
+///
+/// **Scope note (anti-overclaim)**: the KEM and AEAD suites in this
+/// provider are still the test-grade `DummyKem` / `DummyAead` from
+/// `make_test_crypto_provider`. Real `ML-KEM-768` / production AEAD
+/// wiring on the binary path is a separate C4 piece (NOT C4(c)) — see
+/// `docs/whitepaper/contradiction.md`. This run does not claim
+/// production KEMTLS for that part of the stack.
+fn make_pqc_static_root_crypto_provider(
+    kem_suite_id: u8,
+    aead_suite_id: u8,
+    sig_suite_id: u8,
+) -> Arc<StaticCryptoProvider> {
+    Arc::new(
+        StaticCryptoProvider::new()
+            .with_kem_suite(Arc::new(DummyKem::new(kem_suite_id)))
+            .with_aead_suite(Arc::new(DummyAead::new(aead_suite_id)))
+            .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(sig_suite_id))),
+    )
+}
+
 // ============================================================================
 // B7: Test-grade deterministic KEM keypair / NodeId derivation
 //
@@ -544,6 +575,23 @@ pub struct P2pNodeBuilder {
     /// the *verified* `AcceptedPeerInit.verified_peer_validator_id`
     /// instead of the dialer's self-asserted `client_random`.
     mutual_auth_mode: MutualAuthMode,
+    /// Run 037 (C4 piece (c)): production-honest PQC KEMTLS root-key
+    /// distribution config.
+    ///
+    /// When this is `Some(cfg)` with `cfg.mode == PqcRootMode::PqcStaticRoot`,
+    /// the builder:
+    /// - registers the real `MlDsa44SignatureSuite` under suite_id 100
+    ///   (replacing the test-grade `DummySig` for that suite_id);
+    /// - replaces the deterministic `TrustedClientRoots` resolver with
+    ///   one that consults `cfg.trusted_roots`;
+    /// - if `cfg.leaf_credentials` is set, uses those bytes as the
+    ///   on-wire `NetworkDelegationCert` (real ML-DSA-44-signed) and
+    ///   the corresponding KEM secret key, instead of the test-grade
+    ///   deterministic `make_dummy_delegation_cert` pair.
+    ///
+    /// When this is `None` or `cfg.mode == PqcRootMode::TestGradeDummySig`,
+    /// the builder keeps the pre-Run-037 B12 wiring bit-for-bit.
+    pqc_root_config: Option<PqcStaticRootConfig>,
 }
 
 impl Default for P2pNodeBuilder {
@@ -565,6 +613,10 @@ impl P2pNodeBuilder {
             // runs and harnesses. The hardened `Required` path is
             // explicitly opted into via `with_mutual_auth_mode`.
             mutual_auth_mode: MutualAuthMode::Disabled,
+            // Run 037: defaults to None to preserve pre-Run-037
+            // behaviour bit-for-bit. Production-honest mode is opted
+            // into via `with_pqc_root_config`.
+            pqc_root_config: None,
         }
     }
 
@@ -620,6 +672,27 @@ impl P2pNodeBuilder {
         self
     }
 
+    /// Run 037 (C4 piece (c)): opt into production-honest PQC root-key
+    /// distribution.
+    ///
+    /// When called with a config whose `mode == PqcRootMode::PqcStaticRoot`:
+    /// - The crypto provider registers the real `MlDsa44SignatureSuite`
+    ///   under suite_id `100` instead of the test-grade `DummySig`.
+    /// - The listener-side `TrustedClientRoots` resolver consults the
+    ///   operator-configured roots; unknown `root_key_id` ⇒ rejected
+    ///   with `NetError::ClientCertInvalid("untrusted root")`.
+    /// - When `leaf_credentials` is provided, the dialer presents the
+    ///   real ML-DSA-44-signed `NetworkDelegationCert` from disk
+    ///   (matching `cert.leaf_kem_pk` to the loaded KEM secret key).
+    ///
+    /// When called with `mode == PqcRootMode::TestGradeDummySig` (or
+    /// not called at all), pre-Run-037 B12 wiring is preserved
+    /// bit-for-bit.
+    pub fn with_pqc_root_config(mut self, cfg: PqcStaticRootConfig) -> Self {
+        self.pqc_root_config = Some(cfg);
+        self
+    }
+
     /// Build the P2P node context.
     ///
     /// This method:
@@ -654,11 +727,54 @@ impl P2pNodeBuilder {
         // tion now round-trips on every node.
         let node_id = derive_test_node_id_from_validator_id(validator_id.as_u64());
 
-        // Create crypto provider (using test crypto for T175)
+        // Create crypto provider.
+        //
+        // Test-grade default: DummySig at suite_id=3, used by all
+        // pre-Run-037 evidence runs (B7..B12, T175, etc.).
+        //
+        // Run 037 production-honest mode: when the operator opted into
+        // `with_pqc_root_config(cfg)` with `cfg.mode == PqcStaticRoot`,
+        // we register the real `MlDsa44SignatureSuite` at suite_id=100
+        // (the canonical PQC transport suite ID) instead of `DummySig`.
+        // Cert verification then runs through the existing
+        // `qbind_net::handshake::verify_delegation_cert` path against
+        // the operator-configured root pks. KEM/AEAD remain on the
+        // existing test-grade primitives — production ML-KEM-768 /
+        // AEAD wiring on this binary surface is a separate C4 piece
+        // (NOT C4(c)), tracked in `docs/whitepaper/contradiction.md`.
         let kem_suite_id: u8 = 1;
         let aead_suite_id: u8 = 2;
-        let sig_suite_id: u8 = 3;
-        let crypto = make_test_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id);
+        let pqc_active = matches!(
+            self.pqc_root_config.as_ref().map(|c| c.mode),
+            Some(PqcRootMode::PqcStaticRoot)
+        );
+        let sig_suite_id: u8 = if pqc_active {
+            PQC_TRANSPORT_SUITE_ML_DSA_44
+        } else {
+            3
+        };
+        let crypto = if pqc_active {
+            make_pqc_static_root_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id)
+        } else {
+            make_test_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id)
+        };
+        eprintln!(
+            "[Run037] P2pNodeBuilder: pqc_root_mode={} sig_suite_id={} \
+             configured_roots={} leaf_credentials_present={}",
+            self.pqc_root_config
+                .as_ref()
+                .map(|c| c.mode.to_string())
+                .unwrap_or_else(|| "test-grade-dummy-sig".to_string()),
+            sig_suite_id,
+            self.pqc_root_config
+                .as_ref()
+                .map(|c| c.trusted_roots.len())
+                .unwrap_or(0),
+            self.pqc_root_config
+                .as_ref()
+                .map(|c| c.leaf_credentials.is_some())
+                .unwrap_or(false),
+        );
 
         // Create connection configs
         let (server_cfg, client_cfg) = self.create_connection_configs(
@@ -863,6 +979,23 @@ impl P2pNodeBuilder {
         // Create metrics
         let metrics = Arc::new(P2pMetrics::new());
 
+        // Run 037: surface PQC root distribution mode in metrics so
+        // operators / scrapers can confirm at a glance whether the
+        // production-honest path is active and how many roots are
+        // configured. No private key bytes are exposed.
+        let (pqc_mode_n, pqc_roots_n) = match self.pqc_root_config.as_ref() {
+            Some(cfg) => {
+                let m = match cfg.mode {
+                    PqcRootMode::TestGradeDummySig => 0u64,
+                    PqcRootMode::PqcStaticRoot => 1u64,
+                };
+                (m, cfg.trusted_roots.len() as u64)
+            }
+            None => (0u64, 0u64),
+        };
+        metrics.set_pqc_root_mode(pqc_mode_n);
+        metrics.set_pqc_roots_configured(pqc_roots_n);
+
         // Get inbound receiver from P2P service.
         //
         // C4/B6 fix: previously this code created a fresh, immediately-dropped
@@ -954,8 +1087,10 @@ impl P2pNodeBuilder {
         let (server_kem_pk, server_kem_sk) =
             derive_test_kem_keypair_from_validator_id(validator_id.as_u64());
 
-        // Create a dummy delegation certificate
-        let cert = self.make_dummy_delegation_cert(
+        // Create a test-grade dummy delegation certificate (used by
+        // default and when the PQC mode is not active OR when the
+        // operator did not supply leaf_credentials).
+        let dummy_cert = self.make_dummy_delegation_cert(
             validator_id_bytes,
             root_key_id,
             server_kem_pk.clone(),
@@ -963,13 +1098,59 @@ impl P2pNodeBuilder {
             sig_suite_id,
         );
 
-        // Encode certificate
+        // Encode test-grade certificate
         use qbind_wire::io::WireEncode;
-        let mut cert_bytes = Vec::new();
-        cert.encode(&mut cert_bytes);
+        let mut dummy_cert_bytes = Vec::new();
+        dummy_cert.encode(&mut dummy_cert_bytes);
 
-        // Root network public key (dummy)
-        let root_network_pk: Vec<u8> = vec![0u8; 32];
+        // Run 037: when the operator opted into pqc-static-root and
+        // supplied a real ML-DSA-44-signed leaf cert + KEM sk via
+        // `--p2p-leaf-cert*`, present those bytes on the wire instead
+        // of the test-grade dummy. The leaf KEM pk is bound by the
+        // cert (the offline helper wrote it there); the corresponding
+        // KEM sk is read from disk and wrapped into `KemPrivateKey`
+        // (zeroize-on-drop) below.
+        //
+        // We deliberately do not auto-mint a cert at runtime in
+        // production-required mode — the offline helper
+        // `pqc_devnet_helper::issue_leaf_delegation_cert` is the
+        // single source of cert issuance.
+        let pqc_leaf = self
+            .pqc_root_config
+            .as_ref()
+            .filter(|cfg| matches!(cfg.mode, PqcRootMode::PqcStaticRoot))
+            .and_then(|cfg| cfg.leaf_credentials.as_ref());
+        let (cert_bytes, server_kem_sk_final) = match pqc_leaf {
+            Some(creds) => (creds.cert_bytes.clone(), creds.kem_sk_bytes.clone()),
+            None => (dummy_cert_bytes, server_kem_sk),
+        };
+
+        // Root network public key.
+        //
+        // Pre-Run-037 / test-grade default: a 32-byte dummy. The
+        // `DummySig::verify` path accepts any signature so the actual
+        // root pk bytes don't matter on either dialer or listener
+        // side.
+        //
+        // Run 037: when the operator is in `PqcStaticRoot` mode, the
+        // dialer's `peer_root_network_pk` and the server's
+        // `local_root_network_pk` must both be the operator-configured
+        // root pk (the SAME ML-DSA-44 pk that signed our leaf cert).
+        // The dialer uses it to verify the listener's ServerAccept
+        // cert; the listener uses it as the local cert's binding
+        // material. We pick the first configured trusted root for
+        // this DevNet shape (single-root); a future multi-root /
+        // rotated path is tracked under C4 in
+        // `docs/whitepaper/contradiction.md`.
+        let root_network_pk: Vec<u8> = match self
+            .pqc_root_config
+            .as_ref()
+            .filter(|cfg| matches!(cfg.mode, PqcRootMode::PqcStaticRoot))
+            .and_then(|cfg| cfg.trusted_roots.first())
+        {
+            Some(r) => r.root_pk.clone(),
+            None => vec![0u8; 32],
+        };
 
         // Random values for handshake
         let mut client_random = [0u8; 32];
@@ -1014,11 +1195,36 @@ impl P2pNodeBuilder {
         // tampered cert) is rejected with `NetError::KeySchedule`
         // before the AEAD session is established. Production PQC
         // root key distribution is tracked separately under C4.
-        let trusted_client_roots = match mutual_auth_mode {
-            MutualAuthMode::Required | MutualAuthMode::Optional => Some(
+        // Run 037: under `PqcStaticRoot` + `Required`/`Optional`,
+        // install a `TrustedClientRoots` resolver that consults the
+        // operator-configured PQC root pks. Unknown `root_key_id` ⇒
+        // `parse_and_verify_client_cert` returns
+        // `NetError::ClientCertInvalid("untrusted root")` — fail
+        // closed, no silent fallback.
+        //
+        // Pre-Run-037 / test-grade default: keep the deterministic
+        // `Some(vec![0x01u8; 32])` resolver that the existing B12
+        // tests exercise, so all those tests remain bit-for-bit.
+        //
+        // The two paths are mutually exclusive: when PQC is active,
+        // the registered signature suite is real ML-DSA-44 and the
+        // dummy 32-byte resolver pk would not pass verification
+        // anyway; when PQC is inactive, the registered signature
+        // suite is the always-true DummySig and any resolver pk is
+        // accepted.
+        let trusted_client_roots = match (mutual_auth_mode, self.pqc_root_config.as_ref()) {
+            (MutualAuthMode::Required | MutualAuthMode::Optional, Some(cfg))
+                if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) =>
+            {
+                let cfg = cfg.clone();
+                Some(TrustedClientRoots::new(move |root_key_id: &[u8; 32]| {
+                    cfg.lookup_root_pk(root_key_id).map(|r| r.root_pk.clone())
+                }))
+            }
+            (MutualAuthMode::Required | MutualAuthMode::Optional, _) => Some(
                 TrustedClientRoots::new(|_root_key_id: &[u8; 32]| Some(vec![0x01u8; 32])),
             ),
-            MutualAuthMode::Disabled => None,
+            (MutualAuthMode::Disabled, _) => None,
         };
 
         // Create handshake configs
@@ -1037,7 +1243,7 @@ impl P2pNodeBuilder {
             crypto,
             local_root_network_pk: root_network_pk,
             local_delegation_cert: cert_bytes,
-            local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk)),
+            local_kem_sk: Arc::new(KemPrivateKey::new(server_kem_sk_final)),
             kem_metrics: None,
             cookie_config: None,
             local_validator_id: validator_id_bytes,

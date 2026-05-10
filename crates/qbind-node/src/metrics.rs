@@ -5501,6 +5501,49 @@ pub struct P2pMetrics {
     target_outbound_peers: AtomicU64,
     /// Configuration: Maximum known peers.
     max_known_peers: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 037 (C4 piece (c)) — production-honest PQC KEMTLS root-key
+    // distribution observability.
+    //
+    // Exposed names (Prometheus-style):
+    //   qbind_p2p_pqc_root_mode               (gauge: 0=test-grade, 1=pqc-static-root)
+    //   qbind_p2p_pqc_roots_configured        (gauge)
+    //   qbind_p2p_pqc_cert_verify_accepted_total
+    //   qbind_p2p_pqc_cert_verify_rejected_total
+    //   qbind_p2p_pqc_cert_rejected_unknown_root_total
+    //   qbind_p2p_pqc_cert_rejected_wrong_suite_total
+    //   qbind_p2p_pqc_cert_rejected_bad_signature_total
+    //   qbind_p2p_pqc_cert_rejected_validator_mismatch_total
+    //   qbind_p2p_pqc_cert_rejected_malformed_total
+    //   qbind_p2p_pqc_cert_rejected_expired_total
+    // ------------------------------------------------------------------
+    /// Active mutual-auth root mode: 0 = test-grade DummySig (default
+    /// pre-Run-037), 1 = pqc-static-root (Run 037).
+    pqc_root_mode: AtomicU64,
+    /// Number of `--p2p-trusted-root` entries configured at startup.
+    pqc_roots_configured: AtomicU64,
+    /// Total successful PQC delegation cert verifications.
+    pqc_cert_verify_accepted_total: AtomicU64,
+    /// Total rejected PQC delegation cert verifications (any reason).
+    pqc_cert_verify_rejected_total: AtomicU64,
+    /// Sub-counter: rejected because `root_key_id` is not in the
+    /// configured trust set.
+    pqc_cert_rejected_unknown_root_total: AtomicU64,
+    /// Sub-counter: rejected because `sig_suite_id` is not registered
+    /// in the crypto provider.
+    pqc_cert_rejected_wrong_suite_total: AtomicU64,
+    /// Sub-counter: rejected because the ML-DSA-44 signature did not
+    /// verify under the configured root pk.
+    pqc_cert_rejected_bad_signature_total: AtomicU64,
+    /// Sub-counter: rejected because the `validator_id` field did not
+    /// match the expected dialer identity.
+    pqc_cert_rejected_validator_mismatch_total: AtomicU64,
+    /// Sub-counter: rejected because the cert bytes did not parse.
+    pqc_cert_rejected_malformed_total: AtomicU64,
+    /// Sub-counter: rejected because the cert is outside its validity
+    /// window.
+    pqc_cert_rejected_expired_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6184,7 +6227,140 @@ impl P2pMetrics {
             self.config_max_known_peers()
         ));
 
+        // Run 037: PQC root-key distribution observability.
+        output.push_str(&format!(
+            "qbind_p2p_pqc_root_mode {}\n",
+            self.pqc_root_mode()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_roots_configured {}\n",
+            self.pqc_roots_configured()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_verify_accepted_total {}\n",
+            self.pqc_cert_verify_accepted_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_verify_rejected_total {}\n",
+            self.pqc_cert_verify_rejected_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_rejected_unknown_root_total {}\n",
+            self.pqc_cert_rejected_unknown_root_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_rejected_wrong_suite_total {}\n",
+            self.pqc_cert_rejected_wrong_suite_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_rejected_bad_signature_total {}\n",
+            self.pqc_cert_rejected_bad_signature_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_rejected_validator_mismatch_total {}\n",
+            self.pqc_cert_rejected_validator_mismatch_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_rejected_malformed_total {}\n",
+            self.pqc_cert_rejected_malformed_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_rejected_expired_total {}\n",
+            self.pqc_cert_rejected_expired_total()
+        ));
+
         output
+    }
+
+    // ------------------------------------------------------------------
+    // Run 037 (C4 piece (c)) accessors.
+    // ------------------------------------------------------------------
+
+    /// 0 = test-grade DummySig, 1 = pqc-static-root.
+    pub fn pqc_root_mode(&self) -> u64 {
+        self.pqc_root_mode.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_root_mode(&self, mode: u64) {
+        self.pqc_root_mode.store(mode, Ordering::Relaxed);
+    }
+
+    pub fn pqc_roots_configured(&self) -> u64 {
+        self.pqc_roots_configured.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_roots_configured(&self, n: u64) {
+        self.pqc_roots_configured.store(n, Ordering::Relaxed);
+    }
+
+    pub fn pqc_cert_verify_accepted_total(&self) -> u64 {
+        self.pqc_cert_verify_accepted_total.load(Ordering::Relaxed)
+    }
+    pub fn inc_pqc_cert_verify_accepted(&self) {
+        self.pqc_cert_verify_accepted_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn pqc_cert_verify_rejected_total(&self) -> u64 {
+        self.pqc_cert_verify_rejected_total.load(Ordering::Relaxed)
+    }
+    pub fn inc_pqc_cert_verify_rejected_unknown_root(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_unknown_root_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_pqc_cert_verify_rejected_wrong_suite(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_wrong_suite_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_pqc_cert_verify_rejected_bad_signature(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_bad_signature_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_pqc_cert_verify_rejected_validator_mismatch(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_validator_mismatch_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_pqc_cert_verify_rejected_malformed(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_malformed_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn inc_pqc_cert_verify_rejected_expired(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_expired_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn pqc_cert_rejected_unknown_root_total(&self) -> u64 {
+        self.pqc_cert_rejected_unknown_root_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn pqc_cert_rejected_wrong_suite_total(&self) -> u64 {
+        self.pqc_cert_rejected_wrong_suite_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn pqc_cert_rejected_bad_signature_total(&self) -> u64 {
+        self.pqc_cert_rejected_bad_signature_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn pqc_cert_rejected_validator_mismatch_total(&self) -> u64 {
+        self.pqc_cert_rejected_validator_mismatch_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn pqc_cert_rejected_malformed_total(&self) -> u64 {
+        self.pqc_cert_rejected_malformed_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn pqc_cert_rejected_expired_total(&self) -> u64 {
+        self.pqc_cert_rejected_expired_total.load(Ordering::Relaxed)
     }
 }
 

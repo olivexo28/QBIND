@@ -517,35 +517,73 @@ async fn run_p2p_node(
     // wiring to be enabled on MainNet, where the operator's intent
     // is unambiguously production-grade. TestNet is treated as a
     // pre-production environment and only generates a warning.
+    //
+    // Run 037 (C4 piece (c)): when the operator opts into
+    // `--p2p-pqc-root-mode pqc-static-root`, the signature suite is
+    // the real `MlDsa44SignatureSuite` and the trust roots are
+    // operator-configured ML-DSA-44 public keys. That removes the
+    // primary reason this guard refused MainNet startup, so the
+    // guard is relaxed for the PQC-static-root path while keeping
+    // the test-grade DummySig path strictly DevNet-only. Note that
+    // the KEM/AEAD primitives on the binary path are still
+    // test-grade today (separate C4 piece, NOT C4(c)) so MainNet
+    // remains gated on additional pieces — but the cert-verification
+    // / root-distribution surface is now production-honest.
     use qbind_node::node_config::MutualAuthMode as NodeMam;
+    use qbind_node::pqc_root_config::PqcRootMode as PqcMode;
     use qbind_types::NetworkEnvironment;
     let configured_mode = match mutual_auth_mode {
         qbind_net::MutualAuthMode::Required => NodeMam::Required,
         qbind_net::MutualAuthMode::Optional => NodeMam::Optional,
         qbind_net::MutualAuthMode::Disabled => NodeMam::Disabled,
     };
+    // Re-parse the PQC root mode purely for the guard message; the
+    // actual config is built below.
+    let configured_pqc_root_mode = args
+        .p2p_pqc_root_mode
+        .as_deref()
+        .and_then(qbind_node::pqc_root_config::parse_pqc_root_mode)
+        .unwrap_or_default();
     if matches!(configured_mode, NodeMam::Required | NodeMam::Optional) {
-        match config.environment {
-            NetworkEnvironment::Mainnet => {
+        match (config.environment, configured_pqc_root_mode) {
+            (NetworkEnvironment::Mainnet, PqcMode::TestGradeDummySig) => {
                 eprintln!(
                     "[binary] FATAL: --p2p-mutual-auth={} is wired through B12's test-grade \
-                     TrustedClientRoots/DummySig stack and is not a substitute for production PQC \
-                     root-key distribution; refusing to start on environment=mainnet. \
-                     See docs/whitepaper/contradiction.md C4.",
+                     TrustedClientRoots/DummySig stack and is not a substitute for production \
+                     PQC root-key distribution; refusing to start on environment=mainnet \
+                     without --p2p-pqc-root-mode pqc-static-root. \
+                     See docs/whitepaper/contradiction.md C4(c).",
                     configured_mode
                 );
                 std::process::exit(1);
             }
-            NetworkEnvironment::Testnet => {
+            (NetworkEnvironment::Mainnet, PqcMode::PqcStaticRoot) => {
+                eprintln!(
+                    "[binary] Run 037: --p2p-mutual-auth={} on environment=mainnet is using the \
+                     production-honest PQC static-root cert-verification path. NOTE: KEM/AEAD \
+                     primitives on the binary path are still test-grade and remain a separate \
+                     C4 piece (not C4(c)); MainNet readiness is therefore not yet implied. See \
+                     docs/whitepaper/contradiction.md C4.",
+                    configured_mode
+                );
+            }
+            (NetworkEnvironment::Testnet, PqcMode::TestGradeDummySig) => {
                 eprintln!(
                     "[binary] WARNING: --p2p-mutual-auth={} is enabled with the B12 test-grade \
                      TrustedClientRoots/DummySig stack. The cert verification path is exercised \
                      structurally but production PQC root-key distribution is not. \
-                     See docs/whitepaper/contradiction.md C4.",
+                     See docs/whitepaper/contradiction.md C4(c).",
                     configured_mode
                 );
             }
-            NetworkEnvironment::Devnet => {
+            (NetworkEnvironment::Testnet, PqcMode::PqcStaticRoot) => {
+                eprintln!(
+                    "[binary] Run 037: --p2p-mutual-auth={} on TestNet is using the \
+                     production-honest PQC static-root cert-verification path.",
+                    configured_mode
+                );
+            }
+            (NetworkEnvironment::Devnet, _) => {
                 // DevNet is the intended target for the first
                 // mutual-auth binary-path evidence run; no extra
                 // warning beyond the banner above.
@@ -558,6 +596,117 @@ async fn run_p2p_node(
         .with_num_validators(num_validators as usize)
         .with_consensus_handler(Arc::new(consensus_handler))
         .with_mutual_auth_mode(mutual_auth_mode);
+
+    // Run 037 (C4 piece (c)): production-honest PQC KEMTLS root-key
+    // distribution. Default mode is `test-grade-dummy-sig` (preserves
+    // pre-Run-037 B12 wiring bit-for-bit). The operator opts into
+    // `pqc-static-root` via `--p2p-pqc-root-mode pqc-static-root`,
+    // which in combination with `--p2p-mutual-auth required` requires
+    // a non-empty `--p2p-trusted-root` list AND a loadable
+    // `--p2p-leaf-cert` + `--p2p-leaf-cert-key` pair. Any deviation
+    // fails the binary closed at startup — no silent downgrade to
+    // DummySig.
+    use qbind_node::pqc_root_config::{
+        parse_pqc_root_mode, parse_pqc_trusted_root_specs, PqcLeafCredentialPaths, PqcRootMode,
+        PqcStaticRootConfig,
+    };
+    let pqc_root_mode = args
+        .p2p_pqc_root_mode
+        .as_deref()
+        .map(|s| {
+            parse_pqc_root_mode(s).unwrap_or_else(|| {
+                eprintln!(
+                    "[binary] FATAL: unrecognized --p2p-pqc-root-mode value {:?}; \
+                     accepted: test-grade-dummy-sig | pqc-static-root",
+                    s
+                );
+                std::process::exit(1);
+            })
+        })
+        .unwrap_or(PqcRootMode::TestGradeDummySig);
+
+    let pqc_required = matches!(pqc_root_mode, PqcRootMode::PqcStaticRoot)
+        && matches!(mutual_auth_mode, qbind_net::MutualAuthMode::Required);
+
+    let trusted_roots = match parse_pqc_trusted_root_specs(&args.p2p_trusted_roots, pqc_required)
+    {
+        Ok(roots) => roots,
+        Err(e) => {
+            eprintln!(
+                "[binary] FATAL: --p2p-trusted-root parse error: {}. See \
+                 docs/whitepaper/contradiction.md C4(c).",
+                e
+            );
+            std::process::exit(1);
+        }
+    };
+
+    let leaf_credentials = match (
+        args.p2p_leaf_cert.as_ref(),
+        args.p2p_leaf_cert_key.as_ref(),
+    ) {
+        (Some(cert), Some(sk)) => {
+            let paths = PqcLeafCredentialPaths {
+                cert_path: cert.clone(),
+                kem_sk_path: sk.clone(),
+            };
+            match paths.load() {
+                Ok(creds) => Some(creds),
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: failed to load PQC leaf credentials: {}",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        (None, None) => None,
+        _ => {
+            eprintln!(
+                "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set together"
+            );
+            std::process::exit(1);
+        }
+    };
+
+    if pqc_required && leaf_credentials.is_none() {
+        eprintln!(
+            "[binary] FATAL: --p2p-mutual-auth required + --p2p-pqc-root-mode pqc-static-root \
+             requires --p2p-leaf-cert and --p2p-leaf-cert-key (production-honest mode must \
+             not silently fall back to test-grade certs). See \
+             docs/whitepaper/contradiction.md C4(c)."
+        );
+        std::process::exit(1);
+    }
+
+    let pqc_config = PqcStaticRootConfig {
+        mode: pqc_root_mode,
+        trusted_roots: trusted_roots.clone(),
+        leaf_credentials,
+    };
+
+    eprintln!(
+        "[binary] Run 037: pqc_root_mode={} configured_roots={} leaf_credentials_present={} \
+         (root fingerprints: [{}])",
+        pqc_config.mode,
+        pqc_config.trusted_roots.len(),
+        pqc_config.leaf_credentials.is_some(),
+        pqc_config
+            .trusted_roots
+            .iter()
+            .map(|r| format!(
+                "id={}.. suite={} fp={}",
+                &r.root_key_id_hex()[..8],
+                r.suite_id,
+                r.pk_fingerprint()
+            ))
+            .collect::<Vec<_>>()
+            .join("; "),
+    );
+
+    let builder = builder.with_pqc_root_config(pqc_config);
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {

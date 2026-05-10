@@ -1,0 +1,23 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 037: pqc_root_mode=pqc-static-root configured_roots=1 leaf_credentials_present=true (root fingerprints: [id=c63bb7a1.. suite=100 fp=7672bcc4])
+[Run037] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 configured_roots=1 leaf_credentials_present=true
+[binary] P2P transport up. Listen address: 127.0.0.1:19420, static peers: 1
+[binary] Consensus loop config: local_validator_id=ValidatorId(0) num_validators=2 restore_baseline=false interconnect=p2p
+[binary] Multi-validator P2P (2 validators): inbound P2P consensus messages are routed into BasicHotStuffEngine via on_proposal_event / on_vote_event; engine actions flow back out through P2pConsensusNetwork.
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[binary] Run 032: validator signer not loaded — config.signer_keystore_path is not set; Run 030 bit-equivalent path (no outbound timeout signing). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.
+[binary] Run 033: SuiteAwareValidatorKeyProvider NOT built — network.static_peer_consensus_keys is empty (no --validator-consensus-key entries). Preserving Run 032 SignerPresentKeyProviderUnavailable disabled behaviour. See docs/whitepaper/contradiction.md C5.
+[binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=2 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
+[binary] Run 033: timeout verification DISABLED — BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). Inbound timeout/new-view crypto verification and outbound timeout signing remain off until production pieces land. See docs/whitepaper/contradiction.md C5.
+[binary] P2P node started. Press Ctrl+C to exit.
+[binary-consensus] Starting consensus loop: local_id=ValidatorId(0) num_validators=2 tick=100ms restore_baseline=false interconnect=p2p late_peer_reemit=on timeout_verification=off
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[P2P] Inbound connection error: Handshake error: channel error: Net(Protocol("server handle_client_init failed"))
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] dial 127.0.0.1:19421 giving up after 5 attempt(s): Handshake error: channel error: Net(Protocol("client handle_server_accept failed")) (transient=false, max_attempts=8)
+[binary-consensus] B14: emitted TimeoutMsg for view=0 after 50 ticks of no progress

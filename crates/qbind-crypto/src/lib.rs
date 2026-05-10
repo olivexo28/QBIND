@@ -5,6 +5,7 @@ pub mod error;
 pub mod kdf;
 pub mod kem;
 pub mod ml_dsa44;
+pub mod ml_dsa44_signature_suite;
 pub mod ml_kem768;
 pub mod provider;
 pub mod signature;
@@ -25,6 +26,7 @@ pub use ml_dsa44::{
     MlDsa44Backend, ValidatorSigningKey, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SECRET_KEY_SIZE,
     ML_DSA_44_SIGNATURE_SIZE,
 };
+pub use ml_dsa44_signature_suite::{ml_dsa_44_sign_digest, MlDsa44SignatureSuite};
 pub use ml_kem768::{
     MlKem768Backend, KEM_SUITE_ML_KEM_768, ML_KEM_768_CIPHERTEXT_SIZE, ML_KEM_768_PUBLIC_KEY_SIZE,
     ML_KEM_768_SECRET_KEY_SIZE, ML_KEM_768_SHARED_SECRET_SIZE,

@@ -274,6 +274,64 @@ pub struct CliArgs {
     #[arg(long = "validator-consensus-key", action = clap::ArgAction::Append)]
     pub validator_consensus_keys: Vec<String>,
 
+    /// Run 037 (C4 piece (c)): production-honest PQC KEMTLS root-key
+    /// distribution mode for the binary path.
+    ///
+    /// Accepted values:
+    /// - `test-grade-dummy-sig` (aliases: `test-grade`, `dummy`,
+    ///   `test`) — pre-Run-037 B12 wiring with `DummySig` +
+    ///   deterministic `TrustedClientRoots`. Available on DevNet only.
+    /// - `pqc-static-root` (aliases: `pqc-static`, `pqc`,
+    ///   `static-root`) — real `MlDsa44SignatureSuite` registered;
+    ///   `TrustedClientRoots` consults `--p2p-trusted-root`; dialer
+    ///   presents the real ML-DSA-44-signed `NetworkDelegationCert`
+    ///   loaded from `--p2p-leaf-cert*`. Required for any
+    ///   production-honest claim.
+    ///
+    /// Defaults to `test-grade-dummy-sig` to preserve every existing
+    /// DevNet test-grade evidence run bit-for-bit.
+    ///
+    /// See `docs/whitepaper/contradiction.md` C4 piece (c) and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_037.md`.
+    #[arg(long = "p2p-pqc-root-mode")]
+    pub p2p_pqc_root_mode: Option<String>,
+
+    /// Run 037: trusted PQC transport root public key, repeatable.
+    ///
+    /// Format: `ROOT_KEY_ID_HEX:SUITE:ROOT_PK_HEX` where
+    /// - `ROOT_KEY_ID_HEX` is exactly 64 lowercase hex chars
+    ///   (32 bytes), the stable identifier embedded in the cert
+    ///   `root_key_id` field;
+    /// - `SUITE` is the decimal signature suite id; today only
+    ///   `100` (ML-DSA-44) is accepted;
+    /// - `ROOT_PK_HEX` is the lowercase hex of the root public key
+    ///   (for ML-DSA-44, must decode to
+    ///   `qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE` bytes).
+    ///
+    /// Strict parsing: malformed entries / duplicate `root_key_id` /
+    /// unsupported suite all fail closed at startup. Required
+    /// (non-empty) under `--p2p-mutual-auth required` +
+    /// `--p2p-pqc-root-mode pqc-static-root`.
+    #[arg(long = "p2p-trusted-root", action = clap::ArgAction::Append)]
+    pub p2p_trusted_roots: Vec<String>,
+
+    /// Run 037: path to a file containing this node's encoded
+    /// `NetworkDelegationCert` (the bytes produced by
+    /// `qbind_node::pqc_devnet_helper::encode_cert`). Required under
+    /// `--p2p-mutual-auth required` + `--p2p-pqc-root-mode pqc-static-root`.
+    #[arg(long = "p2p-leaf-cert")]
+    pub p2p_leaf_cert: Option<PathBuf>,
+
+    /// Run 037: path to a file containing this node's KEM secret key
+    /// bytes corresponding to the `leaf_kem_pk` bound by
+    /// `--p2p-leaf-cert`. Required under `--p2p-mutual-auth required` +
+    /// `--p2p-pqc-root-mode pqc-static-root`.
+    ///
+    /// **Discipline**: this file must be readable by the qbind-node
+    /// process only. The binary never logs the bytes it loads.
+    #[arg(long = "p2p-leaf-cert-key")]
+    pub p2p_leaf_cert_key: Option<PathBuf>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================
@@ -1489,6 +1547,52 @@ mod tests {
         assert!(help.contains("--snapshot-dir"));
         assert!(help.contains("--snapshot-interval-blocks"));
         assert!(help.contains("--snapshot-max-snapshots"));
+    }
+
+    /// Run 037 (C4 piece (c)): the new PQC root-distribution CLI
+    /// flags are wired into clap and visible in help.
+    #[test]
+    fn test_cli_help_exposes_run_037_pqc_flags() {
+        use clap::CommandFactory;
+        let mut help = Vec::new();
+        CliArgs::command().write_long_help(&mut help).unwrap();
+        let help = String::from_utf8(help).unwrap();
+
+        assert!(help.contains("--p2p-pqc-root-mode"));
+        assert!(help.contains("--p2p-trusted-root"));
+        assert!(help.contains("--p2p-leaf-cert"));
+        assert!(help.contains("--p2p-leaf-cert-key"));
+        // Anti-overclaim discipline: the help text must point operators at
+        // the contradiction document so they can see the trust boundary
+        // before relying on these flags.
+        assert!(help.contains("contradiction.md"));
+    }
+
+    /// Run 037: minimal parse with the new flags set produces the
+    /// expected fields. Repeatable `--p2p-trusted-root` accumulates.
+    #[test]
+    fn test_cli_args_parse_run_037_pqc_flags() {
+        let args = CliArgs::try_parse_from([
+            "qbind-node",
+            "--p2p-pqc-root-mode",
+            "pqc-static-root",
+            "--p2p-trusted-root",
+            "00000000000000000000000000000000000000000000000000000000000000aa:100:dead",
+            "--p2p-trusted-root",
+            "00000000000000000000000000000000000000000000000000000000000000bb:100:beef",
+            "--p2p-leaf-cert",
+            "/tmp/leaf-cert.bin",
+            "--p2p-leaf-cert-key",
+            "/tmp/leaf-kem-sk.bin",
+        ])
+        .expect("clap parse");
+        assert_eq!(
+            args.p2p_pqc_root_mode.as_deref(),
+            Some("pqc-static-root")
+        );
+        assert_eq!(args.p2p_trusted_roots.len(), 2);
+        assert!(args.p2p_leaf_cert.is_some());
+        assert!(args.p2p_leaf_cert_key.is_some());
     }
 
     #[test]
