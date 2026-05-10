@@ -90,6 +90,7 @@ pub mod dag_mempool;
 pub mod evm_commit;
 pub mod evm_state_store;
 pub mod execution_adapter;
+pub mod forged_injection;
 pub mod hotstuff_node_sim;
 pub mod identity_map;
 pub mod keystore;

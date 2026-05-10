@@ -373,6 +373,21 @@ impl ChannelConsensusHandler {
     pub fn from_sender(sender: mpsc::Sender<ConsensusNetMsg>) -> Self {
         Self { sender }
     }
+
+    /// Run 035: clone the inbound `ConsensusNetMsg` sender so an opt-in,
+    /// dev/test-only injection harness can push crafted frames into the
+    /// **same** channel that the P2P inbound demuxer feeds. Frames pushed
+    /// here traverse the identical binary-loop verification gate
+    /// (`handle_inbound_consensus_msg` →
+    /// `verify_timeout_msg` / `verify_timeout_certificate_with_evidence`)
+    /// as real inbound network traffic. Production code does not call
+    /// this; the harness gates activation on `--env devnet` AND
+    /// `QBIND_DEVNET_FORGED_INJECTION=1`. See
+    /// `crates/qbind-node/src/forged_injection.rs` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md`.
+    pub fn sender_clone(&self) -> mpsc::Sender<ConsensusNetMsg> {
+        self.sender.clone()
+    }
 }
 
 impl ConsensusInboundHandler for ChannelConsensusHandler {

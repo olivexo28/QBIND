@@ -864,7 +864,7 @@ pub struct BinaryConsensusLoopInboundStats {
 /// driven by the same `BasicHotStuffEngine::on_proposal_event` /
 /// `on_vote_event` paths the non-restore binary path already uses.
 #[derive(Debug, Clone, Copy)]
-struct RestoreCatchupModeState {
+pub(crate) struct RestoreCatchupModeState {
     /// `true` while the node is in bounded restore-catchup mode.
     active: bool,
     /// The snapshot baseline height the loop was started above, used to
@@ -1801,7 +1801,7 @@ fn forward_actions_to_facade(
 /// Decode failures and engine-level rejections (e.g. wrong epoch) are
 /// counted in `stats` but never panic — they are exactly the kinds of
 /// peer-induced failures the binary path must tolerate.
-fn handle_inbound_consensus_msg(
+pub(crate) fn handle_inbound_consensus_msg(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     msg: ConsensusNetMsg,
     stats: &mut BinaryConsensusLoopInboundStats,
@@ -2259,6 +2259,39 @@ fn handle_inbound_consensus_msg(
             handle_restore_catchup_response(engine, resp, stats, local_validator_id, restore_mode);
         }
     }
+}
+
+/// Run 035: deliver a single `ConsensusNetMsg` through the same binary-loop
+/// inbound path used by real P2P traffic, with a fresh non-restore mode
+/// state. Used by the forged-injection harness's deterministic tests so
+/// that injected frames traverse the **same** verification gate as live
+/// inbound network frames.
+///
+/// This wrapper exists strictly to (a) keep `RestoreCatchupModeState`
+/// private to this module and (b) mirror the helper Run 030 tests use,
+/// so Run 035 cannot drift from the live inbound path the binary loop
+/// drives.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn deliver_inbound_for_run035(
+    engine: &mut BasicHotStuffEngine<[u8; 32]>,
+    msg: ConsensusNetMsg,
+    stats: &mut BinaryConsensusLoopInboundStats,
+    outbound: Option<&dyn ConsensusNetworkFacade>,
+    metrics: &Arc<NodeMetrics>,
+    local_validator_id: ValidatorId,
+    verification_ctx: Option<&TimeoutVerificationContext>,
+) {
+    let mut restore_mode = RestoreCatchupModeState::from_config(None);
+    handle_inbound_consensus_msg(
+        engine,
+        msg,
+        stats,
+        outbound,
+        metrics,
+        local_validator_id,
+        &mut restore_mode,
+        verification_ctx,
+    );
 }
 
 /// B14: per-tick view-timeout emission on the binary path.

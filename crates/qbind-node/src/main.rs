@@ -185,6 +185,80 @@ async fn main() {
     // Validate P2P configuration (may modify config)
     let p2p_enabled = config.validate_p2p_config();
 
+    // Run 035 — universal forged-injection startup gate. Refuses
+    // startup in ANY mode (LocalMesh or P2P) when `--devnet-forged-inject`
+    // is supplied without `--env devnet` and `QBIND_DEVNET_FORGED_INJECTION=1`.
+    // This prevents the harness from being silently accepted on
+    // Testnet/Mainnet even on code paths that don't have the inbound
+    // P2P channel. The actual injection task is spawned only on the
+    // P2P path inside `run_p2p_node`; non-P2P modes refuse the flag
+    // outright because the harness has no inbound channel to push
+    // frames into.
+    if !args.devnet_forged_inject.is_empty() {
+        use qbind_node::forged_injection::{
+            ForgedInjectionCase, ForgedInjectionGateError, ForgedInjectionHarness,
+            FORGED_INJECTION_ENV_VAR,
+        };
+        // Validate every CASE token first.
+        let mut cases: Vec<ForgedInjectionCase> = Vec::new();
+        for raw in args.devnet_forged_inject.iter() {
+            match ForgedInjectionCase::parse(raw) {
+                Ok(c) => cases.push(c),
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: --devnet-forged-inject parse error: {}. \
+                         Refusing startup. See \
+                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        // Validate environment + env var. The actual harness handle
+        // gets re-created inside `run_p2p_node` against the P2P
+        // inbound channel; this top-level call just enforces the
+        // safety gate so non-P2P modes can't slip past it.
+        let env_var = std::env::var(FORGED_INJECTION_ENV_VAR).ok();
+        if let Err(e) = ForgedInjectionHarness::try_activate(
+            config.environment,
+            cases,
+            env_var.as_deref(),
+        ) {
+            match e {
+                ForgedInjectionGateError::NotDevnet { .. }
+                | ForgedInjectionGateError::MissingEnvVar { .. }
+                | ForgedInjectionGateError::UnknownCase(_) => {
+                    eprintln!("[binary] FATAL: {}", e);
+                    std::process::exit(1);
+                }
+                // Disabled cannot occur because we just validated
+                // non-empty cases above, but keep this defensive
+                // arm so the match is exhaustive without unreachable!.
+                ForgedInjectionGateError::Disabled => {
+                    eprintln!(
+                        "[binary] FATAL: Run 035 forged-injection harness gate returned \
+                         Disabled despite non-empty case list; refusing to start. \
+                         This indicates a logic bug in the gate."
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        // The harness is also rejected on non-P2P modes, since it
+        // requires the P2P inbound channel.
+        if !p2p_enabled
+            || !matches!(config.network_mode, qbind_node::node_config::NetworkMode::P2p)
+        {
+            eprintln!(
+                "[binary] FATAL: --devnet-forged-inject requires --network-mode p2p (the \
+                 harness pushes frames through the P2P inbound channel). LocalMesh has \
+                 no inbound channel; refusing to start."
+            );
+            std::process::exit(1);
+        }
+    }
+
     // Log startup information
     let validator_id_str = args.validator_id_str();
     config.log_startup_info(Some(&validator_id_str));
@@ -390,6 +464,14 @@ async fn run_p2p_node(
     // the same default used by the underlying transport's inbound queue,
     // so we don't introduce a tighter bottleneck here.
     let (consensus_handler, consensus_inbound_rx) = ChannelConsensusHandler::new(256);
+    // Run 035: clone the sender BEFORE handing the handler to the P2P
+    // builder, so an opt-in dev/test-only forged-injection harness can
+    // push crafted frames through the same inbound channel real P2P
+    // traffic uses. Production paths never use this clone (the harness
+    // refuses to activate outside `--env devnet` + the explicit
+    // `QBIND_DEVNET_FORGED_INJECTION=1` env var). See
+    // `crates/qbind-node/src/forged_injection.rs`.
+    let consensus_inbound_tx_for_run035 = consensus_handler.sender_clone();
 
     // B12 — opt-in to mutual-auth hardened mode. CLI flag wins; if
     // absent, fall back to the QBIND_MUTUAL_AUTH env var; if still
@@ -934,12 +1016,29 @@ async fn run_p2p_node(
     let (consensus_handle, _progress) =
         spawn_binary_consensus_loop_with_io(consensus_cfg, shutdown_rx, node_metrics, io);
 
+    // Run 035: opt-in, dev/test-only forged Timeout/NewView injection
+    // harness. Disabled by default. Activation requires THREE
+    // concurrent signals (CLI cases + `--env devnet` +
+    // `QBIND_DEVNET_FORGED_INJECTION=1`); any missing signal is a
+    // fail-closed startup error. See
+    // `crates/qbind-node/src/forged_injection.rs` and
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md`.
+    let run035_handle = maybe_spawn_run035_forged_injection_harness(
+        &args,
+        &config,
+        consensus_inbound_tx_for_run035,
+        num_validators,
+    );
+
     eprintln!("[binary] P2P node started. Press Ctrl+C to exit.");
     let _ = tokio::signal::ctrl_c().await;
     eprintln!("[binary] Shutdown signal received, stopping P2P node...");
 
     drop(shutdown_tx);
     let _ = consensus_handle.await;
+    if let Some(handle) = run035_handle {
+        let _ = handle.await;
+    }
     if let Some(handle) = snapshot_handle {
         let _ = handle.await;
     }
@@ -948,6 +1047,134 @@ async fn run_p2p_node(
         eprintln!("[binary] Error during P2P shutdown: {:?}", e);
     }
     eprintln!("[binary] P2P node shutdown complete.");
+}
+
+/// Run 035 — opt-in dev/test-only forged Timeout/NewView injection
+/// harness wiring. Returns `None` when the harness is disabled (which
+/// is the default and the only outcome on Testnet/Mainnet); returns
+/// `Some(handle)` when activation succeeded under
+/// `--env devnet` AND `QBIND_DEVNET_FORGED_INJECTION=1` AND at least
+/// one `--devnet-forged-inject CASE` flag.
+///
+/// On any non-fatal activation refusal the binary continues with the
+/// harness inert. On a CLI parse error (unknown case token) or a
+/// safety-gate violation (the operator passed cases under non-Devnet),
+/// the binary refuses startup with `std::process::exit(1)` so it is
+/// impossible to silently activate the harness in production.
+fn maybe_spawn_run035_forged_injection_harness(
+    args: &CliArgs,
+    config: &qbind_node::node_config::NodeConfig,
+    sender: tokio::sync::mpsc::Sender<qbind_node::p2p::ConsensusNetMsg>,
+    num_validators: u64,
+) -> Option<tokio::task::JoinHandle<()>> {
+    use qbind_node::forged_injection::{
+        ForgedInjectionCase, ForgedInjectionGateError, ForgedInjectionHarness, RuntimeFixture,
+        FORGED_INJECTION_ENV_VAR,
+    };
+
+    if args.devnet_forged_inject.is_empty() {
+        // Default disabled path — emit nothing so /metrics, logs, and
+        // startup banner stay byte-identical to the harness-absent run.
+        return None;
+    }
+
+    // Parse case tokens up front so a typo fails closed before any
+    // gate evaluation.
+    let mut cases: Vec<ForgedInjectionCase> = Vec::with_capacity(args.devnet_forged_inject.len());
+    for raw in args.devnet_forged_inject.iter() {
+        match ForgedInjectionCase::parse(raw) {
+            Ok(c) => cases.push(c),
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: --devnet-forged-inject parse error: {}. \
+                     Refusing startup. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md.",
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
+    let env_var = std::env::var(FORGED_INJECTION_ENV_VAR).ok();
+    let harness = match ForgedInjectionHarness::try_activate(
+        config.environment,
+        cases,
+        env_var.as_deref(),
+    ) {
+        Ok(h) => h,
+        Err(e @ ForgedInjectionGateError::NotDevnet { .. }) => {
+            eprintln!("[binary] FATAL: {}", e);
+            std::process::exit(1);
+        }
+        Err(e @ ForgedInjectionGateError::MissingEnvVar { .. }) => {
+            eprintln!("[binary] FATAL: {}", e);
+            std::process::exit(1);
+        }
+        Err(ForgedInjectionGateError::Disabled) => {
+            // Already short-circuited above; defensive arm.
+            return None;
+        }
+        Err(e @ ForgedInjectionGateError::UnknownCase(_)) => {
+            eprintln!("[binary] FATAL: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Build a self-contained runtime fixture with FRESH ML-DSA-44
+    // keypairs the harness uses to construct forged frames. These
+    // keys are NOT registered with any production
+    // `SuiteAwareValidatorKeyProvider`, so even forged frames whose
+    // signatures decode correctly fail signature verification against
+    // the real per-validator public keys — exactly the rejection
+    // path we want to exercise.
+    let mut signing_keys: std::collections::HashMap<
+        qbind_consensus::ids::ValidatorId,
+        Vec<u8>,
+    > = std::collections::HashMap::new();
+    for i in 0..num_validators {
+        let (_pk, sk) = match qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair() {
+            Ok(kp) => kp,
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: Run 035 forged-injection fixture keygen failed: {:?}. \
+                     Refusing to activate harness.",
+                    e
+                );
+                std::process::exit(1);
+            }
+        };
+        signing_keys.insert(qbind_consensus::ids::ValidatorId(i), sk);
+    }
+
+    let fixture = std::sync::Arc::new(RuntimeFixture {
+        signing_keys,
+        chain_id: config.chain_id(),
+        // Inject at view 0; the engine starts at view 0 and the
+        // verification gate fires regardless of view (forged frames
+        // never reach the engine's view-validity check).
+        view: 0,
+        num_validators,
+    });
+
+    eprintln!(
+        "[binary] Run 035: forged-injection harness ARMED — env=devnet, {}=1, cases={:?}. \
+         Frames will traverse the same binary-loop verification gate as live inbound P2P \
+         traffic; the harness never calls into the engine and never fabricates metrics.",
+        FORGED_INJECTION_ENV_VAR,
+        harness
+            .cases()
+            .iter()
+            .map(|c| c.label())
+            .collect::<Vec<_>>()
+    );
+
+    Some(qbind_node::forged_injection::spawn_runtime_injection_task(
+        harness,
+        sender,
+        fixture,
+        std::time::Duration::from_secs(1),
+    ))
 }
 
 #[cfg(unix)]

@@ -524,6 +524,38 @@ pub struct CliArgs {
     /// Default: 10 seconds
     #[arg(long = "mempool-eviction-interval-secs")]
     pub mempool_eviction_interval_secs: Option<u32>,
+
+    /// Run 035 — opt-in dev/test-only forged Timeout/NewView injection harness.
+    ///
+    /// Hidden, dev/test-only. The harness is **disabled by default**.
+    /// Activation requires THREE concurrent signals:
+    ///
+    /// 1. `--env devnet` (this binary refuses activation on Testnet/Mainnet),
+    /// 2. environment variable `QBIND_DEVNET_FORGED_INJECTION=1` (an
+    ///    affirmative second step the operator must take outside the
+    ///    CLI), and
+    /// 3. one or more `--devnet-forged-inject CASE` flags listing the
+    ///    forged cases to inject.
+    ///
+    /// Valid CASE tokens: `malformed-timeout`, `unsigned-timeout`,
+    /// `bad-signature-timeout`, `wrong-suite-timeout`,
+    /// `unknown-validator-timeout`, `malformed-newview`,
+    /// `missing-evidence-newview`, `duplicate-signer-newview`,
+    /// `insufficient-quorum-newview`, `mixed-view-newview`,
+    /// `bad-signature-newview`, `high-qc-mismatch-newview`.
+    ///
+    /// Each invocation injects a single crafted frame into the same
+    /// inbound `mpsc<ConsensusNetMsg>` channel real P2P traffic uses;
+    /// frames traverse the same binary-loop verification gate as live
+    /// inbound network frames (`verify_timeout_msg` /
+    /// `verify_timeout_certificate_with_evidence` BEFORE
+    /// `engine.on_timeout_msg` / `engine.on_timeout_certificate`).
+    /// The harness never calls into the engine and never fabricates
+    /// metrics. See
+    /// `crates/qbind-node/src/forged_injection.rs` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md`.
+    #[arg(long = "devnet-forged-inject", action = clap::ArgAction::Append, hide = true)]
+    pub devnet_forged_inject: Vec<String>,
 }
 
 // ============================================================================
