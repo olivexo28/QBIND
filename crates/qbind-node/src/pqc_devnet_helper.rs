@@ -22,7 +22,9 @@
 //! Production CA / OCSP / CRL / rotation flow remains out of scope and
 //! is tracked under C4 in `docs/whitepaper/contradiction.md`.
 
-use qbind_crypto::{ml_dsa_44_sign_digest, MlDsa44Backend};
+use qbind_crypto::{
+    ml_dsa_44_sign_digest, MlDsa44Backend, KEM_SUITE_ML_KEM_768, ML_KEM_768_PUBLIC_KEY_SIZE,
+};
 use qbind_hash::net::network_delegation_cert_digest;
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -97,6 +99,7 @@ pub struct LeafCertSpec {
 pub enum DevNetCertError {
     InvalidValidityWindow,
     UnsupportedSuite(u8),
+    MalformedKemPublicKey { expected: usize, actual: usize },
     SigningFailed(String),
 }
 
@@ -105,6 +108,11 @@ impl std::fmt::Display for DevNetCertError {
         match self {
             Self::InvalidValidityWindow => f.write_str("not_before > not_after"),
             Self::UnsupportedSuite(s) => write!(f, "unsupported PQC suite: {}", s),
+            Self::MalformedKemPublicKey { expected, actual } => write!(
+                f,
+                "malformed ML-KEM-768 public key: expected {} bytes, got {}",
+                expected, actual
+            ),
             Self::SigningFailed(s) => write!(f, "ML-DSA-44 signing failed: {}", s),
         }
     }
@@ -122,6 +130,15 @@ pub fn issue_leaf_delegation_cert(
 ) -> Result<NetworkDelegationCert, DevNetCertError> {
     if spec.not_before > spec.not_after {
         return Err(DevNetCertError::InvalidValidityWindow);
+    }
+    if spec.leaf_kem_suite_id != KEM_SUITE_ML_KEM_768 {
+        return Err(DevNetCertError::UnsupportedSuite(spec.leaf_kem_suite_id));
+    }
+    if spec.leaf_kem_pk.len() != ML_KEM_768_PUBLIC_KEY_SIZE {
+        return Err(DevNetCertError::MalformedKemPublicKey {
+            expected: ML_KEM_768_PUBLIC_KEY_SIZE,
+            actual: spec.leaf_kem_pk.len(),
+        });
     }
 
     let mut cert = NetworkDelegationCert {
@@ -157,13 +174,13 @@ pub fn encode_cert(cert: &NetworkDelegationCert) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use qbind_crypto::{MlDsa44SignatureSuite, StaticCryptoProvider};
+    use qbind_crypto::{MlDsa44SignatureSuite, MlKem768Backend, StaticCryptoProvider};
     use std::sync::Arc;
 
     fn mock_leaf_kem_pk() -> Vec<u8> {
-        // KEM pk shape doesn't matter for delegation-cert digest /
-        // signing; pick a reasonable byte string.
-        vec![0xAB; 64]
+        MlKem768Backend::generate_keypair()
+            .expect("ml-kem keygen")
+            .0
     }
 
     #[test]
@@ -172,7 +189,7 @@ mod tests {
         let spec = LeafCertSpec {
             validator_id: [7u8; 32],
             root_key_id: root.root_key_id,
-            leaf_kem_suite_id: 1,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
             leaf_kem_pk: mock_leaf_kem_pk(),
             not_before: 0,
             not_after: u64::MAX,
@@ -185,9 +202,8 @@ mod tests {
         // Verify via the existing qbind_net::handshake::verify_delegation_cert
         // path that production code will use.
         let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-        let crypto: Arc<StaticCryptoProvider> = Arc::new(
-            StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-        );
+        let crypto: Arc<StaticCryptoProvider> =
+            Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
         qbind_net::verify_delegation_cert(crypto.as_ref(), &cert, &root.root_pk)
             .expect("real PQC cert verifies");
 
@@ -203,7 +219,9 @@ mod tests {
 
         // Negative: wrong root pk fails.
         let other_root = mint_devnet_root().expect("root2");
-        assert!(qbind_net::verify_delegation_cert(crypto.as_ref(), &cert, &other_root.root_pk).is_err());
+        assert!(
+            qbind_net::verify_delegation_cert(crypto.as_ref(), &cert, &other_root.root_pk).is_err()
+        );
     }
 
     #[test]
@@ -214,7 +232,7 @@ mod tests {
         let spec = LeafCertSpec {
             validator_id: [9u8; 32],
             root_key_id: root.root_key_id,
-            leaf_kem_suite_id: 1,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
             leaf_kem_pk: mock_leaf_kem_pk(),
             not_before: 100,
             not_after: 200,
@@ -230,9 +248,8 @@ mod tests {
         assert_eq!(decoded, cert);
 
         let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-        let crypto: Arc<StaticCryptoProvider> = Arc::new(
-            StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-        );
+        let crypto: Arc<StaticCryptoProvider> =
+            Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
         qbind_net::verify_delegation_cert(crypto.as_ref(), &decoded, &root.root_pk)
             .expect("decoded PQC cert verifies");
     }
@@ -243,7 +260,7 @@ mod tests {
         let spec = LeafCertSpec {
             validator_id: [0u8; 32],
             root_key_id: root.root_key_id,
-            leaf_kem_suite_id: 1,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
             leaf_kem_pk: mock_leaf_kem_pk(),
             not_before: 200,
             not_after: 100,
@@ -259,7 +276,7 @@ mod tests {
         let spec = LeafCertSpec {
             validator_id: [1u8; 32],
             root_key_id: root.root_key_id,
-            leaf_kem_suite_id: 1,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
             leaf_kem_pk: mock_leaf_kem_pk(),
             not_before: 0,
             not_after: u64::MAX,
@@ -269,41 +286,25 @@ mod tests {
         // Verify with a different root's pk.
         let other = mint_devnet_root().expect("root2");
         let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-        let crypto: Arc<StaticCryptoProvider> = Arc::new(
-            StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-        );
+        let crypto: Arc<StaticCryptoProvider> =
+            Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
         assert!(qbind_net::verify_delegation_cert(crypto.as_ref(), &cert, &other.root_pk).is_err());
     }
 
     #[test]
-    fn devnet_helper_does_not_log_secret() {
-        // Smoke check: our public types do not Debug-print the secret.
+    fn devnet_helper_keeps_root_secret_flow_explicit() {
         let root = mint_devnet_root().expect("root");
-        let dbg = format!("{:?}", root);
-        // The Debug derive prints the bytes — that's an in-process
-        // value the caller gets, not a logger sink, but we still
-        // assert the helper itself contains no `eprintln!` of
-        // `root_sk` by ensuring the only place sk flows is the
-        // explicit signing call. (Source-level discipline check; the
-        // test exists so a future careless change to Debug or to
-        // helper internals trips a visible failure.)
-        assert!(dbg.contains("DevNetRoot"));
-        // SECRET HYGIENE: we explicitly do not assert the absence of
-        // sk bytes in the Debug string here, because the std-derived
-        // Debug for Vec<u8> WILL print bytes. This test exists to
-        // document that the helper itself only ever passes `root_sk`
-        // through `ml_dsa_44_sign_digest`, never through any
-        // log/println/eprintln channel; reviewers should grep this
-        // file for `root_sk` to confirm there are zero log sinks.
-        let src = include_str!("./pqc_devnet_helper.rs");
-        let mut log_count = 0;
-        for line in src.lines() {
-            if (line.contains("println!") || line.contains("eprintln!"))
-                && line.contains("root_sk")
-            {
-                log_count += 1;
-            }
-        }
-        assert_eq!(log_count, 0, "root_sk must not be logged");
+        let spec = LeafCertSpec {
+            validator_id: [3u8; 32],
+            root_key_id: root.root_key_id,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+            leaf_kem_pk: mock_leaf_kem_pk(),
+            not_before: 0,
+            not_after: u64::MAX,
+            ext_bytes: vec![],
+        };
+        let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
+        assert_eq!(cert.root_key_id, root.root_key_id);
+        assert_eq!(cert.leaf_kem_suite_id, KEM_SUITE_ML_KEM_768);
     }
 }

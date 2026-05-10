@@ -39,17 +39,18 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use qbind_crypto::{MlDsa44SignatureSuite, StaticCryptoProvider};
+use qbind_crypto::{
+    MlDsa44SignatureSuite, MlKem768Backend, StaticCryptoProvider, KEM_SUITE_ML_KEM_768,
+};
 use qbind_node::p2p::{NodeId, P2pService};
 use qbind_node::p2p_node_builder::{
-    derive_test_kem_keypair_from_validator_id, derive_test_node_id_from_validator_id,
-    P2pNodeBuilder, P2pNodeContext,
+    derive_test_node_id_from_validator_id, P2pNodeBuilder, P2pNodeContext,
 };
 use qbind_node::pqc_devnet_helper::{
     encode_cert, issue_leaf_delegation_cert, mint_devnet_root, DevNetRoot, LeafCertSpec,
 };
 use qbind_node::pqc_root_config::{
-    PqcLeafCredentials, PqcRootMode, PqcStaticRootConfig, PqcTrustedRoot,
+    PqcLeafCredentials, PqcPeerLeafCert, PqcRootMode, PqcStaticRootConfig, PqcTrustedRoot,
     PQC_TRANSPORT_SUITE_ML_DSA_44,
 };
 use qbind_wire::io::{WireDecode, WireEncode};
@@ -65,11 +66,10 @@ fn make_p2p_test_config(
 ) -> qbind_node::node_config::NodeConfig {
     use qbind_ledger::{FeeDistributionPolicy, MonetaryMode, SeigniorageSplit};
     use qbind_node::node_config::{
-        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig,
-        MempoolDosConfig, MempoolEvictionConfig, MempoolMode, NetworkMode,
-        NetworkTransportConfig, NodeConfig, P2pAntiEclipseConfig, P2pDiscoveryConfig,
-        P2pLivenessConfig, SignerFailureMode, SignerMode, SlashingConfig, SnapshotConfig,
-        StateRetentionConfig, ValidatorStakeConfig,
+        DagCouplingMode, ExecutionProfile, FastSyncConfig, GenesisSourceConfig, MempoolDosConfig,
+        MempoolEvictionConfig, MempoolMode, NetworkMode, NetworkTransportConfig, NodeConfig,
+        P2pAntiEclipseConfig, P2pDiscoveryConfig, P2pLivenessConfig, SignerFailureMode, SignerMode,
+        SlashingConfig, SnapshotConfig, StateRetentionConfig, ValidatorStakeConfig,
     };
     use qbind_node::p2p_diversity::DiversityEnforcementMode;
     use qbind_types::NetworkEnvironment;
@@ -176,16 +176,12 @@ fn validator_id_bytes_for(vid: u64) -> [u8; 32] {
     out
 }
 
-/// Mint a real ML-DSA-44-signed leaf delegation cert for a node, bound
-/// to the deterministic test-grade KEM keypair so the existing
-/// `peer_kem_pk_overrides`/`derive_test_kem_keypair_from_validator_id`
-/// rule still resolves the dialer-side peer KEM pk correctly.
 fn mint_pqc_leaf_creds_for(vid: u64, root: &DevNetRoot) -> PqcLeafCredentials {
-    let (kem_pk, kem_sk) = derive_test_kem_keypair_from_validator_id(vid);
+    let (kem_pk, kem_sk) = MlKem768Backend::generate_keypair().expect("ml-kem keygen");
     let spec = LeafCertSpec {
         validator_id: validator_id_bytes_for(vid),
         root_key_id: root.root_key_id,
-        leaf_kem_suite_id: 1,
+        leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
         leaf_kem_pk: kem_pk,
         not_before: 0,
         not_after: u64::MAX,
@@ -201,6 +197,7 @@ fn mint_pqc_leaf_creds_for(vid: u64, root: &DevNetRoot) -> PqcLeafCredentials {
 fn pqc_static_root_config_for(
     root: &DevNetRoot,
     leaf_creds: PqcLeafCredentials,
+    peer_leaf_certs: Vec<PqcPeerLeafCert>,
 ) -> PqcStaticRootConfig {
     PqcStaticRootConfig {
         mode: PqcRootMode::PqcStaticRoot,
@@ -210,7 +207,21 @@ fn pqc_static_root_config_for(
             root_pk: root.root_pk.clone(),
         }],
         leaf_credentials: Some(leaf_creds),
+        peer_leaf_certs,
     }
+}
+
+fn peer_leaf_cert_for(vid: u64, creds: &PqcLeafCredentials) -> PqcPeerLeafCert {
+    PqcPeerLeafCert {
+        validator_index: vid,
+        cert_bytes: creds.cert_bytes.clone(),
+    }
+}
+
+fn node_id_from_leaf(creds: &PqcLeafCredentials) -> NodeId {
+    let mut slice: &[u8] = &creds.cert_bytes;
+    let cert = NetworkDelegationCert::decode(&mut slice).expect("decode cert");
+    NodeId::new(qbind_hash::derive_node_id_from_pubkey(&cert.leaf_kem_pk))
 }
 
 // ---------------------------------------------------------------------------
@@ -238,8 +249,18 @@ async fn r037_a_two_node_mutual_auth_required_with_real_pqc_cert_succeeds() {
         vec![format!("0@127.0.0.1:{}", port_v0)],
     );
 
-    let pqc_v0 = pqc_static_root_config_for(&root, leaf_v0);
-    let pqc_v1 = pqc_static_root_config_for(&root, leaf_v1);
+    let nid_v0 = node_id_from_leaf(&leaf_v0);
+    let nid_v1 = node_id_from_leaf(&leaf_v1);
+    let pqc_v0 = pqc_static_root_config_for(
+        &root,
+        leaf_v0.clone(),
+        vec![peer_leaf_cert_for(1, &leaf_v1)],
+    );
+    let pqc_v1 = pqc_static_root_config_for(
+        &root,
+        leaf_v1.clone(),
+        vec![peer_leaf_cert_for(0, &leaf_v0)],
+    );
 
     let ctx_v1 = P2pNodeBuilder::new()
         .with_num_validators(2)
@@ -257,11 +278,8 @@ async fn r037_a_two_node_mutual_auth_required_with_real_pqc_cert_succeeds() {
         .await
         .expect("build v0");
 
-    let nid_v0 = derive_test_node_id_from_validator_id(0);
-    let nid_v1 = derive_test_node_id_from_validator_id(1);
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
     assert!(
         saw_v1_on_v0,
         "R037.A: dialer (v0) must observe v1 NodeId among connected peers under real-PQC cert path"
@@ -270,6 +288,47 @@ async fn r037_a_two_node_mutual_auth_required_with_real_pqc_cert_succeeds() {
         saw_v0_on_v1,
         "R037.A: listener (v1) must observe v0's *cert-derived* NodeId among connected peers under real-PQC cert path"
     );
+}
+
+#[tokio::test]
+async fn r039_mismatched_ml_kem_leaf_secret_fails_closed_at_build() {
+    let cfg = make_p2p_test_config("127.0.0.1:0", vec![]);
+    let root = mint_devnet_root().expect("root");
+    let mut leaf = mint_pqc_leaf_creds_for(0, &root);
+    let (_other_pk, other_sk) = MlKem768Backend::generate_keypair().expect("other ml-kem");
+    leaf.kem_sk_bytes = other_sk;
+    let pqc = pqc_static_root_config_for(&root, leaf, vec![]);
+
+    let err = P2pNodeBuilder::new()
+        .with_num_validators(1)
+        .with_mutual_auth_mode(qbind_net::MutualAuthMode::Required)
+        .with_pqc_root_config(pqc)
+        .build(&cfg, 0)
+        .await
+        .expect_err("mismatched ML-KEM secret must fail closed");
+    assert!(format!("{:?}", err).contains("does not match"));
+}
+
+#[tokio::test]
+async fn r039_missing_peer_leaf_cert_fails_closed_before_dummy_kem_fallback() {
+    let port_v0 = reserve_local_port().await;
+    let port_v1 = reserve_local_port().await;
+    let root = mint_devnet_root().expect("root");
+    let leaf_v0 = mint_pqc_leaf_creds_for(0, &root);
+    let cfg_v0 = make_p2p_test_config(
+        &format!("127.0.0.1:{}", port_v0),
+        vec![format!("1@127.0.0.1:{}", port_v1)],
+    );
+    let pqc_v0 = pqc_static_root_config_for(&root, leaf_v0, vec![]);
+
+    let err = P2pNodeBuilder::new()
+        .with_num_validators(2)
+        .with_mutual_auth_mode(qbind_net::MutualAuthMode::Required)
+        .with_pqc_root_config(pqc_v0)
+        .build(&cfg_v0, 0)
+        .await
+        .expect_err("missing certified peer ML-KEM pk must fail closed");
+    assert!(format!("{:?}", err).contains("missing --p2p-peer-leaf-cert"));
 }
 
 // ---------------------------------------------------------------------------
@@ -287,9 +346,8 @@ fn r037_b_tampered_signature_rejected_by_real_pqc_verifier() {
 
     // Real ML-DSA-44 verifier (same one the binary path will register).
     let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-    let crypto: Arc<StaticCryptoProvider> = Arc::new(
-        StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-    );
+    let crypto: Arc<StaticCryptoProvider> =
+        Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
 
     // Honest cert verifies.
     qbind_net::verify_delegation_cert(crypto.as_ref(), &decoded, &root.root_pk)
@@ -316,13 +374,11 @@ fn r037_c_untrusted_root_rejected() {
     let root_a = mint_devnet_root().expect("root_a");
     let root_b = mint_devnet_root().expect("root_b");
     let leaf = mint_pqc_leaf_creds_for(3, &root_a);
-    let decoded =
-        NetworkDelegationCert::decode(&mut leaf.cert_bytes.as_slice()).expect("decode");
+    let decoded = NetworkDelegationCert::decode(&mut leaf.cert_bytes.as_slice()).expect("decode");
 
     let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-    let crypto: Arc<StaticCryptoProvider> = Arc::new(
-        StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-    );
+    let crypto: Arc<StaticCryptoProvider> =
+        Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
     let err = qbind_net::verify_delegation_cert(crypto.as_ref(), &decoded, &root_b.root_pk)
         .expect_err("R037.C: untrusted root MUST be rejected");
     assert!(!format!("{:?}", err).is_empty());
@@ -337,6 +393,7 @@ fn r037_c_untrusted_root_rejected() {
             root_pk: root_b.root_pk.clone(),
         }],
         leaf_credentials: None,
+        peer_leaf_certs: Vec::new(),
     };
     assert!(
         cfg.lookup_root_pk(&root_a.root_key_id).is_none(),
@@ -366,9 +423,8 @@ fn r037_d_wrong_sig_suite_rejected() {
     decoded.sig_suite_id = 250;
     // Verifier registers only the real suite at id 100.
     let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-    let crypto: Arc<StaticCryptoProvider> = Arc::new(
-        StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-    );
+    let crypto: Arc<StaticCryptoProvider> =
+        Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
     let err = qbind_net::verify_delegation_cert(crypto.as_ref(), &decoded, &root.root_pk)
         .expect_err("R037.D: cert advertising an unknown sig_suite_id MUST fail closed");
     assert!(!format!("{:?}", err).is_empty());
@@ -388,9 +444,8 @@ fn r037_e_tampered_validator_id_rejected() {
     decoded.validator_id[0] ^= 0x01;
 
     let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
-    let crypto: Arc<StaticCryptoProvider> = Arc::new(
-        StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)),
-    );
+    let crypto: Arc<StaticCryptoProvider> =
+        Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
     let err = qbind_net::verify_delegation_cert(crypto.as_ref(), &decoded, &root.root_pk)
         .expect_err("R037.E: tampered validator_id MUST be rejected");
     assert!(!format!("{:?}", err).is_empty());
@@ -433,10 +488,15 @@ async fn r037_f_test_grade_dummy_sig_path_preserved() {
     let nid_v0 = derive_test_node_id_from_validator_id(0);
     let nid_v1 = derive_test_node_id_from_validator_id(1);
     let (saw_v1_on_v0, saw_v0_on_v1) =
-        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8))
-            .await;
-    assert!(saw_v1_on_v0, "R037.F: test-grade DummySig path must remain functional (v0 sees v1)");
-    assert!(saw_v0_on_v1, "R037.F: test-grade DummySig path must remain functional (v1 sees v0)");
+        poll_peer_observability(&ctx_v0, &ctx_v1, nid_v0, nid_v1, Duration::from_secs(8)).await;
+    assert!(
+        saw_v1_on_v0,
+        "R037.F: test-grade DummySig path must remain functional (v0 sees v1)"
+    );
+    assert!(
+        saw_v0_on_v1,
+        "R037.F: test-grade DummySig path must remain functional (v1 sees v0)"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -447,19 +507,16 @@ async fn r037_f_test_grade_dummy_sig_path_preserved() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn r037_g_pqc_mode_without_leaf_credentials_yields_test_grade_cert_bytes_at_builder_level() {
+fn r037_g_pqc_mode_without_leaf_credentials_is_representable_for_policy_tests() {
     use qbind_node::pqc_root_config::PqcStaticRootConfig;
 
-    // The builder itself does NOT enforce the "missing leaf creds in
-    // PQC + Required ⇒ refuse to start" rule — that policy lives in
-    // `main.rs` (so unit tests can still construct partial configs
-    // for negative coverage). Documenting this boundary here so a
-    // future change that moves the policy into the builder doesn't
-    // silently break the policy test in `main.rs`.
+    // Partial configs remain representable for parser/policy negative
+    // coverage; production-required builder/startup paths fail closed.
     let cfg = PqcStaticRootConfig {
         mode: PqcRootMode::PqcStaticRoot,
         trusted_roots: vec![],
         leaf_credentials: None,
+        peer_leaf_certs: Vec::new(),
     };
     assert_eq!(cfg.mode, PqcRootMode::PqcStaticRoot);
     assert!(cfg.leaf_credentials.is_none());
@@ -476,7 +533,10 @@ fn r037_h_cert_wire_round_trip_is_byte_exact() {
     let decoded = NetworkDelegationCert::decode(&mut slice).expect("decode");
     let mut re = Vec::new();
     decoded.encode(&mut re);
-    assert_eq!(re, leaf.cert_bytes, "R037.H: cert encode/decode must round-trip byte-exact");
+    assert_eq!(
+        re, leaf.cert_bytes,
+        "R037.H: cert encode/decode must round-trip byte-exact"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +569,7 @@ async fn r037_i_metrics_reflect_pqc_mode_and_root_count() {
             },
         ],
         leaf_credentials: Some(leaf),
+        peer_leaf_certs: Vec::new(),
     };
     let ctx = P2pNodeBuilder::new()
         .with_num_validators(1)

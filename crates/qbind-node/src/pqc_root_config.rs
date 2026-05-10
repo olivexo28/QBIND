@@ -44,7 +44,12 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE;
+use qbind_crypto::{
+    KemSuite, MlKem768Backend, KEM_SUITE_ML_KEM_768, ML_DSA_44_PUBLIC_KEY_SIZE,
+    ML_KEM_768_PUBLIC_KEY_SIZE, ML_KEM_768_SECRET_KEY_SIZE,
+};
+use qbind_wire::io::WireDecode;
+use qbind_wire::net::NetworkDelegationCert;
 
 /// Canonical signature suite ID for ML-DSA-44 in the PQC static-root
 /// transport-identity path. Mirrors `qbind_crypto::SUITE_PQ_RESERVED_1`
@@ -218,12 +223,12 @@ pub fn parse_one_pqc_trusted_root_spec(s: &str) -> Result<PqcTrustedRoot, PqcRoo
             id_hex.len()
         )));
     }
-    let root_key_id = decode_hex_fixed::<32>(id_hex)
-        .map_err(|e| PqcRootConfigError::InvalidRootKeyId(e))?;
+    let root_key_id =
+        decode_hex_fixed::<32>(id_hex).map_err(|e| PqcRootConfigError::InvalidRootKeyId(e))?;
 
-    let suite_id: u8 = suite_str.parse().map_err(|_| {
-        PqcRootConfigError::UnsupportedSuite(format!("not a u8: {}", suite_str))
-    })?;
+    let suite_id: u8 = suite_str
+        .parse()
+        .map_err(|_| PqcRootConfigError::UnsupportedSuite(format!("not a u8: {}", suite_str)))?;
     if suite_id != PQC_TRANSPORT_SUITE_ML_DSA_44 {
         return Err(PqcRootConfigError::UnsupportedSuite(format!(
             "{} (only PQC suite {} = ML-DSA-44 is accepted)",
@@ -236,8 +241,7 @@ pub fn parse_one_pqc_trusted_root_spec(s: &str) -> Result<PqcTrustedRoot, PqcRoo
             "odd hex length".to_string(),
         ));
     }
-    let root_pk = decode_hex_var(pk_hex)
-        .map_err(|e| PqcRootConfigError::MalformedPublicKey(e))?;
+    let root_pk = decode_hex_var(pk_hex).map_err(|e| PqcRootConfigError::MalformedPublicKey(e))?;
     if root_pk.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
         return Err(PqcRootConfigError::MalformedPublicKey(format!(
             "expected {} bytes for ML-DSA-44, got {}",
@@ -311,8 +315,8 @@ impl PqcLeafCredentialPaths {
     /// the success path; on the error path only the file name is
     /// reported.
     pub fn load(&self) -> Result<PqcLeafCredentials, String> {
-        let cert_bytes = read_file_strict(&self.cert_path)
-            .map_err(|e| format!("--p2p-leaf-cert: {}", e))?;
+        let cert_bytes =
+            read_file_strict(&self.cert_path).map_err(|e| format!("--p2p-leaf-cert: {}", e))?;
         let kem_sk_bytes = read_file_strict(&self.kem_sk_path)
             .map_err(|e| format!("--p2p-leaf-cert-key: {}", e))?;
         if cert_bytes.is_empty() {
@@ -321,11 +325,94 @@ impl PqcLeafCredentialPaths {
         if kem_sk_bytes.is_empty() {
             return Err("--p2p-leaf-cert-key: file is empty".to_string());
         }
+        validate_ml_kem_768_leaf_material(&cert_bytes, &kem_sk_bytes)
+            .map_err(|e| format!("--p2p-leaf-cert/--p2p-leaf-cert-key: {}", e))?;
         Ok(PqcLeafCredentials {
             cert_bytes,
             kem_sk_bytes,
         })
     }
+}
+
+/// A configured peer leaf certificate used by the `pqc-static-root`
+/// binary path to learn the peer's certified ML-KEM-768 public key
+/// before the KEMTLS ClientInit is built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PqcPeerLeafCert {
+    pub validator_index: u64,
+    pub cert_bytes: Vec<u8>,
+}
+
+/// Parse `VID:PATH` for a peer leaf cert file.
+pub fn parse_pqc_peer_leaf_cert_spec(s: &str) -> Result<PqcPeerLeafCert, String> {
+    let (vid_s, path_s) = s
+        .split_once(':')
+        .ok_or_else(|| "expected VID:PATH".to_string())?;
+    let validator_index = vid_s
+        .parse::<u64>()
+        .map_err(|e| format!("invalid validator id {:?}: {}", vid_s, e))?;
+    if path_s.is_empty() {
+        return Err("empty peer leaf cert path".to_string());
+    }
+    let cert_bytes = read_file_strict(Path::new(path_s))?;
+    if cert_bytes.is_empty() {
+        return Err("peer leaf cert file is empty".to_string());
+    }
+    let cert = decode_network_delegation_cert(&cert_bytes)?;
+    validate_ml_kem_768_leaf_cert_shape(&cert)?;
+    Ok(PqcPeerLeafCert {
+        validator_index,
+        cert_bytes,
+    })
+}
+
+pub fn decode_network_delegation_cert(cert_bytes: &[u8]) -> Result<NetworkDelegationCert, String> {
+    let mut slice: &[u8] = cert_bytes;
+    NetworkDelegationCert::decode(&mut slice)
+        .map_err(|_| "failed to decode NetworkDelegationCert".to_string())
+}
+
+pub fn validate_ml_kem_768_leaf_cert_shape(cert: &NetworkDelegationCert) -> Result<(), String> {
+    if cert.leaf_kem_suite_id != KEM_SUITE_ML_KEM_768 {
+        return Err(format!(
+            "unsupported leaf_kem_suite_id {}; expected {} (ML-KEM-768)",
+            cert.leaf_kem_suite_id, KEM_SUITE_ML_KEM_768
+        ));
+    }
+    if cert.leaf_kem_pk.len() != ML_KEM_768_PUBLIC_KEY_SIZE {
+        return Err(format!(
+            "malformed ML-KEM-768 public key: expected {} bytes, got {}",
+            ML_KEM_768_PUBLIC_KEY_SIZE,
+            cert.leaf_kem_pk.len()
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_ml_kem_768_leaf_material(
+    cert_bytes: &[u8],
+    kem_sk_bytes: &[u8],
+) -> Result<NetworkDelegationCert, String> {
+    let cert = decode_network_delegation_cert(cert_bytes)?;
+    validate_ml_kem_768_leaf_cert_shape(&cert)?;
+    if kem_sk_bytes.len() != ML_KEM_768_SECRET_KEY_SIZE {
+        return Err(format!(
+            "malformed ML-KEM-768 secret key: expected {} bytes, got {}",
+            ML_KEM_768_SECRET_KEY_SIZE,
+            kem_sk_bytes.len()
+        ));
+    }
+    let kem = MlKem768Backend::new();
+    let (ct, ss_enc) = kem
+        .encaps(&cert.leaf_kem_pk)
+        .map_err(|_| "ML-KEM-768 public key rejected".to_string())?;
+    let ss_dec = kem
+        .decaps(kem_sk_bytes, &ct)
+        .map_err(|_| "ML-KEM-768 secret key rejected".to_string())?;
+    if ss_enc != ss_dec {
+        return Err("ML-KEM-768 secret key does not match certified public key".to_string());
+    }
+    Ok(cert)
 }
 
 fn read_file_strict(path: &Path) -> Result<Vec<u8>, String> {
@@ -349,6 +436,11 @@ pub struct PqcStaticRootConfig {
     /// `MutualAuthMode::Disabled` or `Optional`. Required under
     /// `MutualAuthMode::Required` + `PqcRootMode::PqcStaticRoot`.
     pub leaf_credentials: Option<PqcLeafCredentials>,
+    /// Optional preloaded peer leaf certs, keyed by validator index at
+    /// builder time. Required for multi-peer `pqc-static-root` binary
+    /// runs because the dialer must know the certified static KEM pk
+    /// before it can produce ClientInit.
+    pub peer_leaf_certs: Vec<PqcPeerLeafCert>,
 }
 
 impl PqcStaticRootConfig {
@@ -359,6 +451,7 @@ impl PqcStaticRootConfig {
             mode: PqcRootMode::TestGradeDummySig,
             trusted_roots: Vec::new(),
             leaf_credentials: None,
+            peer_leaf_certs: Vec::new(),
         }
     }
 
@@ -379,11 +472,7 @@ impl PqcStaticRootConfig {
 fn decode_hex_fixed<const N: usize>(s: &str) -> Result<[u8; N], String> {
     let bytes = decode_hex_var(s)?;
     if bytes.len() != N {
-        return Err(format!(
-            "expected {} bytes, got {}",
-            N,
-            bytes.len()
-        ));
+        return Err(format!("expected {} bytes, got {}", N, bytes.len()));
     }
     let mut out = [0u8; N];
     out.copy_from_slice(&bytes);
@@ -448,10 +537,7 @@ mod tests {
             parse_pqc_root_mode("pqc-static-root"),
             Some(PqcRootMode::PqcStaticRoot)
         );
-        assert_eq!(
-            parse_pqc_root_mode("pqc"),
-            Some(PqcRootMode::PqcStaticRoot)
-        );
+        assert_eq!(parse_pqc_root_mode("pqc"), Some(PqcRootMode::PqcStaticRoot));
         // Unknown spelling fails closed.
         assert_eq!(parse_pqc_root_mode("classical"), None);
         assert_eq!(parse_pqc_root_mode(""), None);
@@ -542,8 +628,7 @@ mod tests {
     fn lookup_root_pk_strict() {
         let pk_hex = good_pk_hex();
         let id_a = good_id_hex();
-        let id_b = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"
-            .to_string();
+        let id_b = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100".to_string();
         let specs = vec![
             format!("{}:100:{}", id_a, pk_hex),
             format!("{}:100:{}", id_b, pk_hex),
@@ -553,6 +638,7 @@ mod tests {
             mode: PqcRootMode::PqcStaticRoot,
             trusted_roots: roots,
             leaf_credentials: None,
+            peer_leaf_certs: Vec::new(),
         };
 
         // Configured ID ⇒ Some.
@@ -593,5 +679,58 @@ mod tests {
         );
         let err = parse_one_pqc_trusted_root_spec(&spec).unwrap_err();
         assert!(matches!(err, PqcRootConfigError::InvalidRootKeyId(_)));
+    }
+
+    #[test]
+    fn leaf_material_rejects_wrong_size_secret_key() {
+        use crate::pqc_devnet_helper::{
+            encode_cert, issue_leaf_delegation_cert, mint_devnet_root, LeafCertSpec,
+        };
+
+        let root = mint_devnet_root().expect("root");
+        let (kem_pk, _kem_sk) = MlKem768Backend::generate_keypair().expect("ml-kem");
+        let cert = issue_leaf_delegation_cert(
+            &LeafCertSpec {
+                validator_id: [1u8; 32],
+                root_key_id: root.root_key_id,
+                leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+                leaf_kem_pk: kem_pk,
+                not_before: 0,
+                not_after: u64::MAX,
+                ext_bytes: vec![],
+            },
+            &root.root_sk,
+        )
+        .expect("cert");
+
+        let err = validate_ml_kem_768_leaf_material(&encode_cert(&cert), &[0u8; 32]).unwrap_err();
+        assert!(err.contains("expected 2400 bytes"));
+    }
+
+    #[test]
+    fn leaf_material_rejects_wrong_secret_key_for_cert_public_key() {
+        use crate::pqc_devnet_helper::{
+            encode_cert, issue_leaf_delegation_cert, mint_devnet_root, LeafCertSpec,
+        };
+
+        let root = mint_devnet_root().expect("root");
+        let (kem_pk, _kem_sk) = MlKem768Backend::generate_keypair().expect("ml-kem");
+        let (_other_pk, other_sk) = MlKem768Backend::generate_keypair().expect("other ml-kem");
+        let cert = issue_leaf_delegation_cert(
+            &LeafCertSpec {
+                validator_id: [2u8; 32],
+                root_key_id: root.root_key_id,
+                leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+                leaf_kem_pk: kem_pk,
+                not_before: 0,
+                not_after: u64::MAX,
+                ext_bytes: vec![],
+            },
+            &root.root_sk,
+        )
+        .expect("cert");
+
+        let err = validate_ml_kem_768_leaf_material(&encode_cert(&cert), &other_sk).unwrap_err();
+        assert!(err.contains("does not match"));
     }
 }

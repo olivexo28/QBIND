@@ -70,13 +70,20 @@ use crate::p2p_inbound::{
 use crate::p2p_tcp::{P2pTransportError, TcpKemTlsP2pService};
 
 use qbind_consensus::ids::ValidatorId;
-use qbind_crypto::{AeadSuite, CryptoError, KemSuite, MlDsa44SignatureSuite, SignatureSuite, StaticCryptoProvider};
+use qbind_crypto::{
+    AeadSuite, CryptoError, KemSuite, MlDsa44SignatureSuite, MlKem768Backend, SignatureSuite,
+    StaticCryptoProvider, KEM_SUITE_ML_KEM_768,
+};
 use qbind_net::{
     ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
     ServerConnectionConfig, ServerHandshakeConfig, TrustedClientRoots,
 };
 
-use crate::pqc_root_config::{PqcRootMode, PqcStaticRootConfig, PQC_TRANSPORT_SUITE_ML_DSA_44};
+use crate::pqc_root_config::{
+    decode_network_delegation_cert, validate_ml_kem_768_leaf_cert_shape,
+    validate_ml_kem_768_leaf_material, PqcRootMode, PqcStaticRootConfig,
+    PQC_TRANSPORT_SUITE_ML_DSA_44,
+};
 
 // ============================================================================
 // Error Types
@@ -344,20 +351,16 @@ fn make_test_crypto_provider(
 /// - the registered `sig_suite_id` is the canonical PQC transport
 ///   suite ID (`100` = ML-DSA-44).
 ///
-/// **Scope note (anti-overclaim)**: the KEM and AEAD suites in this
-/// provider are still the test-grade `DummyKem` / `DummyAead` from
-/// `make_test_crypto_provider`. Real `ML-KEM-768` / production AEAD
-/// wiring on the binary path is a separate C4 piece (NOT C4(c)) — see
-/// `docs/whitepaper/contradiction.md`. This run does not claim
-/// production KEMTLS for that part of the stack.
+/// Run 039 replaces the test-grade KEM with real ML-KEM-768 on this
+/// provider. AEAD is still the test-grade `DummyAead`; this run does
+/// not claim full production transport security.
 fn make_pqc_static_root_crypto_provider(
-    kem_suite_id: u8,
     aead_suite_id: u8,
     sig_suite_id: u8,
 ) -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(DummyKem::new(kem_suite_id)))
+            .with_kem_suite(Arc::new(MlKem768Backend::new()))
             .with_aead_suite(Arc::new(DummyAead::new(aead_suite_id)))
             .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(sig_suite_id))),
     )
@@ -498,9 +501,7 @@ pub fn parse_test_validator_id_from_client_random(client_random: &[u8; 32]) -> O
 /// `AcceptedPeerInit::mutual_auth_complete == true` and only on the
 /// `verified_peer_validator_id` bytes (never on the self-asserted
 /// `ClientInit.validator_id`).
-pub fn parse_test_validator_id_from_cert_validator_id(
-    validator_id: &[u8; 32],
-) -> Option<u64> {
+pub fn parse_test_validator_id_from_cert_validator_id(validator_id: &[u8; 32]) -> Option<u64> {
     const PREFIX: &[u8] = b"qbind-val-";
     if !validator_id.starts_with(PREFIX) {
         return None;
@@ -541,6 +542,53 @@ pub fn parse_peer_spec(s: &str) -> Result<(Option<u64>, String), String> {
     } else {
         Ok((None, s.to_string()))
     }
+}
+
+fn validator_id_bytes_for_index(vid: u64) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    let name = format!("qbind-val-{}", vid);
+    out[..name.len().min(32)].copy_from_slice(name.as_bytes());
+    out
+}
+
+fn verify_cert_with_configured_root(
+    crypto: &StaticCryptoProvider,
+    cfg: &PqcStaticRootConfig,
+    cert: &qbind_wire::net::NetworkDelegationCert,
+) -> Result<(), String> {
+    let root = cfg
+        .lookup_root_pk(&cert.root_key_id)
+        .ok_or_else(|| "untrusted root_key_id".to_string())?;
+    qbind_net::verify_delegation_cert(crypto, cert, &root.root_pk)
+        .map_err(|e| format!("delegation cert verification failed: {:?}", e))
+}
+
+fn certified_peer_kem_pk_for_validator(
+    crypto: &StaticCryptoProvider,
+    cfg: &PqcStaticRootConfig,
+    peer_vid: u64,
+) -> Result<Vec<u8>, String> {
+    let peer = cfg
+        .peer_leaf_certs
+        .iter()
+        .find(|p| p.validator_index == peer_vid)
+        .ok_or_else(|| {
+            format!(
+                "missing --p2p-peer-leaf-cert for validator {} in pqc-static-root mode",
+                peer_vid
+            )
+        })?;
+    let cert = decode_network_delegation_cert(&peer.cert_bytes)?;
+    validate_ml_kem_768_leaf_cert_shape(&cert)?;
+    verify_cert_with_configured_root(crypto, cfg, &cert)?;
+    let expected_vid = validator_id_bytes_for_index(peer_vid);
+    if cert.validator_id != expected_vid {
+        return Err(format!(
+            "peer leaf cert validator_id mismatch for validator {}",
+            peer_vid
+        ));
+    }
+    Ok(cert.leaf_kem_pk)
 }
 
 // ============================================================================
@@ -725,7 +773,26 @@ impl P2pNodeBuilder {
         // tions is what closes peer-validator identity for `send_to(...)` on
         // the binary path: the consensus mapping → NodeId → P2P peer connec-
         // tion now round-trips on every node.
-        let node_id = derive_test_node_id_from_validator_id(validator_id.as_u64());
+        let pqc_active = matches!(
+            self.pqc_root_config.as_ref().map(|c| c.mode),
+            Some(PqcRootMode::PqcStaticRoot)
+        );
+        let node_id = if pqc_active {
+            let creds = self
+                .pqc_root_config
+                .as_ref()
+                .and_then(|cfg| cfg.leaf_credentials.as_ref())
+                .ok_or_else(|| {
+                    P2pNodeError::Config(
+                        "pqc-static-root requires local ML-KEM-768 leaf credentials".to_string(),
+                    )
+                })?;
+            let cert = validate_ml_kem_768_leaf_material(&creds.cert_bytes, &creds.kem_sk_bytes)
+                .map_err(P2pNodeError::Config)?;
+            NodeId::new(qbind_hash::derive_node_id_from_pubkey(&cert.leaf_kem_pk))
+        } else {
+            derive_test_node_id_from_validator_id(validator_id.as_u64())
+        };
 
         // Create crypto provider.
         //
@@ -742,30 +809,34 @@ impl P2pNodeBuilder {
         // existing test-grade primitives — production ML-KEM-768 /
         // AEAD wiring on this binary surface is a separate C4 piece
         // (NOT C4(c)), tracked in `docs/whitepaper/contradiction.md`.
-        let kem_suite_id: u8 = 1;
+        let kem_suite_id: u8 = if pqc_active { KEM_SUITE_ML_KEM_768 } else { 1 };
         let aead_suite_id: u8 = 2;
-        let pqc_active = matches!(
-            self.pqc_root_config.as_ref().map(|c| c.mode),
-            Some(PqcRootMode::PqcStaticRoot)
-        );
         let sig_suite_id: u8 = if pqc_active {
             PQC_TRANSPORT_SUITE_ML_DSA_44
         } else {
             3
         };
         let crypto = if pqc_active {
-            make_pqc_static_root_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id)
+            make_pqc_static_root_crypto_provider(aead_suite_id, sig_suite_id)
         } else {
             make_test_crypto_provider(kem_suite_id, aead_suite_id, sig_suite_id)
         };
         eprintln!(
-            "[Run037] P2pNodeBuilder: pqc_root_mode={} sig_suite_id={} \
+            "[Run039] P2pNodeBuilder: pqc_root_mode={} sig_suite_id={} \
+             transport_kem_suite_id={} transport_kem_suite_name={} dummy_kem_registered={} \
              configured_roots={} leaf_credentials_present={}",
             self.pqc_root_config
                 .as_ref()
                 .map(|c| c.mode.to_string())
                 .unwrap_or_else(|| "test-grade-dummy-sig".to_string()),
             sig_suite_id,
+            kem_suite_id,
+            if pqc_active {
+                "ml-kem-768"
+            } else {
+                "dummy-kem"
+            },
+            !pqc_active,
             self.pqc_root_config
                 .as_ref()
                 .map(|c| c.trusted_roots.len())
@@ -784,7 +855,7 @@ impl P2pNodeBuilder {
             aead_suite_id,
             sig_suite_id,
             self.mutual_auth_mode,
-        );
+        )?;
 
         // B7: parse `static_peers` for the optional `vid@addr` syntax and
         // build per-peer overrides:
@@ -800,14 +871,23 @@ impl P2pNodeBuilder {
         //     under.
         let mut peer_kem_pk_overrides: HashMap<String, Vec<u8>> = HashMap::new();
         let mut peer_vid_overrides: HashMap<String, [u8; 32]> = HashMap::new();
+        let mut peer_node_id_by_vid: HashMap<u64, NodeId> = HashMap::new();
         let mut peer_validator_map = PeerValidatorMap::new();
         let mut had_unspec_peer = false;
         for spec in &config.network.static_peers {
-            let (peer_vid_opt, addr) = parse_peer_spec(spec)
-                .map_err(|e| P2pNodeError::Config(e))?;
+            let (peer_vid_opt, addr) =
+                parse_peer_spec(spec).map_err(|e| P2pNodeError::Config(e))?;
             if let Some(peer_vid) = peer_vid_opt {
-                let (peer_pk, _peer_sk) =
-                    derive_test_kem_keypair_from_validator_id(peer_vid);
+                let peer_pk = if pqc_active {
+                    let cfg = self.pqc_root_config.as_ref().ok_or_else(|| {
+                        P2pNodeError::Config("missing pqc-static-root config".to_string())
+                    })?;
+                    certified_peer_kem_pk_for_validator(crypto.as_ref(), cfg, peer_vid)
+                        .map_err(P2pNodeError::Config)?
+                } else {
+                    let (peer_pk, _peer_sk) = derive_test_kem_keypair_from_validator_id(peer_vid);
+                    peer_pk
+                };
                 peer_kem_pk_overrides.insert(addr.clone(), peer_pk.clone());
                 // The 32-byte validator-id field expected by KEMTLS must
                 // exactly match what the peer's listener side puts into
@@ -825,16 +905,12 @@ impl P2pNodeBuilder {
                 let n = name.len().min(32);
                 vid_bytes[..n].copy_from_slice(&name.as_bytes()[..n]);
                 peer_vid_overrides.insert(addr.clone(), vid_bytes);
-                let peer_node_id = NodeId::new(
-                    qbind_hash::derive_node_id_from_pubkey(&peer_pk),
-                );
-                let peer_id_u64 = u64::from_le_bytes(
-                    peer_node_id.as_bytes()[..8].try_into().unwrap_or([0u8; 8]),
-                );
-                peer_validator_map.insert(
-                    crate::peer::PeerId(peer_id_u64),
-                    ValidatorId::new(peer_vid),
-                );
+                let peer_node_id = NodeId::new(qbind_hash::derive_node_id_from_pubkey(&peer_pk));
+                peer_node_id_by_vid.insert(peer_vid, peer_node_id);
+                let peer_id_u64 =
+                    u64::from_le_bytes(peer_node_id.as_bytes()[..8].try_into().unwrap_or([0u8; 8]));
+                peer_validator_map
+                    .insert(crate::peer::PeerId(peer_id_u64), ValidatorId::new(peer_vid));
             } else {
                 had_unspec_peer = true;
             }
@@ -843,7 +919,8 @@ impl P2pNodeBuilder {
         // bare `addr` (no `vid@`) because we cannot then derive the peer's
         // test-grade KEM public key, which is exactly the Run 005 failure
         // mode. Single-validator / no-peer setups never hit this branch.
-        if had_unspec_peer && peer_kem_pk_overrides.is_empty()
+        if had_unspec_peer
+            && peer_kem_pk_overrides.is_empty()
             && config.network.static_peers.len() > 1
         {
             return Err(P2pNodeError::Config(
@@ -865,21 +942,16 @@ impl P2pNodeBuilder {
         // are installed before `start()` so each dial picks up the
         // correct peer KEM public key.
         let mut transport_config = config.network.clone();
-        let mut stripped_peers: Vec<String> = Vec::with_capacity(transport_config.static_peers.len());
+        let mut stripped_peers: Vec<String> =
+            Vec::with_capacity(transport_config.static_peers.len());
         for spec in &transport_config.static_peers {
-            let (_vid_opt, addr) = parse_peer_spec(spec)
-                .map_err(|e| P2pNodeError::Config(e))?;
+            let (_vid_opt, addr) = parse_peer_spec(spec).map_err(|e| P2pNodeError::Config(e))?;
             stripped_peers.push(addr);
         }
         transport_config.static_peers = stripped_peers;
 
-        let mut p2p_service = TcpKemTlsP2pService::new(
-            node_id,
-            transport_config,
-            crypto,
-            server_cfg,
-            client_cfg,
-        )?;
+        let mut p2p_service =
+            TcpKemTlsP2pService::new(node_id, transport_config, crypto, server_cfg, client_cfg)?;
         // B7: install per-peer KEM-pk + validator-id overrides before `start()` dials.
         if !peer_kem_pk_overrides.is_empty() {
             p2p_service.set_peer_kem_pk_overrides(peer_kem_pk_overrides);
@@ -942,6 +1014,8 @@ impl P2pNodeBuilder {
         // transport falls back to the legacy temporary-session-NodeId
         // path automatically.
         let resolver_mode = self.mutual_auth_mode;
+        let resolver_pqc_active = pqc_active;
+        let resolver_peer_node_ids = peer_node_id_by_vid.clone();
         p2p_service.set_inbound_identity_resolver(Arc::new(
             move |peer_init: &crate::secure_channel::AcceptedPeerInit| -> Option<NodeId> {
                 match resolver_mode {
@@ -956,15 +1030,16 @@ impl P2pNodeBuilder {
                             return None;
                         }
                         let vid_bytes = peer_init.verified_peer_validator_id?;
-                        let vid =
-                            parse_test_validator_id_from_cert_validator_id(&vid_bytes)?;
+                        let vid = parse_test_validator_id_from_cert_validator_id(&vid_bytes)?;
+                        if resolver_pqc_active {
+                            return resolver_peer_node_ids.get(&vid).copied();
+                        }
                         Some(derive_test_node_id_from_validator_id(vid))
                     }
                     MutualAuthMode::Disabled => {
                         // B8 — test-grade self-asserted path.
-                        let vid = parse_test_validator_id_from_client_random(
-                            &peer_init.client_random,
-                        )?;
+                        let vid =
+                            parse_test_validator_id_from_client_random(&peer_init.client_random)?;
                         Some(derive_test_node_id_from_validator_id(vid))
                     }
                 }
@@ -1069,7 +1144,7 @@ impl P2pNodeBuilder {
         aead_suite_id: u8,
         sig_suite_id: u8,
         mutual_auth_mode: MutualAuthMode,
-    ) -> (ServerConnectionConfig, ClientConnectionConfig) {
+    ) -> Result<(ServerConnectionConfig, ClientConnectionConfig), P2pNodeError> {
         // Create validator identity bytes
         let mut validator_id_bytes = [0u8; 32];
         let name = format!("qbind-val-{}", validator_id.as_u64());
@@ -1115,14 +1190,35 @@ impl P2pNodeBuilder {
         // production-required mode — the offline helper
         // `pqc_devnet_helper::issue_leaf_delegation_cert` is the
         // single source of cert issuance.
-        let pqc_leaf = self
+        let pqc_cfg = self
             .pqc_root_config
             .as_ref()
-            .filter(|cfg| matches!(cfg.mode, PqcRootMode::PqcStaticRoot))
-            .and_then(|cfg| cfg.leaf_credentials.as_ref());
-        let (cert_bytes, server_kem_sk_final) = match pqc_leaf {
-            Some(creds) => (creds.cert_bytes.clone(), creds.kem_sk_bytes.clone()),
-            None => (dummy_cert_bytes, server_kem_sk),
+            .filter(|cfg| matches!(cfg.mode, PqcRootMode::PqcStaticRoot));
+        let pqc_leaf = pqc_cfg.and_then(|cfg| cfg.leaf_credentials.as_ref());
+        let (cert_bytes, server_kem_pk_final, server_kem_sk_final) = match (pqc_cfg, pqc_leaf) {
+            (Some(cfg), Some(creds)) => {
+                let cert =
+                    validate_ml_kem_768_leaf_material(&creds.cert_bytes, &creds.kem_sk_bytes)
+                        .map_err(P2pNodeError::Config)?;
+                verify_cert_with_configured_root(crypto.as_ref(), cfg, &cert)
+                    .map_err(P2pNodeError::Config)?;
+                if cert.validator_id != validator_id_bytes {
+                    return Err(P2pNodeError::Config(
+                        "local leaf cert validator_id does not match --validator-id".to_string(),
+                    ));
+                }
+                (
+                    creds.cert_bytes.clone(),
+                    cert.leaf_kem_pk,
+                    creds.kem_sk_bytes.clone(),
+                )
+            }
+            (Some(_), None) => {
+                return Err(P2pNodeError::Config(
+                    "pqc-static-root requires local ML-KEM-768 leaf credentials".to_string(),
+                ));
+            }
+            (None, _) => (dummy_cert_bytes, server_kem_pk, server_kem_sk),
         };
 
         // Root network public key.
@@ -1221,9 +1317,11 @@ impl P2pNodeBuilder {
                     cfg.lookup_root_pk(root_key_id).map(|r| r.root_pk.clone())
                 }))
             }
-            (MutualAuthMode::Required | MutualAuthMode::Optional, _) => Some(
-                TrustedClientRoots::new(|_root_key_id: &[u8; 32]| Some(vec![0x01u8; 32])),
-            ),
+            (MutualAuthMode::Required | MutualAuthMode::Optional, _) => {
+                Some(TrustedClientRoots::new(|_root_key_id: &[u8; 32]| {
+                    Some(vec![0x01u8; 32])
+                }))
+            }
             (MutualAuthMode::Disabled, _) => None,
         };
 
@@ -1267,7 +1365,7 @@ impl P2pNodeBuilder {
             handshake_config: client_handshake_cfg,
             client_random,
             validator_id: validator_id_bytes,
-            peer_kem_pk: server_kem_pk,
+            peer_kem_pk: server_kem_pk_final,
         };
 
         let server_cfg = ServerConnectionConfig {
@@ -1275,7 +1373,7 @@ impl P2pNodeBuilder {
             server_random,
         };
 
-        (server_cfg, client_cfg)
+        Ok((server_cfg, client_cfg))
     }
 
     /// Create a dummy delegation certificate for testing.
@@ -1570,17 +1668,19 @@ mod tests {
     #[tokio::test]
     async fn b7_multi_validator_bare_addr_peers_are_rejected() {
         let mut config = make_test_config();
-        config.network.static_peers = vec![
-            "127.0.0.1:19101".to_string(),
-            "127.0.0.1:19102".to_string(),
-        ];
+        config.network.static_peers =
+            vec!["127.0.0.1:19101".to_string(), "127.0.0.1:19102".to_string()];
         let builder = P2pNodeBuilder::new().with_num_validators(3);
         let err = builder
             .build(&config, 0)
             .await
             .expect_err("must reject bare-addr peers in multi-validator path");
         let msg = format!("{}", err);
-        assert!(msg.contains("vid@addr"), "error must mention vid@addr: {}", msg);
+        assert!(
+            msg.contains("vid@addr"),
+            "error must mention vid@addr: {}",
+            msg
+        );
     }
 
     /// B7.E: `vid@addr` static peers produce non-empty per-peer
@@ -1594,10 +1694,8 @@ mod tests {
         // but `build()` configures the overrides + mapping *before*
         // attempting any dial, and `start()` swallows individual dial
         // failures (`[P2P] Failed to dial …`) so `build()` returns Ok.
-        config.network.static_peers = vec![
-            "1@127.0.0.1:1".to_string(),
-            "2@127.0.0.1:2".to_string(),
-        ];
+        config.network.static_peers =
+            vec!["1@127.0.0.1:1".to_string(), "2@127.0.0.1:2".to_string()];
         let builder = P2pNodeBuilder::new().with_num_validators(3);
         let context = builder
             .build(&config, 0)

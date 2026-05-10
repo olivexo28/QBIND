@@ -19,7 +19,10 @@
 
 use std::fs;
 
-use qbind_node::p2p_node_builder::derive_test_kem_keypair_from_validator_id;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+use qbind_crypto::{MlKem768Backend, KEM_SUITE_ML_KEM_768};
 use qbind_node::pqc_devnet_helper::{
     encode_cert, issue_leaf_delegation_cert, mint_devnet_root, LeafCertSpec,
 };
@@ -70,18 +73,12 @@ fn main() {
         .expect("write trusted-root.spec");
 
     for vid in 0..num_validators {
-        // Bind the leaf cert to the deterministic test-grade KEM
-        // keypair so the existing `peer_kem_pk_overrides` rule used
-        // by `TcpKemTlsP2pService::dial_peer` continues to resolve
-        // peer KEM pks correctly. Real ML-KEM-768 production wiring
-        // is a separate C4 piece (NOT C4(c)) — see
-        // `docs/whitepaper/contradiction.md`.
-        let (kem_pk, kem_sk) = derive_test_kem_keypair_from_validator_id(vid);
+        let (kem_pk, kem_sk) = MlKem768Backend::generate_keypair().expect("ML-KEM-768 keygen");
         let cert = issue_leaf_delegation_cert(
             &LeafCertSpec {
                 validator_id: vid_bytes(vid),
                 root_key_id: root.root_key_id,
-                leaf_kem_suite_id: 1,
+                leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
                 leaf_kem_pk: kem_pk,
                 not_before: 0,
                 not_after: u64::MAX,
@@ -91,21 +88,20 @@ fn main() {
         )
         .expect("issue leaf cert");
 
-        fs::write(
-            format!("{}/v{}.cert.bin", outdir, vid),
-            encode_cert(&cert),
-        )
-        .expect("write cert");
+        fs::write(format!("{}/v{}.cert.bin", outdir, vid), encode_cert(&cert)).expect("write cert");
 
         // KEM secret key bytes — the consumer wraps them in
         // `qbind_net::keys::KemPrivateKey` (zeroize-on-drop).
-        fs::write(format!("{}/v{}.kem.sk.bin", outdir, vid), &kem_sk)
-            .expect("write kem sk");
+        let sk_path = format!("{}/v{}.kem.sk.bin", outdir, vid);
+        fs::write(&sk_path, &kem_sk).expect("write kem sk");
+        #[cfg(unix)]
+        fs::set_permissions(&sk_path, fs::Permissions::from_mode(0o600))
+            .expect("chmod kem sk 0600");
     }
 
     eprintln!(
-        "[devnet_pqc_root_helper] DEVNET-EPHEMERAL: root_id={} suite={} validators={} outdir={}",
-        root_id_hex, PQC_TRANSPORT_SUITE_ML_DSA_44, num_validators, outdir
+        "[devnet_pqc_root_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} kem=ml-kem-768 validators={} outdir={}",
+        root_id_hex, PQC_TRANSPORT_SUITE_ML_DSA_44, KEM_SUITE_ML_KEM_768, num_validators, outdir
     );
     eprintln!("[devnet_pqc_root_helper] root_sk was held in memory only; never written to disk.");
 

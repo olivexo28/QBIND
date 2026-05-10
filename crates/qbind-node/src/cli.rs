@@ -332,6 +332,13 @@ pub struct CliArgs {
     #[arg(long = "p2p-leaf-cert-key")]
     pub p2p_leaf_cert_key: Option<PathBuf>,
 
+    /// Run 039: peer leaf certificate mapping for `pqc-static-root`.
+    ///
+    /// Format: `VID:PATH`, repeated once per static peer whose certified
+    /// ML-KEM-768 public key must be known before the KEMTLS ClientInit.
+    #[arg(long = "p2p-peer-leaf-cert", action = clap::ArgAction::Append)]
+    pub p2p_peer_leaf_certs: Vec<String>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================
@@ -1270,10 +1277,7 @@ impl CliArgs {
 fn parse_validator_consensus_key_spec(spec: &str) -> Result<StaticPeerConsensusKey, String> {
     let parts: Vec<&str> = spec.splitn(3, ':').collect();
     if parts.len() != 3 {
-        return Err(format!(
-            "spec '{}' does not match VID:SUITE:HEXPK",
-            spec
-        ));
+        return Err(format!("spec '{}' does not match VID:SUITE:HEXPK", spec));
     }
     let vid: u64 = parts[0]
         .parse()
@@ -1283,10 +1287,7 @@ fn parse_validator_consensus_key_spec(spec: &str) -> Result<StaticPeerConsensusK
         .map_err(|e| format!("invalid suite id '{}': {}", parts[1], e))?;
     let hex = parts[2].to_string();
     if hex.is_empty() {
-        return Err(format!(
-            "empty public_key_hex in spec '{}'",
-            spec
-        ));
+        return Err(format!("empty public_key_hex in spec '{}'", spec));
     }
     if hex.len() % 2 != 0 {
         return Err(format!(
@@ -1330,8 +1331,7 @@ mod tests {
 
     #[test]
     fn run_033_parse_consensus_key_valid() {
-        let parsed =
-            parse_validator_consensus_key_spec("1:100:abcd0102").expect("valid");
+        let parsed = parse_validator_consensus_key_spec("1:100:abcd0102").expect("valid");
         assert_eq!(parsed.validator_id, 1);
         assert_eq!(parsed.suite_id, 100);
         assert_eq!(parsed.public_key_hex, "abcd0102");
@@ -1385,12 +1385,9 @@ mod tests {
 
     #[test]
     fn run_033_consensus_key_invalid_hex_is_caller_error() {
-        let args = CliArgs::try_parse_from([
-            "qbind-node",
-            "--validator-consensus-key",
-            "0:100:abc",
-        ])
-        .expect("clap-level parse ok");
+        let args =
+            CliArgs::try_parse_from(["qbind-node", "--validator-consensus-key", "0:100:abc"])
+                .expect("clap-level parse ok");
         let res = args.to_node_config();
         assert!(res.is_err(), "must error on odd hex");
         match res.unwrap_err() {
@@ -1586,10 +1583,7 @@ mod tests {
             "/tmp/leaf-kem-sk.bin",
         ])
         .expect("clap parse");
-        assert_eq!(
-            args.p2p_pqc_root_mode.as_deref(),
-            Some("pqc-static-root")
-        );
+        assert_eq!(args.p2p_pqc_root_mode.as_deref(), Some("pqc-static-root"));
         assert_eq!(args.p2p_trusted_roots.len(), 2);
         assert!(args.p2p_leaf_cert.is_some());
         assert!(args.p2p_leaf_cert_key.is_some());

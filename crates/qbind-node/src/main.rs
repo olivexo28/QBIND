@@ -220,11 +220,9 @@ async fn main() {
         // inbound channel; this top-level call just enforces the
         // safety gate so non-P2P modes can't slip past it.
         let env_var = std::env::var(FORGED_INJECTION_ENV_VAR).ok();
-        if let Err(e) = ForgedInjectionHarness::try_activate(
-            config.environment,
-            cases,
-            env_var.as_deref(),
-        ) {
+        if let Err(e) =
+            ForgedInjectionHarness::try_activate(config.environment, cases, env_var.as_deref())
+        {
             match e {
                 ForgedInjectionGateError::NotDevnet { .. }
                 | ForgedInjectionGateError::MissingEnvVar { .. }
@@ -248,7 +246,10 @@ async fn main() {
         // The harness is also rejected on non-P2P modes, since it
         // requires the P2P inbound channel.
         if !p2p_enabled
-            || !matches!(config.network_mode, qbind_node::node_config::NetworkMode::P2p)
+            || !matches!(
+                config.network_mode,
+                qbind_node::node_config::NetworkMode::P2p
+            )
         {
             eprintln!(
                 "[binary] FATAL: --devnet-forged-inject requires --network-mode p2p (the \
@@ -607,8 +608,8 @@ async fn run_p2p_node(
     // fails the binary closed at startup — no silent downgrade to
     // DummySig.
     use qbind_node::pqc_root_config::{
-        parse_pqc_root_mode, parse_pqc_trusted_root_specs, PqcLeafCredentialPaths, PqcRootMode,
-        PqcStaticRootConfig,
+        parse_pqc_peer_leaf_cert_spec, parse_pqc_root_mode, parse_pqc_trusted_root_specs,
+        PqcLeafCredentialPaths, PqcRootMode, PqcStaticRootConfig,
     };
     let pqc_root_mode = args
         .p2p_pqc_root_mode
@@ -628,8 +629,7 @@ async fn run_p2p_node(
     let pqc_required = matches!(pqc_root_mode, PqcRootMode::PqcStaticRoot)
         && matches!(mutual_auth_mode, qbind_net::MutualAuthMode::Required);
 
-    let trusted_roots = match parse_pqc_trusted_root_specs(&args.p2p_trusted_roots, pqc_required)
-    {
+    let trusted_roots = match parse_pqc_trusted_root_specs(&args.p2p_trusted_roots, pqc_required) {
         Ok(roots) => roots,
         Err(e) => {
             eprintln!(
@@ -641,10 +641,7 @@ async fn run_p2p_node(
         }
     };
 
-    let leaf_credentials = match (
-        args.p2p_leaf_cert.as_ref(),
-        args.p2p_leaf_cert_key.as_ref(),
-    ) {
+    let leaf_credentials = match (args.p2p_leaf_cert.as_ref(), args.p2p_leaf_cert_key.as_ref()) {
         (Some(cert), Some(sk)) => {
             let paths = PqcLeafCredentialPaths {
                 cert_path: cert.clone(),
@@ -653,10 +650,7 @@ async fn run_p2p_node(
             match paths.load() {
                 Ok(creds) => Some(creds),
                 Err(e) => {
-                    eprintln!(
-                        "[binary] FATAL: failed to load PQC leaf credentials: {}",
-                        e
-                    );
+                    eprintln!("[binary] FATAL: failed to load PQC leaf credentials: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -680,18 +674,33 @@ async fn run_p2p_node(
         std::process::exit(1);
     }
 
+    let peer_leaf_certs = match args
+        .p2p_peer_leaf_certs
+        .iter()
+        .map(|s| parse_pqc_peer_leaf_cert_spec(s))
+        .collect::<Result<Vec<_>, _>>()
+    {
+        Ok(certs) => certs,
+        Err(e) => {
+            eprintln!("[binary] FATAL: --p2p-peer-leaf-cert parse error: {}", e);
+            std::process::exit(1);
+        }
+    };
+
     let pqc_config = PqcStaticRootConfig {
         mode: pqc_root_mode,
         trusted_roots: trusted_roots.clone(),
         leaf_credentials,
+        peer_leaf_certs,
     };
 
     eprintln!(
-        "[binary] Run 037: pqc_root_mode={} configured_roots={} leaf_credentials_present={} \
-         (root fingerprints: [{}])",
+        "[binary] Run 039: pqc_root_mode={} transport_kem_suite=ml-kem-768 configured_roots={} \
+         leaf_credentials_present={} peer_leaf_certs={} (root fingerprints: [{}])",
         pqc_config.mode,
         pqc_config.trusted_roots.len(),
         pqc_config.leaf_credentials.is_some(),
+        pqc_config.peer_leaf_certs.len(),
         pqc_config
             .trusted_roots
             .iter()
@@ -856,8 +865,7 @@ async fn run_p2p_node(
     // Attempt signer load. Honest "no" is reportable but does NOT
     // by itself fail closed — the `RequireOrFail` policy only
     // triggers below when the bridge outcome stays `Disabled`.
-    let signer_load_result =
-        load_validator_signer_from_config(config, local_validator_id);
+    let signer_load_result = load_validator_signer_from_config(config, local_validator_id);
     let (signer_for_bridge, local_signer_pk, signer_log_summary): (
         Option<std::sync::Arc<dyn qbind_node::validator_signer::ValidatorSigner>>,
         Option<Vec<u8>>,
@@ -893,7 +901,11 @@ async fn run_p2p_node(
                  (no outbound timeout signing). See \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md."
             );
-            (None, None, "absent(keystore_path_not_configured)".to_string())
+            (
+                None,
+                None,
+                "absent(keystore_path_not_configured)".to_string(),
+            )
         }
         Err(e) => {
             eprintln!(
@@ -905,8 +917,7 @@ async fn run_p2p_node(
         }
     };
 
-    node_metrics
-        .set_timeout_verification_signer_loaded(signer_for_bridge.is_some());
+    node_metrics.set_timeout_verification_signer_loaded(signer_for_bridge.is_some());
 
     // If the operator declared `--require-timeout-verification` and
     // the signer half was not even loaded, fail closed *before* we
@@ -1021,46 +1032,43 @@ async fn run_p2p_node(
         }
     };
 
-    node_metrics
-        .set_timeout_verification_key_provider_loaded(loaded_kp.is_some());
+    node_metrics.set_timeout_verification_key_provider_loaded(loaded_kp.is_some());
 
     // Build the activation outcome. If both halves are present, run
     // the real `try_build_timeout_verification_context`; otherwise
     // preserve the Run 032 signer-only probe.
     let supported_suite_ids: &[u16] = &[100]; // ML-DSA-44 (SUITE_PQ_RESERVED_1)
-    let timeout_verification_outcome: TimeoutVerificationActivation = match (
-        signer_for_bridge.clone(),
-        loaded_kp.as_ref(),
-    ) {
-        (Some(signer), Some(kp)) => {
-            // Real bridge inputs — reuse existing
-            // `SimpleBackendRegistry` + `MlDsa44Backend` constructors,
-            // explicitly registering the supported suite. Any
-            // unsupported suite reaching the bridge will fail closed
-            // there.
-            use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
-            use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
-            let mut registry = SimpleBackendRegistry::new();
-            registry.register(
-                ConsensusSigSuiteId::new(100),
-                std::sync::Arc::new(MlDsa44Backend::new()),
-            );
-            let inputs = TimeoutVerificationBridgeInputs {
-                validators: kp.validators.clone(),
-                key_provider: kp.key_provider.clone(),
-                backend_registry: std::sync::Arc::new(registry),
-                chain_id: config.chain_id(),
-                signer: Some(signer),
-                local_validator_id,
-            };
-            try_build_timeout_verification_context(inputs)
-        }
-        _ => {
-            // No production peer keys (or no signer) — fall back to
-            // Run 032 disabled-with-precise-reason path.
-            run_032_probe_with_signer(signer_for_bridge.clone(), local_validator_id)
-        }
-    };
+    let timeout_verification_outcome: TimeoutVerificationActivation =
+        match (signer_for_bridge.clone(), loaded_kp.as_ref()) {
+            (Some(signer), Some(kp)) => {
+                // Real bridge inputs — reuse existing
+                // `SimpleBackendRegistry` + `MlDsa44Backend` constructors,
+                // explicitly registering the supported suite. Any
+                // unsupported suite reaching the bridge will fail closed
+                // there.
+                use qbind_consensus::crypto_verifier::SimpleBackendRegistry;
+                use qbind_crypto::{ml_dsa44::MlDsa44Backend, ConsensusSigSuiteId};
+                let mut registry = SimpleBackendRegistry::new();
+                registry.register(
+                    ConsensusSigSuiteId::new(100),
+                    std::sync::Arc::new(MlDsa44Backend::new()),
+                );
+                let inputs = TimeoutVerificationBridgeInputs {
+                    validators: kp.validators.clone(),
+                    key_provider: kp.key_provider.clone(),
+                    backend_registry: std::sync::Arc::new(registry),
+                    chain_id: config.chain_id(),
+                    signer: Some(signer),
+                    local_validator_id,
+                };
+                try_build_timeout_verification_context(inputs)
+            }
+            _ => {
+                // No production peer keys (or no signer) — fall back to
+                // Run 032 disabled-with-precise-reason path.
+                run_032_probe_with_signer(signer_for_bridge.clone(), local_validator_id)
+            }
+        };
 
     eprintln!(
         "[binary] Run 033: timeout-verification probe: active={} reason={} \
@@ -1081,39 +1089,35 @@ async fn run_p2p_node(
         signer_log_summary,
         peer_kp_log_summary,
     );
-    let verification_ctx = match enforce_policy(
-        timeout_verification_policy,
-        timeout_verification_outcome,
-    ) {
-        Ok(opt) => opt,
-        Err(e) => {
-            eprintln!(
-                "[binary] FATAL: --require-timeout-verification was set but timeout \
+    let verification_ctx =
+        match enforce_policy(timeout_verification_policy, timeout_verification_outcome) {
+            Ok(opt) => opt,
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: --require-timeout-verification was set but timeout \
                  verification cannot be activated honestly: {}",
-                e
-            );
-            eprintln!(
-                "[binary] qbind-node refuses to start under RequireOrFail policy with no \
+                    e
+                );
+                eprintln!(
+                    "[binary] qbind-node refuses to start under RequireOrFail policy with no \
                  production-safe context. See \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md, \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md, \
                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_033.md, \
                  and docs/whitepaper/contradiction.md C5/C4."
-            );
-            std::process::exit(1);
-        }
-    };
+                );
+                std::process::exit(1);
+            }
+        };
     node_metrics.set_timeout_verification_active(verification_ctx.is_some());
-    node_metrics.set_timeout_verification_validator_count(
-        if verification_ctx.is_some() {
-            loaded_kp
-                .as_ref()
-                .map(|kp| kp.validator_count as u64)
-                .unwrap_or(0)
-        } else {
-            0
-        },
-    );
+    node_metrics.set_timeout_verification_validator_count(if verification_ctx.is_some() {
+        loaded_kp
+            .as_ref()
+            .map(|kp| kp.validator_count as u64)
+            .unwrap_or(0)
+    } else {
+        0
+    });
     if verification_ctx.is_some() {
         eprintln!(
             "[binary] Run 033: timeout verification ACTIVE — Arc<TimeoutVerificationContext> \
@@ -1246,29 +1250,26 @@ fn maybe_spawn_run035_forged_injection_harness(
     }
 
     let env_var = std::env::var(FORGED_INJECTION_ENV_VAR).ok();
-    let harness = match ForgedInjectionHarness::try_activate(
-        config.environment,
-        cases,
-        env_var.as_deref(),
-    ) {
-        Ok(h) => h,
-        Err(e @ ForgedInjectionGateError::NotDevnet { .. }) => {
-            eprintln!("[binary] FATAL: {}", e);
-            std::process::exit(1);
-        }
-        Err(e @ ForgedInjectionGateError::MissingEnvVar { .. }) => {
-            eprintln!("[binary] FATAL: {}", e);
-            std::process::exit(1);
-        }
-        Err(ForgedInjectionGateError::Disabled) => {
-            // Already short-circuited above; defensive arm.
-            return None;
-        }
-        Err(e @ ForgedInjectionGateError::UnknownCase(_)) => {
-            eprintln!("[binary] FATAL: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let harness =
+        match ForgedInjectionHarness::try_activate(config.environment, cases, env_var.as_deref()) {
+            Ok(h) => h,
+            Err(e @ ForgedInjectionGateError::NotDevnet { .. }) => {
+                eprintln!("[binary] FATAL: {}", e);
+                std::process::exit(1);
+            }
+            Err(e @ ForgedInjectionGateError::MissingEnvVar { .. }) => {
+                eprintln!("[binary] FATAL: {}", e);
+                std::process::exit(1);
+            }
+            Err(ForgedInjectionGateError::Disabled) => {
+                // Already short-circuited above; defensive arm.
+                return None;
+            }
+            Err(e @ ForgedInjectionGateError::UnknownCase(_)) => {
+                eprintln!("[binary] FATAL: {}", e);
+                std::process::exit(1);
+            }
+        };
 
     // Build a self-contained runtime fixture with FRESH ML-DSA-44
     // keypairs the harness uses to construct forged frames. These
@@ -1277,10 +1278,8 @@ fn maybe_spawn_run035_forged_injection_harness(
     // signatures decode correctly fail signature verification against
     // the real per-validator public keys — exactly the rejection
     // path we want to exercise.
-    let mut signing_keys: std::collections::HashMap<
-        qbind_consensus::ids::ValidatorId,
-        Vec<u8>,
-    > = std::collections::HashMap::new();
+    let mut signing_keys: std::collections::HashMap<qbind_consensus::ids::ValidatorId, Vec<u8>> =
+        std::collections::HashMap::new();
     for i in 0..num_validators {
         let (_pk, sk) = match qbind_crypto::ml_dsa44::MlDsa44Backend::generate_keypair() {
             Ok(kp) => kp,
