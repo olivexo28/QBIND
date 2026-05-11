@@ -1,3 +1,4 @@
+pub mod cert_verify_metrics;
 pub mod connection;
 pub mod cookie;
 pub mod error;
@@ -10,6 +11,7 @@ pub mod keys;
 pub mod session;
 pub mod transport;
 
+pub use cert_verify_metrics::{CertVerifyMetricsSink, CertVerifyMetricsSinkRef};
 pub use connection::{ClientConnectionConfig, Connection, ServerConnectionConfig};
 pub use cookie::{
     CookieConfig, CookieValidation, COOKIE_DOMAIN_TAG, COOKIE_SIZE, DEFAULT_BUCKET_DURATION_SECS,

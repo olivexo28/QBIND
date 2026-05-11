@@ -309,6 +309,7 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
         peer_root_network_pk: vec![0u8; 32],
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
+        cert_verify_metrics: None,
     };
 
     let validator_id = [0u8; 32];
@@ -325,6 +326,7 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
         local_validator_id: validator_id,
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
+        cert_verify_metrics: None,
     };
 
     let client_cfg = ClientConnectionConfig {

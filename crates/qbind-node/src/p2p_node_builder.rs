@@ -1407,6 +1407,32 @@ impl P2pNodeBuilder {
             (MutualAuthMode::Disabled, _) => None,
         };
 
+        // Run 044 — observability-only: install the cert-verify metrics
+        // sink ONLY on the production-honest PQC path (mutual auth on +
+        // `PqcRootMode::PqcStaticRoot`). The test-grade DummySig path
+        // intentionally leaves the sink `None` so the
+        // `qbind_p2p_pqc_cert_verify_*` family is never bumped by
+        // non-PQC verifications — preserving the contract that those
+        // counters reflect real PQC delegation-cert verification events
+        // only. When `self.p2p_metrics` is also unset (builder-only
+        // tests / non-binary callers), the sink stays `None` and the
+        // handshake path is the zero-cost no-op path.
+        let cert_verify_metrics: Option<Arc<dyn qbind_net::CertVerifyMetricsSink>> = match (
+            mutual_auth_mode,
+            self.pqc_root_config.as_ref(),
+            self.p2p_metrics.as_ref(),
+        ) {
+            (
+                MutualAuthMode::Required | MutualAuthMode::Optional,
+                Some(cfg),
+                Some(p2p_metrics),
+            ) if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) => {
+                let arc_metrics: Arc<dyn qbind_net::CertVerifyMetricsSink> = p2p_metrics.clone();
+                Some(arc_metrics)
+            }
+            _ => None,
+        };
+
         // Create handshake configs
         let client_handshake_cfg = ClientHandshakeConfig {
             kem_suite_id,
@@ -1415,6 +1441,7 @@ impl P2pNodeBuilder {
             peer_root_network_pk: root_network_pk.clone(),
             kem_metrics: None,
             local_delegation_cert: local_client_cert,
+            cert_verify_metrics: cert_verify_metrics.clone(),
         };
 
         let server_handshake_cfg = ServerHandshakeConfig {
@@ -1429,6 +1456,7 @@ impl P2pNodeBuilder {
             local_validator_id: validator_id_bytes,
             mutual_auth_mode,
             trusted_client_roots,
+            cert_verify_metrics,
         };
 
         // Create connection configs

@@ -45,6 +45,7 @@ use qbind_wire::net::{
 use sha3::{Digest, Sha3_256};
 use zeroize::Zeroize;
 
+use crate::cert_verify_metrics::CertVerifyMetricsSink;
 use crate::cookie::{CookieConfig, CookieValidation, MAX_COOKIE_SIZE};
 use crate::error::NetError;
 use crate::kem_metrics::KemOpMetrics;
@@ -166,6 +167,15 @@ pub struct ClientHandshakeConfig {
     /// The server will verify this certificate and derive a NodeId from it.
     /// If None, uses protocol version 1 (server-auth only).
     pub local_delegation_cert: Option<Vec<u8>>,
+    /// Run 044: optional cert-verify metrics sink (observability-only).
+    ///
+    /// When set, the dialer-side server-cert verification path inside
+    /// `ClientHandshake::handle_server_accept` invokes the sink at each
+    /// existing success/failure boundary. `None` is a zero-cost no-op
+    /// path that preserves pre-Run-044 verification behaviour
+    /// bit-for-bit. Crate layering: defined in `qbind-net` to avoid
+    /// `qbind-net → qbind-node` dependency.
+    pub cert_verify_metrics: Option<Arc<dyn CertVerifyMetricsSink>>,
 }
 
 impl std::fmt::Debug for ClientHandshakeConfig {
@@ -290,20 +300,54 @@ impl ClientHandshake {
         client_init: &ClientInit,
         accept: &ServerAccept,
     ) -> Result<HandshakeResult<'a>, NetError> {
+        // Run 044: observability-only — see `cert_verify_metrics.rs` for
+        // the per-reason mapping table. Each branch below bumps exactly
+        // one per-reason counter before propagating the existing
+        // `NetError` variant; the success path bumps `inc_accepted`
+        // exactly once after ALL checks pass. Verification result is
+        // unchanged whether or not a sink is configured.
+        let sink = self.cfg.cert_verify_metrics.as_ref();
+
         // 1) Parse and verify delegation cert from raw bytes.
         let mut cert_slice: &[u8] = &accept.delegation_cert;
-        let delegation_cert = NetworkDelegationCert::decode(&mut cert_slice)
-            .map_err(|_| NetError::KeySchedule("failed to parse delegation cert"))?;
+        let delegation_cert = match NetworkDelegationCert::decode(&mut cert_slice) {
+            Ok(c) => c,
+            Err(_) => {
+                if let Some(s) = sink {
+                    s.inc_rejected_malformed();
+                }
+                return Err(NetError::KeySchedule("failed to parse delegation cert"));
+            }
+        };
 
-        verify_delegation_cert(
+        if let Err(e) = verify_delegation_cert(
             self.cfg.crypto.as_ref(),
             &delegation_cert,
             &self.cfg.peer_root_network_pk,
-        )?;
+        ) {
+            if let Some(s) = sink {
+                match &e {
+                    NetError::UnsupportedSuite(_) => s.inc_rejected_wrong_suite(),
+                    NetError::KeySchedule(_) => s.inc_rejected_bad_signature(),
+                    _ => s.inc_rejected_bad_signature(),
+                }
+            }
+            return Err(e);
+        }
 
         // 2) Check that validator_id matches what we expected.
         if delegation_cert.validator_id != client_init.validator_id {
+            if let Some(s) = sink {
+                s.inc_rejected_validator_mismatch();
+            }
             return Err(NetError::KeySchedule("validator_id mismatch in cert"));
+        }
+
+        // Run 044: all cert-verification checks at this boundary
+        // succeeded. Bump accepted exactly once before any downstream
+        // (non-cert-verification) handshake work begins.
+        if let Some(s) = sink {
+            s.inc_accepted();
         }
 
         // 3) Compute transcript hash (M8: includes client cert if present for mutual auth).
@@ -425,6 +469,14 @@ pub struct ServerHandshakeConfig {
     /// If empty, client certs are verified against their embedded root_key_id
     /// (assumes self-signed or externally-validated certs).
     pub trusted_client_roots: Option<TrustedClientRoots>,
+    /// Run 044: optional cert-verify metrics sink (observability-only).
+    ///
+    /// When set, the listener-side `parse_and_verify_client_cert` path
+    /// invokes the sink at each existing success/failure boundary.
+    /// `None` is a zero-cost no-op path that preserves pre-Run-044
+    /// verification behaviour bit-for-bit. Crate layering: defined in
+    /// `qbind-net` to avoid `qbind-net → qbind-node` dependency.
+    pub cert_verify_metrics: Option<Arc<dyn CertVerifyMetricsSink>>,
 }
 
 /// Trusted root public keys for client certificate verification (M8).
@@ -826,20 +878,44 @@ impl ServerHandshake {
     /// - `ClientCertInvalid("parse error")`: Failed to parse certificate
     /// - `ClientCertInvalid("untrusted root")`: Root key not in trusted list
     /// - `ClientCertInvalid("signature verify error")`: Signature verification failed
+    ///
+    /// # Run 044 (observability-only)
+    ///
+    /// At each existing success/failure boundary, the optional
+    /// `cert_verify_metrics` sink configured on `ServerHandshakeConfig`
+    /// is invoked exactly once with the matching reason method, before
+    /// the unchanged `NetError` variant is returned. Verification
+    /// result is unchanged whether or not a sink is configured.
     fn parse_and_verify_client_cert(
         &self,
         cert_bytes: &[u8],
     ) -> Result<NetworkDelegationCert, NetError> {
+        let sink = self.cfg.cert_verify_metrics.as_ref();
+
         // 1) Parse the certificate
         let mut slice: &[u8] = cert_bytes;
-        let cert = NetworkDelegationCert::decode(&mut slice)
-            .map_err(|_| NetError::ClientCertInvalid("parse error"))?;
+        let cert = match NetworkDelegationCert::decode(&mut slice) {
+            Ok(c) => c,
+            Err(_) => {
+                if let Some(s) = sink {
+                    s.inc_rejected_malformed();
+                }
+                return Err(NetError::ClientCertInvalid("parse error"));
+            }
+        };
 
         // 2) Look up the root public key for verification
         let root_pk = if let Some(ref roots) = self.cfg.trusted_client_roots {
             // Use configured trusted roots
-            roots.lookup(&cert.root_key_id)
-                .ok_or(NetError::ClientCertInvalid("untrusted root"))?
+            match roots.lookup(&cert.root_key_id) {
+                Some(pk) => pk,
+                None => {
+                    if let Some(s) = sink {
+                        s.inc_rejected_unknown_root();
+                    }
+                    return Err(NetError::ClientCertInvalid("untrusted root"));
+                }
+            }
         } else {
             // No trusted roots configured - for testing, we accept any cert
             // but production should always configure trusted roots
@@ -850,7 +926,28 @@ impl ServerHandshake {
 
         // 3) Verify the certificate signature
         if !root_pk.is_empty() {
-            verify_delegation_cert(self.cfg.crypto.as_ref(), &cert, &root_pk)?;
+            if let Err(e) =
+                verify_delegation_cert(self.cfg.crypto.as_ref(), &cert, &root_pk)
+            {
+                if let Some(s) = sink {
+                    match &e {
+                        NetError::UnsupportedSuite(_) => s.inc_rejected_wrong_suite(),
+                        NetError::KeySchedule(_) => s.inc_rejected_bad_signature(),
+                        _ => s.inc_rejected_bad_signature(),
+                    }
+                }
+                return Err(e);
+            }
+        }
+
+        // Run 044: all listener-side cert-verification checks at this
+        // boundary succeeded. Bump accepted exactly once. NOTE: this
+        // counts the cert-verification event, not the downstream
+        // KEM/AEAD handshake outcome — by design (cert verification is
+        // a distinct, earlier boundary that fails closed before any
+        // KEM decapsulation).
+        if let Some(s) = sink {
+            s.inc_accepted();
         }
 
         Ok(cert)

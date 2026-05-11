@@ -6365,6 +6365,52 @@ impl P2pMetrics {
 }
 
 // ============================================================================
+// Run 044 — CertVerifyMetricsSink adapter
+// ============================================================================
+//
+// `P2pMetrics` lives in `qbind-node`. `qbind-net::CertVerifyMetricsSink` is
+// the smallest safe seam for the live KEMTLS handshake engine to call the
+// existing per-reason `inc_pqc_cert_verify_*` setters on `P2pMetrics` from
+// the cert-verification success/failure boundaries inside
+// `qbind_net::handshake::parse_and_verify_client_cert` (listener) and
+// `ClientHandshake::handle_server_accept` (dialer), without `qbind-net`
+// depending on `qbind-node`.
+//
+// Behavioural contract (Run 044, observability-only):
+// - Every counter that this adapter forwards already existed and was
+//   already declared in `format_metrics` (Run 037 / Run 043). Only the
+//   call-site mapping is new.
+// - Each per-reason `inc_*` on `P2pMetrics` also bumps the aggregate
+//   `pqc_cert_verify_rejected_total` counter exactly once via the
+//   existing Run 037 contract (see e.g. `inc_pqc_cert_verify_rejected_bad_signature`
+//   above).
+// - No counter is bumped twice for the same cert verification event.
+// - Verification behaviour is unaffected by whether the sink is installed.
+impl qbind_net::CertVerifyMetricsSink for P2pMetrics {
+    fn inc_accepted(&self) {
+        self.inc_pqc_cert_verify_accepted();
+    }
+    fn inc_rejected_unknown_root(&self) {
+        self.inc_pqc_cert_verify_rejected_unknown_root();
+    }
+    fn inc_rejected_wrong_suite(&self) {
+        self.inc_pqc_cert_verify_rejected_wrong_suite();
+    }
+    fn inc_rejected_bad_signature(&self) {
+        self.inc_pqc_cert_verify_rejected_bad_signature();
+    }
+    fn inc_rejected_validator_mismatch(&self) {
+        self.inc_pqc_cert_verify_rejected_validator_mismatch();
+    }
+    fn inc_rejected_malformed(&self) {
+        self.inc_pqc_cert_verify_rejected_malformed();
+    }
+    fn inc_rejected_expired(&self) {
+        self.inc_pqc_cert_verify_rejected_expired();
+    }
+}
+
+// ============================================================================
 // MonetaryMetrics - Monetary engine telemetry metrics (T196)
 // ============================================================================
 
