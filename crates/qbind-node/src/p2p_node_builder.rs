@@ -653,6 +653,20 @@ pub struct P2pNodeBuilder {
     /// When this is `None` or `cfg.mode == PqcRootMode::TestGradeDummySig`,
     /// the builder keeps the pre-Run-037 B12 wiring bit-for-bit.
     pqc_root_config: Option<PqcStaticRootConfig>,
+    /// Run 043: optional caller-supplied `P2pMetrics` Arc.
+    ///
+    /// When set, `build()` uses this `Arc<P2pMetrics>` instead of creating
+    /// a fresh local one. This lets `qbind-node`'s `main.rs` share the
+    /// **same** `P2pMetrics` instance between (a) the live P2P transport
+    /// path (which increments cert-verify / per-reason rejection counters)
+    /// and (b) the live `/metrics` HTTP scrape served from
+    /// `NodeMetrics::format_metrics`. Without this shared handle, the
+    /// builder's local `Arc<P2pMetrics>` and `NodeMetrics::p2p` are two
+    /// separate instances and the `qbind_p2p_pqc_*` family on `/metrics`
+    /// stays at zero even under live `pqc-static-root` operation. When
+    /// `None`, `build()` falls back to creating a fresh local instance
+    /// (preserving pre-Run-043 behaviour for builder-only tests).
+    p2p_metrics: Option<Arc<P2pMetrics>>,
 }
 
 impl Default for P2pNodeBuilder {
@@ -678,6 +692,13 @@ impl P2pNodeBuilder {
             // behaviour bit-for-bit. Production-honest mode is opted
             // into via `with_pqc_root_config`.
             pqc_root_config: None,
+            // Run 043: defaults to None — `build()` creates a fresh
+            // local `Arc<P2pMetrics>`. The live binary path
+            // (`qbind-node`'s `main.rs`) wires this through
+            // `with_p2p_metrics(node_metrics.p2p_arc())` so that the
+            // `qbind_p2p_pqc_*` counters surfaced on the live
+            // `/metrics` endpoint reflect real cert-verify activity.
+            p2p_metrics: None,
         }
     }
 
@@ -751,6 +772,22 @@ impl P2pNodeBuilder {
     /// bit-for-bit.
     pub fn with_pqc_root_config(mut self, cfg: PqcStaticRootConfig) -> Self {
         self.pqc_root_config = Some(cfg);
+        self
+    }
+
+    /// Run 043: install a caller-supplied `Arc<P2pMetrics>` so that the
+    /// live transport path and the live `/metrics` HTTP endpoint
+    /// scrape the **same** `P2pMetrics` instance.
+    ///
+    /// Without this, `build()` creates a fresh local `Arc<P2pMetrics>`
+    /// (preserving pre-Run-043 behaviour for builder-only unit tests),
+    /// but in the live binary that local instance is never reached by
+    /// `NodeMetrics::format_metrics`, so the `qbind_p2p_pqc_*` family on
+    /// the live `/metrics` endpoint reads as zero even under
+    /// `pqc-static-root` Required mode. `qbind-node`'s `main.rs` wires
+    /// this via `with_p2p_metrics(node_metrics.p2p_arc())`.
+    pub fn with_p2p_metrics(mut self, metrics: Arc<P2pMetrics>) -> Self {
+        self.p2p_metrics = Some(metrics);
         self
     }
 
@@ -1087,8 +1124,17 @@ impl P2pNodeBuilder {
 
         let p2p_service = Arc::new(p2p_service);
 
-        // Create metrics
-        let metrics = Arc::new(P2pMetrics::new());
+        // Create metrics. Run 043: prefer a caller-supplied
+        // `Arc<P2pMetrics>` (so the live `qbind-node` binary path shares
+        // exactly one `P2pMetrics` instance between the transport and
+        // the `/metrics` HTTP scrape served from
+        // `NodeMetrics::format_metrics`). Falls back to a fresh local
+        // instance for builder-only tests, preserving pre-Run-043
+        // behaviour bit-for-bit when `with_p2p_metrics` is not called.
+        let metrics = self
+            .p2p_metrics
+            .clone()
+            .unwrap_or_else(|| Arc::new(P2pMetrics::new()));
 
         // Run 037: surface PQC root distribution mode in metrics so
         // operators / scrapers can confirm at a glance whether the

@@ -7751,7 +7751,7 @@ pub struct NodeMetrics {
     /// Environment metrics (T162).
     environment: std::sync::RwLock<Option<EnvironmentMetrics>>,
     /// P2P transport metrics (T172).
-    p2p: P2pMetrics,
+    p2p: Arc<P2pMetrics>,
     /// DAG coupling validation metrics (T191).
     dag_coupling: DagCouplingMetrics,
     /// Monetary engine telemetry metrics (T196).
@@ -7828,7 +7828,7 @@ impl NodeMetrics {
             execution: ExecutionMetrics::new(),
             signer_keystore: SignerKeystoreMetrics::new(),
             environment: std::sync::RwLock::new(None),
-            p2p: P2pMetrics::new(),
+            p2p: Arc::new(P2pMetrics::new()),
             dag_coupling: DagCouplingMetrics::new(),
             monetary: MonetaryMetrics::new(),
             hsm: crate::hsm_pkcs11::HsmMetrics::new(),
@@ -7951,6 +7951,19 @@ impl NodeMetrics {
     /// Get P2P transport metrics (T172).
     pub fn p2p(&self) -> &P2pMetrics {
         &self.p2p
+    }
+
+    /// Get a shareable handle to the P2P transport metrics (T172).
+    ///
+    /// Run 043: the live P2P transport (`P2pNodeBuilder::build()`) needs to
+    /// increment the same `P2pMetrics` instance that the live `/metrics`
+    /// HTTP endpoint scrapes via `NodeMetrics::format_metrics`. Wire the
+    /// node's `Arc<P2pMetrics>` into the builder with
+    /// `P2pNodeBuilder::with_p2p_metrics(node_metrics.p2p_arc())` so the
+    /// `qbind_p2p_pqc_*` family on `/metrics` reflects live cert-verify
+    /// activity instead of a parallel, never-scraped counter.
+    pub fn p2p_arc(&self) -> Arc<P2pMetrics> {
+        Arc::clone(&self.p2p)
     }
 
     /// Get DAG coupling validation metrics (T191).
@@ -8460,6 +8473,21 @@ impl NodeMetrics {
 
         // Per-peer metrics (T90.4)
         output.push_str(&self.peer_network.format_metrics());
+
+        // P2P transport / PQC root metrics (T172, T205, T206, T226, Run 037 PQC).
+        //
+        // Run 043: wire `P2pMetrics::format_metrics()` (including the
+        // `qbind_p2p_pqc_*` family declared in `P2pMetrics::format_metrics`)
+        // into the live `/metrics` output served by
+        // `metrics_http::format_metrics_output`. Prior to Run 043 the
+        // `qbind_p2p_pqc_*` family was declared on `P2pMetrics` but the
+        // aggregate `NodeMetrics::format_metrics` did not delegate to it, so
+        // the Run 037/038/039/040/041/042 evidence runs could not observe
+        // those counters on the live scrape endpoint. The single insertion
+        // here also covers `format_metrics_with_crypto`, which composes its
+        // output on top of `format_metrics`. Emitted exactly once.
+        output.push('\n');
+        output.push_str(&self.p2p.format_metrics());
 
         // Connection limit metrics (T105)
         output.push_str(&self.connection_limit.format_metrics());
@@ -9868,5 +9896,226 @@ mod tests {
         assert_eq!(format!("{}", SignerHealth::Healthy), "healthy");
         assert_eq!(format!("{}", SignerHealth::Degraded), "degraded");
         assert_eq!(format!("{}", SignerHealth::Failed), "failed");
+    }
+
+    // ========================================================================
+    // Run 043: qbind_p2p_pqc_* live /metrics wiring tests
+    //
+    // These tests prove `NodeMetrics::format_metrics` and
+    // `NodeMetrics::format_metrics_with_crypto` (the two formatters reached
+    // from the live HTTP `/metrics` endpoint via
+    // `metrics_http::format_metrics_output`) include the full
+    // `qbind_p2p_pqc_*` family declared on `P2pMetrics::format_metrics`,
+    // emit them exactly once, expose zero-valued rejection counters by
+    // default, propagate non-zero increments, and do not regress the
+    // pre-existing consensus / KEM / timeout-verification surfaces.
+    // Observability-only; no protocol or crypto behavior tested here.
+    // ========================================================================
+
+    /// Names of every `qbind_p2p_pqc_*` metric emitted by
+    /// `P2pMetrics::format_metrics`.
+    const RUN_043_PQC_METRIC_NAMES: &[&str] = &[
+        "qbind_p2p_pqc_root_mode",
+        "qbind_p2p_pqc_roots_configured",
+        "qbind_p2p_pqc_cert_verify_accepted_total",
+        "qbind_p2p_pqc_cert_verify_rejected_total",
+        "qbind_p2p_pqc_cert_rejected_unknown_root_total",
+        "qbind_p2p_pqc_cert_rejected_wrong_suite_total",
+        "qbind_p2p_pqc_cert_rejected_bad_signature_total",
+        "qbind_p2p_pqc_cert_rejected_validator_mismatch_total",
+        "qbind_p2p_pqc_cert_rejected_malformed_total",
+        "qbind_p2p_pqc_cert_rejected_expired_total",
+    ];
+
+    /// Count occurrences of a token at the start of a line (so that e.g.
+    /// `qbind_p2p_pqc_root_mode` is not confused with
+    /// `qbind_p2p_pqc_roots_configured`).
+    fn run_043_count_metric_lines(output: &str, name: &str) -> usize {
+        output
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim_start();
+                // Allow either "name " (value form) or "name{" (labeled form)
+                // or exact "name" (no value, never used but safe).
+                trimmed.starts_with(&format!("{name} "))
+                    || trimmed.starts_with(&format!("{name}{{"))
+                    || trimmed == name
+            })
+            .count()
+    }
+
+    #[test]
+    fn run_043_node_metrics_format_metrics_includes_pqc_family() {
+        let metrics = NodeMetrics::new();
+        let output = metrics.format_metrics();
+        for name in RUN_043_PQC_METRIC_NAMES {
+            assert!(
+                output.contains(name),
+                "format_metrics() output is missing `{name}` (Run 043 wiring regression)"
+            );
+        }
+    }
+
+    #[test]
+    fn run_043_node_metrics_format_metrics_with_crypto_includes_pqc_family() {
+        let metrics = NodeMetrics::new();
+        let output = metrics.format_metrics_with_crypto(None, None);
+        for name in RUN_043_PQC_METRIC_NAMES {
+            assert!(
+                output.contains(name),
+                "format_metrics_with_crypto() output is missing `{name}` (Run 043 wiring regression)"
+            );
+        }
+    }
+
+    #[test]
+    fn run_043_pqc_family_emitted_exactly_once_in_format_metrics() {
+        let metrics = NodeMetrics::new();
+        let output = metrics.format_metrics();
+        for name in RUN_043_PQC_METRIC_NAMES {
+            let count = run_043_count_metric_lines(&output, name);
+            assert_eq!(
+                count, 1,
+                "metric `{name}` appears {count} times in format_metrics() output \
+                 (expected exactly 1; Run 043 must not duplicate emission)"
+            );
+        }
+    }
+
+    #[test]
+    fn run_043_pqc_family_emitted_exactly_once_in_format_metrics_with_crypto() {
+        // `format_metrics_with_crypto` wraps `format_metrics`; we must still
+        // see each name exactly once on the wrapper path.
+        let metrics = NodeMetrics::new();
+        let output = metrics.format_metrics_with_crypto(None, None);
+        for name in RUN_043_PQC_METRIC_NAMES {
+            let count = run_043_count_metric_lines(&output, name);
+            assert_eq!(
+                count, 1,
+                "metric `{name}` appears {count} times in \
+                 format_metrics_with_crypto() output \
+                 (expected exactly 1; Run 043 must not duplicate emission)"
+            );
+        }
+    }
+
+    #[test]
+    fn run_043_zero_valued_pqc_rejection_counters_visible_by_default() {
+        // Existing P2pMetrics::format_metrics emits zero-valued counters at
+        // construction time. The wiring must preserve that style so operators
+        // can alarm on `== 0`.
+        let metrics = NodeMetrics::new();
+        let output = metrics.format_metrics();
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_accepted_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_rejected_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_unknown_root_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_wrong_suite_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_bad_signature_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_validator_mismatch_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_malformed_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_expired_total 0"));
+        // Default mode (test-grade DummySig) reports 0 for the gauge.
+        assert!(output.contains("qbind_p2p_pqc_root_mode 0"));
+        assert!(output.contains("qbind_p2p_pqc_roots_configured 0"));
+    }
+
+    #[test]
+    fn run_043_non_zero_pqc_counters_propagate_through_node_formatter() {
+        let metrics = NodeMetrics::new();
+        // Simulate a positive pqc-static-root smoke: mode=1, two configured
+        // roots, three accepted cert verifications.
+        metrics.p2p().set_pqc_root_mode(1);
+        metrics.p2p().set_pqc_roots_configured(2);
+        metrics.p2p().inc_pqc_cert_verify_accepted();
+        metrics.p2p().inc_pqc_cert_verify_accepted();
+        metrics.p2p().inc_pqc_cert_verify_accepted();
+        // Simulate one of each per-reason rejection. The aggregate
+        // `cert_verify_rejected_total` counter is bumped by each per-reason
+        // inc_*, matching the Run 037 contract documented in
+        // contradiction.md.
+        metrics.p2p().inc_pqc_cert_verify_rejected_unknown_root();
+        metrics.p2p().inc_pqc_cert_verify_rejected_wrong_suite();
+        metrics.p2p().inc_pqc_cert_verify_rejected_bad_signature();
+        metrics
+            .p2p()
+            .inc_pqc_cert_verify_rejected_validator_mismatch();
+        metrics.p2p().inc_pqc_cert_verify_rejected_malformed();
+        metrics.p2p().inc_pqc_cert_verify_rejected_expired();
+
+        let output = metrics.format_metrics();
+
+        assert!(output.contains("qbind_p2p_pqc_root_mode 1"));
+        assert!(output.contains("qbind_p2p_pqc_roots_configured 2"));
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_accepted_total 3"));
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_rejected_total 6"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_unknown_root_total 1"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_wrong_suite_total 1"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_bad_signature_total 1"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_validator_mismatch_total 1"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_malformed_total 1"));
+        assert!(output.contains("qbind_p2p_pqc_cert_rejected_expired_total 1"));
+
+        // Also visible on the crypto-wrapper formatter.
+        let output2 = metrics.format_metrics_with_crypto(None, None);
+        assert!(output2.contains("qbind_p2p_pqc_cert_verify_accepted_total 3"));
+        assert!(output2.contains("qbind_p2p_pqc_cert_verify_rejected_total 6"));
+    }
+
+    #[test]
+    fn run_043_pqc_wiring_does_not_regress_existing_metric_surfaces() {
+        // Same fixture as `node_metrics_format_produces_valid_output`,
+        // extended with checks on timeout-verification, consensus_net_*, and
+        // KEM metric surfaces to prove Run 043 wiring is additive only.
+        let metrics = NodeMetrics::new();
+        metrics.network().inc_inbound_vote();
+        metrics.network().inc_inbound_proposal();
+        metrics.runtime().inc_events_tick();
+        metrics
+            .spawn_blocking()
+            .record_blocking_duration(Duration::from_micros(500));
+
+        let output = metrics.format_metrics();
+
+        // Pre-existing consensus_net_* surface.
+        assert!(output.contains("consensus_net_inbound_total{kind=\"vote\"} 1"));
+        assert!(output.contains("consensus_net_inbound_total{kind=\"proposal\"} 1"));
+        assert!(output.contains("consensus_events_total{kind=\"tick\"} 1"));
+        assert!(output.contains("consensus_net_spawn_blocking_total 1"));
+
+        // Run 031–033 timeout-verification activation surface still present.
+        assert!(output.contains("qbind_timeout_verification_active"));
+        assert!(output.contains("qbind_timeout_verification_signer_loaded"));
+        assert!(output.contains("qbind_timeout_verification_key_provider_loaded"));
+        assert!(output.contains("qbind_timeout_verification_validator_count"));
+
+        // KEM operation metrics surface still present.
+        assert!(output.contains("qbind_net_kem_encaps_total"));
+        assert!(output.contains("qbind_net_kem_decaps_total"));
+
+        // And the Run 043 newly-wired PQC surface is present.
+        assert!(output.contains("qbind_p2p_pqc_root_mode"));
+    }
+
+    #[test]
+    fn run_043_pqc_section_header_emitted_once() {
+        // The `P2pMetrics::format_metrics` output begins with the
+        // `# P2P transport metrics (T172)` section header. Run 043 wiring
+        // must not duplicate it.
+        let metrics = NodeMetrics::new();
+        let output = metrics.format_metrics();
+        let header_count = output.matches("# P2P transport metrics (T172)").count();
+        assert_eq!(
+            header_count, 1,
+            "`# P2P transport metrics (T172)` header must appear exactly once \
+             in NodeMetrics::format_metrics output (got {header_count})"
+        );
+
+        let output2 = metrics.format_metrics_with_crypto(None, None);
+        let header_count2 = output2.matches("# P2P transport metrics (T172)").count();
+        assert_eq!(
+            header_count2, 1,
+            "`# P2P transport metrics (T172)` header must appear exactly once \
+             in NodeMetrics::format_metrics_with_crypto output (got {header_count2})"
+        );
     }
 }

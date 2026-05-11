@@ -593,10 +593,20 @@ async fn run_p2p_node(
     }
 
     // Build the P2P transport with the inbound consensus handler installed.
+    //
+    // Run 043: share the same `Arc<P2pMetrics>` between the live P2P
+    // transport (where `qbind_p2p_pqc_*` cert-verify / per-reason
+    // rejection counters are incremented) and the live `/metrics` HTTP
+    // endpoint (served from `NodeMetrics::format_metrics`, which since
+    // Run 043 includes `self.p2p.format_metrics()`). Without this, the
+    // builder would mint a fresh local `Arc<P2pMetrics>` that never
+    // reaches the scrape path, so the family on `/metrics` would stay
+    // at zero under `pqc-static-root` operation.
     let builder = P2pNodeBuilder::new()
         .with_num_validators(num_validators as usize)
         .with_consensus_handler(Arc::new(consensus_handler))
-        .with_mutual_auth_mode(mutual_auth_mode);
+        .with_mutual_auth_mode(mutual_auth_mode)
+        .with_p2p_metrics(node_metrics.p2p_arc());
 
     // Run 037 (C4 piece (c)): production-honest PQC KEMTLS root-key
     // distribution. Default mode is `test-grade-dummy-sig` (preserves
