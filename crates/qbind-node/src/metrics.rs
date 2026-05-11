@@ -2105,6 +2105,35 @@ pub struct BinaryViewTimeoutMetrics {
     // existing latency families (see `/metrics` exposition below).
     timeout_crypto_verify_latency_ns_total: AtomicU64,
     timeout_crypto_verify_latency_observations_total: AtomicU64,
+
+    // -------------------------------------------------------------------
+    // Run 046: bounded exponential-backoff view-timeout pacing.
+    //
+    // These observe the binary-loop `ViewTimeoutBackoffState` pacer:
+    //
+    //   * `view_timeout_current_threshold_ticks` (gauge) — current
+    //     effective threshold the pacer would fire a TimeoutMsg on,
+    //     in ticks. Equals the configured base while at level 0,
+    //     grows by `multiplier` per consecutive timeout, saturating
+    //     at `view_timeout_max_ticks`. Reads 0 when the primitive
+    //     is disabled (`view_timeout_ticks = None`).
+    //   * `view_timeout_backoff_level` (gauge) — current pacer level
+    //     (0 = at base). Reset to 0 on committed-height progress.
+    //   * `view_timeout_backoff_resets_total` — cumulative count of
+    //     resets that genuinely lowered the threshold. No-op resets
+    //     (already at base) do not increment.
+    //   * `view_timeout_backoff_increases_total` — cumulative count
+    //     of increases that genuinely raised the threshold (or
+    //     pinned at the cap on the cap-arrival transition).
+    //   * `view_timeout_max_cap_hits_total` — cumulative count of
+    //     cap saturations: incremented on cap-arrival and on every
+    //     subsequent attempt to grow further while already capped.
+    // -------------------------------------------------------------------
+    view_timeout_current_threshold_ticks: AtomicU64,
+    view_timeout_backoff_level: AtomicU64,
+    view_timeout_backoff_resets_total: AtomicU64,
+    view_timeout_backoff_increases_total: AtomicU64,
+    view_timeout_max_cap_hits_total: AtomicU64,
 }
 
 impl BinaryViewTimeoutMetrics {
@@ -2257,6 +2286,30 @@ impl BinaryViewTimeoutMetrics {
             stats.timeout_crypto_verify_latency_observations_total,
             Ordering::Relaxed,
         );
+    }
+
+    /// Run 046: store the exponential-backoff pacer state. Called
+    /// from the binary loop on every tick / inbound event after a
+    /// pacer-state-changing call has had a chance to mutate. Reads
+    /// are atomic, lock-free.
+    pub fn set_run046(
+        &self,
+        current_threshold_ticks: u64,
+        current_level: u64,
+        resets_total: u64,
+        increases_total: u64,
+        max_cap_hits_total: u64,
+    ) {
+        self.view_timeout_current_threshold_ticks
+            .store(current_threshold_ticks, Ordering::Relaxed);
+        self.view_timeout_backoff_level
+            .store(current_level, Ordering::Relaxed);
+        self.view_timeout_backoff_resets_total
+            .store(resets_total, Ordering::Relaxed);
+        self.view_timeout_backoff_increases_total
+            .store(increases_total, Ordering::Relaxed);
+        self.view_timeout_max_cap_hits_total
+            .store(max_cap_hits_total, Ordering::Relaxed);
     }
 
     pub fn format_metrics(&self) -> String {
@@ -2446,6 +2499,31 @@ impl BinaryViewTimeoutMetrics {
             "qbind_consensus_timeout_crypto_verify_latency_observations_total {}\n",
             self.timeout_crypto_verify_latency_observations_total
                 .load(Ordering::Relaxed)
+        ));
+        // Run 046: bounded exponential-backoff view-timeout pacing.
+        output.push_str("\n# Binary view-timeout exponential-backoff pacing (Run 046)\n");
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_current_threshold_ticks {}\n",
+            self.view_timeout_current_threshold_ticks
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_backoff_level {}\n",
+            self.view_timeout_backoff_level.load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_backoff_resets_total {}\n",
+            self.view_timeout_backoff_resets_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_backoff_increases_total {}\n",
+            self.view_timeout_backoff_increases_total
+                .load(Ordering::Relaxed)
+        ));
+        output.push_str(&format!(
+            "qbind_consensus_view_timeout_max_cap_hits_total {}\n",
+            self.view_timeout_max_cap_hits_total.load(Ordering::Relaxed)
         ));
         output
     }

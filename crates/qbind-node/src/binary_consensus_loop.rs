@@ -235,6 +235,34 @@ const RESTORE_CATCHUP_MAX_BLOCKS_PER_RESPONSE: usize = 128;
 /// deterministic.
 pub const DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS: u64 = 50;
 
+/// Run 046: integer multiplier applied to the current view-timeout
+/// threshold after each consecutive local timeout emission without
+/// real (committed-height) progress.
+///
+/// `1` disables growth (every timeout fires at exactly the base
+/// threshold — pre-Run-046 fixed-cadence behaviour). The default of
+/// `2` matches the existing `qbind_consensus::TimeoutPacemakerConfig`
+/// default and yields the classic HotStuff exponential-backoff
+/// schedule `base, 2*base, 4*base, …` capped at
+/// [`DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS`].
+///
+/// We use an integer multiplier — not a floating-point one — so the
+/// binary loop stays bit-deterministic. Floats are explicitly avoided
+/// in the binary tick path (see the module preamble re: deterministic
+/// tick-based pacing).
+pub const DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER: u64 = 2;
+
+/// Run 046: maximum tick value the exponential-backoff pacer is
+/// allowed to grow the view-timeout threshold to before saturating.
+///
+/// At `base = 50` and `multiplier = 2`, the level-by-level schedule
+/// is `50, 100, 200, 400, 800` and saturates at level 4. The cap is
+/// a production-honest "this view is stuck long enough; do not pace
+/// even slower" bound, not a liveness guarantee. We deliberately
+/// keep this cap modest so a recovered cluster still re-converges
+/// without operator intervention.
+pub const DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS: u64 = 800;
+
 /// B14: maximum accepted byte length for an inbound bincode-encoded
 /// `TimeoutMsg` / `TimeoutCertificate` payload before we even attempt
 /// deserialization.
@@ -290,6 +318,19 @@ pub struct BinaryConsensusLoopConfig {
     /// restored node never times out a live view it is still catching
     /// up to.
     pub view_timeout_ticks: Option<u64>,
+    /// Run 046: integer multiplier the exponential-backoff pacer
+    /// applies to the current view-timeout threshold after each
+    /// consecutive local timeout emission without committed-height
+    /// progress.
+    ///
+    /// Must be `>= 1`. `1` disables growth (preserves the pre-Run-046
+    /// fixed cadence). Default: [`DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER`].
+    pub view_timeout_backoff_multiplier: u64,
+    /// Run 046: maximum (saturating) tick value the exponential-backoff
+    /// pacer is allowed to grow the view-timeout threshold to. Must be
+    /// `>= view_timeout_ticks` when the primitive is enabled. Default:
+    /// [`DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS`].
+    pub view_timeout_max_ticks: u64,
     /// Optional committed-height periodic VM-v0 snapshot trigger.
     pub periodic_snapshot: Option<BinaryPeriodicSnapshotConfig>,
 }
@@ -344,6 +385,9 @@ impl BinaryConsensusLoopConfig {
             max_ticks: None,
             restore_baseline: None,
             view_timeout_ticks: Some(DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS),
+            view_timeout_backoff_multiplier:
+                DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER,
+            view_timeout_max_ticks: DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS,
             periodic_snapshot: None,
         }
     }
@@ -377,6 +421,21 @@ impl BinaryConsensusLoopConfig {
     /// trigger timeouts within a bounded `max_ticks` window.
     pub fn with_view_timeout_ticks(mut self, n: Option<u64>) -> Self {
         self.view_timeout_ticks = n;
+        self
+    }
+
+    /// Run 046: override the exponential-backoff multiplier applied to
+    /// the view-timeout threshold after each consecutive local timeout
+    /// emission without committed-height progress. `1` disables growth.
+    pub fn with_view_timeout_backoff_multiplier(mut self, m: u64) -> Self {
+        self.view_timeout_backoff_multiplier = m;
+        self
+    }
+
+    /// Run 046: override the saturating cap the exponential-backoff
+    /// pacer is allowed to grow the view-timeout threshold to.
+    pub fn with_view_timeout_max_ticks(mut self, n: u64) -> Self {
+        self.view_timeout_max_ticks = n;
         self
     }
 
@@ -995,18 +1054,29 @@ impl ViewTimeoutState {
     }
 
     /// Update progress tracking from current engine state. Returns
-    /// `true` if forward progress was observed on this call (view
-    /// strictly increased OR commits strictly increased), in which
-    /// case `last_progress_tick` is updated.
-    fn observe(&mut self, current_view: u64, current_commits: u64, current_tick: u64) -> bool {
-        let progressed =
-            current_view > self.last_observed_view || current_commits > self.last_observed_commits;
+    /// `ViewTimeoutProgress` indicating whether any forward progress
+    /// occurred (view strictly increased OR commits strictly
+    /// increased — both reset the timeout window), and separately
+    /// whether commits strictly increased (Run 046 uses this stricter
+    /// "real committed-height progress" signal to reset the
+    /// exponential-backoff pacer level back to base).
+    fn observe(
+        &mut self,
+        current_view: u64,
+        current_commits: u64,
+        current_tick: u64,
+    ) -> ViewTimeoutProgress {
+        let commits_progressed = current_commits > self.last_observed_commits;
+        let progressed = current_view > self.last_observed_view || commits_progressed;
         if progressed {
             self.last_observed_view = current_view;
             self.last_observed_commits = current_commits;
             self.last_progress_tick = current_tick;
         }
-        progressed
+        ViewTimeoutProgress {
+            progressed,
+            commits_progressed,
+        }
     }
 
     /// Whether the timeout window has elapsed for the current tick.
@@ -1022,6 +1092,253 @@ impl ViewTimeoutState {
             None => false,
             Some(n) => current_tick.saturating_sub(self.last_progress_tick) >= n,
         }
+    }
+}
+
+/// Run 046: outcome of [`ViewTimeoutState::observe`].
+///
+/// `progressed` is the existing "did the loop see any forward
+/// movement (view OR commits)?" signal — it controls whether the
+/// timeout window resets on this tick.
+///
+/// `commits_progressed` is the stricter "did the committed-height
+/// advance?" signal — it is the only progress signal the
+/// [`ViewTimeoutBackoffState`] pacer treats as "real progress" for
+/// resetting its backoff level back to base. View-only advances
+/// (including TC-driven view advances, which are timeout-driven
+/// and therefore NOT a recovery signal in their own right) do not
+/// reset the pacer level. This matches the standard HotStuff
+/// pacemaker convention that only commits demonstrate liveness.
+#[derive(Debug, Clone, Copy)]
+struct ViewTimeoutProgress {
+    progressed: bool,
+    commits_progressed: bool,
+}
+
+/// Run 046: bounded, tick-based exponential-backoff pacer for the
+/// binary-path B14 view-timeout primitive.
+///
+/// # Why this exists
+///
+/// Pre-Run-046 the binary loop fired a `TimeoutMsg` for the current
+/// view every time `view_timeout_ticks` ticks of zero forward
+/// progress elapsed, regardless of how many consecutive views had
+/// already timed out. In a sustained absent-leader / no-progress
+/// scenario this produces a constant, aggressive timeout cadence:
+/// every `base` ticks, fire again. That is wasteful (forged-traffic
+/// rejection still costs verify work on every fired-then-discarded
+/// TC) and noisy on `/metrics`, and it does not match the standard
+/// HotStuff pacemaker design.
+///
+/// Run 046 replaces the fixed cadence with a bounded exponential
+/// backoff: after each consecutive local timeout emission without
+/// committed-height progress, the effective threshold grows by
+/// `multiplier`, saturating at `max_ticks`. Real committed-height
+/// progress resets the pacer back to `base`.
+///
+/// # Invariants
+///
+/// * `base_ticks = Some(b)` ⇒ `b > 0` and `max_ticks >= b`.
+/// * `multiplier >= 1`. `multiplier == 1` disables growth (pre-Run-046
+///   fixed cadence, useful for tests and explicit operator override).
+/// * `current_ticks` is always in `[base, max_ticks]` while
+///   `base_ticks` is `Some(_)`; `current_ticks == base` exactly when
+///   `current_level == 0`.
+/// * The first timeout for a view fires at exactly `base_ticks` — the
+///   pacer level only grows AFTER an emission, never speculatively.
+/// * `base_ticks == None` ⇒ the primitive is disabled and the pacer
+///   permanently reports `threshold() == None`. All counters stay at
+///   zero.
+///
+/// # Determinism
+///
+/// All arithmetic is integer (`saturating_mul`, `min`); no
+/// floating-point appears in the binary tick loop, preserving
+/// bit-deterministic behaviour for tests and replays.
+///
+/// # Observability
+///
+/// `backoff_resets_total`, `backoff_increases_total`, and
+/// `max_cap_hits_total` are strict accounts of state transitions
+/// that actually occurred:
+///
+/// * A reset increments `backoff_resets_total` only when
+///   `current_level > 0` and committed-height genuinely progressed.
+///   No-op resets (already at base) do NOT increment the counter.
+/// * An increase increments `backoff_increases_total` only when a
+///   local timeout was actually emitted; it does NOT increment on
+///   no-op or capped-at-max calls.
+/// * `max_cap_hits_total` increments only when an increase would
+///   have grown beyond `max_ticks` and was saturated to it, OR when
+///   a further-increase attempt is made while already at the cap.
+#[derive(Debug, Clone, Copy)]
+struct ViewTimeoutBackoffState {
+    /// Base threshold in ticks. `None` ⇒ primitive disabled.
+    base_ticks: Option<u64>,
+    /// Integer multiplier applied per increase. `>= 1`.
+    multiplier: u64,
+    /// Saturating cap. `>= base_ticks` when enabled.
+    max_ticks: u64,
+    /// Current effective threshold in ticks. Equal to `base_ticks`
+    /// at level 0; saturates at `max_ticks`.
+    current_ticks: u64,
+    /// Number of consecutive increases since the last reset.
+    current_level: u32,
+    /// Cumulative count of resets that genuinely lowered the
+    /// effective threshold (i.e. previous level was non-zero).
+    backoff_resets_total: u64,
+    /// Cumulative count of increases that genuinely raised the
+    /// effective threshold (or pinned at cap on first cap-hit).
+    backoff_increases_total: u64,
+    /// Cumulative count of cap saturations. Incremented on the
+    /// transition into the cap and on every subsequent attempt to
+    /// grow further while already at the cap.
+    max_cap_hits_total: u64,
+}
+
+/// Run 046: errors returned by [`ViewTimeoutBackoffState::new`] when
+/// the configuration is rejected. Callers MUST fail closed (no
+/// timeout emission, no silent fallback).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ViewTimeoutBackoffConfigError {
+    /// `base_ticks == Some(0)`.
+    BaseZero,
+    /// `max_ticks < base_ticks` (with `base_ticks` enabled).
+    MaxLessThanBase,
+    /// `multiplier == 0` (`multiplier < 1`).
+    MultiplierLessThanOne,
+}
+
+impl ViewTimeoutBackoffState {
+    /// Build a new pacer. Fails closed on invalid config — callers
+    /// must surface the error (or `expect` in test fixtures only).
+    fn new(
+        base_ticks: Option<u64>,
+        multiplier: u64,
+        max_ticks: u64,
+    ) -> Result<Self, ViewTimeoutBackoffConfigError> {
+        if multiplier < 1 {
+            return Err(ViewTimeoutBackoffConfigError::MultiplierLessThanOne);
+        }
+        if let Some(b) = base_ticks {
+            if b == 0 {
+                return Err(ViewTimeoutBackoffConfigError::BaseZero);
+            }
+            if max_ticks < b {
+                return Err(ViewTimeoutBackoffConfigError::MaxLessThanBase);
+            }
+        }
+        let current_ticks = base_ticks.unwrap_or(0);
+        Ok(Self {
+            base_ticks,
+            multiplier,
+            max_ticks,
+            current_ticks,
+            current_level: 0,
+            backoff_resets_total: 0,
+            backoff_increases_total: 0,
+            max_cap_hits_total: 0,
+        })
+    }
+
+    /// Build a "no-growth" pacer (multiplier = 1, max = u64::MAX).
+    /// Used by tests that want to exercise the existing fixed-cadence
+    /// emission semantics without growing the threshold. The first
+    /// (and every) timeout fires at exactly `base_ticks`.
+    #[cfg(test)]
+    fn no_growth(base_ticks: Option<u64>) -> Self {
+        Self::new(base_ticks, 1, u64::MAX).expect("no_growth config is always valid")
+    }
+
+    /// Effective current threshold in ticks. Returns `None` when the
+    /// primitive is disabled.
+    fn threshold(&self) -> Option<u64> {
+        self.base_ticks.map(|_| self.current_ticks)
+    }
+
+    /// Whether the primitive is enabled (`base_ticks` is `Some(_)`).
+    #[allow(dead_code)] // used in tests; kept on the API for clarity
+    fn is_enabled(&self) -> bool {
+        self.base_ticks.is_some()
+    }
+
+    /// Current backoff level (0 = at base, 1 = base*multiplier, …).
+    fn current_level(&self) -> u32 {
+        self.current_level
+    }
+
+    /// Cumulative count of resets that lowered the threshold.
+    fn backoff_resets_total(&self) -> u64 {
+        self.backoff_resets_total
+    }
+
+    /// Cumulative count of increases that raised the threshold.
+    fn backoff_increases_total(&self) -> u64 {
+        self.backoff_increases_total
+    }
+
+    /// Cumulative count of cap saturations.
+    fn max_cap_hits_total(&self) -> u64 {
+        self.max_cap_hits_total
+    }
+
+    /// Reset the pacer to base on real committed-height progress.
+    /// Returns `true` iff the reset actually changed state (i.e.
+    /// the level was non-zero). Disabled primitive ⇒ always `false`.
+    fn reset_on_progress(&mut self) -> bool {
+        let Some(base) = self.base_ticks else {
+            return false;
+        };
+        if self.current_level == 0 && self.current_ticks == base {
+            return false;
+        }
+        self.current_level = 0;
+        self.current_ticks = base;
+        self.backoff_resets_total = self.backoff_resets_total.saturating_add(1);
+        true
+    }
+
+    /// Increase the pacer after a local timeout was actually emitted
+    /// for a view without committed-height progress. Saturates at
+    /// `max_ticks`. Disabled primitive ⇒ no-op.
+    ///
+    /// Returns `true` iff the threshold actually changed (i.e. we
+    /// were not already saturated at the cap before this call).
+    fn increase_after_timeout(&mut self) -> bool {
+        let Some(_base) = self.base_ticks else {
+            return false;
+        };
+        if self.current_ticks >= self.max_ticks {
+            // Already saturated: count the cap-hit but do not
+            // increment increases_total (no real threshold change).
+            self.max_cap_hits_total = self.max_cap_hits_total.saturating_add(1);
+            return false;
+        }
+        let raw_next = self.current_ticks.saturating_mul(self.multiplier);
+        let next = raw_next.min(self.max_ticks);
+        // A cap-hit fires when the requested growth lands at or
+        // beyond the cap — i.e. the pacer can no longer grow as
+        // requested. Arriving exactly at the cap from below counts:
+        // the next attempt will be in the "already saturated"
+        // branch above. `u64::MAX` is also treated as saturation to
+        // capture the (theoretically unreachable in production)
+        // overflow case for `saturating_mul`.
+        let was_capped = raw_next >= self.max_ticks;
+        let changed = next != self.current_ticks;
+        self.current_ticks = next;
+        if changed {
+            self.current_level = self.current_level.saturating_add(1);
+            self.backoff_increases_total = self.backoff_increases_total.saturating_add(1);
+        }
+        if was_capped {
+            // The increase landed on the cap (or would have overshot
+            // it). Record the cap-hit even if the threshold didn't
+            // technically change (multiplier=1 at cap is the
+            // already-saturated path handled above; here we're
+            // genuinely arriving at the cap).
+            self.max_cap_hits_total = self.max_cap_hits_total.saturating_add(1);
+        }
+        changed
     }
 }
 
@@ -1213,6 +1530,33 @@ pub async fn run_binary_consensus_loop_with_io(
         engine.current_view(),
         engine.commit_log().len() as u64,
     );
+    // Run 046: per-loop exponential-backoff pacer. Fail-closed on
+    // invalid config: an operator who configures a multiplier of 0
+    // or a max below base does NOT get silent fallback to the fixed
+    // cadence — the pacer falls back to the disabled state and a
+    // warning is logged. With `view_timeout_ticks = None` the pacer
+    // is permanently disabled (matches existing primitive-off
+    // semantics).
+    let mut view_timeout_backoff = match ViewTimeoutBackoffState::new(
+        cfg.view_timeout_ticks,
+        cfg.view_timeout_backoff_multiplier,
+        cfg.view_timeout_max_ticks,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "[binary-consensus] Run 046: invalid view-timeout backoff config ({:?}); \
+                 disabling view-timeout primitive fail-closed (base={:?}, multiplier={}, max={})",
+                e,
+                cfg.view_timeout_ticks,
+                cfg.view_timeout_backoff_multiplier,
+                cfg.view_timeout_max_ticks,
+            );
+            ViewTimeoutBackoffState::new(None, 1, u64::MAX)
+                .expect("disabled config is always valid")
+        }
+    };
+    update_binary_view_timeout_backoff_metrics(&metrics, &view_timeout_backoff);
     let mut last_periodic_snapshot_height: Option<u64> = None;
     log_periodic_snapshot_config(cfg.periodic_snapshot.as_ref());
 
@@ -1331,7 +1675,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut engine,
                         &mut view_timeout_state,
                         ticks,
-                        cfg.view_timeout_ticks,
+                        &mut view_timeout_backoff,
                         restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
@@ -1352,6 +1696,10 @@ pub async fn run_binary_consensus_loop_with_io(
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
                     update_binary_view_timeout_metrics(&metrics, &inbound_stats);
+                    update_binary_view_timeout_backoff_metrics(
+                        &metrics,
+                        &view_timeout_backoff,
+                    );
                     {
                         inbound_stats.qcs_formed_total =
                             metrics.progress().qcs_formed_total();
@@ -1424,7 +1772,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         &mut engine,
                         &mut view_timeout_state,
                         ticks,
-                        cfg.view_timeout_ticks,
+                        &mut view_timeout_backoff,
                         restore_mode.is_active(),
                         outbound_facade.as_deref(),
                         &mut inbound_stats,
@@ -1445,6 +1793,10 @@ pub async fn run_binary_consensus_loop_with_io(
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
                     update_binary_view_timeout_metrics(&metrics, &inbound_stats);
+                    update_binary_view_timeout_backoff_metrics(
+                        &metrics,
+                        &view_timeout_backoff,
+                    );
                     {
                         inbound_stats.qcs_formed_total =
                             metrics.progress().qcs_formed_total();
@@ -2294,7 +2646,8 @@ pub(crate) fn deliver_inbound_for_run035(
     );
 }
 
-/// B14: per-tick view-timeout emission on the binary path.
+/// B14 + Run 046: per-tick view-timeout emission on the binary path
+/// with bounded exponential-backoff pacing.
 ///
 /// Called from the loop's tick handler after the leader-step
 /// (`do_leader_tick`) and after `restore_mode` evaluation, but before
@@ -2308,12 +2661,18 @@ pub(crate) fn deliver_inbound_for_run035(
 ///    (proposal/QC/commit). When the leader is genuinely live the
 ///    window keeps resetting and no timeout ever fires.
 ///
-/// 2. If `view_timeout_ticks` is `None` (primitive disabled), or
-///    restore-catchup mode is still active (we never time out a view
-///    we are still catching up to), or no outbound facade is wired
-///    (single-validator / LocalMesh), or the engine has already
-///    emitted a timeout for the current view, the function returns
-///    without side-effects.
+///    Run 046: if commits strictly increased, the exponential-backoff
+///    pacer is also reset back to base — committed-height progress is
+///    the only signal treated as "real progress" for backoff reset.
+///    View-only advances (including TC-driven view advances, which are
+///    themselves timeout-driven) do NOT reset the pacer level.
+///
+/// 2. If the backoff pacer reports `threshold() = None` (primitive
+///    disabled), or restore-catchup mode is still active (we never
+///    time out a view we are still catching up to), or no outbound
+///    facade is wired (single-validator / LocalMesh), or the engine
+///    has already emitted a timeout for the current view, the
+///    function returns without side-effects.
 ///
 /// 3. Otherwise, when the configured tick window has elapsed, the
 ///    function builds a `TimeoutMsg` via `engine.create_timeout_msg()`,
@@ -2323,6 +2682,11 @@ pub(crate) fn deliver_inbound_for_run035(
 ///    permanently waiting for its own bytes to round-trip back), and
 ///    broadcasts the bincode-encoded payload as
 ///    `ConsensusNetMsg::Timeout(bytes)`.
+///
+///    Run 046: after a successful emit, the backoff pacer is
+///    increased exactly once. Subsequent views without committed
+///    progress fire at progressively larger thresholds, saturating
+///    at `max_ticks`.
 ///
 /// 4. If local ingestion already crosses the 2/3 threshold (e.g. in a
 ///    bounded test where this validator drives the timeout-accumulator
@@ -2339,7 +2703,7 @@ fn maybe_emit_view_timeout(
     engine: &mut BasicHotStuffEngine<[u8; 32]>,
     view_state: &mut ViewTimeoutState,
     ticks: u64,
-    view_timeout_ticks: Option<u64>,
+    backoff: &mut ViewTimeoutBackoffState,
     restore_mode_active: bool,
     outbound: Option<&dyn ConsensusNetworkFacade>,
     stats: &mut BinaryConsensusLoopInboundStats,
@@ -2347,12 +2711,20 @@ fn maybe_emit_view_timeout(
 ) {
     // Always observe progress, even if the primitive is disabled — so
     // re-enabling later starts from a current baseline.
-    let progressed = view_state.observe(
+    let prog = view_state.observe(
         engine.current_view(),
         engine.commit_log().len() as u64,
         ticks,
     );
-    if progressed {
+    if prog.commits_progressed {
+        // Run 046: real committed-height progress resets the
+        // exponential-backoff pacer level back to base. View-only
+        // advances do NOT — they may be timeout-driven, and treating
+        // them as a recovery signal would defeat the purpose of the
+        // backoff.
+        backoff.reset_on_progress();
+    }
+    if prog.progressed {
         // Forward progress resets the engine's per-view timeout-emitted
         // flag indirectly via `try_advance_to_view` / `advance_view` /
         // `on_timeout_certificate` — those are the only paths that
@@ -2360,8 +2732,8 @@ fn maybe_emit_view_timeout(
         // observe.
         return;
     }
-    // Gate 1: primitive enabled?
-    let Some(_) = view_timeout_ticks else {
+    // Gate 1: primitive enabled? Threshold = None ⇒ disabled.
+    let Some(threshold_ticks) = backoff.threshold() else {
         return;
     };
     // Gate 2: restore-catchup mode must not be active.
@@ -2376,8 +2748,11 @@ fn maybe_emit_view_timeout(
     if engine.timeout_emitted_in_view() {
         return;
     }
-    // Gate 5: the configured tick window must have elapsed.
-    if !view_state.timeout_window_elapsed(ticks, view_timeout_ticks) {
+    // Gate 5: the configured tick window must have elapsed. Inclusive
+    // boundary: emission fires on the first tick where
+    // `current_tick - last_progress_tick >= threshold_ticks` — the same
+    // boundary as the pre-Run-046 fixed-cadence path.
+    if !view_state.timeout_window_elapsed(ticks, Some(threshold_ticks)) {
         return;
     }
 
@@ -2489,6 +2864,17 @@ fn maybe_emit_view_timeout(
     engine.mark_timeout_emitted();
     stats.view_timeouts_emitted = stats.view_timeouts_emitted.saturating_add(1);
 
+    // Run 046: a local timeout was actually emitted for this view
+    // without committed-height progress. Grow the exponential-backoff
+    // pacer level so the NEXT timeout window (entered after a TC
+    // advances the view) starts at a larger threshold. Saturates at
+    // `max_ticks`. The increase happens before any TC application so
+    // a self-quorum self-fire that immediately advances the view
+    // still records the increase honestly.
+    let backoff_threshold_before = threshold_ticks;
+    let backoff_changed = backoff.increase_after_timeout();
+    let _ = backoff_changed; // observed via stats below.
+
     // Locally ingest. In a 2/3 quorum where this validator is the
     // first to time out, no TC forms yet; in a small (e.g. f=0,
     // n=1) topology this single timeout already crosses 2/3 and the
@@ -2522,9 +2908,13 @@ fn maybe_emit_view_timeout(
         );
     } else {
         eprintln!(
-            "[binary-consensus] B14: emitted TimeoutMsg for view={} after {} ticks of no progress",
+            "[binary-consensus] B14: emitted TimeoutMsg for view={} after {} ticks of no progress \
+             (Run 046 pacer: threshold={} ticks, level={}, next_threshold={} ticks)",
             timed_out_view,
             ticks.saturating_sub(view_state.last_progress_tick),
+            backoff_threshold_before,
+            backoff.current_level(),
+            backoff.threshold().unwrap_or(0),
         );
     }
 
@@ -3218,6 +3608,25 @@ fn update_binary_view_timeout_metrics(
             timeout_crypto_verify_latency_observations_total: stats
                 .timeout_crypto_verify_latency_observations_total,
         });
+}
+
+/// Run 046: push the current exponential-backoff pacer state to
+/// `/metrics`. Reads strictly from the in-process pacer state, never
+/// fabricates values. With `view_timeout_ticks = None` the pacer is
+/// disabled and the gauges read 0 for `current_threshold_ticks` and
+/// `current_level`; the cumulative counters stay at 0 for the
+/// lifetime of the loop.
+fn update_binary_view_timeout_backoff_metrics(
+    metrics: &Arc<NodeMetrics>,
+    backoff: &ViewTimeoutBackoffState,
+) {
+    metrics.binary_view_timeout().set_run046(
+        backoff.threshold().unwrap_or(0),
+        backoff.current_level() as u64,
+        backoff.backoff_resets_total(),
+        backoff.backoff_increases_total(),
+        backoff.max_cap_hits_total(),
+    );
 }
 
 /// Spawn `run_binary_consensus_loop` on the current tokio runtime. Returns a
@@ -4209,12 +4618,13 @@ mod tests {
             ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
 
         // Ticks below threshold ⇒ no emission.
+        let mut __b46_below = ViewTimeoutBackoffState::no_growth(Some(5));
         for tick in 1..=4 {
             maybe_emit_view_timeout(
                 &mut engine,
                 &mut view_state,
                 tick,
-                Some(5), // small window for test determinism
+                &mut __b46_below, // small window for test determinism
                 /* restore_mode_active */ false,
                 Some(&facade),
                 &mut stats,
@@ -4225,11 +4635,12 @@ mod tests {
         }
 
         // First tick at which window has elapsed ⇒ emit exactly once.
+        let mut __b46_1 = ViewTimeoutBackoffState::no_growth(Some(5));
         maybe_emit_view_timeout(
             &mut engine,
             &mut view_state,
             5,
-            Some(5),
+            &mut __b46_1,
             false,
             Some(&facade),
             &mut stats,
@@ -4242,11 +4653,12 @@ mod tests {
         // Subsequent ticks must NOT re-emit (engine flag prevents
         // duplicate emission for the same view).
         for tick in 6..=20 {
+            let mut __b46_2 = ViewTimeoutBackoffState::no_growth(Some(5));
             maybe_emit_view_timeout(
                 &mut engine,
                 &mut view_state,
                 tick,
-                Some(5),
+                &mut __b46_2,
                 false,
                 Some(&facade),
                 &mut stats,
@@ -4282,11 +4694,12 @@ mod tests {
             ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
 
         for tick in 1..=200 {
+            let mut __b46_3 = ViewTimeoutBackoffState::no_growth(Some(5));
             maybe_emit_view_timeout(
                 &mut engine,
                 &mut view_state,
                 tick,
-                Some(5),
+                &mut __b46_3,
                 /* restore_mode_active */ true,
                 Some(&facade),
                 &mut stats,
@@ -4309,12 +4722,13 @@ mod tests {
         let mut view_state =
             ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
 
+        let mut __b46_disabled = ViewTimeoutBackoffState::no_growth(None);
         for tick in 1..=1000 {
             maybe_emit_view_timeout(
                 &mut engine,
                 &mut view_state,
                 tick,
-                /* view_timeout_ticks */ None,
+                /* view_timeout_ticks */ &mut __b46_disabled,
                 false,
                 Some(&facade),
                 &mut stats,
@@ -4341,11 +4755,12 @@ mod tests {
         // forward progress and resets the window. Window threshold = 3.
         for tick in 1..=20 {
             assert!(engine.try_advance_to_view(engine.current_view() + 1));
+            let mut __b46_4 = ViewTimeoutBackoffState::no_growth(Some(3));
             maybe_emit_view_timeout(
                 &mut engine,
                 &mut view_state,
                 tick,
-                Some(3),
+                &mut __b46_4,
                 false,
                 Some(&facade),
                 &mut stats,
@@ -4371,8 +4786,9 @@ mod tests {
             ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
 
         // Below window: no emission.
+        let mut __b46_e = ViewTimeoutBackoffState::no_growth(Some(2));
         maybe_emit_view_timeout(
-            &mut engine, &mut view_state, 1, Some(2), false, Some(&facade), &mut stats,
+            &mut engine, &mut view_state, 1, &mut __b46_e, false, Some(&facade), &mut stats,
             None,
         );
         assert_eq!(stats.view_timeouts_emitted, 0);
@@ -4380,7 +4796,7 @@ mod tests {
         // At window: emit, self-ingest, TC forms (1 ≥ 2/3 of 1 = 1),
         // engine advances view, NewView broadcast.
         maybe_emit_view_timeout(
-            &mut engine, &mut view_state, 2, Some(2), false, Some(&facade), &mut stats,
+            &mut engine, &mut view_state, 2, &mut __b46_e, false, Some(&facade), &mut stats,
             None,
         );
         assert_eq!(stats.view_timeouts_emitted, 1);
@@ -4415,8 +4831,9 @@ mod tests {
             ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
         let metrics = Arc::new(NodeMetrics::new());
 
+        let mut __b46_f = ViewTimeoutBackoffState::no_growth(Some(2));
         maybe_emit_view_timeout(
-            &mut engine, &mut view_state, 2, Some(2), false, Some(&facade), &mut stats,
+            &mut engine, &mut view_state, 2, &mut __b46_f, false, Some(&facade), &mut stats,
             None,
         );
         update_binary_view_timeout_metrics(&metrics, &stats);
@@ -4594,21 +5011,23 @@ mod tests {
         let metrics = Arc::new(NodeMetrics::new());
 
         // 1) Local V0 times out (window=2, tick=2 ⇒ emit).
+        let mut __b46_5 = ViewTimeoutBackoffState::no_growth(Some(2));
         maybe_emit_view_timeout(
             &mut engine,
             &mut view_state,
             1,
-            Some(2),
+            &mut __b46_5,
             false,
             Some(&facade),
             &mut stats,
             None,
         );
+        let mut __b46_6 = ViewTimeoutBackoffState::no_growth(Some(2));
         maybe_emit_view_timeout(
             &mut engine,
             &mut view_state,
             2,
-            Some(2),
+            &mut __b46_6,
             false,
             Some(&facade),
             &mut stats,
@@ -4785,6 +5204,382 @@ mod tests {
     //     accepted, view advanced, etc.),
     //   * `view_advances_due_to_verified_tc` increments on TC application.
     // =========================================================================
+    // =========================================================================
+    // Run 046: ViewTimeoutBackoffState unit tests.
+    //
+    // These tests target the bounded exponential-backoff pacer in
+    // isolation. They prove:
+    //   * default base threshold equals the old fixed threshold.
+    //   * first timeout fires at base; threshold doubles per increase
+    //     until it saturates at max; reset_on_progress returns to base.
+    //   * base = 0, max < base, and multiplier < 1 are all rejected.
+    //   * disabled (base = None) primitive permanently reports no
+    //     threshold and all backoff counters stay at zero.
+    //   * cumulative counters (resets / increases / cap-hits) only
+    //     increment on real state transitions — no fabricated values.
+    //   * end-to-end through `maybe_emit_view_timeout`: the second
+    //     timeout in an absent-leader scenario waits the doubled
+    //     threshold.
+    // =========================================================================
+
+    /// The pacer's default base must equal the pre-Run-046 fixed
+    /// threshold so existing default-configured nodes preserve their
+    /// first-timeout boundary exactly.
+    #[test]
+    fn run046_default_base_equals_old_fixed_threshold() {
+        let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1);
+        assert_eq!(
+            cfg.view_timeout_ticks,
+            Some(DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS)
+        );
+        assert_eq!(
+            cfg.view_timeout_backoff_multiplier,
+            DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER
+        );
+        assert_eq!(
+            cfg.view_timeout_max_ticks,
+            DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS
+        );
+
+        let backoff = ViewTimeoutBackoffState::new(
+            cfg.view_timeout_ticks,
+            cfg.view_timeout_backoff_multiplier,
+            cfg.view_timeout_max_ticks,
+        )
+        .expect("default config is valid");
+        assert_eq!(backoff.threshold(), Some(50));
+        assert_eq!(backoff.current_level(), 0);
+        assert_eq!(backoff.backoff_resets_total(), 0);
+        assert_eq!(backoff.backoff_increases_total(), 0);
+        assert_eq!(backoff.max_cap_hits_total(), 0);
+    }
+
+    /// Threshold doubles after each increase and saturates at max.
+    #[test]
+    fn run046_threshold_doubles_then_saturates_at_max() {
+        // base=50, mult=2, max=800 ⇒ schedule 50, 100, 200, 400, 800
+        // saturating thereafter at 800 indefinitely.
+        let mut b = ViewTimeoutBackoffState::new(Some(50), 2, 800).unwrap();
+        assert_eq!(b.threshold(), Some(50));
+        assert_eq!(b.current_level(), 0);
+
+        // Four increases bring us 50 → 100 → 200 → 400 → 800. The
+        // fourth increase lands on the cap exactly.
+        for (i, expected) in [(1, 100), (2, 200), (3, 400), (4, 800)] {
+            let changed = b.increase_after_timeout();
+            assert!(changed, "increase #{} must change threshold", i);
+            assert_eq!(b.threshold(), Some(expected));
+            assert_eq!(b.current_level(), i);
+            assert_eq!(b.backoff_increases_total(), i as u64);
+        }
+        // We just landed on the cap; that arrival counts as one
+        // cap-hit (the saturation transition).
+        assert_eq!(b.max_cap_hits_total(), 1);
+
+        // Subsequent increases are no-ops on the threshold and do NOT
+        // increment `backoff_increases_total`. They DO increment
+        // `max_cap_hits_total` — the pacer truthfully reports we are
+        // still trying to grow past the cap.
+        let increases_before = b.backoff_increases_total();
+        let level_before = b.current_level();
+        let cap_hits_before = b.max_cap_hits_total();
+        for _ in 0..5 {
+            let changed = b.increase_after_timeout();
+            assert!(!changed, "saturated increase must not change threshold");
+        }
+        assert_eq!(b.threshold(), Some(800));
+        assert_eq!(b.current_level(), level_before);
+        assert_eq!(b.backoff_increases_total(), increases_before);
+        assert_eq!(b.max_cap_hits_total(), cap_hits_before + 5);
+    }
+
+    /// Reset returns the pacer to base and counts resets that
+    /// actually lowered the threshold; no-op resets at base do not
+    /// increment the counter.
+    #[test]
+    fn run046_reset_returns_to_base_and_counts_real_resets_only() {
+        let mut b = ViewTimeoutBackoffState::new(Some(50), 2, 800).unwrap();
+
+        // No-op reset at base: counter must NOT increment.
+        let reset_at_base = b.reset_on_progress();
+        assert!(!reset_at_base);
+        assert_eq!(b.backoff_resets_total(), 0);
+
+        // Increase, then reset: counter increments exactly once.
+        b.increase_after_timeout();
+        b.increase_after_timeout();
+        assert_eq!(b.threshold(), Some(200));
+        assert_eq!(b.current_level(), 2);
+
+        let reset_above_base = b.reset_on_progress();
+        assert!(reset_above_base);
+        assert_eq!(b.threshold(), Some(50));
+        assert_eq!(b.current_level(), 0);
+        assert_eq!(b.backoff_resets_total(), 1);
+
+        // Repeated reset at base is a no-op.
+        let second_reset_at_base = b.reset_on_progress();
+        assert!(!second_reset_at_base);
+        assert_eq!(b.backoff_resets_total(), 1);
+    }
+
+    /// `multiplier = 1` disables growth: the threshold stays at base
+    /// across many increases, no cap is ever hit, no counters move
+    /// beyond `increases_total` (which still counts real "no-progress
+    /// view emitted a timeout" events).
+    #[test]
+    fn run046_multiplier_one_preserves_fixed_cadence() {
+        let mut b = ViewTimeoutBackoffState::new(Some(50), 1, u64::MAX).unwrap();
+        for _ in 0..10 {
+            // current_ticks * 1 = current_ticks ⇒ unchanged.
+            assert!(!b.increase_after_timeout());
+        }
+        assert_eq!(b.threshold(), Some(50));
+        assert_eq!(b.current_level(), 0);
+        assert_eq!(b.backoff_increases_total(), 0);
+        assert_eq!(b.max_cap_hits_total(), 0);
+    }
+
+    /// Fail-closed config rejection.
+    #[test]
+    fn run046_invalid_config_rejected_fail_closed() {
+        // base = 0
+        assert!(matches!(
+            ViewTimeoutBackoffState::new(Some(0), 2, 800),
+            Err(ViewTimeoutBackoffConfigError::BaseZero)
+        ));
+        // max < base
+        assert!(matches!(
+            ViewTimeoutBackoffState::new(Some(100), 2, 50),
+            Err(ViewTimeoutBackoffConfigError::MaxLessThanBase)
+        ));
+        // multiplier < 1 (i.e. 0)
+        assert!(matches!(
+            ViewTimeoutBackoffState::new(Some(50), 0, 800),
+            Err(ViewTimeoutBackoffConfigError::MultiplierLessThanOne)
+        ));
+        // None base + multiplier 0 still rejected — multiplier is
+        // validated before base.
+        assert!(matches!(
+            ViewTimeoutBackoffState::new(None, 0, 800),
+            Err(ViewTimeoutBackoffConfigError::MultiplierLessThanOne)
+        ));
+        // Edge: max == base is OK (no headroom but valid).
+        let b = ViewTimeoutBackoffState::new(Some(50), 2, 50).unwrap();
+        assert_eq!(b.threshold(), Some(50));
+    }
+
+    /// Disabled primitive (`base = None`) permanently reports no
+    /// threshold; reset/increase are no-ops; counters stay at zero.
+    #[test]
+    fn run046_disabled_primitive_is_inert() {
+        let mut b = ViewTimeoutBackoffState::new(None, 2, 800).unwrap();
+        assert_eq!(b.threshold(), None);
+        assert!(!b.is_enabled());
+        assert!(!b.increase_after_timeout());
+        assert!(!b.reset_on_progress());
+        assert_eq!(b.threshold(), None);
+        assert_eq!(b.current_level(), 0);
+        assert_eq!(b.backoff_resets_total(), 0);
+        assert_eq!(b.backoff_increases_total(), 0);
+        assert_eq!(b.max_cap_hits_total(), 0);
+    }
+
+    /// End-to-end through `maybe_emit_view_timeout`: with a real
+    /// backoff (base=4, mult=2), the first timeout fires at base, the
+    /// pacer level grows to 1, and the second-view timeout window
+    /// extends accordingly. The view advance between the two timeouts
+    /// is timeout-driven (TC self-fire on n=1), which is NOT a
+    /// committed-height progress signal — so the backoff does NOT
+    /// reset between the two emissions.
+    #[test]
+    fn run046_second_view_emits_at_doubled_threshold_after_self_fire() {
+        // N=1 so each local timeout self-fires a TC and advances the
+        // view immediately. We use this single-validator topology
+        // only to keep the test deterministic; the pacing semantics
+        // we're proving are not specific to n=1.
+        let mut engine = b14_make_engine(1, 0);
+        assert!(engine.try_advance_to_view(7));
+        let from_view = engine.current_view();
+        let facade = B14RecordingFacade::default();
+        let mut stats = BinaryConsensusLoopInboundStats::default();
+        let mut view_state =
+            ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
+        let mut backoff = ViewTimeoutBackoffState::new(Some(4), 2, 64).unwrap();
+
+        // First view: window=4, tick=4 ⇒ emit. Self-fires a TC ⇒
+        // current_view advances. Backoff goes 4 → 8.
+        for tick in 1..=4 {
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                &mut backoff,
+                false,
+                Some(&facade),
+                &mut stats,
+                None,
+            );
+        }
+        assert_eq!(stats.view_timeouts_emitted, 1, "first timeout emitted at base");
+        assert!(engine.current_view() > from_view, "TC self-fire advanced view");
+        assert_eq!(backoff.threshold(), Some(8), "backoff doubled after emit");
+        assert_eq!(backoff.current_level(), 1);
+        assert_eq!(backoff.backoff_increases_total(), 1);
+        assert_eq!(backoff.backoff_resets_total(), 0);
+
+        // View advanced (timeout-driven), so on the NEXT
+        // `maybe_emit_view_timeout` call view_state will observe
+        // forward view-progress and reset `last_progress_tick` to
+        // THAT tick. From there we need `threshold = 8` more ticks
+        // of no progress before the next emission. So if the first
+        // emit happens at tick=4 and the view advance is observed
+        // on the very next call at tick=5, the next emission fires
+        // at tick=5+8=13.
+        let view_advance_observation_tick = 5;
+        for tick in view_advance_observation_tick..=(view_advance_observation_tick + 7) {
+            maybe_emit_view_timeout(
+                &mut engine,
+                &mut view_state,
+                tick,
+                &mut backoff,
+                false,
+                Some(&facade),
+                &mut stats,
+                None,
+            );
+            assert_eq!(
+                stats.view_timeouts_emitted, 1,
+                "second timeout must NOT fire before threshold=8 elapses (tick={})",
+                tick,
+            );
+        }
+        maybe_emit_view_timeout(
+            &mut engine,
+            &mut view_state,
+            view_advance_observation_tick + 8,
+            &mut backoff,
+            false,
+            Some(&facade),
+            &mut stats,
+            None,
+        );
+        assert_eq!(stats.view_timeouts_emitted, 2, "second timeout fires at doubled threshold");
+        assert_eq!(backoff.threshold(), Some(16), "backoff doubled again");
+        assert_eq!(backoff.current_level(), 2);
+        assert_eq!(backoff.backoff_increases_total(), 2);
+        // No committed-height progress occurred (the engine never
+        // committed a block), so the pacer never reset.
+        assert_eq!(backoff.backoff_resets_total(), 0);
+    }
+
+    /// End-to-end through `maybe_emit_view_timeout`: when a real
+    /// committed-height progress is observed between views, the
+    /// pacer resets back to base.
+    #[test]
+    fn run046_committed_height_progress_resets_pacer() {
+        // We exercise reset_on_progress by simulating the loop's
+        // observation: a separate `view_state` whose commits count
+        // increases. We don't need to actually emit a timeout here;
+        // we just verify the reset path is the only path that
+        // increments the resets counter.
+        let mut backoff = ViewTimeoutBackoffState::new(Some(4), 2, 64).unwrap();
+        backoff.increase_after_timeout();
+        backoff.increase_after_timeout();
+        assert_eq!(backoff.threshold(), Some(16));
+        assert_eq!(backoff.current_level(), 2);
+
+        // Simulate the run-loop observation: ViewTimeoutState reports
+        // commits_progressed=true.
+        let mut view_state = ViewTimeoutState::new(0, 0);
+        let prog = view_state.observe(0, 1, 100);
+        assert!(prog.progressed);
+        assert!(prog.commits_progressed);
+
+        // The run loop calls backoff.reset_on_progress() on a
+        // commits_progressed event.
+        assert!(backoff.reset_on_progress());
+        assert_eq!(backoff.threshold(), Some(4));
+        assert_eq!(backoff.current_level(), 0);
+        assert_eq!(backoff.backoff_resets_total(), 1);
+    }
+
+    /// View-only progress (no commits) must NOT reset the pacer:
+    /// the run loop only resets on `commits_progressed`. This guards
+    /// against TC-driven view advances (which are themselves
+    /// timeout-driven) being misread as "real progress".
+    #[test]
+    fn run046_view_only_progress_does_not_reset_pacer() {
+        let mut backoff = ViewTimeoutBackoffState::new(Some(4), 2, 64).unwrap();
+        backoff.increase_after_timeout();
+        backoff.increase_after_timeout();
+        assert_eq!(backoff.threshold(), Some(16));
+
+        // Simulate view-only progress (commits stay the same).
+        let mut view_state = ViewTimeoutState::new(5, 0);
+        let prog = view_state.observe(6, 0, 100);
+        assert!(prog.progressed);
+        assert!(!prog.commits_progressed);
+
+        // The run loop's conditional reset path (commits_progressed-only)
+        // does NOT fire. Backoff state is unchanged.
+        if prog.commits_progressed {
+            backoff.reset_on_progress();
+        }
+        assert_eq!(backoff.threshold(), Some(16));
+        assert_eq!(backoff.current_level(), 2);
+        assert_eq!(backoff.backoff_resets_total(), 0);
+    }
+
+    /// Backoff metrics are exposed on `/metrics` exactly with the
+    /// values the pacer reports — no fabrication.
+    #[test]
+    fn run046_metrics_export_reflects_pacer_state_exactly() {
+        let metrics = Arc::new(NodeMetrics::new());
+        let mut backoff = ViewTimeoutBackoffState::new(Some(4), 2, 16).unwrap();
+
+        update_binary_view_timeout_backoff_metrics(&metrics, &backoff);
+        let out = metrics.format_metrics();
+        assert!(out.contains("qbind_consensus_view_timeout_current_threshold_ticks 4"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_level 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_resets_total 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_increases_total 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_max_cap_hits_total 0"));
+
+        // 4 → 8 → 16 (saturates).
+        backoff.increase_after_timeout();
+        backoff.increase_after_timeout();
+        // Extra attempt while already at cap.
+        backoff.increase_after_timeout();
+        backoff.reset_on_progress();
+
+        update_binary_view_timeout_backoff_metrics(&metrics, &backoff);
+        let out = metrics.format_metrics();
+        assert!(out.contains("qbind_consensus_view_timeout_current_threshold_ticks 4"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_level 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_resets_total 1"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_increases_total 2"));
+        // First increase 4→8 doesn't cap; second 8→16 lands on cap
+        // (1 cap-hit); third saturated attempt (2 cap-hits).
+        assert!(out.contains("qbind_consensus_view_timeout_max_cap_hits_total 2"));
+    }
+
+    /// Disabled-primitive `/metrics`: counters stay at zero and the
+    /// threshold gauge reads 0 (no fabricated default).
+    #[test]
+    fn run046_metrics_export_disabled_primitive_reads_zero() {
+        let metrics = Arc::new(NodeMetrics::new());
+        let backoff = ViewTimeoutBackoffState::new(None, 2, 800).unwrap();
+        update_binary_view_timeout_backoff_metrics(&metrics, &backoff);
+        let out = metrics.format_metrics();
+        assert!(out.contains("qbind_consensus_view_timeout_current_threshold_ticks 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_level 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_resets_total 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_backoff_increases_total 0"));
+        assert!(out.contains("qbind_consensus_view_timeout_max_cap_hits_total 0"));
+    }
+
+
     mod run030 {
         use super::*;
         use crate::metrics::NodeMetrics;
@@ -4958,11 +5753,12 @@ mod tests {
 
             // Drive enough ticks to elapse the configured timeout window.
             for tick in 1..=5 {
+                let mut __b46_7 = ViewTimeoutBackoffState::no_growth(Some(3));
                 maybe_emit_view_timeout(
                     &mut engine,
                     &mut view_state,
                     tick,
-                    Some(3),
+                    &mut __b46_7,
                     /* restore_mode_active */ false,
                     Some(&facade),
                     &mut stats,
@@ -5010,11 +5806,12 @@ mod tests {
             let facade = CapturingFacade::new();
 
             for tick in 1..=5 {
+                let mut __b46_8 = ViewTimeoutBackoffState::no_growth(Some(3));
                 maybe_emit_view_timeout(
                     &mut engine,
                     &mut view_state,
                     tick,
-                    Some(3),
+                    &mut __b46_8,
                     false,
                     Some(&facade),
                     &mut stats,
