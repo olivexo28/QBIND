@@ -33,7 +33,7 @@
 //! - `MutualAuthMode::Disabled`: Server-auth only, v1 protocol (DevNet compatibility)
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use qbind_crypto::CryptoProvider;
 use qbind_hash::net::{derive_node_id_from_cert, network_delegation_cert_digest};
@@ -127,10 +127,54 @@ pub struct HandshakeResult<'a> {
 ///
 /// This uses qbind-hash::net::network_delegation_cert_digest(cert) as the message
 /// to be signed, and verifies using the suite indicated by `cert.sig_suite_id`.
+///
+/// # Run 045 — validity-window enforcement (transport freshness)
+///
+/// This convenience entry point enforces the cert's `not_before` / `not_after`
+/// fields against the current wall-clock (Unix seconds). Wall-clock here is
+/// strictly a **transport-layer operational freshness check** and is NOT a
+/// consensus time source — consensus safety remains independent of wall-clock.
+/// For deterministic tests, pass an explicit validation time via
+/// [`verify_delegation_cert_at`].
+///
+/// On a malformed validity window (`not_before > not_after`), an expired cert
+/// (`now > not_after`), or a not-yet-valid cert (`now < not_before`), this
+/// returns [`NetError::ClientCertInvalid`] with a distinguishable static
+/// string (`"cert expired"`, `"cert not yet valid"`,
+/// `"cert invalid validity window"`).
 pub fn verify_delegation_cert(
     crypto: &dyn CryptoProvider,
     cert: &NetworkDelegationCert,
     root_pk: &[u8],
+) -> Result<(), NetError> {
+    verify_delegation_cert_at(crypto, cert, root_pk, current_unix_secs())
+}
+
+/// Verify a NetworkDelegationCert against a trusted root public key at an
+/// explicit validation time (Unix seconds).
+///
+/// See [`verify_delegation_cert`] for the wall-clock convenience wrapper.
+///
+/// # Validity-window semantics (Run 045)
+///
+/// Inclusive on both ends: a cert is valid iff
+/// `not_before <= validation_time <= not_after`.
+///
+/// Fail-closed cases:
+/// - `not_before > not_after` → [`NetError::ClientCertInvalid("cert invalid validity window")`]
+/// - `validation_time > not_after` → [`NetError::ClientCertInvalid("cert expired")`]
+/// - `validation_time < not_before` → [`NetError::ClientCertInvalid("cert not yet valid")`]
+///
+/// Signature verification still runs first, so a tampered validity field
+/// (which is signature-covered via
+/// [`qbind_hash::net::network_delegation_cert_digest`]) fails as
+/// `NetError::KeySchedule("signature verify error")` rather than as a
+/// validity-window error.
+pub fn verify_delegation_cert_at(
+    crypto: &dyn CryptoProvider,
+    cert: &NetworkDelegationCert,
+    root_pk: &[u8],
+    validation_time_secs: u64,
 ) -> Result<(), NetError> {
     // 1) Resolve signature suite.
     let suite = crypto
@@ -138,6 +182,8 @@ pub fn verify_delegation_cert(
         .ok_or(NetError::UnsupportedSuite(cert.sig_suite_id))?;
 
     // 2) Compute digest for the cert according to qbind-hash.
+    //    Validity fields are part of the digest preimage (qbind-hash::net),
+    //    so any tampered window fails signature verify below.
     let digest = network_delegation_cert_digest(cert);
 
     // 3) Verify signature.
@@ -145,7 +191,34 @@ pub fn verify_delegation_cert(
         .verify(root_pk, &digest, &cert.sig_bytes)
         .map_err(|_| NetError::KeySchedule("signature verify error"))?;
 
+    // 4) Run 045: enforce validity window AFTER signature verify so that
+    //    tampered validity fields surface as bad-signature (the existing
+    //    failure-mode contract) rather than as validity-window errors.
+    if cert.not_before > cert.not_after {
+        return Err(NetError::ClientCertInvalid("cert invalid validity window"));
+    }
+    if validation_time_secs < cert.not_before {
+        return Err(NetError::ClientCertInvalid("cert not yet valid"));
+    }
+    if validation_time_secs > cert.not_after {
+        return Err(NetError::ClientCertInvalid("cert expired"));
+    }
+
     Ok(())
+}
+
+/// Current Unix time in seconds.
+///
+/// Wall-clock here is strictly used for transport-layer cert freshness
+/// (Run 045) and is **not** a consensus time source. If the system clock is
+/// before the Unix epoch (extremely unlikely; system misconfiguration),
+/// returns 0, which forces honest certs with `not_before > 0` to be
+/// classified as "not yet valid" rather than silently treated as valid.
+fn current_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Configuration inputs for a client-side handshake.
@@ -328,6 +401,19 @@ impl ClientHandshake {
             if let Some(s) = sink {
                 match &e {
                     NetError::UnsupportedSuite(_) => s.inc_rejected_wrong_suite(),
+                    // Run 045: validity-window failures surface as
+                    // `ClientCertInvalid` with these three specific
+                    // strings. Map them to `inc_rejected_expired` (the
+                    // already-wired Run 044 boundary). Any other
+                    // `ClientCertInvalid` would currently never occur
+                    // from `verify_delegation_cert`; if it ever does,
+                    // fall back to bad_signature rather than
+                    // mis-classify as expired.
+                    NetError::ClientCertInvalid(
+                        "cert expired"
+                        | "cert not yet valid"
+                        | "cert invalid validity window",
+                    ) => s.inc_rejected_expired(),
                     NetError::KeySchedule(_) => s.inc_rejected_bad_signature(),
                     _ => s.inc_rejected_bad_signature(),
                 }
@@ -932,6 +1018,13 @@ impl ServerHandshake {
                 if let Some(s) = sink {
                     match &e {
                         NetError::UnsupportedSuite(_) => s.inc_rejected_wrong_suite(),
+                        // Run 045: validity-window failures map to the
+                        // already-wired `inc_rejected_expired` boundary.
+                        NetError::ClientCertInvalid(
+                            "cert expired"
+                            | "cert not yet valid"
+                            | "cert invalid validity window",
+                        ) => s.inc_rejected_expired(),
                         NetError::KeySchedule(_) => s.inc_rejected_bad_signature(),
                         _ => s.inc_rejected_bad_signature(),
                     }

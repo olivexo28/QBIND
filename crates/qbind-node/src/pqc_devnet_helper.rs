@@ -94,6 +94,68 @@ pub struct LeafCertSpec {
     pub ext_bytes: Vec<u8>,
 }
 
+impl LeafCertSpec {
+    /// Run 045: build a `LeafCertSpec` that is currently valid under any
+    /// realistic wall-clock — `not_before=0, not_after=u64::MAX`. This
+    /// is the default helper / example shape used across DevNet and the
+    /// vast majority of existing tests.
+    pub fn currently_valid(
+        validator_id: [u8; 32],
+        root_key_id: [u8; 32],
+        leaf_kem_pk: Vec<u8>,
+    ) -> Self {
+        Self {
+            validator_id,
+            root_key_id,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+            leaf_kem_pk,
+            not_before: 0,
+            not_after: u64::MAX,
+            ext_bytes: Vec::new(),
+        }
+    }
+
+    /// Run 045: build a `LeafCertSpec` that is guaranteed-expired under
+    /// any realistic wall-clock (`not_after = 1` second after the Unix
+    /// epoch). Intended for negative tests / negative smoke evidence
+    /// only — fail-closed verification is the property under test.
+    pub fn expired_for_test(
+        validator_id: [u8; 32],
+        root_key_id: [u8; 32],
+        leaf_kem_pk: Vec<u8>,
+    ) -> Self {
+        Self {
+            validator_id,
+            root_key_id,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+            leaf_kem_pk,
+            not_before: 0,
+            not_after: 1,
+            ext_bytes: Vec::new(),
+        }
+    }
+
+    /// Run 045: build a `LeafCertSpec` that is guaranteed-not-yet-valid
+    /// under any realistic wall-clock
+    /// (`not_before = u64::MAX - 1`). Intended for negative tests /
+    /// negative smoke evidence only.
+    pub fn not_yet_valid_for_test(
+        validator_id: [u8; 32],
+        root_key_id: [u8; 32],
+        leaf_kem_pk: Vec<u8>,
+    ) -> Self {
+        Self {
+            validator_id,
+            root_key_id,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+            leaf_kem_pk,
+            not_before: u64::MAX - 1,
+            not_after: u64::MAX,
+            ext_bytes: Vec::new(),
+        }
+    }
+}
+
 /// Errors returned by the cert-issuance helper.
 #[derive(Debug)]
 pub enum DevNetCertError {
@@ -250,7 +312,11 @@ mod tests {
         let suite = MlDsa44SignatureSuite::new(PQC_TRANSPORT_SUITE_ML_DSA_44);
         let crypto: Arc<StaticCryptoProvider> =
             Arc::new(StaticCryptoProvider::new().with_signature_suite(Arc::new(suite)));
-        qbind_net::verify_delegation_cert(crypto.as_ref(), &decoded, &root.root_pk)
+        // Run 045: use the explicit validation-time entry point so the
+        // assertion is independent of wall-clock (this cert is
+        // intentionally pinned to a fixed historical window for digest
+        // round-trip purposes).
+        qbind_net::verify_delegation_cert_at(crypto.as_ref(), &decoded, &root.root_pk, 150)
             .expect("decoded PQC cert verifies");
     }
 
@@ -306,5 +372,163 @@ mod tests {
         let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
         assert_eq!(cert.root_key_id, root.root_key_id);
         assert_eq!(cert.leaf_kem_suite_id, KEM_SUITE_ML_KEM_768);
+    }
+
+    // ========================================================================
+    // Run 045 — validity-window helper tests
+    // ========================================================================
+
+    fn pqc_crypto_provider() -> Arc<StaticCryptoProvider> {
+        Arc::new(
+            StaticCryptoProvider::new()
+                .with_signature_suite(Arc::new(MlDsa44SignatureSuite::new(
+                    PQC_TRANSPORT_SUITE_ML_DSA_44,
+                ))),
+        )
+    }
+
+    #[test]
+    fn helper_default_cert_is_currently_valid() {
+        let root = mint_devnet_root().expect("root");
+        let spec =
+            LeafCertSpec::currently_valid([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
+        assert_eq!(spec.not_before, 0);
+        assert_eq!(spec.not_after, u64::MAX);
+        let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
+        // Wall-clock wrapper must accept.
+        qbind_net::verify_delegation_cert(pqc_crypto_provider().as_ref(), &cert, &root.root_pk)
+            .expect("currently-valid cert must verify");
+    }
+
+    #[test]
+    fn helper_can_create_expired_cert_that_fails_closed() {
+        let root = mint_devnet_root().expect("root");
+        let spec =
+            LeafCertSpec::expired_for_test([7u8; 32], root.root_key_id, mock_leaf_kem_pk());
+        let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
+        // Real signature MUST still verify against the digest preimage
+        // (validity fields are signature-covered).
+        let provider = pqc_crypto_provider();
+        // At an explicit validation time inside the window, it
+        // succeeds (proves signature verifies).
+        qbind_net::verify_delegation_cert_at(provider.as_ref(), &cert, &root.root_pk, 1)
+            .expect("expired cert verifies at validation_time within window");
+        // Under wall-clock, it must fail closed as expired.
+        let err = qbind_net::verify_delegation_cert(provider.as_ref(), &cert, &root.root_pk)
+            .unwrap_err();
+        assert!(
+            matches!(err, qbind_net::NetError::ClientCertInvalid("cert expired")),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn helper_can_create_not_yet_valid_cert_that_fails_closed() {
+        let root = mint_devnet_root().expect("root");
+        let spec = LeafCertSpec::not_yet_valid_for_test(
+            [7u8; 32],
+            root.root_key_id,
+            mock_leaf_kem_pk(),
+        );
+        let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
+        let provider = pqc_crypto_provider();
+        // Inside future window: passes.
+        qbind_net::verify_delegation_cert_at(
+            provider.as_ref(),
+            &cert,
+            &root.root_pk,
+            u64::MAX,
+        )
+        .expect("not-yet-valid cert verifies at validation_time inside future window");
+        // Wall-clock: fails closed.
+        let err = qbind_net::verify_delegation_cert(provider.as_ref(), &cert, &root.root_pk)
+            .unwrap_err();
+        assert!(
+            matches!(err, qbind_net::NetError::ClientCertInvalid("cert not yet valid")),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn helper_rejects_inverted_window_at_issuance() {
+        // Inverted windows are explicitly rejected at issuance — the
+        // helper does NOT mint such certs. This is the most defensive
+        // contract: we never mint a cert that we know is unverifiable.
+        let root = mint_devnet_root().expect("root");
+        let spec = LeafCertSpec {
+            validator_id: [0u8; 32],
+            root_key_id: root.root_key_id,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+            leaf_kem_pk: mock_leaf_kem_pk(),
+            not_before: 200,
+            not_after: 100,
+            ext_bytes: vec![],
+        };
+        let err = issue_leaf_delegation_cert(&spec, &root.root_sk).unwrap_err();
+        assert!(matches!(err, DevNetCertError::InvalidValidityWindow));
+    }
+
+    #[test]
+    fn helper_validity_fields_are_encoded_and_signature_covered() {
+        use qbind_hash::net::network_delegation_cert_digest;
+
+        let root = mint_devnet_root().expect("root");
+        let spec = LeafCertSpec {
+            validator_id: [11u8; 32],
+            root_key_id: root.root_key_id,
+            leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
+            leaf_kem_pk: mock_leaf_kem_pk(),
+            not_before: 1_000,
+            not_after: 2_000,
+            ext_bytes: vec![],
+        };
+        let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue");
+        assert_eq!(cert.not_before, 1_000);
+        assert_eq!(cert.not_after, 2_000);
+
+        // Wire-encoding round-trip preserves both fields.
+        use qbind_wire::io::WireDecode;
+        let mut slice: &[u8] = &encode_cert(&cert);
+        let decoded = NetworkDelegationCert::decode(&mut slice).expect("decode");
+        assert_eq!(decoded.not_before, 1_000);
+        assert_eq!(decoded.not_after, 2_000);
+
+        // Tampering not_before must change the digest preimage (proves
+        // signature coverage).
+        let mut tampered = cert.clone();
+        tampered.not_before = 1_001;
+        assert_ne!(
+            network_delegation_cert_digest(&cert),
+            network_delegation_cert_digest(&tampered),
+            "not_before MUST be in digest preimage"
+        );
+        let mut tampered2 = cert.clone();
+        tampered2.not_after = 1_999;
+        assert_ne!(
+            network_delegation_cert_digest(&cert),
+            network_delegation_cert_digest(&tampered2),
+            "not_after MUST be in digest preimage"
+        );
+
+        // The original cert verifies at validation_time inside [1000, 2000].
+        let provider = pqc_crypto_provider();
+        qbind_net::verify_delegation_cert_at(provider.as_ref(), &cert, &root.root_pk, 1_500)
+            .expect("currently-valid window must verify");
+        // The tampered (not_before=1001) cert fails signature verify
+        // (because the real signature only covers the original digest).
+        let err = qbind_net::verify_delegation_cert_at(
+            provider.as_ref(),
+            &tampered,
+            &root.root_pk,
+            1_500,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, qbind_net::NetError::KeySchedule("signature verify error")),
+            "got {:?}",
+            err
+        );
     }
 }

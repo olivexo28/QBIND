@@ -3,7 +3,14 @@
 //! certs.
 //!
 //! Usage:
-//!   cargo run -p qbind-node --example devnet_pqc_root_helper -- <outdir> <num_validators>
+//!   cargo run -p qbind-node --example devnet_pqc_root_helper -- <outdir> <num_validators> [validity_mode]
+//!
+//! `validity_mode` (Run 045, optional, defaults to `currently-valid`):
+//!   - `currently-valid` — `not_before=0, not_after=u64::MAX` (default).
+//!   - `expired` — `not_before=0, not_after=1` (guaranteed-expired,
+//!                 for negative cert-validity-window smoke evidence).
+//!   - `not-yet-valid` — `not_before=u64::MAX-1, not_after=u64::MAX`
+//!                       (guaranteed not-yet-valid).
 //!
 //! Writes to `outdir`:
 //!   root.id.hex             — 64 lowercase hex chars (root_key_id)
@@ -45,16 +52,41 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
+/// Run 045: select the validity-window mode for the minted leaf certs.
+fn leaf_spec_for_mode(
+    mode: &str,
+    validator_id: [u8; 32],
+    root_key_id: [u8; 32],
+    leaf_kem_pk: Vec<u8>,
+) -> LeafCertSpec {
+    match mode {
+        "currently-valid" => {
+            LeafCertSpec::currently_valid(validator_id, root_key_id, leaf_kem_pk)
+        }
+        "expired" => LeafCertSpec::expired_for_test(validator_id, root_key_id, leaf_kem_pk),
+        "not-yet-valid" => {
+            LeafCertSpec::not_yet_valid_for_test(validator_id, root_key_id, leaf_kem_pk)
+        }
+        other => panic!(
+            "unknown validity_mode `{}` (expected `currently-valid` / `expired` / `not-yet-valid`)",
+            other
+        ),
+    }
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let outdir = args
         .next()
-        .expect("usage: devnet_pqc_root_helper <outdir> <num_validators>");
+        .expect("usage: devnet_pqc_root_helper <outdir> <num_validators> [validity_mode]");
     let num_validators: u64 = args
         .next()
-        .expect("usage: devnet_pqc_root_helper <outdir> <num_validators>")
+        .expect("usage: devnet_pqc_root_helper <outdir> <num_validators> [validity_mode]")
         .parse()
         .expect("num_validators must be a u64");
+    // Run 045: optional third argument selects the validity-window
+    // shape of the minted leaf certs (default: currently-valid).
+    let validity_mode = args.next().unwrap_or_else(|| "currently-valid".to_string());
 
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
@@ -74,19 +106,8 @@ fn main() {
 
     for vid in 0..num_validators {
         let (kem_pk, kem_sk) = MlKem768Backend::generate_keypair().expect("ML-KEM-768 keygen");
-        let cert = issue_leaf_delegation_cert(
-            &LeafCertSpec {
-                validator_id: vid_bytes(vid),
-                root_key_id: root.root_key_id,
-                leaf_kem_suite_id: KEM_SUITE_ML_KEM_768,
-                leaf_kem_pk: kem_pk,
-                not_before: 0,
-                not_after: u64::MAX,
-                ext_bytes: vec![],
-            },
-            &root.root_sk,
-        )
-        .expect("issue leaf cert");
+        let spec = leaf_spec_for_mode(&validity_mode, vid_bytes(vid), root.root_key_id, kem_pk);
+        let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue leaf cert");
 
         fs::write(format!("{}/v{}.cert.bin", outdir, vid), encode_cert(&cert)).expect("write cert");
 
@@ -100,8 +121,13 @@ fn main() {
     }
 
     eprintln!(
-        "[devnet_pqc_root_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} kem=ml-kem-768 validators={} outdir={}",
-        root_id_hex, PQC_TRANSPORT_SUITE_ML_DSA_44, KEM_SUITE_ML_KEM_768, num_validators, outdir
+        "[devnet_pqc_root_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} kem=ml-kem-768 validators={} validity_mode={} outdir={}",
+        root_id_hex,
+        PQC_TRANSPORT_SUITE_ML_DSA_44,
+        KEM_SUITE_ML_KEM_768,
+        num_validators,
+        validity_mode,
+        outdir
     );
     eprintln!("[devnet_pqc_root_helper] root_sk was held in memory only; never written to disk.");
 

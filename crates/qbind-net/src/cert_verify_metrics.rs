@@ -32,7 +32,7 @@
 //!   existing Run 037 contract (the per-reason `inc_*` setters bump
 //!   the aggregate too).
 //!
-//! # Reason mapping (Run 044)
+//! # Reason mapping (Run 044 + Run 045)
 //!
 //! | Failure boundary                                                  | Reason method                |
 //! |-------------------------------------------------------------------|------------------------------|
@@ -40,12 +40,17 @@
 //! | `trusted_client_roots.lookup` returns `None`                       | `inc_rejected_unknown_root`  |
 //! | `verify_delegation_cert` returns `NetError::UnsupportedSuite(_)`   | `inc_rejected_wrong_suite`   |
 //! | `verify_delegation_cert` returns `NetError::KeySchedule("signature verify error")` | `inc_rejected_bad_signature` |
+//! | `verify_delegation_cert` returns `NetError::ClientCertInvalid("cert expired" \| "cert not yet valid" \| "cert invalid validity window")` (Run 045) | `inc_rejected_expired` |
 //! | dialer-side `delegation_cert.validator_id != client_init.validator_id` | `inc_rejected_validator_mismatch` |
 //!
-//! `inc_rejected_expired` is currently unused at the live boundary because
-//! validity-window enforcement is not yet implemented in
-//! [`crate::handshake::verify_delegation_cert`]. The counter stays visible
-//! on `/metrics` at zero and is documented as such; see Run 044 evidence.
+//! Run 045: `inc_rejected_expired` is now wired at the live boundary —
+//! [`crate::handshake::verify_delegation_cert`] enforces `not_before` /
+//! `not_after` (inclusive on both ends) against the current wall-clock
+//! (Unix seconds), AFTER signature verification, so a tampered
+//! validity field surfaces as bad-signature rather than as expired.
+//! Wall-clock here is strictly a transport-layer freshness check; it
+//! is NOT a consensus time source. For deterministic tests, see
+//! [`crate::handshake::verify_delegation_cert_at`].
 
 use std::sync::Arc;
 
@@ -80,9 +85,12 @@ pub trait CertVerifyMetricsSink: Send + Sync {
     /// Called exactly once when the cert bytes failed to parse.
     fn inc_rejected_malformed(&self) {}
 
-    /// Called exactly once when the cert is outside its validity window.
-    /// (Currently unused at the live boundary — validity-window
-    /// enforcement is not yet implemented; counter stays at zero.)
+    /// Called exactly once when the cert is outside its validity window
+    /// (Run 045): cert expired, not yet valid, or has an inverted
+    /// (`not_before > not_after`) window. The handshake engine maps
+    /// `NetError::ClientCertInvalid("cert expired" | "cert not yet valid" |
+    /// "cert invalid validity window")` returned by
+    /// [`crate::handshake::verify_delegation_cert`] onto this method.
     fn inc_rejected_expired(&self) {}
 }
 
