@@ -56,15 +56,36 @@ async fn read_http_response(stream: &mut TcpStream) -> std::io::Result<(String, 
         headers.push_str(&line);
     }
 
-    // Read the rest as body (limited to avoid hanging)
-    let mut buf = vec![0u8; 32768];
-    match timeout(Duration::from_millis(500), reader.read(&mut buf)).await {
-        Ok(Ok(n)) => {
-            body = String::from_utf8_lossy(&buf[..n]).to_string();
+    // Parse Content-Length from headers so we can read the full body
+    let content_length: Option<usize> = headers
+        .lines()
+        .find(|l| l.to_lowercase().starts_with("content-length:"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .and_then(|v| v.trim().parse().ok());
+
+    // Read the body: use read_exact when Content-Length is known, otherwise
+    // fall back to a single timed read.
+    if let Some(len) = content_length {
+        let mut buf = vec![0u8; len];
+        match timeout(Duration::from_secs(2), reader.read_exact(&mut buf)).await {
+            Ok(Ok(_)) => {
+                body = String::from_utf8_lossy(&buf).to_string();
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                // Timeout – return whatever we have (none)
+            }
         }
-        Ok(Err(e)) => return Err(e),
-        Err(_) => {
-            // Timeout reading body - that's OK, we might have all we need
+    } else {
+        let mut buf = vec![0u8; 32768];
+        match timeout(Duration::from_millis(500), reader.read(&mut buf)).await {
+            Ok(Ok(n)) => {
+                body = String::from_utf8_lossy(&buf[..n]).to_string();
+            }
+            Ok(Err(e)) => return Err(e),
+            Err(_) => {
+                // Timeout reading body - that's OK, we might have all we need
+            }
         }
     }
 
