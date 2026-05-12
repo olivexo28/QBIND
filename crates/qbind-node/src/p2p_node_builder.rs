@@ -52,7 +52,7 @@
 //! P2pNodeBuilder::shutdown(context).await?;
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -76,8 +76,8 @@ use qbind_crypto::{
     KEM_SUITE_ML_KEM_768,
 };
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
-    ServerConnectionConfig, ServerHandshakeConfig, TrustedClientRoots,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, LeafCertRevocationList,
+    MutualAuthMode, ServerConnectionConfig, ServerHandshakeConfig, TrustedClientRoots,
 };
 
 use crate::pqc_root_config::{
@@ -667,6 +667,15 @@ pub struct P2pNodeBuilder {
     /// `None`, `build()` falls back to creating a fresh local instance
     /// (preserving pre-Run-043 behaviour for builder-only tests).
     p2p_metrics: Option<Arc<P2pMetrics>>,
+    /// Run 052: optional revoked leaf-cert fingerprint set, derived
+    /// from the loaded trust bundle's currently-active
+    /// `revocations[i].leaf_cert_fingerprint` entries. Default is
+    /// `None`, in which case no leaf-cert revocation enforcement is
+    /// installed and the handshake engine takes the zero-cost no-op
+    /// path. The set is shared by Arc so the same revocation list
+    /// flows into both client- and server-side handshake configs
+    /// without re-allocation.
+    pqc_revoked_leaf_fingerprints: Option<Arc<HashSet<[u8; 32]>>>,
 }
 
 impl Default for P2pNodeBuilder {
@@ -699,6 +708,10 @@ impl P2pNodeBuilder {
             // `qbind_p2p_pqc_*` counters surfaced on the live
             // `/metrics` endpoint reflect real cert-verify activity.
             p2p_metrics: None,
+            // Run 052: leaf-cert revocations default to none so that
+            // pre-Run-052 builders behave bit-for-bit identically.
+            // The live binary wires this from the loaded trust bundle.
+            pqc_revoked_leaf_fingerprints: None,
         }
     }
 
@@ -788,6 +801,26 @@ impl P2pNodeBuilder {
     /// this via `with_p2p_metrics(node_metrics.p2p_arc())`.
     pub fn with_p2p_metrics(mut self, metrics: Arc<P2pMetrics>) -> Self {
         self.p2p_metrics = Some(metrics);
+        self
+    }
+
+    /// Run 052: install a caller-supplied set of revoked leaf-cert
+    /// fingerprints (the active subset of
+    /// `revocations[i].leaf_cert_fingerprint` from the loaded trust
+    /// bundle). On the production-honest PQC mutual-auth path
+    /// (`MutualAuthMode::Required` or `Optional` + `PqcStaticRoot`),
+    /// this set is wrapped in a `LeafCertRevocationList` and wired
+    /// into both client- and server-side handshake configs so that a
+    /// verified leaf cert whose fingerprint matches an entry fails
+    /// closed with `NetError::ClientCertInvalid("cert revoked")`. On
+    /// the test-grade DummySig path the set is ignored — the leaf-
+    /// revocation surface is intentionally PQC-only, mirroring the
+    /// Run 044 cert-verify metrics sink wiring discipline.
+    pub fn with_pqc_leaf_revocations(
+        mut self,
+        revoked_leaf_fingerprints: Arc<HashSet<[u8; 32]>>,
+    ) -> Self {
+        self.pqc_revoked_leaf_fingerprints = Some(revoked_leaf_fingerprints);
         self
     }
 
@@ -1433,6 +1466,37 @@ impl P2pNodeBuilder {
             _ => None,
         };
 
+        // Run 052 — leaf-level certificate revocation enforcement:
+        // wrap the configured revoked-leaf fingerprint set into a
+        // `LeafCertRevocationList` ONLY on the production-honest PQC
+        // path (mutual auth on + `PqcRootMode::PqcStaticRoot`).
+        // The test-grade DummySig path intentionally leaves the
+        // revocation list `None` so the legacy B12 / pre-Run-037
+        // tests remain bit-for-bit unchanged. When no revocations are
+        // configured (`with_pqc_leaf_revocations` not called, or the
+        // bundle's active leaf-revocation set is empty), the list is
+        // also left `None` so the handshake takes the zero-cost no-op
+        // path (preserves Run 050/051 behaviour).
+        let leaf_cert_revocations: Option<LeafCertRevocationList> = match (
+            mutual_auth_mode,
+            self.pqc_root_config.as_ref(),
+            self.pqc_revoked_leaf_fingerprints.as_ref(),
+        ) {
+            (
+                MutualAuthMode::Required | MutualAuthMode::Optional,
+                Some(cfg),
+                Some(revoked_set),
+            ) if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) && !revoked_set.is_empty() => {
+                let active_count = revoked_set.len();
+                let revoked_set_for_closure = revoked_set.clone();
+                Some(LeafCertRevocationList::new(
+                    active_count,
+                    move |fp: &[u8; 32]| revoked_set_for_closure.contains(fp),
+                ))
+            }
+            _ => None,
+        };
+
         // Create handshake configs
         let client_handshake_cfg = ClientHandshakeConfig {
             kem_suite_id,
@@ -1442,6 +1506,7 @@ impl P2pNodeBuilder {
             kem_metrics: None,
             local_delegation_cert: local_client_cert,
             cert_verify_metrics: cert_verify_metrics.clone(),
+            leaf_cert_revocations: leaf_cert_revocations.clone(),
         };
 
         let server_handshake_cfg = ServerHandshakeConfig {
@@ -1457,6 +1522,7 @@ impl P2pNodeBuilder {
             mutual_auth_mode,
             trusted_client_roots,
             cert_verify_metrics,
+            leaf_cert_revocations,
         };
 
         // Create connection configs

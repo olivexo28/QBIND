@@ -265,6 +265,7 @@ fn handshake_roundtrip_succeeds() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server config
@@ -281,6 +282,7 @@ fn handshake_roundtrip_succeeds() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Client random
@@ -371,6 +373,7 @@ fn handshake_aead_session_works() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -386,6 +389,7 @@ fn handshake_aead_session_works() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let mut client_random = [0u8; 32];
@@ -484,6 +488,7 @@ fn handshake_suite_mismatch_fails() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server supports the original suite
@@ -500,6 +505,7 @@ fn handshake_suite_mismatch_fails() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];
@@ -564,6 +570,7 @@ fn handshake_server_rejects_wrong_kem_suite() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -579,6 +586,7 @@ fn handshake_server_rejects_wrong_kem_suite() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];
@@ -644,6 +652,7 @@ fn handshake_validator_id_mismatch_fails() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -659,6 +668,7 @@ fn handshake_validator_id_mismatch_fails() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];

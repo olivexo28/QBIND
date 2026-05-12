@@ -314,6 +314,7 @@ fn create_kemtls_config_for_node(node_index: usize) -> NodeKemtlsConfig {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_handshake_cfg = ServerHandshakeConfig {
@@ -329,6 +330,7 @@ fn create_kemtls_config_for_node(node_index: usize) -> NodeKemtlsConfig {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_cfg = ClientConnectionConfig {

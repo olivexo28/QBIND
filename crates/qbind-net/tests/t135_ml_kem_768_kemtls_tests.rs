@@ -159,6 +159,7 @@ fn ml_kem_768_handshake_roundtrip_succeeds() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server config
@@ -175,6 +176,7 @@ fn ml_kem_768_handshake_roundtrip_succeeds() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Client random
@@ -304,6 +306,7 @@ fn ml_kem_768_corrupted_ciphertext_causes_failure() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -319,6 +322,7 @@ fn ml_kem_768_corrupted_ciphertext_causes_failure() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];
@@ -453,6 +457,7 @@ fn ml_kem_768_configuration_test() {
         kem_metrics: None,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -468,6 +473,7 @@ fn ml_kem_768_configuration_test() {
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];

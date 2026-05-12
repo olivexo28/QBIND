@@ -37,7 +37,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use qbind_crypto::CryptoProvider;
 use qbind_hash::net::{derive_node_id_from_cert, network_delegation_cert_digest};
-use qbind_wire::io::WireDecode;
+use qbind_wire::io::{WireDecode, WireEncode};
 use qbind_wire::net::{
     ClientInit, NetworkDelegationCert, ServerAccept, ServerCookie,
     PROTOCOL_VERSION_1, PROTOCOL_VERSION_2,
@@ -221,6 +221,34 @@ fn current_unix_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// Run 052: domain separator for the canonical leaf-cert fingerprint
+/// used to identify a specific validator delegation cert for
+/// leaf-level revocation lookups. MUST stay byte-identical to the
+/// `TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR` constant in
+/// `qbind_node::pqc_trust_bundle`; a regression test in `qbind-node`
+/// asserts that the two helpers produce identical bytes for a fixed
+/// cert fixture.
+pub const LEAF_CERT_FINGERPRINT_DOMAIN_SEPARATOR: &[u8] =
+    b"QBIND:pqc-trust-bundle-leaf-fp:v1";
+
+/// Run 052: canonical 32-byte fingerprint of a validator's leaf
+/// `NetworkDelegationCert`. The handshake engine computes this
+/// locally on the verified cert and looks it up in the configured
+/// [`LeafCertRevocationList`]. The function is a pure function of
+/// the cert's canonical wire encoding, so two peers that agree on
+/// the wire format also agree on the fingerprint.
+pub fn leaf_cert_fingerprint(cert: &NetworkDelegationCert) -> [u8; 32] {
+    let mut encoded = Vec::with_capacity(256);
+    cert.encode(&mut encoded);
+    let mut h = Sha3_256::new();
+    h.update(LEAF_CERT_FINGERPRINT_DOMAIN_SEPARATOR);
+    h.update(&encoded);
+    let digest = h.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
+}
+
 /// Configuration inputs for a client-side handshake.
 #[derive(Clone)]
 pub struct ClientHandshakeConfig {
@@ -249,6 +277,13 @@ pub struct ClientHandshakeConfig {
     /// bit-for-bit. Crate layering: defined in `qbind-net` to avoid
     /// `qbind-net → qbind-node` dependency.
     pub cert_verify_metrics: Option<Arc<dyn CertVerifyMetricsSink>>,
+    /// Run 052: optional leaf-level cert revocation list. When set,
+    /// the dialer rejects a verified server delegation cert whose
+    /// canonical fingerprint matches an active leaf-revocation entry
+    /// from the trust bundle, AFTER signature + validator-id checks
+    /// pass and BEFORE `inc_accepted` is bumped. `None` is the
+    /// zero-cost no-op path that preserves Run 044 behaviour bit-for-bit.
+    pub leaf_cert_revocations: Option<LeafCertRevocationList>,
 }
 
 impl std::fmt::Debug for ClientHandshakeConfig {
@@ -429,6 +464,21 @@ impl ClientHandshake {
             return Err(NetError::KeySchedule("validator_id mismatch in cert"));
         }
 
+        // Run 052: leaf-level revocation enforcement on the dialer
+        // side. The server's delegation cert has passed every other
+        // check (parse, signature, validity window, validator-id).
+        // If the verified leaf is on the active leaf-cert revocation
+        // list, fail closed before bumping `inc_accepted`.
+        if let Some(rev_list) = self.cfg.leaf_cert_revocations.as_ref() {
+            let fp = leaf_cert_fingerprint(&delegation_cert);
+            if rev_list.is_revoked(&fp) {
+                if let Some(s) = sink {
+                    s.inc_rejected_revoked();
+                }
+                return Err(NetError::ClientCertInvalid("cert revoked"));
+            }
+        }
+
         // Run 044: all cert-verification checks at this boundary
         // succeeded. Bump accepted exactly once before any downstream
         // (non-cert-verification) handshake work begins.
@@ -563,6 +613,13 @@ pub struct ServerHandshakeConfig {
     /// verification behaviour bit-for-bit. Crate layering: defined in
     /// `qbind-net` to avoid `qbind-net → qbind-node` dependency.
     pub cert_verify_metrics: Option<Arc<dyn CertVerifyMetricsSink>>,
+    /// Run 052: optional leaf-level cert revocation list. When set,
+    /// the listener rejects a verified client delegation cert whose
+    /// canonical fingerprint matches an active leaf-revocation entry
+    /// from the trust bundle, AFTER signature checks pass and BEFORE
+    /// `inc_accepted` is bumped. `None` is the zero-cost no-op path
+    /// that preserves Run 044 behaviour bit-for-bit.
+    pub leaf_cert_revocations: Option<LeafCertRevocationList>,
 }
 
 /// Trusted root public keys for client certificate verification (M8).
@@ -608,6 +665,88 @@ impl TrustedClientRoots {
     /// is performed elsewhere.
     pub fn trust_self_signed() -> Self {
         Self::new(|_| None)
+    }
+}
+
+/// Run 052 — leaf-level certificate revocation list (PQC).
+///
+/// Carries an opaque lookup that returns `true` when the supplied
+/// 32-byte canonical leaf-cert fingerprint is on the active
+/// revocation list. The handshake engine computes the leaf cert
+/// fingerprint locally on each verified delegation cert and consults
+/// this list as the final fail-closed step before `inc_accepted`.
+///
+/// **Behavioural contract.**
+///
+/// - The lookup is invoked only AFTER all other cert-verification
+///   checks (parse, root lookup, signature, validator-id (dialer),
+///   validity window) have succeeded.
+/// - The lookup is invoked exactly once per cert-verification event.
+/// - A revoked leaf MUST fail closed with
+///   `NetError::ClientCertInvalid("cert revoked")` and bump
+///   `CertVerifyMetricsSink::inc_rejected_revoked` exactly once.
+/// - A `None` field on the handshake config (the default) is a zero-
+///   cost no-op path that preserves the pre-Run-052 verification
+///   surface bit-for-bit.
+/// - The fingerprint format is the canonical 32-byte SHA3-256
+///   produced by `qbind_node::pqc_trust_bundle::cert_leaf_fingerprint`.
+///   `qbind-net` does NOT compute the fingerprint itself or know its
+///   construction beyond "32-byte opaque tag" — this is intentional
+///   to keep the crate-layering invariant intact.
+///
+/// Crate layering: defined here so that `qbind-node` can construct
+/// it from the loaded trust bundle and hand it to the handshake
+/// configs without `qbind-net` taking a dependency on `qbind-node`.
+#[derive(Clone)]
+pub struct LeafCertRevocationList {
+    is_revoked_fn: Arc<dyn Fn(&[u8; 32]) -> bool + Send + Sync>,
+    /// Stable count of currently-active revocations, for logs /
+    /// observability. The `is_revoked_fn` is the source of truth at
+    /// lookup time; this number is provided as a steady-state hint
+    /// for the operator-facing log line and does not influence the
+    /// verification result.
+    active_count: usize,
+}
+
+impl std::fmt::Debug for LeafCertRevocationList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LeafCertRevocationList")
+            .field("is_revoked_fn", &"<fn>")
+            .field("active_count", &self.active_count)
+            .finish()
+    }
+}
+
+impl LeafCertRevocationList {
+    /// Create a new list backed by an arbitrary lookup function.
+    pub fn new<F>(active_count: usize, is_revoked_fn: F) -> Self
+    where
+        F: Fn(&[u8; 32]) -> bool + Send + Sync + 'static,
+    {
+        LeafCertRevocationList {
+            is_revoked_fn: Arc::new(is_revoked_fn),
+            active_count,
+        }
+    }
+
+    /// Returns true iff the supplied canonical leaf-cert fingerprint
+    /// is currently revoked.
+    pub fn is_revoked(&self, fingerprint: &[u8; 32]) -> bool {
+        (self.is_revoked_fn)(fingerprint)
+    }
+
+    /// Number of currently-active revocations as recorded at
+    /// construction time. Observability-only; the source of truth for
+    /// a lookup at verify time is `is_revoked`.
+    pub fn active_count(&self) -> usize {
+        self.active_count
+    }
+
+    /// Test helper: an empty revocation list (every lookup returns
+    /// `false`). Used by tests that want to install the wiring
+    /// without revoking anything.
+    pub fn empty() -> Self {
+        Self::new(0, |_| false)
     }
 }
 
@@ -1030,6 +1169,24 @@ impl ServerHandshake {
                     }
                 }
                 return Err(e);
+            }
+        }
+
+        // Run 044: all listener-side cert-verification checks at this
+        // boundary succeeded so far. Before bumping `inc_accepted`,
+        // Run 052 enforces the leaf-level revocation surface (when
+        // configured). A revoked leaf cert MUST fail closed here,
+        // AFTER signature + validity-window have already passed —
+        // computing the fingerprint on an unverified cert would be
+        // wasteful and would let an attacker probe the revocation
+        // set with forged inputs.
+        if let Some(rev_list) = self.cfg.leaf_cert_revocations.as_ref() {
+            let fp = leaf_cert_fingerprint(&cert);
+            if rev_list.is_revoked(&fp) {
+                if let Some(s) = sink {
+                    s.inc_rejected_revoked();
+                }
+                return Err(NetError::ClientCertInvalid("cert revoked"));
             }
         }
 

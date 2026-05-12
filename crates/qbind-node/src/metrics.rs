@@ -5622,6 +5622,18 @@ pub struct P2pMetrics {
     /// Sub-counter: rejected because the cert is outside its validity
     /// window.
     pqc_cert_rejected_expired_total: AtomicU64,
+    /// Run 052 sub-counter: rejected because the cert's canonical
+    /// leaf fingerprint matches an active entry on the trust bundle's
+    /// leaf-cert revocation list. Counts only events where every other
+    /// PQC cert verification check (parse, root lookup, signature,
+    /// validity window, dialer-side validator-id) had already
+    /// succeeded — i.e. the cert was a valid, in-window, correctly
+    /// signed delegation that nonetheless MUST be refused because
+    /// it was revoked. This is bumped via the `CertVerifyMetricsSink`
+    /// adapter on the same per-event "exactly once" contract as the
+    /// other Run 037/044/045 sub-counters and also bumps the
+    /// aggregate `pqc_cert_verify_rejected_total`.
+    pqc_cert_rejected_revoked_total: AtomicU64,
 
     // ------------------------------------------------------------------
     // Run 050 (C4 piece: PQC transport trust-anchor lifecycle — foundation
@@ -6419,6 +6431,11 @@ impl P2pMetrics {
             "qbind_p2p_pqc_cert_rejected_expired_total {}\n",
             self.pqc_cert_rejected_expired_total()
         ));
+        // Run 052: leaf-cert revocation enforcement counter.
+        output.push_str(&format!(
+            "qbind_p2p_pqc_cert_verify_rejected_revoked_total {}\n",
+            self.pqc_cert_verify_rejected_revoked_total()
+        ));
 
         // Run 050: PQC trust-anchor bundle observability.
         output.push_str(&format!(
@@ -6525,6 +6542,21 @@ impl P2pMetrics {
         self.pqc_cert_rejected_expired_total
             .fetch_add(1, Ordering::Relaxed);
     }
+    /// Run 052: bump the leaf-cert revocation rejection counter.
+    /// Per the same Run 037/044 contract used by the other per-reason
+    /// `inc_*` setters above, this also bumps the aggregate
+    /// `pqc_cert_verify_rejected_total` exactly once. Called by the
+    /// `CertVerifyMetricsSink` adapter only at the live verification
+    /// boundary (see `parse_and_verify_client_cert` and
+    /// `ClientHandshake::handle_server_accept` in `qbind-net`); never
+    /// bumped on the legacy DummySig / non-PQC path because that path
+    /// installs no sink at all (Run 044 contract).
+    pub fn inc_pqc_cert_verify_rejected_revoked(&self) {
+        self.pqc_cert_verify_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+        self.pqc_cert_rejected_revoked_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
 
     pub fn pqc_cert_rejected_unknown_root_total(&self) -> u64 {
         self.pqc_cert_rejected_unknown_root_total
@@ -6548,6 +6580,10 @@ impl P2pMetrics {
     }
     pub fn pqc_cert_rejected_expired_total(&self) -> u64 {
         self.pqc_cert_rejected_expired_total.load(Ordering::Relaxed)
+    }
+    /// Run 052 sub-counter accessor.
+    pub fn pqc_cert_verify_rejected_revoked_total(&self) -> u64 {
+        self.pqc_cert_rejected_revoked_total.load(Ordering::Relaxed)
     }
 
     // Run 050 trust-bundle gauges.
@@ -6659,6 +6695,9 @@ impl qbind_net::CertVerifyMetricsSink for P2pMetrics {
     }
     fn inc_rejected_expired(&self) {
         self.inc_pqc_cert_verify_rejected_expired();
+    }
+    fn inc_rejected_revoked(&self) {
+        self.inc_pqc_cert_verify_rejected_revoked();
     }
 }
 
@@ -10223,6 +10262,8 @@ mod tests {
         "qbind_p2p_pqc_cert_rejected_validator_mismatch_total",
         "qbind_p2p_pqc_cert_rejected_malformed_total",
         "qbind_p2p_pqc_cert_rejected_expired_total",
+        // Run 052: leaf-cert revocation enforcement counter.
+        "qbind_p2p_pqc_cert_verify_rejected_revoked_total",
     ];
 
     /// Count occurrences of a token at the start of a line (so that e.g.
@@ -10312,6 +10353,7 @@ mod tests {
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_validator_mismatch_total 0"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_malformed_total 0"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_expired_total 0"));
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_rejected_revoked_total 0"));
         // Default mode (test-grade DummySig) reports 0 for the gauge.
         assert!(output.contains("qbind_p2p_pqc_root_mode 0"));
         assert!(output.contains("qbind_p2p_pqc_roots_configured 0"));
@@ -10339,24 +10381,29 @@ mod tests {
             .inc_pqc_cert_verify_rejected_validator_mismatch();
         metrics.p2p().inc_pqc_cert_verify_rejected_malformed();
         metrics.p2p().inc_pqc_cert_verify_rejected_expired();
+        // Run 052: also bump the leaf-revocation rejection counter.
+        metrics.p2p().inc_pqc_cert_verify_rejected_revoked();
 
         let output = metrics.format_metrics();
 
         assert!(output.contains("qbind_p2p_pqc_root_mode 1"));
         assert!(output.contains("qbind_p2p_pqc_roots_configured 2"));
         assert!(output.contains("qbind_p2p_pqc_cert_verify_accepted_total 3"));
-        assert!(output.contains("qbind_p2p_pqc_cert_verify_rejected_total 6"));
+        // Aggregate is one higher than pre-Run-052 because the
+        // revoked sub-counter also bumps the aggregate.
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_rejected_total 7"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_unknown_root_total 1"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_wrong_suite_total 1"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_bad_signature_total 1"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_validator_mismatch_total 1"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_malformed_total 1"));
         assert!(output.contains("qbind_p2p_pqc_cert_rejected_expired_total 1"));
+        assert!(output.contains("qbind_p2p_pqc_cert_verify_rejected_revoked_total 1"));
 
         // Also visible on the crypto-wrapper formatter.
         let output2 = metrics.format_metrics_with_crypto(None, None);
         assert!(output2.contains("qbind_p2p_pqc_cert_verify_accepted_total 3"));
-        assert!(output2.contains("qbind_p2p_pqc_cert_verify_rejected_total 6"));
+        assert!(output2.contains("qbind_p2p_pqc_cert_verify_rejected_total 7"));
     }
 
     #[test]

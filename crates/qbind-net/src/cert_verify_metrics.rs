@@ -42,6 +42,7 @@
 //! | `verify_delegation_cert` returns `NetError::KeySchedule("signature verify error")` | `inc_rejected_bad_signature` |
 //! | `verify_delegation_cert` returns `NetError::ClientCertInvalid("cert expired" \| "cert not yet valid" \| "cert invalid validity window")` (Run 045) | `inc_rejected_expired` |
 //! | dialer-side `delegation_cert.validator_id != client_init.validator_id` | `inc_rejected_validator_mismatch` |
+//! | leaf-cert fingerprint is on the active leaf-revocation list (Run 052) — `NetError::ClientCertInvalid("cert revoked")` | `inc_rejected_revoked` |
 //!
 //! Run 045: `inc_rejected_expired` is now wired at the live boundary —
 //! [`crate::handshake::verify_delegation_cert`] enforces `not_before` /
@@ -92,6 +93,16 @@ pub trait CertVerifyMetricsSink: Send + Sync {
     /// "cert invalid validity window")` returned by
     /// [`crate::handshake::verify_delegation_cert`] onto this method.
     fn inc_rejected_expired(&self) {}
+
+    /// Called exactly once (Run 052) when the cert otherwise verified
+    /// (parse + root lookup + signature + validity window + (dialer)
+    /// validator-id all passed) but its canonical leaf fingerprint
+    /// is on the active leaf-cert revocation list configured on the
+    /// handshake config (see
+    /// [`crate::handshake::LeafCertRevocationList`]). The handshake
+    /// engine returns `NetError::ClientCertInvalid("cert revoked")`
+    /// for this case.
+    fn inc_rejected_revoked(&self) {}
 }
 
 /// Convenience alias for an optional shared sink.
@@ -112,6 +123,7 @@ mod tests {
         validator_mismatch: AtomicU64,
         malformed: AtomicU64,
         expired: AtomicU64,
+        revoked: AtomicU64,
     }
 
     impl CertVerifyMetricsSink for CountingSink {
@@ -136,6 +148,9 @@ mod tests {
         fn inc_rejected_expired(&self) {
             self.expired.fetch_add(1, Ordering::Relaxed);
         }
+        fn inc_rejected_revoked(&self) {
+            self.revoked.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     #[test]
@@ -151,6 +166,7 @@ mod tests {
         s.inc_rejected_validator_mismatch();
         s.inc_rejected_malformed();
         s.inc_rejected_expired();
+        s.inc_rejected_revoked();
     }
 
     #[test]
@@ -165,6 +181,7 @@ mod tests {
         dyn_sink.inc_rejected_validator_mismatch();
         dyn_sink.inc_rejected_malformed();
         dyn_sink.inc_rejected_expired();
+        dyn_sink.inc_rejected_revoked();
 
         assert_eq!(s.accepted.load(Ordering::Relaxed), 2);
         assert_eq!(s.unknown_root.load(Ordering::Relaxed), 1);
@@ -173,5 +190,6 @@ mod tests {
         assert_eq!(s.validator_mismatch.load(Ordering::Relaxed), 1);
         assert_eq!(s.malformed.load(Ordering::Relaxed), 1);
         assert_eq!(s.expired.load(Ordering::Relaxed), 1);
+        assert_eq!(s.revoked.load(Ordering::Relaxed), 1);
     }
 }

@@ -205,6 +205,7 @@ fn make_mlkem768_server_config(kem_metrics: Option<Arc<KemOpMetrics>>) -> TestNo
         kem_metrics: kem_metrics.clone(),
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server handshake config
@@ -221,6 +222,7 @@ fn make_mlkem768_server_config(kem_metrics: Option<Arc<KemOpMetrics>>) -> TestNo
         mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_cfg = ClientConnectionConfig {
@@ -268,6 +270,7 @@ fn make_mlkem768_client_config(
         kem_metrics,
         local_delegation_cert: None, // M8: No client cert for backward compat tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     ClientConnectionConfig {

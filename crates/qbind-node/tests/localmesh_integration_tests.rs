@@ -310,6 +310,7 @@ fn create_localmesh_kemtls_config(node_index: usize, with_cookie: bool) -> Local
         kem_metrics: None,
         local_delegation_cert: None, // Client cert optional in these tests
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_handshake_cfg = ServerHandshakeConfig {
@@ -325,6 +326,7 @@ fn create_localmesh_kemtls_config(node_index: usize, with_cookie: bool) -> Local
         mutual_auth_mode: MutualAuthMode::Disabled, // Can be enabled for M8 tests
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_cfg = ClientConnectionConfig {

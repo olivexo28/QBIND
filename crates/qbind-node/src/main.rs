@@ -988,6 +988,33 @@ async fn run_p2p_node(
 
     let builder = builder.with_pqc_root_config(pqc_config);
 
+    // Run 052 — wire the loaded trust bundle's currently-active leaf-cert
+    // revocation set into the builder. The builder will install a
+    // `LeafCertRevocationList` on both client- and server-side
+    // handshake configs ONLY on the production-honest PQC mutual-auth
+    // path; on the test-grade DummySig / non-PQC path the set is
+    // ignored. An empty active set takes the zero-cost no-op path so
+    // pre-Run-052 behaviour is preserved bit-for-bit when no leaf
+    // revocations are configured.
+    let builder = if let Some(loaded) = trust_bundle_loaded.as_ref() {
+        let revoked_leaves: std::collections::HashSet<[u8; 32]> =
+            loaded.revoked_leaf_fingerprints.iter().copied().collect();
+        let revoked_count = revoked_leaves.len();
+        eprintln!(
+            "[binary] Run 052: revoked_leaf_fingerprints={} (from trust bundle env={} sequence={})",
+            revoked_count,
+            loaded.environment(),
+            loaded.bundle.sequence,
+        );
+        if revoked_count > 0 {
+            builder.with_pqc_leaf_revocations(std::sync::Arc::new(revoked_leaves))
+        } else {
+            builder
+        }
+    } else {
+        builder
+    };
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {

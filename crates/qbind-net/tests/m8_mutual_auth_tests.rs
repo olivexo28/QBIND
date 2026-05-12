@@ -263,6 +263,7 @@ fn test_missing_client_cert_in_required_mode_fails() {
         kem_metrics: None,
         local_delegation_cert: None, // No client cert!
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server config with MutualAuthMode::Required
@@ -279,6 +280,7 @@ fn test_missing_client_cert_in_required_mode_fails() {
         mutual_auth_mode: MutualAuthMode::Required, // Requires client cert!
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let mut client_random = [0u8; 32];
@@ -359,6 +361,7 @@ fn test_empty_client_cert_v2_in_required_mode_fails() {
         mutual_auth_mode: MutualAuthMode::Required,
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_random = [0u8; 32];
@@ -436,6 +439,7 @@ fn test_invalid_client_cert_parse_error_fails() {
         mutual_auth_mode: MutualAuthMode::Required,
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_random = [0u8; 32];
@@ -519,6 +523,7 @@ fn test_invalid_client_cert_signature_fails() {
         mutual_auth_mode: MutualAuthMode::Required,
         trusted_client_roots: Some(trusted_roots),
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_random = [0u8; 32];
@@ -614,6 +619,7 @@ fn test_cookie_blocks_before_client_cert_parsing() {
         mutual_auth_mode: MutualAuthMode::Required,
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_random = [0u8; 32];
@@ -719,6 +725,7 @@ fn test_successful_mutual_auth_returns_client_node_id() {
         kem_metrics: None,
         local_delegation_cert: Some(client_cert_bytes.clone()), // Client has cert!
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server config with MutualAuthMode::Required
@@ -735,6 +742,7 @@ fn test_successful_mutual_auth_returns_client_node_id() {
         mutual_auth_mode: MutualAuthMode::Required,
         trusted_client_roots: None, // No roots = accepts any cert for testing
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let mut client_random = [0u8; 32];
@@ -826,6 +834,7 @@ fn test_optional_mode_accepts_v1_protocol() {
         kem_metrics: None,
         local_delegation_cert: None, // No client cert!
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server config with MutualAuthMode::Optional
@@ -842,6 +851,7 @@ fn test_optional_mode_accepts_v1_protocol() {
         mutual_auth_mode: MutualAuthMode::Optional, // Optional mode
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];
@@ -927,6 +937,7 @@ fn test_disabled_mode_ignores_client_cert() {
         kem_metrics: None,
         local_delegation_cert: Some(client_cert_bytes),
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Server config with MutualAuthMode::Disabled
@@ -943,6 +954,7 @@ fn test_disabled_mode_ignores_client_cert() {
         mutual_auth_mode: MutualAuthMode::Disabled, // Disabled mode
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let client_random = [0u8; 32];
@@ -1020,6 +1032,7 @@ fn test_transcript_binding_includes_client_cert() {
         kem_metrics: None,
         local_delegation_cert: Some(client_cert_bytes.clone()),
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let server_cfg = ServerHandshakeConfig {
@@ -1035,6 +1048,7 @@ fn test_transcript_binding_includes_client_cert() {
         mutual_auth_mode: MutualAuthMode::Optional, // Optional to allow both v1 and v2
         trusted_client_roots: None,
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     // Complete v2 handshake
@@ -1057,6 +1071,7 @@ fn test_transcript_binding_includes_client_cert() {
         kem_metrics: None,
         local_delegation_cert: None, // No client cert
         cert_verify_metrics: None,
+        leaf_cert_revocations: None,
     };
 
     let mut client_v1 = ClientHandshake::new(client_cfg_v1, client_random);

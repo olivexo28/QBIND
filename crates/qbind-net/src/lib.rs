@@ -23,9 +23,10 @@ pub use framed_io::{
     MAX_HANDSHAKE_PAYLOAD, MAX_TRANSPORT_CIPHERTEXT,
 };
 pub use handshake::{
-    verify_delegation_cert, verify_delegation_cert_at, ClientHandshake, ClientHandshakeConfig,
-    ConnectionState, HandshakeResult, HandshakeSide, MutualAuthMode, ServerHandshake,
-    ServerHandshakeConfig, ServerHandshakeResponse, TrustedClientRoots,
+    leaf_cert_fingerprint, verify_delegation_cert, verify_delegation_cert_at, ClientHandshake,
+    ClientHandshakeConfig, ConnectionState, HandshakeResult, HandshakeSide, LeafCertRevocationList,
+    MutualAuthMode, ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse,
+    TrustedClientRoots, LEAF_CERT_FINGERPRINT_DOMAIN_SEPARATOR,
 };
 pub use handshake_packet::{
     pack_client_init, pack_server_accept, pack_server_cookie, unpack_client_init,

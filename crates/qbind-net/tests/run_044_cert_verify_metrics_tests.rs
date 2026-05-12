@@ -272,6 +272,7 @@ fn server_cfg(
         mutual_auth_mode: MutualAuthMode::Required,
         trusted_client_roots: trusted,
         cert_verify_metrics: sink,
+        leaf_cert_revocations: None,
     }
 }
 
@@ -470,6 +471,7 @@ fn dialer_cfg(
         kem_metrics: None,
         local_delegation_cert: None,
         cert_verify_metrics: sink,
+        leaf_cert_revocations: None,
     }
 }
 

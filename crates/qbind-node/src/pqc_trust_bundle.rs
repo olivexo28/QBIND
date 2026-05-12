@@ -590,6 +590,14 @@ pub enum TrustBundleError {
     /// the signed-bundle verification feature was wired in.
     #[doc(hidden)]
     SignedBundleVerificationNotImplemented,
+    /// Run 052: a revocation entry carried a malformed
+    /// `leaf_cert_fingerprint` field (not 64 lowercase-hex chars, or
+    /// hex-decode failure). Refusing the whole bundle catches operator
+    /// typos rather than silently dropping the entry.
+    MalformedLeafFingerprint {
+        root_id: String,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for TrustBundleError {
@@ -696,6 +704,11 @@ impl std::fmt::Display for TrustBundleError {
                 "trust bundle carries a signature but signed-bundle verification is not \
                  wired (legacy Run 050 boundary; should not appear in Run 051+).",
             ),
+            Self::MalformedLeafFingerprint { root_id, reason } => write!(
+                f,
+                "trust bundle revocation for root_id {} has malformed leaf_cert_fingerprint: {}",
+                root_id, reason
+            ),
         }
     }
 }
@@ -717,6 +730,16 @@ pub struct LoadedTrustBundle {
     /// the construction below already filters them out, this field is
     /// retained for lookup at verify time and for metrics).
     pub revoked_root_ids: HashSet<[u8; 32]>,
+    /// Run 052: set of revoked validator leaf-cert fingerprints
+    /// (32-byte SHA3-256 of the canonical wire encoding of the leaf
+    /// `NetworkDelegationCert`; see [`cert_leaf_fingerprint`]). A leaf
+    /// fingerprint that appears here MUST be rejected at PQC cert
+    /// verification time, fail closed, regardless of whether the leaf
+    /// otherwise verifies against a still-active root. Populated only
+    /// from `revocations[i].leaf_cert_fingerprint` entries whose
+    /// `effective_from <= validation_time_secs`; future-dated leaf
+    /// revocations are recorded but not yet active.
+    pub revoked_leaf_fingerprints: HashSet<[u8; 32]>,
     /// Run 051: result of the ML-DSA-44 signed-bundle verification
     /// step. `Unsigned` for DevNet unsigned bundles; `Verified` for
     /// any signed bundle that successfully verified against the
@@ -786,6 +809,20 @@ impl LoadedTrustBundle {
     /// the active set.
     pub fn is_root_revoked(&self, root_id: &[u8; 32]) -> bool {
         self.revoked_root_ids.contains(root_id)
+    }
+
+    /// Run 052: returns true iff the given leaf cert fingerprint (the
+    /// SHA3-256 of the leaf `NetworkDelegationCert` canonical wire
+    /// encoding; see [`cert_leaf_fingerprint`]) is on the bundle's
+    /// currently-active leaf revocation list. Used by the PQC cert
+    /// verify path to fail closed on a revoked leaf cert.
+    pub fn is_leaf_revoked(&self, leaf_fingerprint: &[u8; 32]) -> bool {
+        self.revoked_leaf_fingerprints.contains(leaf_fingerprint)
+    }
+
+    /// Run 052: count of currently-active leaf revocations.
+    pub fn revoked_leaf_fingerprint_count(&self) -> usize {
+        self.revoked_leaf_fingerprints.len()
     }
 }
 
@@ -977,8 +1014,37 @@ impl TrustBundle {
         }
 
         // 6. Parse + canonicalise revocations. Each must reference a
-        //    known root id; duplicates fail closed.
+        //    known root id.
+        //
+        //    Run 052 semantics — the existing `revocations[]` schema
+        //    is now interpreted as a *scoped* revocation list, with
+        //    the scope chosen by the optional `leaf_cert_fingerprint`
+        //    field:
+        //
+        //    - `leaf_cert_fingerprint = None`  → **root-level** revocation.
+        //       Excludes the root from the active set (Run 050 behaviour;
+        //       preserved). Duplicate root-level revocations of the
+        //       same `root_id` fail closed (`DuplicateRevocation`).
+        //    - `leaf_cert_fingerprint = Some(fp)` → **leaf-level**
+        //       revocation. Revokes the specific leaf cert whose
+        //       canonical fingerprint (see [`cert_leaf_fingerprint`])
+        //       equals `fp`. Does NOT exclude the root; the root
+        //       remains usable for other (still-valid) leaf certs.
+        //       Multiple leaf-level entries under the same `root_id`
+        //       are allowed (one per leaf); duplicate leaf fingerprints
+        //       (same 32-byte fp under any root) fail closed.
+        //
+        //    Malformed `leaf_cert_fingerprint` hex fails closed
+        //    (`MalformedLeafFingerprint`) so an operator typo cannot
+        //    silently drop a leaf revocation.
+        //
+        //    Future-dated revocations (`effective_from > validation_time_secs`)
+        //    are recorded but not yet active: they are excluded from
+        //    `revoked_root_ids` AND from `revoked_leaf_fingerprints`.
         let mut revoked_root_ids: HashSet<[u8; 32]> = HashSet::new();
+        let mut revoked_leaf_fingerprints: HashSet<[u8; 32]> = HashSet::new();
+        let mut seen_root_level_revocations: HashSet<[u8; 32]> = HashSet::new();
+        let mut seen_leaf_fingerprints: HashSet<[u8; 32]> = HashSet::new();
         for rev in &self.revocations {
             let id_bytes = decode_hex_fixed_32(&rev.root_id).map_err(|e| {
                 TrustBundleError::MalformedHex(format!(
@@ -991,15 +1057,36 @@ impl TrustBundle {
                     rev.root_id.clone(),
                 ));
             }
-            if !revoked_root_ids.insert(id_bytes) {
-                return Err(TrustBundleError::DuplicateRevocation(rev.root_id.clone()));
-            }
-            // `effective_from` in the future: still record the
-            // revocation, but it does not yet exclude the root. That
-            // matches the task definition of `effective_from` as
-            // "the time at which this revocation activates".
-            if rev.effective_from > validation_time_secs {
-                revoked_root_ids.remove(&id_bytes);
+            match &rev.leaf_cert_fingerprint {
+                None => {
+                    // Root-level revocation. Run 050 behaviour preserved.
+                    if !seen_root_level_revocations.insert(id_bytes) {
+                        return Err(TrustBundleError::DuplicateRevocation(
+                            rev.root_id.clone(),
+                        ));
+                    }
+                    if rev.effective_from <= validation_time_secs {
+                        revoked_root_ids.insert(id_bytes);
+                    }
+                }
+                Some(leaf_fp_hex) => {
+                    // Leaf-level revocation. Run 052 surface.
+                    let leaf_fp_bytes =
+                        decode_hex_fixed_32(leaf_fp_hex).map_err(|e| {
+                            TrustBundleError::MalformedLeafFingerprint {
+                                root_id: rev.root_id.clone(),
+                                reason: e,
+                            }
+                        })?;
+                    if !seen_leaf_fingerprints.insert(leaf_fp_bytes) {
+                        return Err(TrustBundleError::DuplicateRevocation(
+                            rev.root_id.clone(),
+                        ));
+                    }
+                    if rev.effective_from <= validation_time_secs {
+                        revoked_leaf_fingerprints.insert(leaf_fp_bytes);
+                    }
+                }
             }
         }
 
@@ -1134,6 +1221,7 @@ impl TrustBundle {
             fingerprint,
             active_roots,
             revoked_root_ids,
+            revoked_leaf_fingerprints,
             signature_status,
         })
     }
@@ -1257,6 +1345,61 @@ pub fn canonical_fingerprint(bundle: &TrustBundle) -> [u8; 32] {
     let digest = h.finalize();
     let mut out = [0u8; 32];
     out.copy_from_slice(&digest);
+    out
+}
+
+/// Run 052: domain separator for the canonical leaf-cert fingerprint
+/// that the leaf-revocation surface uses to identify a specific
+/// validator delegation cert. Distinct from every other SHA3-256
+/// domain used by this crate so a leaf-cert fingerprint cannot
+/// collide with a bundle fingerprint, signing-key id, transport root
+/// id, or any other digest the project produces.
+pub const TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR: &[u8] =
+    b"QBIND:pqc-trust-bundle-leaf-fp:v1";
+
+/// Run 052: canonical 32-byte fingerprint of a validator's leaf
+/// `NetworkDelegationCert`.
+///
+/// Defined as
+/// `SHA3-256( TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR || cert.encode() )`
+/// where `cert.encode()` is the existing canonical wire encoding via
+/// [`qbind_wire::WireEncode`]. The domain-separator string is
+/// distinct from every other SHA3-256 domain used by this crate.
+///
+/// Operators MUST use this fingerprint as the
+/// `revocations[i].leaf_cert_fingerprint` value (lowercase 64-char
+/// hex) when revoking an individual leaf delegation cert.
+///
+/// Stability: the inputs to this hash are the exact bytes that a
+/// peer would put on the wire, so the fingerprint is invariant
+/// under any operator-side reformatting of source files. A cert
+/// whose `sig_bytes` is later re-signed (e.g. with a different
+/// signing nonce) hashes to a different fingerprint — which is the
+/// intended behaviour: leaf-level revocation is per-issued-cert, not
+/// per-validator-id.
+pub fn cert_leaf_fingerprint(cert: &qbind_wire::net::NetworkDelegationCert) -> [u8; 32] {
+    use qbind_wire::io::WireEncode;
+    use sha3::{Digest, Sha3_256};
+    let mut encoded = Vec::with_capacity(256);
+    cert.encode(&mut encoded);
+    let mut h = Sha3_256::new();
+    h.update(TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR);
+    h.update(&encoded);
+    let digest = h.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
+}
+
+/// Run 052: hex-encode a 32-byte leaf-cert fingerprint as 64
+/// lowercase hex chars (the format that `revocations[i].leaf_cert_fingerprint`
+/// is required to use).
+pub fn cert_leaf_fingerprint_hex(fp: &[u8; 32]) -> String {
+    let mut out = String::with_capacity(64);
+    for b in fp {
+        use std::fmt::Write;
+        let _ = write!(out, "{:02x}", b);
+    }
     out
 }
 
@@ -1746,6 +1889,208 @@ mod tests {
         let err =
             TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).unwrap_err();
         assert!(matches!(err, TrustBundleError::DuplicateRevocation(_)));
+    }
+
+    // ----- Run 052 leaf-cert revocation surface --------------------------
+
+    /// Build a minimal `NetworkDelegationCert` whose canonical wire
+    /// encoding is deterministic. The exact field values do not
+    /// matter for the fingerprint-shape tests below; the fields are
+    /// chosen to be non-zero so that a zero-cert and this cert do
+    /// NOT collide.
+    fn build_fixture_cert(validator_byte: u8) -> qbind_wire::net::NetworkDelegationCert {
+        qbind_wire::net::NetworkDelegationCert {
+            version: 1,
+            validator_id: [validator_byte; 32],
+            root_key_id: [0x11; 32],
+            leaf_kem_suite_id: 1,
+            leaf_kem_pk: vec![0x22; 32],
+            not_before: 1_000,
+            not_after: 2_000,
+            ext_bytes: vec![],
+            sig_suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            sig_bytes: vec![0x33; 64],
+        }
+    }
+
+    #[test]
+    fn cert_leaf_fingerprint_is_deterministic_and_distinct() {
+        let cert_a = build_fixture_cert(0xAA);
+        let cert_b = build_fixture_cert(0xAA);
+        let cert_c = build_fixture_cert(0xBB);
+        let fp_a1 = cert_leaf_fingerprint(&cert_a);
+        let fp_a2 = cert_leaf_fingerprint(&cert_b);
+        let fp_c = cert_leaf_fingerprint(&cert_c);
+        // Same content -> same fingerprint.
+        assert_eq!(fp_a1, fp_a2);
+        // Different content -> different fingerprint.
+        assert_ne!(fp_a1, fp_c);
+        // Hex helper round-trips the byte length.
+        assert_eq!(cert_leaf_fingerprint_hex(&fp_a1).len(), 64);
+    }
+
+    #[test]
+    fn cert_leaf_fingerprint_domain_separator_is_distinct() {
+        // The leaf-cert fingerprint domain separator must not equal
+        // the bundle fingerprint or signature domain separators. This
+        // is what makes leaf-cert fingerprints structurally
+        // impossible to confuse with any other digest in the project.
+        assert_ne!(
+            TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR,
+            TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR
+        );
+        assert_ne!(
+            TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR,
+            b"QBIND:pqc-trust-bundle-fp:v1".as_slice()
+        );
+        assert_ne!(
+            TRUST_BUNDLE_LEAF_FINGERPRINT_DOMAIN_SEPARATOR,
+            b"QBIND:pqc-trust-bundle-signing-key-id:v1".as_slice()
+        );
+    }
+
+    #[test]
+    fn revoked_leaf_fingerprint_is_surfaced_for_lookup() {
+        let (id, pk) = fresh_root_pair();
+        let cert = build_fixture_cert(0xCC);
+        let fp = cert_leaf_fingerprint(&cert);
+        let fp_hex = cert_leaf_fingerprint_hex(&fp);
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id.clone(),
+            leaf_cert_fingerprint: Some(fp_hex.clone()),
+            reason: "leaf-compromise".to_string(),
+            effective_from: 0,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).expect("loads");
+        // Root is still active (root-level revocation is a separate
+        // axis); only the specific leaf is revoked.
+        assert_eq!(loaded.active_root_count(), 1);
+        assert!(!loaded.is_root_revoked(&decode_hex_fixed_32(&id).unwrap()));
+        // Leaf revocation is surfaced.
+        assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
+        assert!(loaded.is_leaf_revoked(&fp));
+        // An unrelated cert is NOT revoked.
+        let other_fp = cert_leaf_fingerprint(&build_fixture_cert(0xDD));
+        assert!(!loaded.is_leaf_revoked(&other_fp));
+    }
+
+    #[test]
+    fn future_dated_leaf_revocation_is_not_yet_active() {
+        let (id, pk) = fresh_root_pair();
+        let cert = build_fixture_cert(0xEE);
+        let fp = cert_leaf_fingerprint(&cert);
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id.clone(),
+            leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
+            reason: "scheduled-leaf-rotation".to_string(),
+            effective_from: 1_000_000,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).expect("loads");
+        // Leaf revocation recorded but not yet effective.
+        assert_eq!(loaded.revoked_leaf_fingerprint_count(), 0);
+        assert!(!loaded.is_leaf_revoked(&fp));
+    }
+
+    #[test]
+    fn malformed_leaf_fingerprint_fails_closed() {
+        let (id, pk) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id.clone(),
+            // Wrong length AND illegal char — exercise the parser.
+            leaf_cert_fingerprint: Some("ZZ".to_string()),
+            reason: "leaf-compromise".to_string(),
+            effective_from: 0,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).unwrap_err();
+        assert!(matches!(
+            err,
+            TrustBundleError::MalformedLeafFingerprint { .. }
+        ));
+    }
+
+    #[test]
+    fn leaf_revocation_preserves_root_level_revocation_axis() {
+        // Both axes coexist: a bundle can carry a root-level revocation
+        // for one root AND a leaf-level revocation under a different
+        // root in the same revocations[] list, and BOTH surfaces are
+        // populated independently.
+        let (id1, pk1) = fresh_root_pair();
+        let (id2, pk2) = fresh_root_pair();
+        let cert = build_fixture_cert(0xFE);
+        let fp = cert_leaf_fingerprint(&cert);
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id1, &pk1, 0);
+        // Add a second root so we can revoke one root + revoke a leaf
+        // under the other root.
+        bundle.roots.push(TrustBundleRoot {
+            root_id: id2.clone(),
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            root_pk: pk2,
+            status: RootStatus::Active,
+            not_before: 0,
+            not_after: u64::MAX,
+            activation_epoch: None,
+            activation_height: None,
+        });
+        // Root-level revocation on root #1.
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id1.clone(),
+            leaf_cert_fingerprint: None,
+            reason: "root-compromise".to_string(),
+            effective_from: 0,
+        });
+        // Leaf-level revocation under root #2.
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id2.clone(),
+            leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
+            reason: "leaf-compromise".to_string(),
+            effective_from: 0,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).expect("loads");
+        // Root #1 revoked; root #2 still active.
+        assert_eq!(loaded.active_root_count(), 1);
+        assert_eq!(loaded.revoked_root_count(), 1);
+        assert!(loaded.is_root_revoked(&decode_hex_fixed_32(&id1).unwrap()));
+        assert!(!loaded.is_root_revoked(&decode_hex_fixed_32(&id2).unwrap()));
+        // Leaf revocation surfaced.
+        assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
+        assert!(loaded.is_leaf_revoked(&fp));
+    }
+
+    #[test]
+    fn unsigned_devnet_bundle_with_leaf_revocation_loads_clean() {
+        // Regression guard: leaf-revocation parsing must NOT regress
+        // the Run 050 unsigned-DevNet path. A bundle with a single
+        // valid leaf-revocation still loads, the signature_status is
+        // still Unsigned, and the fingerprint is stable.
+        let (id, pk) = fresh_root_pair();
+        let cert = build_fixture_cert(0x77);
+        let fp = cert_leaf_fingerprint(&cert);
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id.clone(),
+            leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
+            reason: "leaf-compromise".to_string(),
+            effective_from: 0,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).expect("loads");
+        assert!(matches!(
+            loaded.signature_status,
+            BundleSignatureStatus::Unsigned
+        ));
+        assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
     }
 
     #[test]

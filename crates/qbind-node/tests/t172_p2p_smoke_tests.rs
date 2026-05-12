@@ -42,6 +42,7 @@ fn create_test_connection_configs(
             mutual_auth_mode: MutualAuthMode::Disabled, // M8: Disabled for backward compat tests
             trusted_client_roots: None,
             cert_verify_metrics: None,
+            leaf_cert_revocations: None,
         },
         server_random: [0u8; 32],
     };
@@ -55,6 +56,7 @@ fn create_test_connection_configs(
             kem_metrics: None,
             local_delegation_cert: None, // M8: No client cert for backward compat tests
             cert_verify_metrics: None,
+            leaf_cert_revocations: None,
         },
         client_random: [0u8; 32],
         validator_id: [0u8; 32],
