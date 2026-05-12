@@ -1,0 +1,9 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] FATAL: --p2p-trust-bundle sequence anti-rollback check failed for path=/tmp/run056/seq2_alt/trust-bundle.json (sequence persistence file=/tmp/run056/data/pqc_trust_bundle_sequence.json): pqc trust-bundle equal-sequence equivocation rejected: sequence=2 persisted_fingerprint=951df85c7a615c615696322b6df54a438107b5fe6afa5eba8b8977c63c6c92a9 attempted_fingerprint=9a699845ddba237bd953a3b625c96debc08822fac52e2359b77ee8505f7fa441 (fail closed; two distinct bundles cannot share the same sequence). No fallback to --p2p-trusted-root on bundle failure (production-honest lifecycle must not silently downgrade or silently reset persistence state). See docs/whitepaper/contradiction.md C4 (signed root distribution).

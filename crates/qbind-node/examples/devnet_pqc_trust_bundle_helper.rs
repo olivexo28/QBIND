@@ -56,6 +56,17 @@
 //!                                       which no real validator
 //!                                       leaf cert can produce.
 //!
+//! Optional 4th positional argument: `[sequence_override]`
+//!   Decimal `u64`. If supplied, the bundle's `sequence` field is set
+//!   to this value BEFORE signing (for signed modes) and before the
+//!   canonical fingerprint is computed. Defaults to whatever
+//!   `build_helper_bundle` emits (currently `1`). This is an
+//!   evidence-tooling knob used by Run 056 to mint
+//!   `sequence=1`/`sequence=2`/equivocation fixtures on the same
+//!   DevNet trust domain shape; it does NOT change signing semantics
+//!   (the new sequence is part of the signed preimage exactly as
+//!   `build_helper_bundle` would have produced).
+//!
 //! Writes to `outdir`:
 //!   root.id.hex                — 64 lowercase hex chars (root_key_id)
 //!   root.pk.hex                — full ML-DSA-44 root public key
@@ -248,6 +259,10 @@ fn main() {
         .expect("num_validators must be a u64");
     let bundle_mode_arg = args.next().unwrap_or_else(|| "valid".to_string());
     let mode = parse_mode(&bundle_mode_arg);
+    let sequence_override: Option<u64> = args.next().map(|s| {
+        s.parse::<u64>()
+            .expect("optional [sequence_override] must be a u64 decimal")
+    });
 
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
@@ -298,6 +313,9 @@ fn main() {
             if let Some(env) = env_override {
                 b.environment = env;
             }
+            if let Some(seq) = sequence_override {
+                b.sequence = seq;
+            }
             b
         }
         Mode::Signed(env, signed_mode, leaf_revocation_target) => {
@@ -308,6 +326,11 @@ fn main() {
                 generated_at,
             );
             b.environment = env;
+            if let Some(seq) = sequence_override {
+                // Run 056: override sequence BEFORE signing so the
+                // signed preimage covers the requested sequence.
+                b.sequence = seq;
+            }
 
             // Run 054: inject an active leaf-cert revocation for the
             // requested target before signing, so the signed preimage
@@ -445,7 +468,7 @@ fn main() {
 
     eprintln!(
         "[devnet_pqc_trust_bundle_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} \
-         validators={} bundle_mode={} bundle_env={} bundle_fingerprint={} \
+         validators={} bundle_mode={} bundle_env={} bundle_sequence={} bundle_fingerprint={} \
          signature={} bundle_path={} outdir={}",
         root_id_hex,
         PQC_TRANSPORT_SUITE_ML_DSA_44,
@@ -453,6 +476,7 @@ fn main() {
         num_validators,
         bundle_mode_arg,
         bundle.environment,
+        bundle.sequence,
         fp_hex,
         signed_summary,
         bundle_path,
