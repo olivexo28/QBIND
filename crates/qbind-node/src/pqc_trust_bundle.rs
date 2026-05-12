@@ -92,7 +92,7 @@ use serde::{Deserialize, Serialize};
 use qbind_crypto::{
     MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
 };
-use qbind_types::NetworkEnvironment;
+use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::pqc_root_config::{PqcTrustedRoot, PQC_TRANSPORT_SUITE_ML_DSA_44};
 
@@ -250,9 +250,8 @@ pub struct TrustBundle {
     /// Target environment. MUST match the runtime environment or
     /// loading fails closed (`WrongEnvironment`).
     pub environment: TrustBundleEnvironment,
-    /// Optional chain-id (hex) when available. Recorded for future
-    /// crosscheck against the runtime chain id; NOT enforced today
-    /// to keep this layer minimal.
+    /// Optional chain-id (hex) when available. When present, it MUST
+    /// match the runtime chain id or loading fails closed.
     #[serde(default)]
     pub chain_id: Option<String>,
     /// Bundle creation time (Unix seconds). Informational.
@@ -522,6 +521,14 @@ pub enum TrustBundleError {
         expected: TrustBundleEnvironment,
         found: TrustBundleEnvironment,
     },
+    /// Bundle `chain_id` was present but not a supported canonical
+    /// 64-bit lowercase-hex representation.
+    InvalidChainIdFormat(String),
+    /// Runtime chain id did not match `bundle.chain_id`.
+    WrongChainId {
+        expected: ChainId,
+        found: ChainId,
+    },
     /// `valid_from > valid_until` (inverted window).
     InvalidBundleValidityWindow,
     /// `validation_time < valid_from`.
@@ -611,6 +618,16 @@ impl std::fmt::Display for TrustBundleError {
             Self::WrongEnvironment { expected, found } => write!(
                 f,
                 "trust bundle environment mismatch (expected {}, bundle declares {})",
+                expected, found
+            ),
+            Self::InvalidChainIdFormat(s) => write!(
+                f,
+                "trust bundle chain_id has invalid format: {} (expected 16 lowercase hex chars, optionally prefixed by 0x or chain_)",
+                s
+            ),
+            Self::WrongChainId { expected, found } => write!(
+                f,
+                "trust bundle chain_id mismatch (expected {}, bundle declares {})",
                 expected, found
             ),
             Self::InvalidBundleValidityWindow => f.write_str(
@@ -856,11 +873,33 @@ impl TrustBundle {
         validation_time_secs: u64,
         signing_keys: &BundleSigningKeySet,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        Self::load_from_path_with_signing_keys_and_chain_id(
+            path,
+            expected_env,
+            expected_env.chain_id(),
+            validation_time_secs,
+            signing_keys,
+        )
+    }
+
+    /// Run 053: load + validate + verify signature from a JSON file,
+    /// additionally enforcing a present bundle `chain_id` against the
+    /// runtime chain id. Callers with custom chain ids should use this
+    /// entry point; the older shim uses the canonical chain id for the
+    /// selected environment.
+    pub fn load_from_path_with_signing_keys_and_chain_id(
+        path: &Path,
+        expected_env: NetworkEnvironment,
+        expected_chain_id: ChainId,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
         let bytes = std::fs::read(path)
             .map_err(|e| TrustBundleError::Io(format!("{}: {}", path.display(), e)))?;
-        Self::load_from_bytes_with_signing_keys(
+        Self::load_from_bytes_with_signing_keys_and_chain_id(
             &bytes,
             expected_env,
+            expected_chain_id,
             validation_time_secs,
             signing_keys,
         )
@@ -889,10 +928,28 @@ impl TrustBundle {
         validation_time_secs: u64,
         signing_keys: &BundleSigningKeySet,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        Self::load_from_bytes_with_signing_keys_and_chain_id(
+            bytes,
+            expected_env,
+            expected_env.chain_id(),
+            validation_time_secs,
+            signing_keys,
+        )
+    }
+
+    /// Run 053: in-memory load + validate with explicit runtime chain id.
+    pub fn load_from_bytes_with_signing_keys_and_chain_id(
+        bytes: &[u8],
+        expected_env: NetworkEnvironment,
+        expected_chain_id: ChainId,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
         let bundle: TrustBundle = serde_json::from_slice(bytes)
             .map_err(|e| TrustBundleError::Malformed(format!("{}", e)))?;
-        bundle.validate_at_with_signing_keys(
+        bundle.validate_at_with_signing_keys_and_chain_id(
             expected_env,
+            expected_chain_id,
             validation_time_secs,
             signing_keys,
         )
@@ -922,6 +979,24 @@ impl TrustBundle {
         validation_time_secs: u64,
         signing_keys: &BundleSigningKeySet,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        self.validate_at_with_signing_keys_and_chain_id(
+            expected_env,
+            expected_env.chain_id(),
+            validation_time_secs,
+            signing_keys,
+        )
+    }
+
+    /// Run 053: validate with explicit runtime chain id. A missing
+    /// bundle `chain_id` remains accepted for Run-050 compatibility;
+    /// a present value is parsed strictly and compared fail-closed.
+    pub fn validate_at_with_signing_keys_and_chain_id(
+        self,
+        expected_env: NetworkEnvironment,
+        expected_chain_id: ChainId,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
         // 1. Schema version.
         if self.bundle_version != Self::SUPPORTED_SCHEMA_VERSION {
             return Err(TrustBundleError::UnsupportedSchemaVersion(
@@ -936,6 +1011,21 @@ impl TrustBundle {
                 expected,
                 found: self.environment,
             });
+        }
+
+        // 2b. Chain-id binding. Run 050 recorded the field without
+        // enforcing it; Run 053 enforces it when present, while
+        // preserving absent/null compatibility for existing DevNet
+        // fixtures and operator bundles.
+        if let Some(raw_chain_id) = self.chain_id.as_deref() {
+            let found = parse_bundle_chain_id(raw_chain_id)
+                .map_err(TrustBundleError::InvalidChainIdFormat)?;
+            if found != expected_chain_id {
+                return Err(TrustBundleError::WrongChainId {
+                    expected: expected_chain_id,
+                    found,
+                });
+            }
         }
 
         // 3. Signature model boundary (Run 051).
@@ -1431,6 +1521,26 @@ fn decode_hex_var(s: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+fn parse_bundle_chain_id(s: &str) -> Result<ChainId, String> {
+    let hex = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("chain_"))
+        .unwrap_or(s);
+    if hex.len() != 16 {
+        return Err(format!("expected 16 hex chars, got {}", hex.len()));
+    }
+    let mut value = 0u64;
+    for c in hex.bytes() {
+        let n = match c {
+            b'0'..=b'9' => (c - b'0') as u64,
+            b'a'..=b'f' => (10 + c - b'a') as u64,
+            _ => return Err(format!("invalid hex char: {:?}", c as char)),
+        };
+        value = (value << 4) | n;
+    }
+    Ok(ChainId::new(value))
+}
+
 fn nibble(c: u8) -> Result<u8, String> {
     match c {
         b'0'..=b'9' => Ok(c - b'0'),
@@ -1648,6 +1758,57 @@ mod tests {
         let err =
             TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).unwrap_err();
         assert!(matches!(err, TrustBundleError::WrongEnvironment { .. }));
+    }
+
+    #[test]
+    fn matching_chain_id_loads_when_present() {
+        let (id, pk) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.chain_id = Some("0x51424e4444455600".to_string());
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded = TrustBundle::load_from_bytes_with_signing_keys_and_chain_id(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            100,
+            &BundleSigningKeySet::empty(),
+        )
+        .expect("matching chain_id loads");
+        assert_eq!(loaded.bundle.chain_id.as_deref(), Some("0x51424e4444455600"));
+    }
+
+    #[test]
+    fn wrong_chain_id_fails_closed_when_present() {
+        let (id, pk) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.chain_id = Some("0x51424e4454535400".to_string());
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys_and_chain_id(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            qbind_types::QBIND_DEVNET_CHAIN_ID,
+            100,
+            &BundleSigningKeySet::empty(),
+        )
+        .unwrap_err();
+        match err {
+            TrustBundleError::WrongChainId { expected, found } => {
+                assert_eq!(expected, qbind_types::QBIND_DEVNET_CHAIN_ID);
+                assert_eq!(found, qbind_types::QBIND_TESTNET_CHAIN_ID);
+            }
+            other => panic!("expected WrongChainId, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn malformed_chain_id_fails_closed_when_present() {
+        let (id, pk) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.chain_id = Some("0x51424g4444455600".to_string());
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).unwrap_err();
+        assert!(matches!(err, TrustBundleError::InvalidChainIdFormat(_)));
     }
 
     #[test]

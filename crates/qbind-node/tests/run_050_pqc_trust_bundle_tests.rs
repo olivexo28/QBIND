@@ -90,6 +90,22 @@ fn wrong_environment_bundle_is_rejected_fail_closed() {
 }
 
 #[test]
+fn chain_id_mismatch_bundle_is_rejected_fail_closed() {
+    let (id, pk) = fresh_root_pair();
+    let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+    bundle.chain_id = Some("chain_51424e4454535400".to_string());
+    let json = serde_json::to_vec(&bundle).unwrap();
+    let err = TrustBundle::load_from_bytes(&json, NetworkEnvironment::Devnet, 100).unwrap_err();
+    match err {
+        TrustBundleError::WrongChainId { expected, found } => {
+            assert_eq!(expected, qbind_types::QBIND_DEVNET_CHAIN_ID);
+            assert_eq!(found, qbind_types::QBIND_TESTNET_CHAIN_ID);
+        }
+        other => panic!("expected WrongChainId, got {:?}", other),
+    }
+}
+
+#[test]
 fn revoked_root_is_excluded_from_resolved_trust_set() {
     let (id, pk) = fresh_root_pair();
     let bundle = build_helper_bundle(HelperBundleMode::RootRevocationListed, &id, &pk, 0);

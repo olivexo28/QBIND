@@ -818,9 +818,10 @@ async fn run_p2p_node(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys(
+            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_and_chain_id(
                 path,
                 config.environment,
+                config.chain_id(),
                 now_secs,
                 &bundle_signing_keys,
             ) {
