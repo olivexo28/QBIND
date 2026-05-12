@@ -5658,6 +5658,43 @@ pub struct P2pMetrics {
     /// Gauge: bundle monotonic sequence number. Useful for operators
     /// confirming a rotation took effect on a given node.
     pqc_trust_bundle_sequence: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 051 (C4 piece: PQC trust-bundle ML-DSA-44 signed-bundle
+    // verification). Counters/gauges added on top of the Run 050 set;
+    // no Run 050 metric was renamed or removed.
+    //
+    // Exposed names:
+    //   qbind_p2p_pqc_trust_bundle_signature_verified_total
+    //       (counter; +1 exactly once per successful signed-bundle
+    //       startup load; remains 0 on DevNet unsigned bundles)
+    //   qbind_p2p_pqc_trust_bundle_signature_rejected_total
+    //       (counter; +1 exactly once on any signed-bundle envelope
+    //       rejection observable from the metrics surface — note
+    //       that startup fail-closed exits before /metrics is
+    //       reachable for the rejected-at-startup case; unit tests
+    //       drive the counter directly.)
+    //   qbind_p2p_pqc_trust_bundle_signing_keys_configured
+    //       (gauge; number of --p2p-trust-bundle-signing-key entries
+    //       successfully parsed)
+    // ------------------------------------------------------------------
+    /// Counter incremented exactly once per process whenever an
+    /// ML-DSA-44 signed trust bundle successfully verified at
+    /// startup. Stays at 0 for unsigned (DevNet) bundles and for
+    /// processes started without `--p2p-trust-bundle`.
+    pqc_trust_bundle_signature_verified_total: AtomicU64,
+    /// Counter incremented on any rejected signed-bundle envelope
+    /// (missing signing key, bad signature, malformed bytes,
+    /// unsupported suite, suite mismatch). In the binary's
+    /// fail-closed startup path the process exits before
+    /// `/metrics` is scraped, so this counter is primarily observed
+    /// through unit/integration tests; it is still exposed so that
+    /// a future hot-reload of the trust bundle (out of scope for
+    /// Run 051) can report rejected reloads.
+    pqc_trust_bundle_signature_rejected_total: AtomicU64,
+    /// Gauge: number of `--p2p-trust-bundle-signing-key` entries
+    /// successfully parsed at startup. 0 when no flag was supplied.
+    pqc_trust_bundle_signing_keys_configured: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6405,6 +6442,20 @@ impl P2pMetrics {
             self.pqc_trust_bundle_sequence()
         ));
 
+        // Run 051: PQC trust-bundle ML-DSA-44 signed-bundle metrics.
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_signature_verified_total {}\n",
+            self.pqc_trust_bundle_signature_verified_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_signature_rejected_total {}\n",
+            self.pqc_trust_bundle_signature_rejected_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_signing_keys_configured {}\n",
+            self.pqc_trust_bundle_signing_keys_configured()
+        ));
+
         output
     }
 
@@ -6529,6 +6580,39 @@ impl P2pMetrics {
     }
     pub fn set_pqc_trust_bundle_sequence(&self, v: u64) {
         self.pqc_trust_bundle_sequence.store(v, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------
+    // Run 051: signed-bundle verification counters.
+    // ------------------------------------------------------------------
+    pub fn pqc_trust_bundle_signature_verified_total(&self) -> u64 {
+        self.pqc_trust_bundle_signature_verified_total
+            .load(Ordering::Relaxed)
+    }
+    /// Increments the verified counter by exactly one. Called only
+    /// after a real, successful ML-DSA-44 signature verification.
+    pub fn inc_pqc_trust_bundle_signature_verified(&self) {
+        self.pqc_trust_bundle_signature_verified_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_signature_rejected_total(&self) -> u64 {
+        self.pqc_trust_bundle_signature_rejected_total
+            .load(Ordering::Relaxed)
+    }
+    /// Increments the rejected counter by exactly one. Called only
+    /// on a real signed-bundle envelope rejection (missing key, bad
+    /// signature, malformed, unsupported suite, suite mismatch).
+    pub fn inc_pqc_trust_bundle_signature_rejected(&self) {
+        self.pqc_trust_bundle_signature_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_signing_keys_configured(&self) -> u64 {
+        self.pqc_trust_bundle_signing_keys_configured
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_signing_keys_configured(&self, v: u64) {
+        self.pqc_trust_bundle_signing_keys_configured
+            .store(v, Ordering::Relaxed);
     }
 }
 
@@ -10331,5 +10415,76 @@ mod tests {
             "`# P2P transport metrics (T172)` header must appear exactly once \
              in NodeMetrics::format_metrics_with_crypto output (got {header_count2})"
         );
+    }
+
+    // ----------------------------------------------------------------
+    // Run 051: signed-bundle metrics — counters move only on real
+    // events, and no duplicate metric family is emitted.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn pqc_trust_bundle_signature_metrics_start_at_zero_and_increment_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.pqc_trust_bundle_signature_verified_total(), 0);
+        assert_eq!(p.pqc_trust_bundle_signature_rejected_total(), 0);
+        assert_eq!(p.pqc_trust_bundle_signing_keys_configured(), 0);
+
+        p.inc_pqc_trust_bundle_signature_verified();
+        assert_eq!(p.pqc_trust_bundle_signature_verified_total(), 1);
+        assert_eq!(p.pqc_trust_bundle_signature_rejected_total(), 0);
+
+        p.inc_pqc_trust_bundle_signature_rejected();
+        p.inc_pqc_trust_bundle_signature_rejected();
+        assert_eq!(p.pqc_trust_bundle_signature_rejected_total(), 2);
+
+        p.set_pqc_trust_bundle_signing_keys_configured(3);
+        assert_eq!(p.pqc_trust_bundle_signing_keys_configured(), 3);
+    }
+
+    #[test]
+    fn pqc_trust_bundle_signature_metrics_render_once_in_format_metrics() {
+        let metrics = NodeMetrics::new();
+        let p = metrics.p2p();
+        p.inc_pqc_trust_bundle_signature_verified();
+        p.set_pqc_trust_bundle_signing_keys_configured(1);
+        let out = metrics.format_metrics_with_crypto(None, None);
+        assert_eq!(
+            out.matches("qbind_p2p_pqc_trust_bundle_signature_verified_total ")
+                .count(),
+            1,
+            "verified counter line must appear exactly once"
+        );
+        assert_eq!(
+            out.matches("qbind_p2p_pqc_trust_bundle_signature_rejected_total ")
+                .count(),
+            1,
+            "rejected counter line must appear exactly once"
+        );
+        assert_eq!(
+            out.matches("qbind_p2p_pqc_trust_bundle_signing_keys_configured ")
+                .count(),
+            1,
+            "signing-keys-configured gauge line must appear exactly once"
+        );
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_signature_verified_total 1"),
+            "verified counter should reflect the single inc; got:\n{}",
+            out
+        );
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_signature_rejected_total 0"),
+            "rejected counter should stay at 0 when only verified was incremented; got:\n{}",
+            out
+        );
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_signing_keys_configured 1"),
+            "configured-keys gauge should reflect the set; got:\n{}",
+            out
+        );
+        // Existing Run 050 metrics must still be present.
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_loaded "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_active_roots "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_revoked_roots "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
     }
 }

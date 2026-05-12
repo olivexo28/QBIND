@@ -1,0 +1,8 @@
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[binary] P2P mode: starting transport + consensus loop. environment=TestNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 037: --p2p-mutual-auth=required on TestNet is using the production-honest PQC static-root cert-verification path.
+[binary] FATAL: --p2p-trust-bundle load/validate failed for path=/tmp/run051/unsigned-testnet/trust-bundle.json: trust bundle is unsigned but environment testnet requires a signed bundle. See docs/whitepaper/contradiction.md C4 (signed root distribution).. No fallback to --p2p-trusted-root on bundle failure (production-honest lifecycle must not silently downgrade). See docs/whitepaper/contradiction.md C4 (signed root distribution).

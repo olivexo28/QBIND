@@ -709,24 +709,102 @@ async fn run_p2p_node(
     };
 
     // Run 050 (C4 piece: PQC transport trust-anchor lifecycle —
-    // foundation layer): if `--p2p-trust-bundle <PATH>` was supplied,
+    // foundation layer) + Run 051 (signed-bundle ML-DSA-44
+    // verification): if `--p2p-trust-bundle <PATH>` was supplied,
     // load + validate the bundle, then merge its active, non-revoked,
     // in-window roots into the trust set. Failures here fail closed
     // (the binary refuses to start) — there is NO silent fallback to
     // the `--p2p-trusted-root` CLI path on bundle failure.
     //
-    // Static-roots + bundle conflict policy:
+    // Static-roots + bundle conflict policy (Run 050):
     //   DevNet           — both allowed, deduplicated by `root_key_id`.
     //   TestNet/MainNet  — both supplied is a configuration error and
     //                      fails closed; the operator must use the
     //                      bundle alone.
     //
-    // The bundle's own signature policy is enforced inside
-    // `TrustBundle::validate_at`:
-    //   DevNet           — unsigned bundle accepted.
+    // Signature policy (Run 051; enforced inside
+    // `TrustBundle::validate_at_with_signing_keys`):
+    //   DevNet           — unsigned bundle accepted; signed bundle
+    //                      verified against the configured
+    //                      `--p2p-trust-bundle-signing-key` set;
+    //                      any failure (missing key, bad signature,
+    //                      malformed, unsupported suite) fails closed.
     //   TestNet/MainNet  — unsigned bundle REFUSED; signed bundle
-    //                      REFUSED with `SignedBundleVerificationNotImplemented`
-    //                      until the next C4 layer lands.
+    //                      verified or fails closed.
+    //
+    // Trust-separation: the signing-key id MUST NOT collide with any
+    // configured transport root id, from either source. Collisions
+    // fail closed before the bundle is loaded.
+
+    // Run 051: parse the bundle-signing key list once up front so we
+    // can both enforce trust separation against `trusted_roots` and
+    // surface the gauge for the configured-keys count.
+    let bundle_signing_keys =
+        match qbind_node::pqc_trust_bundle::BundleSigningKeySet::parse_specs(
+            &args.p2p_trust_bundle_signing_keys,
+        ) {
+            Ok(set) => set,
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-signing-key parse error: {}. \
+                     See docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                    e
+                );
+                std::process::exit(1);
+            }
+        };
+
+    // Trust-separation between bundle-signing keys and transport
+    // root IDs (CLI `--p2p-trusted-root` set). A separate check
+    // against bundle `roots[]` is performed inside
+    // `TrustBundle::validate_at_with_signing_keys` (Run 050
+    // invariant). Both directions fail closed: a transport-root key
+    // MUST NOT also be a bundle-signing key.
+    {
+        let cli_root_ids: std::collections::HashSet<[u8; 32]> =
+            trusted_roots.iter().map(|r| r.root_key_id).collect();
+        for key in bundle_signing_keys.iter() {
+            if cli_root_ids.contains(&key.key_id_bytes) {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-signing-key {} collides with a \
+                     configured --p2p-trusted-root id. Bundle-signing authority MUST be \
+                     trust-separated from transport roots. See \
+                     docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                    key.key_id_hex()
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Run 051: TestNet/MainNet + bundle => require a signing-key
+    // configuration. This rule encodes "production bundle layer
+    // cannot operate without a verified signature path".
+    if let Some(path) = args.p2p_trust_bundle.as_ref() {
+        use qbind_types::NetworkEnvironment;
+        if !matches!(config.environment, NetworkEnvironment::Devnet)
+            && bundle_signing_keys.is_empty()
+        {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle {} on environment={} requires at least one \
+                 --p2p-trust-bundle-signing-key (TestNet/MainNet refuse unsigned bundles, and \
+                 cannot verify a signed bundle without a configured signing key). See \
+                 docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                path.display(),
+                config.environment
+            );
+            std::process::exit(1);
+        }
+    } else if !bundle_signing_keys.is_empty() {
+        // Documented behavior: signing keys without a bundle is a
+        // no-op. We warn so operators notice the misconfiguration,
+        // but do not fail closed (the live trust set is unchanged).
+        eprintln!(
+            "[binary] WARNING: --p2p-trust-bundle-signing-key supplied without \
+             --p2p-trust-bundle; signing keys have no effect and will be ignored."
+        );
+    }
+
     let trust_bundle_loaded: Option<qbind_node::pqc_trust_bundle::LoadedTrustBundle> = match args
         .p2p_trust_bundle
         .as_ref()
@@ -740,10 +818,11 @@ async fn run_p2p_node(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path(
+            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys(
                 path,
                 config.environment,
                 now_secs,
+                &bundle_signing_keys,
             ) {
                 Ok(loaded) => {
                     // Enforce static-roots + bundle conflict policy.
@@ -773,11 +852,19 @@ async fn run_p2p_node(
                             trusted_roots.push(r.clone());
                         }
                     }
+                    let signed_status = match &loaded.signature_status {
+                        qbind_node::pqc_trust_bundle::BundleSignatureStatus::Unsigned => {
+                            "unsigned".to_string()
+                        }
+                        qbind_node::pqc_trust_bundle::BundleSignatureStatus::Verified {
+                            signing_key_id,
+                        } => format!("verified(signing_key_id={}..)", &signing_key_id[..8]),
+                    };
                     eprintln!(
-                        "[binary] Run 050: trust bundle loaded path={} env={} fp={} \
+                        "[binary] Run 050/051: trust bundle loaded path={} env={} fp={} \
                          active_roots={} revoked_roots={} sequence={} valid_from={} \
-                         valid_until={} signed=false (DevNet-unsigned scaffolding; signed-bundle \
-                         verification remains C4-open). Bundle root IDs: [{}]",
+                         valid_until={} signature={} signing_keys_configured={}. \
+                         Bundle root IDs: [{}]",
                         path.display(),
                         loaded.environment(),
                         loaded.fingerprint_hex(),
@@ -786,6 +873,8 @@ async fn run_p2p_node(
                         loaded.bundle.sequence,
                         loaded.bundle.valid_from,
                         loaded.bundle.valid_until,
+                        signed_status,
+                        bundle_signing_keys.len(),
                         loaded
                             .active_roots
                             .iter()
@@ -796,6 +885,25 @@ async fn run_p2p_node(
                     Some(loaded)
                 }
                 Err(e) => {
+                    // Run 051: surface signed-bundle envelope rejections
+                    // on the rejected counter before exiting fail-closed.
+                    // For non-signature failures (e.g. WrongEnvironment),
+                    // the counter is left at zero so it remains a
+                    // truthful signal of signature-specific rejection.
+                    use qbind_node::pqc_trust_bundle::TrustBundleError as E;
+                    let signature_envelope_rejection = matches!(
+                        &e,
+                        E::MissingSigningKey { .. }
+                            | E::UnsupportedSignatureSuite { .. }
+                            | E::SignatureSuiteMismatch { .. }
+                            | E::MalformedSignatureBytes { .. }
+                            | E::BadSignature { .. }
+                    );
+                    if signature_envelope_rejection {
+                        node_metrics
+                            .p2p()
+                            .inc_pqc_trust_bundle_signature_rejected();
+                    }
                     eprintln!(
                         "[binary] FATAL: --p2p-trust-bundle load/validate failed for path={}: \
                          {}. No fallback to --p2p-trusted-root on bundle failure (production-honest \
@@ -828,17 +936,27 @@ async fn run_p2p_node(
         std::process::exit(1);
     }
 
-    // Run 050: surface the trust-bundle observability gauges on the
-    // shared `P2pMetrics` instance. The same Arc is wired into the
-    // builder via `with_p2p_metrics(node_metrics.p2p_arc())` above,
-    // so these set_* calls reach the live `/metrics` scrape path.
-    if let Some(loaded) = trust_bundle_loaded.as_ref() {
+    // Run 050/051: surface the trust-bundle observability gauges and
+    // signed-bundle counters on the shared `P2pMetrics` instance.
+    // The same Arc is wired into the builder via
+    // `with_p2p_metrics(node_metrics.p2p_arc())` above, so these
+    // set_*/inc_* calls reach the live `/metrics` scrape path.
+    {
         let p2p = node_metrics.p2p();
-        p2p.set_pqc_trust_bundle_loaded(1);
-        p2p.set_pqc_trust_bundle_environment(loaded.environment().metric_code());
-        p2p.set_pqc_trust_bundle_active_roots(loaded.active_root_count() as u64);
-        p2p.set_pqc_trust_bundle_revoked_roots(loaded.revoked_root_count() as u64);
-        p2p.set_pqc_trust_bundle_sequence(loaded.bundle.sequence);
+        p2p.set_pqc_trust_bundle_signing_keys_configured(bundle_signing_keys.len() as u64);
+        if let Some(loaded) = trust_bundle_loaded.as_ref() {
+            p2p.set_pqc_trust_bundle_loaded(1);
+            p2p.set_pqc_trust_bundle_environment(loaded.environment().metric_code());
+            p2p.set_pqc_trust_bundle_active_roots(loaded.active_root_count() as u64);
+            p2p.set_pqc_trust_bundle_revoked_roots(loaded.revoked_root_count() as u64);
+            p2p.set_pqc_trust_bundle_sequence(loaded.bundle.sequence);
+            // Run 051: bump the verified counter exactly once on a
+            // successfully verified signed bundle. Unsigned bundles
+            // leave the counter at zero.
+            if loaded.signature_status.is_verified() {
+                p2p.inc_pqc_trust_bundle_signature_verified();
+            }
+        }
     }
 
     let pqc_config = PqcStaticRootConfig {

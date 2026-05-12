@@ -1,6 +1,7 @@
-//! Run 050 (C4 piece: PQC transport trust-anchor lifecycle —
-//! foundation layer): structured, environment-bound, canonically-hashable
-//! PQC trust-anchor bundle.
+//! Run 050/051 (C4 piece: PQC transport trust-anchor lifecycle —
+//! foundation + signed-bundle layer): structured, environment-bound,
+//! canonically-hashable PQC trust-anchor bundle with ML-DSA-44
+//! signed-bundle verification.
 //!
 //! This is the smallest production-honest replacement for the pre-Run-050
 //! "ad hoc static `--p2p-trusted-root` only" surface. It introduces:
@@ -45,30 +46,59 @@
 //!   by default. The struct shape below intentionally distinguishes
 //!   `signing_key_id` from `root_id`s in `roots`.
 //!
-//! # Signature model (Run 050)
+//! # Signature model (Run 051)
 //!
-//! - **DevNet**: unsigned bundles are accepted (explicitly scoped to
-//!   DevNet, mirrors the DevNet ephemeral-root helper that exists
-//!   since Run 037).
-//! - **TestNet / MainNet**: unsigned bundles are REFUSED at load time.
-//!   Signed bundles are also REFUSED at load time *for now* with a
-//!   precise error pointing operators at C4 — the signed-bundle
-//!   verification flow is not implemented in this layer.
+//! - **DevNet**: unsigned bundles are accepted (Run 050 scaffolding).
+//!   Signed DevNet bundles are *verified* against the configured
+//!   bundle-signing key list; a signed bundle with no configured
+//!   signing key, an unknown signing-key id, an unsupported suite, a
+//!   malformed signature, or a bad signature all fail closed.
+//! - **TestNet / MainNet**: unsigned bundles are REFUSED at load time
+//!   (same as Run 050). Signed bundles are verified against the
+//!   configured bundle-signing key list; the same fail-closed
+//!   conditions as DevNet apply. A TestNet/MainNet bundle whose
+//!   signature is `None` is rejected with `UnsignedBundleNotAllowed`,
+//!   not with a "verification not implemented" message.
 //!
-//! This is the documented "Option B + future Option C" boundary in
-//! the Run 050 task description: smallest layer that lands real
-//! environment binding and root-level revocation enforcement on
-//! DevNet today, without claiming TestNet/MainNet readiness.
+//! # Signing preimage and domain separation
+//!
+//! The signing preimage is:
+//!
+//!     b"QBIND:pqc-trust-bundle-signature:v1" || canonical_json(bundle{signature: None})
+//!
+//! i.e. the bundle is canonicalised through `serde_json::to_vec`
+//! exactly as for the fingerprint, with the `signature` envelope
+//! stripped, and a distinct signing-domain-separator string is
+//! prepended so this preimage cannot collide with any other digest
+//! the project uses (transport cert digest, bundle fingerprint, etc).
+//! See [`canonical_signing_bytes`].
+//!
+//! # Run 050 boundary preserved
+//!
+//! All Run 050 fail-closed conditions (wrong environment, validity
+//! windows, root status, duplicates, unsupported suite, revocation
+//! list consistency, schema version, signing_key_id collides with a
+//! transport `root_id`) continue to hold *before* signature
+//! verification is attempted, so an attacker cannot exercise the
+//! verifier with a malformed envelope.
 
 use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE;
+use qbind_crypto::{
+    MlDsa44Backend, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
+};
 use qbind_types::NetworkEnvironment;
 
 use crate::pqc_root_config::{PqcTrustedRoot, PQC_TRANSPORT_SUITE_ML_DSA_44};
+
+/// Domain separator for ML-DSA-44 trust-bundle signatures. Distinct
+/// from the bundle fingerprint domain separator (`QBIND:pqc-trust-bundle-fp:v1`)
+/// so a fingerprint hash and a signature preimage can never collide.
+pub const TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR: &[u8] =
+    b"QBIND:pqc-trust-bundle-signature:v1";
 
 /// Environment label embedded in a bundle. Mirrors
 /// [`qbind_types::NetworkEnvironment`] but is serialised in a
@@ -263,6 +293,216 @@ pub struct TrustBundleSignature {
     pub sig_bytes: String,
 }
 
+// ---------------------------------------------------------------------
+// Run 051: bundle-signing key list (trust-separated from transport
+// roots). Verifies the `signature` envelope above.
+// ---------------------------------------------------------------------
+
+/// One configured bundle-signing verification key. Parsed from the
+/// repeatable `--p2p-trust-bundle-signing-key KEYID:SUITE:PK` CLI flag.
+///
+/// The key set lives **separately** from any `--p2p-trusted-root` /
+/// `TrustBundleRoot` — a transport-root key MUST NOT also be a
+/// bundle-signing key. The cross-source collision check is enforced
+/// at startup in `main.rs`; the bundle's own `signature.signing_key_id`
+/// vs. `roots[i].root_id` collision is enforced by [`TrustBundle::validate_at`]
+/// (Run 050 invariant, preserved).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleSigningKey {
+    /// 32-byte stable id, lowercase-hex form preserved for log/metric
+    /// surfaces.
+    pub key_id_bytes: [u8; 32],
+    /// Signature suite. Today only `100` (ML-DSA-44) is accepted.
+    pub suite_id: u8,
+    /// Raw public-key bytes (length = `ML_DSA_44_PUBLIC_KEY_SIZE` for suite 100).
+    pub pk_bytes: Vec<u8>,
+}
+
+impl BundleSigningKey {
+    /// Short, log-safe id (first 8 hex chars). Never logs the public key.
+    pub fn key_id_short(&self) -> String {
+        let mut out = String::with_capacity(8);
+        for b in &self.key_id_bytes[..4] {
+            use std::fmt::Write;
+            let _ = write!(out, "{:02x}", b);
+        }
+        out
+    }
+
+    /// Full 64-char lowercase hex id.
+    pub fn key_id_hex(&self) -> String {
+        let mut out = String::with_capacity(64);
+        for b in &self.key_id_bytes {
+            use std::fmt::Write;
+            let _ = write!(out, "{:02x}", b);
+        }
+        out
+    }
+}
+
+/// Set of configured bundle-signing keys, keyed by `key_id_bytes`.
+/// Lookup is by exact id; duplicate ids are rejected at parse time.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BundleSigningKeySet {
+    pub(crate) keys: Vec<BundleSigningKey>,
+}
+
+impl BundleSigningKeySet {
+    /// Construct an empty set. Used by the DevNet-unsigned path and by
+    /// the back-compat 3-arg `load_from_bytes` shim.
+    pub fn empty() -> Self {
+        Self { keys: Vec::new() }
+    }
+
+    /// Test/helper constructor: build a `BundleSigningKeySet` from a
+    /// raw list of `BundleSigningKey` (no parsing). Caller is
+    /// responsible for ensuring suite/length/duplicate-id invariants
+    /// — the type-level invariants of `BundleSigningKey` (suite,
+    /// pk length) are preserved, but no duplicate check is performed.
+    /// Used by tests and by helpers that already have validated keys.
+    #[doc(hidden)]
+    pub fn from_keys_unchecked(keys: Vec<BundleSigningKey>) -> Self {
+        Self { keys }
+    }
+
+    /// Test/helper accessor: push a key without de-dup checks. Used
+    /// only by integration tests that simulate misconfiguration.
+    #[doc(hidden)]
+    pub fn push_key_unchecked(&mut self, key: BundleSigningKey) {
+        self.keys.push(key);
+    }
+
+    /// Returns `true` iff no signing keys are configured.
+    pub fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
+
+    /// Number of configured signing keys.
+    pub fn len(&self) -> usize {
+        self.keys.len()
+    }
+
+    /// Iterator over configured keys (no public-key bytes in `Display`).
+    pub fn iter(&self) -> impl Iterator<Item = &BundleSigningKey> {
+        self.keys.iter()
+    }
+
+    /// Look up a signing key by canonical 32-byte id.
+    pub fn lookup(&self, key_id: &[u8; 32]) -> Option<&BundleSigningKey> {
+        self.keys.iter().find(|k| &k.key_id_bytes == key_id)
+    }
+
+    /// Parse one `KEYID:SUITE:PK` spec and push it into the set,
+    /// enforcing strict validation and duplicate-id rejection.
+    pub fn push_spec(&mut self, spec: &str) -> Result<(), BundleSigningKeySpecError> {
+        let key = parse_bundle_signing_key_spec(spec)?;
+        if self.keys.iter().any(|k| k.key_id_bytes == key.key_id_bytes) {
+            return Err(BundleSigningKeySpecError::DuplicateKeyId(
+                key.key_id_hex(),
+            ));
+        }
+        self.keys.push(key);
+        Ok(())
+    }
+
+    /// Parse a list of specs into a fresh set. Fails closed on the
+    /// first malformed / duplicate entry.
+    pub fn parse_specs(specs: &[String]) -> Result<Self, BundleSigningKeySpecError> {
+        let mut out = Self::empty();
+        for s in specs {
+            out.push_spec(s)?;
+        }
+        Ok(out)
+    }
+}
+
+/// Errors returned by [`BundleSigningKeySet::push_spec`] and friends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BundleSigningKeySpecError {
+    /// Format mismatch (expected `KEYID:SUITE:PK` with exactly two
+    /// colon separators; no trailing or empty fields).
+    Malformed(String),
+    /// Hex parse error in the `KEYID` or `PK` field.
+    MalformedHex(String),
+    /// Suite id was not `100` (ML-DSA-44).
+    UnsupportedSuite(u8),
+    /// `PK` decoded to the wrong length for the declared suite.
+    WrongPublicKeyLength { expected: usize, actual: usize },
+    /// Duplicate `KEYID` in the configured list.
+    DuplicateKeyId(String),
+}
+
+impl std::fmt::Display for BundleSigningKeySpecError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Malformed(s) => write!(
+                f,
+                "malformed --p2p-trust-bundle-signing-key spec {:?} (expected KEYID:SUITE:PK)",
+                s
+            ),
+            Self::MalformedHex(s) => write!(
+                f,
+                "malformed --p2p-trust-bundle-signing-key hex: {}",
+                s
+            ),
+            Self::UnsupportedSuite(s) => write!(
+                f,
+                "unsupported --p2p-trust-bundle-signing-key suite_id {} (only {} = ML-DSA-44 accepted)",
+                s, PQC_TRANSPORT_SUITE_ML_DSA_44
+            ),
+            Self::WrongPublicKeyLength { expected, actual } => write!(
+                f,
+                "--p2p-trust-bundle-signing-key public key length mismatch (expected {} bytes, got {})",
+                expected, actual
+            ),
+            Self::DuplicateKeyId(id) => write!(
+                f,
+                "duplicate --p2p-trust-bundle-signing-key id {} in configured set",
+                id
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BundleSigningKeySpecError {}
+
+/// Parse a single `KEYID:SUITE:PK` spec. Strict: exactly two colons,
+/// no empty fields, hex must be lowercase-only via the same `nibble`
+/// discipline as the rest of `pqc_trust_bundle`.
+pub fn parse_bundle_signing_key_spec(
+    spec: &str,
+) -> Result<BundleSigningKey, BundleSigningKeySpecError> {
+    let parts: Vec<&str> = spec.split(':').collect();
+    if parts.len() != 3 {
+        return Err(BundleSigningKeySpecError::Malformed(spec.to_string()));
+    }
+    let (keyid_str, suite_str, pk_str) = (parts[0], parts[1], parts[2]);
+    if keyid_str.is_empty() || suite_str.is_empty() || pk_str.is_empty() {
+        return Err(BundleSigningKeySpecError::Malformed(spec.to_string()));
+    }
+    let key_id_bytes = decode_hex_fixed_32(keyid_str)
+        .map_err(|e| BundleSigningKeySpecError::MalformedHex(format!("KEYID: {}", e)))?;
+    let suite_id: u8 = suite_str
+        .parse()
+        .map_err(|_| BundleSigningKeySpecError::Malformed(spec.to_string()))?;
+    if suite_id != PQC_TRANSPORT_SUITE_ML_DSA_44 {
+        return Err(BundleSigningKeySpecError::UnsupportedSuite(suite_id));
+    }
+    let pk_bytes = decode_hex_var(pk_str)
+        .map_err(|e| BundleSigningKeySpecError::MalformedHex(format!("PK: {}", e)))?;
+    if pk_bytes.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
+        return Err(BundleSigningKeySpecError::WrongPublicKeyLength {
+            expected: ML_DSA_44_PUBLIC_KEY_SIZE,
+            actual: pk_bytes.len(),
+        });
+    }
+    Ok(BundleSigningKey {
+        key_id_bytes,
+        suite_id,
+        pk_bytes,
+    })
+}
+
 /// Errors returned by [`TrustBundle::load_from_path`] and
 /// [`TrustBundle::validate_at`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,9 +559,34 @@ pub enum TrustBundleError {
     /// The bundle is unsigned but the target environment is
     /// TestNet or MainNet, both of which require a signature.
     UnsignedBundleNotAllowed(TrustBundleEnvironment),
-    /// The bundle carries a signature but signed-bundle verification
-    /// is not implemented in this layer (Run 050 boundary). Recorded
-    /// as a remaining C4 piece in `contradiction.md`.
+    /// Run 051: bundle carries a signature but no bundle-signing key
+    /// matching `signature.signing_key_id` is configured.
+    MissingSigningKey { signing_key_id: String },
+    /// Run 051: bundle signature suite is not supported. Today only
+    /// `100` (ML-DSA-44) is accepted.
+    UnsupportedSignatureSuite { signing_key_id: String, suite_id: u8 },
+    /// Run 051: bundle signature suite differs from the configured
+    /// signing key's suite (cross-suite confusion). Fail closed.
+    SignatureSuiteMismatch {
+        signing_key_id: String,
+        bundle_suite_id: u8,
+        configured_suite_id: u8,
+    },
+    /// Run 051: bundle signature bytes did not decode to the
+    /// declared suite's signature length / contained non-hex chars.
+    MalformedSignatureBytes {
+        signing_key_id: String,
+        reason: String,
+    },
+    /// Run 051: ML-DSA-44 signature verification failed. Tampered
+    /// bundle, wrong signing key (which collided on id but not pk),
+    /// or any forged envelope falls here. Fail closed.
+    BadSignature { signing_key_id: String },
+    /// Run 051 deprecated boundary (kept for source-level back-compat
+    /// with Run 050 test fixtures; not produced by the new verify
+    /// path). Indicates a signed bundle reached the validator before
+    /// the signed-bundle verification feature was wired in.
+    #[doc(hidden)]
     SignedBundleVerificationNotImplemented,
 }
 
@@ -392,10 +657,42 @@ impl std::fmt::Display for TrustBundleError {
                  See docs/whitepaper/contradiction.md C4 (signed root distribution).",
                 env
             ),
+            Self::MissingSigningKey { signing_key_id } => write!(
+                f,
+                "trust bundle signature references signing_key_id {} but no matching \
+                 --p2p-trust-bundle-signing-key was configured (fail closed)",
+                signing_key_id
+            ),
+            Self::UnsupportedSignatureSuite { signing_key_id, suite_id } => write!(
+                f,
+                "trust bundle signature for signing_key_id {} uses unsupported suite_id {} \
+                 (only {} = ML-DSA-44 accepted)",
+                signing_key_id, suite_id, PQC_TRANSPORT_SUITE_ML_DSA_44
+            ),
+            Self::SignatureSuiteMismatch {
+                signing_key_id,
+                bundle_suite_id,
+                configured_suite_id,
+            } => write!(
+                f,
+                "trust bundle signature for signing_key_id {} declares suite_id {} but the \
+                 configured signing key uses suite_id {} (cross-suite mismatch fails closed)",
+                signing_key_id, bundle_suite_id, configured_suite_id
+            ),
+            Self::MalformedSignatureBytes { signing_key_id, reason } => write!(
+                f,
+                "trust bundle signature for signing_key_id {} has malformed sig_bytes: {}",
+                signing_key_id, reason
+            ),
+            Self::BadSignature { signing_key_id } => write!(
+                f,
+                "trust bundle ML-DSA-44 signature verification failed for signing_key_id {} \
+                 (tampered bundle or forged envelope — fail closed)",
+                signing_key_id
+            ),
             Self::SignedBundleVerificationNotImplemented => f.write_str(
                 "trust bundle carries a signature but signed-bundle verification is not \
-                 implemented in this layer (Run 050 boundary). See \
-                 docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                 wired (legacy Run 050 boundary; should not appear in Run 051+).",
             ),
         }
     }
@@ -418,6 +715,34 @@ pub struct LoadedTrustBundle {
     /// the construction below already filters them out, this field is
     /// retained for lookup at verify time and for metrics).
     pub revoked_root_ids: HashSet<[u8; 32]>,
+    /// Run 051: result of the ML-DSA-44 signed-bundle verification
+    /// step. `Unsigned` for DevNet unsigned bundles; `Verified` for
+    /// any signed bundle that successfully verified against the
+    /// configured signing-key set. The validator never returns
+    /// `LoadedTrustBundle` with a failed signature — failures fail
+    /// closed in `validate_at_with_signing_keys`.
+    pub signature_status: BundleSignatureStatus,
+}
+
+/// Outcome of the signed-bundle verification step on a successfully
+/// loaded bundle. (Failed verifications fail closed inside
+/// [`TrustBundle::validate_at_with_signing_keys`] and never reach
+/// this type.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BundleSignatureStatus {
+    /// Bundle carried no signature envelope (DevNet unsigned).
+    Unsigned,
+    /// Bundle signature was successfully verified by the configured
+    /// signing key. The `signing_key_id` is the 64-char lowercase hex
+    /// id used at the wire boundary.
+    Verified { signing_key_id: String },
+}
+
+impl BundleSignatureStatus {
+    /// Returns `true` iff the bundle was verified.
+    pub fn is_verified(&self) -> bool {
+        matches!(self, Self::Verified { .. })
+    }
 }
 
 impl LoadedTrustBundle {
@@ -466,35 +791,97 @@ impl TrustBundle {
     /// Currently supported schema version.
     pub const SUPPORTED_SCHEMA_VERSION: u32 = 1;
 
-    /// Load + validate from a JSON file on disk.
+    /// Load + validate from a JSON file on disk. Back-compat shim with
+    /// an empty `BundleSigningKeySet`: a DevNet unsigned bundle still
+    /// loads, but any signed bundle now fails closed with
+    /// `MissingSigningKey` rather than the Run 050
+    /// `SignedBundleVerificationNotImplemented` placeholder.
     pub fn load_from_path(
         path: &Path,
         expected_env: NetworkEnvironment,
         validation_time_secs: u64,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
-        let bytes = std::fs::read(path)
-            .map_err(|e| TrustBundleError::Io(format!("{}: {}", path.display(), e)))?;
-        Self::load_from_bytes(&bytes, expected_env, validation_time_secs)
+        Self::load_from_path_with_signing_keys(
+            path,
+            expected_env,
+            validation_time_secs,
+            &BundleSigningKeySet::empty(),
+        )
     }
 
-    /// Load + validate from in-memory bytes. Useful for tests and for
-    /// the helper binary.
+    /// Run 051: load + validate + verify signature from a JSON file
+    /// on disk against the supplied signing-key set.
+    pub fn load_from_path_with_signing_keys(
+        path: &Path,
+        expected_env: NetworkEnvironment,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| TrustBundleError::Io(format!("{}: {}", path.display(), e)))?;
+        Self::load_from_bytes_with_signing_keys(
+            &bytes,
+            expected_env,
+            validation_time_secs,
+            signing_keys,
+        )
+    }
+
+    /// Load + validate from in-memory bytes (back-compat shim;
+    /// empty signing-key set).
     pub fn load_from_bytes(
         bytes: &[u8],
         expected_env: NetworkEnvironment,
         validation_time_secs: u64,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
-        let bundle: TrustBundle = serde_json::from_slice(bytes)
-            .map_err(|e| TrustBundleError::Malformed(format!("{}", e)))?;
-        bundle.validate_at(expected_env, validation_time_secs)
+        Self::load_from_bytes_with_signing_keys(
+            bytes,
+            expected_env,
+            validation_time_secs,
+            &BundleSigningKeySet::empty(),
+        )
     }
 
-    /// Validate and produce the [`LoadedTrustBundle`] derived data.
-    /// Pure: takes no I/O.
+    /// Run 051: load + validate + verify signature from in-memory
+    /// bytes against the supplied signing-key set.
+    pub fn load_from_bytes_with_signing_keys(
+        bytes: &[u8],
+        expected_env: NetworkEnvironment,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        let bundle: TrustBundle = serde_json::from_slice(bytes)
+            .map_err(|e| TrustBundleError::Malformed(format!("{}", e)))?;
+        bundle.validate_at_with_signing_keys(
+            expected_env,
+            validation_time_secs,
+            signing_keys,
+        )
+    }
+
+    /// Validate and produce [`LoadedTrustBundle`] (back-compat shim;
+    /// empty signing-key set).
     pub fn validate_at(
         self,
         expected_env: NetworkEnvironment,
         validation_time_secs: u64,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        self.validate_at_with_signing_keys(
+            expected_env,
+            validation_time_secs,
+            &BundleSigningKeySet::empty(),
+        )
+    }
+
+    /// Run 051: validate the bundle (schema, environment, validity
+    /// window, root status / windows, revocation consistency,
+    /// trust-separation) AND verify the ML-DSA-44 signature against
+    /// the supplied signing-key set. Pure: takes no I/O.
+    pub fn validate_at_with_signing_keys(
+        self,
+        expected_env: NetworkEnvironment,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
         // 1. Schema version.
         if self.bundle_version != Self::SUPPORTED_SCHEMA_VERSION {
@@ -512,25 +899,32 @@ impl TrustBundle {
             });
         }
 
-        // 3. Signature model boundary (Run 050).
+        // 3. Signature model boundary (Run 051).
         //
-        //    DevNet      -> unsigned OK; signed rejected as "not yet
-        //                   implemented" so that DevNet test artifacts
-        //                   never accidentally exercise an unverified
-        //                   signature path and mask a future regression.
-        //    TestNet/MainNet -> unsigned rejected; signed rejected as
-        //                   "not yet implemented" (NO silent fall-through
-        //                   to "accept" — the operator must wait for the
-        //                   signed-bundle verification piece).
-        match (&self.signature, self.environment) {
-            (None, TrustBundleEnvironment::Devnet) => {
-                // OK — DevNet unsigned scaffolding.
-            }
-            (None, env @ (TrustBundleEnvironment::Testnet | TrustBundleEnvironment::Mainnet)) => {
-                return Err(TrustBundleError::UnsignedBundleNotAllowed(env));
-            }
-            (Some(_), _) => {
-                return Err(TrustBundleError::SignedBundleVerificationNotImplemented);
+        //    DevNet      -> unsigned OK; signed verified against the
+        //                   configured signing-key set; missing key,
+        //                   bad signature, malformed bytes,
+        //                   unsupported suite, or suite mismatch all
+        //                   fail closed.
+        //    TestNet     -> unsigned REFUSED; signed verified
+        //                   (same fail-closed conditions as DevNet).
+        //    MainNet     -> unsigned REFUSED; signed verified
+        //                   (same fail-closed conditions as DevNet).
+        //
+        //    Note: actual ML-DSA-44 verification is deferred to step
+        //    7b below, AFTER the structural validations (schema,
+        //    window, root status, revocations, trust-separation) so
+        //    that we never invoke the verifier with a malformed
+        //    envelope. The early branch here only catches "unsigned
+        //    bundle on a network that requires a signature".
+        if self.signature.is_none() {
+            match self.environment {
+                TrustBundleEnvironment::Devnet => {
+                    // OK — DevNet unsigned scaffolding (preserved).
+                }
+                env @ (TrustBundleEnvironment::Testnet | TrustBundleEnvironment::Mainnet) => {
+                    return Err(TrustBundleError::UnsignedBundleNotAllowed(env));
+                }
             }
         }
 
@@ -608,11 +1002,8 @@ impl TrustBundle {
         }
 
         // 7. Trust-separation: signing_key_id MUST NOT collide with
-        //    any root_id. (We already validated `signature == Some(_)`
-        //    is rejected above, but recheck defensively in case the
-        //    signature path is enabled in a future patch — fail
-        //    closed here too.)
-        if let Some(sig) = &self.signature {
+        //    any root_id. (Run 050 invariant; preserved.)
+        let parsed_signing_id: Option<[u8; 32]> = if let Some(sig) = &self.signature {
             let signing_id_bytes = decode_hex_fixed_32(&sig.signing_key_id).map_err(|e| {
                 TrustBundleError::MalformedHex(format!(
                     "signing_key_id {}: {}",
@@ -624,7 +1015,82 @@ impl TrustBundle {
                     sig.signing_key_id.clone(),
                 ));
             }
-        }
+            Some(signing_id_bytes)
+        } else {
+            None
+        };
+
+        // 7b. Run 051: ML-DSA-44 signature verification. Only reached
+        //     when the envelope has already passed every structural
+        //     check above. Any failure here fails closed; we never
+        //     return `LoadedTrustBundle` for a signed-but-unverified
+        //     bundle.
+        let signature_status: BundleSignatureStatus = match (&self.signature, parsed_signing_id) {
+            (None, _) => BundleSignatureStatus::Unsigned,
+            (Some(sig), Some(signing_id_bytes)) => {
+                // Suite gate: only ML-DSA-44 (suite 100) is accepted.
+                if sig.suite_id != PQC_TRANSPORT_SUITE_ML_DSA_44 {
+                    return Err(TrustBundleError::UnsupportedSignatureSuite {
+                        signing_key_id: sig.signing_key_id.clone(),
+                        suite_id: sig.suite_id,
+                    });
+                }
+                // Look up the configured signing key by id.
+                let key = signing_keys.lookup(&signing_id_bytes).ok_or_else(|| {
+                    TrustBundleError::MissingSigningKey {
+                        signing_key_id: sig.signing_key_id.clone(),
+                    }
+                })?;
+                // Cross-check the configured suite against the
+                // declared envelope suite (defence in depth — both
+                // must currently be ML-DSA-44 / 100).
+                if key.suite_id != sig.suite_id {
+                    return Err(TrustBundleError::SignatureSuiteMismatch {
+                        signing_key_id: sig.signing_key_id.clone(),
+                        bundle_suite_id: sig.suite_id,
+                        configured_suite_id: key.suite_id,
+                    });
+                }
+                // Decode signature bytes; check length matches suite.
+                let sig_bytes = decode_hex_var(&sig.sig_bytes).map_err(|e| {
+                    TrustBundleError::MalformedSignatureBytes {
+                        signing_key_id: sig.signing_key_id.clone(),
+                        reason: e,
+                    }
+                })?;
+                if sig_bytes.len() != ML_DSA_44_SIGNATURE_SIZE {
+                    return Err(TrustBundleError::MalformedSignatureBytes {
+                        signing_key_id: sig.signing_key_id.clone(),
+                        reason: format!(
+                            "expected {} bytes, got {}",
+                            ML_DSA_44_SIGNATURE_SIZE,
+                            sig_bytes.len()
+                        ),
+                    });
+                }
+                // Build the canonical signing preimage (domain
+                // separator || canonical JSON of bundle with
+                // signature stripped). Then verify with ML-DSA-44.
+                let preimage = canonical_signing_bytes(&self);
+                MlDsa44Backend::verify(&key.pk_bytes, &preimage, &sig_bytes).map_err(
+                    |_| TrustBundleError::BadSignature {
+                        signing_key_id: sig.signing_key_id.clone(),
+                    },
+                )?;
+                BundleSignatureStatus::Verified {
+                    signing_key_id: sig.signing_key_id.clone(),
+                }
+            }
+            // signature.is_some() implies parsed_signing_id.is_some()
+            // by construction above; this arm is unreachable but
+            // explicit to keep the match exhaustive.
+            (Some(sig), None) => {
+                return Err(TrustBundleError::MalformedHex(format!(
+                    "signing_key_id {} did not parse",
+                    sig.signing_key_id
+                )));
+            }
+        };
 
         // 8. Build the `active_roots` view. A root is "acceptable" iff
         //    its status is Active AND it is within its own validity
@@ -666,8 +1132,101 @@ impl TrustBundle {
             fingerprint,
             active_roots,
             revoked_root_ids,
+            signature_status,
         })
     }
+}
+
+/// Run 051: Canonical signing preimage for an ML-DSA-44 trust-bundle
+/// signature.
+///
+///     preimage = TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR
+///             || serde_json::to_vec(bundle { signature: None })
+///
+/// The domain separator (`QBIND:pqc-trust-bundle-signature:v1`) is
+/// distinct from the bundle-fingerprint domain separator
+/// (`QBIND:pqc-trust-bundle-fp:v1`), so a fingerprint hash can never
+/// collide with a signature preimage.
+///
+/// The `signature` envelope is stripped so that a bundle's preimage
+/// is independent of any signature metadata — adding/removing/
+/// replacing the signature does not change what was signed.
+pub fn canonical_signing_bytes(bundle: &TrustBundle) -> Vec<u8> {
+    let stripped = TrustBundle {
+        bundle_version: bundle.bundle_version,
+        environment: bundle.environment,
+        chain_id: bundle.chain_id.clone(),
+        generated_at: bundle.generated_at,
+        valid_from: bundle.valid_from,
+        valid_until: bundle.valid_until,
+        sequence: bundle.sequence,
+        roots: bundle.roots.clone(),
+        revocations: bundle.revocations.clone(),
+        signature: None,
+    };
+    let json = serde_json::to_vec(&stripped)
+        .expect("TrustBundle is pure structs/Vec, serde_json::to_vec cannot fail");
+    let mut out =
+        Vec::with_capacity(TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR.len() + json.len());
+    out.extend_from_slice(TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR);
+    out.extend_from_slice(&json);
+    out
+}
+
+/// Run 051: Sign a bundle with an ML-DSA-44 secret key and return a
+/// freshly-populated `TrustBundleSignature` envelope. Helper-only;
+/// production signing happens out-of-process in a real KMS.
+///
+/// `signing_key_id` is the canonical 32-byte stable id (typically the
+/// SHA3-256 of the signing public key, mirroring
+/// `pqc_devnet_helper::derive_root_key_id` but with a different
+/// domain separator — see [`derive_signing_key_id`]).
+///
+/// **DevNet/test fixture only**: this function exists so the helper
+/// binary and unit tests can produce signed bundles. Production
+/// signing must happen in a real signing service and is out of
+/// scope for this layer.
+pub fn sign_bundle_devnet_helper(
+    bundle: &TrustBundle,
+    signing_key_id: [u8; 32],
+    signing_sk: &[u8],
+) -> Result<TrustBundleSignature, String> {
+    let preimage = canonical_signing_bytes(bundle);
+    let sig = MlDsa44Backend::sign(signing_sk, &preimage)
+        .map_err(|e| format!("ML-DSA-44 trust-bundle sign failed: {:?}", e))?;
+    let mut id_hex = String::with_capacity(64);
+    for b in &signing_key_id {
+        use std::fmt::Write;
+        let _ = write!(id_hex, "{:02x}", b);
+    }
+    let mut sig_hex = String::with_capacity(sig.len() * 2);
+    for b in &sig {
+        use std::fmt::Write;
+        let _ = write!(sig_hex, "{:02x}", b);
+    }
+    Ok(TrustBundleSignature {
+        signing_key_id: id_hex,
+        suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+        sig_bytes: sig_hex,
+    })
+}
+
+/// Run 051: stable id derived from a bundle-signing public key.
+///
+/// Distinct from `pqc_devnet_helper::derive_root_key_id` only by the
+/// SHA3-256 domain-separator string, so a transport root key and a
+/// bundle-signing key with the same bytes (which should never happen
+/// by policy anyway) still hash to distinct ids — and any code path
+/// that confuses the two surfaces the mismatch immediately.
+pub fn derive_signing_key_id(signing_pk: &[u8]) -> [u8; 32] {
+    use sha3::{Digest, Sha3_256};
+    let mut h = Sha3_256::new();
+    h.update(b"QBIND:pqc-trust-bundle-signing-key-id:v1");
+    h.update(signing_pk);
+    let digest = h.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest);
+    out
 }
 
 /// SHA3-256 of the canonical JSON encoding of the bundle with the
@@ -973,22 +1532,22 @@ mod tests {
     }
 
     #[test]
-    fn signed_bundle_not_yet_supported_anywhere() {
+    fn signed_bundle_without_signing_keys_now_fails_missing_key() {
+        // Run 051: with the new verify path, a signed bundle on an
+        // empty signing-key set is rejected with MissingSigningKey
+        // (no longer SignedBundleVerificationNotImplemented).
         let (id, pk) = fresh_root_pair();
         let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
         bundle.signature = Some(TrustBundleSignature {
             signing_key_id:
                 "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
             suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
-            sig_bytes: "00".to_string(),
+            sig_bytes: "00".repeat(ML_DSA_44_SIGNATURE_SIZE),
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let err =
             TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).unwrap_err();
-        assert!(matches!(
-            err,
-            TrustBundleError::SignedBundleVerificationNotImplemented
-        ));
+        assert!(matches!(err, TrustBundleError::MissingSigningKey { .. }));
     }
 
     #[test]
@@ -1243,5 +1802,469 @@ mod tests {
         assert_eq!(loaded.active_roots[0].root_key_id, id_bytes);
         assert_eq!(loaded.active_roots[0].suite_id, PQC_TRANSPORT_SUITE_ML_DSA_44);
         assert_eq!(loaded.active_roots[0].root_pk.len(), ML_DSA_44_PUBLIC_KEY_SIZE);
+    }
+
+    // ================================================================
+    // Run 051: bundle-signing key parser and signed-bundle verification.
+    // ================================================================
+
+    fn fresh_signing_keypair() -> (Vec<u8>, Vec<u8>, [u8; 32]) {
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen");
+        let id = derive_signing_key_id(&pk);
+        (pk, sk, id)
+    }
+
+    fn signing_key_spec(id: [u8; 32], pk: &[u8]) -> String {
+        format!(
+            "{}:{}:{}",
+            hex_lower(&id),
+            PQC_TRANSPORT_SUITE_ML_DSA_44,
+            hex_lower(pk)
+        )
+    }
+
+    // ---- parser tests ----------------------------------------------
+
+    #[test]
+    fn signing_key_spec_parses_valid() {
+        let (pk, _sk, id) = fresh_signing_keypair();
+        let spec = signing_key_spec(id, &pk);
+        let key = parse_bundle_signing_key_spec(&spec).expect("parse");
+        assert_eq!(key.key_id_bytes, id);
+        assert_eq!(key.suite_id, PQC_TRANSPORT_SUITE_ML_DSA_44);
+        assert_eq!(key.pk_bytes, pk);
+        assert_eq!(key.key_id_hex().len(), 64);
+        assert_eq!(key.key_id_short().len(), 8);
+    }
+
+    #[test]
+    fn signing_key_spec_rejects_malformed_keyid() {
+        let (pk, _sk, _id) = fresh_signing_keypair();
+        let spec = format!(
+            "ZZ:{}:{}",
+            PQC_TRANSPORT_SUITE_ML_DSA_44,
+            hex_lower(&pk)
+        );
+        let err = parse_bundle_signing_key_spec(&spec).unwrap_err();
+        assert!(matches!(err, BundleSigningKeySpecError::MalformedHex(_)));
+    }
+
+    #[test]
+    fn signing_key_spec_rejects_unsupported_suite() {
+        let (pk, _sk, id) = fresh_signing_keypair();
+        let spec = format!("{}:99:{}", hex_lower(&id), hex_lower(&pk));
+        let err = parse_bundle_signing_key_spec(&spec).unwrap_err();
+        assert!(matches!(err, BundleSigningKeySpecError::UnsupportedSuite(99)));
+    }
+
+    #[test]
+    fn signing_key_spec_rejects_wrong_pk_length() {
+        let (_pk, _sk, id) = fresh_signing_keypair();
+        let spec = format!(
+            "{}:{}:deadbeef",
+            hex_lower(&id),
+            PQC_TRANSPORT_SUITE_ML_DSA_44
+        );
+        let err = parse_bundle_signing_key_spec(&spec).unwrap_err();
+        assert!(matches!(
+            err,
+            BundleSigningKeySpecError::WrongPublicKeyLength { .. }
+        ));
+    }
+
+    #[test]
+    fn signing_key_spec_rejects_empty_fields() {
+        let (pk, _sk, id) = fresh_signing_keypair();
+        let spec = format!(":{}:{}", PQC_TRANSPORT_SUITE_ML_DSA_44, hex_lower(&pk));
+        assert!(matches!(
+            parse_bundle_signing_key_spec(&spec).unwrap_err(),
+            BundleSigningKeySpecError::Malformed(_)
+        ));
+        let spec = format!("{}::{}", hex_lower(&id), hex_lower(&pk));
+        assert!(matches!(
+            parse_bundle_signing_key_spec(&spec).unwrap_err(),
+            BundleSigningKeySpecError::Malformed(_)
+        ));
+        let spec = format!("{}:{}:", hex_lower(&id), PQC_TRANSPORT_SUITE_ML_DSA_44);
+        assert!(matches!(
+            parse_bundle_signing_key_spec(&spec).unwrap_err(),
+            BundleSigningKeySpecError::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn signing_key_spec_rejects_trailing_fields() {
+        let (pk, _sk, id) = fresh_signing_keypair();
+        let spec = format!(
+            "{}:{}:{}:extra",
+            hex_lower(&id),
+            PQC_TRANSPORT_SUITE_ML_DSA_44,
+            hex_lower(&pk)
+        );
+        assert!(matches!(
+            parse_bundle_signing_key_spec(&spec).unwrap_err(),
+            BundleSigningKeySpecError::Malformed(_)
+        ));
+    }
+
+    #[test]
+    fn signing_key_set_rejects_duplicate_keyid() {
+        let (pk, _sk, id) = fresh_signing_keypair();
+        let spec = signing_key_spec(id, &pk);
+        let err = BundleSigningKeySet::parse_specs(&[spec.clone(), spec]).unwrap_err();
+        assert!(matches!(err, BundleSigningKeySpecError::DuplicateKeyId(_)));
+    }
+
+    #[test]
+    fn signing_key_set_accumulates_distinct_keys() {
+        let (pk1, _sk1, id1) = fresh_signing_keypair();
+        let (pk2, _sk2, id2) = fresh_signing_keypair();
+        let specs = vec![signing_key_spec(id1, &pk1), signing_key_spec(id2, &pk2)];
+        let set = BundleSigningKeySet::parse_specs(&specs).expect("parse");
+        assert_eq!(set.len(), 2);
+        assert!(set.lookup(&id1).is_some());
+        assert!(set.lookup(&id2).is_some());
+    }
+
+    // ---- canonical signing bytes ----------------------------------
+
+    #[test]
+    fn canonical_signing_bytes_includes_domain_separator() {
+        let (id, pk) = fresh_root_pair();
+        let bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let preimage = canonical_signing_bytes(&bundle);
+        assert!(preimage.starts_with(TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR));
+        assert_eq!(
+            TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR,
+            b"QBIND:pqc-trust-bundle-signature:v1"
+        );
+    }
+
+    #[test]
+    fn canonical_signing_bytes_is_deterministic() {
+        let (id, pk) = fresh_root_pair();
+        let a = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let b = a.clone();
+        assert_eq!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    #[test]
+    fn canonical_signing_bytes_strips_signature() {
+        let (id, pk) = fresh_root_pair();
+        let a = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let mut b = a.clone();
+        b.signature = Some(TrustBundleSignature {
+            signing_key_id: "aa".repeat(32),
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            sig_bytes: "bb".repeat(ML_DSA_44_SIGNATURE_SIZE),
+        });
+        assert_eq!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    #[test]
+    fn canonical_signing_bytes_changes_with_root_field() {
+        let (id, pk) = fresh_root_pair();
+        let a = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let mut b = a.clone();
+        b.roots[0].status = RootStatus::Retired;
+        assert_ne!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    #[test]
+    fn canonical_signing_bytes_changes_with_environment() {
+        let (id, pk) = fresh_root_pair();
+        let a = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let mut b = a.clone();
+        b.environment = TrustBundleEnvironment::Testnet;
+        assert_ne!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    #[test]
+    fn canonical_signing_bytes_changes_with_sequence() {
+        let (id, pk) = fresh_root_pair();
+        let a = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let mut b = a.clone();
+        b.sequence = a.sequence + 1;
+        assert_ne!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    #[test]
+    fn canonical_signing_bytes_changes_with_revocations() {
+        let (id, pk) = fresh_root_pair();
+        let a = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let mut b = a.clone();
+        b.revocations.push(TrustBundleRevocation {
+            root_id: id.clone(),
+            leaf_cert_fingerprint: None,
+            reason: "x".to_string(),
+            effective_from: 0,
+        });
+        assert_ne!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    #[test]
+    fn signing_and_fingerprint_separators_are_distinct() {
+        // Defence in depth: a signature preimage MUST NOT start with
+        // the fingerprint domain separator.
+        assert_ne!(
+            TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR,
+            b"QBIND:pqc-trust-bundle-fp:v1"
+        );
+    }
+
+    // ---- signature verification end-to-end -------------------------
+
+    /// Build a freshly-signed `(bundle, signing_keys, signing_id)` triple
+    /// for the given env.
+    fn signed_bundle_fixture(
+        env: TrustBundleEnvironment,
+    ) -> (TrustBundle, BundleSigningKeySet, [u8; 32], Vec<u8>) {
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        bundle.environment = env;
+        let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();
+        let sig = sign_bundle_devnet_helper(&bundle, signing_id, &signing_sk).expect("sign");
+        bundle.signature = Some(sig);
+        let mut set = BundleSigningKeySet::empty();
+        set.push_spec(&signing_key_spec(signing_id, &signing_pk))
+            .expect("set");
+        (bundle, set, signing_id, signing_sk)
+    }
+
+    #[test]
+    fn signed_devnet_bundle_verifies() {
+        let (bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .expect("verify");
+        assert!(loaded.signature_status.is_verified());
+        assert_eq!(loaded.active_root_count(), 1);
+    }
+
+    #[test]
+    fn signed_testnet_bundle_verifies() {
+        let (bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Testnet);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Testnet,
+            100,
+            &set,
+        )
+        .expect("verify");
+        assert!(loaded.signature_status.is_verified());
+    }
+
+    #[test]
+    fn signed_mainnet_bundle_verifies() {
+        let (bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Mainnet);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Mainnet,
+            100,
+            &set,
+        )
+        .expect("verify");
+        assert!(loaded.signature_status.is_verified());
+    }
+
+    #[test]
+    fn tampered_root_after_signing_fails_closed() {
+        let (mut bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        // Flip one byte in root_pk *after* signing (signature now
+        // covers the original bytes).
+        let mut new_pk = bundle.roots[0].root_pk.clone();
+        // mutate hex char in a safe position
+        let mut chars: Vec<char> = new_pk.chars().collect();
+        chars[0] = if chars[0] == '0' { '1' } else { '0' };
+        new_pk = chars.into_iter().collect();
+        bundle.roots[0].root_pk = new_pk;
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(err, TrustBundleError::BadSignature { .. }));
+    }
+
+    #[test]
+    fn tampered_environment_after_signing_fails_closed() {
+        let (mut bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        bundle.environment = TrustBundleEnvironment::Testnet;
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Testnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(err, TrustBundleError::BadSignature { .. }));
+    }
+
+    #[test]
+    fn tampered_sequence_after_signing_fails_closed() {
+        let (mut bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        bundle.sequence += 1;
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(err, TrustBundleError::BadSignature { .. }));
+    }
+
+    #[test]
+    fn wrong_signing_key_fails_closed() {
+        let (bundle, _set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        // Same id, but different pk bytes — sneak in a confused
+        // entry. Forge the spec with the right id but a fresh
+        // (unrelated) pk: verification with that pk must fail.
+        let signing_id = decode_hex_fixed_32(
+            &bundle.signature.as_ref().unwrap().signing_key_id,
+        )
+        .unwrap();
+        let (other_pk, _other_sk) = MlDsa44Backend::generate_keypair().expect("kg");
+        let mut set = BundleSigningKeySet::empty();
+        set.keys.push(BundleSigningKey {
+            key_id_bytes: signing_id,
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            pk_bytes: other_pk,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(err, TrustBundleError::BadSignature { .. }));
+    }
+
+    #[test]
+    fn missing_signing_key_fails_closed() {
+        let (bundle, _set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &BundleSigningKeySet::empty(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, TrustBundleError::MissingSigningKey { .. }));
+    }
+
+    #[test]
+    fn unsupported_signature_suite_fails_closed() {
+        let (mut bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        bundle.signature.as_mut().unwrap().suite_id = 99;
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            TrustBundleError::UnsupportedSignatureSuite { suite_id: 99, .. }
+        ));
+    }
+
+    #[test]
+    fn malformed_signature_bytes_fails_closed() {
+        let (mut bundle, set, _id, _sk) = signed_bundle_fixture(TrustBundleEnvironment::Devnet);
+        bundle.signature.as_mut().unwrap().sig_bytes = "00".to_string(); // wrong length
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            TrustBundleError::MalformedSignatureBytes { .. }
+        ));
+    }
+
+    #[test]
+    fn signing_key_id_colliding_with_root_id_fails_closed() {
+        // signature.signing_key_id == roots[0].root_id — fail closed
+        // even before verification is attempted.
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        let (signing_pk, signing_sk, _signing_id) = fresh_signing_keypair();
+        // Sign with a real key, but then overwrite the signing_key_id
+        // to collide with the root id.
+        let id_bytes = decode_hex_fixed_32(&id_hex).unwrap();
+        let sig = sign_bundle_devnet_helper(&bundle, id_bytes, &signing_sk).expect("sign");
+        bundle.signature = Some(sig);
+        let mut set = BundleSigningKeySet::empty();
+        // Configure that colliding id (operator typo): the validator
+        // must still refuse it before reaching the verifier.
+        set.keys.push(BundleSigningKey {
+            key_id_bytes: id_bytes,
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            pk_bytes: signing_pk,
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            TrustBundleError::SigningKeyCollidesWithRootId(_)
+        ));
+    }
+
+    #[test]
+    fn unsigned_devnet_bundle_loads_signature_status_unsigned() {
+        let (id, pk) = fresh_root_pair();
+        let bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let loaded =
+            TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 100).expect("loads");
+        assert_eq!(loaded.signature_status, BundleSignatureStatus::Unsigned);
+        assert!(!loaded.signature_status.is_verified());
+    }
+
+    #[test]
+    fn unsigned_testnet_still_refused() {
+        let (id, pk) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id, &pk, 0);
+        bundle.environment = TrustBundleEnvironment::Testnet;
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Testnet,
+            100,
+            &BundleSigningKeySet::empty(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            TrustBundleError::UnsignedBundleNotAllowed(TrustBundleEnvironment::Testnet)
+        ));
     }
 }

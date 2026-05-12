@@ -1,15 +1,19 @@
-//! Run 050: DevNet-only helper that mints a real ML-DSA-44-signed
+//! Run 050/051: DevNet-only helper that mints a real ML-DSA-44-signed
 //! PQC trust root, generates per-validator leaf certs (delegating to
 //! the existing Run 037 `devnet_pqc_root_helper` shape), AND emits a
-//! Run 050 PQC trust-anchor bundle (`trust-bundle.json`) covering the
-//! requested fixture mode.
+//! Run 050/051 PQC trust-anchor bundle (`trust-bundle.json`) covering
+//! the requested fixture mode — including signed-bundle fixtures for
+//! Run 051 (DevNet/TestNet/MainNet signed bundles, tampered, wrong
+//! signing key, unsupported suite, signing-key/root-id collision,
+//! malformed signature bytes, and unsigned TestNet/MainNet).
 //!
 //! Usage:
 //!   cargo run -p qbind-node --example devnet_pqc_trust_bundle_helper -- \
 //!     <outdir> <num_validators> [bundle_mode]
 //!
 //! `bundle_mode` (optional, defaults to `valid`):
-//!   - `valid`              — currently-valid DevNet bundle.
+//!   Run 050 fixtures (unsigned):
+//!   - `valid`              — currently-valid DevNet unsigned bundle.
 //!   - `wrong-environment`  — TestNet bundle (DevNet loader rejects).
 //!   - `expired-bundle`     — `valid_until=1` (loader rejects as expired).
 //!   - `expired-root`       — root `not_after=1` (loader rejects).
@@ -20,18 +24,40 @@
 //!   - `duplicate-root`     — two `roots[]` entries with same id.
 //!   - `unsupported-suite`  — `roots[0].suite_id = 99`.
 //!
+//!   Run 051 fixtures (signed-bundle):
+//!   - `signed-devnet`      — valid signed DevNet bundle.
+//!   - `signed-testnet`     — valid signed TestNet bundle.
+//!   - `signed-mainnet`     — valid signed MainNet bundle.
+//!   - `signed-tampered`    — valid signature, then root mutated.
+//!   - `signed-wrong-key`   — signed by a different ML-DSA-44 key
+//!                            than the one the helper publishes for
+//!                            the `--p2p-trust-bundle-signing-key`
+//!                            flag (verification will fail closed).
+//!   - `signed-unsupported-suite` — signature envelope sets
+//!                            `suite_id = 99` post-signing.
+//!   - `signed-malformed`   — signature envelope's `sig_bytes` is
+//!                            truncated to 1 byte after signing.
+//!   - `signed-key-root-collision` — signing_key_id is overwritten
+//!                            to collide with roots[0].root_id.
+//!   - `unsigned-testnet`   — unsigned bundle declared `testnet`
+//!                            (TestNet/MainNet loader rejects).
+//!   - `unsigned-mainnet`   — unsigned bundle declared `mainnet`.
+//!
 //! Writes to `outdir`:
 //!   root.id.hex                — 64 lowercase hex chars (root_key_id)
 //!   root.pk.hex                — full ML-DSA-44 root public key
 //!   v<N>.cert.bin              — encoded NetworkDelegationCert
 //!   v<N>.kem.sk.bin            — KEM secret key bytes (0o600)
 //!   trusted-root.spec          — `--p2p-trusted-root` line (DevNet only)
-//!   trust-bundle.json          — Run 050 PQC trust-anchor bundle
+//!   trust-bundle.json          — Run 050/051 PQC trust-anchor bundle
+//!   signing-key.id.hex         — (signed modes) bundle-signing key id
+//!   signing-key.pk.hex         — (signed modes) bundle-signing public key
+//!   signing-key.spec           — (signed modes) `--p2p-trust-bundle-signing-key` line
 //!
-//! **DevNet only**: the root signing key is generated fresh on every
-//! invocation and never written to disk in any form. A fully-
-//! production CA flow with rotation / revocation / signed bundle
-//! verification is out of scope and tracked under C4 in
+//! **DevNet only**: the root signing key and the bundle-signing key
+//! are generated fresh on every invocation and never written to disk
+//! in any form. A fully-production CA / KMS / rotation flow remains
+//! out of scope and is tracked under C4 in
 //! `docs/whitepaper/contradiction.md`.
 
 use std::fs;
@@ -39,12 +65,15 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use qbind_crypto::{MlKem768Backend, KEM_SUITE_ML_KEM_768};
+use qbind_crypto::{MlDsa44Backend, MlKem768Backend, KEM_SUITE_ML_KEM_768};
 use qbind_node::pqc_devnet_helper::{
     encode_cert, issue_leaf_delegation_cert, mint_devnet_root, LeafCertSpec,
 };
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
-use qbind_node::pqc_trust_bundle::{build_helper_bundle, HelperBundleMode};
+use qbind_node::pqc_trust_bundle::{
+    build_helper_bundle, canonical_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper,
+    HelperBundleMode, TrustBundle, TrustBundleEnvironment, TrustBundleSignature,
+};
 
 fn vid_bytes(vid: u64) -> [u8; 32] {
     let mut b = [0u8; 32];
@@ -63,21 +92,86 @@ fn hex_lower(bytes: &[u8]) -> String {
     s
 }
 
-fn parse_bundle_mode(s: &str) -> HelperBundleMode {
+/// Run 051: post-signing tampering knobs for signed-bundle fixtures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignedMode {
+    /// Sign as-is.
+    Honest,
+    /// Sign honestly, then mutate `roots[0].not_after` (so the
+    /// signed preimage no longer matches the on-disk bytes).
+    TamperRootAfterSigning,
+    /// Sign with one keypair, but publish a *different* keypair as
+    /// the bundle-signing key spec for the CLI.
+    WrongSigningKey,
+    /// Sign honestly, then set `signature.suite_id = 99`.
+    UnsupportedSuite,
+    /// Sign honestly, then truncate `signature.sig_bytes` to 1 byte.
+    MalformedSignatureBytes,
+    /// Sign honestly, then overwrite `signature.signing_key_id`
+    /// with `roots[0].root_id` (collision).
+    KeyRootCollision,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Unsigned(HelperBundleMode, Option<TrustBundleEnvironment>),
+    Signed(TrustBundleEnvironment, SignedMode),
+}
+
+fn parse_mode(s: &str) -> Mode {
     match s {
-        "valid" => HelperBundleMode::Valid,
-        "wrong-environment" => HelperBundleMode::WrongEnvironment,
-        "expired-bundle" => HelperBundleMode::ExpiredBundle,
-        "expired-root" => HelperBundleMode::ExpiredRoot,
-        "root-revocation-listed" => HelperBundleMode::RootRevocationListed,
-        "root-status-revoked" => HelperBundleMode::RootStatusRevoked,
-        "duplicate-root" => HelperBundleMode::DuplicateRoot,
-        "unsupported-suite" => HelperBundleMode::UnsupportedSuite,
+        // Run 050 unsigned fixtures.
+        "valid" => Mode::Unsigned(HelperBundleMode::Valid, None),
+        "wrong-environment" => Mode::Unsigned(HelperBundleMode::WrongEnvironment, None),
+        "expired-bundle" => Mode::Unsigned(HelperBundleMode::ExpiredBundle, None),
+        "expired-root" => Mode::Unsigned(HelperBundleMode::ExpiredRoot, None),
+        "root-revocation-listed" => {
+            Mode::Unsigned(HelperBundleMode::RootRevocationListed, None)
+        }
+        "root-status-revoked" => Mode::Unsigned(HelperBundleMode::RootStatusRevoked, None),
+        "duplicate-root" => Mode::Unsigned(HelperBundleMode::DuplicateRoot, None),
+        "unsupported-suite" => Mode::Unsigned(HelperBundleMode::UnsupportedSuite, None),
+        // Run 050 unsigned-on-non-devnet fixtures.
+        "unsigned-testnet" => Mode::Unsigned(
+            HelperBundleMode::Valid,
+            Some(TrustBundleEnvironment::Testnet),
+        ),
+        "unsigned-mainnet" => Mode::Unsigned(
+            HelperBundleMode::Valid,
+            Some(TrustBundleEnvironment::Mainnet),
+        ),
+        // Run 051 signed fixtures.
+        "signed-devnet" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest),
+        "signed-testnet" => Mode::Signed(TrustBundleEnvironment::Testnet, SignedMode::Honest),
+        "signed-mainnet" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::Honest),
+        "signed-tampered" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::TamperRootAfterSigning,
+        ),
+        "signed-wrong-key" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::WrongSigningKey,
+        ),
+        "signed-unsupported-suite" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::UnsupportedSuite,
+        ),
+        "signed-malformed" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::MalformedSignatureBytes,
+        ),
+        "signed-key-root-collision" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::KeyRootCollision,
+        ),
         other => panic!(
             "unknown bundle_mode `{}` (expected one of: \
              valid / wrong-environment / expired-bundle / expired-root / \
              root-revocation-listed / root-status-revoked / duplicate-root / \
-             unsupported-suite)",
+             unsupported-suite / unsigned-testnet / unsigned-mainnet / \
+             signed-devnet / signed-testnet / signed-mainnet / signed-tampered / \
+             signed-wrong-key / signed-unsupported-suite / signed-malformed / \
+             signed-key-root-collision)",
             other
         ),
     }
@@ -94,7 +188,7 @@ fn main() {
         .parse()
         .expect("num_validators must be a u64");
     let bundle_mode_arg = args.next().unwrap_or_else(|| "valid".to_string());
-    let bundle_mode = parse_bundle_mode(&bundle_mode_arg);
+    let mode = parse_mode(&bundle_mode_arg);
 
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
@@ -127,33 +221,140 @@ fn main() {
             .expect("chmod kem sk 0600");
     }
 
-    // Run 050: emit the trust bundle JSON.
     let generated_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let bundle = build_helper_bundle(bundle_mode, &root_id_hex, &root_pk_hex, generated_at);
+
+    let bundle: TrustBundle = match mode {
+        Mode::Unsigned(helper_mode, env_override) => {
+            let mut b = build_helper_bundle(helper_mode, &root_id_hex, &root_pk_hex, generated_at);
+            if let Some(env) = env_override {
+                b.environment = env;
+            }
+            b
+        }
+        Mode::Signed(env, signed_mode) => {
+            let mut b = build_helper_bundle(
+                HelperBundleMode::Valid,
+                &root_id_hex,
+                &root_pk_hex,
+                generated_at,
+            );
+            b.environment = env;
+
+            // Mint a fresh bundle-signing keypair. NEVER written to disk.
+            let (signing_pk, signing_sk) =
+                MlDsa44Backend::generate_keypair().expect("ML-DSA-44 signing keygen");
+            let signing_id = derive_signing_key_id(&signing_pk);
+            let signing_id_hex = hex_lower(&signing_id);
+            let signing_pk_hex = hex_lower(&signing_pk);
+
+            // Decide what (pk, sk) to *publish* to the operator as
+            // the verification key spec — for `WrongSigningKey` we
+            // publish an unrelated keypair so verification fails.
+            let (pub_id_hex, pub_pk_hex) = if signed_mode == SignedMode::WrongSigningKey {
+                let (other_pk, _other_sk) =
+                    MlDsa44Backend::generate_keypair().expect("ML-DSA-44 other keygen");
+                let other_id = derive_signing_key_id(&other_pk);
+                (hex_lower(&other_id), hex_lower(&other_pk))
+            } else {
+                (signing_id_hex.clone(), signing_pk_hex.clone())
+            };
+
+            // For KeyRootCollision: publish a signing-key spec that
+            // happens to use the root id as its KEYID (operator typo).
+            let (pub_id_hex, pub_pk_hex) = if signed_mode == SignedMode::KeyRootCollision {
+                (root_id_hex.clone(), pub_pk_hex)
+            } else {
+                (pub_id_hex, pub_pk_hex)
+            };
+
+            // Sign the bundle.
+            let mut sig = sign_bundle_devnet_helper(&b, signing_id, &signing_sk)
+                .expect("sign trust bundle");
+
+            // Apply post-signing tampering as requested.
+            match signed_mode {
+                SignedMode::Honest | SignedMode::WrongSigningKey => {}
+                SignedMode::TamperRootAfterSigning => {
+                    // Mutate not_after — fingerprint changes;
+                    // signature still references the original.
+                    b.roots[0].not_after = b.roots[0].not_after.wrapping_sub(1);
+                }
+                SignedMode::UnsupportedSuite => {
+                    sig.suite_id = 99;
+                }
+                SignedMode::MalformedSignatureBytes => {
+                    sig.sig_bytes = "ab".to_string();
+                }
+                SignedMode::KeyRootCollision => {
+                    sig.signing_key_id = root_id_hex.clone();
+                }
+            }
+            b.signature = Some(sig);
+
+            // Write signing-key fixtures.
+            fs::write(
+                format!("{}/signing-key.id.hex", outdir),
+                &pub_id_hex,
+            )
+            .expect("write signing-key.id.hex");
+            fs::write(
+                format!("{}/signing-key.pk.hex", outdir),
+                &pub_pk_hex,
+            )
+            .expect("write signing-key.pk.hex");
+            let signing_spec = format!(
+                "{}:{}:{}",
+                pub_id_hex, PQC_TRANSPORT_SUITE_ML_DSA_44, pub_pk_hex
+            );
+            fs::write(format!("{}/signing-key.spec", outdir), &signing_spec)
+                .expect("write signing-key.spec");
+
+            b
+        }
+    };
+
     let bundle_json = serde_json::to_vec_pretty(&bundle).expect("serialize trust bundle");
     let bundle_path = format!("{}/trust-bundle.json", outdir);
     fs::write(&bundle_path, &bundle_json).expect("write trust-bundle.json");
 
-    let fp = qbind_node::pqc_trust_bundle::canonical_fingerprint(&bundle);
+    let fp = canonical_fingerprint(&bundle);
     let fp_hex = hex_lower(&fp);
+
+    let signed_summary = match bundle.signature.as_ref() {
+        None => "unsigned".to_string(),
+        Some(TrustBundleSignature {
+            signing_key_id,
+            suite_id,
+            sig_bytes,
+        }) => format!(
+            "signed(signing_key_id={}.. suite={} sig_len_hex={})",
+            &signing_key_id.chars().take(8).collect::<String>(),
+            suite_id,
+            sig_bytes.len(),
+        ),
+    };
 
     eprintln!(
         "[devnet_pqc_trust_bundle_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} \
-         validators={} bundle_mode={} bundle_fingerprint={} bundle_path={} outdir={}",
+         validators={} bundle_mode={} bundle_env={} bundle_fingerprint={} \
+         signature={} bundle_path={} outdir={}",
         root_id_hex,
         PQC_TRANSPORT_SUITE_ML_DSA_44,
         KEM_SUITE_ML_KEM_768,
         num_validators,
         bundle_mode_arg,
+        bundle.environment,
         fp_hex,
+        signed_summary,
         bundle_path,
         outdir,
     );
     eprintln!(
-        "[devnet_pqc_trust_bundle_helper] root_sk was held in memory only; never written to disk."
+        "[devnet_pqc_trust_bundle_helper] root_sk and bundle signing_sk were held in memory \
+         only; never written to disk."
     );
 
     // Print the trusted-root spec on stdout for shell capture (matches

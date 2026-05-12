@@ -352,12 +352,40 @@ pub struct CliArgs {
     /// unsupported suite, revocation list consistency, signature
     /// model). Any failure aborts startup with a precise reason.
     ///
-    /// DevNet accepts unsigned bundles for development convenience.
-    /// TestNet and MainNet REFUSE unsigned bundles. Signed-bundle
-    /// verification itself is NOT yet implemented (Run 050 boundary)
-    /// and is tracked under C4 in `docs/whitepaper/contradiction.md`.
+    /// **Run 051 update**: signed bundles are now verified with
+    /// ML-DSA-44 against the `--p2p-trust-bundle-signing-key` list.
+    /// DevNet still accepts unsigned bundles for development
+    /// convenience; TestNet and MainNet REFUSE unsigned bundles and
+    /// REFUSE signed bundles whose signature does not verify.
     #[arg(long = "p2p-trust-bundle")]
     pub p2p_trust_bundle: Option<PathBuf>,
+
+    /// Run 051: bundle-signing verification public key, repeatable.
+    ///
+    /// Format: `KEYID:SUITE:PK` where
+    /// - `KEYID` is exactly 64 lowercase hex chars (32 bytes), the
+    ///   stable identifier of the bundle-signing key. MUST NOT
+    ///   collide with any transport root id (either from
+    ///   `--p2p-trusted-root` or from the bundle's `roots[]`).
+    /// - `SUITE` is the decimal signature suite id; today only
+    ///   `100` (ML-DSA-44) is accepted.
+    /// - `PK` is the lowercase hex of the bundle-signing public key
+    ///   (for ML-DSA-44, must decode to
+    ///   `qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE` bytes).
+    ///
+    /// Strict parsing: malformed entries / duplicate `KEYID` /
+    /// unsupported suite all fail closed at startup. This flag is
+    /// REQUIRED when `--p2p-trust-bundle` is supplied on
+    /// TestNet/MainNet (those environments require a verified
+    /// signed bundle). On DevNet it is optional (unsigned DevNet
+    /// bundles still load) but, when both an unsigned bundle and
+    /// signing keys are supplied, the unsigned bundle still loads
+    /// and the signing-key list has no effect.
+    #[arg(
+        long = "p2p-trust-bundle-signing-key",
+        action = clap::ArgAction::Append
+    )]
+    pub p2p_trust_bundle_signing_keys: Vec<String>,
 
     // ========================================================================
     // Node Identity & Storage
