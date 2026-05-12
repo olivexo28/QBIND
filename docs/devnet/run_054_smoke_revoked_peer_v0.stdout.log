@@ -1,0 +1,6 @@
+qbind-node[validator=V0]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:19430 peers=1 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:19430 (node_id=NodeId(7738466c84a3e48b))
+[T175] P2P node builder: validator=ValidatorId(0) node_id=NodeId(7738466c84a3e48b) num_validators=2 peer_kem_overrides=1 mutual_auth=Required
+[P2P] Accepted connection from 127.0.0.1:52634
+[P2P] Dial 127.0.0.1:19431: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Accepted connection from 127.0.0.1:52648

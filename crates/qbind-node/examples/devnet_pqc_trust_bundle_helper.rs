@@ -43,6 +43,19 @@
 //!                            (TestNet/MainNet loader rejects).
 //!   - `unsigned-mainnet`   — unsigned bundle declared `mainnet`.
 //!
+//!   Run 054 fixtures (signed-bundle + active leaf revocation, DevNet):
+//!   - `signed-devnet-revoked-v0`      — signed DevNet bundle that
+//!                                       revokes the v0 validator
+//!                                       leaf cert fingerprint.
+//!   - `signed-devnet-revoked-v1`      — signed DevNet bundle that
+//!                                       revokes the v1 validator
+//!                                       leaf cert fingerprint.
+//!   - `signed-devnet-revoked-unknown` — signed DevNet bundle that
+//!                                       revokes a synthetic
+//!                                       all-zeros leaf fingerprint
+//!                                       which no real validator
+//!                                       leaf cert can produce.
+//!
 //! Writes to `outdir`:
 //!   root.id.hex                — 64 lowercase hex chars (root_key_id)
 //!   root.pk.hex                — full ML-DSA-44 root public key
@@ -71,8 +84,9 @@ use qbind_node::pqc_devnet_helper::{
 };
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_bundle::{
-    build_helper_bundle, canonical_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper,
-    HelperBundleMode, TrustBundle, TrustBundleEnvironment, TrustBundleSignature,
+    build_helper_bundle, canonical_fingerprint, cert_leaf_fingerprint, cert_leaf_fingerprint_hex,
+    derive_signing_key_id, sign_bundle_devnet_helper, HelperBundleMode, TrustBundle,
+    TrustBundleEnvironment, TrustBundleRevocation, TrustBundleSignature,
 };
 
 fn vid_bytes(vid: u64) -> [u8; 32] {
@@ -113,9 +127,20 @@ enum SignedMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LeafRevocationTarget {
+    /// No active leaf revocation in the bundle.
+    None,
+    /// Revoke the leaf cert of validator `vid` (must be < num_validators).
+    Validator(u64),
+    /// Revoke a synthetic all-zeros leaf fingerprint that no real
+    /// validator leaf cert produces (Run 054 unknown-fp smoke).
+    UnknownAllZeros,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Unsigned(HelperBundleMode, Option<TrustBundleEnvironment>),
-    Signed(TrustBundleEnvironment, SignedMode),
+    Signed(TrustBundleEnvironment, SignedMode, LeafRevocationTarget),
 }
 
 fn parse_mode(s: &str) -> Mode {
@@ -141,28 +166,61 @@ fn parse_mode(s: &str) -> Mode {
             Some(TrustBundleEnvironment::Mainnet),
         ),
         // Run 051 signed fixtures.
-        "signed-devnet" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest),
-        "signed-testnet" => Mode::Signed(TrustBundleEnvironment::Testnet, SignedMode::Honest),
-        "signed-mainnet" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::Honest),
+        "signed-devnet" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+        ),
+        "signed-testnet" => Mode::Signed(
+            TrustBundleEnvironment::Testnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+        ),
+        "signed-mainnet" => Mode::Signed(
+            TrustBundleEnvironment::Mainnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+        ),
         "signed-tampered" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::TamperRootAfterSigning,
+            LeafRevocationTarget::None,
         ),
         "signed-wrong-key" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::WrongSigningKey,
+            LeafRevocationTarget::None,
         ),
         "signed-unsupported-suite" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::UnsupportedSuite,
+            LeafRevocationTarget::None,
         ),
         "signed-malformed" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::MalformedSignatureBytes,
+            LeafRevocationTarget::None,
         ),
         "signed-key-root-collision" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::KeyRootCollision,
+            LeafRevocationTarget::None,
+        ),
+        // Run 054 signed-bundle leaf-revocation fixtures.
+        "signed-devnet-revoked-v0" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::Validator(0),
+        ),
+        "signed-devnet-revoked-v1" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::Validator(1),
+        ),
+        "signed-devnet-revoked-unknown" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::UnknownAllZeros,
         ),
         other => panic!(
             "unknown bundle_mode `{}` (expected one of: \
@@ -171,7 +229,8 @@ fn parse_mode(s: &str) -> Mode {
              unsupported-suite / unsigned-testnet / unsigned-mainnet / \
              signed-devnet / signed-testnet / signed-mainnet / signed-tampered / \
              signed-wrong-key / signed-unsupported-suite / signed-malformed / \
-             signed-key-root-collision)",
+             signed-key-root-collision / signed-devnet-revoked-v0 / \
+             signed-devnet-revoked-v1 / signed-devnet-revoked-unknown)",
             other
         ),
     }
@@ -206,10 +265,17 @@ fn main() {
     fs::write(format!("{}/trusted-root.spec", outdir), &trusted_spec)
         .expect("write trusted-root.spec");
 
+    let mut issued_leaf_fps: Vec<(u64, String)> = Vec::new();
     for vid in 0..num_validators {
         let (kem_pk, kem_sk) = MlKem768Backend::generate_keypair().expect("ML-KEM-768 keygen");
         let spec = LeafCertSpec::currently_valid(vid_bytes(vid), root.root_key_id, kem_pk);
         let cert = issue_leaf_delegation_cert(&spec, &root.root_sk).expect("issue leaf cert");
+
+        let leaf_fp = cert_leaf_fingerprint(&cert);
+        let leaf_fp_hex = cert_leaf_fingerprint_hex(&leaf_fp);
+        issued_leaf_fps.push((vid, leaf_fp_hex.clone()));
+        fs::write(format!("{}/v{}.leaf-fp.hex", outdir, vid), &leaf_fp_hex)
+            .expect("write v{vid}.leaf-fp.hex");
 
         fs::write(format!("{}/v{}.cert.bin", outdir, vid), encode_cert(&cert))
             .expect("write cert");
@@ -234,7 +300,7 @@ fn main() {
             }
             b
         }
-        Mode::Signed(env, signed_mode) => {
+        Mode::Signed(env, signed_mode, leaf_revocation_target) => {
             let mut b = build_helper_bundle(
                 HelperBundleMode::Valid,
                 &root_id_hex,
@@ -242,6 +308,46 @@ fn main() {
                 generated_at,
             );
             b.environment = env;
+
+            // Run 054: inject an active leaf-cert revocation for the
+            // requested target before signing, so the signed preimage
+            // covers the revocation entry.
+            match leaf_revocation_target {
+                LeafRevocationTarget::None => {}
+                LeafRevocationTarget::Validator(target_vid) => {
+                    let (_, fp_hex) = issued_leaf_fps
+                        .iter()
+                        .find(|(vid, _)| *vid == target_vid)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "signed-devnet-revoked-v{} requires num_validators > {}",
+                                target_vid, target_vid
+                            )
+                        });
+                    b.revocations.push(TrustBundleRevocation {
+                        root_id: root_id_hex.clone(),
+                        leaf_cert_fingerprint: Some(fp_hex.clone()),
+                        reason: "test-leaf-revocation-run054".to_string(),
+                        effective_from: 0,
+                    });
+                }
+                LeafRevocationTarget::UnknownAllZeros => {
+                    // Run 054: revoke an all-zeros leaf fingerprint
+                    // that no real validator leaf cert can produce
+                    // (cert_leaf_fingerprint is a SHA3-256 with a
+                    // domain separator and never emits all-zeros for
+                    // a real cert in practice).
+                    b.revocations.push(TrustBundleRevocation {
+                        root_id: root_id_hex.clone(),
+                        leaf_cert_fingerprint: Some(
+                            "0000000000000000000000000000000000000000000000000000000000000000"
+                                .to_string(),
+                        ),
+                        reason: "test-leaf-revocation-run054-unknown-fp".to_string(),
+                        effective_from: 0,
+                    });
+                }
+            }
 
             // Mint a fresh bundle-signing keypair. NEVER written to disk.
             let (signing_pk, signing_sk) =
