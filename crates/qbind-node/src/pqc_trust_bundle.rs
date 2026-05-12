@@ -64,7 +64,9 @@
 //!
 //! The signing preimage is:
 //!
-//!     b"QBIND:pqc-trust-bundle-signature:v1" || canonical_json(bundle{signature: None})
+//! ```text
+//! b"QBIND:pqc-trust-bundle-signature:v1" || canonical_json(bundle{signature: None})
+//! ```
 //!
 //! i.e. the bundle is canonicalised through `serde_json::to_vec`
 //! exactly as for the fingerprint, with the `signature` envelope
@@ -1140,8 +1142,10 @@ impl TrustBundle {
 /// Run 051: Canonical signing preimage for an ML-DSA-44 trust-bundle
 /// signature.
 ///
-///     preimage = TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR
-///             || serde_json::to_vec(bundle { signature: None })
+/// ```text
+/// preimage = TRUST_BUNDLE_SIGNATURE_DOMAIN_SEPARATOR
+///         || serde_json::to_vec(bundle { signature: None })
+/// ```
 ///
 /// The domain separator (`QBIND:pqc-trust-bundle-signature:v1`) is
 /// distinct from the bundle-fingerprint domain separator
