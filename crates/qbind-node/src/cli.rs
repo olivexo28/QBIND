@@ -339,6 +339,26 @@ pub struct CliArgs {
     #[arg(long = "p2p-peer-leaf-cert", action = clap::ArgAction::Append)]
     pub p2p_peer_leaf_certs: Vec<String>,
 
+    /// Run 050: path to a JSON PQC transport trust-anchor bundle.
+    ///
+    /// When supplied with `--p2p-pqc-root-mode pqc-static-root`, the
+    /// bundle's per-environment, status- and validity-window-checked,
+    /// non-revoked roots are merged into the trust set (in addition to
+    /// any `--p2p-trusted-root` CLI roots, which are accepted only on
+    /// DevNet; TestNet/MainNet fail closed if both are supplied).
+    ///
+    /// The bundle is validated at load time (environment binding,
+    /// validity window, root status, root window, duplicates,
+    /// unsupported suite, revocation list consistency, signature
+    /// model). Any failure aborts startup with a precise reason.
+    ///
+    /// DevNet accepts unsigned bundles for development convenience.
+    /// TestNet and MainNet REFUSE unsigned bundles. Signed-bundle
+    /// verification itself is NOT yet implemented (Run 050 boundary)
+    /// and is tracked under C4 in `docs/whitepaper/contradiction.md`.
+    #[arg(long = "p2p-trust-bundle")]
+    pub p2p_trust_bundle: Option<PathBuf>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

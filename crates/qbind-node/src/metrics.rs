@@ -5622,6 +5622,42 @@ pub struct P2pMetrics {
     /// Sub-counter: rejected because the cert is outside its validity
     /// window.
     pqc_cert_rejected_expired_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 050 (C4 piece: PQC transport trust-anchor lifecycle — foundation
+    // layer). All values are set at startup and remain steady for the
+    // lifetime of the process (the binary fails closed on any bundle
+    // validation error so a successful scrape implies a healthy bundle).
+    //
+    // Exposed names:
+    //   qbind_p2p_pqc_trust_bundle_loaded            (gauge: 0=no bundle, 1=valid bundle loaded)
+    //   qbind_p2p_pqc_trust_bundle_environment       (gauge: 0=devnet, 1=testnet, 2=mainnet — meaningful only when `_loaded == 1`)
+    //   qbind_p2p_pqc_trust_bundle_active_roots      (gauge)
+    //   qbind_p2p_pqc_trust_bundle_revoked_roots     (gauge)
+    //   qbind_p2p_pqc_trust_bundle_sequence          (gauge)
+    // ------------------------------------------------------------------
+    /// Gauge: 1 when a valid PQC trust bundle has been loaded into the
+    /// transport's trust set at startup, 0 otherwise. Because the
+    /// binary fails closed on bundle errors, a running process will
+    /// only ever emit 0 (no bundle path supplied) or 1 (bundle loaded
+    /// successfully).
+    pqc_trust_bundle_loaded: AtomicU64,
+    /// Gauge encoding the environment declared by the loaded bundle.
+    /// 0=devnet, 1=testnet, 2=mainnet. Only meaningful when
+    /// `qbind_p2p_pqc_trust_bundle_loaded == 1`; otherwise reads as 0
+    /// by default (use the `loaded` gauge as the disambiguator).
+    pqc_trust_bundle_environment: AtomicU64,
+    /// Gauge: number of active, non-revoked, in-window roots
+    /// contributed by the bundle.
+    pqc_trust_bundle_active_roots: AtomicU64,
+    /// Gauge: number of roots excluded from the active set due to
+    /// being on the revocation list (does NOT include status=Retired
+    /// or status=Revoked entries, which are reported only via
+    /// active_roots = 0).
+    pqc_trust_bundle_revoked_roots: AtomicU64,
+    /// Gauge: bundle monotonic sequence number. Useful for operators
+    /// confirming a rotation took effect on a given node.
+    pqc_trust_bundle_sequence: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6347,6 +6383,28 @@ impl P2pMetrics {
             self.pqc_cert_rejected_expired_total()
         ));
 
+        // Run 050: PQC trust-anchor bundle observability.
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_loaded {}\n",
+            self.pqc_trust_bundle_loaded()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_environment {}\n",
+            self.pqc_trust_bundle_environment()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_active_roots {}\n",
+            self.pqc_trust_bundle_active_roots()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revoked_roots {}\n",
+            self.pqc_trust_bundle_revoked_roots()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_sequence {}\n",
+            self.pqc_trust_bundle_sequence()
+        ));
+
         output
     }
 
@@ -6439,6 +6497,38 @@ impl P2pMetrics {
     }
     pub fn pqc_cert_rejected_expired_total(&self) -> u64 {
         self.pqc_cert_rejected_expired_total.load(Ordering::Relaxed)
+    }
+
+    // Run 050 trust-bundle gauges.
+    pub fn pqc_trust_bundle_loaded(&self) -> u64 {
+        self.pqc_trust_bundle_loaded.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_loaded(&self, v: u64) {
+        self.pqc_trust_bundle_loaded.store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_environment(&self) -> u64 {
+        self.pqc_trust_bundle_environment.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_environment(&self, v: u64) {
+        self.pqc_trust_bundle_environment.store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_active_roots(&self) -> u64 {
+        self.pqc_trust_bundle_active_roots.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_active_roots(&self, v: u64) {
+        self.pqc_trust_bundle_active_roots.store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revoked_roots(&self) -> u64 {
+        self.pqc_trust_bundle_revoked_roots.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revoked_roots(&self, v: u64) {
+        self.pqc_trust_bundle_revoked_roots.store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_sequence(&self) -> u64 {
+        self.pqc_trust_bundle_sequence.load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_sequence(&self, v: u64) {
+        self.pqc_trust_bundle_sequence.store(v, Ordering::Relaxed);
     }
 }
 

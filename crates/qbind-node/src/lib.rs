@@ -111,6 +111,10 @@ pub mod peer_key_provider;
 pub mod pqc_root_config;
 // Run 037 — DevNet-only helper to mint real ML-DSA-44-signed delegation certs.
 pub mod pqc_devnet_helper;
+// Run 050 — production-honest PQC transport trust-anchor bundle
+// (environment binding, root status + window, revocation entries,
+// canonical fingerprint, DevNet-unsigned scaffolding boundary).
+pub mod pqc_trust_bundle;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;

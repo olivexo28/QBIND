@@ -639,7 +639,18 @@ async fn run_p2p_node(
     let pqc_required = matches!(pqc_root_mode, PqcRootMode::PqcStaticRoot)
         && matches!(mutual_auth_mode, qbind_net::MutualAuthMode::Required);
 
-    let trusted_roots = match parse_pqc_trusted_root_specs(&args.p2p_trusted_roots, pqc_required) {
+    // Run 050: when a trust bundle is supplied, the CLI `--p2p-trusted-root`
+    // list is allowed to be empty (the bundle provides the trust set);
+    // otherwise we keep the Run 037 requirement that Required-mode
+    // operators must configure at least one CLI root. This is the
+    // smallest change that supports bundle-only operation without
+    // weakening the pre-bundle invariant.
+    let cli_trusted_roots_required = pqc_required && args.p2p_trust_bundle.is_none();
+
+    let mut trusted_roots = match parse_pqc_trusted_root_specs(
+        &args.p2p_trusted_roots,
+        cli_trusted_roots_required,
+    ) {
         Ok(roots) => roots,
         Err(e) => {
             eprintln!(
@@ -696,6 +707,139 @@ async fn run_p2p_node(
             std::process::exit(1);
         }
     };
+
+    // Run 050 (C4 piece: PQC transport trust-anchor lifecycle —
+    // foundation layer): if `--p2p-trust-bundle <PATH>` was supplied,
+    // load + validate the bundle, then merge its active, non-revoked,
+    // in-window roots into the trust set. Failures here fail closed
+    // (the binary refuses to start) — there is NO silent fallback to
+    // the `--p2p-trusted-root` CLI path on bundle failure.
+    //
+    // Static-roots + bundle conflict policy:
+    //   DevNet           — both allowed, deduplicated by `root_key_id`.
+    //   TestNet/MainNet  — both supplied is a configuration error and
+    //                      fails closed; the operator must use the
+    //                      bundle alone.
+    //
+    // The bundle's own signature policy is enforced inside
+    // `TrustBundle::validate_at`:
+    //   DevNet           — unsigned bundle accepted.
+    //   TestNet/MainNet  — unsigned bundle REFUSED; signed bundle
+    //                      REFUSED with `SignedBundleVerificationNotImplemented`
+    //                      until the next C4 layer lands.
+    let trust_bundle_loaded: Option<qbind_node::pqc_trust_bundle::LoadedTrustBundle> = match args
+        .p2p_trust_bundle
+        .as_ref()
+    {
+        Some(path) => {
+            use qbind_types::NetworkEnvironment;
+            // Wall-clock used for the bundle/root validity-window
+            // checks. Same operational-freshness scope as Run 045
+            // `verify_delegation_cert` — NOT a consensus time source.
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path(
+                path,
+                config.environment,
+                now_secs,
+            ) {
+                Ok(loaded) => {
+                    // Enforce static-roots + bundle conflict policy.
+                    if !trusted_roots.is_empty()
+                        && !matches!(config.environment, NetworkEnvironment::Devnet)
+                    {
+                        eprintln!(
+                            "[binary] FATAL: --p2p-trust-bundle and --p2p-trusted-root cannot be \
+                             combined on environment={} (only DevNet allows the operator \
+                             override). Use the bundle alone, or omit `--p2p-trusted-root`. \
+                             See docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                            config.environment
+                        );
+                        std::process::exit(1);
+                    }
+                    // Merge active bundle roots into the trust set,
+                    // deduplicating by `root_key_id`. The bundle's
+                    // active_roots list has already been filtered by
+                    // `validate_at` to status=Active, in-window, not
+                    // on the revocation list.
+                    let mut seen: std::collections::HashSet<[u8; 32]> = trusted_roots
+                        .iter()
+                        .map(|r| r.root_key_id)
+                        .collect();
+                    for r in &loaded.active_roots {
+                        if seen.insert(r.root_key_id) {
+                            trusted_roots.push(r.clone());
+                        }
+                    }
+                    eprintln!(
+                        "[binary] Run 050: trust bundle loaded path={} env={} fp={} \
+                         active_roots={} revoked_roots={} sequence={} valid_from={} \
+                         valid_until={} signed=false (DevNet-unsigned scaffolding; signed-bundle \
+                         verification remains C4-open). Bundle root IDs: [{}]",
+                        path.display(),
+                        loaded.environment(),
+                        loaded.fingerprint_hex(),
+                        loaded.active_root_count(),
+                        loaded.revoked_root_count(),
+                        loaded.bundle.sequence,
+                        loaded.bundle.valid_from,
+                        loaded.bundle.valid_until,
+                        loaded
+                            .active_roots
+                            .iter()
+                            .map(|r| format!("{}..", &r.root_key_id_hex()[..8]))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
+                    Some(loaded)
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: --p2p-trust-bundle load/validate failed for path={}: \
+                         {}. No fallback to --p2p-trusted-root on bundle failure (production-honest \
+                         lifecycle must not silently downgrade). See \
+                         docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                        path.display(),
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
+
+    // Run 050: enforce Required-mode invariant. When PQC mutual-auth
+    // Required is selected, *some* trusted root must be configured —
+    // either via CLI flags, the bundle, or both. `parse_pqc_trusted_root_specs`
+    // already enforces the no-bundle case; here we cover the
+    // bundle-only-but-empty-active-set case (a valid bundle whose
+    // every root is retired/revoked/expired would otherwise leave the
+    // trust set empty and silently break verification).
+    if pqc_required && trusted_roots.is_empty() {
+        eprintln!(
+            "[binary] FATAL: --p2p-mutual-auth required + --p2p-pqc-root-mode pqc-static-root \
+             requires at least one configured trusted root. The supplied trust bundle (if any) \
+             contained zero active, in-window, non-revoked roots. See \
+             docs/whitepaper/contradiction.md C4 (signed root distribution)."
+        );
+        std::process::exit(1);
+    }
+
+    // Run 050: surface the trust-bundle observability gauges on the
+    // shared `P2pMetrics` instance. The same Arc is wired into the
+    // builder via `with_p2p_metrics(node_metrics.p2p_arc())` above,
+    // so these set_* calls reach the live `/metrics` scrape path.
+    if let Some(loaded) = trust_bundle_loaded.as_ref() {
+        let p2p = node_metrics.p2p();
+        p2p.set_pqc_trust_bundle_loaded(1);
+        p2p.set_pqc_trust_bundle_environment(loaded.environment().metric_code());
+        p2p.set_pqc_trust_bundle_active_roots(loaded.active_root_count() as u64);
+        p2p.set_pqc_trust_bundle_revoked_roots(loaded.revoked_root_count() as u64);
+        p2p.set_pqc_trust_bundle_sequence(loaded.bundle.sequence);
+    }
 
     let pqc_config = PqcStaticRootConfig {
         mode: pqc_root_mode,

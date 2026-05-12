@@ -1,0 +1,10 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 050: trust bundle loaded path=/tmp/run050/root-status-revoked/trust-bundle.json env=devnet fp=4e72cfccdfe1e3a3f3abc69df0b202b203a74a83ef39559a55448b9eae68703f active_roots=0 revoked_roots=0 sequence=1 valid_from=0 valid_until=18446744073709551615 signed=false (DevNet-unsigned scaffolding; signed-bundle verification remains C4-open). Bundle root IDs: []
+[binary] FATAL: --p2p-mutual-auth required + --p2p-pqc-root-mode pqc-static-root requires at least one configured trusted root. The supplied trust bundle (if any) contained zero active, in-window, non-revoked roots. See docs/whitepaper/contradiction.md C4 (signed root distribution).
