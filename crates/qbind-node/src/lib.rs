@@ -115,6 +115,11 @@ pub mod pqc_devnet_helper;
 // (environment binding, root status + window, revocation entries,
 // canonical fingerprint, DevNet-unsigned scaffolding boundary).
 pub mod pqc_trust_bundle;
+// Run 055 — anti-rollback persistence for signed PQC trust bundles
+// (highest accepted bundle sequence per (environment, chain_id) trust
+// domain; atomic JSON record under `<data_dir>/`; fail-closed on
+// rollback / equivocation / corrupt persistence).
+pub mod pqc_trust_sequence;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;

@@ -5707,6 +5707,32 @@ pub struct P2pMetrics {
     /// Gauge: number of `--p2p-trust-bundle-signing-key` entries
     /// successfully parsed at startup. 0 when no flag was supplied.
     pqc_trust_bundle_signing_keys_configured: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 055 — anti-rollback persistence for signed trust bundles.
+    //   qbind_p2p_pqc_trust_bundle_sequence_highest
+    //       (gauge; mirrors the persisted highest_sequence after a
+    //       successful startup; 0 when no bundle was loaded or no
+    //       persistence file exists yet)
+    //   qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total
+    //       (counter; bumped when a load attempt is rejected because
+    //       its sequence is strictly lower than the persisted highest.
+    //       In the binary's fail-closed startup path the process
+    //       exits before /metrics is scraped, so this counter is
+    //       primarily observed through unit/integration tests today.)
+    //   qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total
+    //       (counter; bumped when a load attempt is rejected because
+    //       its sequence equals the persisted highest but its
+    //       canonical fingerprint differs — equivocation guard.)
+    //   qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total
+    //       (counter; bumped on any I/O / serialise / rename failure
+    //       writing the sequence record. Fail-closed; the bundle is
+    //       NOT accepted if its sequence cannot be persisted.)
+    // ------------------------------------------------------------------
+    pqc_trust_bundle_sequence_highest: AtomicU64,
+    pqc_trust_bundle_sequence_rollback_rejected_total: AtomicU64,
+    pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total: AtomicU64,
+    pqc_trust_bundle_sequence_persist_failures_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6473,6 +6499,26 @@ impl P2pMetrics {
             self.pqc_trust_bundle_signing_keys_configured()
         ));
 
+        // Run 055: anti-rollback persistence metrics for signed trust
+        // bundles. Each name appears exactly once in the rendered
+        // body (asserted by `pqc_trust_bundle_sequence_metrics_render_once`).
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_sequence_highest {}\n",
+            self.pqc_trust_bundle_sequence_highest()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total {}\n",
+            self.pqc_trust_bundle_sequence_rollback_rejected_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total {}\n",
+            self.pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total {}\n",
+            self.pqc_trust_bundle_sequence_persist_failures_total()
+        ));
+
         output
     }
 
@@ -6649,6 +6695,56 @@ impl P2pMetrics {
     pub fn set_pqc_trust_bundle_signing_keys_configured(&self, v: u64) {
         self.pqc_trust_bundle_signing_keys_configured
             .store(v, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------
+    // Run 055 — anti-rollback persistence accessors.
+    // ------------------------------------------------------------------
+
+    pub fn pqc_trust_bundle_sequence_highest(&self) -> u64 {
+        self.pqc_trust_bundle_sequence_highest
+            .load(Ordering::Relaxed)
+    }
+    /// Setter for the persisted highest sequence gauge. Called after
+    /// a successful `check_and_update_sequence`. Reflects the value
+    /// that is on disk, NOT the value the caller hopes to write.
+    pub fn set_pqc_trust_bundle_sequence_highest(&self, v: u64) {
+        self.pqc_trust_bundle_sequence_highest
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_sequence_rollback_rejected_total(&self) -> u64 {
+        self.pqc_trust_bundle_sequence_rollback_rejected_total
+            .load(Ordering::Relaxed)
+    }
+    /// Increments the rollback-rejected counter by exactly one. Called
+    /// only when an attempted bundle load is rejected because its
+    /// sequence is strictly lower than the persisted highest.
+    pub fn inc_pqc_trust_bundle_sequence_rollback_rejected(&self) {
+        self.pqc_trust_bundle_sequence_rollback_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total(&self) -> u64 {
+        self.pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total
+            .load(Ordering::Relaxed)
+    }
+    /// Increments the equal-sequence equivocation counter by exactly
+    /// one. Called only when an attempted bundle load is rejected
+    /// because its sequence equals the persisted highest but its
+    /// canonical fingerprint differs from the persisted fingerprint.
+    pub fn inc_pqc_trust_bundle_sequence_equal_fingerprint_mismatch(&self) {
+        self.pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_sequence_persist_failures_total(&self) -> u64 {
+        self.pqc_trust_bundle_sequence_persist_failures_total
+            .load(Ordering::Relaxed)
+    }
+    /// Increments the persist-failures counter by exactly one. Called
+    /// only on a real I/O / serialise / rename failure when writing
+    /// the sequence record.
+    pub fn inc_pqc_trust_bundle_sequence_persist_failures(&self) {
+        self.pqc_trust_bundle_sequence_persist_failures_total
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -10533,5 +10629,73 @@ mod tests {
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_active_roots "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_revoked_roots "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
+    }
+
+    // ----------------------------------------------------------------
+    // Run 055: sequence anti-rollback persistence metrics — counters
+    // move only on real events, the gauge reflects persisted state,
+    // and no duplicate metric family is emitted.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn pqc_trust_bundle_sequence_metrics_start_at_zero_and_increment_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.pqc_trust_bundle_sequence_highest(), 0);
+        assert_eq!(p.pqc_trust_bundle_sequence_rollback_rejected_total(), 0);
+        assert_eq!(
+            p.pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total(),
+            0
+        );
+        assert_eq!(p.pqc_trust_bundle_sequence_persist_failures_total(), 0);
+
+        p.set_pqc_trust_bundle_sequence_highest(7);
+        assert_eq!(p.pqc_trust_bundle_sequence_highest(), 7);
+
+        p.inc_pqc_trust_bundle_sequence_rollback_rejected();
+        p.inc_pqc_trust_bundle_sequence_rollback_rejected();
+        assert_eq!(p.pqc_trust_bundle_sequence_rollback_rejected_total(), 2);
+
+        p.inc_pqc_trust_bundle_sequence_equal_fingerprint_mismatch();
+        assert_eq!(
+            p.pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total(),
+            1
+        );
+
+        p.inc_pqc_trust_bundle_sequence_persist_failures();
+        assert_eq!(p.pqc_trust_bundle_sequence_persist_failures_total(), 1);
+    }
+
+    #[test]
+    fn pqc_trust_bundle_sequence_metrics_render_once_in_format_metrics() {
+        let p = P2pMetrics::new();
+        p.set_pqc_trust_bundle_sequence_highest(3);
+        p.inc_pqc_trust_bundle_sequence_rollback_rejected();
+        let out = p.format_metrics();
+        for name in [
+            "qbind_p2p_pqc_trust_bundle_sequence_highest ",
+            "qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total ",
+            "qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total ",
+            "qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total ",
+        ] {
+            let n = out.matches(name).count();
+            assert_eq!(
+                n, 1,
+                "metric {} must appear exactly once in P2pMetrics::format_metrics output (got {})\n--- output ---\n{}",
+                name, n, out
+            );
+        }
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest 3"));
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total 1")
+        );
+        assert!(out.contains(
+            "qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total 0"
+        ));
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total 0")
+        );
+        // Existing Run 050/051 metrics still present (no displacement).
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_signature_verified_total "));
     }
 }

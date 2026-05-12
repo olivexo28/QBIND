@@ -839,6 +839,140 @@ async fn run_p2p_node(
                         );
                         std::process::exit(1);
                     }
+
+                    // Run 055: anti-rollback persistence check. MUST run
+                    // AFTER all existing bundle validation (schema, env,
+                    // chain_id, validity window, root status / windows,
+                    // revocation consistency, ML-DSA-44 signature) and
+                    // BEFORE we merge bundle roots into `trusted_roots`,
+                    // so a rejected rollback / equivocation / corrupt
+                    // persistence state cannot leak new trust anchors
+                    // into the live PQC trust set. Fail-closed on any
+                    // error. Never silently falls back to `--p2p-trusted-root`
+                    // and never resets / deletes corrupted persistence
+                    // state silently.
+                    if let Some(data_dir) = config.data_dir.as_ref() {
+                        let seq_path =
+                            qbind_node::pqc_trust_sequence::sequence_file_path(data_dir);
+                        match qbind_node::pqc_trust_sequence::check_and_update_sequence(
+                            &seq_path,
+                            config.environment,
+                            config.chain_id(),
+                            loaded.bundle.sequence,
+                            &loaded.fingerprint,
+                            now_secs,
+                        ) {
+                            Ok(outcome) => {
+                                use qbind_node::pqc_trust_sequence::SequenceCheckOutcome;
+                                node_metrics
+                                    .p2p()
+                                    .set_pqc_trust_bundle_sequence_highest(
+                                        outcome.persisted_sequence(),
+                                    );
+                                let detail = match &outcome {
+                                    SequenceCheckOutcome::FirstLoad {
+                                        persisted_sequence,
+                                        ..
+                                    } => format!(
+                                        "first-load persisted_sequence={}",
+                                        persisted_sequence
+                                    ),
+                                    SequenceCheckOutcome::Upgraded {
+                                        previous_sequence,
+                                        new_sequence,
+                                        ..
+                                    } => format!(
+                                        "upgraded previous_sequence={} -> new_sequence={}",
+                                        previous_sequence, new_sequence
+                                    ),
+                                    SequenceCheckOutcome::EqualSequenceSameFingerprint {
+                                        sequence,
+                                        ..
+                                    } => format!(
+                                        "equal-sequence same-fingerprint (no write) sequence={}",
+                                        sequence
+                                    ),
+                                };
+                                eprintln!(
+                                    "[binary] Run 055: trust-bundle sequence persistence \
+                                     env={} chain_id={} path={} {} fp={}",
+                                    qbind_node::pqc_trust_bundle::TrustBundleEnvironment::from_runtime(
+                                        config.environment
+                                    ),
+                                    qbind_node::pqc_trust_sequence::chain_id_hex(
+                                        config.chain_id()
+                                    ),
+                                    seq_path.display(),
+                                    detail,
+                                    &loaded.fingerprint_hex()[..8],
+                                );
+                            }
+                            Err(e) => {
+                                use qbind_node::pqc_trust_sequence::TrustBundleSequenceError as SE;
+                                let p2p = node_metrics.p2p();
+                                match &e {
+                                    SE::SequenceRollback { .. } => {
+                                        p2p.inc_pqc_trust_bundle_sequence_rollback_rejected();
+                                    }
+                                    SE::EqualSequenceFingerprintMismatch { .. } => {
+                                        p2p.inc_pqc_trust_bundle_sequence_equal_fingerprint_mismatch();
+                                    }
+                                    SE::PersistFailure(_) => {
+                                        p2p.inc_pqc_trust_bundle_sequence_persist_failures();
+                                    }
+                                    SE::Io(_)
+                                    | SE::Malformed(_)
+                                    | SE::UnsupportedRecordVersion(_)
+                                    | SE::WrongEnvironment { .. }
+                                    | SE::WrongChainId { .. } => {}
+                                }
+                                eprintln!(
+                                    "[binary] FATAL: --p2p-trust-bundle sequence anti-rollback \
+                                     check failed for path={} (sequence persistence file={}): \
+                                     {}. No fallback to --p2p-trusted-root on bundle failure \
+                                     (production-honest lifecycle must not silently downgrade or \
+                                     silently reset persistence state). See \
+                                     docs/whitepaper/contradiction.md C4 (signed root \
+                                     distribution).",
+                                    path.display(),
+                                    seq_path.display(),
+                                    e
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    } else if matches!(config.environment, NetworkEnvironment::Devnet) {
+                        // DevNet convenience: a `--p2p-trust-bundle`
+                        // run without `--data-dir` is permitted (this
+                        // preserves the Run 050/051/054 DevNet smoke
+                        // shape) but anti-rollback persistence is NOT
+                        // active. Document this honestly so operators
+                        // are not surprised.
+                        eprintln!(
+                            "[binary] Run 055 WARNING: --p2p-trust-bundle supplied without \
+                             --data-dir on environment=devnet; trust-bundle sequence \
+                             anti-rollback persistence is NOT active for this run (DevNet \
+                             convenience; TestNet/MainNet would fail closed). See \
+                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_055.md."
+                        );
+                    } else {
+                        // Production-honest: a TestNet/MainNet bundle
+                        // load with no `--data-dir` cannot persist the
+                        // anti-rollback record, so we refuse the bundle
+                        // rather than silently degrade to a path that
+                        // would accept rollback on the next restart.
+                        eprintln!(
+                            "[binary] FATAL: --p2p-trust-bundle {} on environment={} requires \
+                             --data-dir so the bundle's sequence number can be persisted across \
+                             restarts. Without persistence, an older signed bundle could be \
+                             replayed after a restart (anti-rollback regression). See \
+                             docs/whitepaper/contradiction.md C4 (signed root distribution).",
+                            path.display(),
+                            config.environment
+                        );
+                        std::process::exit(1);
+                    }
+
                     // Merge active bundle roots into the trust set,
                     // deduplicating by `root_key_id`. The bundle's
                     // active_roots list has already been filtered by
