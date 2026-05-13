@@ -1,0 +1,311 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification:
+  - DevNet signed-bundle live startup proven
+  - TestNet signed-bundle live startup proven
+  - unsigned TestNet/MainNet fail closed in tests
+  - tampered/wrong-key/malformed/unsupported-suite/key-root-collision fail closed
+  - no fallback to --p2p-trusted-root
+  - no DummySig/DummyKem/DummyAead fallback
+- Run 052 landed leaf-level certificate revocation enforcement.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary leaf-revocation evidence artifacts.
+- Run 055 landed trust-bundle sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence artifacts.
+- Run 057 implemented activation-height gating.
+- Run 058 strongest-positive:
+  - produced release-binary activation-height evidence artifacts
+  - active-now bundle accepted and persisted
+  - future-height bundle rejected fail-closed
+  - future-height rejection did not create/update sequence state
+  - later valid sequence upgrade still worked
+  - no fallback to --p2p-trusted-root
+  - no DummySig / DummyKem / DummyAead fallback
+- Current remaining C4 trust-bundle/lifecycle items:
+  - MainNet live signed-bundle smoke
+  - epoch gating runtime source
+  - restore-height live smoke
+  - activation gates on revocation entries
+  - per-environment activation policy
+  - production CA / cert rotation / signing-key rotation operator playbook
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 059. Produce release-binary MainNet signed-bundle smoke evidence.
+
+Primary objective:
+Prove on the real release qbind-node binary that MainNet mode uses the production-honest signed trust-bundle path:
+- valid signed MainNet trust bundle loads;
+- unsigned MainNet bundle fails closed;
+- tampered signed MainNet bundle fails closed;
+- wrong signing key fails closed;
+- chain_id enforcement remains active;
+- sequence persistence remains active;
+- no fallback to --p2p-trusted-root or Dummy crypto occurs.
+
+Important framing:
+This is evidence-first unless a real bug appears.
+Do not implement CA/rotation playbook in this run.
+Do not implement epoch gating in this run.
+Do not implement activation gates on revocations in this run.
+Do not implement per-environment minimum activation policy in this run.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not modify consensus or timeout logic.
+Do not weaken signed-bundle verification.
+Do not weaken chain_id enforcement.
+Do not weaken sequence anti-rollback persistence.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Required active stack:
+- release qbind-node binary
+- --env mainnet
+- --p2p-mutual-auth required
+- --p2p-pqc-root-mode pqc-static-root
+- --p2p-trust-bundle <signed-mainnet-bundle>
+- --p2p-trust-bundle-signing-key KEYID:100:PK
+- explicit --data-dir
+- real ML-DSA-44 transport delegation certs
+- real ML-KEM-768 leaf KEM material
+- real ChaCha20-Poly1305 AEAD
+- metrics enabled where process lives long enough
+- no DummySig
+- no DummyKem
+- no DummyAead
+
+Strict scope:
+- Evidence-only unless a real bug is found.
+- Existing Run 050/051/052/053/054/055/056/057/058 behavior must be preserved.
+- Do not add bypass flags.
+- Do not relax MainNet unsigned-bundle rejection.
+- Do not allow DevNet unsigned behavior to leak into MainNet.
+- Do not allow static-root fallback after trust-bundle failure.
+- Use existing chain_id and sequence semantics.
+- Crosscheck all evidence against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required evidence cases:
+
+1. Build and identify binaries
+   - Build release qbind-node.
+   - Build release devnet_pqc_trust_bundle_helper.
+   - Build release devnet_pqc_root_helper if needed.
+   - Record:
+     - branch
+     - commit
+     - dirty/clean status
+     - qbind-node sha256
+     - qbind-node ELF BuildID
+     - helper sha256
+     - helper ELF BuildID
+   - Confirm --devnet-forged-inject remains hidden from normal --help.
+   - Confirm relevant flags:
+     - --env
+     - --p2p-trust-bundle
+     - --p2p-trust-bundle-signing-key
+     - --p2p-pqc-root-mode
+     - --p2p-leaf-cert
+     - --p2p-leaf-cert-key
+     - --p2p-peer-leaf-cert
+     - --p2p-mutual-auth
+     - --data-dir
+
+2. Positive MainNet signed-bundle startup smoke
+   Create a valid signed MainNet trust bundle with:
+   - environment = MainNet
+   - chain_id matching runtime NodeConfig.chain_id(), or document exact MainNet chain_id expected by qbind-node
+   - sequence = 1
+   - activation_height satisfied or absent
+   - valid ML-DSA-44 bundle signature
+   - valid active root
+   - no revoked local leaf
+   - valid root/leaf validity windows
+
+   Run release qbind-node with:
+   - --env mainnet
+   - signed MainNet bundle
+   - trust-bundle signing key
+   - explicit data dir
+   - Required pqc-static-root
+   - real PQC transport material
+
+   Prove:
+   - node starts or reaches the expected startup stage for MainNet.
+   - signed bundle verifies.
+   - environment MainNet is accepted only because bundle environment is MainNet.
+   - trust bundle loads.
+   - active roots > 0.
+   - sequence record is written.
+   - chain_id check passes.
+   - no fallback to --p2p-trusted-root.
+   - no DummySig/DummyKem/DummyAead fallback.
+   - no private key material in logs.
+
+   If full MainNet node startup requires production-only config not available in this test environment:
+   - do not fake it.
+   - prove the signed-bundle startup/load path up to the precise boundary.
+   - document the exact boundary and why it is unrelated to trust-bundle verification.
+
+3. Negative unsigned MainNet bundle smoke
+   Create an otherwise valid MainNet trust bundle with no signature.
+
+   Expected:
+   - startup fails closed.
+   - precise FATAL/log reason says unsigned MainNet bundle is not allowed or signature required.
+   - no roots merged.
+   - no sequence file created/updated.
+   - no fallback to --p2p-trusted-root.
+   - no Dummy crypto fallback.
+
+4. Negative tampered signed MainNet bundle smoke
+   Create a signed MainNet bundle, then tamper a signature-covered field:
+   - root public key, sequence, activation height, chain_id, root status, or revocation entry.
+
+   Expected:
+   - startup fails closed due signature verification failure.
+   - no roots merged.
+   - no sequence update.
+   - no fallback.
+   - no Dummy crypto.
+
+5. Negative wrong-signing-key MainNet smoke
+   Provide a valid signed MainNet bundle but configure a wrong --p2p-trust-bundle-signing-key.
+
+   Expected:
+   - startup fails closed due missing/wrong signing key or signature verification failure.
+   - no roots merged.
+   - no sequence update.
+   - no fallback.
+   - no Dummy crypto.
+
+6. Negative MainNet wrong chain_id smoke
+   Create a signed MainNet bundle with a chain_id that does not match runtime NodeConfig.chain_id().
+
+   Expected:
+   - startup fails closed due chain_id mismatch.
+   - failure occurs before sequence persistence and before root merge.
+   - no fallback.
+   - no Dummy crypto.
+
+7. Optional MainNet two-node smoke
+   If low cost and qbind-node MainNet startup permits:
+   - run two MainNet-mode nodes with the signed MainNet bundle.
+   - prove peer connection succeeds.
+   - prove cert accepted metrics move.
+   - prove rejected counters stay zero.
+   - do not block Run 059 on this if MainNet node startup has unrelated missing production config; document boundary.
+
+Required tests to rerun:
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --lib pqc_trust_activation
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_059.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests run and pass/fail status
+- binary identity
+- helper identities
+- MainNet trust-bundle material procedure
+- MainNet chain_id expected/used
+- signed-bundle verification proof
+- sequence persistence file path and record content
+- positive signed MainNet smoke
+- unsigned MainNet negative smoke
+- tampered signed MainNet negative smoke
+- wrong-signing-key MainNet negative smoke
+- wrong-chain_id MainNet negative smoke
+- optional two-node MainNet smoke if run
+- /metrics excerpts where available
+- exact boundary if fail-closed startup prevents metric scraping
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- remaining open items
+- exact immediate next action
+
+contradiction.md update rules:
+- If release-binary MainNet signed-bundle evidence passes, update C4 to record MainNet live signed-bundle smoke narrowed/closed for the scoped startup path.
+- If full MainNet node startup is blocked by unrelated production config, record the precise boundary honestly.
+- Keep C4 open for:
+  - epoch gating runtime source
+  - restore-height live smoke if still absent
+  - activation gates on revocation entries if still absent
+  - per-environment minimum activation-height policy if still absent
+  - production CA / cert rotation / signing-key rotation operator playbook
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation if not fully solved
+- Do not close full C4.
+- Do not claim C5 closure unless explicitly justified.
+- If unsigned MainNet bundle loads, record as contradiction/regression.
+- If tampered/wrong-key/wrong-chain bundle loads, record as contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record as contradiction/regression.
+- If metrics are unavailable due to fail-closed startup, document boundary honestly rather than fabricating.
+
+Expected verdict options:
+- Strongest positive:
+  Release-binary MainNet signed-bundle startup/load path is proven; unsigned/tampered/wrong-key/wrong-chain MainNet bundles fail closed; sequence persistence and chain_id checks remain active; no fallback; no Dummy crypto; all regressions pass.
+- Partial positive:
+  MainNet signed-bundle verification is proven through the startup/load path, but full MainNet node startup or two-node peer connection is blocked by unrelated production config. State exact boundary.
+- Negative:
+  unsigned/tampered/wrong-key/wrong-chain MainNet bundle is accepted, fallback/Dummy crypto activates, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Exact tests/evidence run and pass/fail status
+5. What was proven
+6. What remains not solved
+7. Whether contradiction.md was updated and why
+8. Exact immediate next action recommended
