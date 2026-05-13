@@ -93,6 +93,8 @@ fn sign_devnet_helper_bundle(
         }],
         revocations: vec![],
         signature: None,
+        activation_epoch: None,
+        activation_height: None,
     };
     let sig = sign_bundle_devnet_helper(&bundle, signing_key_id, signing_sk)
         .expect("ML-DSA-44 sign devnet helper bundle");

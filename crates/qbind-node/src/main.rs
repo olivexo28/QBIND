@@ -818,14 +818,38 @@ async fn run_p2p_node(
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_and_chain_id(
+            // Run 057: build the activation runtime context.
+            //
+            //   current_height = restore_baseline.snapshot_height when
+            //     the node was started with --restore-from-snapshot,
+            //     else 0 (fresh-from-genesis local committed height).
+            //     This is the only safe height source available pre-
+            //     consensus — see
+            //     crates/qbind-node/src/pqc_trust_activation.rs
+            //     module docs.
+            //   current_epoch  = None. There is no safe pre-consensus
+            //     epoch source today (epoch transitions only happen
+            //     after consensus begins committing blocks). A bundle
+            //     that declares `activation_epoch` therefore fails
+            //     closed here; epoch gating recorded as remaining-open
+            //     in docs/whitepaper/contradiction.md C4.
+            let activation_current_height: u64 = restore_baseline
+                .as_ref()
+                .map(|b| b.snapshot_height)
+                .unwrap_or(0);
+            let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+                current_height: Some(activation_current_height),
+                current_epoch: None,
+            };
+            match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
                 path,
                 config.environment,
                 config.chain_id(),
                 now_secs,
                 &bundle_signing_keys,
+                activation_ctx,
             ) {
-                Ok(loaded) => {
+                Ok((loaded, activation_outcome)) => {
                     // Enforce static-roots + bundle conflict policy.
                     if !trusted_roots.is_empty()
                         && !matches!(config.environment, NetworkEnvironment::Devnet)
@@ -840,16 +864,46 @@ async fn run_p2p_node(
                         std::process::exit(1);
                     }
 
+                    // Run 057: surface the activation observability
+                    // gauges immediately on a satisfied gate. Values
+                    // are stable for the rest of the process lifetime
+                    // unless a future run reloads the bundle.
+                    {
+                        let p2p = node_metrics.p2p();
+                        p2p.set_pqc_trust_bundle_activation_height_required(
+                            activation_outcome.required_height.unwrap_or(0),
+                        );
+                        p2p.set_pqc_trust_bundle_activation_height_current(
+                            activation_outcome.current_height.unwrap_or(0),
+                        );
+                        p2p.set_pqc_trust_bundle_activation_epoch_required(
+                            activation_outcome.required_epoch.unwrap_or(0),
+                        );
+                        p2p.set_pqc_trust_bundle_activation_epoch_current(
+                            activation_outcome.current_epoch.unwrap_or(0),
+                        );
+                    }
+                    eprintln!(
+                        "[binary] Run 057: trust-bundle activation gate satisfied \
+                         (required_height={:?} current_height={:?} required_epoch={:?} \
+                         current_epoch={:?})",
+                        activation_outcome.required_height,
+                        activation_outcome.current_height,
+                        activation_outcome.required_epoch,
+                        activation_outcome.current_epoch,
+                    );
+
                     // Run 055: anti-rollback persistence check. MUST run
                     // AFTER all existing bundle validation (schema, env,
                     // chain_id, validity window, root status / windows,
-                    // revocation consistency, ML-DSA-44 signature) and
-                    // BEFORE we merge bundle roots into `trusted_roots`,
-                    // so a rejected rollback / equivocation / corrupt
-                    // persistence state cannot leak new trust anchors
-                    // into the live PQC trust set. Fail-closed on any
-                    // error. Never silently falls back to `--p2p-trusted-root`
-                    // and never resets / deletes corrupted persistence
+                    // revocation consistency, ML-DSA-44 signature, AND
+                    // Run 057 activation gate) and BEFORE we merge
+                    // bundle roots into `trusted_roots`, so a rejected
+                    // rollback / equivocation / corrupt persistence
+                    // state cannot leak new trust anchors into the live
+                    // PQC trust set. Fail-closed on any error. Never
+                    // silently falls back to `--p2p-trusted-root` and
+                    // never resets / deletes corrupted persistence
                     // state silently.
                     if let Some(data_dir) = config.data_dir.as_ref() {
                         let seq_path =
@@ -1025,6 +1079,10 @@ async fn run_p2p_node(
                     // For non-signature failures (e.g. WrongEnvironment),
                     // the counter is left at zero so it remains a
                     // truthful signal of signature-specific rejection.
+                    // Run 057: distinguish activation-gate rejection
+                    // (future-dated or runtime-source-unavailable)
+                    // so the `pqc_trust_bundle_activation_rejected_total`
+                    // counter is bumped exactly once per rejected load.
                     use qbind_node::pqc_trust_bundle::TrustBundleError as E;
                     let signature_envelope_rejection = matches!(
                         &e,
@@ -1038,6 +1096,39 @@ async fn run_p2p_node(
                         node_metrics
                             .p2p()
                             .inc_pqc_trust_bundle_signature_rejected();
+                    }
+                    if let E::Activation(act) = &e {
+                        let p2p = node_metrics.p2p();
+                        p2p.inc_pqc_trust_bundle_activation_rejected();
+                        // Surface the runtime height we asked the gate
+                        // about, so an operator-side /metrics scrape on
+                        // a node that *did* manage to bind /metrics on
+                        // a prior run can correlate. (Not reachable
+                        // on this exact path because we exit before
+                        // the metrics HTTP server binds; recorded
+                        // honestly anyway for tests.)
+                        p2p.set_pqc_trust_bundle_activation_height_current(
+                            activation_current_height,
+                        );
+                        use qbind_node::pqc_trust_activation::TrustBundleActivationError as AE;
+                        match act {
+                            AE::ActivationHeightNotYetReached {
+                                required_height, ..
+                            }
+                            | AE::CurrentHeightUnavailable {
+                                required_height, ..
+                            } => p2p.set_pqc_trust_bundle_activation_height_required(
+                                *required_height,
+                            ),
+                            AE::ActivationEpochNotYetReached {
+                                required_epoch, ..
+                            }
+                            | AE::CurrentEpochUnavailable {
+                                required_epoch, ..
+                            } => p2p.set_pqc_trust_bundle_activation_epoch_required(
+                                *required_epoch,
+                            ),
+                        }
                     }
                     eprintln!(
                         "[binary] FATAL: --p2p-trust-bundle load/validate failed for path={}: \

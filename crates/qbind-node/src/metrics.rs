@@ -5733,6 +5733,39 @@ pub struct P2pMetrics {
     pqc_trust_bundle_sequence_rollback_rejected_total: AtomicU64,
     pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total: AtomicU64,
     pqc_trust_bundle_sequence_persist_failures_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 057 — trust-bundle activation epoch/height gating.
+    //   qbind_p2p_pqc_trust_bundle_activation_height_required
+    //       (gauge; highest `activation_height` declared by the most
+    //       recent loaded bundle across bundle-level and per-root
+    //       gates; 0 means no `activation_height` was declared
+    //       anywhere in the loaded bundle.)
+    //   qbind_p2p_pqc_trust_bundle_activation_height_current
+    //       (gauge; runtime current_height supplied to the activation
+    //       gate at the most recent bundle load; 0 means no height
+    //       source was supplied.)
+    //   qbind_p2p_pqc_trust_bundle_activation_epoch_required
+    //       (gauge; highest `activation_epoch` declared by the most
+    //       recent loaded bundle; 0 means no `activation_epoch` was
+    //       declared anywhere in the loaded bundle.)
+    //   qbind_p2p_pqc_trust_bundle_activation_epoch_current
+    //       (gauge; runtime current_epoch supplied to the activation
+    //       gate at the most recent bundle load; 0 means no epoch
+    //       source was supplied.)
+    //   qbind_p2p_pqc_trust_bundle_activation_rejected_total
+    //       (counter; bumped exactly once per startup load attempt
+    //       that fails the activation gate — either future-dated
+    //       gate or runtime-source-unavailable. In the binary's
+    //       fail-closed startup path the process exits before
+    //       /metrics is scraped, so this counter is observed
+    //       primarily through unit/integration tests today.)
+    // ------------------------------------------------------------------
+    pqc_trust_bundle_activation_height_required: AtomicU64,
+    pqc_trust_bundle_activation_height_current: AtomicU64,
+    pqc_trust_bundle_activation_epoch_required: AtomicU64,
+    pqc_trust_bundle_activation_epoch_current: AtomicU64,
+    pqc_trust_bundle_activation_rejected_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6519,6 +6552,30 @@ impl P2pMetrics {
             self.pqc_trust_bundle_sequence_persist_failures_total()
         ));
 
+        // Run 057: trust-bundle activation epoch/height gating metrics.
+        // Each name appears exactly once in the rendered body
+        // (asserted by `pqc_trust_bundle_activation_metrics_render_once`).
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_activation_height_required {}\n",
+            self.pqc_trust_bundle_activation_height_required()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_activation_height_current {}\n",
+            self.pqc_trust_bundle_activation_height_current()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_activation_epoch_required {}\n",
+            self.pqc_trust_bundle_activation_epoch_required()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_activation_epoch_current {}\n",
+            self.pqc_trust_bundle_activation_epoch_current()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_activation_rejected_total {}\n",
+            self.pqc_trust_bundle_activation_rejected_total()
+        ));
+
         output
     }
 
@@ -6744,6 +6801,60 @@ impl P2pMetrics {
     /// the sequence record.
     pub fn inc_pqc_trust_bundle_sequence_persist_failures(&self) {
         self.pqc_trust_bundle_sequence_persist_failures_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ----- Run 057: activation epoch/height gating gauges + counter ----
+    pub fn pqc_trust_bundle_activation_height_required(&self) -> u64 {
+        self.pqc_trust_bundle_activation_height_required
+            .load(Ordering::Relaxed)
+    }
+    /// Setter for the bundle-level activation_height gauge. Reflects
+    /// the highest `activation_height` declared across the most-
+    /// recently loaded bundle and any of its Active roots. Stays at
+    /// 0 when no `activation_height` was declared on the bundle.
+    pub fn set_pqc_trust_bundle_activation_height_required(&self, v: u64) {
+        self.pqc_trust_bundle_activation_height_required
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_activation_height_current(&self) -> u64 {
+        self.pqc_trust_bundle_activation_height_current
+            .load(Ordering::Relaxed)
+    }
+    /// Setter for the runtime current_height gauge supplied to the
+    /// activation gate. 0 means "no runtime height source was
+    /// supplied", which is honest given Run 057's
+    /// "current_height = 0 on a fresh-from-genesis node" surface.
+    pub fn set_pqc_trust_bundle_activation_height_current(&self, v: u64) {
+        self.pqc_trust_bundle_activation_height_current
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_activation_epoch_required(&self) -> u64 {
+        self.pqc_trust_bundle_activation_epoch_required
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_activation_epoch_required(&self, v: u64) {
+        self.pqc_trust_bundle_activation_epoch_required
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_activation_epoch_current(&self) -> u64 {
+        self.pqc_trust_bundle_activation_epoch_current
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_activation_epoch_current(&self, v: u64) {
+        self.pqc_trust_bundle_activation_epoch_current
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_activation_rejected_total(&self) -> u64 {
+        self.pqc_trust_bundle_activation_rejected_total
+            .load(Ordering::Relaxed)
+    }
+    /// Increments the activation-rejected counter by exactly one.
+    /// Called only when a bundle load is rejected because its
+    /// activation gate is not yet satisfied or its runtime source is
+    /// unavailable. Bumped exactly once per rejected load.
+    pub fn inc_pqc_trust_bundle_activation_rejected(&self) {
+        self.pqc_trust_bundle_activation_rejected_total
             .fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -10695,6 +10806,62 @@ mod tests {
             out.contains("qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total 0")
         );
         // Existing Run 050/051 metrics still present (no displacement).
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_signature_verified_total "));
+    }
+
+    // Run 057: activation epoch/height gating metrics. Start at 0,
+    // increment / set atomically, render exactly once in the body of
+    // `P2pMetrics::format_metrics` (asserted alongside).
+    #[test]
+    fn pqc_trust_bundle_activation_metrics_start_at_zero_and_increment_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.pqc_trust_bundle_activation_height_required(), 0);
+        assert_eq!(p.pqc_trust_bundle_activation_height_current(), 0);
+        assert_eq!(p.pqc_trust_bundle_activation_epoch_required(), 0);
+        assert_eq!(p.pqc_trust_bundle_activation_epoch_current(), 0);
+        assert_eq!(p.pqc_trust_bundle_activation_rejected_total(), 0);
+
+        p.set_pqc_trust_bundle_activation_height_required(123);
+        p.set_pqc_trust_bundle_activation_height_current(99);
+        p.set_pqc_trust_bundle_activation_epoch_required(7);
+        p.set_pqc_trust_bundle_activation_epoch_current(0);
+        assert_eq!(p.pqc_trust_bundle_activation_height_required(), 123);
+        assert_eq!(p.pqc_trust_bundle_activation_height_current(), 99);
+        assert_eq!(p.pqc_trust_bundle_activation_epoch_required(), 7);
+        assert_eq!(p.pqc_trust_bundle_activation_epoch_current(), 0);
+
+        p.inc_pqc_trust_bundle_activation_rejected();
+        p.inc_pqc_trust_bundle_activation_rejected();
+        assert_eq!(p.pqc_trust_bundle_activation_rejected_total(), 2);
+    }
+
+    #[test]
+    fn pqc_trust_bundle_activation_metrics_render_once_in_format_metrics() {
+        let p = P2pMetrics::new();
+        p.set_pqc_trust_bundle_activation_height_required(100);
+        p.set_pqc_trust_bundle_activation_height_current(99);
+        p.inc_pqc_trust_bundle_activation_rejected();
+        let out = p.format_metrics();
+        for name in [
+            "qbind_p2p_pqc_trust_bundle_activation_height_required ",
+            "qbind_p2p_pqc_trust_bundle_activation_height_current ",
+            "qbind_p2p_pqc_trust_bundle_activation_epoch_required ",
+            "qbind_p2p_pqc_trust_bundle_activation_epoch_current ",
+            "qbind_p2p_pqc_trust_bundle_activation_rejected_total ",
+        ] {
+            let n = out.matches(name).count();
+            assert_eq!(
+                n, 1,
+                "metric {} must appear exactly once in P2pMetrics::format_metrics (got {})\n--- output ---\n{}",
+                name, n, out
+            );
+        }
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_activation_height_required 100"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_activation_height_current 99"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_activation_rejected_total 1"));
+        // Existing Run 050/051/055 metrics still present (no displacement).
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_signature_verified_total "));
     }

@@ -120,6 +120,14 @@ pub mod pqc_trust_bundle;
 // domain; atomic JSON record under `<data_dir>/`; fail-closed on
 // rollback / equivocation / corrupt persistence).
 pub mod pqc_trust_sequence;
+// Run 057 — trust-bundle activation epoch/height gating. Enforces
+// optional `activation_height` / `activation_epoch` fields on a
+// freshly validated trust bundle so a structurally valid, signed,
+// anti-rollback-checked bundle is not accepted before its declared
+// activation condition is satisfied. Runs AFTER signature/env/
+// chain_id/revocation/window validation and BEFORE sequence
+// persistence + root merge.
+pub mod pqc_trust_activation;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;

@@ -67,6 +67,18 @@
 //!   (the new sequence is part of the signed preimage exactly as
 //!   `build_helper_bundle` would have produced).
 //!
+//! Optional 5th positional argument: `[activation_height_override]`
+//!   Decimal `u64`. If supplied, the bundle's bundle-level
+//!   `activation_height` field is set to this value BEFORE signing
+//!   and before the canonical fingerprint is computed. Defaults to
+//!   `None` (no bundle-level activation gate). This is an
+//!   evidence-tooling knob used by Run 057 to mint
+//!   "future-activation" fixtures on the same DevNet trust domain
+//!   shape; it does NOT change signing semantics (the field is part
+//!   of the signed preimage and canonical fingerprint, as
+//!   `pqc_trust_bundle::canonical_signing_bytes` /
+//!   `canonical_fingerprint` already include it).
+//!
 //! Writes to `outdir`:
 //!   root.id.hex                — 64 lowercase hex chars (root_key_id)
 //!   root.pk.hex                — full ML-DSA-44 root public key
@@ -263,6 +275,10 @@ fn main() {
         s.parse::<u64>()
             .expect("optional [sequence_override] must be a u64 decimal")
     });
+    let activation_height_override: Option<u64> = args.next().map(|s| {
+        s.parse::<u64>()
+            .expect("optional [activation_height_override] must be a u64 decimal")
+    });
 
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
@@ -316,6 +332,12 @@ fn main() {
             if let Some(seq) = sequence_override {
                 b.sequence = seq;
             }
+            if let Some(h) = activation_height_override {
+                // Run 057: bundle-level activation_height set before
+                // fingerprint computation; unsigned paths still cover
+                // the field via the canonical fingerprint.
+                b.activation_height = Some(h);
+            }
             b
         }
         Mode::Signed(env, signed_mode, leaf_revocation_target) => {
@@ -330,6 +352,11 @@ fn main() {
                 // Run 056: override sequence BEFORE signing so the
                 // signed preimage covers the requested sequence.
                 b.sequence = seq;
+            }
+            if let Some(h) = activation_height_override {
+                // Run 057: override bundle-level activation_height
+                // BEFORE signing so the signed preimage covers it.
+                b.activation_height = Some(h);
             }
 
             // Run 054: inject an active leaf-cert revocation for the
@@ -468,7 +495,8 @@ fn main() {
 
     eprintln!(
         "[devnet_pqc_trust_bundle_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} \
-         validators={} bundle_mode={} bundle_env={} bundle_sequence={} bundle_fingerprint={} \
+         validators={} bundle_mode={} bundle_env={} bundle_sequence={} \
+         bundle_activation_height={:?} bundle_fingerprint={} \
          signature={} bundle_path={} outdir={}",
         root_id_hex,
         PQC_TRANSPORT_SUITE_ML_DSA_44,
@@ -477,6 +505,7 @@ fn main() {
         bundle_mode_arg,
         bundle.environment,
         bundle.sequence,
+        bundle.activation_height,
         fp_hex,
         signed_summary,
         bundle_path,

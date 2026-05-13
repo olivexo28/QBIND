@@ -278,6 +278,37 @@ pub struct TrustBundle {
     /// operators can find the C4 piece in `contradiction.md`).
     #[serde(default)]
     pub signature: Option<TrustBundleSignature>,
+    /// Run 057: optional bundle-level activation gate.
+    ///
+    /// When present and `>` the runtime current epoch supplied to
+    /// the loader, the bundle is structurally valid but **not yet
+    /// effective** and MUST NOT be merged into the live trust set
+    /// or advance the persisted highest sequence (see
+    /// `crates/qbind-node/src/pqc_trust_activation.rs`).
+    ///
+    /// Run 057 surface: there is no safe pre-consensus epoch source
+    /// in this binary, so any bundle declaring this field fails
+    /// closed today (epoch gating recorded as remaining-open in
+    /// `docs/whitepaper/contradiction.md` C4). The field is
+    /// canonically signed and fingerprinted (it appears in
+    /// `canonical_signing_bytes` and `canonical_fingerprint`); a
+    /// tamper of this field after signing therefore changes the
+    /// signature.
+    #[serde(default)]
+    pub activation_epoch: Option<u64>,
+    /// Run 057: optional bundle-level activation height gate.
+    ///
+    /// When present and `>` the runtime current height supplied to
+    /// the loader, the bundle is structurally valid but **not yet
+    /// effective** and MUST NOT be merged into the live trust set
+    /// or advance the persisted highest sequence. Inclusive: a
+    /// bundle whose `activation_height` equals the runtime current
+    /// height is considered active.
+    ///
+    /// The field is canonically signed and fingerprinted; tampering
+    /// after signing invalidates the signature.
+    #[serde(default)]
+    pub activation_height: Option<u64>,
 }
 
 /// Bundle signature envelope. Stored on disk in the canonical bundle
@@ -605,6 +636,14 @@ pub enum TrustBundleError {
         root_id: String,
         reason: String,
     },
+    /// Run 057: structurally valid + signed bundle was refused
+    /// because its declared `activation_height` / `activation_epoch`
+    /// gate is not yet satisfied at the supplied runtime context,
+    /// OR the runtime source for the gate is unavailable. Carries
+    /// the precise [`crate::pqc_trust_activation::TrustBundleActivationError`]
+    /// detail (which scope — bundle vs. root — and which gate
+    /// fired, plus required / current values).
+    Activation(crate::pqc_trust_activation::TrustBundleActivationError),
 }
 
 impl std::fmt::Display for TrustBundleError {
@@ -726,6 +765,7 @@ impl std::fmt::Display for TrustBundleError {
                 "trust bundle revocation for root_id {} has malformed leaf_cert_fingerprint: {}",
                 root_id, reason
             ),
+            Self::Activation(e) => write!(f, "trust bundle activation gating: {}", e),
         }
     }
 }
@@ -953,6 +993,59 @@ impl TrustBundle {
             validation_time_secs,
             signing_keys,
         )
+    }
+
+    /// Run 057: load + validate + verify signature + check activation
+    /// gate from a JSON file on disk. This is the entry point used by
+    /// the binary (`main.rs`) when an activation runtime context is
+    /// available. On a successful return the bundle has passed every
+    /// Run 050/051/053 structural check AND any declared
+    /// `activation_height` / `activation_epoch` gate.
+    ///
+    /// A bundle whose declared activation gate is not yet reached
+    /// fails closed with [`TrustBundleError::ActivationNotYetReached`];
+    /// a bundle that declares a gate which depends on a runtime
+    /// source that the caller did not supply
+    /// fails closed with [`TrustBundleError::ActivationRuntimeSourceUnavailable`].
+    /// Either failure means the caller MUST NOT advance sequence
+    /// persistence and MUST NOT merge the bundle's roots — the
+    /// returned `Err` already carries the [`crate::pqc_trust_activation::TrustBundleActivationError`]
+    /// detail for forensic logging.
+    pub fn load_from_path_with_signing_keys_chain_id_and_activation(
+        path: &Path,
+        expected_env: NetworkEnvironment,
+        expected_chain_id: ChainId,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+        activation_ctx: crate::pqc_trust_activation::ActivationContext,
+    ) -> Result<
+        (LoadedTrustBundle, crate::pqc_trust_activation::ActivationCheckOutcome),
+        TrustBundleError,
+    > {
+        let bytes = std::fs::read(path)
+            .map_err(|e| TrustBundleError::Io(format!("{}: {}", path.display(), e)))?;
+        let bundle: TrustBundle = serde_json::from_slice(&bytes)
+            .map_err(|e| TrustBundleError::Malformed(format!("{}", e)))?;
+        // Run 057: capture an activation preview from the parsed bundle
+        // so that on activation failure we can surface
+        // (required_height, current_height) even though we never
+        // produced a LoadedTrustBundle. The structural validation
+        // below runs FIRST so we never invoke activation gating on a
+        // malformed envelope; the activation re-check after a
+        // successful structural validate is what binds the gate to
+        // an actually-verified bundle.
+        let loaded = bundle.validate_at_with_signing_keys_and_chain_id(
+            expected_env,
+            expected_chain_id,
+            validation_time_secs,
+            signing_keys,
+        )?;
+        let activation = crate::pqc_trust_activation::check_bundle_activation(
+            &loaded.bundle,
+            activation_ctx,
+        )
+        .map_err(TrustBundleError::Activation)?;
+        Ok((loaded, activation))
     }
 
     /// Validate and produce [`LoadedTrustBundle`] (back-compat shim;
@@ -1345,6 +1438,8 @@ pub fn canonical_signing_bytes(bundle: &TrustBundle) -> Vec<u8> {
         roots: bundle.roots.clone(),
         revocations: bundle.revocations.clone(),
         signature: None,
+        activation_epoch: bundle.activation_epoch,
+        activation_height: bundle.activation_height,
     };
     let json = serde_json::to_vec(&stripped)
         .expect("TrustBundle is pure structs/Vec, serde_json::to_vec cannot fail");
@@ -1426,6 +1521,8 @@ pub fn canonical_fingerprint(bundle: &TrustBundle) -> [u8; 32] {
         roots: bundle.roots.clone(),
         revocations: bundle.revocations.clone(),
         signature: None,
+        activation_epoch: bundle.activation_epoch,
+        activation_height: bundle.activation_height,
     };
     let bytes = serde_json::to_vec(&stripped)
         .expect("TrustBundle is pure structs/Vec, serde_json::to_vec cannot fail");
@@ -1695,6 +1792,8 @@ pub fn build_helper_bundle(
         roots,
         revocations,
         signature: None,
+        activation_epoch: None,
+        activation_height: None,
     }
 }
 
