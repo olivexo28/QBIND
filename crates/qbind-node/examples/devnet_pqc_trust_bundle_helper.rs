@@ -109,6 +109,40 @@
 //!                                       active_roots immediately;
 //!                                       legacy Run 050 behaviour).
 //!
+//!   Run 063 fixtures (signed-bundle + local revoked-issuer-root
+//!   startup self-check, DevNet):
+//!   - `signed-devnet-issuer-root-revocation-active-v0` — signed
+//!                                       DevNet bundle that mints a
+//!                                       SECOND fresh DevNet root and
+//!                                       appends it to `roots[]`
+//!                                       BEFORE signing, then root-
+//!                                       revokes `roots[0]` (the
+//!                                       v0..vN leaf-issuing root)
+//!                                       with `activation_height =
+//!                                       None` (immediately active).
+//!                                       With a second still-active
+//!                                       root in place, the Run 050
+//!                                       `trusted_roots.is_empty()`
+//!                                       FATAL does NOT fire — the
+//!                                       Run 063 startup self-check
+//!                                       fires on a node pointed at
+//!                                       `v0.cert.bin` because the
+//!                                       cert's issuing root is on
+//!                                       the active `revoked_root_ids`
+//!                                       set.
+//!   - `signed-devnet-issuer-root-revocation-pending-v0` — same
+//!                                       two-root shape as
+//!                                       `*-active-v0` but with
+//!                                       `activation_height =
+//!                                       u64::MAX`. The revocation
+//!                                       stays PENDING under the
+//!                                       binary's loader, so neither
+//!                                       Run 050 nor Run 063 fires —
+//!                                       the node starts cleanly
+//!                                       even though the bundle
+//!                                       DECLARES the v0 issuer's
+//!                                       root revoked.
+//!
 //! Optional 4th positional argument: `[sequence_override]`
 //!   Decimal `u64`. If supplied, the bundle's `sequence` field is set
 //!   to this value BEFORE signing (for signed modes) and before the
@@ -264,6 +298,17 @@ struct Run062RevocationGate {
     /// smokes can be driven from the helper without redesigning the
     /// mode taxonomy.
     emit_root_revocation: bool,
+    /// Run 063: when true, mint a second fresh DevNet root and append
+    /// it to `roots[]` BEFORE signing. No leaf cert is issued from the
+    /// second root; it exists solely so that an active root-scope
+    /// revocation of `roots[0]` (the leaf-issuing root) does not
+    /// empty the bundle's active-roots set. This is the smallest
+    /// helper extension that lets a release-binary smoke exercise
+    /// the Run 063 local revoked-issuer-root self-check on its
+    /// negative path (where `roots[0]` is revoked but `roots[1]`
+    /// remains active so the Run 050 `trusted_roots.is_empty()` FATAL
+    /// does NOT fire before Run 063).
+    emit_second_unrelated_root: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,11 +345,11 @@ fn parse_mode(s: &str) -> Mode {
             Some(TrustBundleEnvironment::Mainnet),
         ),
         // Run 051 signed fixtures.
-        "signed-devnet" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-testnet" => Mode::Signed(TrustBundleEnvironment::Testnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-mainnet" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-tampered" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-wrong-key" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-devnet" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-testnet" => Mode::Signed(TrustBundleEnvironment::Testnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-mainnet" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-tampered" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-wrong-key" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
         // Run 059 MainNet evidence fixtures: same tamper / wrong-key
         // semantics as the existing DevNet-env signed-tampered /
         // signed-wrong-key modes, but emitted with
@@ -312,15 +357,15 @@ fn parse_mode(s: &str) -> Mode {
         // MainNet bundle path. The env is the only difference from
         // the existing DevNet-env modes; the per-mode signing /
         // tampering logic below is unchanged.
-        "signed-mainnet-tampered" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-mainnet-wrong-key" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-unsupported-suite" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::UnsupportedSuite, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-malformed" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::MalformedSignatureBytes, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-key-root-collision" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::KeyRootCollision, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-mainnet-tampered" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-mainnet-wrong-key" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-unsupported-suite" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::UnsupportedSuite, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-malformed" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::MalformedSignatureBytes, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-key-root-collision" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::KeyRootCollision, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
         // Run 054 signed-bundle leaf-revocation fixtures.
-        "signed-devnet-revoked-v0" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(0), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-devnet-revoked-v1" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(1), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
-        "signed-devnet-revoked-unknown" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::UnknownAllZeros, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-devnet-revoked-v0" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(0), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-devnet-revoked-v1" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(1), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
+        "signed-devnet-revoked-unknown" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::UnknownAllZeros, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false, emit_second_unrelated_root: false }),
         // Run 062 leaf-revocation activation gates. The
         // `[revocation_activation_height_for_target]` positional arg
         // (see `main` below) sets the `activation_height` field on
@@ -337,6 +382,7 @@ fn parse_mode(s: &str) -> Mode {
             Run062RevocationGate {
                 revocation_activation_height: Some(u64::MAX),
                 emit_root_revocation: false,
+                emit_second_unrelated_root: false,
             },
         ),
         "signed-devnet-leaf-revocation-active-v0" => Mode::Signed(
@@ -346,6 +392,7 @@ fn parse_mode(s: &str) -> Mode {
             Run062RevocationGate {
                 revocation_activation_height: Some(0),
                 emit_root_revocation: false,
+                emit_second_unrelated_root: false,
             },
         ),
         // Run 062 root-revocation activation gates. These emit a
@@ -360,6 +407,7 @@ fn parse_mode(s: &str) -> Mode {
             Run062RevocationGate {
                 revocation_activation_height: Some(u64::MAX),
                 emit_root_revocation: true,
+                emit_second_unrelated_root: false,
             },
         ),
         "signed-devnet-root-revocation-active" => Mode::Signed(
@@ -369,6 +417,53 @@ fn parse_mode(s: &str) -> Mode {
             Run062RevocationGate {
                 revocation_activation_height: Some(0),
                 emit_root_revocation: true,
+                emit_second_unrelated_root: false,
+            },
+        ),
+        // Run 063 issuer-root local revocation startup self-check
+        // fixtures. Both modes mint a SECOND fresh DevNet root and
+        // append it to `roots[]` BEFORE signing, then root-revoke
+        // `roots[0]` (the root from which all v0..vN leaf certs are
+        // issued). With a second still-active root in place, the
+        // bundle's `active_roots` set is non-empty even after
+        // `roots[0]` is revoked, so the Run 050
+        // `trusted_roots.is_empty()` FATAL does NOT fire — giving
+        // the Run 063 startup self-check a chance to evaluate the
+        // local leaf's issuing root against the active
+        // `revoked_root_ids` set.
+        //
+        //   - `*-active-v0` uses `activation_height = None` so the
+        //     revocation is immediately active under the binary's
+        //     `validate_at_with_signing_keys_chain_id_and_revocation_
+        //     activation` loader (Run 062). The expected outcome is
+        //     that the Run 063 FATAL fires when the operator points
+        //     `--p2p-leaf-cert` at `v0.cert.bin` (whose issuer is the
+        //     revoked `roots[0]`).
+        //   - `*-pending-v0` uses `activation_height = u64::MAX` so
+        //     the revocation stays PENDING under the binary's
+        //     loader. The expected outcome is that the Run 063
+        //     self-check does NOT fire (pending entries do not
+        //     appear in `revoked_root_ids`), so the node starts
+        //     cleanly even though the bundle DECLARES the v0
+        //     issuer's root revoked.
+        "signed-devnet-issuer-root-revocation-active-v0" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: None,
+                emit_root_revocation: true,
+                emit_second_unrelated_root: true,
+            },
+        ),
+        "signed-devnet-issuer-root-revocation-pending-v0" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: Some(u64::MAX),
+                emit_root_revocation: true,
+                emit_second_unrelated_root: true,
             },
         ),
         other => panic!(
@@ -384,7 +479,9 @@ fn parse_mode(s: &str) -> Mode {
              signed-devnet-leaf-revocation-pending-v0 / \
              signed-devnet-leaf-revocation-active-v0 / \
              signed-devnet-root-revocation-pending / \
-             signed-devnet-root-revocation-active)",
+             signed-devnet-root-revocation-active / \
+             signed-devnet-issuer-root-revocation-active-v0 / \
+             signed-devnet-issuer-root-revocation-pending-v0)",
             other
         ),
     }
@@ -595,6 +692,41 @@ fn main() {
                     effective_from: 0,
                     activation_height: revocation_activation_height_for_target,
                 });
+            }
+
+            // Run 063: append a SECOND fresh DevNet root to `roots[]`
+            // BEFORE signing when the mode requests it. No leaf cert
+            // is issued from this root — its sole purpose is to keep
+            // the bundle's `active_roots` set non-empty after an
+            // active root-scope revocation of `roots[0]` (the leaf-
+            // issuing root). This lets the Run 063 startup self-check
+            // be exercised on the live release binary without the
+            // Run 050 `trusted_roots.is_empty()` FATAL firing first.
+            // The second root's `root_pk` is a fresh ephemeral
+            // ML-DSA-44 public key; the corresponding secret key is
+            // discarded (never written to disk and never used).
+            if run062_gate.emit_second_unrelated_root {
+                let second_root = mint_devnet_root().expect("second root keygen");
+                let second_root_id_hex = hex_lower(&second_root.root_key_id);
+                let second_root_pk_hex = hex_lower(&second_root.root_pk);
+                b.roots.push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
+                    root_id: second_root_id_hex.clone(),
+                    suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+                    root_pk: second_root_pk_hex.clone(),
+                    not_before: 0,
+                    not_after: u64::MAX,
+                    status: qbind_node::pqc_trust_bundle::RootStatus::Active,
+                    activation_epoch: None,
+                    activation_height: None,
+                });
+                // Emit a side-channel file so a smoke can record the
+                // identity of the second still-active root for the
+                // evidence doc.
+                fs::write(
+                    format!("{}/second-root.id.hex", outdir),
+                    &second_root_id_hex,
+                )
+                .expect("write second-root.id.hex");
             }
 
             // Mint a fresh bundle-signing keypair. NEVER written to disk.

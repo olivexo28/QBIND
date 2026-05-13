@@ -1324,6 +1324,110 @@ async fn run_p2p_node(
         }
     }
 
+    // Run 063 — local revoked-issuer-root startup self-check.
+    //
+    // If the node's own `--p2p-leaf-cert` was issued by a transport
+    // root that is on the loaded trust bundle's currently-ACTIVE
+    // `revoked_root_ids` set, fail closed BEFORE any P2P state is
+    // constructed or any peer connection is attempted. We use
+    // `loaded.revoked_root_ids` (the ACTIVE set built by Run 062's
+    // `validate_at_with_signing_keys_chain_id_and_revocation_activation`):
+    // PENDING root revocations (`pending_revoked_root_ids`) MUST NOT
+    // trigger startup failure.
+    //
+    // Ordering. This check runs:
+    //   - AFTER signed-bundle ML-DSA-44 signature verification
+    //     (Run 051), environment binding (Run 050), chain_id
+    //     binding (Run 053), activation-height gating (Run 057),
+    //     sequence anti-rollback persistence (Run 055), revocation
+    //     activation filtering (Run 062), and the Run 061 local
+    //     leaf-fingerprint self-check;
+    //   - BEFORE `pqc_config` is moved into the builder,
+    //     `P2pNodeBuilder::with_pqc_leaf_revocations` is called,
+    //     `builder.build(...)` constructs any live P2P trust
+    //     context, listener, dialer, or peer manager, and any
+    //     cert-verify counter could move.
+    //
+    // Identity rule. The issuer root identity is taken from the
+    // decoded `NetworkDelegationCert.root_key_id` field — byte-
+    // identical to the identity the cert-verify path uses to look
+    // up the trusted root pk (pinned by the unit test
+    // `run063_self_check_uses_same_root_id_as_cert_verify_path`).
+    //
+    // Metrics/logging. No new `/metrics` family is added: the node
+    // exits before `/metrics` is bound by the live HTTP path, so a
+    // counter bumped here would never be scrapeable. The Run 052
+    // peer-handshake counter `qbind_p2p_pqc_cert_verify_rejected_
+    // revoked_total` is NOT bumped — it is a handshake metric.
+    if let (Some(loaded), Some(local_leaf)) =
+        (trust_bundle_loaded.as_ref(), leaf_credentials.as_ref())
+    {
+        match qbind_node::pqc_trust_bundle::check_local_leaf_issuer_root_not_revoked(
+            &local_leaf.cert_bytes,
+            &loaded.revoked_root_ids,
+            &loaded.fingerprint,
+        ) {
+                Ok(local_root_id) => {
+                    let local_root_hex =
+                        qbind_node::pqc_trust_bundle::cert_leaf_fingerprint_hex(&local_root_id);
+                    eprintln!(
+                        "[binary] Run 063: local-leaf issuer-root startup self-check passed \
+                         (local_issuer_root_id={}.. bundle_fp={}.. \
+                         active_revoked_root_ids={})",
+                        &local_root_hex[..8],
+                        &loaded.fingerprint_hex()[..8],
+                        loaded.revoked_root_count(),
+                    );
+                }
+                Err(e) => {
+                    use qbind_node::pqc_trust_bundle::LocalLeafIssuerRootSelfCheckError;
+                    // We deliberately do NOT bump
+                    // `qbind_p2p_pqc_cert_verify_rejected_revoked_total`
+                    // here: that family is the Run 052 peer-handshake
+                    // contract and must remain a handshake-only signal.
+                    // A dedicated startup metric is not added in Run
+                    // 063 because the node exits before `/metrics` is
+                    // bound by the live HTTP path, so a counter would
+                    // never be scrapeable — adding it would be
+                    // misleading per task §4 (metrics/logging).
+                    match &e {
+                        LocalLeafIssuerRootSelfCheckError::IssuerRootRevoked {
+                            root_id_prefix,
+                            leaf_fingerprint_prefix,
+                            bundle_fingerprint_prefix,
+                        } => {
+                            eprintln!(
+                                "[binary] FATAL: Run 063 local leaf certificate issuer root revoked: \
+                                 the local --p2p-leaf-cert was issued by transport root id ({}..) \
+                                 which appears in the active revoked_root_ids set of the loaded \
+                                 trust bundle (bundle fp {}.., local leaf fp {}..). Refusing to \
+                                 start P2P. No fallback to --p2p-trusted-root on bundle-revoked \
+                                 local issuer root. See \
+                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_063.md and \
+                                 docs/whitepaper/contradiction.md C4 (signed root \
+                                 distribution).",
+                                root_id_prefix, bundle_fingerprint_prefix, leaf_fingerprint_prefix,
+                            );
+                            std::process::exit(1);
+                        }
+                        LocalLeafIssuerRootSelfCheckError::DecodeFailed => {
+                            // Unreachable on this path —
+                            // `PqcLeafCredentialPaths::load` already
+                            // validated the cert shape. Preserve
+                            // fail-closed behaviour anyway.
+                            eprintln!(
+                                "[binary] FATAL: Run 063 local --p2p-leaf-cert could not be \
+                                 decoded as NetworkDelegationCert during startup issuer-root \
+                                 self-check. Refusing to start P2P. See \
+                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_063.md."
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+    }
+
     let pqc_config = PqcStaticRootConfig {
         mode: pqc_root_mode,
         trusted_roots: trusted_roots.clone(),

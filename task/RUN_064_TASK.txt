@@ -1,0 +1,277 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement at the handshake boundary.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary revoked-peer leaf evidence artifacts.
+- Run 055 landed sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence artifacts.
+- Run 057 implemented activation-height gating for trust bundles.
+- Run 058 produced release-binary activation-height evidence artifacts.
+- Run 059 produced MainNet signed-bundle release-binary evidence.
+- Run 060 landed the production PQC trust lifecycle operator playbook.
+- Run 061 implemented local revoked-leaf startup self-check:
+  - local leaf fingerprint uses the same Run 052 semantics:
+    SHA3-256("QBIND:pqc-trust-bundle-leaf-fp:v1" || cert.encode())
+  - local revoked leaf fails closed before P2P startup
+  - unknown revoked fingerprint remains no-op
+- Run 062 implemented per-entry revocation activation_height:
+  - revocation entries without activation_height remain immediate
+  - revocation entries with activation_height > current_height are pending
+  - revocation entries with activation_height <= current_height are active
+  - pending root/leaf revocations do not reject early
+  - active root/leaf revocations fail closed
+- Run 063 implemented local issuer-root revocation startup self-check:
+  - local leaf cert is decoded
+  - issuing root_id is extracted
+  - active revoked root set is checked
+  - active-revoked local issuer root fails closed before P2P startup
+  - pending-revoked local issuer root is not rejected early
+  - unrelated active-revoked root does not reject the local leaf
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust/lifecycle items include:
+- operator runbook prose update for Runs 061–063 behavior
+- per-environment minimum activation-height policy
+- on-the-fly trust-bundle hot reload
+- activation_epoch runtime source
+- in-binary / on-chain bundle-signing-key ratification
+- external KMS/HSM custody integration
+- multi-validator MainNet peer-connection evidence
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+
+Task:
+Run 064. Update the operator lifecycle runbook to reflect Runs 061–063 behavior.
+
+Primary objective:
+Update docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md so operators have accurate guidance for:
+- local leaf-fingerprint startup self-check from Run 061;
+- per-entry revocation activation_height from Run 062;
+- local issuer-root startup self-check from Run 063;
+- root/leaf revocation ordering and operational expectations;
+- evidence mapping to Runs 061–063.
+
+Important framing:
+This is a documentation and consistency task.
+Do not change runtime code unless a contradiction is found.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not modify consensus or timeout logic.
+Do not implement KMS/HSM.
+Do not implement signing-key ratification.
+Do not implement hot reload.
+Do not implement minimum activation-margin policy.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Docs-first.
+- Source changes are allowed only if the runbook reveals a real contradiction in current code or tests.
+- If no contradiction is found, do not touch crates/**/src/**.
+- Preserve all Run 050–063 claims accurately.
+- Do not recommend static-root fallback.
+- Do not recommend Dummy crypto.
+- Do not recommend unsigned MainNet bundles.
+- Do not recommend key reuse between transport roots, bundle-signing keys, validator consensus keys, or leaf KEM material.
+- Crosscheck all runbook updates against existing evidence docs and contradiction.md.
+
+Required investigation:
+
+1. Inspect current operator runbook
+   Inspect:
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_060.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_061.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_062.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_063.md
+   - docs/whitepaper/contradiction.md
+
+   Also inspect code only for reference, not to modify:
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/examples/devnet_pqc_trust_bundle_helper.rs
+   - crates/qbind-node/tests/run_061_pqc_local_leaf_self_check_tests.rs
+   - crates/qbind-node/tests/run_062_pqc_revocation_activation_tests.rs
+   - crates/qbind-node/tests/run_063_pqc_local_issuer_root_self_check_tests.rs
+
+   Document investigation findings in Run 064 evidence doc.
+
+2. Update runbook sections for Run 061
+   Add or revise operator guidance for local leaf-fingerprint startup self-check:
+   - local node fails closed if its own --p2p-leaf-cert fingerprint is active-revoked.
+   - check occurs before P2P startup.
+   - unknown revoked leaf fingerprint is no-op.
+   - fingerprint semantics:
+     SHA3-256("QBIND:pqc-trust-bundle-leaf-fp:v1" || cert.encode())
+   - operators should treat local revoked-leaf startup failure as credential-compromise or stale-cert deployment.
+   - remediation:
+     - issue fresh leaf cert and KEM material if needed;
+     - publish signed trust bundle with correct revocation state;
+     - do not remove revocation or use static-root fallback to restore liveness.
+   - note that handshake-level peer revocation from Run 052 remains active.
+
+3. Update runbook sections for Run 062
+   Add or revise operator guidance for per-entry revocation activation_height:
+   - immediate revocation if activation_height is absent.
+   - pending revocation if activation_height > current_height.
+   - active revocation if activation_height <= current_height.
+   - pending revocations must not reject early.
+   - active revocations must fail closed.
+   - root and leaf revocations both support active/pending behavior.
+   - current_height source follows Run 057 semantics:
+     - restore baseline snapshot_height if restore path is used;
+     - otherwise 0 at startup.
+   - do not confuse bundle activation_height with revocation entry activation_height:
+     - bundle activation gate controls whether the entire bundle may load;
+     - revocation activation controls whether a specific revocation entry is enforced after bundle load.
+   - sequence interaction:
+     - future revocation bundle may advance sequence if the bundle itself is active and valid;
+     - the revocation remains pending until its own activation_height is reached.
+   - operational recommendation:
+     - scheduled revocations should use activation_height only when operators can safely coordinate the cutover;
+     - emergency compromise revocations should usually be immediate.
+
+4. Update runbook sections for Run 063
+   Add or revise operator guidance for local issuer-root startup self-check:
+   - local node fails closed if its local leaf cert was issued by an actively revoked root.
+   - pending root revocation does not reject early.
+   - unrelated active-revoked root does not reject a local leaf issued by a still-active root.
+   - root-level local check is independent from leaf-fingerprint local check.
+   - precedence:
+     - active leaf fingerprint revocation fails local startup;
+     - active issuer-root revocation also fails local startup;
+     - if both apply, operator should treat the credential as untrusted and rotate.
+   - remediation:
+     - move validator to fresh cert under non-revoked root;
+     - ensure bundle includes active trusted root;
+     - do not bypass with static CLI roots.
+
+5. Update operator workflows
+   Revise normal and emergency flows to include Runs 061–063:
+   - Normal transport root rotation:
+     - during overlap, old and new roots active.
+     - scheduled future root revocation may be used only after validators have migrated.
+     - local issuer-root startup check will stop nodes still using old-root certs once old root revocation becomes active.
+   - Emergency root revocation:
+     - active root revocation will stop any local node still using certs issued by the compromised root.
+     - liveness risk must be explicitly considered before publishing immediate root revocation.
+   - Leaf cert rotation:
+     - active leaf revocation stops only that exact cert.
+     - pending leaf revocation can be used for coordinated cutover.
+   - Incident checklist:
+     - identify whether revocation is root-level or leaf-level.
+     - identify activation_height.
+     - confirm which validators will fail local startup after activation.
+     - confirm new certs are available before activation if liveness is needed.
+   - Evidence checklist:
+     - require positive pending-revocation smoke where scheduled revocation is used.
+     - require active-revocation fail-closed smoke.
+     - require no static-root fallback and no Dummy crypto proof.
+
+6. Update residual risks section
+   Ensure remaining open items are accurate:
+   - per-environment minimum activation-height policy remains open.
+   - activation_epoch runtime source remains open.
+   - hot reload remains open.
+   - in-binary/on-chain bundle-signing-key ratification remains open.
+   - external KMS/HSM custody remains open.
+   - multi-validator MainNet peer-connection smoke remains open.
+   - production fast-sync / consensus-storage restore remains open.
+   - full C4/C5 remain open.
+   - Remove or update any text saying local revoked-leaf or local issuer-root startup self-check is still open.
+
+7. Update evidence mapping
+   Add mapping:
+   - Run 061: local leaf-fingerprint startup self-check.
+   - Run 062: per-entry revocation activation_height active/pending behavior.
+   - Run 063: local issuer-root startup self-check.
+   - Update Runs 050–060 mapping if needed so the chronology remains clear.
+
+Required deliverables:
+
+1. Update:
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+
+2. Create:
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_064.md
+
+   Evidence doc must include:
+   - exact objective
+   - exact verdict
+   - exact files changed
+   - exact commands run
+   - tests/checks run and pass/fail status
+   - investigation findings with file/function references
+   - runbook sections changed
+   - how Runs 061–063 are represented
+   - contradictions found or not found
+   - remaining open items
+   - exact immediate next action
+
+3. Update if needed:
+   - docs/whitepaper/contradiction.md
+
+   Update rules:
+   - If the runbook is updated to reflect Runs 061–063, append a Run 064 C4 note saying the operator playbook prose gap is closed/narrowed.
+   - Keep C4 open for:
+     - per-environment minimum activation-height policy
+     - activation_epoch runtime source
+     - hot reload
+     - in-binary/on-chain bundle-signing-key ratification
+     - KMS/HSM custody
+     - multi-validator MainNet peer-connection evidence
+     - production fast-sync / consensus-storage restore
+     - per-environment production trust-anchor operation
+   - Do not close full C4.
+   - Do not claim C5 closure.
+   - If the runbook contradicts implemented behavior, fix the runbook and record the contradiction if material.
+
+Required checks:
+Because this is docs-only unless contradictions are found, run:
+- grep or rg checks proving no unsafe guidance:
+  - no recommendation to use --p2p-trusted-root as fallback
+  - no recommendation to use DummySig / DummyKem / DummyAead
+  - no recommendation to accept unsigned MainNet bundles
+  - no recommendation to reuse transport root key as bundle-signing key
+- markdown/link sanity if project has a checker.
+- cargo check -p qbind-node --bin qbind-node
+
+If source files are touched, additionally run all affected unit/integration tests.
+
+Expected verdict options:
+- Strongest positive:
+  runbook updated accurately for Runs 061–063, evidence doc created, contradiction.md updated, unsafe guidance absent, cargo check passes, no source changes required.
+- Partial positive:
+  runbook updated but some evidence references or checks are incomplete. State boundary.
+- Negative:
+  runbook still contradicts implemented behavior, unsafe fallback/key reuse guidance remains, or checks fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/checks run and pass/fail status
+5. What was fixed or documented
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended

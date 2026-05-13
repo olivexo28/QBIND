@@ -1894,6 +1894,173 @@ pub fn check_local_leaf_not_revoked(
 }
 
 // ---------------------------------------------------------------------
+// Run 063: local revoked-issuer-root startup self-check.
+// ---------------------------------------------------------------------
+//
+// Boundary closed by this helper (paired with Run 061's
+// `check_local_leaf_not_revoked`):
+//
+//   - Run 061 fail-closes when the local `--p2p-leaf-cert`'s canonical
+//     leaf fingerprint matches an ACTIVE entry on the bundle's
+//     `revoked_leaf_fingerprints` set.
+//   - Run 063 fail-closes when the local `--p2p-leaf-cert`'s issuing
+//     transport-root id matches an ACTIVE entry on the bundle's
+//     `revoked_root_ids` set (i.e. the cert was issued by a root the
+//     trust bundle has actively revoked at the root scope).
+//
+// Identity rule (pinned by tests):
+//
+//   - The issuer root identity is taken from the decoded
+//     `NetworkDelegationCert.root_key_id` field — byte-identical to
+//     the identity the cert-verify path uses to look up the trusted
+//     root pk in `pqc_root_config::PqcRootConfig::lookup_root_pk` and
+//     to the identity the bundle parser inserts into
+//     `LoadedTrustBundle::revoked_root_ids` (the `roots[i].root_id`
+//     32-byte canonical form). The helper does NOT infer root_id from
+//     the cert file name, the CLI root order, the validator id, or
+//     the KEM pk.
+//
+// Activation-gate semantics (pinned by tests):
+//
+//   - The helper is told the ACTIVE revoked-root set only. PENDING
+//     root revocations (Run 062 `pending_revoked_root_ids`) MUST NOT
+//     be passed in — the binary call site uses
+//     `loaded.revoked_root_ids` (the active set), which already
+//     excludes pending entries by construction in
+//     `validate_at_with_signing_keys_chain_id_and_revocation_activation`.
+//
+// Precedence relative to Run 061 (pinned by tests):
+//
+//   - Both checks run at startup; both must pass for the node to
+//     start. The leaf-fingerprint check (Run 061) fires first in
+//     `main.rs`; the issuer-root check (Run 063) fires immediately
+//     after. The two error variants are distinct so the FATAL line
+//     reveals which axis rejected the boot. If a bundle revokes both
+//     the local leaf fingerprint AND the local issuer root, Run 061's
+//     FATAL is the one observed (and both would otherwise fire).
+//
+// Metrics / logging discipline:
+//
+//   - No new `/metrics` family is added in Run 063. The node exits
+//     before the live `/metrics` scrape path is bound, so a counter
+//     bumped here would never be scrapeable — adding it would be
+//     misleading per the task §4 (metrics/logging).
+//   - The Run 052 peer-handshake counter
+//     `qbind_p2p_pqc_cert_verify_rejected_revoked_total` is a
+//     handshake metric and MUST NOT be bumped by this startup
+//     self-check (asserted by the unit test
+//     `run063_self_check_does_not_touch_peer_handshake_metric_family`).
+//
+// Private-material discipline (pinned by tests):
+//
+//   - The helper signature accepts only the public cert bytes, the
+//     public active revoked-root id set, and the public bundle
+//     fingerprint. There is no way to supply a KEM secret, a root
+//     signing secret, or a bundle-signing secret. The helper is a
+//     pure function: same inputs → same output.
+
+/// Outcome of a [`check_local_leaf_issuer_root_not_revoked`] call.
+/// Carries only log-safe digest prefixes; never any private-key
+/// material.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalLeafIssuerRootSelfCheckError {
+    /// The local leaf cert bytes could not be decoded as a
+    /// `NetworkDelegationCert`. On the binary path this is unreachable
+    /// because `PqcLeafCredentialPaths::load` already validates the
+    /// shape; the helper preserves fail-closed semantics anyway so it
+    /// is safe to call from tests or any future wiring point that has
+    /// not yet decoded the cert.
+    DecodeFailed,
+    /// The local leaf cert's issuing transport-root id is on the
+    /// trust bundle's currently-active root revocation set. The
+    /// 8-hex-char prefixes are log-safe identifiers: the root id is
+    /// a public anchor identifier surfaced on the wire and on
+    /// `/metrics`, and the bundle fingerprint is already surfaced as
+    /// a startup log line and on `/metrics`.
+    IssuerRootRevoked {
+        root_id_prefix: String,
+        leaf_fingerprint_prefix: String,
+        bundle_fingerprint_prefix: String,
+    },
+}
+
+impl std::fmt::Display for LocalLeafIssuerRootSelfCheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DecodeFailed => write!(
+                f,
+                "local leaf certificate could not be decoded as a NetworkDelegationCert"
+            ),
+            Self::IssuerRootRevoked {
+                root_id_prefix,
+                leaf_fingerprint_prefix,
+                bundle_fingerprint_prefix,
+            } => write!(
+                f,
+                "local leaf certificate issuer root revoked: root_id={}.. leaf_fp={}.. bundle_fp={}..",
+                root_id_prefix, leaf_fingerprint_prefix, bundle_fingerprint_prefix,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LocalLeafIssuerRootSelfCheckError {}
+
+/// Run 063: local revoked-issuer-root startup self-check helper.
+///
+/// Decodes `local_leaf_cert_bytes` as a `NetworkDelegationCert`,
+/// extracts the issuing transport-root id (the cert's
+/// `root_key_id` field — byte-identical to the identity the
+/// cert-verify path uses to look up the trusted root pk), and
+/// returns:
+///
+/// - `Ok(root_id)` if the issuer root is NOT in
+///   `active_revoked_root_ids` (including the common empty-set case);
+/// - `Err(LocalLeafIssuerRootSelfCheckError::IssuerRootRevoked { .. })`
+///   if it is — the caller (the `qbind-node` binary) MUST fail
+///   closed and exit before any P2P construction;
+/// - `Err(LocalLeafIssuerRootSelfCheckError::DecodeFailed)` if the
+///   bytes are not a well-formed cert (defence-in-depth —
+///   unreachable on the binary path because the cert has already
+///   been decoded once by `PqcLeafCredentialPaths::load`).
+///
+/// `active_revoked_root_ids` MUST be the ACTIVE set
+/// (`LoadedTrustBundle::revoked_root_ids`). PENDING root revocations
+/// (Run 062 `pending_revoked_root_ids`) MUST NOT be passed in.
+///
+/// `bundle_fingerprint` is used only to populate the log-safe
+/// `bundle_fingerprint_prefix` on a revocation rejection; it is not
+/// otherwise consulted.
+///
+/// This function reads NO private-key material. It takes only the
+/// public cert bytes, the public active revoked-root set, and the
+/// public bundle fingerprint. The helper is a pure function: same
+/// inputs → same output.
+pub fn check_local_leaf_issuer_root_not_revoked(
+    local_leaf_cert_bytes: &[u8],
+    active_revoked_root_ids: &HashSet<[u8; 32]>,
+    bundle_fingerprint: &[u8; 32],
+) -> Result<[u8; 32], LocalLeafIssuerRootSelfCheckError> {
+    use qbind_wire::io::WireDecode;
+    let mut slice: &[u8] = local_leaf_cert_bytes;
+    let cert = qbind_wire::net::NetworkDelegationCert::decode(&mut slice)
+        .map_err(|_| LocalLeafIssuerRootSelfCheckError::DecodeFailed)?;
+    let root_id = cert.root_key_id;
+    if active_revoked_root_ids.contains(&root_id) {
+        let root_prefix = cert_leaf_fingerprint_hex(&root_id);
+        let leaf_fp = cert_leaf_fingerprint(&cert);
+        let leaf_prefix = cert_leaf_fingerprint_hex(&leaf_fp);
+        let bundle_prefix = cert_leaf_fingerprint_hex(bundle_fingerprint);
+        return Err(LocalLeafIssuerRootSelfCheckError::IssuerRootRevoked {
+            root_id_prefix: root_prefix[..8].to_string(),
+            leaf_fingerprint_prefix: leaf_prefix[..8].to_string(),
+            bundle_fingerprint_prefix: bundle_prefix[..8].to_string(),
+        });
+    }
+    Ok(root_id)
+}
+
+// ---------------------------------------------------------------------
 // helpers — mirror the hex parsing discipline of `pqc_root_config`.
 // ---------------------------------------------------------------------
 
@@ -3374,6 +3541,225 @@ mod tests {
         // bundle prefix is `abababab` (8 chars), not the full hex.
         assert!(s.contains("abababab"));
         assert!(!s.contains("abababababababababababababababab"));
+    }
+
+    // -----------------------------------------------------------------
+    // Run 063: local revoked-issuer-root startup self-check unit tests.
+    // -----------------------------------------------------------------
+
+    fn build_fixture_cert_with_root(
+        validator_byte: u8,
+        root_byte: u8,
+    ) -> qbind_wire::net::NetworkDelegationCert {
+        qbind_wire::net::NetworkDelegationCert {
+            version: 1,
+            validator_id: [validator_byte; 32],
+            root_key_id: [root_byte; 32],
+            leaf_kem_suite_id: 1,
+            leaf_kem_pk: vec![0x22; 32],
+            not_before: 1_000,
+            not_after: 2_000,
+            ext_bytes: vec![],
+            sig_suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            sig_bytes: vec![0x33; 64],
+        }
+    }
+
+    #[test]
+    fn run063_self_check_passes_when_issuer_root_is_not_revoked() {
+        // Empty active revoked-root set: the most common no-op case.
+        // The helper returns the issuer root_id and the caller
+        // proceeds normally.
+        let cert = build_fixture_cert_with_root(0xA1, 0x77);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let root_id = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        assert_eq!(root_id, [0x77u8; 32]);
+    }
+
+    #[test]
+    fn run063_self_check_passes_when_unrelated_root_is_revoked() {
+        // The bundle root-revokes a DIFFERENT root; the local cert's
+        // issuer root is unrelated and must be allowed to start.
+        let cert = build_fixture_cert_with_root(0xB2, 0x77);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let mut revoked: HashSet<[u8; 32]> = HashSet::new();
+        revoked.insert([0x99u8; 32]);
+        let bundle_fp = [0u8; 32];
+        let root_id = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("unrelated revoked root must not reject local issuer root");
+        assert_eq!(root_id, [0x77u8; 32]);
+    }
+
+    #[test]
+    fn run063_self_check_fails_closed_when_issuer_root_is_actively_revoked() {
+        // Negative path: the local cert's issuer root_id appears in
+        // the active revoked-root set. Helper MUST return
+        // IssuerRootRevoked and the caller MUST exit non-zero.
+        let cert = build_fixture_cert_with_root(0xD4, 0x77);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let mut revoked: HashSet<[u8; 32]> = HashSet::new();
+        revoked.insert([0x77u8; 32]);
+        let bundle_fp: [u8; 32] = [
+            0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let err = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .unwrap_err();
+        match err {
+            LocalLeafIssuerRootSelfCheckError::IssuerRootRevoked {
+                root_id_prefix,
+                leaf_fingerprint_prefix,
+                bundle_fingerprint_prefix,
+            } => {
+                assert_eq!(root_id_prefix.len(), 8);
+                assert_eq!(root_id_prefix, "77777777");
+                assert_eq!(leaf_fingerprint_prefix.len(), 8);
+                let leaf_fp = cert_leaf_fingerprint(&cert);
+                let leaf_full = cert_leaf_fingerprint_hex(&leaf_fp);
+                assert_eq!(leaf_fingerprint_prefix, leaf_full[..8]);
+                assert_eq!(bundle_fingerprint_prefix, "feedface");
+            }
+            other => panic!("expected IssuerRootRevoked, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run063_self_check_fails_closed_on_malformed_local_cert_bytes() {
+        // Defence in depth: even though the binary path has already
+        // validated the cert shape via `PqcLeafCredentialPaths::load`,
+        // the helper itself fails closed on garbage input.
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let err = check_local_leaf_issuer_root_not_revoked(&[0u8; 4], &revoked, &bundle_fp)
+            .unwrap_err();
+        assert_eq!(err, LocalLeafIssuerRootSelfCheckError::DecodeFailed);
+        assert!(format!("{}", err).contains("could not be decoded"));
+    }
+
+    #[test]
+    fn run063_self_check_uses_same_root_id_as_cert_verify_path() {
+        // The Run 063 issuer-root identity MUST be the decoded
+        // `NetworkDelegationCert.root_key_id` field — byte-identical
+        // to the identity the cert-verify path uses to look up the
+        // trusted root pk. We assert this by decoding the cert with
+        // the public `decode_network_delegation_cert` helper from
+        // `pqc_root_config` and comparing the returned root_id.
+        let cert = build_fixture_cert_with_root(0xE5, 0x42);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let helper_root_id =
+            check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+                .expect("not revoked");
+        // The cert-verify path decodes the cert and reads root_key_id.
+        let decoded = crate::pqc_root_config::decode_network_delegation_cert(&cert_bytes)
+            .expect("decode");
+        assert_eq!(
+            helper_root_id, decoded.root_key_id,
+            "Run 063 issuer-root identity must equal cert.root_key_id used by cert-verify path"
+        );
+    }
+
+    #[test]
+    fn run063_self_check_does_not_require_private_key_material() {
+        // The helper's signature accepts only cert bytes + the public
+        // active revoked-root set + the public bundle fingerprint.
+        // There is no way to supply a private key — this test pins
+        // the API shape so a future refactor cannot accidentally
+        // widen it.
+        let cert = build_fixture_cert_with_root(0xF6, 0x18);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let _imaginary_kem_sk = vec![0u8; 32];
+        let a = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        let b = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        assert_eq!(a, b);
+        assert_eq!(a, [0x18u8; 32]);
+    }
+
+    #[test]
+    fn run063_self_check_is_orthogonal_to_leaf_fingerprint_axis() {
+        // A bundle that LEAF-revokes the local cert MUST NOT, by
+        // itself, trip the Run 063 issuer-root self-check. The two
+        // axes are orthogonal at this layer: the leaf axis is owned
+        // by Run 061, the root axis is owned by Run 063. The two
+        // checks run independently in `main.rs`; either failing is
+        // sufficient to fail closed.
+        let cert = build_fixture_cert_with_root(0x07, 0x21);
+        let cert_bytes = encode_cert_bytes(&cert);
+        // Empty revoked-root set; the leaf set is NOT passed to this
+        // helper.
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("root-only helper must not consult leaf revocation axis");
+    }
+
+    #[test]
+    fn run063_self_check_revoked_error_display_carries_log_safe_prefixes_only() {
+        // The Display impl must surface only 8-char prefixes — root
+        // id prefix, leaf fingerprint prefix, and bundle fingerprint
+        // prefix — never any full digest or private material.
+        let cert = build_fixture_cert_with_root(0x28, 0x55);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let mut revoked: HashSet<[u8; 32]> = HashSet::new();
+        revoked.insert([0x55u8; 32]);
+        let bundle_fp = [0xAB; 32];
+        let err = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .unwrap_err();
+        let s = format!("{}", err);
+        assert!(
+            s.contains("local leaf certificate issuer root revoked"),
+            "expected marker phrase, got: {}",
+            s
+        );
+        assert!(s.contains("root_id="));
+        assert!(s.contains("leaf_fp="));
+        assert!(s.contains("bundle_fp="));
+        // Does NOT leak the full 64-char root_id (i.e. no widened
+        // surface). The 8-char prefix `55555555` appears, the
+        // 64-char form does not.
+        let full_root = "5".repeat(64);
+        assert!(
+            !s.contains(&full_root),
+            "FATAL line must NOT leak full root id"
+        );
+        // Bundle prefix is `abababab` (8 chars), not the full hex.
+        assert!(s.contains("abababab"));
+        assert!(!s.contains("abababababababababababababababab"));
+    }
+
+    #[test]
+    fn run063_self_check_does_not_touch_peer_handshake_metric_family() {
+        // The Run 063 helper signature does not take any metrics
+        // sink, so calling it cannot bump the Run 052 peer-handshake
+        // counter `qbind_p2p_pqc_cert_verify_rejected_revoked_total`.
+        // This pins the "startup self-check is NOT a handshake event"
+        // boundary required by the task.
+        use crate::metrics::NodeMetrics;
+        let metrics = NodeMetrics::new();
+        let cert = build_fixture_cert_with_root(0x99, 0x33);
+        let cert_bytes = encode_cert_bytes(&cert);
+
+        // Positive call.
+        let revoked_ok: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let _ = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked_ok, &bundle_fp);
+
+        // Negative call.
+        let mut revoked_bad: HashSet<[u8; 32]> = HashSet::new();
+        revoked_bad.insert([0x33u8; 32]);
+        let _ = check_local_leaf_issuer_root_not_revoked(&cert_bytes, &revoked_bad, &bundle_fp);
+
+        // Peer-handshake counter MUST remain at zero.
+        assert_eq!(metrics.p2p().pqc_cert_verify_rejected_revoked_total(), 0);
+        assert_eq!(metrics.p2p().pqc_cert_verify_rejected_total(), 0);
     }
 
     // ============================================================
