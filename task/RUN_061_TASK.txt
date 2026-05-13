@@ -1,0 +1,328 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement at the handshake boundary:
+  - revocations[].leaf_cert_fingerprint = Some(fp) means leaf-only revocation
+  - revoked leaf fails closed with NetError::ClientCertInvalid("cert revoked")
+  - qbind_p2p_pqc_cert_verify_rejected_revoked_total exists
+  - peer listener/dialer enforcement works
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary revoked-peer leaf evidence artifacts.
+- Run 055 landed trust-bundle sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence artifacts.
+- Run 057 implemented activation-height gating.
+- Run 058 produced release-binary activation-height evidence artifacts.
+- Run 059 produced MainNet signed-bundle release-binary evidence.
+- Run 060 landed the production PQC trust lifecycle operator playbook and DevNet rehearsal scripts.
+- Run 060 remaining boundary:
+  - local revoked-leaf startup self-check is still open
+  - today, a node whose own --p2p-leaf-cert fingerprint is listed in revoked_leaf_fingerprints may only fail when the cert is used in wire-level handshake, not necessarily before P2P startup
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 061. Implement and prove a local revoked-leaf startup self-check.
+
+Primary objective:
+If the node’s own local PQC transport delegation certificate is listed in the active trust-bundle leaf revocation set, the node must fail closed during startup before P2P is constructed or started.
+
+Important framing:
+This is a narrow startup hardening task.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not redesign P2P.
+Do not modify consensus or timeout logic.
+Do not implement epoch gating.
+Do not implement KMS/HSM.
+Do not implement signing-key ratification.
+Do not implement fast-sync restore.
+Do not weaken peer-handshake leaf revocation from Run 052.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Compute the local --p2p-leaf-cert fingerprint using the exact same canonical fingerprint semantics as Run 052.
+- Check it against the active LoadedTrustBundle revoked_leaf_fingerprints set.
+- Perform the check after:
+  - signed bundle verification
+  - environment validation
+  - chain_id validation
+  - activation-height validation
+  - sequence anti-rollback validation
+  - root/revocation extraction
+- Perform the check before:
+  - roots are used to construct live P2P trust context if feasible
+  - P2pNodeBuilder starts
+  - any peer connection attempt
+  - any accepted cert counter could move
+- Fail closed with a precise FATAL/log reason.
+- Do not update or fabricate handshake rejection metrics for startup self-check unless a dedicated startup metric is added.
+- Preserve Run 052 peer-handshake revoked-leaf metric behavior exactly.
+- Preserve Run 050–060 behavior.
+- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required investigation:
+
+1. Inspect current local cert loading path
+   Inspect:
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/src/p2p_node_builder.rs
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - qbind-net NetworkDelegationCert decode/encode helpers
+   - Run 052 leaf fingerprint helper
+   - LoadedTrustBundle::revoked_leaf_fingerprints
+   - P2pNodeBuilder::with_pqc_leaf_revocations
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_052.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_054.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_060.md
+   - docs/whitepaper/contradiction.md
+
+   Document exact file/function references in the evidence doc.
+
+2. Define startup self-check semantics
+   Required:
+   - If no trust bundle is loaded, preserve existing behavior.
+   - If trust bundle has no revoked leaf fingerprints, preserve existing behavior.
+   - If local leaf cert is missing/malformed, preserve existing existing fail-closed behavior.
+   - If local leaf cert fingerprint is revoked, fail closed before P2P startup.
+   - If local leaf cert fingerprint is not revoked, continue normally.
+   - Unknown revoked fingerprint remains no-op.
+   - Root-level revocation behavior remains unchanged.
+   - Peer revoked-leaf behavior remains unchanged.
+
+3. Define fingerprint source
+   Required:
+   - use exact local leaf cert file supplied by --p2p-leaf-cert
+   - decode it as NetworkDelegationCert, or use the existing decode path
+   - compute the same fingerprint used by Run 052 revocation entries
+   - do not hash only validator_id
+   - do not hash only KEM pk
+   - do not hash only root_id
+   - include signature bytes if Run 052 fingerprint includes them
+   - tests must prove local self-check and handshake revocation use the same fingerprint
+
+4. Define metrics/logging
+   Preferred minimal approach:
+   - no new metric if startup fails before /metrics is available
+   - precise FATAL/log reason:
+     - local leaf certificate revoked
+     - fingerprint prefix
+     - bundle fingerprint prefix
+     - no private material
+   Optional:
+   - add qbind_p2p_pqc_local_leaf_revoked_startup_rejected_total only if metrics infrastructure can expose it honestly on startup failures.
+   - If metric would not be observable due fail-closed startup, do not add a misleading metric.
+
+Required implementation:
+
+1. Add local leaf self-check helper
+   Implement a small helper in the narrowest appropriate module, for example:
+   - qbind-node trust-bundle startup wiring, or
+   - p2p_node_builder if that is where local leaf cert is already parsed
+
+   Function shape may be like:
+   - check_local_leaf_not_revoked(local_leaf_cert_path, revoked_leaf_fingerprints, bundle_fingerprint) -> Result<()>
+
+   Requirements:
+   - no private key reads
+   - no KEM secret reads
+   - no root signing secret reads
+   - cert file only
+   - deterministic fingerprint
+   - fail closed on decode error according to existing local cert behavior
+   - precise error variant / message for revoked local leaf
+
+2. Wire startup order
+   In main.rs / builder setup:
+   - after trust bundle is loaded and active revoked_leaf_fingerprints are known
+   - before P2pNodeBuilder build/start
+   - ensure failure exits with the standard FATAL path and no fallback message
+
+3. Preserve peer handshake behavior
+   Do not remove:
+   - LeafCertRevocationList
+   - listener-side revoked peer rejection
+   - dialer-side revoked peer rejection
+   - qbind_p2p_pqc_cert_verify_rejected_revoked_total behavior
+   - aggregate rejected counter behavior
+
+4. Helper/evidence support
+   If current devnet_pqc_trust_bundle_helper can already mint revoked-local fixtures, use it.
+   If not, add only the smallest evidence-helper extension needed to produce a signed bundle revoking the local leaf fingerprint.
+   Do not alter core runtime behavior for fixture convenience.
+
+Required tests:
+
+1. Unit tests
+   - local leaf not revoked passes.
+   - local leaf revoked fails closed.
+   - unknown revoked fingerprint passes.
+   - empty revocation set passes.
+   - malformed local cert preserves fail-closed behavior.
+   - local self-check fingerprint equals Run 052 handshake fingerprint.
+   - root-level revocation behavior unchanged.
+   - revoked local leaf check does not require private key material.
+
+2. Integration tests
+   - signed DevNet bundle with non-revoked local leaf loads.
+   - signed DevNet bundle with revoked local leaf fails closed before P2P builder start.
+   - signed DevNet bundle with unknown revoked leaf fingerprint loads.
+   - signed TestNet/MainNet behavior unchanged if feasible.
+   - Run 052 revoked-peer handshake tests still pass.
+   - Run 054 revoked-peer evidence assumptions remain valid.
+   - Run 050/051/052/053/055/057/059 regression suites still pass.
+
+3. Metrics/log tests
+   - if no metric added, test precise error/log reason where practical.
+   - if metric added, prove no duplicate family and no fabricated increments.
+   - qbind_p2p_pqc_cert_verify_rejected_revoked_total remains a handshake metric, not falsely incremented by startup self-check unless deliberately documented.
+
+Required regression tests:
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --lib pqc_trust_activation
+- new Run 061 tests
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Positive non-revoked local leaf startup smoke
+   - signed DevNet or MainNet bundle
+   - local leaf not revoked
+   - node starts
+   - signed bundle verifies
+   - local leaf self-check passes or no revoked local match
+   - no fallback
+   - no Dummy crypto
+
+2. Negative revoked-local leaf startup smoke
+   - signed bundle revokes the exact local --p2p-leaf-cert fingerprint
+   - node exits fail-closed before P2P startup
+   - precise FATAL/log reason:
+     - local leaf certificate revoked
+   - no P2pNodeBuilder start / no newly_connected_peers
+   - no sequence/root merge side effects beyond already-valid trust-bundle checks, according to chosen ordering
+   - no fallback to --p2p-trusted-root
+   - no DummySig/DummyKem/DummyAead
+
+3. Positive unknown revoked fingerprint smoke
+   - signed bundle includes a revoked leaf fingerprint not matching local cert
+   - node starts normally
+   - no fallback
+   - no Dummy crypto
+
+4. Optional peer-revoked smoke
+   - rerun Run 054 revoked-peer smoke if low cost
+   - prove handshake metric still moves
+   - do not block Run 061 if tests already prove peer path unchanged
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_061.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests run and pass/fail status
+- investigation findings with file/function references
+- startup self-check semantics
+- fingerprint semantics
+- startup ordering
+- metrics/logging decision
+- binary identity:
+  - branch
+  - commit
+  - dirty/clean status
+  - qbind-node sha256
+  - qbind-node ELF BuildID
+- helper identity:
+  - helper sha256
+  - helper ELF BuildID
+- positive non-revoked local leaf smoke
+- negative revoked-local leaf smoke
+- positive unknown-revoked-fingerprint smoke
+- optional peer-revoked smoke if run
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- remaining open items
+- exact immediate next action
+
+contradiction.md update rules:
+- If local revoked-leaf startup self-check lands and is proven, update C4 to record that boundary narrowed/closed.
+- Keep C4 open for:
+  - epoch gating runtime source
+  - restore-height live smoke if still absent
+  - activation gates on revocation entries if still absent
+  - per-environment minimum activation-height policy if still absent
+  - in-binary / on-chain bundle-signing-key ratification if still absent
+  - external KMS/HSM custody integration if still absent
+  - multi-validator MainNet peer-connection evidence if still absent
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation if not fully solved
+- Do not close full C4.
+- Do not claim C5 closure unless explicitly justified.
+- If revoked local leaf starts successfully, record as contradiction/regression.
+- If startup failure falls back to static roots or Dummy crypto, record as contradiction/regression.
+- If startup self-check hashes different bytes from Run 052 handshake revocation, record as contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  local revoked-leaf startup self-check is implemented and proven by tests plus release-binary smokes; revoked local cert fails closed before P2P startup; non-revoked and unknown-fingerprint paths still work; peer handshake revocation remains intact; no fallback; no Dummy crypto.
+- Partial positive:
+  implementation/tests pass but release-binary smoke or optional peer-regression smoke is incomplete. State exact boundary.
+- Negative:
+  revoked local leaf starts, fallback/Dummy crypto activates, fingerprint mismatch with Run 052 is found, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Exact tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
