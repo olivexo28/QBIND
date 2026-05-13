@@ -1,0 +1,351 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary leaf-revocation evidence artifacts.
+- Run 055 landed trust-bundle sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence artifacts.
+- Run 057 implemented activation-height gating.
+- Run 058 produced release-binary activation-height evidence artifacts.
+- Run 059 strongest-positive:
+  - produced MainNet signed-bundle release-binary evidence
+  - valid signed MainNet bundle loaded and ran
+  - unsigned MainNet bundle failed closed
+  - tampered signed MainNet bundle failed closed
+  - wrong signing key failed closed
+  - wrong chain_id failed closed
+  - sequence persistence remained active
+  - no fallback to --p2p-trusted-root
+  - no DummySig / DummyKem / DummyAead fallback
+  - release qbind-node binary unchanged from Run 058
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Remaining C4 trust/lifecycle items:
+- production CA / certificate rotation / signing-key rotation operator playbook
+- per-environment production trust-anchor operation
+- epoch gating runtime source
+- restore-height live smoke
+- activation gates on revocation entries
+- per-environment minimum activation-height policy
+- production fast-sync / consensus-storage restore
+
+Task:
+Run 060. Produce a production CA / certificate rotation / trust-bundle signing-key rotation operator playbook, with concrete scripts/fixtures/evidence where safe, without redesigning protocol or weakening fail-closed behavior.
+
+Primary objective:
+Convert the trust-bundle machinery proven in Runs 050–059 into an operator-safe production lifecycle playbook for:
+- transport root generation and custody;
+- bundle-signing key generation and custody;
+- normal transport root rotation;
+- emergency transport root revocation;
+- leaf certificate rotation;
+- trust-bundle signing-key rotation;
+- rollback prevention via sequence persistence;
+- environment separation for DevNet/TestNet/MainNet;
+- fail-closed negative cases.
+
+Important framing:
+This is an operator lifecycle and evidence task.
+Do not redesign KEMTLS.
+Do not redesign trust bundles.
+Do not redesign consensus.
+Do not modify timeout/NewView logic.
+Do not modify transport crypto.
+Do not weaken signed-bundle verification.
+Do not weaken chain_id enforcement.
+Do not weaken sequence anti-rollback persistence.
+Do not weaken activation-height gating.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 closure unless all remaining C4 items are actually solved.
+Do not implement a full external KMS/HSM integration unless already present and safe to document; prefer an interface/runbook boundary.
+
+Strict scope:
+- Prefer docs + scripts + fixture/evidence.
+- Source changes only if required to make operator workflows reproducible or safer.
+- If source changes are needed, keep them additive and evidence/tooling oriented unless a real runtime bug is found.
+- Do not introduce bypass flags.
+- Do not add “ignore revocation,” “ignore sequence,” “ignore signature,” or “allow unsigned MainNet” options.
+- Crosscheck all new docs/scripts against existing code and design. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required investigation:
+
+1. Inspect existing trust lifecycle implementation
+   Inspect:
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - crates/qbind-node/src/pqc_trust_sequence.rs
+   - crates/qbind-node/src/pqc_trust_activation.rs
+   - crates/qbind-node/examples/devnet_pqc_trust_bundle_helper.rs
+   - crates/qbind-node/examples/devnet_pqc_root_helper.rs
+   - crates/qbind-node/src/main.rs trust-bundle load path
+   - crates/qbind-node/src/p2p_node_builder.rs
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md through RUN_059.md
+   - docs/whitepaper/contradiction.md
+
+   Document exact file/function references in the evidence document.
+
+2. Define production lifecycle roles
+   Create a clear trust model:
+   - offline transport root authority
+   - offline trust-bundle signing authority
+   - online validator node operator
+   - bundle publisher/distributor
+   - incident responder / emergency revocation authority
+   - auditor
+
+   Required separation:
+   - transport root keys must not be reused as trust-bundle signing keys.
+   - leaf transport cert keys must not sign bundles.
+   - bundle-signing keys must not be used as validator consensus keys.
+   - DevNet helper-generated keys are not production custody.
+
+3. Define artifact classes
+   Document the production artifacts:
+   - transport root public key
+   - transport root signing secret
+   - bundle-signing public key
+   - bundle-signing secret
+   - validator leaf delegation certificate
+   - validator leaf KEM secret
+   - trust bundle JSON
+   - sequence persistence file
+   - revocation entry
+   - activation-height field
+   - chain_id field
+   - environment field
+
+   For each artifact:
+   - where it may live
+   - who may access it
+   - whether it may be online/offline
+   - rotation cadence recommendation
+   - emergency handling
+   - backup/recovery notes
+   - logging rules
+
+4. Define normal rotation flows
+   Produce step-by-step operator playbooks for:
+
+   A. Normal transport root rotation
+   - create new transport root offline
+   - issue new leaf certs under new root
+   - produce bundle sequence N+1 containing old root + new root during overlap
+   - activate new root at height H if activation gating is used
+   - roll validators to new leaf certs
+   - produce bundle sequence N+2 marking old root retired
+   - later produce bundle sequence N+3 revoking old root if needed
+   - prove no rollback to N after N+1/N+2 due sequence persistence
+
+   B. Emergency transport root revocation
+   - produce sequence N+1 bundle revoking compromised root
+   - ensure compromised-root leaf certs fail closed
+   - operators replace affected certs
+   - no static-root fallback
+   - no Dummy crypto fallback
+   - document liveness tradeoff if too many validators depend on revoked root
+
+   C. Leaf certificate rotation
+   - issue new leaf cert for validator
+   - bundle does not necessarily need root change
+   - deploy new leaf cert/KEM secret
+   - revoke old leaf fingerprint if key compromise suspected
+   - prove old revoked leaf fails closed
+
+   D. Bundle-signing key rotation
+   - because bundle-signing keys are configured via CLI today, define current safe operator path
+   - if current code cannot rotate bundle-signing key via bundle itself, state that boundary honestly
+   - recommended current process:
+     - distribute new --p2p-trust-bundle-signing-key out of band
+     - overlap old and new signing verification keys
+     - publish bundle signed by new key
+     - remove old signing key after rollout
+   - do not pretend bundle-signing-key rotation is on-chain or self-updating unless implemented
+
+5. Define per-environment policy
+   For DevNet:
+   - allow convenience helpers
+   - unsigned bundles may be allowed only where current code permits
+   - do not confuse with production
+
+   For TestNet:
+   - signed bundles required
+   - sequence persistence required
+   - chain_id must match
+   - negative smokes expected before promotion
+
+   For MainNet:
+   - signed bundles required
+   - static CLI roots should not be mixed with bundles
+   - sequence persistence required
+   - activation-height policy should be used for planned rotations
+   - bundle-signing keys must be offline or HSM-backed
+   - no unsigned bundle
+   - no fallback
+
+6. Define evidence checklist
+   Add an operator checklist for every production trust-bundle change:
+   - validate bundle signature
+   - validate environment
+   - validate chain_id
+   - validate sequence increment
+   - validate activation-height
+   - validate root count
+   - validate revocation entries
+   - run negative tamper test
+   - run wrong-chain test
+   - run rollback test
+   - run revoked-root or revoked-leaf test if applicable
+   - confirm no fallback and no Dummy crypto
+   - archive bundle fingerprint and binary identity
+
+Required deliverables:
+
+1. New operator playbook document
+   Create:
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+
+   Must include:
+   - scope and non-goals
+   - trust model
+   - artifact inventory
+   - custody rules
+   - normal transport root rotation
+   - emergency root revocation
+   - leaf cert rotation
+   - bundle-signing key rotation
+   - DevNet/TestNet/MainNet policies
+   - promotion checklist
+   - incident checklist
+   - evidence checklist
+   - residual risks
+   - exact mapping to Runs 050–059 behavior
+
+2. New evidence doc
+   Create:
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_060.md
+
+   Must include:
+   - exact objective
+   - exact verdict
+   - exact files changed
+   - exact commands run
+   - tests run and pass/fail status
+   - investigation findings with file/function references
+   - playbook summary
+   - which parts are implemented vs operationally documented
+   - any scripts/helpers added
+   - evidence generated
+   - binary/helper identities if release smokes are run
+   - remaining open items
+   - exact immediate next action
+
+3. Optional scripts/tooling
+   If useful and safe, add docs-only or scripts-only tooling such as:
+   - scripts/devnet/trust_bundle_rotation_demo.sh
+   - scripts/devnet/trust_bundle_revocation_demo.sh
+
+   Requirements:
+   - scripts must be clearly DevNet/evidence only
+   - no private key leakage
+   - fail on error
+   - output artifact paths and fingerprints
+   - do not bypass trust-bundle checks
+   - do not require external proprietary KMS
+
+4. Optional release-binary evidence
+   If low cost, run one or more release-binary smokes:
+   - normal root overlap bundle loads
+   - revoked-root bundle fails closed for old cert
+   - old sequence rollback fails closed after rotation
+   - wrong-chain bundle fails closed
+   - no fallback
+   - no Dummy crypto
+
+   Do not block the playbook on long multi-node tests if docs/scripts/tests are the target. State boundaries honestly.
+
+Required tests/checks:
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --lib pqc_trust_activation
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If only docs/scripts change and the full suite is too expensive, at minimum run:
+- markdown/link sanity if project has one
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --lib pqc_trust_activation
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo check -p qbind-node --bin qbind-node
+
+contradiction.md update rules:
+- If the production CA / rotation / signing-key rotation playbook lands, update C4 to record this lifecycle item as narrowed by operator documentation and evidence.
+- Do not mark it fully solved unless executable production-grade automation and custody enforcement exist.
+- Keep C4 open for:
+  - epoch gating runtime source
+  - restore-height live smoke if still absent
+  - activation gates on revocation entries if still absent
+  - per-environment minimum activation-height policy if still absent
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation if not fully solved
+- Do not close full C4.
+- Do not claim C5 closure unless explicitly justified.
+- If playbook contradicts implemented fail-closed behavior, update contradiction.md and fix the playbook.
+- If the playbook suggests static-root fallback, Dummy crypto fallback, unsigned MainNet bundles, or key reuse between transport roots and bundle-signing keys, treat as a contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  production trust lifecycle runbook lands, maps cleanly to implemented Runs 050–059 behavior, includes rotation/revocation/signing-key-rotation workflows, preserves key separation and fail-closed behavior, and optional evidence/scripts/tests pass. Full C4 remains open for remaining items.
+- Partial positive:
+  playbook lands but executable evidence/scripts or some workflow sections remain incomplete. State exact boundary.
+- Negative:
+  playbook contradicts implemented behavior, encourages unsafe fallback/key reuse, or tests/evidence fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Exact tests/evidence run and pass/fail status
+5. What was fixed or documented
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
