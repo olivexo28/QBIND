@@ -1,13 +1,18 @@
 # QBIND PQC Trust Lifecycle Operator Runbook
 
-**Run:** 060
-**Status:** Operator playbook landed; full C4 remains OPEN
+**Run:** 064 (prose update of the Run 060 playbook for Runs 061–063)
+**Status:** Operator playbook landed and updated for Runs 050–063; full C4 remains OPEN
 **Scope owner:** transport trust-anchor + bundle-signing lifecycle
 **Date:** 2026-05-13
 
 This runbook converts the PQC trust-bundle machinery proven by
-Runs 050–059 into a concrete operator playbook for production
+Runs 050–063 into a concrete operator playbook for production
 custody, rotation, revocation, and bundle-signing-key rotation.
+Run 064 is a documentation-only update of the Run 060 playbook
+that incorporates Runs 061 (local revoked-leaf startup self-check),
+062 (per-entry revocation `activation_height`), and 063 (local
+revoked-issuer-root startup self-check). No runtime code, no
+test source, and no helper source is changed by Run 064.
 
 It is **operator documentation**. It is **not** a redesign of any
 runtime layer. It does **not** introduce new bypass flags, does
@@ -19,11 +24,18 @@ implementation wins and this runbook MUST be updated.
 References to behaviour are anchored in:
 
 - `crates/qbind-node/src/pqc_trust_bundle.rs` (envelope, canonical
-  fingerprint, ML-DSA-44 signature verification — Runs 050/051/053).
+  fingerprint, ML-DSA-44 signature verification — Runs 050/051/053;
+  leaf-fingerprint domain separator `QBIND:pqc-trust-bundle-leaf-fp:v1`
+  — Runs 052/054; sequence anti-rollback persistence — Run 055;
+  per-entry revocation `activation_height` + active/pending split —
+  Run 062; local-leaf startup self-check helper
+  `check_local_leaf_not_revoked` — Run 061; local-issuer-root startup
+  self-check helper `check_local_leaf_issuer_root_not_revoked` —
+  Run 063).
 - `crates/qbind-node/src/pqc_trust_sequence.rs` (sequence anti-
   rollback persistence — Run 055).
-- `crates/qbind-node/src/pqc_trust_activation.rs` (activation height
-  / epoch gating — Run 057).
+- `crates/qbind-node/src/pqc_trust_activation.rs` (bundle-level
+  activation height / epoch gating — Run 057).
 - `crates/qbind-node/src/pqc_root_config.rs` (root parsing,
   `PQC_TRANSPORT_SUITE_ML_DSA_44 = 100`).
 - `crates/qbind-node/src/p2p_node_builder.rs::make_pqc_static_root_crypto_provider`
@@ -31,11 +43,14 @@ References to behaviour are anchored in:
   `ChaCha20Poly1305Backend` — Runs 037/039/040).
 - `crates/qbind-node/src/main.rs` trust-bundle load path (calls
   `TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation`
-  then `check_and_update_sequence` BEFORE root merge).
+  then `check_and_update_sequence` BEFORE root merge; emits the
+  Run 062 revocation-activation banner; runs the Run 061
+  local-leaf-fingerprint and Run 063 local-issuer-root startup
+  self-checks BEFORE `PqcStaticRootConfig` construction).
 - `crates/qbind-node/examples/devnet_pqc_root_helper.rs` and
   `crates/qbind-node/examples/devnet_pqc_trust_bundle_helper.rs`
   (DevNet evidence tooling only — not production custody).
-- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md` through `RUN_059.md`
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md` through `RUN_063.md`
   (live-binary smoke evidence for every fail-closed boundary cited
   below).
 
@@ -85,12 +100,15 @@ Per-environment chain ids (`crates/qbind-types/src/primitives.rs`):
 - An epoch-gating runtime source (Run 057 boundary: bundles that
   declare `activation_epoch` continue to fail closed with
   `TrustBundleActivationError::CurrentEpochUnavailable`).
-- A startup self-check that fails the binary closed when
-  `--p2p-leaf-cert` matches an active entry in the loaded bundle's
-  `revoked_leaf_fingerprints` (Run 052/054 boundary — still open).
 - A per-environment minimum-activation-height policy enforced by
   the binary (this runbook recommends one in §5.3 but the binary
-  does not yet enforce it).
+  does not yet enforce it). This applies both to the bundle-level
+  `activation_height` (Run 057) and to the per-entry revocation
+  `activation_height` (Run 062).
+- On-the-fly trust-bundle hot reload. The bundle is loaded exactly
+  once per process lifetime; the Run 062 active/pending gauges are
+  sticky-at-startup snapshots. Rotation today requires a validator
+  restart.
 - Production fast-sync / consensus-storage restore (separate C4
   piece).
 
@@ -119,6 +137,9 @@ and must not be weakened by any operator procedure described here:
 | `activation_epoch` declared without a runtime epoch source fails closed (`CurrentEpochUnavailable`). | same | RUN_057 |
 | On any bundle-load failure, the binary does NOT silently fall back to `--p2p-trusted-root`. FATAL message ends with the literal phrase `No fallback to --p2p-trusted-root on bundle failure (production-honest lifecycle must not silently downgrade)`. | `main.rs` | every Run 050–059 negative smoke |
 | Under `--p2p-pqc-root-mode pqc-static-root`, the registered crypto provider is the real ML-DSA-44 / ML-KEM-768 / ChaCha20-Poly1305 set. No `DummySig` / `DummyKem` / `DummyAead` is registered. | `p2p_node_builder::make_pqc_static_root_crypto_provider` | RUN_037/039/040, RUN_041 |
+| **Local-leaf startup self-check (Run 061).** If a configured `--p2p-leaf-cert` has a canonical leaf fingerprint (SHA3-256 of `b"QBIND:pqc-trust-bundle-leaf-fp:v1" \|\| cert.encode()`) that appears in the loaded bundle's currently-**active** `revoked_leaf_fingerprints` set, the binary emits one `[binary] FATAL: Run 061 local leaf certificate revoked …` line and exits 1 BEFORE `PqcStaticRootConfig` is built and BEFORE any peer handshake. The Run 052 peer-handshake counter `qbind_p2p_pqc_cert_verify_rejected_revoked_total` is NOT bumped. | `pqc_trust_bundle::check_local_leaf_not_revoked`, wired in `main.rs` between Run 050/051/062 banners and `pqc_config` construction | RUN_061 |
+| **Per-entry revocation activation gate (Run 062).** A `revocations[]` entry with `activation_height: None` is immediate. A signature-valid entry with `activation_height > current_height` is **PENDING** — surfaced via `pending_revoked_root_ids` / `pending_revoked_leaf_fingerprints` and the `_revocations_*_pending` gauges, but NOT enforced anywhere (not in `active_roots`, not in the Run 061 startup self-check, not in the Run 052 peer-handshake context). An entry with `activation_height <= current_height` is **ACTIVE** and enforced bit-for-bit as the legacy immediate revocation. Tampering `activation_height` after signing invalidates the ML-DSA-44 bundle signature (canonical preimage coverage). | `pqc_trust_bundle::TrustBundle::validate_at_with_signing_keys_chain_id_and_revocation_activation`; gauges in `metrics.rs` (`qbind_p2p_pqc_trust_bundle_revocations_{configured,active,pending}_total`, `_revocations_{root,leaf}_{active,pending}`) | RUN_062 |
+| **Local-issuer-root startup self-check (Run 063).** If a configured `--p2p-leaf-cert` decodes to a `root_key_id` that appears in the loaded bundle's currently-**active** `revoked_root_ids` set, the binary emits one `[binary] FATAL: Run 063 local leaf certificate issuer root revoked …` line and exits 1 BEFORE `PqcStaticRootConfig` is built. The Run 062 pending set is explicitly NOT consulted. Independent of the Run 061 check; either failing fails closed. | `pqc_trust_bundle::check_local_leaf_issuer_root_not_revoked`, wired in `main.rs` immediately after the Run 061 call site and BEFORE `pqc_config` is moved into the builder | RUN_063 |
 
 If any procedure in this runbook appears to require violating one
 of the above, the procedure is wrong, not the implementation. Open
@@ -335,11 +356,52 @@ handling, backup/recovery notes, logging rules.
 
 - **Where:** the `revocations[]` array on the `trust-bundle.json`,
   with `root_id`, optional `leaf_cert_fingerprint`, `reason`,
-  `effective_from` (Unix seconds).
-- **Activation:** entries with `effective_from > validation_time`
-  are NOT yet active (the validity-window layer). Activation
-  height / epoch gating on revocation entries is NOT yet
-  implemented (Run 052/054 boundary — recorded in §10).
+  `effective_from` (Unix seconds), and (Run 062) optional
+  `activation_height` (`Option<u64>`).
+- **Active vs pending (Run 062).** Resolution rule at bundle load:
+  - entry is **ACTIVE** iff `effective_from <= validation_time`
+    AND (`activation_height` is absent OR
+    `current_height >= activation_height`);
+  - entry is **PENDING** iff signature-valid + `effective_from`
+    satisfied but `activation_height > current_height` (or no
+    runtime height source is available);
+  - entries with `effective_from > validation_time` remain neither
+    active nor pending (the wall-clock validity-window layer keeps
+    them off both surfaces, exactly as in Run 050).
+  Pending entries are surfaced on `pending_revoked_root_ids` /
+  `pending_revoked_leaf_fingerprints` and on the new
+  `qbind_p2p_pqc_trust_bundle_revocations_*_pending` gauges, but
+  are NOT enforced anywhere (not in `active_roots`, not in the
+  Run 061 startup self-check, not in the Run 052 peer-handshake
+  context, not in the Run 063 issuer-root startup self-check).
+- **`current_height` source (Run 062, mirrors Run 057).** If
+  `--restore-from-snapshot` is used, `current_height` is the
+  restore baseline `snapshot_height`. Otherwise `current_height`
+  is `0` at startup. There is no production runtime epoch source;
+  per-entry `activation_epoch` is intentionally NOT supported
+  (Run 057 boundary stands).
+- **Bundle-level vs per-entry activation.** DO NOT confuse:
+  - bundle-level `activation_height` (Run 057) gates whether the
+    whole bundle may take effect (sequence persist + root merge);
+  - per-entry revocation `activation_height` (Run 062) gates only
+    whether one specific revocation is enforced once the bundle
+    has already loaded and persisted.
+  A bundle that does NOT pass the bundle-level activation gate
+  never publishes ANY revocation (active or pending). A bundle
+  that DOES pass the bundle-level gate publishes its revocations
+  according to the per-entry rule above.
+- **Sequence interaction (Run 055 + Run 062).** A scheduled
+  revocation bundle MAY advance `highest_sequence` immediately
+  (the bundle itself is active and signature-valid); its
+  scheduled revocation entries remain PENDING until each entry's
+  own `activation_height` is reached. The persisted sequence
+  record never rolls back on activation.
+- **Operational recommendation:** use `activation_height` only for
+  scheduled revocations where operators can safely coordinate a
+  cutover (and have already issued replacement credentials to any
+  validator that would otherwise fail closed at activation).
+  Emergency-compromise revocations SHOULD be immediate (omit
+  `activation_height` or set it `<= current_height`).
 - **Logging:** safe to log root_id prefix + reason; never log
   the `leaf_cert_fingerprint` of a compromised validator more
   noisily than the rest of the run log requires.
@@ -564,7 +626,24 @@ Steps:
    `roots[]` = `[R_old(status=revoked), R_new(status=active)]` and
    a `revocations[]` entry for R_old with `effective_from = now`.
    Use this if the rotation reason was compromise rather than
-   scheduled rotation.
+   scheduled rotation. For scheduled rotation, the operator MAY
+   instead set the `revocations[]` entry's `activation_height`
+   (Run 062) to a future block height comfortably past the point
+   by which every validator is expected to have rolled to an
+   R_new leaf — until that height the entry is PENDING and not
+   enforced, so the cutover is observable on the
+   `qbind_p2p_pqc_trust_bundle_revocations_root_pending` gauge
+   before any validator fails closed at startup.
+
+**Run 063 interaction at root retire/revoke.** Once a bundle that
+**actively** revokes R_old is loaded, any validator still booting
+with a `--p2p-leaf-cert` chained to R_old will fail closed at
+startup (Run 063 local-issuer-root self-check) BEFORE reaching the
+peer-handshake layer. Operators MUST therefore confirm that every
+validator has rolled to R_new leaf material BEFORE the R_old
+revocation entry's `activation_height` becomes satisfied. PENDING
+root revocations do NOT trip the Run 063 check (the helper reads
+the **active** `revoked_root_ids` set only).
 
 Rollback proofs:
 
@@ -621,6 +700,19 @@ Steps:
    completed the §6.A leaf rotation, emergency revocation WILL
    cause those validators to drop out until they roll to R_new
    leaves. This is the **correct** fail-closed behaviour.
+   Run 063 makes this drop-out happen at **startup** (one FATAL
+   line, exit 1) instead of silently at the peer-handshake layer
+   — operators see the affected validator set immediately on
+   restart rather than via degraded handshake counters.
+6. **Scheduled vs immediate emergency revocation (Run 062).** For a
+   true compromise, the revocation MUST be immediate (omit
+   `activation_height` or set it to `<= current_finalised_height`).
+   `activation_height` is appropriate ONLY when the rotation is
+   pre-planned and replacement leaves are already provisioned. Do
+   NOT use `activation_height` to "soften" a compromise revocation;
+   between bundle load and activation the compromised root is
+   still in `active_roots` and still issues handshake-acceptable
+   certs.
 
 ### 6.C Leaf certificate rotation
 
@@ -652,13 +744,36 @@ hands).
 3. **Publish bundle N+1.** All validators reject inbound handshakes
    presenting the revoked fingerprint at the listener side
    (RUN_052, RUN_054).
-4. **Operator MUST also ensure the local validator's
-   `--p2p-leaf-cert` does NOT match an active entry in
-   `revoked_leaf_fingerprints`** — otherwise it would be telling
-   peers "I am presenting a revoked cert", and would itself be
-   refused. **Note:** the binary does NOT yet self-check this at
-   startup (Run 052/054 remaining boundary — §10). Operator MUST
-   verify out-of-band.
+4. **Local-leaf startup self-check (Run 061).** Beginning with
+   Run 061, the binary itself fails closed at startup if the local
+   `--p2p-leaf-cert` matches an **active** entry in
+   `revoked_leaf_fingerprints`. The operator therefore receives an
+   immediate, in-process FATAL on the compromised validator if it
+   is restarted with the still-revoked credential, rather than
+   relying on out-of-band verification. The check uses the same
+   canonical fingerprint as the Run 052 peer-handshake layer
+   (SHA3-256 of `b"QBIND:pqc-trust-bundle-leaf-fp:v1" \|\| cert.encode()`)
+   and the same active set the peer-handshake layer consults.
+   PENDING leaf revocations (Run 062 `activation_height` in the
+   future) do NOT trip the Run 061 check; the entry must be
+   active for startup to fail closed.
+5. **Coordinated cutover via `activation_height` (Run 062).** For a
+   scheduled leaf retirement (e.g. a planned validator-host
+   migration), an operator MAY set `activation_height` on the
+   leaf-revocation entry to a future block height. Until that
+   height is reached the entry is PENDING and neither the Run 061
+   startup self-check nor the Run 052 peer-handshake enforcement
+   fires; on or after that height it becomes ACTIVE and both
+   surfaces fire as in Variant 2 step 3/4. Operators MUST ensure
+   the affected validator(s) have rolled to a non-revoked leaf
+   BEFORE the activation height; otherwise those validators will
+   fail closed at next restart (Run 061) and on every subsequent
+   handshake (Run 052).
+6. **Suspected-compromise revocations SHOULD be immediate.** Do not
+   use `activation_height` to delay enforcement of a leaf revocation
+   that arose from suspected key compromise. Between bundle load
+   and activation the compromised leaf is still acceptable to
+   peers; that is the wrong default for a compromise event.
 
 ### 6.D Bundle-signing key rotation
 
@@ -713,6 +828,77 @@ Rollback safety:
   bundle. The anti-rollback layer keys off `(environment, chain_id)`
   only (RUN_055).
 
+### 6.E Scheduled revocation via per-entry `activation_height` (Run 062)
+
+Use this workflow when an operator wants to publish a revocation
+NOW but have it take effect at a known future block height (for
+example, to coordinate a retirement window across all validators).
+For suspected-compromise revocations, prefer §6.B (root) or §6.C
+variant 2 (leaf) without `activation_height`.
+
+Steps:
+
+1. **Decide the target activation height.** Pick
+   `activation_height_target = current_finalised_height + N` where
+   N is large enough that every validator restart window
+   completes before the entry becomes active. The binary does not
+   today enforce a minimum margin (§10); the recommended floor is
+   the same as §5.3 for the bundle-level `activation_height`.
+2. **Mint the bundle (sequence = N+1)** with the revocation entry
+   carrying `activation_height = activation_height_target`. Sign
+   with BSK offline.
+3. **Publish bundle N+1.** On every validator restart the binary
+   prints `[binary] Run 062: trust-bundle revocation activation
+   (configured=K active=A pending=P root_active=Ra root_pending=Rp
+   leaf_active=La leaf_pending=Lp)`. The pending counters
+   `qbind_p2p_pqc_trust_bundle_revocations_{leaf,root}_pending`
+   confirm the scheduled entry is loaded but not yet enforced.
+4. **Cutover preparation.** Before `activation_height_target` is
+   reached:
+   - confirm every affected validator has been issued, and has
+     deployed, a non-revoked replacement credential (a new leaf
+     under a non-revoked root for a leaf-revocation; a new leaf
+     under R_new for a root-revocation);
+   - confirm replacement KEM secrets are on every affected
+     validator host with mode `0o600`;
+   - if a validator cannot be migrated before
+     `activation_height_target`, EITHER republish the bundle at
+     `sequence = N+2` with the revocation entry's
+     `activation_height` advanced further, OR accept the liveness
+     consequence at activation.
+5. **Activation.** At `current_height >= activation_height_target`
+   the entry transitions from PENDING to ACTIVE. From the next
+   validator restart onward:
+   - a leaf-fingerprint entry trips the Run 061 local-leaf startup
+     self-check on any validator still using the revoked cert;
+   - a root entry trips the Run 063 local-issuer-root startup
+     self-check on any validator still using a cert chained to
+     the revoked root;
+   - peer-handshake enforcement (Run 052 for leaf, Run 050 for
+     root) is in effect against all peers from this point.
+6. **Confirm activation.** After at least one validator has
+   restarted on or after the activation height, the corresponding
+   `_revocations_*_active` gauge increments and the `_pending`
+   gauge decrements by one. Audit
+   `qbind_p2p_pqc_trust_bundle_revocations_*` across the
+   validator fleet to confirm a clean cutover.
+
+Notes:
+
+- A scheduled-revocation bundle MAY simultaneously advance the
+  bundle-level `sequence` and the bundle-level `activation_height`.
+  The two activation gates are independent: the bundle-level gate
+  controls whether ANY of the bundle's roots / revocations take
+  effect; the per-entry gate controls whether one specific
+  revocation is enforced once the bundle has loaded.
+- `activation_height` is intentionally NOT the same field as
+  `effective_from`. `effective_from` is a wall-clock validity
+  window (Run 050). `activation_height` is block-height-gated
+  (Run 062). Both gates must pass for an entry to be active.
+- There is no on-the-fly hot reload (§10). Validators that never
+  restart between bundle load and `activation_height` will not see
+  the transition in their in-process state; the next restart will.
+
 ---
 
 ## 7. Promotion checklist (every production trust-bundle change)
@@ -738,12 +924,19 @@ item blocks promotion.
       activation period.
 - [ ] `revocations[i].effective_from` is at most the current time
       for any entry intended to be active immediately.
+- [ ] For each `revocations[i]`, `activation_height` (Run 062) is
+      EITHER absent (immediate) OR satisfies the §5.3 operator
+      margin against the current finalised height. Emergency
+      compromise revocations MUST NOT carry an `activation_height`
+      that postpones enforcement past the next validator restart.
 - [ ] `signing_key_id` does NOT equal any `roots[i].root_id`.
 - [ ] Bundle ML-DSA-44 signature verifies against the operator's
       configured `--p2p-trust-bundle-signing-key` set.
 - [ ] Canonical fingerprint computed by
       `pqc_trust_bundle::canonical_fingerprint` recorded in the
-      artifact-inventory log.
+      artifact-inventory log. Per-entry `activation_height` is
+      covered by the canonical preimage (Run 062): tampering it
+      after signing must invalidate the bundle signature.
 - [ ] Negative tamper test passes (flip any byte of
       `roots[0].not_after`; the test fixture must fail closed —
       RUN_059 Smoke 3 shape).
@@ -758,8 +951,22 @@ item blocks promotion.
 - [ ] If a revoked root or revoked leaf is being introduced, a
       revoked-root / revoked-leaf negative test passes (RUN_052,
       RUN_054).
+- [ ] If a SCHEDULED revocation entry is being introduced
+      (`activation_height` set in the future), a pending-revocation
+      smoke passes: the live binary reports the entry on the
+      `_revocations_*_pending` gauge AND on the `Run 062: …
+      pending=…` log line, AND neither the Run 061 nor the Run 063
+      local startup self-check fires (RUN_062 Smokes 1/3 shape).
+- [ ] If a leaf revocation is intended to be ACTIVE on a validator
+      that currently uses that leaf, a Run 061 local-leaf
+      startup self-check FATAL smoke passes (RUN_061 Smoke 2 shape).
+- [ ] If a root revocation is intended to be ACTIVE on a validator
+      whose local leaf is chained to that root, a Run 063
+      local-issuer-root startup self-check FATAL smoke passes
+      (RUN_063 Smoke 2 shape).
 - [ ] On a clean test validator, the live binary prints the Run
-      050/051/053/055/057 banners with the expected fingerprints
+      050/051/053/055/057/062/061/063 banners (in the order the
+      binary emits them) with the expected fingerprints
       and ends with the Run 040 `[Run040] P2pNodeBuilder: ...
       dummy_kem_registered=false dummy_aead_registered=false ...`
       banner — confirming no fallback to test-grade primitives.
@@ -780,7 +987,21 @@ compromise, observed rollback / equivocation attempt.
       re-use any compromised key for **any** subsequent step.
 - [ ] Identify which authority (§2.1) is compromised. Root,
       bundle-signing, and leaf compromises follow different
-      workflows (§6.B, §6.D, §6.C).
+      workflows (§6.B, §6.D, §6.C). Decide explicitly whether the
+      revocation is root-level or leaf-level, and whether it must
+      be immediate or scheduled (§6.E). Compromise revocations
+      MUST be immediate.
+- [ ] Identify, for each candidate revocation entry, what
+      `activation_height` (if any) is appropriate. For an
+      emergency compromise event the answer is "none / immediate".
+- [ ] Identify which validators will fail closed at startup once
+      the revocation activates. For a leaf revocation: validators
+      whose local `--p2p-leaf-cert` matches the revoked
+      fingerprint will trip the Run 061 self-check. For a root
+      revocation: validators whose local leaf cert is issued by
+      the revoked root will trip the Run 063 self-check. Confirm
+      that any validator that MUST stay alive has a replacement
+      credential ready BEFORE the entry becomes active.
 - [ ] Mint replacement material on a clean offline / HSM host
       (§4).
 - [ ] Mint an `(N+1)` bundle that excludes the compromised
@@ -793,6 +1014,10 @@ compromise, observed rollback / equivocation attempt.
       = `N+1` on `/metrics`.
 - [ ] Confirm `qbind_p2p_pqc_trust_bundle_signature_rejected_total`
       stays 0 on every validator after the change.
+- [ ] Confirm the Run 062 revocation banner shows
+      `active=K pending=0` for the compromise entry on every
+      validator (i.e. no validator silently treats the compromise
+      revocation as pending due to a stale runtime height source).
 - [ ] If a bundle-signing key was compromised, follow §6.D in the
       shortened "emergency rotation" form: distribute BSK_new
       before the next steady-state bundle, mint bundle N+2 under
@@ -821,15 +1046,36 @@ every bundle change. The directory layout MAY follow the existing
       (the bundle this one replaces).
 - [ ] Positive smoke transcript: a fresh validator started with
       the new bundle, with `--p2p-pqc-root-mode pqc-static-root`,
-      printed the Run 050/051/053/055/057 banners and the Run 040
+      printed the Run 050/051/053/055/057 banners, the Run 062
+      `[binary] Run 062: trust-bundle revocation activation
+      (configured=… active=… pending=…)` banner, the Run 061
+      `local-leaf startup self-check passed` line (when a
+      `--p2p-leaf-cert` is supplied), the Run 063 `local-leaf
+      issuer-root startup self-check passed` line, and the Run 040
       `dummy_kem_registered=false dummy_aead_registered=false`
       banner; `/metrics` reports the expected
-      `qbind_p2p_pqc_trust_bundle_*` series.
+      `qbind_p2p_pqc_trust_bundle_*` series, including the seven
+      Run 062 `_revocations_*` gauges.
 - [ ] Negative tamper smoke transcript (RUN_059 Smoke 3 shape).
 - [ ] Wrong-chain smoke transcript (RUN_059 Smoke 5 shape).
 - [ ] Rollback smoke transcript (RUN_056 Smoke 3 shape).
-- [ ] If a root was revoked: revoked-root smoke (RUN_052 shape).
-- [ ] If a leaf was revoked: revoked-leaf smoke (RUN_054 shape).
+- [ ] If a root was revoked (immediate): revoked-root smoke
+      (RUN_050 / RUN_062 Smoke 4 shape; expects the Run 050
+      "no trusted roots" FATAL if all roots are revoked, or
+      successful exclusion from `active_roots` otherwise).
+- [ ] If a leaf was revoked (immediate): revoked-leaf smoke
+      (RUN_054 / RUN_062 Smoke 2 shape) AND a Run 061 local-leaf
+      startup self-check FATAL transcript on the validator that
+      still uses that leaf (RUN_061 Smoke 2 shape).
+- [ ] If a root revocation is intended to affect a validator
+      whose local leaf was issued by that root: a Run 063
+      local-issuer-root startup self-check FATAL transcript
+      (RUN_063 Smoke 2 shape).
+- [ ] If any revocation is SCHEDULED (`activation_height` set):
+      a pending-revocation smoke transcript (RUN_062 Smoke 1 for
+      leaf-scope OR Smoke 3 for root-scope) — exit non-FATAL, the
+      `_revocations_*_pending` gauge shows the entry, and NEITHER
+      the Run 061 nor the Run 063 startup self-check fires.
 - [ ] Confirmation that no `--p2p-trusted-root` line was supplied
       on any validator.
 - [ ] Confirmation that `pqc_root_mode=pqc-static-root` and no
@@ -842,52 +1088,75 @@ every bundle change. The directory layout MAY follow the existing
 ## 10. Residual risks (NOT solved by this runbook)
 
 This runbook narrows the C4 "production CA / certificate rotation
-/ signing-key rotation operator playbook" item. It does **NOT**
-close any of the following, which remain open under C4:
+/ signing-key rotation operator playbook" item, and Runs 061–063
+closed three previously-open boundaries (local-leaf-fingerprint
+startup self-check, per-entry revocation `activation_height`, and
+local-issuer-root startup self-check). The following remain open
+under C4:
 
-1. **Epoch-gating runtime source.** `activation_epoch` continues
-   to fail closed with `TrustBundleActivationError::CurrentEpochUnavailable`
-   (Run 057). Operators MUST NOT set `activation_epoch` on
-   production bundles.
-2. **Activation gates on revocation entries.** `revocations[]`
-   honour only `effective_from` (Unix seconds); no
-   `activation_height` / `activation_epoch` field on a revocation
-   entry today.
-3. **Per-environment minimum activation-height policy.** The
+1. **Epoch-gating runtime source.** Bundle-level `activation_epoch`
+   continues to fail closed with
+   `TrustBundleActivationError::CurrentEpochUnavailable` (Run 057).
+   Per-entry `activation_epoch` on revocations is intentionally
+   NOT supported either (Run 062 boundary). Operators MUST NOT
+   set `activation_epoch` on production bundles or on revocation
+   entries.
+2. **Per-environment minimum activation-height policy.** The
    binary does not enforce a minimum margin between
-   `activation_height` and the current finalised height. This
-   runbook RECOMMENDS one in §5.3 but the enforcement is operator
-   policy, not binary policy.
-4. **Startup self-check that fails the binary closed when
-   `--p2p-leaf-cert` matches an active entry in
-   `revoked_leaf_fingerprints`** (Run 052/054 boundary). Operators
-   MUST verify out-of-band that they are not loading a revoked
-   leaf as their own identity.
-5. **Production fast-sync / consensus-storage restore.** Separate
+   `activation_height` (bundle-level OR per-entry revocation) and
+   the current finalised height. This runbook RECOMMENDS one in
+   §5.3 and §6.E but the enforcement is operator policy, not
+   binary policy.
+3. **On-the-fly trust-bundle hot reload.** The bundle is loaded
+   exactly once per process lifetime. The Run 062 active/pending
+   gauges are sticky-at-startup snapshots; a scheduled revocation
+   does NOT transition from PENDING to ACTIVE inside a running
+   validator without a restart. The Run 061 and Run 063 startup
+   self-checks therefore observe only the trust state present at
+   process boot.
+4. **Production fast-sync / consensus-storage restore.** Separate
    C4 piece; trust-bundle persistence is independent.
-6. **Per-environment production trust-anchor operation.** Not
+5. **Per-environment production trust-anchor operation.** Not
    fully solved by documentation alone; depends on the operator
    actually using offline / HSM custody for the secrets in §3.2
    and §3.4.
-7. **In-binary bundle-signing-key rotation / ratification.** The
-   binary does NOT ratify a new bundle-signing key on-chain. §6.D
-   is an out-of-band CLI overlap procedure. If a future runtime
-   adds on-chain ratification, this runbook MUST be updated.
-8. **Two-node / N-node MainNet release-binary smoke evidence.**
-   RUN_059 produced a single-validator MainNet release-binary
-   smoke; a multi-validator MainNet peer-connection smoke remains
-   on the C4 list (blocked by unrelated production-config items —
-   validator keystore loading on startup, per-peer consensus-key
-   distribution).
-9. **External KMS / HSM integration.** This runbook treats the
+6. **In-binary / on-chain bundle-signing-key rotation /
+   ratification.** The binary does NOT ratify a new bundle-signing
+   key on-chain or in-binary. §6.D is an out-of-band CLI overlap
+   procedure. If a future runtime adds on-chain ratification,
+   this runbook MUST be updated.
+7. **Two-node / N-node MainNet release-binary peer-connection
+   smoke evidence.** RUN_059 produced a single-validator MainNet
+   release-binary smoke; a multi-validator MainNet
+   peer-connection smoke remains on the C4 list (blocked by
+   unrelated production-config items — validator keystore loading
+   on startup, per-peer consensus-key distribution).
+8. **External KMS / HSM integration.** This runbook treats the
    signing-key custody surface as an interface boundary; full
    KMS integration is not in scope.
+
+**Closed by Runs 061–063 (no longer in §10):**
+
+- Local-leaf-fingerprint startup self-check — closed by Run 061
+  (`pqc_trust_bundle::check_local_leaf_not_revoked` + the FATAL
+  call site in `main.rs`). The binary now fails closed at startup
+  if `--p2p-leaf-cert`'s canonical fingerprint is in the
+  bundle's active `revoked_leaf_fingerprints`.
+- Per-entry revocation activation gate — closed by Run 062
+  (optional, ML-DSA-44-signature-covered `activation_height` on
+  every revocation entry; deterministic active/pending split;
+  seven new `qbind_p2p_pqc_trust_bundle_revocations_*` gauges).
+- Local-issuer-root startup self-check — closed by Run 063
+  (`pqc_trust_bundle::check_local_leaf_issuer_root_not_revoked` +
+  the FATAL call site immediately after Run 061). The binary now
+  fails closed at startup if the local leaf cert decodes to a
+  `root_key_id` in the bundle's active `revoked_root_ids`.
 
 **Full C4 remains OPEN. C5 is NOT closed by this runbook.**
 
 ---
 
-## 11. Mapping to Runs 050–059
+## 11. Mapping to Runs 050–063
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -898,9 +1167,13 @@ close any of the following, which remain open under C4:
 | 054 | Release-binary leaf-revocation evidence helper modes. | §3.9, §6.C, §7, §9. |
 | 055 | Sequence anti-rollback persistence (rollback, equivocation, corrupt-file fail-closed). | §1.3, §3.8, §6.A, §6.B, §6.D, §7. |
 | 056 | Release-binary anti-rollback evidence (positive upgrade, rollback, equal-sequence different-fp, corrupt persistence). | §3.8, §6.A, §7. |
-| 057 | Activation-height gating (`current_height` source from restore baseline or 0; future activation does NOT advance persisted sequence). | §1.3, §3.10, §6.A, §7. |
+| 057 | Bundle-level activation-height gating (`current_height` source from restore baseline or 0; future activation does NOT advance persisted sequence). | §1.3, §3.10, §6.A, §6.E, §7. |
 | 058 | Release-binary activation-height evidence (positive active-now, negative future-height, positive upgrade-after-rejection). | §3.10, §6.A, §7. |
 | 059 | MainNet signed-bundle release-binary smoke (positive, unsigned, tampered, wrong key, wrong chain). | §1.3, §5.3, §7, §9. |
+| 060 | Operator playbook landed (this runbook). | All §sections. |
+| 061 | Local-leaf-fingerprint startup self-check: binary fails closed before P2P startup if `--p2p-leaf-cert` is in the bundle's active `revoked_leaf_fingerprints`. | §1.3, §3.9, §6.C variant 2, §7, §9, §10 (closed item). |
+| 062 | Per-entry revocation `activation_height`: signature-covered, active/pending split, seven new `qbind_p2p_pqc_trust_bundle_revocations_*` gauges. | §1.3, §3.9, §3.10, §6.A, §6.B, §6.C, §6.E, §7, §9, §10 (closed item). |
+| 063 | Local-issuer-root startup self-check: binary fails closed before P2P startup if the local leaf cert decodes to a `root_key_id` in the bundle's active `revoked_root_ids`. Independent of Run 061. | §1.3, §6.A, §6.B, §6.E, §7, §9, §10 (closed item). |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---
