@@ -1175,6 +1175,44 @@ async fn run_p2p_node(
             p2p.set_pqc_trust_bundle_environment(loaded.environment().metric_code());
             p2p.set_pqc_trust_bundle_active_roots(loaded.active_root_count() as u64);
             p2p.set_pqc_trust_bundle_revoked_roots(loaded.revoked_root_count() as u64);
+            // Run 062: revocation activation-gate gauges.
+            // `_root_active` == `_revoked_roots` by construction (kept
+            // as a separate name so the active vs. pending split is
+            // symmetrical with the leaf surface).
+            p2p.set_pqc_trust_bundle_revocations_configured_total(
+                loaded.configured_revocations_total() as u64,
+            );
+            p2p.set_pqc_trust_bundle_revocations_active_total(
+                loaded.active_revocations_total() as u64,
+            );
+            p2p.set_pqc_trust_bundle_revocations_pending_total(
+                loaded.pending_revocations_total() as u64,
+            );
+            p2p.set_pqc_trust_bundle_revocations_root_active(
+                loaded.revoked_root_count() as u64,
+            );
+            p2p.set_pqc_trust_bundle_revocations_root_pending(
+                loaded.pending_revoked_root_count() as u64,
+            );
+            p2p.set_pqc_trust_bundle_revocations_leaf_active(
+                loaded.revoked_leaf_fingerprint_count() as u64,
+            );
+            p2p.set_pqc_trust_bundle_revocations_leaf_pending(
+                loaded.pending_revoked_leaf_fingerprint_count() as u64,
+            );
+            eprintln!(
+                "[binary] Run 062: trust-bundle revocation activation \
+                 (configured={} active={} pending={} \
+                  root_active={} root_pending={} \
+                  leaf_active={} leaf_pending={})",
+                loaded.configured_revocations_total(),
+                loaded.active_revocations_total(),
+                loaded.pending_revocations_total(),
+                loaded.revoked_root_count(),
+                loaded.pending_revoked_root_count(),
+                loaded.revoked_leaf_fingerprint_count(),
+                loaded.pending_revoked_leaf_fingerprint_count(),
+            );
             p2p.set_pqc_trust_bundle_sequence(loaded.bundle.sequence);
             // Run 051: bump the verified counter exactly once on a
             // successfully verified signed bundle. Unsigned bundles

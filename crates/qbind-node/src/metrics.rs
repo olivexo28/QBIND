@@ -5667,6 +5667,38 @@ pub struct P2pMetrics {
     /// or status=Revoked entries, which are reported only via
     /// active_roots = 0).
     pqc_trust_bundle_revoked_roots: AtomicU64,
+    /// Run 062: gauge — total revocation entries declared in the
+    /// underlying bundle envelope (active + pending + effective_from-
+    /// future). Sticky at startup; only ever 0 (no bundle) or the
+    /// loaded bundle's `revocations.len()` thereafter.
+    pqc_trust_bundle_revocations_configured_total: AtomicU64,
+    /// Run 062: gauge — active revocations currently enforced
+    /// (root-scope + leaf-scope summed). Active iff
+    /// `effective_from <= validation_time` AND
+    /// (`activation_height` is `None` OR
+    /// `current_height >= activation_height`).
+    pqc_trust_bundle_revocations_active_total: AtomicU64,
+    /// Run 062: gauge — pending revocations awaiting their declared
+    /// `activation_height` to be reached (root-scope + leaf-scope
+    /// summed). PENDING entries do NOT appear in any enforcement
+    /// path (active_roots filter, local leaf self-check, P2P
+    /// handshake revocation context); they are surfaced on this
+    /// metric (and on logs) for operator observability so that a
+    /// scheduled rotation window is visible before activation.
+    pqc_trust_bundle_revocations_pending_total: AtomicU64,
+    /// Run 062: gauge — active root-scope revocations only. Equals
+    /// the existing `pqc_trust_bundle_revoked_roots` gauge by
+    /// construction (kept as a separate name so the active vs.
+    /// pending split is symmetrical with the leaf surface and so
+    /// `revoked_roots`'s long-standing semantics are not silently
+    /// re-meaning'd to include pending entries).
+    pqc_trust_bundle_revocations_root_active: AtomicU64,
+    /// Run 062: gauge — pending root-scope revocations only.
+    pqc_trust_bundle_revocations_root_pending: AtomicU64,
+    /// Run 062: gauge — active leaf-scope revocations only.
+    pqc_trust_bundle_revocations_leaf_active: AtomicU64,
+    /// Run 062: gauge — pending leaf-scope revocations only.
+    pqc_trust_bundle_revocations_leaf_pending: AtomicU64,
     /// Gauge: bundle monotonic sequence number. Useful for operators
     /// confirming a rotation took effect on a given node.
     pqc_trust_bundle_sequence: AtomicU64,
@@ -6513,6 +6545,42 @@ impl P2pMetrics {
             "qbind_p2p_pqc_trust_bundle_revoked_roots {}\n",
             self.pqc_trust_bundle_revoked_roots()
         ));
+        // Run 062: revocation activation-gate gauges. Counts are
+        // populated at startup (sticky for the rest of the process
+        // lifetime) and reflect the active vs. pending split applied
+        // by `LoadedTrustBundle` after the revocation-entry
+        // activation_height gate runs. `_configured_total` counts
+        // every revocation entry in the underlying bundle envelope
+        // (active + pending + any `effective_from`-future entries).
+        // `_active_total` and `_pending_total` are root+leaf summed.
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_configured_total {}\n",
+            self.pqc_trust_bundle_revocations_configured_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_active_total {}\n",
+            self.pqc_trust_bundle_revocations_active_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_pending_total {}\n",
+            self.pqc_trust_bundle_revocations_pending_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_root_active {}\n",
+            self.pqc_trust_bundle_revocations_root_active()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_root_pending {}\n",
+            self.pqc_trust_bundle_revocations_root_pending()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_leaf_active {}\n",
+            self.pqc_trust_bundle_revocations_leaf_active()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_revocations_leaf_pending {}\n",
+            self.pqc_trust_bundle_revocations_leaf_pending()
+        ));
         output.push_str(&format!(
             "qbind_p2p_pqc_trust_bundle_sequence {}\n",
             self.pqc_trust_bundle_sequence()
@@ -6713,6 +6781,63 @@ impl P2pMetrics {
     }
     pub fn set_pqc_trust_bundle_revoked_roots(&self, v: u64) {
         self.pqc_trust_bundle_revoked_roots.store(v, Ordering::Relaxed);
+    }
+    // Run 062 revocation-activation gauges.
+    pub fn pqc_trust_bundle_revocations_configured_total(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_configured_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_configured_total(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_configured_total
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revocations_active_total(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_active_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_active_total(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_active_total
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revocations_pending_total(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_pending_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_pending_total(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_pending_total
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revocations_root_active(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_root_active
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_root_active(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_root_active
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revocations_root_pending(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_root_pending
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_root_pending(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_root_pending
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revocations_leaf_active(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_leaf_active
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_leaf_active(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_leaf_active
+            .store(v, Ordering::Relaxed);
+    }
+    pub fn pqc_trust_bundle_revocations_leaf_pending(&self) -> u64 {
+        self.pqc_trust_bundle_revocations_leaf_pending
+            .load(Ordering::Relaxed)
+    }
+    pub fn set_pqc_trust_bundle_revocations_leaf_pending(&self, v: u64) {
+        self.pqc_trust_bundle_revocations_leaf_pending
+            .store(v, Ordering::Relaxed);
     }
     pub fn pqc_trust_bundle_sequence(&self) -> u64 {
         self.pqc_trust_bundle_sequence.load(Ordering::Relaxed)

@@ -124,6 +124,7 @@ fn signed_bundle_with_revoked_leaf_surfaces_revoked_leaf_fingerprint() {
         leaf_cert_fingerprint: Some(fp_hex.clone()),
         reason: "leaf-compromise".to_string(),
         effective_from: 0,
+        activation_height: None,
     });
     let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();
     let sig = sign_bundle_devnet_helper(&bundle, signing_id, &signing_sk).expect("sign");
@@ -204,6 +205,7 @@ fn future_dated_leaf_revocation_is_not_yet_active_in_signed_bundle() {
         leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
         reason: "scheduled-leaf-rotation".to_string(),
         effective_from: 1_000_000,
+        activation_height: None,
     });
     let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();
     let sig = sign_bundle_devnet_helper(&bundle, signing_id, &signing_sk).expect("sign");
@@ -246,6 +248,7 @@ fn malformed_leaf_fingerprint_in_signed_bundle_fails_closed() {
         leaf_cert_fingerprint: Some("not-a-valid-fingerprint".to_string()),
         reason: "leaf-compromise".to_string(),
         effective_from: 0,
+        activation_height: None,
     });
     let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();
     let sig = sign_bundle_devnet_helper(&bundle, signing_id, &signing_sk).expect("sign");
@@ -423,6 +426,7 @@ fn no_fallback_to_test_grade_dummy_primitives_for_pqc_path() {
         ))),
         reason: "leaf-compromise".to_string(),
         effective_from: 0,
+        activation_height: None,
     });
     let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();
     let sig = sign_bundle_devnet_helper(&bundle, signing_id, &signing_sk).expect("sign");

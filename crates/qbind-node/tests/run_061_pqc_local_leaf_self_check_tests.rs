@@ -125,6 +125,7 @@ fn signed_devnet_bundle_revoking(
             leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(fp)),
             reason: "leaf-compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
     }
     let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();

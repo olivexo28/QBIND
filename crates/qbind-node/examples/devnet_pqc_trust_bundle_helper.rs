@@ -74,6 +74,41 @@
 //!                                       which no real validator
 //!                                       leaf cert can produce.
 //!
+//!   Run 062 fixtures (signed-bundle + per-entry revocation activation
+//!   gate, DevNet):
+//!   - `signed-devnet-leaf-revocation-pending-v0` — signed DevNet
+//!                                       bundle that revokes the v0
+//!                                       validator leaf cert with
+//!                                       `activation_height = u64::MAX`
+//!                                       (revocation is PENDING at
+//!                                       startup — does NOT reject
+//!                                       the v0 leaf yet).
+//!   - `signed-devnet-leaf-revocation-active-v0` — signed DevNet
+//!                                       bundle that revokes the v0
+//!                                       validator leaf cert with
+//!                                       `activation_height = 0`
+//!                                       (revocation is ACTIVE at
+//!                                       startup — same enforcement
+//!                                       as the existing Run 054
+//!                                       `signed-devnet-revoked-v0`,
+//!                                       but the entry now carries an
+//!                                       explicit height gate covered
+//!                                       by the bundle signature).
+//!   - `signed-devnet-root-revocation-pending` — signed DevNet bundle
+//!                                       with a root-scope revocation
+//!                                       carrying
+//!                                       `activation_height = u64::MAX`
+//!                                       (root remains in active_roots
+//!                                       at startup; revocation
+//!                                       PENDING).
+//!   - `signed-devnet-root-revocation-active` — signed DevNet bundle
+//!                                       with a root-scope revocation
+//!                                       carrying
+//!                                       `activation_height = 0`
+//!                                       (root excluded from
+//!                                       active_roots immediately;
+//!                                       legacy Run 050 behaviour).
+//!
 //! Optional 4th positional argument: `[sequence_override]`
 //!   Decimal `u64`. If supplied, the bundle's `sequence` field is set
 //!   to this value BEFORE signing (for signed modes) and before the
@@ -112,6 +147,23 @@
 //!   the same trust domain shape; it does NOT change signing
 //!   semantics (the field is part of the signed preimage and
 //!   canonical fingerprint, as
+//!   `pqc_trust_bundle::canonical_signing_bytes` /
+//!   `canonical_fingerprint` already include it).
+//!
+//! Optional 7th positional argument: `[revocation_activation_height_for_target]`
+//!   Decimal `u64` (or the literal string `none`). If supplied, the
+//!   `activation_height` field on the revocation entry emitted by the
+//!   selected mode (leaf-revocation OR root-revocation, whichever the
+//!   mode emits) is overridden BEFORE signing and BEFORE the canonical
+//!   fingerprint is computed. `none` forces `activation_height = null`
+//!   explicitly (i.e. legacy Run 050/052 immediate revocation). The
+//!   default is the per-mode value from `parse_mode` (`None` for
+//!   pre-Run-062 modes, `Some(u64::MAX)` for `*-pending`, `Some(0)`
+//!   for `*-active`). This is an evidence-tooling knob used by
+//!   Run 062 to mint "future-height pending revocation" and
+//!   "currently-active revocation" fixtures on the same trust domain
+//!   shape; it does NOT change signing semantics (the field is part
+//!   of the signed preimage and canonical fingerprint, as
 //!   `pqc_trust_bundle::canonical_signing_bytes` /
 //!   `canonical_fingerprint` already include it).
 //!
@@ -196,10 +248,33 @@ enum LeafRevocationTarget {
     UnknownAllZeros,
 }
 
+/// Run 062: extra revocation gate applied to the revocation entry
+/// emitted by the selected mode. When `Some(h)`, the helper writes the
+/// revocation entry with `activation_height = Some(h)`; the bundle
+/// will accept the revocation as **pending** until `current_height >= h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct Run062RevocationGate {
+    /// Per-entry `activation_height` override applied to the
+    /// leaf-revocation OR root-revocation entry emitted by the mode.
+    /// `None` ⇒ legacy Run 050/052 (immediate, no height gate).
+    revocation_activation_height: Option<u64>,
+    /// When true, also emit a root-level revocation entry (in addition
+    /// to whatever leaf-revocation the mode already emits) for the
+    /// bundle's `roots[0].root_id` so root-revocation pending/active
+    /// smokes can be driven from the helper without redesigning the
+    /// mode taxonomy.
+    emit_root_revocation: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Unsigned(HelperBundleMode, Option<TrustBundleEnvironment>),
-    Signed(TrustBundleEnvironment, SignedMode, LeafRevocationTarget),
+    Signed(
+        TrustBundleEnvironment,
+        SignedMode,
+        LeafRevocationTarget,
+        Run062RevocationGate,
+    ),
 }
 
 fn parse_mode(s: &str) -> Mode {
@@ -225,31 +300,11 @@ fn parse_mode(s: &str) -> Mode {
             Some(TrustBundleEnvironment::Mainnet),
         ),
         // Run 051 signed fixtures.
-        "signed-devnet" => Mode::Signed(
-            TrustBundleEnvironment::Devnet,
-            SignedMode::Honest,
-            LeafRevocationTarget::None,
-        ),
-        "signed-testnet" => Mode::Signed(
-            TrustBundleEnvironment::Testnet,
-            SignedMode::Honest,
-            LeafRevocationTarget::None,
-        ),
-        "signed-mainnet" => Mode::Signed(
-            TrustBundleEnvironment::Mainnet,
-            SignedMode::Honest,
-            LeafRevocationTarget::None,
-        ),
-        "signed-tampered" => Mode::Signed(
-            TrustBundleEnvironment::Devnet,
-            SignedMode::TamperRootAfterSigning,
-            LeafRevocationTarget::None,
-        ),
-        "signed-wrong-key" => Mode::Signed(
-            TrustBundleEnvironment::Devnet,
-            SignedMode::WrongSigningKey,
-            LeafRevocationTarget::None,
-        ),
+        "signed-devnet" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-testnet" => Mode::Signed(TrustBundleEnvironment::Testnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-mainnet" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::Honest, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-tampered" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-wrong-key" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
         // Run 059 MainNet evidence fixtures: same tamper / wrong-key
         // semantics as the existing DevNet-env signed-tampered /
         // signed-wrong-key modes, but emitted with
@@ -257,46 +312,64 @@ fn parse_mode(s: &str) -> Mode {
         // MainNet bundle path. The env is the only difference from
         // the existing DevNet-env modes; the per-mode signing /
         // tampering logic below is unchanged.
-        "signed-mainnet-tampered" => Mode::Signed(
-            TrustBundleEnvironment::Mainnet,
-            SignedMode::TamperRootAfterSigning,
-            LeafRevocationTarget::None,
-        ),
-        "signed-mainnet-wrong-key" => Mode::Signed(
-            TrustBundleEnvironment::Mainnet,
-            SignedMode::WrongSigningKey,
-            LeafRevocationTarget::None,
-        ),
-        "signed-unsupported-suite" => Mode::Signed(
-            TrustBundleEnvironment::Devnet,
-            SignedMode::UnsupportedSuite,
-            LeafRevocationTarget::None,
-        ),
-        "signed-malformed" => Mode::Signed(
-            TrustBundleEnvironment::Devnet,
-            SignedMode::MalformedSignatureBytes,
-            LeafRevocationTarget::None,
-        ),
-        "signed-key-root-collision" => Mode::Signed(
-            TrustBundleEnvironment::Devnet,
-            SignedMode::KeyRootCollision,
-            LeafRevocationTarget::None,
-        ),
+        "signed-mainnet-tampered" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::TamperRootAfterSigning, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-mainnet-wrong-key" => Mode::Signed(TrustBundleEnvironment::Mainnet, SignedMode::WrongSigningKey, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-unsupported-suite" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::UnsupportedSuite, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-malformed" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::MalformedSignatureBytes, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-key-root-collision" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::KeyRootCollision, LeafRevocationTarget::None, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
         // Run 054 signed-bundle leaf-revocation fixtures.
-        "signed-devnet-revoked-v0" => Mode::Signed(
+        "signed-devnet-revoked-v0" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(0), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-devnet-revoked-v1" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::Validator(1), Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        "signed-devnet-revoked-unknown" => Mode::Signed(TrustBundleEnvironment::Devnet, SignedMode::Honest, LeafRevocationTarget::UnknownAllZeros, Run062RevocationGate { revocation_activation_height: None, emit_root_revocation: false }),
+        // Run 062 leaf-revocation activation gates. The
+        // `[revocation_activation_height_for_target]` positional arg
+        // (see `main` below) sets the `activation_height` field on
+        // the emitted leaf-revocation entry. With no arg the entry is
+        // immediate (legacy Run 052). A `*-pending` mode is intended
+        // to be paired with a large value (e.g. u64::MAX) to keep the
+        // revocation in the PENDING set at startup. A `*-active`
+        // mode is intended to be paired with a value <= current
+        // height (e.g. 0) to keep it ACTIVE at startup.
+        "signed-devnet-leaf-revocation-pending-v0" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::Honest,
             LeafRevocationTarget::Validator(0),
+            Run062RevocationGate {
+                revocation_activation_height: Some(u64::MAX),
+                emit_root_revocation: false,
+            },
         ),
-        "signed-devnet-revoked-v1" => Mode::Signed(
+        "signed-devnet-leaf-revocation-active-v0" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::Honest,
-            LeafRevocationTarget::Validator(1),
+            LeafRevocationTarget::Validator(0),
+            Run062RevocationGate {
+                revocation_activation_height: Some(0),
+                emit_root_revocation: false,
+            },
         ),
-        "signed-devnet-revoked-unknown" => Mode::Signed(
+        // Run 062 root-revocation activation gates. These emit a
+        // root-level (no leaf_cert_fingerprint) revocation pointing at
+        // the bundle's roots[0]. `*-pending` keeps the root in the
+        // active set at startup (revocation deferred); `*-active`
+        // excludes it immediately (legacy Run 050 behaviour).
+        "signed-devnet-root-revocation-pending" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::Honest,
-            LeafRevocationTarget::UnknownAllZeros,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: Some(u64::MAX),
+                emit_root_revocation: true,
+            },
+        ),
+        "signed-devnet-root-revocation-active" => Mode::Signed(
+            TrustBundleEnvironment::Devnet,
+            SignedMode::Honest,
+            LeafRevocationTarget::None,
+            Run062RevocationGate {
+                revocation_activation_height: Some(0),
+                emit_root_revocation: true,
+            },
         ),
         other => panic!(
             "unknown bundle_mode `{}` (expected one of: \
@@ -307,7 +380,11 @@ fn parse_mode(s: &str) -> Mode {
              signed-wrong-key / signed-mainnet-tampered / signed-mainnet-wrong-key / \
              signed-unsupported-suite / signed-malformed / \
              signed-key-root-collision / signed-devnet-revoked-v0 / \
-             signed-devnet-revoked-v1 / signed-devnet-revoked-unknown)",
+             signed-devnet-revoked-v1 / signed-devnet-revoked-unknown / \
+             signed-devnet-leaf-revocation-pending-v0 / \
+             signed-devnet-leaf-revocation-active-v0 / \
+             signed-devnet-root-revocation-pending / \
+             signed-devnet-root-revocation-active)",
             other
         ),
     }
@@ -344,6 +421,22 @@ fn main() {
             Some(s)
         }
     });
+    // Run 062: optional per-entry `activation_height` override applied
+    // to the revocation entry emitted by the selected mode (leaf-
+    // revocation or root-revocation). Overrides any default value the
+    // mode set in `parse_mode`. `none` forces `activation_height =
+    // null` explicitly (legacy Run 050/052 immediate revocation).
+    let revocation_activation_height_for_target_override: Option<Option<u64>> =
+        args.next().map(|s| {
+            if s.eq_ignore_ascii_case("none") {
+                None
+            } else {
+                Some(
+                    s.parse::<u64>()
+                        .expect("optional [revocation_activation_height_for_target] must be a u64 decimal or 'none'"),
+                )
+            }
+        });
 
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
@@ -410,7 +503,7 @@ fn main() {
             }
             b
         }
-        Mode::Signed(env, signed_mode, leaf_revocation_target) => {
+        Mode::Signed(env, signed_mode, leaf_revocation_target, run062_gate) => {
             let mut b = build_helper_bundle(
                 HelperBundleMode::Valid,
                 &root_id_hex,
@@ -437,6 +530,20 @@ fn main() {
             // Run 054: inject an active leaf-cert revocation for the
             // requested target before signing, so the signed preimage
             // covers the revocation entry.
+            //
+            // Run 062: the per-entry `activation_height` field is
+            // resolved as follows:
+            //   1. If the operator supplied
+            //      `[revocation_activation_height_for_target]` on the
+            //      command line, that value (or `None` when `none` was
+            //      passed) wins, regardless of mode default.
+            //   2. Else, the mode default from `parse_mode` wins
+            //      (`Run062RevocationGate.revocation_activation_height`).
+            let revocation_activation_height_for_target: Option<u64> =
+                match revocation_activation_height_for_target_override {
+                    Some(maybe) => maybe,
+                    None => run062_gate.revocation_activation_height,
+                };
             match leaf_revocation_target {
                 LeafRevocationTarget::None => {}
                 LeafRevocationTarget::Validator(target_vid) => {
@@ -454,6 +561,7 @@ fn main() {
                         leaf_cert_fingerprint: Some(fp_hex.clone()),
                         reason: "test-leaf-revocation-run054".to_string(),
                         effective_from: 0,
+                        activation_height: revocation_activation_height_for_target,
                     });
                 }
                 LeafRevocationTarget::UnknownAllZeros => {
@@ -470,8 +578,23 @@ fn main() {
                         ),
                         reason: "test-leaf-revocation-run054-unknown-fp".to_string(),
                         effective_from: 0,
+                        activation_height: revocation_activation_height_for_target,
                     });
                 }
+            }
+
+            // Run 062: emit a root-level revocation entry when the
+            // mode requests it. The entry's `activation_height`
+            // follows the same resolution rule as the leaf-revocation
+            // path above (CLI override > mode default).
+            if run062_gate.emit_root_revocation {
+                b.revocations.push(TrustBundleRevocation {
+                    root_id: root_id_hex.clone(),
+                    leaf_cert_fingerprint: None,
+                    reason: "test-root-revocation-run062".to_string(),
+                    effective_from: 0,
+                    activation_height: revocation_activation_height_for_target,
+                });
             }
 
             // Mint a fresh bundle-signing keypair. NEVER written to disk.

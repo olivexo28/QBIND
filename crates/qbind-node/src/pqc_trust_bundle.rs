@@ -240,6 +240,37 @@ pub struct TrustBundleRevocation {
     /// the smallest safe shape that supports planned rotation
     /// windows.
     pub effective_from: u64,
+    /// Run 062: optional revocation-entry activation height gate.
+    ///
+    /// When `Some(H)`, this revocation entry is **pending** (not yet
+    /// enforced) until the runtime committed height `current_height`
+    /// supplied via [`crate::pqc_trust_activation::ActivationContext`]
+    /// reaches `H` inclusive (`current_height >= H`). A revocation
+    /// entry with `activation_height = None` preserves Run 050/052
+    /// behaviour: it is gated solely by `effective_from` and becomes
+    /// active immediately on a satisfied `effective_from`.
+    ///
+    /// Future-dated revocations therefore do NOT exclude their target
+    /// root from `active_roots` and do NOT appear in
+    /// `revoked_leaf_fingerprints` (the surface consumed by the local
+    /// leaf self-check and the P2P handshake revocation context)
+    /// until the activation height is satisfied. They DO appear in
+    /// the parallel `pending_revoked_root_ids` /
+    /// `pending_revoked_leaf_fingerprints` sets for observability.
+    ///
+    /// Like every other field on [`TrustBundleRevocation`], this field
+    /// is covered by `canonical_signing_bytes` and
+    /// `canonical_fingerprint`: tampering with it after signing
+    /// invalidates the bundle signature (see
+    /// `tampered_revocation_activation_height_fails_signature`).
+    ///
+    /// When no runtime height source is available
+    /// (`ActivationContext.current_height = None`), a revocation entry
+    /// declaring `activation_height = Some(_)` stays **pending** —
+    /// fail-safe: the entry never silently enforces early, and never
+    /// silently rejects valid certs.
+    #[serde(default)]
+    pub activation_height: Option<u64>,
 }
 
 /// Top-level trust bundle artifact.
@@ -794,9 +825,24 @@ pub struct LoadedTrustBundle {
     /// verification time, fail closed, regardless of whether the leaf
     /// otherwise verifies against a still-active root. Populated only
     /// from `revocations[i].leaf_cert_fingerprint` entries whose
-    /// `effective_from <= validation_time_secs`; future-dated leaf
-    /// revocations are recorded but not yet active.
+    /// `effective_from <= validation_time_secs` AND whose Run 062
+    /// `activation_height` gate is satisfied
+    /// (`activation_height = None` or
+    /// `current_height >= activation_height`).
     pub revoked_leaf_fingerprints: HashSet<[u8; 32]>,
+    /// Run 062: revoked root ids whose `effective_from` is satisfied
+    /// but whose `activation_height` gate has NOT yet been reached
+    /// (or whose `current_height` runtime source is unavailable while
+    /// `activation_height` is declared). PENDING revocations MUST NOT
+    /// be consulted by any enforcement path (`active_roots` filter,
+    /// `is_root_revoked`, local leaf self-check, P2P handshake
+    /// revocation context); they are surfaced for metrics/logs only.
+    pub pending_revoked_root_ids: HashSet<[u8; 32]>,
+    /// Run 062: revoked leaf fingerprints whose `effective_from` is
+    /// satisfied but whose `activation_height` gate has NOT yet been
+    /// reached. Same observability-only semantics as
+    /// [`Self::pending_revoked_root_ids`].
+    pub pending_revoked_leaf_fingerprints: HashSet<[u8; 32]>,
     /// Run 051: result of the ML-DSA-44 signed-bundle verification
     /// step. `Unsigned` for DevNet unsigned bundles; `Verified` for
     /// any signed bundle that successfully verified against the
@@ -880,6 +926,45 @@ impl LoadedTrustBundle {
     /// Run 052: count of currently-active leaf revocations.
     pub fn revoked_leaf_fingerprint_count(&self) -> usize {
         self.revoked_leaf_fingerprints.len()
+    }
+
+    /// Run 062: count of revoked root ids that are currently PENDING
+    /// (declared with an `activation_height` gate not yet satisfied).
+    /// Surfaced on
+    /// `qbind_p2p_pqc_trust_bundle_revocations_pending_total` together
+    /// with [`Self::pending_revoked_leaf_fingerprint_count`].
+    pub fn pending_revoked_root_count(&self) -> usize {
+        self.pending_revoked_root_ids.len()
+    }
+
+    /// Run 062: count of revoked leaf fingerprints that are currently
+    /// PENDING (declared with an `activation_height` gate not yet
+    /// satisfied).
+    pub fn pending_revoked_leaf_fingerprint_count(&self) -> usize {
+        self.pending_revoked_leaf_fingerprints.len()
+    }
+
+    /// Run 062: total active revocations (root + leaf scope) currently
+    /// enforced by this loaded bundle. Surfaced on
+    /// `qbind_p2p_pqc_trust_bundle_revocations_active_total`.
+    pub fn active_revocations_total(&self) -> usize {
+        self.revoked_root_ids.len() + self.revoked_leaf_fingerprints.len()
+    }
+
+    /// Run 062: total pending revocations (root + leaf scope) declared
+    /// by this loaded bundle but NOT yet enforced. Surfaced on
+    /// `qbind_p2p_pqc_trust_bundle_revocations_pending_total`.
+    pub fn pending_revocations_total(&self) -> usize {
+        self.pending_revoked_root_ids.len()
+            + self.pending_revoked_leaf_fingerprints.len()
+    }
+
+    /// Run 062: total revocations declared in the underlying bundle
+    /// envelope (active + pending + any future `effective_from`
+    /// entries that are not yet pending-height-gated either). Surfaced
+    /// on `qbind_p2p_pqc_trust_bundle_revocations_configured_total`.
+    pub fn configured_revocations_total(&self) -> usize {
+        self.bundle.revocations.len()
     }
 }
 
@@ -1034,11 +1119,12 @@ impl TrustBundle {
         // malformed envelope; the activation re-check after a
         // successful structural validate is what binds the gate to
         // an actually-verified bundle.
-        let loaded = bundle.validate_at_with_signing_keys_and_chain_id(
+        let loaded = bundle.validate_at_with_signing_keys_chain_id_and_revocation_activation(
             expected_env,
             expected_chain_id,
             validation_time_secs,
             signing_keys,
+            activation_ctx.current_height,
         )?;
         let activation = crate::pqc_trust_activation::check_bundle_activation(
             &loaded.bundle,
@@ -1083,12 +1169,58 @@ impl TrustBundle {
     /// Run 053: validate with explicit runtime chain id. A missing
     /// bundle `chain_id` remains accepted for Run-050 compatibility;
     /// a present value is parsed strictly and compared fail-closed.
+    ///
+    /// Back-compat shim: revocation-entry `activation_height` gates
+    /// (Run 062) are evaluated under
+    /// [`crate::pqc_trust_activation::ActivationContext::unavailable`]
+    /// — height-gated entries therefore stay PENDING and do NOT
+    /// silently enforce early. Callers that have a safe pre-consensus
+    /// height source should use
+    /// [`Self::validate_at_with_signing_keys_chain_id_and_revocation_activation`]
+    /// or the higher-level
+    /// [`Self::load_from_path_with_signing_keys_chain_id_and_activation`].
     pub fn validate_at_with_signing_keys_and_chain_id(
         self,
         expected_env: NetworkEnvironment,
         expected_chain_id: ChainId,
         validation_time_secs: u64,
         signing_keys: &BundleSigningKeySet,
+    ) -> Result<LoadedTrustBundle, TrustBundleError> {
+        self.validate_at_with_signing_keys_chain_id_and_revocation_activation(
+            expected_env,
+            expected_chain_id,
+            validation_time_secs,
+            signing_keys,
+            None,
+        )
+    }
+
+    /// Run 062: validate (Run 050/051/053 structural + signed-bundle
+    /// + chain-id pipeline) AND gate revocation entries by their
+    /// declared `activation_height` against the supplied runtime
+    /// height source.
+    ///
+    /// * `revocation_activation_height = Some(h)` — a revocation entry
+    ///   whose `activation_height` is `None` is gated only by
+    ///   `effective_from` (legacy Run 050/052 semantics, preserved).
+    ///   An entry whose `activation_height = Some(H)` is **active**
+    ///   iff `h >= H` and **pending** otherwise. The pending entries
+    ///   are recorded in `pending_revoked_root_ids` /
+    ///   `pending_revoked_leaf_fingerprints` for metrics/logs but are
+    ///   NOT consulted by any enforcement path.
+    /// * `revocation_activation_height = None` — no runtime height
+    ///   source is available. Entries with
+    ///   `activation_height = Some(_)` stay PENDING (fail-safe: never
+    ///   enforce early when the gate source is missing). Legacy
+    ///   `activation_height = None` entries behave exactly as in
+    ///   Run 050/052.
+    pub fn validate_at_with_signing_keys_chain_id_and_revocation_activation(
+        self,
+        expected_env: NetworkEnvironment,
+        expected_chain_id: ChainId,
+        validation_time_secs: u64,
+        signing_keys: &BundleSigningKeySet,
+        revocation_activation_height: Option<u64>,
     ) -> Result<LoadedTrustBundle, TrustBundleError> {
         // 1. Schema version.
         if self.bundle_version != Self::SUPPORTED_SCHEMA_VERSION {
@@ -1224,8 +1356,24 @@ impl TrustBundle {
         //    Future-dated revocations (`effective_from > validation_time_secs`)
         //    are recorded but not yet active: they are excluded from
         //    `revoked_root_ids` AND from `revoked_leaf_fingerprints`.
+        //
+        //    Run 062: in addition to `effective_from`, revocation
+        //    entries may declare an optional `activation_height` gate.
+        //    An entry whose `effective_from` is satisfied but whose
+        //    declared `activation_height` is NOT yet reached against
+        //    the supplied `revocation_activation_height` source is
+        //    recorded in the parallel PENDING sets
+        //    (`pending_revoked_root_ids`,
+        //    `pending_revoked_leaf_fingerprints`) and excluded from
+        //    the ACTIVE enforcement sets. Legacy entries
+        //    (`activation_height = None`) keep Run 050/052 behaviour.
+        //    A missing `revocation_activation_height` source while
+        //    `activation_height = Some(_)` is declared keeps the
+        //    entry PENDING — fail-safe: never enforce early.
         let mut revoked_root_ids: HashSet<[u8; 32]> = HashSet::new();
         let mut revoked_leaf_fingerprints: HashSet<[u8; 32]> = HashSet::new();
+        let mut pending_revoked_root_ids: HashSet<[u8; 32]> = HashSet::new();
+        let mut pending_revoked_leaf_fingerprints: HashSet<[u8; 32]> = HashSet::new();
         let mut seen_root_level_revocations: HashSet<[u8; 32]> = HashSet::new();
         let mut seen_leaf_fingerprints: HashSet<[u8; 32]> = HashSet::new();
         for rev in &self.revocations {
@@ -1240,6 +1388,19 @@ impl TrustBundle {
                     rev.root_id.clone(),
                 ));
             }
+            // Run 062: an entry is "height-active" iff its
+            // `activation_height` is None or the supplied runtime
+            // height has reached the declared activation height. A
+            // missing runtime source while `activation_height` is
+            // declared is treated as "not yet active" (pending).
+            let height_active: bool = match rev.activation_height {
+                None => true,
+                Some(req) => match revocation_activation_height {
+                    Some(cur) => cur >= req,
+                    None => false,
+                },
+            };
+            let time_active: bool = rev.effective_from <= validation_time_secs;
             match &rev.leaf_cert_fingerprint {
                 None => {
                     // Root-level revocation. Run 050 behaviour preserved.
@@ -1248,9 +1409,16 @@ impl TrustBundle {
                             rev.root_id.clone(),
                         ));
                     }
-                    if rev.effective_from <= validation_time_secs {
+                    if time_active && height_active {
                         revoked_root_ids.insert(id_bytes);
+                    } else if time_active && !height_active {
+                        // Run 062: future-height pending root revocation.
+                        pending_revoked_root_ids.insert(id_bytes);
                     }
+                    // else: `effective_from`-future entry; recorded in
+                    // the underlying bundle but not yet surfaced on
+                    // either active or pending sets (Run 050 behaviour
+                    // preserved).
                 }
                 Some(leaf_fp_hex) => {
                     // Leaf-level revocation. Run 052 surface.
@@ -1266,9 +1434,14 @@ impl TrustBundle {
                             rev.root_id.clone(),
                         ));
                     }
-                    if rev.effective_from <= validation_time_secs {
+                    if time_active && height_active {
                         revoked_leaf_fingerprints.insert(leaf_fp_bytes);
+                    } else if time_active && !height_active {
+                        // Run 062: future-height pending leaf revocation.
+                        pending_revoked_leaf_fingerprints.insert(leaf_fp_bytes);
                     }
+                    // else: `effective_from`-future entry; Run 052
+                    // behaviour preserved (recorded but not surfaced).
                 }
             }
         }
@@ -1405,6 +1578,8 @@ impl TrustBundle {
             active_roots,
             revoked_root_ids,
             revoked_leaf_fingerprints,
+            pending_revoked_root_ids,
+            pending_revoked_leaf_fingerprints,
             signature_status,
         })
     }
@@ -1860,6 +2035,7 @@ pub fn build_helper_bundle(
                 leaf_cert_fingerprint: None,
                 reason: "test-revocation".to_string(),
                 effective_from: 0,
+                activation_height: None,
             }],
         ),
         HelperBundleMode::WrongEnvironment => (
@@ -2228,6 +2404,7 @@ mod tests {
             leaf_cert_fingerprint: None,
             reason: "compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let err =
@@ -2247,6 +2424,7 @@ mod tests {
             leaf_cert_fingerprint: None,
             reason: "scheduled-rotation".to_string(),
             effective_from: 1_000_000,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let loaded =
@@ -2266,12 +2444,14 @@ mod tests {
             leaf_cert_fingerprint: None,
             reason: "a".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         bundle.revocations.push(TrustBundleRevocation {
             root_id: id.clone(),
             leaf_cert_fingerprint: None,
             reason: "b".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let err =
@@ -2349,6 +2529,7 @@ mod tests {
             leaf_cert_fingerprint: Some(fp_hex.clone()),
             reason: "leaf-compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let loaded =
@@ -2376,6 +2557,7 @@ mod tests {
             leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
             reason: "scheduled-leaf-rotation".to_string(),
             effective_from: 1_000_000,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let loaded =
@@ -2395,6 +2577,7 @@ mod tests {
             leaf_cert_fingerprint: Some("ZZ".to_string()),
             reason: "leaf-compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let err =
@@ -2434,6 +2617,7 @@ mod tests {
             leaf_cert_fingerprint: None,
             reason: "root-compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         // Leaf-level revocation under root #2.
         bundle.revocations.push(TrustBundleRevocation {
@@ -2441,6 +2625,7 @@ mod tests {
             leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
             reason: "leaf-compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let loaded =
@@ -2470,6 +2655,7 @@ mod tests {
             leaf_cert_fingerprint: Some(cert_leaf_fingerprint_hex(&fp)),
             reason: "leaf-compromise".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         let bytes = serde_json::to_vec(&bundle).unwrap();
         let loaded =
@@ -2735,6 +2921,7 @@ mod tests {
             leaf_cert_fingerprint: None,
             reason: "x".to_string(),
             effective_from: 0,
+            activation_height: None,
         });
         assert_ne!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
     }
@@ -3187,5 +3374,341 @@ mod tests {
         // bundle prefix is `abababab` (8 chars), not the full hex.
         assert!(s.contains("abababab"));
         assert!(!s.contains("abababababababababababababababab"));
+    }
+
+    // ============================================================
+    // Run 062 — per-entry revocation activation gates.
+    // ============================================================
+
+    /// Build an unsigned DevNet bundle with one root and a single
+    /// leaf-revocation entry whose `activation_height` is configurable.
+    fn run062_unsigned_devnet_with_leaf_revocation(
+        activation_height: Option<u64>,
+        effective_from: u64,
+    ) -> (TrustBundle, String, String, [u8; 32]) {
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        // Choose a synthetic but parsable leaf fp.
+        let leaf_fp_hex = "11".repeat(32);
+        let leaf_fp_bytes = decode_hex_fixed_32(&leaf_fp_hex).unwrap();
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id_hex.clone(),
+            leaf_cert_fingerprint: Some(leaf_fp_hex.clone()),
+            reason: "run062-test".to_string(),
+            effective_from,
+            activation_height,
+        });
+        (bundle, id_hex, leaf_fp_hex, leaf_fp_bytes)
+    }
+
+    /// Run 062: revocation with `activation_height = None` (legacy)
+    /// behaves exactly as Run 052: immediate, active in revoked_leaf
+    /// set, NOT in pending set.
+    #[test]
+    fn run062_legacy_no_activation_height_is_immediately_active() {
+        let (bundle, _, _, leaf_fp_bytes) =
+            run062_unsigned_devnet_with_leaf_revocation(None, 0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                100,
+                &BundleSigningKeySet::empty(),
+                Some(0),
+            )
+            .expect("loads");
+        assert!(loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded.pending_revoked_leaf_fingerprints.is_empty());
+        assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
+        assert_eq!(loaded.pending_revoked_leaf_fingerprint_count(), 0);
+        assert_eq!(loaded.active_revocations_total(), 1);
+        assert_eq!(loaded.pending_revocations_total(), 0);
+        assert_eq!(loaded.configured_revocations_total(), 1);
+    }
+
+    /// Run 062: revocation with `activation_height = Some(0)` and a
+    /// satisfied runtime height is ACTIVE (not pending).
+    #[test]
+    fn run062_height_satisfied_is_active() {
+        let (bundle, _, _, leaf_fp_bytes) =
+            run062_unsigned_devnet_with_leaf_revocation(Some(100), 0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                1000,
+                &BundleSigningKeySet::empty(),
+                Some(150),
+            )
+            .expect("loads");
+        assert!(loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded.pending_revoked_leaf_fingerprints.is_empty());
+        assert_eq!(loaded.active_revocations_total(), 1);
+        assert_eq!(loaded.pending_revocations_total(), 0);
+    }
+
+    /// Run 062: revocation with future `activation_height` is PENDING,
+    /// never ACTIVE. Local leaf self-check therefore must not reject.
+    #[test]
+    fn run062_height_future_is_pending() {
+        let (bundle, _, _, leaf_fp_bytes) =
+            run062_unsigned_devnet_with_leaf_revocation(Some(1_000_000), 0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                1000,
+                &BundleSigningKeySet::empty(),
+                Some(150),
+            )
+            .expect("loads");
+        assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert_eq!(loaded.active_revocations_total(), 0);
+        assert_eq!(loaded.pending_revocations_total(), 1);
+        assert_eq!(loaded.configured_revocations_total(), 1);
+    }
+
+    /// Run 062: when no runtime height source is available, a
+    /// height-gated revocation stays PENDING (fail-safe — never
+    /// enforce early).
+    #[test]
+    fn run062_height_unavailable_keeps_entry_pending() {
+        let (bundle, _, _, leaf_fp_bytes) =
+            run062_unsigned_devnet_with_leaf_revocation(Some(100), 0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                1000,
+                &BundleSigningKeySet::empty(),
+                None,
+            )
+            .expect("loads");
+        assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert_eq!(loaded.active_revocations_total(), 0);
+        assert_eq!(loaded.pending_revocations_total(), 1);
+    }
+
+    /// Run 062: the legacy `validate_at_with_signing_keys_and_chain_id`
+    /// path (no activation context) still works for legacy bundles
+    /// without `activation_height` declared, and treats new
+    /// height-gated entries as PENDING (fail-safe).
+    #[test]
+    fn run062_legacy_validate_shim_treats_height_gated_as_pending() {
+        let (bundle, _, _, leaf_fp_bytes) =
+            run062_unsigned_devnet_with_leaf_revocation(Some(100), 0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_and_chain_id(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                1000,
+                &BundleSigningKeySet::empty(),
+            )
+            .expect("loads");
+        assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+    }
+
+    /// Run 062: a root-level revocation with future `activation_height`
+    /// keeps the target root in `active_roots` (not silently
+    /// excluded) and reports the entry in `pending_revoked_root_ids`.
+    #[test]
+    fn run062_root_revocation_pending_keeps_root_active() {
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        let id_bytes = decode_hex_fixed_32(&id_hex).unwrap();
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id_hex.clone(),
+            leaf_cert_fingerprint: None,
+            reason: "run062-root-pending".to_string(),
+            effective_from: 0,
+            activation_height: Some(u64::MAX),
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                100,
+                &BundleSigningKeySet::empty(),
+                Some(0),
+            )
+            .expect("loads");
+        // Active root set still contains the root (revocation pending).
+        assert_eq!(loaded.active_root_count(), 1);
+        assert!(!loaded.revoked_root_ids.contains(&id_bytes));
+        assert!(loaded.pending_revoked_root_ids.contains(&id_bytes));
+        assert_eq!(loaded.pending_revoked_root_count(), 1);
+        assert_eq!(loaded.active_revocations_total(), 0);
+        assert_eq!(loaded.pending_revocations_total(), 1);
+    }
+
+    /// Run 062: a root-level revocation with satisfied `activation_height`
+    /// is ACTIVE and excludes the root from `active_roots`, just like
+    /// the legacy Run 050 root-revocation path.
+    #[test]
+    fn run062_root_revocation_active_excludes_root() {
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        let id_bytes = decode_hex_fixed_32(&id_hex).unwrap();
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id_hex.clone(),
+            leaf_cert_fingerprint: None,
+            reason: "run062-root-active".to_string(),
+            effective_from: 0,
+            activation_height: Some(0),
+        });
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                100,
+                &BundleSigningKeySet::empty(),
+                Some(100),
+            )
+            .expect("loads");
+        assert_eq!(loaded.active_root_count(), 0);
+        assert!(loaded.revoked_root_ids.contains(&id_bytes));
+        assert!(!loaded.pending_revoked_root_ids.contains(&id_bytes));
+        assert_eq!(loaded.active_revocations_total(), 1);
+        assert_eq!(loaded.pending_revocations_total(), 0);
+    }
+
+    /// Run 062: `effective_from`-future entries (legacy Run 050/052)
+    /// stay out of BOTH active and pending sets — they remain on the
+    /// bundle envelope but are not yet surfaced anywhere, exactly as
+    /// before. This preserves backwards-compatibility with
+    /// pre-Run-062 fixtures that schedule a revocation via wall-clock
+    /// rather than height.
+    #[test]
+    fn run062_effective_from_future_legacy_entry_neither_active_nor_pending() {
+        // effective_from in the far future; no activation_height.
+        let (bundle, _, _, leaf_fp_bytes) =
+            run062_unsigned_devnet_with_leaf_revocation(None, u64::MAX);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let parsed: TrustBundle = serde_json::from_slice(&bytes).unwrap();
+        let loaded = parsed
+            .validate_at_with_signing_keys_chain_id_and_revocation_activation(
+                NetworkEnvironment::Devnet,
+                NetworkEnvironment::Devnet.chain_id(),
+                100,
+                &BundleSigningKeySet::empty(),
+                Some(1000),
+            )
+            .expect("loads");
+        assert!(!loaded.revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert!(!loaded.pending_revoked_leaf_fingerprints.contains(&leaf_fp_bytes));
+        assert_eq!(loaded.active_revocations_total(), 0);
+        assert_eq!(loaded.pending_revocations_total(), 0);
+        // Still counted as configured.
+        assert_eq!(loaded.configured_revocations_total(), 1);
+    }
+
+    /// Run 062: tampering the `activation_height` field on a
+    /// revocation entry after signing invalidates the ML-DSA-44
+    /// bundle signature. Proves the field is signature-covered.
+    #[test]
+    fn run062_tampered_revocation_activation_height_fails_signature() {
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut bundle =
+            build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        bundle.revocations.push(TrustBundleRevocation {
+            root_id: id_hex.clone(),
+            leaf_cert_fingerprint: Some("22".repeat(32)),
+            reason: "run062-tamper".to_string(),
+            effective_from: 0,
+            activation_height: Some(1_000_000),
+        });
+        let (signing_pk, signing_sk, signing_id) = fresh_signing_keypair();
+        let sig = sign_bundle_devnet_helper(&bundle, signing_id, &signing_sk).expect("sign");
+        bundle.signature = Some(sig);
+        let mut set = BundleSigningKeySet::empty();
+        set.push_spec(&signing_key_spec(signing_id, &signing_pk))
+            .expect("set");
+
+        // Tamper the field AFTER signing.
+        bundle.revocations[0].activation_height = Some(0);
+        let bytes = serde_json::to_vec(&bundle).unwrap();
+        let err = TrustBundle::load_from_bytes_with_signing_keys(
+            &bytes,
+            NetworkEnvironment::Devnet,
+            100,
+            &set,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, TrustBundleError::BadSignature { .. }),
+            "expected BadSignature, got: {:?}",
+            err
+        );
+    }
+
+    /// Run 062: `canonical_fingerprint` and `canonical_signing_bytes`
+    /// both incorporate the per-entry `activation_height` (so two
+    /// otherwise-identical bundles that differ only by this field on
+    /// a revocation hash to distinct fingerprints).
+    #[test]
+    fn run062_canonical_fingerprint_covers_revocation_activation_height() {
+        let (id_hex, pk_hex) = fresh_root_pair();
+        let mut a = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 0);
+        a.revocations.push(TrustBundleRevocation {
+            root_id: id_hex.clone(),
+            leaf_cert_fingerprint: Some("33".repeat(32)),
+            reason: "run062-canon".to_string(),
+            effective_from: 0,
+            activation_height: None,
+        });
+        let mut b = a.clone();
+        b.revocations[0].activation_height = Some(42);
+        assert_ne!(canonical_fingerprint(&a), canonical_fingerprint(&b));
+        assert_ne!(canonical_signing_bytes(&a), canonical_signing_bytes(&b));
+    }
+
+    /// Run 062: serde default — a JSON bundle that omits
+    /// `activation_height` entirely on a revocation entry deserialises
+    /// with `activation_height = None` (legacy compatibility).
+    #[test]
+    fn run062_serde_default_for_missing_activation_height() {
+        let json = r#"{
+            "bundle_version": 1,
+            "environment": "devnet",
+            "chain_id": null,
+            "generated_at": 0,
+            "valid_from": 0,
+            "valid_until": 18446744073709551615,
+            "sequence": 1,
+            "roots": [{
+                "root_id": "aa00000000000000000000000000000000000000000000000000000000000000",
+                "suite_id": 1,
+                "root_pk": "00",
+                "status": "active",
+                "not_before": 0,
+                "not_after": 18446744073709551615
+            }],
+            "revocations": [{
+                "root_id": "aa00000000000000000000000000000000000000000000000000000000000000",
+                "reason": "legacy-no-activation-height",
+                "effective_from": 0
+            }],
+            "signature": null
+        }"#;
+        let parsed: TrustBundle = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.revocations.len(), 1);
+        assert_eq!(parsed.revocations[0].activation_height, None);
     }
 }
