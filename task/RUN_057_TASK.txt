@@ -1,0 +1,380 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured trust bundles:
+  - --p2p-trust-bundle <PATH>
+  - environment binding
+  - bundle/root validity windows
+  - root status active | retired | revoked
+  - root-level revocation
+  - canonical fingerprint
+  - fail-closed validation
+- Run 051 landed signed ML-DSA-44 trust-bundle verification:
+  - --p2p-trust-bundle-signing-key KEYID:SUITE:PK
+  - signed DevNet/TestNet live startup proven
+  - unsigned TestNet/MainNet fail closed
+  - tampered/wrong-key/malformed/unsupported-suite/key-root-collision fail closed
+  - no fallback to --p2p-trusted-root
+  - no DummySig/DummyKem/DummyAead fallback
+- Run 052 landed leaf-level certificate revocation enforcement.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary leaf-revocation evidence artifacts.
+- Run 055 landed trust-bundle sequence-number monotonicity persistence:
+  - first load accepted and persisted
+  - higher sequence accepted and persisted
+  - lower sequence rejected as rollback
+  - equal sequence + same fingerprint accepted as no-op restart
+  - equal sequence + different fingerprint rejected as equivocation
+  - corrupt/malformed/wrong-env/wrong-chain persistence fails closed
+- Run 056 strongest-positive:
+  - produced release-binary anti-rollback smoke artifacts
+  - sequence 1 first-load accepted and persisted
+  - sequence 2 upgrade accepted and persisted
+  - rollback to sequence 1 after sequence 2 rejected
+  - equal sequence same fingerprint accepted
+  - equal sequence different fingerprint rejected
+  - corrupted persistence file rejected
+  - no fallback to --p2p-trusted-root
+  - no DummySig / DummyKem / DummyAead fallback
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust-bundle/lifecycle items:
+- activation epoch/height gating
+- MainNet live signed-bundle smoke
+- production CA / cert rotation / signing-key rotation operator playbook
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+
+Task:
+Run 057. Implement and prove trust-bundle activation epoch/height gating.
+
+Primary objective:
+Enforce trust-bundle activation gates so a valid signed trust bundle is not accepted before its declared activation condition is satisfied.
+
+Important framing:
+This is an activation-gating task.
+Do not implement CA/rotation playbook in this run.
+Do not implement MainNet live smoke unless trivial and non-distracting.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not modify consensus message formats.
+Do not modify timeout/NewView logic.
+Do not weaken signed-bundle verification.
+Do not weaken sequence anti-rollback persistence.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Enforce optional activation_epoch and/or activation_height fields already present or recorded in the trust-bundle model.
+- Define the runtime source of current height/epoch precisely.
+- If a safe current epoch source does not exist, do not invent fake epoch semantics.
+- If a safe current height source exists but epoch does not, implement height gating first and record epoch gating as remaining.
+- If neither source exists safely at startup, produce a partial result with precise boundary and do not fake enforcement.
+- Enforce gates after signature verification, environment validation, chain_id validation, and sequence anti-rollback validation, but before roots are merged into the live PQC trust set.
+- Preserve Run 050/051/052/053/054/055/056 behavior.
+- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required investigation:
+
+1. Inspect trust-bundle activation fields
+   Inspect:
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - TrustBundle metadata
+   - root entries
+   - any activation_epoch / activation_height fields
+   - validation currently applied to those fields
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md through RUN_056.md
+   - docs/whitepaper/contradiction.md
+
+   Determine:
+   - whether activation fields exist at bundle level, root level, or both
+   - whether fields are currently parsed but unenforced
+   - whether activation fields are signature-covered
+   - whether activation fields affect canonical fingerprint
+   - whether helper can mint future/past activation fixtures
+
+2. Identify safe runtime height/epoch source
+   Inspect:
+   - qbind-node startup config
+   - NodeConfig.chain_id()
+   - genesis/runtime state
+   - ledger committed height source
+   - restore/snapshot path
+   - VM-v0 / ledger state opening order
+   - any existing epoch manager or epoch-transition code
+   - whether activation is meaningful before consensus starts
+
+   Required decision:
+   - If a committed-height source is available before trust roots are merged, use it.
+   - If current height is only available after transport starts, do not create a circular dependency.
+   - If epoch is derived from height using existing epoch config, document exact derivation.
+   - If no safe epoch source exists, defer epoch gating and implement only height gating or document partial result.
+
+3. Define activation semantics
+   Recommended policy:
+   - activation_height is inclusive:
+     - current_height >= activation_height means active
+     - current_height < activation_height means fail closed / not yet active
+   - activation_epoch is inclusive:
+     - current_epoch >= activation_epoch means active
+     - current_epoch < activation_epoch means fail closed / not yet active
+   - If both height and epoch gates are present:
+     - both must be satisfied.
+   - Missing gate:
+     - no activation restriction from that field.
+   - Invalid gate:
+     - fail closed.
+   - Bundle/root with future activation:
+     - must not be merged into live root set.
+   - Bundle/root with satisfied activation:
+     - behaves as before.
+   - Activation check must happen before sequence persistence update if accepting a future bundle would incorrectly burn a higher sequence.
+     - Important: do not persist sequence for a bundle that is not yet active.
+   - Activation check must happen before roots are merged.
+
+4. Define sequence interaction
+   Required:
+   - A not-yet-active bundle must not update the highest accepted sequence.
+   - A rejected future-activation bundle must leave the existing persisted sequence record unchanged.
+   - If a lower sequence is not yet active, rollback still should be rejected according to existing ordering if sequence is checked before activation; choose and document ordering.
+   - Recommended ordering:
+     1. parse bundle
+     2. verify signature
+     3. validate env/chain_id/root status/revocation/windows
+     4. activation gating
+     5. sequence monotonicity persistence
+     6. merge roots
+   - This prevents not-yet-active future bundles from advancing sequence.
+
+5. Define metrics/logs
+   Add metrics if appropriate:
+   - qbind_p2p_pqc_trust_bundle_activation_height_current
+   - qbind_p2p_pqc_trust_bundle_activation_height_required
+   - qbind_p2p_pqc_trust_bundle_activation_epoch_current
+   - qbind_p2p_pqc_trust_bundle_activation_epoch_required
+   - qbind_p2p_pqc_trust_bundle_activation_rejected_total
+
+   Requirements:
+   - no fabricated metrics
+   - no duplicate metric families
+   - if startup fails before metrics are reachable, prove via tests and document live boundary
+   - logs should show only safe metadata:
+     - current height/epoch
+     - required height/epoch
+     - bundle fingerprint prefix
+     - sequence
+   - no private material
+
+Required implementation:
+
+1. Add activation-gating validation
+   Implement in the smallest appropriate module:
+   - likely pqc_trust_bundle.rs or new pqc_trust_activation.rs
+   - define ActivationContext:
+     - current_height: Option<u64>
+     - current_epoch: Option<u64>
+   - define check_activation(bundle/root, ctx)
+   - strict errors:
+     - activation height not yet reached
+     - activation epoch not yet reached
+     - required current height unavailable
+     - required current epoch unavailable
+     - invalid activation field if applicable
+
+2. Wire activation context into startup
+   In main.rs trust-bundle load path:
+   - compute/read activation context
+   - run activation gating before sequence persistence update and root merge
+   - fail closed on future activation or unavailable required source
+   - do not persist sequence on activation failure
+   - do not merge roots on activation failure
+   - preserve Run 055 anti-rollback semantics for accepted bundles
+
+3. Helper support
+   Extend devnet_pqc_trust_bundle_helper if necessary:
+   - valid active-now bundle
+   - future activation_height bundle
+   - satisfied activation_height bundle
+   - future activation_epoch bundle if epoch source exists
+   - satisfied activation_epoch bundle if epoch source exists
+   - both-gates fixture if both are implemented
+   - invalid activation fixture if applicable
+
+   The helper extension must be evidence tooling only and must not affect core runtime semantics.
+
+4. Metrics
+   Add metrics only if the values are meaningful and available.
+   If not adding metrics, document why logs/tests are sufficient.
+   If adding metrics, add formatting tests and ensure no duplicates.
+
+Required tests:
+
+1. Unit tests
+   - missing activation fields accepted.
+   - activation_height satisfied accepted.
+   - activation_height future rejected.
+   - activation_epoch satisfied accepted if implemented.
+   - activation_epoch future rejected if implemented.
+   - both gates satisfied accepted.
+   - one of both gates future rejected.
+   - required current height unavailable rejected when activation_height exists.
+   - required current epoch unavailable rejected when activation_epoch exists.
+   - activation fields are included in canonical fingerprint/signing bytes.
+   - tampering activation fields after signing fails signature verification.
+   - not-yet-active bundle does not update sequence state.
+   - accepted active bundle updates sequence state.
+
+2. Integration tests
+   - signed DevNet bundle with no activation gate still loads.
+   - signed DevNet bundle with activation_height <= current height loads.
+   - signed DevNet bundle with activation_height > current height fails closed.
+   - future activation does not update sequence persistence.
+   - after failing future activation, old active bundle still loads if sequence policy permits.
+   - if epoch gating implemented:
+     - activation_epoch <= current epoch loads.
+     - activation_epoch > current epoch fails closed.
+   - existing Run 050/051/052/053/055 tests pass.
+   - static-root conflict policy unchanged.
+   - chain_id enforcement unchanged.
+   - sequence rollback/equivocation unchanged.
+
+3. Release-binary evidence
+   Positive active-now smoke:
+   - release qbind-node
+   - signed DevNet trust bundle
+   - activation_height <= current height or no activation gate
+   - explicit --data-dir
+   - Required pqc-static-root
+   - prove startup succeeds
+   - prove sequence persistence still works
+   - no fallback
+   - no Dummy crypto
+
+   Negative future-height smoke:
+   - signed DevNet trust bundle with activation_height > current height
+   - prove startup fails closed before root merge
+   - prove sequence file is not created or not updated
+   - precise FATAL/log reason mentions activation height not reached
+   - no fallback
+   - no Dummy crypto
+
+   Optional satisfied-height after simulated/current height:
+   - if the runtime height source can be controlled safely, prove the same bundle is accepted once height is reached.
+   - if not feasible, rely on unit/integration tests and document boundary.
+
+   Optional epoch smoke:
+   - only if epoch source is safe and implemented.
+
+Required tests to rerun:
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- new Run 057 activation tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_057.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests run and pass/fail status
+- investigation findings with file/function references
+- activation field location and semantics
+- runtime height/epoch source decision
+- sequence-interaction ordering
+- activation failure policy
+- metrics added/changed, or why not added
+- binary identity:
+  - branch
+  - commit
+  - dirty/clean status
+  - qbind-node sha256
+  - qbind-node ELF BuildID
+- helper identity:
+  - helper sha256
+  - helper ELF BuildID
+- positive active-now smoke
+- negative future-height smoke
+- optional epoch smoke if implemented
+- proof sequence file is not updated on activation failure
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- remaining open items
+- exact immediate next action
+
+contradiction.md update rules:
+- If activation height gating lands and is proven, update C4 to record height activation gating narrowed/closed for the scoped signed-bundle path.
+- If epoch gating is deferred because no safe epoch source exists, record that explicitly.
+- If activation failure does not update sequence state, record that as positive.
+- Keep C4 open for:
+  - epoch gating if not implemented
+  - MainNet live signed-bundle smoke if still absent
+  - production CA / cert rotation / signing-key rotation operator playbook
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation if not fully solved
+- Do not close full C4.
+- Do not claim C5 closure unless explicitly justified.
+- If a future-activation bundle is accepted too early, record as contradiction/regression.
+- If a future-activation bundle updates sequence state before becoming active, record as contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record as contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  activation_height gating is implemented and proven on tests plus release-binary smokes; future-height bundle fails closed before root merge and before sequence update; active-now bundle loads; no fallback; no Dummy crypto; epoch gating is either implemented or explicitly deferred due no safe source.
+- Partial positive:
+  activation gating tests pass but release-binary evidence or height/epoch source is incomplete. State exact boundary.
+- Negative:
+  future activation accepted early, sequence updated on rejected future bundle, fallback/Dummy crypto activates, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Exact tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
