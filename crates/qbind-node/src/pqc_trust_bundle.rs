@@ -1591,6 +1591,134 @@ pub fn cert_leaf_fingerprint_hex(fp: &[u8; 32]) -> String {
 }
 
 // ---------------------------------------------------------------------
+// Run 061: local revoked-leaf startup self-check
+//
+// If the node's own local PQC transport delegation certificate is
+// listed in the active trust-bundle leaf revocation set, the node
+// MUST fail closed during startup BEFORE P2P is constructed or
+// started. This module provides the smallest pure helper that the
+// binary wiring in `main.rs` calls right after the trust bundle is
+// fully validated and right before any builder/peer-handshake state
+// is constructed.
+//
+// Scope (kept narrow on purpose):
+//   - reads ONLY the local leaf cert bytes; never the private KEM
+//     secret key, never the root signing secret;
+//   - decodes them with the same `NetworkDelegationCert::decode`
+//     path the rest of the transport stack uses (and that
+//     `PqcLeafCredentialPaths::load` has already exercised on this
+//     binary path), so a malformed cert cannot reach this helper on
+//     the binary path — but the helper still fails closed if it
+//     were called with malformed bytes directly;
+//   - computes the canonical Run 052 fingerprint via
+//     [`cert_leaf_fingerprint`] — the SAME bytes the qbind-net
+//     peer-handshake revocation list looks up, so the startup
+//     self-check and the peer-handshake check agree by
+//     construction.
+//
+// Out of scope (Run 061 is deliberately narrow):
+//   - no metric is fabricated for the startup path; if the node
+//     fails closed before `/metrics` is bound, an extra counter
+//     would never be scrapeable. The peer-handshake
+//     `qbind_p2p_pqc_cert_verify_rejected_revoked_total` counter
+//     keeps its Run 052 contract unchanged.
+//   - no new error variant on `TrustBundleError` (the bundle is
+//     already validated by the time this helper runs; the failure
+//     is a *local-config* failure, not a bundle failure).
+//   - no changes to `LoadedTrustBundle::revoked_leaf_fingerprints`
+//     semantics, no changes to root-level revocation, no changes
+//     to the peer-handshake `LeafCertRevocationList`.
+// ---------------------------------------------------------------------
+
+/// Outcome of a [`check_local_leaf_not_revoked`] call. Carries only
+/// log-safe digest prefixes; never any private-key material.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalLeafSelfCheckError {
+    /// The local leaf cert bytes could not be decoded as a
+    /// `NetworkDelegationCert`. On the binary path this is unreachable
+    /// because `PqcLeafCredentialPaths::load` already validates the
+    /// shape; the helper preserves fail-closed semantics anyway so
+    /// it is safe to call from tests or any future wiring point that
+    /// has not yet decoded the cert.
+    DecodeFailed,
+    /// The local leaf cert's canonical Run 052 fingerprint matches an
+    /// active entry on the trust bundle's revocation list. The
+    /// 8-hex-char prefixes are log-safe identifiers: the cert
+    /// fingerprint is a public digest of a cert that the peer would
+    /// have seen on the wire anyway, and the bundle fingerprint is
+    /// already surfaced as a startup log line and on `/metrics`.
+    Revoked {
+        leaf_fingerprint_prefix: String,
+        bundle_fingerprint_prefix: String,
+    },
+}
+
+impl std::fmt::Display for LocalLeafSelfCheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DecodeFailed => write!(
+                f,
+                "local leaf certificate could not be decoded as a NetworkDelegationCert"
+            ),
+            Self::Revoked {
+                leaf_fingerprint_prefix,
+                bundle_fingerprint_prefix,
+            } => write!(
+                f,
+                "local leaf certificate revoked: leaf_fp={}.. bundle_fp={}..",
+                leaf_fingerprint_prefix, bundle_fingerprint_prefix,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for LocalLeafSelfCheckError {}
+
+/// Run 061: local revoked-leaf startup self-check helper.
+///
+/// Decodes `local_leaf_cert_bytes` as a `NetworkDelegationCert`,
+/// computes its canonical Run 052 fingerprint (see
+/// [`cert_leaf_fingerprint`]), and returns:
+///
+/// - `Ok(fp)` if the fingerprint is NOT in `revoked_leaf_fingerprints`
+///   (including the common empty-set case);
+/// - `Err(LocalLeafSelfCheckError::Revoked { .. })` if it is — the
+///   caller (the `qbind-node` binary) MUST fail closed and exit
+///   before any P2P construction;
+/// - `Err(LocalLeafSelfCheckError::DecodeFailed)` if the bytes are
+///   not a well-formed cert (defence-in-depth — unreachable on the
+///   binary path because the cert has already been decoded once by
+///   `PqcLeafCredentialPaths::load`).
+///
+/// `bundle_fingerprint` is used only to populate the log-safe
+/// `bundle_fingerprint_prefix` on a revocation rejection; it is not
+/// otherwise consulted.
+///
+/// This function reads NO private-key material. It takes only the
+/// public cert bytes and the public revocation set. The helper is a
+/// pure function: same inputs → same output.
+pub fn check_local_leaf_not_revoked(
+    local_leaf_cert_bytes: &[u8],
+    revoked_leaf_fingerprints: &HashSet<[u8; 32]>,
+    bundle_fingerprint: &[u8; 32],
+) -> Result<[u8; 32], LocalLeafSelfCheckError> {
+    use qbind_wire::io::WireDecode;
+    let mut slice: &[u8] = local_leaf_cert_bytes;
+    let cert = qbind_wire::net::NetworkDelegationCert::decode(&mut slice)
+        .map_err(|_| LocalLeafSelfCheckError::DecodeFailed)?;
+    let fp = cert_leaf_fingerprint(&cert);
+    if revoked_leaf_fingerprints.contains(&fp) {
+        let leaf_prefix = cert_leaf_fingerprint_hex(&fp);
+        let bundle_prefix = cert_leaf_fingerprint_hex(bundle_fingerprint);
+        return Err(LocalLeafSelfCheckError::Revoked {
+            leaf_fingerprint_prefix: leaf_prefix[..8].to_string(),
+            bundle_fingerprint_prefix: bundle_prefix[..8].to_string(),
+        });
+    }
+    Ok(fp)
+}
+
+// ---------------------------------------------------------------------
 // helpers — mirror the hex parsing discipline of `pqc_root_config`.
 // ---------------------------------------------------------------------
 
@@ -2875,5 +3003,189 @@ mod tests {
             err,
             TrustBundleError::UnsignedBundleNotAllowed(TrustBundleEnvironment::Testnet)
         ));
+    }
+
+    // -----------------------------------------------------------------
+    // Run 061: local revoked-leaf startup self-check unit tests.
+    // -----------------------------------------------------------------
+
+    fn encode_cert_bytes(cert: &qbind_wire::net::NetworkDelegationCert) -> Vec<u8> {
+        use qbind_wire::io::WireEncode;
+        let mut out = Vec::with_capacity(256);
+        cert.encode(&mut out);
+        out
+    }
+
+    #[test]
+    fn run_061_self_check_passes_when_local_leaf_is_not_revoked() {
+        // Empty revocation set: the most common no-op case. The helper
+        // returns the computed fingerprint and the caller proceeds
+        // normally.
+        let cert = build_fixture_cert(0xA1);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let fp = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        // The returned fingerprint is the same as cert_leaf_fingerprint.
+        assert_eq!(fp, cert_leaf_fingerprint(&cert));
+    }
+
+    #[test]
+    fn run_061_self_check_passes_when_unknown_revoked_fingerprint_does_not_match() {
+        // The bundle revokes some OTHER leaf cert; the local cert is
+        // unrelated and must be allowed to start.
+        let local = build_fixture_cert(0xB2);
+        let other = build_fixture_cert(0xC3);
+        assert_ne!(
+            cert_leaf_fingerprint(&local),
+            cert_leaf_fingerprint(&other),
+            "fixture sanity: local and other must differ"
+        );
+        let mut revoked: HashSet<[u8; 32]> = HashSet::new();
+        revoked.insert(cert_leaf_fingerprint(&other));
+        let bundle_fp = [0u8; 32];
+        let fp = check_local_leaf_not_revoked(&encode_cert_bytes(&local), &revoked, &bundle_fp)
+            .expect("local not in revoked set");
+        assert_eq!(fp, cert_leaf_fingerprint(&local));
+    }
+
+    #[test]
+    fn run_061_self_check_fails_closed_when_local_leaf_is_revoked() {
+        // Negative path: the local cert's fingerprint is present in
+        // the revocation set. Helper MUST return Revoked and the
+        // caller MUST exit non-zero. We assert on the variant and on
+        // the log-safe prefixes.
+        let cert = build_fixture_cert(0xD4);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let fp = cert_leaf_fingerprint(&cert);
+        let mut revoked: HashSet<[u8; 32]> = HashSet::new();
+        revoked.insert(fp);
+        let bundle_fp: [u8; 32] = [
+            0xfe, 0xed, 0xfa, 0xce, 0xde, 0xad, 0xbe, 0xef, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let err = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp).unwrap_err();
+        match err {
+            LocalLeafSelfCheckError::Revoked {
+                leaf_fingerprint_prefix,
+                bundle_fingerprint_prefix,
+            } => {
+                // Prefixes are exactly 8 lowercase-hex chars and
+                // reflect the computed digests (the leaf prefix is
+                // the first 8 hex chars of `fp`).
+                assert_eq!(leaf_fingerprint_prefix.len(), 8);
+                assert_eq!(bundle_fingerprint_prefix, "feedface");
+                let full = cert_leaf_fingerprint_hex(&fp);
+                assert_eq!(leaf_fingerprint_prefix, full[..8]);
+            }
+            other => panic!("expected Revoked, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run_061_self_check_fails_closed_on_malformed_local_cert_bytes() {
+        // Defence in depth: even though the binary path has already
+        // validated the cert shape via `PqcLeafCredentialPaths::load`,
+        // the helper itself fails closed on garbage input.
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let err = check_local_leaf_not_revoked(&[0u8; 4], &revoked, &bundle_fp).unwrap_err();
+        assert_eq!(err, LocalLeafSelfCheckError::DecodeFailed);
+        assert!(format!("{}", err).contains("could not be decoded"));
+    }
+
+    #[test]
+    fn run_061_self_check_fingerprint_equals_run_052_handshake_fingerprint() {
+        // The startup self-check MUST hash the same bytes the
+        // qbind-net peer handshake hashes for the same cert; otherwise
+        // a node could either start with a peer-revoked leaf
+        // (false negative on startup) or fail to start with a
+        // peer-allowed leaf (false positive on startup). We assert
+        // byte-identity directly via the qbind-net helper.
+        use qbind_net::leaf_cert_fingerprint as net_leaf_fp;
+        let cert = build_fixture_cert(0xE5);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let net_fp = net_leaf_fp(&cert);
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        let node_fp = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        assert_eq!(
+            node_fp, net_fp,
+            "Run 061 startup self-check fingerprint must equal Run 052 handshake fingerprint"
+        );
+    }
+
+    #[test]
+    fn run_061_self_check_does_not_require_private_key_material() {
+        // The helper's signature accepts only cert bytes + the public
+        // revocation set + the public bundle fingerprint. There is no
+        // way to supply a private key — this test pins the API shape
+        // so a future refactor cannot accidentally widen it. We also
+        // assert at runtime that the helper produces the same result
+        // whether or not a separate "secret" byte buffer exists in
+        // the caller scope (proxy for "no private-key dependency").
+        let cert = build_fixture_cert(0xF6);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        // Imaginary KEM secret bytes; must not affect the result.
+        let _imaginary_kem_sk = vec![0u8; 32];
+        let fp_a = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        let fp_b = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("not revoked");
+        assert_eq!(fp_a, fp_b);
+        // Sanity: helper output is exactly the public cert digest.
+        assert_eq!(fp_a, cert_leaf_fingerprint(&cert));
+    }
+
+    #[test]
+    fn run_061_self_check_ignores_root_level_revocation_axis() {
+        // A bundle that root-revokes the local cert's issuing root
+        // MUST NOT trigger a leaf-self-check rejection unless the
+        // leaf fingerprint itself is also on the leaf revocation
+        // list. The two axes are orthogonal at this layer (root
+        // revocation is enforced separately at cert verify time;
+        // this helper is leaf-only).
+        let cert = build_fixture_cert(0x17);
+        let cert_bytes = encode_cert_bytes(&cert);
+        // Root revocation lives on `revoked_root_ids`, which is NOT
+        // passed to this helper. The leaf set is empty.
+        let revoked: HashSet<[u8; 32]> = HashSet::new();
+        let bundle_fp = [0u8; 32];
+        check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp)
+            .expect("leaf-only helper must not consult root revocation axis");
+    }
+
+    #[test]
+    fn run_061_self_check_revoked_error_display_carries_log_safe_prefixes_only() {
+        // The Display impl must surface only the 8-char prefixes,
+        // never the full fingerprint and never any private material.
+        // This is what makes the FATAL log line safe to publish.
+        let cert = build_fixture_cert(0x28);
+        let cert_bytes = encode_cert_bytes(&cert);
+        let fp = cert_leaf_fingerprint(&cert);
+        let mut revoked: HashSet<[u8; 32]> = HashSet::new();
+        revoked.insert(fp);
+        let bundle_fp = [0xAB; 32];
+        let err = check_local_leaf_not_revoked(&cert_bytes, &revoked, &bundle_fp).unwrap_err();
+        let s = format!("{}", err);
+        // Contains the documented marker phrase and 8-hex prefixes.
+        assert!(
+            s.contains("local leaf certificate revoked"),
+            "expected marker phrase, got: {}",
+            s
+        );
+        assert!(s.contains("leaf_fp="));
+        assert!(s.contains("bundle_fp="));
+        // Does NOT contain the full 64-char fingerprint (i.e. no
+        // accidentally widened leak surface).
+        let full = cert_leaf_fingerprint_hex(&fp);
+        assert!(!s.contains(&full), "FATAL line must NOT leak full leaf fp");
+        // bundle prefix is `abababab` (8 chars), not the full hex.
+        assert!(s.contains("abababab"));
+        assert!(!s.contains("abababababababababababababababab"));
     }
 }

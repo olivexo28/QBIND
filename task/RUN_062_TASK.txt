@@ -1,0 +1,417 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles:
+  - environment binding
+  - root validity windows
+  - root status active | retired | revoked
+  - root-level revocation
+  - canonical fingerprint
+  - fail-closed validation
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement at the handshake boundary.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary revoked-peer leaf evidence artifacts.
+- Run 055 landed sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence artifacts.
+- Run 057 implemented activation-height gating for trust bundles.
+- Run 058 produced release-binary activation-height evidence artifacts.
+- Run 059 produced MainNet signed-bundle release-binary evidence.
+- Run 060 landed the production PQC trust lifecycle operator playbook.
+- Run 061 strongest-positive:
+  - implemented local revoked-leaf startup self-check
+  - check_local_leaf_not_revoked uses the same Run 052 fingerprint semantics:
+    SHA3-256("QBIND:pqc-trust-bundle-leaf-fp:v1" || cert.encode())
+  - local revoked leaf fails closed before pqc_config construction, with_pqc_leaf_revocations, and P2pNodeBuilder::build()
+  - non-revoked local leaf starts normally
+  - unknown revoked fingerprint remains no-op
+  - no fallback to --p2p-trusted-root
+  - no DummySig / DummyKem / DummyAead fallback
+  - regressions passed
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust/lifecycle items include:
+- activation gates on revocation entries
+- epoch gating runtime source
+- restore-height live smoke
+- per-environment minimum activation-height policy
+- in-binary / on-chain bundle-signing-key ratification
+- external KMS/HSM custody integration
+- multi-validator MainNet peer-connection evidence
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+
+Task:
+Run 062. Implement and prove activation gates on revocation entries.
+
+Primary objective:
+Revocation entries in PQC trust bundles must become active only when their own activation/effective condition is satisfied. A future-dated root or leaf revocation must not reject valid certs early, while an active revocation must continue to fail closed.
+
+Important framing:
+This is a narrow revocation-activation task.
+Do not implement epoch gating unless a safe pre-consensus epoch source already exists.
+Do not implement KMS/HSM.
+Do not implement bundle-signing-key ratification.
+Do not implement per-environment minimum activation policy.
+Do not implement production fast-sync restore.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not modify consensus or timeout logic.
+Do not weaken signed-bundle verification.
+Do not weaken chain_id enforcement.
+Do not weaken sequence anti-rollback persistence.
+Do not weaken activation-height gating for bundles.
+Do not weaken root/leaf revocation enforcement.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Locate the existing trust-bundle revocation entry model.
+- If revocation entries already have effective_from, activation_height, activation_epoch, or similar fields, enforce the already-existing field.
+- If only effective_from exists and it is timestamp-like, do not invent unsafe clock semantics unless a safe source already exists.
+- Prefer height-based gating if activation_height exists and the Run 057 current_height source can be reused.
+- Immediate revocations with no activation/effective gate must preserve existing behavior.
+- Future revocations must not be active early.
+- Active/satisfied revocations must fail closed exactly as Run 050/052/061 require.
+- Revocation activation must be evaluated before constructing:
+  - revoked root set
+  - revoked leaf fingerprint set
+  - local leaf self-check
+  - P2P handshake revocation context
+- Preserve Run 050–061 behavior.
+- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required investigation:
+
+1. Inspect current revocation schema
+   Inspect:
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - TrustBundle revocations[] model
+   - revocation root_id behavior
+   - revocation leaf_cert_fingerprint behavior
+   - effective_from or activation fields, if present
+   - LoadedTrustBundle::revoked_leaf_fingerprints
+   - LoadedTrustBundle root revocation lookup/accessors
+   - Run 050 root-level revocation tests
+   - Run 052 leaf-level revocation tests
+   - Run 061 local leaf self-check tests
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_052.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_054.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_061.md
+   - docs/whitepaper/contradiction.md
+
+   Document exact file/function references in the evidence doc.
+
+2. Define activation source
+   Reuse Run 057 semantics if height-based gating is available:
+   - current_height = restore_baseline.snapshot_height if --restore-from-snapshot is used
+   - current_height = 0 otherwise
+
+   Required:
+   - if revocation activation_height exists:
+     - active iff current_height >= activation_height
+   - if revocation activation_epoch exists but no safe epoch source exists:
+     - fail closed or defer, but document boundary honestly
+   - if effective_from is wall-clock based:
+     - inspect existing project wall-clock usage
+     - do not use wall-clock for consensus-critical decisions unless already accepted for this trust lifecycle layer
+     - if using it, document it as transport trust lifecycle freshness, not consensus time
+   - if no activation field exists in revocation entries:
+     - add the smallest field if consistent with the existing bundle schema and signed canonicalization, preferably activation_height
+     - ensure old revocation entries without the field remain immediate
+
+3. Define revocation activation semantics
+   Required policy:
+   - revocation entry without activation/effective gate:
+     - active immediately, preserving Run 050/052 behavior
+   - revocation entry with activation_height H:
+     - active iff current_height >= H
+     - inactive iff current_height < H
+   - inactive revocation entries:
+     - must not appear in active revoked root set
+     - must not appear in active revoked leaf fingerprint set
+     - must not cause local leaf startup self-check failure
+     - must not cause peer handshake revoked failure
+   - active revocation entries:
+     - root revocation excludes/rejects root as before
+     - leaf revocation rejects local/peer leaf as before
+   - activation fields must be signature-covered and fingerprint-covered.
+   - tampering revocation activation fields after signing must fail signature verification.
+   - invalid activation field must fail closed.
+
+4. Define sequence interaction
+   Required:
+   - adding a future revocation bundle should still be a valid bundle if the bundle itself is active and signed.
+   - sequence should be allowed to advance for a future revocation bundle if all bundle-level activation gates are satisfied.
+   - future revocation means “the bundle is accepted, but this revocation entry is not yet active.”
+   - document this carefully to avoid confusing it with future bundle activation from Run 057.
+   - when height later reaches the revocation activation height, a restart/load should activate the revocation without requiring a new bundle.
+   - if live height progression cannot be shown safely, prove through tests and document live boundary.
+
+5. Define metrics/logs
+   Add metrics only if meaningful:
+   - qbind_p2p_pqc_trust_bundle_revocations_configured_total
+   - qbind_p2p_pqc_trust_bundle_revocations_active_total
+   - qbind_p2p_pqc_trust_bundle_revocations_pending_total
+   Optional split if easy:
+   - active root revocations
+   - pending root revocations
+   - active leaf revocations
+   - pending leaf revocations
+
+   Requirements:
+   - no fabricated metrics
+   - no duplicate metric families
+   - if metrics already expose revoked_roots/leaf counts, clarify whether they mean active only
+   - logs should show safe metadata:
+     - total revocations
+     - active revocations
+     - pending revocations
+     - current_height
+     - activation_height prefixes/values
+     - no private material
+
+Required implementation:
+
+1. Add revocation activation filtering
+   Implement in the narrowest appropriate module:
+   - likely pqc_trust_bundle.rs
+   - introduce active vs pending revocation classification
+   - LoadedTrustBundle should expose only active root/leaf revocations to runtime enforcement paths
+   - optionally expose pending counts for metrics/logs
+   - preserve current accessors where they are used for enforcement
+
+2. Wire ActivationContext into revocation processing
+   Reuse or adapt Run 057 ActivationContext:
+   - current_height
+   - current_epoch if safely available, otherwise None
+   - ensure revocation activation filtering uses the same current_height source as Run 057
+
+3. Preserve local leaf self-check
+   Ensure Run 061 self-check sees only active revoked leaf fingerprints:
+   - future-revoked local leaf must start successfully before activation_height
+   - active-revoked local leaf must fail closed
+   - unknown fingerprint remains no-op
+
+4. Preserve peer handshake revocation
+   Ensure P2P builder receives only active revoked leaf fingerprints:
+   - future-revoked peer leaf should connect before activation_height
+   - active-revoked peer leaf should fail closed
+   - existing revoked-peer metrics behavior preserved
+
+5. Helper support
+   Extend devnet_pqc_trust_bundle_helper if needed:
+   - create bundle with immediate root revocation
+   - create bundle with future-height root revocation
+   - create bundle with active-height root revocation
+   - create bundle with immediate leaf revocation
+   - create bundle with future-height leaf revocation
+   - create bundle with active-height leaf revocation
+   - preserve existing helper behavior
+   - no private key leakage
+
+Required tests:
+
+1. Unit tests
+   - immediate root revocation active.
+   - future-height root revocation pending.
+   - satisfied-height root revocation active.
+   - immediate leaf revocation active.
+   - future-height leaf revocation pending.
+   - satisfied-height leaf revocation active.
+   - active/pending counts correct.
+   - future leaf revocation does not appear in revoked_leaf_fingerprints.
+   - active leaf revocation does appear in revoked_leaf_fingerprints.
+   - future root revocation does not exclude active root early.
+   - active root revocation excludes/rejects root as before.
+   - activation fields are canonical/signature-covered.
+   - tampering revocation activation after signing fails verification.
+   - legacy revocation entries without activation remain immediate.
+
+2. Integration tests
+   - signed DevNet bundle with future leaf revocation loads; local leaf starts.
+   - signed DevNet bundle with active leaf revocation fails local startup self-check.
+   - signed DevNet bundle with future peer leaf revocation allows connection.
+   - signed DevNet bundle with active peer leaf revocation rejects peer.
+   - signed DevNet bundle with future root revocation loads while root still active.
+   - signed DevNet bundle with active root revocation fails closed as existing root revocation.
+   - sequence persistence accepts future-revocation bundle without treating pending revocation as failure.
+   - Run 050/052/054/061 revocation behavior remains unchanged for immediate revocations.
+   - Run 057 bundle activation behavior remains unchanged.
+
+3. Metrics tests
+   If metrics are added:
+   - active revocation count correct.
+   - pending revocation count correct.
+   - existing trust-bundle metrics still emitted once.
+   - no duplicate families.
+   - rejected_revoked metric remains handshake/local-rejection behavior, not pending-revocation behavior.
+
+Required regression tests:
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_activation
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- new Run 062 tests
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-node --test run_061_pqc_local_leaf_self_check_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Positive pending local leaf revocation smoke
+   - signed bundle includes local leaf revocation with activation_height > current_height
+   - node starts successfully
+   - local leaf self-check passes because revocation is pending
+   - logs/metrics show pending revocation if implemented
+   - no fallback
+   - no Dummy crypto
+
+2. Negative active local leaf revocation smoke
+   - signed bundle includes local leaf revocation with activation_height <= current_height or immediate
+   - node exits fail-closed before P2P startup
+   - precise FATAL/log reason:
+     - local leaf certificate revoked
+   - no fallback
+   - no Dummy crypto
+
+3. Positive pending peer leaf revocation smoke
+   - two-node signed bundle
+   - peer leaf revocation has activation_height > current_height
+   - peer connects
+   - rejected_revoked_total remains 0
+   - no fallback
+   - no Dummy crypto
+
+4. Negative active peer leaf revocation smoke
+   - two-node signed bundle
+   - peer leaf revocation has activation_height <= current_height or immediate
+   - peer rejected fail-closed
+   - rejected_revoked_total moves where observable
+   - no fallback
+   - no Dummy crypto
+
+5. Optional pending root revocation smoke
+   - signed bundle marks root revoked but activation_height > current_height
+   - bundle loads and root remains usable until activation
+   - no fallback
+   - no Dummy crypto
+
+6. Optional active root revocation smoke
+   - signed bundle marks root revoked with activation_height <= current_height
+   - startup fails closed as existing root revocation
+   - no fallback
+   - no Dummy crypto
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_062.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests run and pass/fail status
+- investigation findings with file/function references
+- revocation activation semantics
+- current-height source
+- root revocation behavior
+- leaf revocation behavior
+- sequence interaction
+- metrics/logging decision
+- binary identity:
+  - branch
+  - commit
+  - dirty/clean status
+  - qbind-node sha256
+  - qbind-node ELF BuildID
+- helper identity:
+  - helper sha256
+  - helper ELF BuildID
+- pending local leaf revocation smoke
+- active local leaf revocation smoke
+- pending peer leaf revocation smoke
+- active peer leaf revocation smoke
+- optional root revocation smokes if run
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- remaining open items
+- exact immediate next action
+
+contradiction.md update rules:
+- If activation gates on revocation entries land and are proven, update C4 to record that boundary narrowed/closed.
+- If only leaf revocation activation is implemented but root revocation activation remains open, state that boundary.
+- If only tests pass but release-binary evidence is incomplete, state that boundary.
+- Keep C4 open for:
+  - epoch gating runtime source
+  - restore-height live smoke if still absent
+  - per-environment minimum activation-height policy if still absent
+  - in-binary / on-chain bundle-signing-key ratification if still absent
+  - external KMS/HSM custody integration if still absent
+  - multi-validator MainNet peer-connection evidence if still absent
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation if not fully solved
+- Do not close full C4.
+- Do not claim C5 closure unless explicitly justified.
+- If future revocation is enforced early, record as contradiction/regression.
+- If active revocation is ignored, record as contradiction/regression.
+- If startup/handshake failure falls back to static roots or Dummy crypto, record as contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  activation gates on revocation entries are implemented and proven by tests plus release-binary smokes; future revocations are pending and do not reject early; active revocations fail closed; local and peer leaf paths work; optional root paths proven if implemented; no fallback; no Dummy crypto.
+- Partial positive:
+  implementation/tests pass but release-binary evidence or root/leaf coverage is incomplete. State exact boundary.
+- Negative:
+  future revocation rejects early, active revocation is ignored, fallback/Dummy crypto activates, fingerprint/revocation semantics regress, or tests fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Exact tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended

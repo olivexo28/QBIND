@@ -1185,6 +1185,107 @@ async fn run_p2p_node(
         }
     }
 
+    // Run 061 — local revoked-leaf startup self-check.
+    //
+    // If the node's own `--p2p-leaf-cert` fingerprint is on the
+    // loaded trust bundle's currently-active
+    // `revoked_leaf_fingerprints` set, fail closed BEFORE any P2P
+    // state is constructed or any peer connection is attempted. We
+    // run this check AFTER:
+    //   - signed-bundle ML-DSA-44 signature verification (Run 051),
+    //   - environment binding (Run 050),
+    //   - chain_id binding (Run 053),
+    //   - activation-height gating (Run 057),
+    //   - sequence anti-rollback persistence (Run 055),
+    //   - root + revocation extraction (Run 050/052),
+    // and BEFORE:
+    //   - `pqc_config` is moved into the builder,
+    //   - `P2pNodeBuilder::with_pqc_leaf_revocations` is called
+    //     (which would install the peer-side
+    //     `LeafCertRevocationList`),
+    //   - `builder.build(...)` constructs any live P2P trust
+    //     context, listener, dialer, or peer manager,
+    //   - any cert-verify counter could move.
+    //
+    // The helper takes ONLY the public cert bytes + the public
+    // revocation set + the public bundle fingerprint. The KEM
+    // secret (`--p2p-leaf-cert-key`) and any bundle-signing or
+    // transport-root secret are not consulted. The fingerprint
+    // semantics are byte-identical to Run 052's peer-handshake
+    // fingerprint (see `pqc_trust_bundle::cert_leaf_fingerprint`
+    // and the regression test `run_061_self_check_fingerprint_
+    // equals_run_052_handshake_fingerprint`), so the startup
+    // self-check and the peer-handshake check agree by
+    // construction.
+    if let (Some(loaded), Some(local_leaf)) =
+        (trust_bundle_loaded.as_ref(), leaf_credentials.as_ref())
+    {
+        if !loaded.revoked_leaf_fingerprints.is_empty() {
+            match qbind_node::pqc_trust_bundle::check_local_leaf_not_revoked(
+                &local_leaf.cert_bytes,
+                &loaded.revoked_leaf_fingerprints,
+                &loaded.fingerprint,
+            ) {
+                Ok(local_fp) => {
+                    let local_fp_hex =
+                        qbind_node::pqc_trust_bundle::cert_leaf_fingerprint_hex(&local_fp);
+                    eprintln!(
+                        "[binary] Run 061: local-leaf startup self-check passed \
+                         (local_leaf_fp={}.. bundle_fp={}.. \
+                         active_revoked_leaf_fingerprints={})",
+                        &local_fp_hex[..8],
+                        &loaded.fingerprint_hex()[..8],
+                        loaded.revoked_leaf_fingerprint_count(),
+                    );
+                }
+                Err(e) => {
+                    use qbind_node::pqc_trust_bundle::LocalLeafSelfCheckError;
+                    // We deliberately do NOT bump
+                    // `qbind_p2p_pqc_cert_verify_rejected_revoked_total`
+                    // here: that family is the Run 052 peer-handshake
+                    // contract and must remain a handshake-only signal.
+                    // A dedicated startup metric is not added in Run
+                    // 061 because the node exits before `/metrics` is
+                    // bound by the live HTTP path, so a counter would
+                    // never be scrapeable — adding it would be
+                    // misleading per task §4 (metrics/logging).
+                    match &e {
+                        LocalLeafSelfCheckError::Revoked {
+                            leaf_fingerprint_prefix,
+                            bundle_fingerprint_prefix,
+                        } => {
+                            eprintln!(
+                                "[binary] FATAL: Run 061 local leaf certificate revoked: \
+                                 the local --p2p-leaf-cert fingerprint ({}..) appears in the \
+                                 active revoked_leaf_fingerprints set of the loaded trust \
+                                 bundle (bundle fp {}..). Refusing to start P2P. No fallback \
+                                 to --p2p-trusted-root on bundle-revoked local leaf. See \
+                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_061.md and \
+                                 docs/whitepaper/contradiction.md C4 (signed root \
+                                 distribution).",
+                                leaf_fingerprint_prefix, bundle_fingerprint_prefix,
+                            );
+                            std::process::exit(1);
+                        }
+                        LocalLeafSelfCheckError::DecodeFailed => {
+                            // Unreachable on this path —
+                            // `PqcLeafCredentialPaths::load` already
+                            // validated the cert shape. Preserve
+                            // fail-closed behaviour anyway.
+                            eprintln!(
+                                "[binary] FATAL: Run 061 local --p2p-leaf-cert could not be \
+                                 decoded as NetworkDelegationCert during startup self-check. \
+                                 Refusing to start P2P. See \
+                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_061.md."
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let pqc_config = PqcStaticRootConfig {
         mode: pqc_root_mode,
         trusted_roots: trusted_roots.clone(),
