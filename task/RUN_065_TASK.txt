@@ -1,0 +1,384 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path:
+  - ML-DSA-44 transport delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement at the handshake boundary.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary revoked-peer leaf evidence artifacts.
+- Run 055 landed sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence artifacts.
+- Run 057 implemented activation-height gating for trust bundles.
+- Run 058 produced release-binary activation-height evidence artifacts.
+- Run 059 produced MainNet signed-bundle release-binary evidence.
+- Run 060 landed the production PQC trust lifecycle operator playbook.
+- Run 061 implemented local revoked-leaf startup self-check.
+- Run 062 implemented per-entry revocation activation_height active/pending behavior.
+- Run 063 implemented local issuer-root revocation startup self-check.
+- Run 064 updated the operator lifecycle runbook to reflect Runs 061–063.
+- Current remaining C4 trust/lifecycle items include:
+  - per-environment minimum activation-height policy
+  - activation_epoch runtime source
+  - hot reload
+  - in-binary / on-chain bundle-signing-key ratification
+  - KMS/HSM custody
+  - multi-validator MainNet peer-connection evidence
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 065. Define and enforce per-environment minimum activation-height policy for trust-bundle and revocation activation scheduling.
+
+Primary objective:
+Prevent unsafe too-soon activation scheduling in production-like environments while preserving DevNet convenience and emergency response semantics.
+
+Important framing:
+This is a policy-enforcement hardening task.
+Do not implement activation_epoch runtime source in this run.
+Do not implement hot reload in this run.
+Do not implement KMS/HSM in this run.
+Do not implement bundle-signing-key ratification in this run.
+Do not implement fast-sync restore in this run.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not modify consensus or timeout logic.
+Do not weaken signed-bundle verification.
+Do not weaken chain_id enforcement.
+Do not weaken sequence anti-rollback persistence.
+Do not weaken activation-height gating.
+Do not weaken local revoked-leaf or issuer-root self-checks.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Add a deterministic per-environment minimum activation-height margin policy.
+- Apply it to trust-bundle activation_height.
+- Apply it to revocation-entry activation_height only if doing so does not break emergency revocation semantics.
+- Preserve DevNet flexibility unless unsafe behavior is currently leaking into TestNet/MainNet.
+- TestNet/MainNet must not accept planned activation heights that are too close to current_height.
+- Emergency revocations must be handled explicitly:
+  - either preserve immediate emergency revocation as a documented allowed path if schema already supports emergency reason/type;
+  - or keep emergency immediate revocation allowed only for active immediate revocations with explicit reason, if such a reason exists;
+  - or document that emergency immediate revocation remains operator-governed and do not silently weaken production policy.
+- Do not add a broad bypass flag such as --ignore-min-activation-height.
+- Crosscheck all code and docs against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required investigation:
+
+1. Inspect existing activation fields and policy points
+   Inspect:
+   - crates/qbind-node/src/pqc_trust_activation.rs
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - crates/qbind-node/src/pqc_trust_sequence.rs
+   - crates/qbind-node/src/main.rs trust-bundle startup ordering
+   - revocation entry model from Run 062
+   - Run 057 and Run 058 evidence docs
+   - Run 062 and Run 063 evidence docs
+   - Run 064 operator runbook
+   - docs/whitepaper/contradiction.md
+
+   Document exact file/function references in the evidence doc.
+
+2. Define current_height source
+   Preserve Run 057 source:
+   - current_height = restore_baseline.snapshot_height if --restore-from-snapshot is used
+   - current_height = 0 otherwise
+
+   Do not invent a new height source unless one already exists safely before trust roots are merged.
+
+3. Define minimum activation-margin policy
+   Required:
+   - policy must be deterministic by environment.
+   - DevNet:
+     - may allow activation_height = 0 and immediate scheduled testing.
+   - TestNet:
+     - require activation_height >= current_height + MIN_TESTNET_ACTIVATION_MARGIN.
+   - MainNet:
+     - require activation_height >= current_height + MIN_MAINNET_ACTIVATION_MARGIN.
+   - Choose conservative constants appropriate for current evidence/devnet environment, or define constants with clear comments.
+   - If existing config has epoch/block-time parameters, consider whether constants should use existing config; do not overdesign.
+   - If an activation_height is absent, existing immediate behavior remains unless policy intentionally changes it.
+   - If activation_height is present but below the required minimum margin in TestNet/MainNet, fail closed.
+   - DevNet behavior must remain compatible with prior runs unless explicitly changed and justified.
+
+4. Define scope of policy application
+   Required decision:
+   - Bundle-level activation_height:
+     - apply minimum margin in TestNet/MainNet.
+   - Revocation-entry activation_height:
+     - decide whether normal scheduled revocations require minimum margin.
+     - immediate revocation without activation_height should remain available for emergency compromise unless the schema has an explicit emergency flag and policy can distinguish.
+     - Do not accidentally block emergency root/leaf revocation.
+   - If schema has revocation reason codes:
+     - inspect whether emergency/compromise reason exists.
+     - if yes, allow immediate revocation for emergency reasons and enforce margin for planned reasons.
+     - if no, preserve immediate revocation and document operator responsibility.
+
+5. Define ordering with sequence persistence
+   Preserve:
+   - signature/env/chain_id/root/window validation
+   - activation policy / minimum margin enforcement
+   - sequence persistence
+   - root merge
+
+   Required:
+   - a bundle rejected for too-soon activation must not update sequence.
+   - a revocation entry rejected for invalid too-soon scheduled activation must not let the bundle partially load unless policy defines it as pending and acceptable.
+   - if scheduled revocation activation_height is too soon in TestNet/MainNet and the policy requires margin, fail closed before sequence update.
+   - DevNet immediate/pending behavior remains compatible.
+
+6. Define metrics/logs
+   Add metrics only if meaningful:
+   - qbind_p2p_pqc_trust_bundle_activation_policy_rejected_total
+   - qbind_p2p_pqc_trust_bundle_activation_min_margin_blocks
+   - qbind_p2p_pqc_trust_bundle_activation_required_min_height
+
+   Requirements:
+   - no fabricated metrics
+   - no duplicate metric families
+   - if startup fails before /metrics is reachable, prove via tests/logs and document boundary
+   - logs should include:
+     - environment
+     - current_height
+     - activation_height
+     - required_min_height
+     - bundle fingerprint prefix
+   - no private material
+
+Required implementation:
+
+1. Add policy module or extend existing activation module
+   Implement in the narrowest appropriate place:
+   - likely crates/qbind-node/src/pqc_trust_activation.rs
+
+   Add:
+   - ActivationPolicy
+   - minimum_activation_margin_for_environment(env)
+   - check_min_activation_height_policy(...)
+   - strict errors:
+     - activation_height_below_minimum_margin
+     - revocation_activation_height_below_minimum_margin if applicable
+     - unsupported environment if applicable
+
+2. Wire policy into startup
+   In main.rs trust-bundle load path:
+   - compute current_height as Run 057 does
+   - enforce minimum margin before sequence update
+   - fail closed before roots are merged
+   - preserve Run 057 future-height gating
+   - preserve Run 055 sequence anti-rollback
+   - preserve Run 062 active/pending revocation split
+   - preserve Run 061/063 local startup self-checks
+
+3. Helper support
+   Extend devnet_pqc_trust_bundle_helper only if needed:
+   - TestNet/MainNet bundle with too-soon activation_height
+   - TestNet/MainNet bundle with sufficient activation_height
+   - scheduled revocation activation fixtures if policy applies to revocations
+   - preserve existing helper modes
+
+Required tests:
+
+1. Unit tests
+   - DevNet activation_height=0 accepted.
+   - TestNet activation_height below margin rejected.
+   - TestNet activation_height at margin accepted.
+   - MainNet activation_height below margin rejected.
+   - MainNet activation_height at margin accepted.
+   - missing activation_height behavior preserved.
+   - too-soon rejected bundle does not update sequence.
+   - Run 057 future-height gating still works.
+   - Run 058 active-now DevNet behavior preserved.
+   - if revocation policy applies:
+     - scheduled revocation below margin rejected in TestNet/MainNet.
+     - scheduled revocation at margin accepted.
+     - immediate emergency revocation behavior preserved.
+   - activation policy fields/errors are deterministic.
+
+2. Integration tests
+   - signed DevNet bundle with activation_height=0 still loads.
+   - signed TestNet bundle with too-soon activation_height fails closed.
+   - signed TestNet bundle with sufficient activation_height loads or reaches the next expected boundary.
+   - signed MainNet bundle with too-soon activation_height fails closed.
+   - signed MainNet bundle with sufficient activation_height loads or reaches the next expected boundary.
+   - too-soon activation rejection does not create/update sequence file.
+   - existing Run 050/051/052/055/057/061/062/063 tests pass.
+
+3. Metrics/log tests
+   If metrics are added:
+   - activation policy rejected counter increments in tests.
+   - min margin gauge appears.
+   - no duplicate metric family.
+   - existing activation/revocation metrics still appear.
+
+Required regression tests:
+- cargo test -p qbind-node --lib pqc_trust_activation
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- new Run 065 tests
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-node --test run_061_pqc_local_leaf_self_check_tests
+- cargo test -p qbind-node --test run_062_pqc_revocation_activation_tests
+- cargo test -p qbind-node --test run_063_pqc_local_issuer_root_self_check_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Positive DevNet compatibility smoke
+   - signed DevNet bundle with activation_height=0
+   - node starts
+   - proves Run 058 DevNet behavior preserved
+   - no fallback
+   - no Dummy crypto
+
+2. Negative TestNet too-soon activation smoke
+   - signed TestNet bundle with activation_height below required margin
+   - startup fails closed
+   - precise FATAL/log reason mentions minimum activation-height policy
+   - no sequence file created/updated
+   - no roots merged
+   - no fallback
+   - no Dummy crypto
+
+3. Positive TestNet sufficient-margin smoke
+   - signed TestNet bundle with activation_height at or above required margin
+   - if current_height source is 0, use activation_height = margin
+   - node starts or reaches expected signed-bundle startup boundary
+   - sequence persists if startup succeeds
+   - no fallback
+   - no Dummy crypto
+
+4. Negative MainNet too-soon activation smoke
+   - signed MainNet bundle with activation_height below required margin
+   - fail closed
+   - no sequence update
+   - no root merge
+   - no fallback
+   - no Dummy crypto
+
+5. Positive MainNet sufficient-margin smoke
+   - signed MainNet bundle with activation_height at or above required margin
+   - node starts or reaches expected signed-bundle startup boundary
+   - no fallback
+   - no Dummy crypto
+
+6. Revocation margin smoke if policy applies
+   - too-soon scheduled revocation rejected or accepted according to chosen policy
+   - immediate emergency revocation preserved if intended
+   - document exact behavior
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_065.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence run and pass/fail status
+- investigation findings with file/function references
+- minimum activation-height policy
+- per-environment constants
+- current_height source
+- bundle activation policy behavior
+- revocation activation policy behavior
+- emergency revocation behavior
+- sequence interaction
+- metrics/logging decision
+- binary identity:
+  - branch
+  - commit
+  - dirty/clean status
+  - qbind-node sha256
+  - qbind-node ELF BuildID
+- helper identity:
+  - helper sha256
+  - helper ELF BuildID
+- DevNet compatibility smoke
+- TestNet too-soon negative smoke
+- TestNet sufficient-margin positive smoke
+- MainNet too-soon negative smoke
+- MainNet sufficient-margin positive smoke
+- revocation margin smoke if run
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- remaining open items
+- exact immediate next action
+
+contradiction.md update rules:
+- If per-environment minimum activation-height policy lands and is proven, update C4 to record that boundary narrowed/closed.
+- If emergency revocation remains immediate by design, record the rationale.
+- If policy applies only to bundle activation and not revocation activation, record that boundary.
+- Keep C4 open for:
+  - activation_epoch runtime source
+  - hot reload if still absent
+  - in-binary / on-chain bundle-signing-key ratification if still absent
+  - external KMS/HSM custody integration if still absent
+  - multi-validator MainNet peer-connection evidence if still absent
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation if not fully solved
+- Do not close full C4.
+- Do not claim C5 closure unless explicitly justified.
+- If too-soon TestNet/MainNet activation is accepted, record as contradiction/regression.
+- If emergency revocation is accidentally blocked without documented safe alternative, record as contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record as contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  per-environment minimum activation-height policy is implemented and proven by tests plus release-binary smokes; DevNet compatibility preserved; TestNet/MainNet too-soon activation fails closed; sufficient-margin activation succeeds; sequence state is not updated on rejected too-soon activation; emergency revocation behavior is explicit; no fallback; no Dummy crypto.
+- Partial positive:
+  implementation/tests pass but release-binary evidence or revocation policy boundary remains incomplete. State exact boundary.
+- Negative:
+  too-soon production activation is accepted, emergency revocation is unsafely blocked, sequence updates on rejection, fallback/Dummy crypto activates, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
