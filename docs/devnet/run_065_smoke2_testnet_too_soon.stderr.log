@@ -1,0 +1,8 @@
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[binary] P2P mode: starting transport + consensus loop. environment=TestNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 037: --p2p-mutual-auth=required on TestNet is using the production-honest PQC static-root cert-verification path.
+[binary] FATAL: --p2p-trust-bundle load/validate failed for path=/tmp/qbind_run065/testnet_too_soon/trust-bundle.json: trust bundle activation gating: pqc trust-bundle minimum activation-height policy violation (scope=bundle, environment=testnet, current_height=0, activation_height=7, minimum_margin=8, required_min_height=8); fail closed — declared activation_height is too close to current_height for environment testnet. Reschedule the bundle with activation_height >= 8 (= current_height + minimum_margin). No fallback to --p2p-trusted-root.. No fallback to --p2p-trusted-root on bundle failure (production-honest lifecycle must not silently downgrade). See docs/whitepaper/contradiction.md C4 (signed root distribution).

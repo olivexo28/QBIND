@@ -1126,6 +1126,23 @@ impl TrustBundle {
             signing_keys,
             activation_ctx.current_height,
         )?;
+        // Run 065: per-environment minimum activation-height policy.
+        // Runs BEFORE Run 057 future-height gating so a too-soon
+        // production activation (activation_height in
+        // [current_height, current_height + margin)) is reported as
+        // a margin violation rather than a generic "not yet reached"
+        // future-height error. Bundles further in the future than
+        // the margin reach Run 057's path instead. Both checks run
+        // BEFORE the caller touches sequence persistence / root
+        // merge.
+        let bundle_env = TrustBundleEnvironment::from_runtime(expected_env);
+        crate::pqc_trust_activation::check_min_activation_height_policy(
+            &loaded.bundle,
+            bundle_env,
+            activation_ctx.current_height,
+        )
+        .map_err(TrustBundleError::Activation)?;
+        // Run 057: future-height gating (rejects activation_height > current_height).
         let activation = crate::pqc_trust_activation::check_bundle_activation(
             &loaded.bundle,
             activation_ctx,

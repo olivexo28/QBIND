@@ -1128,6 +1128,26 @@ async fn run_p2p_node(
                             } => p2p.set_pqc_trust_bundle_activation_epoch_required(
                                 *required_epoch,
                             ),
+                            // Run 065: surface the policy's
+                            // required_min_height on the
+                            // `_activation_height_required` gauge so an
+                            // operator who scrapes /metrics on a prior
+                            // successful run can correlate the rejected
+                            // value. Activation_height itself is the
+                            // declared bundle/root/revocation value; the
+                            // gauge represents the minimum the operator
+                            // must publish at the current committed
+                            // height.
+                            AE::ActivationHeightBelowMinimumMargin {
+                                required_min_height,
+                                ..
+                            }
+                            | AE::RevocationActivationHeightBelowMinimumMargin {
+                                required_min_height,
+                                ..
+                            } => p2p.set_pqc_trust_bundle_activation_height_required(
+                                *required_min_height,
+                            ),
                         }
                     }
                     eprintln!(

@@ -1,0 +1,255 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened the PQC transport path.
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary revoked-peer leaf evidence.
+- Run 055 landed sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence.
+- Run 057 implemented activation-height gating.
+- Run 058 produced release-binary activation-height evidence.
+- Run 059 produced MainNet signed-bundle release-binary evidence.
+- Run 060 landed the production PQC trust lifecycle operator playbook.
+- Run 061 implemented local revoked-leaf startup self-check.
+- Run 062 implemented per-entry revocation activation_height active/pending behavior.
+- Run 063 implemented local issuer-root revocation startup self-check.
+- Run 064 updated the operator runbook for Runs 061–063.
+- Run 065 strongest-positive:
+  - implemented deterministic per-environment minimum activation-height policy
+  - constants:
+    - DevNet = 0 blocks
+    - TestNet = 8 blocks
+    - MainNet = 32 blocks
+  - policy rejects activation heights in the half-open window:
+    - [current_height, current_height + margin)
+  - already-effective activation_height < current_height is not retroactively rejected
+  - activation_height >= current_height + margin passes Run 065 and then reaches Run 057’s “not yet reached” gate if current_height is still below activation_height
+  - applied to:
+    - bundle activation_height
+    - active-root activation_height
+    - scheduled revocation activation_height when Some(_)
+  - emergency immediate revocation preserved:
+    - revocation activation_height = None is not constrained by minimum-margin policy
+  - too-soon TestNet/MainNet activations fail closed before sequence update, root merge, or P2P start
+  - DevNet activation_height=0 remains accepted
+  - tests and live release smokes passed
+- Run 065 boundary:
+  - operator runbook was not updated
+  - minimum-margin policy for future gossiped / peer-supplied bundle path remains open
+  - activation_epoch runtime source remains open
+  - hot reload remains open
+  - in-binary / on-chain bundle-signing-key ratification remains open
+  - KMS/HSM custody remains open
+  - multi-validator MainNet peer-connection smoke remains open
+  - production fast-sync / consensus-storage restore remains open
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 066. Update the operator lifecycle runbook to reflect Run 065’s per-environment minimum activation-height policy.
+
+Primary objective:
+Update docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md so operators have accurate production guidance for:
+- DevNet/TestNet/MainNet minimum activation-height margins;
+- the half-open too-soon rejection window;
+- interaction with Run 057 activation-height gating;
+- interaction with Run 055 sequence persistence;
+- interaction with Run 062 scheduled revocations;
+- emergency immediate revocation behavior;
+- evidence mapping to Run 065.
+
+Important framing:
+This is a documentation and consistency task.
+Do not change runtime code unless a contradiction is found.
+Do not redesign trust bundles.
+Do not redesign KEMTLS.
+Do not modify consensus or timeout logic.
+Do not implement hot reload.
+Do not implement activation_epoch runtime source.
+Do not implement KMS/HSM.
+Do not implement signing-key ratification.
+Do not implement fast-sync restore.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Docs-first.
+- If no contradiction is found, do not touch crates/**/src/**.
+- Preserve all Run 050–065 claims accurately.
+- Do not recommend --p2p-trusted-root fallback.
+- Do not recommend DummySig / DummyKem / DummyAead.
+- Do not recommend unsigned MainNet bundles.
+- Do not recommend key reuse between transport roots, bundle-signing keys, validator consensus keys, or leaf KEM material.
+- Crosscheck all runbook updates against Run 065 evidence and contradiction.md.
+
+Required investigation:
+
+1. Inspect current operator runbook and Run 065 evidence
+   Inspect:
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_065.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_057.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_062.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_064.md
+   - docs/whitepaper/contradiction.md
+
+   Inspect code only for reference:
+   - crates/qbind-node/src/pqc_trust_activation.rs
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/tests/run_065_* if present
+
+   Document investigation findings in the Run 066 evidence doc.
+
+2. Update runbook for Run 065 policy
+   Add or revise operator guidance:
+   - DevNet minimum margin = 0 blocks.
+   - TestNet minimum margin = 8 blocks.
+   - MainNet minimum margin = 32 blocks.
+   - The reject window is half-open:
+     - current_height <= activation_height < current_height + margin
+   - Already-effective activation_height < current_height is not rejected.
+   - activation_height >= current_height + margin satisfies the Run 065 minimum-margin check but may still fail Run 057 “not yet reached” until current_height catches up.
+   - This is intentional and must not be described as a contradiction.
+
+3. Explain current_height source
+   Preserve Run 057 semantics:
+   - current_height = restore_baseline.snapshot_height if --restore-from-snapshot is used
+   - current_height = 0 otherwise
+   - do not invent epoch semantics
+
+4. Update operator workflows
+   Update normal transport root rotation:
+   - TestNet/MainNet planned root activation must respect minimum margin.
+   - operators should choose activation_height >= current_height + environment margin.
+   - during overlap, old and new roots should both remain active until migration is complete.
+
+   Update scheduled revocation workflow:
+   - scheduled revocation activation_height must respect minimum margin in TestNet/MainNet when Some(_).
+   - pending revocations must not reject early.
+   - active revocations must fail closed.
+   - immediate emergency revocation with activation_height=None remains available.
+
+   Update emergency revocation workflow:
+   - emergency compromise revocations may remain immediate by omitting activation_height.
+   - this should be used only for compromise/emergency cases because it can affect liveness.
+   - do not tell operators to bypass policy with static roots or unsigned bundles.
+
+5. Update checklists
+   Promotion checklist must include:
+   - confirm environment margin constant.
+   - confirm current_height.
+   - confirm activation_height is outside the too-soon rejection window.
+   - confirm sequence will not be burned by a rejected bundle.
+   - confirm future activation rejection does not create/update sequence state.
+   - confirm immediate emergency revocation is intentional if activation_height is absent.
+
+   Incident checklist must include:
+   - distinguish planned scheduled revocation from emergency immediate revocation.
+   - confirm liveness impact before immediate root revocation.
+   - confirm validators have replacement certs if root revocation is scheduled.
+
+   Evidence checklist must include:
+   - too-soon negative smoke for TestNet/MainNet.
+   - sufficient-margin positive or expected Run 057 boundary smoke.
+   - no static-root fallback proof.
+   - no Dummy crypto proof.
+   - sequence file unchanged on rejected too-soon activation.
+
+6. Update residual risks
+   Ensure remaining open items are accurate:
+   - minimum-margin policy for future gossiped / peer-supplied bundle path remains open if still true.
+   - activation_epoch runtime source remains open.
+   - hot reload remains open.
+   - in-binary/on-chain bundle-signing-key ratification remains open.
+   - KMS/HSM custody remains open.
+   - multi-validator MainNet peer-connection evidence remains open.
+   - fast-sync / consensus-storage restore remains open.
+   - full C4/C5 remain open.
+   - Remove or update any text saying per-environment minimum activation-height policy is still open for the binary --p2p-trust-bundle load path.
+
+7. Update evidence mapping
+   Add mapping:
+   - Run 065: per-environment minimum activation-height policy.
+   - Include constants and what release-binary smokes proved.
+
+Required deliverables:
+
+1. Update:
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+
+2. Create:
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_066.md
+
+   Evidence doc must include:
+   - exact objective
+   - exact verdict
+   - exact files changed
+   - exact commands run
+   - tests/checks run and pass/fail status
+   - investigation findings with file/function references
+   - runbook sections changed
+   - how Run 065 is represented
+   - contradictions found or not found
+   - remaining open items
+   - exact immediate next action
+
+3. Update if needed:
+   - docs/whitepaper/contradiction.md
+
+   Update rules:
+   - If the runbook is updated to reflect Run 065, append a Run 066 C4 note saying the operator playbook prose gap for minimum activation-height policy is closed/narrowed.
+   - Keep C4 open for:
+     - activation_epoch runtime source
+     - hot reload
+     - in-binary/on-chain bundle-signing-key ratification
+     - KMS/HSM custody
+     - multi-validator MainNet peer-connection evidence
+     - production fast-sync / consensus-storage restore
+     - per-environment production trust-anchor operation
+   - Do not close full C4.
+   - Do not claim C5 closure.
+   - If the runbook contradicts implemented behavior, fix the runbook and record the contradiction if material.
+
+Required checks:
+Because this is docs-only unless contradictions are found, run:
+- grep or rg checks proving no unsafe guidance:
+  - no recommendation to use --p2p-trusted-root as fallback
+  - no recommendation to use DummySig / DummyKem / DummyAead
+  - no recommendation to accept unsigned MainNet bundles
+  - no recommendation to reuse transport root key as bundle-signing key
+- markdown/link sanity if project has a checker
+- cargo check -p qbind-node --bin qbind-node
+
+If source files are touched, additionally run all affected unit/integration tests.
+
+Expected verdict options:
+- Strongest positive:
+  runbook updated accurately for Run 065; evidence doc created; contradiction.md updated; unsafe guidance absent; cargo check passes; no source changes required.
+- Partial positive:
+  runbook updated but some evidence references or checks are incomplete. State boundary.
+- Negative:
+  runbook still contradicts implemented behavior, unsafe fallback/key reuse guidance remains, or checks fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/checks run and pass/fail status
+5. What was fixed or documented
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended

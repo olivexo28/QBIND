@@ -82,7 +82,108 @@
 //!   present surface; epoch gating is recorded as remaining-open in
 //!   `docs/whitepaper/contradiction.md` C4.
 
-use crate::pqc_trust_bundle::{TrustBundle, TrustBundleRoot};
+use crate::pqc_trust_bundle::{TrustBundle, TrustBundleEnvironment, TrustBundleRoot};
+
+// ---------------------------------------------------------------------
+// Run 065: per-environment minimum activation-height policy.
+// ---------------------------------------------------------------------
+//
+// Run 057 enforced future-height gating on a bundle's *declared*
+// activation_height: a bundle whose activation_height was greater than
+// the runtime current_height failed closed. Run 062 added the same
+// shape for per-entry revocation activation_height (active / pending
+// split). Neither run constrained how *close* to current_height an
+// operator could schedule activation.
+//
+// Run 065 closes that gap by introducing a deterministic, per-
+// environment **minimum activation-margin**:
+//
+//   activation_height (when declared) MUST satisfy
+//       activation_height >= current_height + MIN_<ENV>_ACTIVATION_MARGIN
+//
+//   When activation_height is not declared (`None`), Run 050/052/062
+//   immediate behaviour is preserved exactly — this matters for
+//   emergency root/leaf revocations, which intentionally do NOT carry
+//   a scheduled activation_height (a revocation entry without
+//   activation_height becomes active as soon as effective_from is
+//   satisfied, exactly as in Run 050/052).
+//
+// Constants below are chosen to be **production-honest but evidence-
+// realistic**: small enough that the Run 065 release-binary smokes
+// can exercise both the negative (too-soon) and positive (sufficient
+// margin) paths from `current_height = 0`, but strictly positive so
+// that on TestNet/MainNet an operator cannot publish a signed bundle
+// whose activation_height equals the current committed height (the
+// "immediate cutover" path that Run 057/062 still admitted at the
+// type level).
+//
+// DevNet keeps margin = 0 so that every prior Run 050–064 fixture
+// (including activation_height = 0 / activation_height = current
+// height) continues to load. This is deliberate: DevNet is the
+// scaffolding environment for evidence runs and operator rehearsals,
+// and tightening it would break Run 057/058/062/063 evidence shape
+// without buying any production safety (DevNet roots never bind
+// MainNet validators).
+
+/// Minimum margin between `activation_height` and `current_height`
+/// for a TestNet trust-bundle / scheduled-revocation entry. 8 blocks
+/// is the smallest value that meaningfully blocks "immediate" /
+/// "almost-immediate" production-like cutover while remaining small
+/// enough to be cheaply exercised by Run 065 release-binary smokes
+/// starting from `current_height = 0`.
+pub const MIN_TESTNET_ACTIVATION_MARGIN: u64 = 8;
+
+/// Minimum margin between `activation_height` and `current_height`
+/// for a MainNet trust-bundle / scheduled-revocation entry. 32 blocks
+/// is strictly stricter than TestNet so a MainNet bundle cannot be
+/// scheduled tighter than a TestNet bundle.
+pub const MIN_MAINNET_ACTIVATION_MARGIN: u64 = 32;
+
+/// Margin used on DevNet. Zero by design — DevNet fixtures from
+/// Run 050–064 continue to load with `activation_height = 0` or
+/// `activation_height = current_height` (immediate cutover).
+pub const MIN_DEVNET_ACTIVATION_MARGIN: u64 = 0;
+
+/// Deterministic per-environment activation-margin policy. Today the
+/// only knob is `minimum_activation_margin`; this struct is the
+/// extension point if a future run needs e.g. a per-environment
+/// maximum activation horizon. The values returned by
+/// [`Self::for_environment`] are stable and signature-pinned by
+/// [`policy_constants_are_deterministic`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ActivationPolicy {
+    /// Minimum margin between any declared `activation_height` and
+    /// the runtime `current_height` at the moment of trust-bundle
+    /// load. Applies to bundle-level + per-active-root activation,
+    /// and to per-entry revocation activation (scheduled revocations
+    /// only; revocations without `activation_height` are not
+    /// constrained — see module docs above on emergency revocation).
+    pub minimum_activation_margin: u64,
+}
+
+impl ActivationPolicy {
+    /// Resolve the policy for a [`TrustBundleEnvironment`]. Pure
+    /// function over the environment label; no I/O, no global state.
+    pub const fn for_environment(env: TrustBundleEnvironment) -> Self {
+        match env {
+            TrustBundleEnvironment::Devnet => Self {
+                minimum_activation_margin: MIN_DEVNET_ACTIVATION_MARGIN,
+            },
+            TrustBundleEnvironment::Testnet => Self {
+                minimum_activation_margin: MIN_TESTNET_ACTIVATION_MARGIN,
+            },
+            TrustBundleEnvironment::Mainnet => Self {
+                minimum_activation_margin: MIN_MAINNET_ACTIVATION_MARGIN,
+            },
+        }
+    }
+}
+
+/// Convenience wrapper: return the minimum activation margin (in
+/// blocks) for the given environment.
+pub const fn minimum_activation_margin_for_environment(env: TrustBundleEnvironment) -> u64 {
+    ActivationPolicy::for_environment(env).minimum_activation_margin
+}
 
 /// Runtime source for activation-gate evaluation. Both fields are
 /// optional so callers without a safe source can express that
@@ -158,6 +259,60 @@ pub enum TrustBundleActivationError {
         required_epoch: u64,
         scope: ActivationScope,
     },
+    /// Run 065: bundle-level / per-active-root `activation_height`
+    /// is declared but is closer to `current_height` than the
+    /// per-environment minimum activation margin allows. Fail closed
+    /// BEFORE sequence persistence and BEFORE root merge so a too-
+    /// soon activation cannot burn a higher sequence on a not-yet-
+    /// effective bundle. Carries the resolved `required_min_height`
+    /// (= `current_height + margin`) for forensic logging.
+    ActivationHeightBelowMinimumMargin {
+        environment: TrustBundleEnvironment,
+        current_height: u64,
+        activation_height: u64,
+        minimum_margin: u64,
+        required_min_height: u64,
+        scope: ActivationScope,
+    },
+    /// Run 065: a per-entry revocation `activation_height` is
+    /// declared (scheduled revocation) but is closer to
+    /// `current_height` than the per-environment minimum activation
+    /// margin allows. Fail closed BEFORE sequence persistence and
+    /// BEFORE root merge. Immediate revocations (revocation entries
+    /// with `activation_height = None`) are NOT constrained — that
+    /// preserves the Run 050/052/062 immediate emergency-revocation
+    /// path. Carries the offending revocation's `root_id` and (if
+    /// any) `leaf_cert_fingerprint` prefix in `scope` for forensic
+    /// logging.
+    RevocationActivationHeightBelowMinimumMargin {
+        environment: TrustBundleEnvironment,
+        current_height: u64,
+        activation_height: u64,
+        minimum_margin: u64,
+        required_min_height: u64,
+        scope: RevocationScope,
+    },
+}
+
+/// Forensic scope for [`TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin`].
+/// Carries enough information to identify the offending revocation
+/// entry in operator logs without leaking any private material.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevocationScope {
+    /// Lowercase-hex root id of the revoked root (64 chars).
+    pub root_id: String,
+    /// Lowercase-hex leaf fingerprint if the revocation targets a
+    /// leaf, else `None` for a root-scope revocation.
+    pub leaf_fingerprint: Option<String>,
+}
+
+impl std::fmt::Display for RevocationScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.leaf_fingerprint {
+            Some(fp) => write!(f, "revocation root_id={} leaf_fp={}", self.root_id, fp),
+            None => write!(f, "revocation root_id={}", self.root_id),
+        }
+    }
 }
 
 /// Granularity for the activation field that triggered the error.
@@ -223,6 +378,42 @@ impl std::fmt::Display for TrustBundleActivationError {
                  signed but has not yet become effective at this epoch. No fallback to \
                  --p2p-trusted-root.",
                 scope, current_epoch, required_epoch
+            ),
+            Self::ActivationHeightBelowMinimumMargin {
+                environment,
+                current_height,
+                activation_height,
+                minimum_margin,
+                required_min_height,
+                scope,
+            } => write!(
+                f,
+                "pqc trust-bundle minimum activation-height policy violation (scope={}, \
+                 environment={}, current_height={}, activation_height={}, minimum_margin={}, \
+                 required_min_height={}); fail closed — declared activation_height is too \
+                 close to current_height for environment {}. Reschedule the bundle with \
+                 activation_height >= {} (= current_height + minimum_margin). No fallback to \
+                 --p2p-trusted-root.",
+                scope, environment, current_height, activation_height, minimum_margin,
+                required_min_height, environment, required_min_height
+            ),
+            Self::RevocationActivationHeightBelowMinimumMargin {
+                environment,
+                current_height,
+                activation_height,
+                minimum_margin,
+                required_min_height,
+                scope,
+            } => write!(
+                f,
+                "pqc trust-bundle scheduled-revocation minimum activation-height policy \
+                 violation ({}, environment={}, current_height={}, activation_height={}, \
+                 minimum_margin={}, required_min_height={}); fail closed — scheduled \
+                 revocation activation_height is too close to current_height for environment \
+                 {}. Emergency revocations should be published without activation_height \
+                 (immediate effect, preserved by Run 065). No fallback to --p2p-trusted-root.",
+                scope, environment, current_height, activation_height, minimum_margin,
+                required_min_height, environment
             ),
         }
     }
@@ -403,6 +594,160 @@ pub fn check_bundle_activation(
 fn root_is_active_candidate(r: &TrustBundleRoot) -> bool {
     use crate::pqc_trust_bundle::RootStatus;
     matches!(r.status, RootStatus::Active)
+}
+
+/// Run 065: enforce the per-environment minimum activation-height
+/// policy on a structurally-validated, signature-verified bundle.
+///
+/// Scope of enforcement (only triggers when `activation_height` is
+/// **declared** AND is in the half-open window
+/// `[current_height, current_height + minimum_margin)`; absent
+/// fields and already-past activations preserve Run 050/052/062
+/// immediate semantics):
+///
+/// * Bundle-level [`TrustBundle::activation_height`].
+/// * Per-active-root [`TrustBundleRoot::activation_height`] on roots
+///   whose `status == Active` (other statuses are filtered out by
+///   `validate_at_*` and never reach the live trust set, mirroring
+///   [`check_bundle_activation`]).
+/// * Per-entry **scheduled-revocation** `activation_height`. An
+///   immediate revocation (`activation_height = None`) is NOT
+///   constrained — that path is reserved for emergency response
+///   (Run 050/052 semantics preserved).
+///
+/// Rationale for the half-open window: a declared `activation_height`
+/// strictly less than `current_height` is an **already-active**
+/// schedule that was published earlier (operator was diligent at
+/// publication time and `current_height` has since advanced). Run 065
+/// MUST NOT retroactively reject such bundles — that would prevent a
+/// fresh node from rejoining the network with a snapshot whose
+/// `current_height` has crossed the activation point. The policy
+/// therefore fires only on bundles that are **active now or
+/// activating imminently** (`activation_height >= current_height`)
+/// AND whose activation distance is **shorter than the per-
+/// environment margin**. This composes cleanly with Run 057 future-
+/// height gating: bundles further in the future than the margin
+/// reach Run 057's "not yet reached" path, not Run 065's policy
+/// rejection.
+///
+/// Returns `Ok(())` when:
+///   * the environment's minimum margin is zero (DevNet today),
+///   * the bundle/roots/revocations declare no `activation_height`,
+///   * every declared `activation_height` is either strictly less
+///     than `current_height` (already effective in the past) or at
+///     least `current_height + margin` (sufficiently future-dated).
+///
+/// Returns `Err(TrustBundleActivationError::ActivationHeightBelowMinimumMargin)`
+/// on a too-soon bundle/root, or
+/// `Err(TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin)`
+/// on a too-soon scheduled-revocation entry. The caller MUST fail
+/// closed before sequence persistence and root merge.
+///
+/// `current_height = None` means "no runtime height source available
+/// at all". Under that context this check returns `Ok(())` because
+/// [`check_bundle_activation`] has already rejected any bundle that
+/// declares a gate which depends on an unavailable runtime source —
+/// the policy layer never receives such bundles. Callers that supply
+/// `Some(_)` get the full Run 065 policy check.
+pub fn check_min_activation_height_policy(
+    bundle: &TrustBundle,
+    env: TrustBundleEnvironment,
+    current_height: Option<u64>,
+) -> Result<(), TrustBundleActivationError> {
+    let policy = ActivationPolicy::for_environment(env);
+    let margin = policy.minimum_activation_margin;
+
+    // Fast path: zero margin (DevNet) — by construction every
+    // declared activation_height satisfies the margin. We still
+    // return Ok(()) explicitly so the caller can rely on the
+    // function being side-effect-free.
+    if margin == 0 {
+        return Ok(());
+    }
+
+    // If no runtime height source is supplied, defer to
+    // `check_bundle_activation`, which has already rejected any
+    // bundle/root that declares a height gate against a missing
+    // source. We do not invent a policy decision here.
+    let cur = match current_height {
+        Some(h) => h,
+        None => return Ok(()),
+    };
+
+    // `required_min_height = current_height + margin`, saturating on
+    // overflow so a near-`u64::MAX` `current_height` cannot wrap and
+    // silently turn a real-world "too-soon" check into "no
+    // requirement" (defence in depth — `current_height` near
+    // `u64::MAX` is not reachable today but we refuse to rely on
+    // that for correctness).
+    let required_min_height = cur.saturating_add(margin);
+
+    // Helper: a declared activation_height violates the policy iff
+    // it falls in the half-open window
+    // `[current_height, required_min_height)`.
+    let violates = |act: u64| act >= cur && act < required_min_height;
+
+    // Bundle-level gate.
+    if let Some(act) = bundle.activation_height {
+        if violates(act) {
+            return Err(
+                TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                    environment: env,
+                    current_height: cur,
+                    activation_height: act,
+                    minimum_margin: margin,
+                    required_min_height,
+                    scope: ActivationScope::Bundle,
+                },
+            );
+        }
+    }
+
+    // Per-active-root gates.
+    for r in &bundle.roots {
+        if !root_is_active_candidate(r) {
+            continue;
+        }
+        if let Some(act) = r.activation_height {
+            if violates(act) {
+                return Err(
+                    TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                        environment: env,
+                        current_height: cur,
+                        activation_height: act,
+                        minimum_margin: margin,
+                        required_min_height,
+                        scope: ActivationScope::Root(r.root_id.clone()),
+                    },
+                );
+            }
+        }
+    }
+
+    // Per-entry scheduled-revocation gates. Immediate revocations
+    // (activation_height = None) intentionally skipped: the emergency
+    // revocation path remains immediate. See module docs.
+    for rev in &bundle.revocations {
+        if let Some(act) = rev.activation_height {
+            if violates(act) {
+                return Err(
+                    TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin {
+                        environment: env,
+                        current_height: cur,
+                        activation_height: act,
+                        minimum_margin: margin,
+                        required_min_height,
+                        scope: RevocationScope {
+                            root_id: rev.root_id.clone(),
+                            leaf_fingerprint: rev.leaf_cert_fingerprint.clone(),
+                        },
+                    },
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -652,5 +997,446 @@ mod tests {
             msg
         );
         assert!(msg.contains("No fallback to --p2p-trusted-root"));
+    }
+
+    // -----------------------------------------------------------------
+    // Run 065: per-environment minimum activation-height policy tests.
+    // -----------------------------------------------------------------
+
+    use crate::pqc_trust_bundle::TrustBundleRevocation;
+
+    fn testnet_bundle() -> TrustBundle {
+        let mut b = fresh_bundle();
+        b.environment = TrustBundleEnvironment::Testnet;
+        b
+    }
+
+    fn mainnet_bundle() -> TrustBundle {
+        let mut b = fresh_bundle();
+        b.environment = TrustBundleEnvironment::Mainnet;
+        b
+    }
+
+    /// Constants are deterministic and have the documented relative
+    /// ordering: DevNet=0 < TestNet < MainNet. Pinning this prevents
+    /// a future edit from accidentally widening DevNet or relaxing
+    /// MainNet without an accompanying contradiction.md update.
+    #[test]
+    fn run065_policy_constants_are_deterministic() {
+        assert_eq!(MIN_DEVNET_ACTIVATION_MARGIN, 0);
+        assert_eq!(MIN_TESTNET_ACTIVATION_MARGIN, 8);
+        assert_eq!(MIN_MAINNET_ACTIVATION_MARGIN, 32);
+        assert!(MIN_DEVNET_ACTIVATION_MARGIN < MIN_TESTNET_ACTIVATION_MARGIN);
+        assert!(MIN_TESTNET_ACTIVATION_MARGIN < MIN_MAINNET_ACTIVATION_MARGIN);
+        assert_eq!(
+            minimum_activation_margin_for_environment(TrustBundleEnvironment::Devnet),
+            0
+        );
+        assert_eq!(
+            minimum_activation_margin_for_environment(TrustBundleEnvironment::Testnet),
+            8
+        );
+        assert_eq!(
+            minimum_activation_margin_for_environment(TrustBundleEnvironment::Mainnet),
+            32
+        );
+        assert_eq!(
+            ActivationPolicy::for_environment(TrustBundleEnvironment::Mainnet)
+                .minimum_activation_margin,
+            32
+        );
+    }
+
+    /// DevNet preserves Run 050–064 immediate-cutover behaviour:
+    /// `activation_height = 0` against `current_height = 0` is
+    /// accepted (no margin requirement on DevNet).
+    #[test]
+    fn run065_devnet_activation_height_zero_accepted() {
+        let mut b = fresh_bundle();
+        b.activation_height = Some(0);
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Devnet, Some(0))
+            .expect("DevNet accepts activation_height = 0");
+    }
+
+    /// DevNet preserves immediate cutover even when bundle declares
+    /// `activation_height = current_height` (the path that Run 057
+    /// already accepts under "inclusive" semantics).
+    #[test]
+    fn run065_devnet_activation_height_equals_current_accepted() {
+        let mut b = fresh_bundle();
+        b.activation_height = Some(100);
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Devnet, Some(100))
+            .expect("DevNet accepts immediate cutover");
+    }
+
+    /// A bundle that declares no `activation_height` is unaffected by
+    /// the Run 065 policy (preserves Run 050/052/062 immediate
+    /// semantics — emergency response path).
+    #[test]
+    fn run065_missing_activation_height_unaffected_on_mainnet() {
+        let b = mainnet_bundle();
+        assert!(b.activation_height.is_none());
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(0))
+            .expect("no declared activation_height -> no policy fire");
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(1_000_000))
+            .expect("no declared activation_height -> no policy fire");
+    }
+
+    /// TestNet: a bundle whose `activation_height` falls strictly
+    /// inside `[current_height, current_height + margin)` is
+    /// rejected with the scoped error.
+    #[test]
+    fn run065_testnet_activation_height_below_margin_rejected() {
+        let mut b = testnet_bundle();
+        // current = 0, margin = 8, activation = 7 -> 0 <= 7 < 8.
+        b.activation_height = Some(MIN_TESTNET_ACTIVATION_MARGIN - 1);
+        let err = check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Testnet,
+            Some(0),
+        )
+        .unwrap_err();
+        match err {
+            TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                environment,
+                current_height,
+                activation_height,
+                minimum_margin,
+                required_min_height,
+                ref scope,
+            } => {
+                assert_eq!(environment, TrustBundleEnvironment::Testnet);
+                assert_eq!(current_height, 0);
+                assert_eq!(activation_height, 7);
+                assert_eq!(minimum_margin, MIN_TESTNET_ACTIVATION_MARGIN);
+                assert_eq!(required_min_height, MIN_TESTNET_ACTIVATION_MARGIN);
+                assert!(matches!(scope, ActivationScope::Bundle));
+            }
+            other => panic!(
+                "expected ActivationHeightBelowMinimumMargin, got {:?}",
+                other
+            ),
+        }
+        let msg = format!("{}", err);
+        assert!(msg.contains("minimum activation-height policy violation"));
+        assert!(msg.contains("No fallback to --p2p-trusted-root"));
+        assert!(!err.is_future_activation());
+    }
+
+    /// TestNet: immediate cutover (`activation_height == current_height`)
+    /// is rejected. This is the worst case the policy is designed to
+    /// block — a production-honest TestNet operator cannot ship a
+    /// bundle that activates the same block it's published.
+    #[test]
+    fn run065_testnet_immediate_cutover_rejected() {
+        let mut b = testnet_bundle();
+        b.activation_height = Some(100);
+        let err = check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Testnet,
+            Some(100),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                activation_height: 100,
+                current_height: 100,
+                ..
+            }
+        ));
+    }
+
+    /// TestNet: activation_height exactly at the required minimum
+    /// margin is ACCEPTED. Inclusive upper boundary on
+    /// `[current_height, current_height + margin)`: the next height
+    /// (current + margin) is the smallest permissible scheduling.
+    #[test]
+    fn run065_testnet_activation_height_at_margin_accepted() {
+        let mut b = testnet_bundle();
+        b.activation_height = Some(MIN_TESTNET_ACTIVATION_MARGIN); // 8
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(0))
+            .expect("activation_height == current + margin (inclusive) is accepted");
+    }
+
+    /// TestNet: activation_height comfortably above the margin is
+    /// accepted.
+    #[test]
+    fn run065_testnet_activation_height_above_margin_accepted() {
+        let mut b = testnet_bundle();
+        b.activation_height = Some(1_000_000);
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(0))
+            .expect("activation_height >> current + margin is accepted");
+    }
+
+    /// TestNet: a bundle whose `activation_height` is strictly less
+    /// than `current_height` (already-effective, published earlier
+    /// when `current_height` was smaller) is NOT retroactively
+    /// rejected. This is essential for snapshot-rejoin semantics —
+    /// a fresh node rejoining at a high `current_height` must still
+    /// be able to load older valid bundles whose activation has
+    /// long passed.
+    #[test]
+    fn run065_testnet_already_effective_bundle_not_retroactively_rejected() {
+        let mut b = testnet_bundle();
+        b.activation_height = Some(5); // very old, current is now 1000
+        check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Testnet,
+            Some(1000),
+        )
+        .expect("already-effective bundle (activation_height < current_height) is accepted");
+    }
+
+    /// MainNet rejects a bundle inside its (stricter) reject window.
+    /// Also proves the constants chain: a value that satisfies
+    /// TestNet's 8-block margin is still rejected by MainNet's
+    /// 32-block margin.
+    #[test]
+    fn run065_mainnet_activation_height_below_margin_rejected() {
+        let mut b = mainnet_bundle();
+        // 10 satisfies TestNet (>= 8) but is in MainNet's [0, 32) window.
+        b.activation_height = Some(10);
+        let err = check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Mainnet,
+            Some(0),
+        )
+        .unwrap_err();
+        match err {
+            TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                environment,
+                minimum_margin,
+                required_min_height,
+                ..
+            } => {
+                assert_eq!(environment, TrustBundleEnvironment::Mainnet);
+                assert_eq!(minimum_margin, MIN_MAINNET_ACTIVATION_MARGIN);
+                assert_eq!(required_min_height, MIN_MAINNET_ACTIVATION_MARGIN);
+            }
+            other => panic!(
+                "expected ActivationHeightBelowMinimumMargin, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// MainNet accepts activation_height at the (stricter) margin
+    /// boundary `current_height + margin`.
+    #[test]
+    fn run065_mainnet_activation_height_at_margin_accepted() {
+        let mut b = mainnet_bundle();
+        b.activation_height = Some(MIN_MAINNET_ACTIVATION_MARGIN); // 32
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(0))
+            .expect("MainNet accepts activation_height == current + margin");
+    }
+
+    /// Per-root activation_height is also constrained by the policy
+    /// (same enforcement scope as Run 057's `check_bundle_activation`).
+    #[test]
+    fn run065_root_level_activation_height_below_margin_rejected_on_testnet() {
+        let mut b = testnet_bundle();
+        b.roots[0].activation_height = Some(1); // in [0, 8)
+        let err = check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Testnet,
+            Some(0),
+        )
+        .unwrap_err();
+        match err {
+            TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                scope: ActivationScope::Root(id),
+                ..
+            } => {
+                assert_eq!(id, b.roots[0].root_id);
+            }
+            other => panic!("expected Root scope, got {:?}", other),
+        }
+    }
+
+    /// Per-root activation_height on a non-Active root is advisory-
+    /// only (mirrors Run 057). Even an `activation_height` inside
+    /// the MainNet reject window on a Retired root does not fire
+    /// the Run 065 policy.
+    #[test]
+    fn run065_retired_root_activation_height_not_enforced() {
+        use crate::pqc_trust_bundle::RootStatus;
+        let mut b = mainnet_bundle();
+        b.roots[0].status = RootStatus::Retired;
+        b.roots[0].activation_height = Some(1); // would fail if Active
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(0))
+            .expect("retired root activation_height is advisory-only");
+    }
+
+    /// Immediate revocation (revocation entry with
+    /// `activation_height = None`) is intentionally NOT constrained
+    /// by the Run 065 policy — that path is reserved for emergency
+    /// response. This test pins that boundary on MainNet, the
+    /// strictest environment.
+    #[test]
+    fn run065_immediate_revocation_preserved_on_mainnet() {
+        let mut b = mainnet_bundle();
+        b.revocations.push(TrustBundleRevocation {
+            root_id: b.roots[0].root_id.clone(),
+            leaf_cert_fingerprint: None,
+            reason: "compromise".to_string(),
+            effective_from: 0,
+            activation_height: None, // emergency: immediate
+        });
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(0))
+            .expect("immediate revocation is not subject to the minimum margin policy");
+    }
+
+    /// A scheduled revocation entry with `activation_height` inside
+    /// the reject window is rejected with the scoped error.
+    /// Emergency immediate revocations remain available.
+    #[test]
+    fn run065_scheduled_revocation_below_margin_rejected_on_mainnet() {
+        let mut b = mainnet_bundle();
+        let target_root = b.roots[0].root_id.clone();
+        b.revocations.push(TrustBundleRevocation {
+            root_id: target_root.clone(),
+            leaf_cert_fingerprint: Some("aa".repeat(32)),
+            reason: "rotation".to_string(),
+            effective_from: 0,
+            activation_height: Some(10), // in [0, 32)
+        });
+        let err = check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Mainnet,
+            Some(0),
+        )
+        .unwrap_err();
+        match err {
+            TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin {
+                environment,
+                current_height,
+                activation_height,
+                minimum_margin,
+                required_min_height,
+                ref scope,
+            } => {
+                assert_eq!(environment, TrustBundleEnvironment::Mainnet);
+                assert_eq!(current_height, 0);
+                assert_eq!(activation_height, 10);
+                assert_eq!(minimum_margin, MIN_MAINNET_ACTIVATION_MARGIN);
+                assert_eq!(required_min_height, MIN_MAINNET_ACTIVATION_MARGIN);
+                assert_eq!(scope.root_id, target_root);
+                assert!(scope.leaf_fingerprint.is_some());
+            }
+            other => panic!(
+                "expected RevocationActivationHeightBelowMinimumMargin, got {:?}",
+                other
+            ),
+        }
+        let msg = format!("{}", err);
+        assert!(msg.contains("scheduled-revocation minimum activation-height policy"));
+        assert!(msg.contains("Emergency revocations should be published without activation_height"));
+        assert!(msg.contains("No fallback to --p2p-trusted-root"));
+    }
+
+    /// Already-effective scheduled revocation
+    /// (`activation_height < current_height`) is NOT retroactively
+    /// rejected — preserves snapshot-rejoin semantics for older
+    /// scheduled revocations that have long since activated.
+    #[test]
+    fn run065_already_effective_scheduled_revocation_not_retroactively_rejected() {
+        let mut b = mainnet_bundle();
+        b.revocations.push(TrustBundleRevocation {
+            root_id: b.roots[0].root_id.clone(),
+            leaf_cert_fingerprint: Some("dd".repeat(32)),
+            reason: "rotation".to_string(),
+            effective_from: 0,
+            activation_height: Some(5), // already in the past
+        });
+        check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Mainnet,
+            Some(1000),
+        )
+        .expect(
+            "already-effective scheduled revocation (activation_height < current_height) is accepted",
+        );
+    }
+
+    /// Scheduled revocation activation_height at the margin is
+    /// accepted (TestNet, inclusive upper boundary).
+    #[test]
+    fn run065_scheduled_revocation_at_margin_accepted_on_testnet() {
+        let mut b = testnet_bundle();
+        b.revocations.push(TrustBundleRevocation {
+            root_id: b.roots[0].root_id.clone(),
+            leaf_cert_fingerprint: Some("bb".repeat(32)),
+            reason: "rotation".to_string(),
+            effective_from: 0,
+            activation_height: Some(MIN_TESTNET_ACTIVATION_MARGIN), // 8
+        });
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(0))
+            .expect("scheduled revocation at margin is accepted");
+    }
+
+    /// The policy honours a non-zero `current_height`: the required
+    /// minimum is `current_height + margin`. This pins the
+    /// `--restore-from-snapshot` use case (Run 057 height source).
+    #[test]
+    fn run065_required_min_is_current_plus_margin_on_restore() {
+        let mut b = testnet_bundle();
+        b.activation_height = Some(105); // in [100, 108)
+        let err = check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Testnet,
+            Some(100),
+        )
+        .unwrap_err();
+        match err {
+            TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
+                required_min_height: 108,
+                current_height: 100,
+                activation_height: 105,
+                ..
+            } => {}
+            other => panic!("expected required_min_height=108, got {:?}", other),
+        }
+    }
+
+    /// `current_height = None` (Run 057 "unavailable" surface) does
+    /// not fire the policy on its own — that decision belongs to
+    /// `check_bundle_activation`, which has already rejected any
+    /// bundle whose gate depends on a missing source. The policy
+    /// layer is silent under this combination.
+    #[test]
+    fn run065_no_current_height_source_does_not_fire_policy() {
+        let mut b = mainnet_bundle();
+        b.activation_height = Some(1);
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, None)
+            .expect("policy is silent when current_height is unavailable");
+    }
+
+    /// `current_height` near `u64::MAX` plus a non-zero margin
+    /// saturates rather than wrapping — defence in depth against a
+    /// future runtime source that could push `current_height` close
+    /// to the type's maximum. Without saturation, the policy would
+    /// wrap to a near-zero `required_min_height` and silently admit
+    /// every activation_height — a critical regression.
+    #[test]
+    fn run065_required_min_height_saturates_on_overflow() {
+        let mut b = mainnet_bundle();
+        b.activation_height = Some(u64::MAX); // accepted: equal to saturated required
+        check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Mainnet,
+            Some(u64::MAX),
+        )
+        .expect("saturating add keeps required_min_height at u64::MAX");
+
+        // u64::MAX - 1 is in [u64::MAX, u64::MAX)? No: u64::MAX-1 < u64::MAX = current,
+        // so it falls in the "already-effective" past path and is accepted.
+        b.activation_height = Some(u64::MAX - 1);
+        check_min_activation_height_policy(
+            &b,
+            TrustBundleEnvironment::Mainnet,
+            Some(u64::MAX),
+        )
+        .expect("activation < current is already-effective, accepted");
     }
 }
