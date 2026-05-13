@@ -43,6 +43,24 @@
 //!                            (TestNet/MainNet loader rejects).
 //!   - `unsigned-mainnet`   — unsigned bundle declared `mainnet`.
 //!
+//!   Run 059 fixtures (signed-bundle, MainNet env, for MainNet
+//!   release-binary negative smokes):
+//!   - `signed-mainnet-tampered`  — MainNet-env signed bundle, then
+//!                                  `roots[0].not_after` mutated
+//!                                  after signing (signature no
+//!                                  longer verifies). Same tamper
+//!                                  semantics as `signed-tampered`,
+//!                                  emitted with `environment=mainnet`.
+//!   - `signed-mainnet-wrong-key` — MainNet-env bundle signed by
+//!                                  one ML-DSA-44 keypair, but the
+//!                                  helper publishes an unrelated
+//!                                  ML-DSA-44 keypair as the
+//!                                  `--p2p-trust-bundle-signing-key`
+//!                                  the operator should use, so
+//!                                  verification fails closed. Same
+//!                                  semantics as `signed-wrong-key`,
+//!                                  emitted with `environment=mainnet`.
+//!
 //!   Run 054 fixtures (signed-bundle + active leaf revocation, DevNet):
 //!   - `signed-devnet-revoked-v0`      — signed DevNet bundle that
 //!                                       revokes the v0 validator
@@ -76,6 +94,24 @@
 //!   "future-activation" fixtures on the same DevNet trust domain
 //!   shape; it does NOT change signing semantics (the field is part
 //!   of the signed preimage and canonical fingerprint, as
+//!   `pqc_trust_bundle::canonical_signing_bytes` /
+//!   `canonical_fingerprint` already include it).
+//!
+//! Optional 6th positional argument: `[chain_id_override]`
+//!   Bundle `chain_id` declaration written into the trust bundle
+//!   BEFORE signing and before the canonical fingerprint is computed.
+//!   Accepts the same wire-format the loader accepts:
+//!   16 lowercase hex chars optionally prefixed with `0x` or
+//!   `chain_` (e.g. `0x51424e444d41494e` for QBIND MainNet,
+//!   `0x51424e4444455600` for DevNet). The literal string `none`
+//!   forces `chain_id = null` explicitly. Defaults to whatever
+//!   `build_helper_bundle` emits (currently `None`). This is an
+//!   evidence-tooling knob used by Run 059 to mint
+//!   "signed-mainnet with declared chain_id" (positive) and
+//!   "signed-mainnet with wrong chain_id" (negative) fixtures on
+//!   the same trust domain shape; it does NOT change signing
+//!   semantics (the field is part of the signed preimage and
+//!   canonical fingerprint, as
 //!   `pqc_trust_bundle::canonical_signing_bytes` /
 //!   `canonical_fingerprint` already include it).
 //!
@@ -214,6 +250,23 @@ fn parse_mode(s: &str) -> Mode {
             SignedMode::WrongSigningKey,
             LeafRevocationTarget::None,
         ),
+        // Run 059 MainNet evidence fixtures: same tamper / wrong-key
+        // semantics as the existing DevNet-env signed-tampered /
+        // signed-wrong-key modes, but emitted with
+        // `environment=mainnet` so the release binary exercises the
+        // MainNet bundle path. The env is the only difference from
+        // the existing DevNet-env modes; the per-mode signing /
+        // tampering logic below is unchanged.
+        "signed-mainnet-tampered" => Mode::Signed(
+            TrustBundleEnvironment::Mainnet,
+            SignedMode::TamperRootAfterSigning,
+            LeafRevocationTarget::None,
+        ),
+        "signed-mainnet-wrong-key" => Mode::Signed(
+            TrustBundleEnvironment::Mainnet,
+            SignedMode::WrongSigningKey,
+            LeafRevocationTarget::None,
+        ),
         "signed-unsupported-suite" => Mode::Signed(
             TrustBundleEnvironment::Devnet,
             SignedMode::UnsupportedSuite,
@@ -251,7 +304,8 @@ fn parse_mode(s: &str) -> Mode {
              root-revocation-listed / root-status-revoked / duplicate-root / \
              unsupported-suite / unsigned-testnet / unsigned-mainnet / \
              signed-devnet / signed-testnet / signed-mainnet / signed-tampered / \
-             signed-wrong-key / signed-unsupported-suite / signed-malformed / \
+             signed-wrong-key / signed-mainnet-tampered / signed-mainnet-wrong-key / \
+             signed-unsupported-suite / signed-malformed / \
              signed-key-root-collision / signed-devnet-revoked-v0 / \
              signed-devnet-revoked-v1 / signed-devnet-revoked-unknown)",
             other
@@ -278,6 +332,17 @@ fn main() {
     let activation_height_override: Option<u64> = args.next().map(|s| {
         s.parse::<u64>()
             .expect("optional [activation_height_override] must be a u64 decimal")
+    });
+    // Run 059: optional bundle `chain_id` override. The string `none`
+    // forces `chain_id = null` explicitly; any other value is written
+    // verbatim into the bundle (the loader parses it the same way it
+    // parses operator-supplied chain ids).
+    let chain_id_override: Option<Option<String>> = args.next().map(|s| {
+        if s.eq_ignore_ascii_case("none") {
+            None
+        } else {
+            Some(s)
+        }
     });
 
     fs::create_dir_all(&outdir).expect("mkdir outdir");
@@ -338,6 +403,11 @@ fn main() {
                 // the field via the canonical fingerprint.
                 b.activation_height = Some(h);
             }
+            // Run 059: bundle.chain_id override before fingerprint
+            // computation.
+            if let Some(maybe_cid) = chain_id_override.clone() {
+                b.chain_id = maybe_cid;
+            }
             b
         }
         Mode::Signed(env, signed_mode, leaf_revocation_target) => {
@@ -357,6 +427,11 @@ fn main() {
                 // Run 057: override bundle-level activation_height
                 // BEFORE signing so the signed preimage covers it.
                 b.activation_height = Some(h);
+            }
+            // Run 059: override bundle.chain_id BEFORE signing so
+            // the signed preimage covers the declared chain_id.
+            if let Some(maybe_cid) = chain_id_override.clone() {
+                b.chain_id = maybe_cid;
             }
 
             // Run 054: inject an active leaf-cert revocation for the
@@ -496,7 +571,7 @@ fn main() {
     eprintln!(
         "[devnet_pqc_trust_bundle_helper] DEVNET-EPHEMERAL: root_id={} sig_suite={} kem_suite={} \
          validators={} bundle_mode={} bundle_env={} bundle_sequence={} \
-         bundle_activation_height={:?} bundle_fingerprint={} \
+         bundle_activation_height={:?} bundle_chain_id={:?} bundle_fingerprint={} \
          signature={} bundle_path={} outdir={}",
         root_id_hex,
         PQC_TRANSPORT_SUITE_ML_DSA_44,
@@ -506,6 +581,7 @@ fn main() {
         bundle.environment,
         bundle.sequence,
         bundle.activation_height,
+        bundle.chain_id,
         fp_hex,
         signed_summary,
         bundle_path,

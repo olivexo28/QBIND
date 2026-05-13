@@ -1,0 +1,8 @@
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[binary] P2P mode: starting transport + consensus loop. environment=MainNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 037: --p2p-mutual-auth=required on environment=mainnet is using the production-honest PQC static-root cert-verification path. NOTE: KEM/AEAD primitives on the binary path are still test-grade and remain a separate C4 piece (not C4(c)); MainNet readiness is therefore not yet implied. See docs/whitepaper/contradiction.md C4.
+[binary] FATAL: --p2p-trust-bundle load/validate failed for path=/tmp/run059/tampered/trust-bundle.json: trust bundle ML-DSA-44 signature verification failed for signing_key_id 27b886a5ff5971a747f846e77a933c916d10783f881bed52225bcb3de558d427 (tampered bundle or forged envelope — fail closed). No fallback to --p2p-trusted-root on bundle failure (production-honest lifecycle must not silently downgrade). See docs/whitepaper/contradiction.md C4 (signed root distribution).
