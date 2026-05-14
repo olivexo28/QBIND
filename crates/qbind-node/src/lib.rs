@@ -163,6 +163,19 @@ pub mod pqc_live_trust;
 // docs and `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_live_trust_apply;
 
+// Run 074 — long-running local operator-triggered live trust-bundle
+// reload-apply trigger. Builds on Run 073's
+// `ProductionLiveTrustApplyContext` adapter and the running node's
+// live `LivePqcTrustState` + live `TcpKemTlsP2pService` session-
+// evictor to expose a SIGHUP-driven trigger that an operator can
+// fire on a long-running node without restarting the process. The
+// node continues running after a successful apply; an invalid
+// candidate leaves live trust state, sessions, and the on-disk
+// sequence record unchanged. Local file only; disabled by default;
+// hidden CLI flags. See module docs and
+// `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_live_trust_reload;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;

@@ -1,0 +1,794 @@
+//! Run 074 (C4 piece: PQC trust-anchor lifecycle — long-running
+//! local operator-triggered live trust-bundle reload-apply trigger):
+//! the smallest safe long-running-node trigger that drives the
+//! Run 073 [`crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext`]
+//! against the **already-running** node's live
+//! [`crate::pqc_live_trust::LivePqcTrustState`] handle and the live
+//! [`crate::p2p_session_eviction::P2pSessionEvictor`]
+//! implementation provided by
+//! [`crate::p2p_tcp::TcpKemTlsP2pService`].
+//!
+//! # Strict scope (what Run 074 is and is NOT)
+//!
+//! Run 074 is **only** the long-running-node trigger blocker called
+//! out under "what is NOT narrowed (Run 073)" in
+//! `docs/whitepaper/contradiction.md` C4. It is intentionally
+//! minimal:
+//!
+//! - This module introduces a [`LiveReloadController`] that the
+//!   `qbind-node` binary builds AFTER P2P bring-up and holds across
+//!   the lifetime of the running node. The controller owns:
+//!   * an [`Arc<LivePqcTrustState>`] (Run 071) — the same handle
+//!     installed on the [`crate::p2p_node_builder::P2pNodeBuilder`]
+//!     via `with_live_pqc_trust(...)`;
+//!   * an [`Arc<dyn P2pSessionEvictor>`] (Run 072) — the running
+//!     [`crate::p2p_tcp::TcpKemTlsP2pService`] held by the node
+//!     context (`P2pNodeContext::p2p_service`);
+//!   * an [`Arc<crate::metrics::P2pMetrics>`] — the same metrics
+//!     handle the running node already serves on `/metrics`;
+//!   * a clonable [`LiveReloadConfig`] carrying the
+//!     candidate path, environment, chain id, signing keys,
+//!     activation context, sequence persistence path, optional
+//!     local leaf cert bytes, and a per-trigger
+//!     `now_unix_secs` source.
+//! - The controller exposes a single public entry point,
+//!   [`LiveReloadController::try_trigger`], which the binary's
+//!   SIGHUP signal-handler task calls on each `SIGHUP`. The same
+//!   entry point is what the Run 074 integration tests drive
+//!   directly (no spawning of the binary, no signal traffic).
+//! - Concurrent triggers are serialized via an
+//!   `Arc<AtomicBool>` "in progress" guard: a second trigger
+//!   arriving while a previous trigger has not yet returned is
+//!   rejected with [`LiveReloadOutcome::AlreadyInProgress`] and a
+//!   single bump on
+//!   [`crate::metrics::P2pMetrics::record_live_reload_already_in_progress`].
+//!   Triggers do **not** queue and do **not** re-enter the apply
+//!   pipeline. This preserves the Run 070
+//!   `validate → swap → evict → commit` atomicity guarantee under
+//!   concurrent operator action.
+//! - Run 074 NEVER falls back to `--p2p-trusted-root`; NEVER
+//!   re-introduces `DummySig` / `DummyKem` / `DummyAead`; NEVER
+//!   accepts a candidate that the Run 069 pipeline refused.
+//!
+//! Run 074 is **NOT**:
+//!
+//! - peer-supplied / gossiped bundle acceptance (local file only);
+//! - automatic filesystem-watcher hot reload (operator-triggered
+//!   only — SIGHUP at the binary surface, direct API call in tests);
+//! - admin-API / RPC trigger (SIGHUP is the only binary-surface
+//!   trigger in Run 074; a future run that lands an authenticated
+//!   admin endpoint can call the SAME `try_trigger` entry point);
+//! - KMS / HSM custody (signing keys remain operator-supplied via
+//!   `--p2p-trust-bundle-signing-key`);
+//! - bundle-signing-key ratification (the trusted set is still
+//!   operator-distributed at startup);
+//! - `activation_epoch` runtime sourcing (unchanged from
+//!   Run 057/058: bundles that declare `activation_epoch` continue
+//!   to fail closed);
+//! - selective session retention — the v0 policy is "evict all"
+//!   (Run 072) and is preserved bit-for-bit;
+//! - fast-sync / consensus-storage restore parity on a partially
+//!   restored long-running node.
+//!
+//! # Composition with Run 069/070/071/072/073
+//!
+//! Every trigger walks the SAME Run 070 entry point that the
+//! Run 073 at-startup-time hook drives:
+//!
+//! 1. [`crate::pqc_trust_reload::validate_candidate_bundle_full`]
+//!    (Run 069) validates the candidate at
+//!    [`LiveReloadConfig::candidate_path`] — same parse + structural
+//!    validation + ML-DSA-44 signature verification +
+//!    environment binding + chain-id binding + activation-height
+//!    gating + Run 065 min-activation-margin + revocation
+//!    activation gating + Run 069 sequence-peek + Run 061/063
+//!    local-leaf self-checks as startup. Validation refusal
+//!    surfaces as [`LiveReloadOutcome::Invalid`] with no mutation
+//!    of any kind.
+//! 2. [`crate::pqc_trust_reload::apply_validated_candidate_with_previous`]
+//!    (Run 070) drives the strict
+//!    `snapshot → swap → evict → commit` pipeline against a
+//!    [`crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext`]
+//!    that the controller builds for the trigger. The adapter
+//!    captures the previous fingerprint prefix + sequence under a
+//!    short read lock BEFORE the swap so the operator-log line
+//!    shows both old and new fingerprints.
+//! 3. The live `TcpKemTlsP2pService` evicts every authenticated
+//!    KEMTLS session (Run 072) — peers must reconnect under the
+//!    new trust context. The listener / dialer-retry tasks
+//!    continue running.
+//! 4. The atomic sequence writer
+//!    ([`crate::pqc_trust_sequence::check_and_update_sequence`])
+//!    persists the new `(sequence, fingerprint)` record under the
+//!    same path the startup binary uses.
+//! 5. On success the controller surfaces
+//!    [`LiveReloadOutcome::Applied`] with the
+//!    [`crate::pqc_trust_reload::AppliedCandidate`] (carries
+//!    `applied_log_line` for canonical operator logging) and bumps
+//!    the four Run 074 success counters
+//!    (`live_reload_apply_success_total`,
+//!    `live_reload_sessions_evicted_total`,
+//!    `live_reload_last_applied_sequence` gauge, AND the
+//!    Run 072 `qbind_p2p_session_eviction_*` family via the
+//!    underlying `TcpKemTlsP2pService::evict_all_sessions` call).
+//!    On any failure branch the controller surfaces
+//!    [`LiveReloadOutcome::Invalid`] (validation / swap / evict /
+//!    commit) or [`LiveReloadOutcome::Fatal`]
+//!    (`SequenceCommitFailedRollbackAlsoFailed`) and bumps
+//!    `live_reload_apply_failure_total`. Live trust state is
+//!    rolled back to the captured snapshot whenever Run 070's
+//!    apply pipeline calls `rollback_trust_state`. The on-disk
+//!    sequence record is preserved across every failure branch
+//!    because `check_and_update_sequence` is atomic.
+//!
+//! # Fatal-branch policy
+//!
+//! [`LiveReloadOutcome::Fatal`] arises ONLY from the
+//! [`crate::pqc_trust_reload::ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed`]
+//! branch — the live trust state may be ahead of the on-disk
+//! sequence record. The Run 074 controller does NOT panic and does
+//! NOT exit the process on its own; it surfaces a `Fatal` outcome
+//! so the caller (the binary's SIGHUP task in `main.rs`) can
+//! initiate an operator-visible graceful shutdown. The integration
+//! tests in `tests/run_074_pqc_trust_bundle_live_reload_tests.rs`
+//! drive the same code path through `MockP2pSessionEvictor` +
+//! injected commit failure to prove the outcome shape, without
+//! actually killing the process.
+//!
+//! # No fabrication, no double-counting
+//!
+//! Run 074 reuses every Run 069/070/071/072/073 entry point
+//! verbatim. The new metrics family
+//! (`qbind_p2p_trust_bundle_live_reload_*`) is a SEPARATE rendering
+//! row from the Run 072 `qbind_p2p_session_eviction_*` family;
+//! eviction calls bump both families exactly once (the Run 072
+//! family via the live `TcpKemTlsP2pService::evict_all_sessions`
+//! call; the Run 074 family via `record_live_reload_apply_success`).
+//! The controller NEVER writes the persistence file directly — it
+//! always goes through `check_and_update_sequence` via the
+//! Run 073 adapter so any future anti-rollback hardening applies
+//! automatically.
+
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+use qbind_types::{ChainId, NetworkEnvironment};
+
+use crate::metrics::P2pMetrics;
+use crate::p2p_session_eviction::P2pSessionEvictor;
+use crate::pqc_live_trust::LivePqcTrustState;
+use crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext;
+use crate::pqc_trust_activation::ActivationContext;
+use crate::pqc_trust_bundle::BundleSigningKeySet;
+use crate::pqc_trust_reload::{
+    apply_validated_candidate_with_previous, ApplyMode, AppliedCandidate, ReloadApplyError,
+    ReloadCheckInputs,
+};
+
+/// Run 074 — clonable bundle of every input needed to validate +
+/// apply a candidate on the long-running-node trigger path.
+///
+/// The controller stores a single [`LiveReloadConfig`] for the
+/// lifetime of the running node. Triggers do not mutate it. The
+/// only per-trigger value not in this struct is `now_unix_secs`,
+/// which the controller computes from `SystemTime::now()` at the
+/// top of each trigger (tests inject a deterministic value via
+/// [`LiveReloadController::try_trigger_with_now`]).
+#[derive(Debug, Clone)]
+pub struct LiveReloadConfig {
+    /// Local file path of the candidate trust bundle. Re-read on
+    /// every trigger so an operator can replace the file
+    /// in-place between triggers without restarting the node.
+    pub candidate_path: PathBuf,
+    /// Runtime environment of the running node. MUST match the
+    /// environment the candidate was minted under; bundles with
+    /// the wrong environment surface a fail-closed
+    /// [`crate::pqc_trust_bundle::TrustBundleError`] at validation.
+    pub environment: NetworkEnvironment,
+    /// Runtime chain id of the running node. Same parity rule as
+    /// `environment`.
+    pub chain_id: ChainId,
+    /// Bundle-signing key set the running node has configured.
+    /// MUST satisfy the same TestNet/MainNet refuse-unsigned
+    /// policy as startup.
+    pub signing_keys: BundleSigningKeySet,
+    /// Activation runtime context. Captured once at controller
+    /// construction; tests that want the controller to react to a
+    /// changed `current_height` between triggers can use
+    /// [`LiveReloadController::try_trigger_with_activation`].
+    pub activation_ctx: ActivationContext,
+    /// On-disk sequence persistence file path. `None` is allowed
+    /// for DevNet without `--data-dir`; in that case the controller
+    /// surfaces a clean fail-closed `Invalid` outcome on commit
+    /// (mirroring the Run 073 adapter's
+    /// `commit_sequence_without_data_dir` branch).
+    pub sequence_path: Option<PathBuf>,
+    /// Optional local leaf cert bytes. When `Some`, the Run 061
+    /// (local-leaf-not-revoked) and Run 063 (local-leaf-issuer-
+    /// root-not-revoked) self-checks fire against the candidate.
+    pub local_leaf_cert_bytes: Option<Vec<u8>>,
+}
+
+/// Run 074 — outcome of a single trigger.
+///
+/// Used by both the binary SIGHUP task (to choose a log shape and
+/// exit code on the fatal branch) and the integration tests (to
+/// assert the controller's contract without spinning up signals).
+#[derive(Debug)]
+pub enum LiveReloadOutcome {
+    /// Validation + swap + evict + commit all succeeded. The
+    /// embedded [`AppliedCandidate`] carries the canonical
+    /// operator-log line via [`AppliedCandidate::applied_log_line`].
+    Applied(AppliedCandidate),
+    /// The "in progress" guard rejected this trigger because a
+    /// previous trigger had not yet returned. No mutation occurred.
+    AlreadyInProgress,
+    /// A fail-closed branch (validation refusal, swap failure,
+    /// session-eviction partial failure with successful rollback,
+    /// or sequence-commit failure with successful rollback). The
+    /// live trust state is consistent with the on-disk sequence
+    /// record. The node continues running; the operator may
+    /// re-trigger after correcting the candidate.
+    Invalid(ReloadApplyError),
+    /// The unrecoverable branch: sequence-commit failed AND the
+    /// rollback ALSO failed. The live trust state may be ahead of
+    /// the on-disk sequence record. The controller does NOT exit
+    /// the process; the caller MUST initiate a graceful shutdown
+    /// and the operator MUST recover offline before restarting the
+    /// node.
+    Fatal(ReloadApplyError),
+}
+
+impl LiveReloadOutcome {
+    /// `true` iff the live trust state advanced as a result of this
+    /// trigger.
+    pub fn is_applied(&self) -> bool {
+        matches!(self, LiveReloadOutcome::Applied(_))
+    }
+
+    /// `true` iff the trigger was rejected by the in-progress
+    /// guard.
+    pub fn is_already_in_progress(&self) -> bool {
+        matches!(self, LiveReloadOutcome::AlreadyInProgress)
+    }
+
+    /// `true` iff the trigger surfaced a fatal
+    /// `SequenceCommitFailedRollbackAlsoFailed` branch.
+    pub fn is_fatal(&self) -> bool {
+        matches!(self, LiveReloadOutcome::Fatal(_))
+    }
+
+    /// Canonical Run 074 operator-log line summarising the
+    /// outcome. Single source of truth so the binary's SIGHUP
+    /// handler and the integration tests agree on the literal
+    /// shape.
+    pub fn log_line(&self) -> String {
+        match self {
+            LiveReloadOutcome::Applied(applied) => format!(
+                "[binary] Run 074: VERDICT=applied (live trust-bundle apply on long-running \
+                 node; session_evictions={}; sequence_commit=ok)",
+                applied.session_evictions
+            ),
+            LiveReloadOutcome::AlreadyInProgress => {
+                "[binary] Run 074: VERDICT=already-in-progress (a previous trigger has not \
+                 yet returned; this trigger was rejected without touching live trust state, \
+                 sessions, or the sequence record)"
+                    .to_string()
+            }
+            LiveReloadOutcome::Invalid(e) => format!(
+                "[binary] Run 074: VERDICT=invalid (candidate rejected at validation, swap, \
+                 eviction, or commit stage; live trust state rolled back to previous snapshot \
+                 where applicable; on-disk sequence record preserved). Reason: {}",
+                e
+            ),
+            LiveReloadOutcome::Fatal(e) => format!(
+                "[binary] Run 074: VERDICT=FATAL (sequence-commit failure AND rollback \
+                 failure; live trust state may be ahead of the on-disk sequence record; \
+                 graceful shutdown required; operator MUST recover offline). Reason: {}",
+                e
+            ),
+        }
+    }
+}
+
+/// Run 074 — long-running local operator-triggered live trust-bundle
+/// reload-apply controller. See module-level docs for the strict
+/// scope and the fail-closed guarantees.
+///
+/// The controller is `Clone` — cloning it bumps the inner `Arc`
+/// handles and shares the same in-progress guard with every clone.
+/// The binary builds one controller per running node and hands a
+/// clone to the SIGHUP signal-handler task.
+#[derive(Clone)]
+pub struct LiveReloadController {
+    /// Shared live PQC trust-state handle (Run 071). Same handle
+    /// the binary installs on `P2pNodeBuilder::with_live_pqc_trust`
+    /// — readers continue to read through this handle for every
+    /// inbound / outbound KEMTLS handshake.
+    live: Arc<LivePqcTrustState>,
+    /// Shared session-evictor handle (Run 072). On the live binary
+    /// path this is the same `Arc<TcpKemTlsP2pService>` exposed via
+    /// `P2pNodeContext::p2p_service`, upcast to
+    /// `Arc<dyn P2pSessionEvictor>`. Tests use
+    /// `Arc<MockP2pSessionEvictor>` so deterministic failure
+    /// branches are reachable without spinning up real TCP.
+    evictor: Arc<dyn P2pSessionEvictor>,
+    /// Shared metrics handle. Bumped on every trigger (the trigger
+    /// counter is always bumped; the apply counters are bumped
+    /// after the apply pipeline returns; the in-progress counter is
+    /// bumped when the guard rejects a trigger).
+    metrics: Arc<P2pMetrics>,
+    /// Per-controller configuration. Cloned on every trigger so the
+    /// borrow of the controller is non-mutating.
+    config: LiveReloadConfig,
+    /// In-process serialization guard. `true` while a trigger is
+    /// running through the apply pipeline; CAS'd back to `false`
+    /// before [`LiveReloadController::try_trigger`] returns. Shared
+    /// across every clone of the controller so the binary's SIGHUP
+    /// task and a test-driven direct call cannot both enter the
+    /// apply pipeline simultaneously.
+    in_progress: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for LiveReloadController {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LiveReloadController")
+            .field("config", &self.config)
+            .field(
+                "in_progress",
+                &self.in_progress.load(Ordering::Relaxed),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
+impl LiveReloadController {
+    /// Construct a Run 074 controller. All handles are stored
+    /// as-is; no validation is performed at construction. The
+    /// candidate bundle is NOT read here — it is read on every
+    /// trigger so an operator can replace the file in-place
+    /// between triggers.
+    pub fn new(
+        live: Arc<LivePqcTrustState>,
+        evictor: Arc<dyn P2pSessionEvictor>,
+        metrics: Arc<P2pMetrics>,
+        config: LiveReloadConfig,
+    ) -> Self {
+        Self {
+            live,
+            evictor,
+            metrics,
+            config,
+            in_progress: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Borrow the controller's static configuration (read-only).
+    pub fn config(&self) -> &LiveReloadConfig {
+        &self.config
+    }
+
+    /// `true` iff a trigger is currently running through the apply
+    /// pipeline. Lock-free; useful for binary-side observability
+    /// without taking the guard.
+    pub fn is_in_progress(&self) -> bool {
+        self.in_progress.load(Ordering::Relaxed)
+    }
+
+    /// **Test-only.** Atomically swap the in-progress guard to the
+    /// requested value and return the previous value. Hidden from
+    /// documentation because production code MUST NOT touch the
+    /// guard directly — the guard's contract is owned by
+    /// [`Self::try_trigger`]. Integration tests use this to simulate
+    /// "another trigger is in flight" without spinning up a slow
+    /// candidate or a second OS thread. Renaming this method is a
+    /// breaking change to the Run 074 integration test surface.
+    #[doc(hidden)]
+    pub fn __test_in_progress_swap(&self, new: bool) -> bool {
+        self.in_progress.swap(new, Ordering::AcqRel)
+    }
+
+    /// Run 074 entry point. Computes `now_unix_secs` from
+    /// `SystemTime::now()` and delegates to
+    /// [`Self::try_trigger_with_now`]. The binary's SIGHUP task
+    /// calls this on every signal.
+    pub fn try_trigger(&self) -> LiveReloadOutcome {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.try_trigger_with_now(now_secs)
+    }
+
+    /// Run 074 entry point with an explicit `now_unix_secs`.
+    /// Integration tests use this to drive deterministic
+    /// validity-window / `accepted_at` values.
+    pub fn try_trigger_with_now(&self, now_unix_secs: u64) -> LiveReloadOutcome {
+        self.try_trigger_with_activation(now_unix_secs, self.config.activation_ctx.clone())
+    }
+
+    /// Run 074 entry point with an explicit `now_unix_secs` and an
+    /// override [`ActivationContext`]. Useful when the running node
+    /// has progressed past the controller's captured activation
+    /// height since construction (e.g. an integration test that
+    /// applies a candidate at one height, lets the node commit a
+    /// few blocks, and applies a second candidate at the new
+    /// height).
+    pub fn try_trigger_with_activation(
+        &self,
+        now_unix_secs: u64,
+        activation_ctx: ActivationContext,
+    ) -> LiveReloadOutcome {
+        // Bump the trigger counter unconditionally — this is the
+        // truthful "operator sent a signal" counter, BEFORE the
+        // in-progress guard consults its CAS.
+        self.metrics.record_live_reload_trigger();
+
+        // CAS the in-progress guard: false → true. If another
+        // trigger had already taken the guard, return immediately
+        // without touching live trust state, sessions, or the
+        // sequence record.
+        if self
+            .in_progress
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            self.metrics.record_live_reload_already_in_progress();
+            return LiveReloadOutcome::AlreadyInProgress;
+        }
+
+        // The apply pipeline is synchronous and entirely fallible;
+        // wrap it in a closure so the in-progress guard is always
+        // released via the `defer`-style block below.
+        let outcome = self.run_apply_pipeline(now_unix_secs, activation_ctx);
+
+        // Release the guard BEFORE returning so any concurrent
+        // trigger (the next SIGHUP, a follow-up programmatic call)
+        // can proceed.
+        self.in_progress.store(false, Ordering::Release);
+
+        // Bump apply-side metrics from a single place so binary and
+        // test paths agree on the counter shape.
+        match &outcome {
+            LiveReloadOutcome::Applied(applied) => {
+                self.metrics.record_live_reload_apply_success(
+                    applied.session_evictions as u64,
+                    applied.validated.sequence,
+                );
+            }
+            LiveReloadOutcome::Invalid(_) | LiveReloadOutcome::Fatal(_) => {
+                self.metrics.record_live_reload_apply_failure();
+            }
+            // AlreadyInProgress is already accounted for above and
+            // never reaches this match (we returned early).
+            LiveReloadOutcome::AlreadyInProgress => {}
+        }
+
+        outcome
+    }
+
+    /// Inner apply-pipeline driver. Runs the same validate → swap →
+    /// evict → commit pipeline the Run 073 at-startup-time hook
+    /// drives, but against the running node's live trust handle
+    /// and live session-evictor.
+    ///
+    /// Does NOT touch any metric: every counter update happens on
+    /// the surrounding [`Self::try_trigger_with_activation`] so
+    /// metric updates and outcome shape stay in lockstep.
+    fn run_apply_pipeline(
+        &self,
+        now_unix_secs: u64,
+        activation_ctx: ActivationContext,
+    ) -> LiveReloadOutcome {
+        let seq_path_ref: Option<&Path> = self.config.sequence_path.as_deref();
+        let leaf_bytes_ref: Option<&[u8]> = self.config.local_leaf_cert_bytes.as_deref();
+
+        // Capture pre-swap metadata under a short read lock BEFORE
+        // building the apply context. The Run 073 adapter exposes
+        // a helper for this so the operator-log line shows both
+        // old and new fingerprints.
+        let mut apply_ctx = ProductionLiveTrustApplyContext::new(
+            self.live.clone(),
+            self.evictor.clone(),
+            self.config.environment,
+            self.config.chain_id,
+            self.config.sequence_path.clone(),
+            now_unix_secs,
+        );
+        let (prev_fp_prefix, prev_seq) = apply_ctx.snapshot_previous_metadata();
+
+        let inputs = ReloadCheckInputs {
+            candidate_path: self.config.candidate_path.as_path(),
+            environment: self.config.environment,
+            chain_id: self.config.chain_id,
+            validation_time_secs: now_unix_secs,
+            signing_keys: &self.config.signing_keys,
+            activation_ctx,
+            sequence_persistence_path: seq_path_ref,
+            local_leaf_cert_bytes: leaf_bytes_ref,
+        };
+
+        match apply_validated_candidate_with_previous(
+            inputs,
+            ApplyMode::ApplyLive,
+            Some(&mut apply_ctx),
+            prev_fp_prefix,
+            prev_seq,
+        ) {
+            Ok(applied) => LiveReloadOutcome::Applied(applied),
+            Err(e @ ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed { .. }) => {
+                LiveReloadOutcome::Fatal(e)
+            }
+            Err(e) => LiveReloadOutcome::Invalid(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::p2p_session_eviction::{
+        EvictionError, EvictionReason, EvictionReport, MockP2pSessionEvictor,
+    };
+    use crate::pqc_devnet_helper::mint_devnet_root;
+    use crate::pqc_trust_bundle::{
+        build_helper_bundle, HelperBundleMode, TrustBundle,
+    };
+
+    fn hex_lower(b: &[u8]) -> String {
+        let mut s = String::with_capacity(b.len() * 2);
+        for x in b {
+            use std::fmt::Write;
+            let _ = write!(s, "{:02x}", x);
+        }
+        s
+    }
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "qbind-run074-unit-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ));
+        std::fs::create_dir_all(&p).expect("create_dir_all");
+        p
+    }
+
+    /// Build an unsigned-DevNet helper bundle on disk so a controller
+    /// can be exercised end-to-end without minting an ML-DSA-44
+    /// signing key. Returns the on-disk path + the helper bundle's
+    /// active root metadata so the live trust state can be seeded
+    /// from the SAME bytes.
+    fn write_helper_bundle(
+        dir: &Path,
+        name: &str,
+        sequence: u64,
+        generated_at: u64,
+    ) -> (PathBuf, [u8; 32], Vec<u8>) {
+        let root = mint_devnet_root().expect("mint devnet root");
+        let id_hex = hex_lower(&root.root_key_id);
+        let pk_hex = hex_lower(&root.root_pk);
+        let mut bundle =
+            build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, generated_at);
+        bundle.sequence = sequence;
+        let bytes = serde_json::to_vec(&bundle).expect("serialise");
+        let path = dir.join(name);
+        std::fs::write(&path, &bytes).expect("write");
+        (path, root.root_key_id, root.root_pk)
+    }
+
+    fn load_bundle(path: &Path) -> crate::pqc_trust_bundle::LoadedTrustBundle {
+        let bytes = std::fs::read(path).expect("read");
+        TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 200).expect("loads")
+    }
+
+    fn devnet_config(
+        candidate_path: PathBuf,
+        sequence_path: Option<PathBuf>,
+    ) -> LiveReloadConfig {
+        LiveReloadConfig {
+            candidate_path,
+            environment: NetworkEnvironment::Devnet,
+            chain_id: NetworkEnvironment::Devnet.chain_id(),
+            signing_keys: BundleSigningKeySet::default(),
+            activation_ctx: ActivationContext::height_only(0),
+            sequence_path,
+            local_leaf_cert_bytes: None,
+        }
+    }
+
+    /// Mock evictor that always returns an `Err(_)` from
+    /// `evict_all_sessions` — used to drive the partial-failure /
+    /// unsupported-runtime branch on the controller without
+    /// spinning up real TCP.
+    #[derive(Debug)]
+    struct AlwaysUnsupportedEvictor;
+    impl P2pSessionEvictor for AlwaysUnsupportedEvictor {
+        fn connected_session_count(&self) -> usize {
+            0
+        }
+        fn evict_all_sessions(
+            &self,
+            _reason: EvictionReason,
+        ) -> Result<EvictionReport, EvictionError> {
+            Err(EvictionError::UnsupportedSessionEviction(
+                "unit-test induced unsupported runtime".to_string(),
+            ))
+        }
+    }
+
+    // ====================================================================
+    // Controller construction + getters.
+    // ====================================================================
+
+    #[test]
+    fn controller_construction_does_not_read_candidate_path() {
+        // The controller MUST NOT read the candidate file on
+        // construction — a typo-only candidate path that does not
+        // exist yet must still allow the controller to exist; the
+        // failure surfaces only when an operator triggers it.
+        let dir = tmpdir("construct");
+        let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(
+            &load_bundle(&write_helper_bundle(&dir, "baseline.json", 1, 100).0),
+        ));
+        let metrics = Arc::new(P2pMetrics::new());
+        let mock: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
+        let nonexistent = dir.join("does-not-exist-yet.json");
+        let ctl = LiveReloadController::new(
+            live,
+            mock,
+            metrics.clone(),
+            devnet_config(nonexistent.clone(), None),
+        );
+        assert!(!nonexistent.exists());
+        assert_eq!(ctl.config().candidate_path, nonexistent);
+        assert!(!ctl.is_in_progress());
+        // Trigger counter still 0 because no trigger has fired.
+        assert_eq!(metrics.live_reload_trigger_total(), 0);
+    }
+
+    #[test]
+    fn controller_is_clone_and_shares_in_progress_guard() {
+        let dir = tmpdir("clone");
+        let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(
+            &load_bundle(&write_helper_bundle(&dir, "baseline.json", 1, 100).0),
+        ));
+        let metrics = Arc::new(P2pMetrics::new());
+        let mock: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(0));
+        let ctl = LiveReloadController::new(
+            live,
+            mock,
+            metrics,
+            devnet_config(dir.join("c.json"), None),
+        );
+        let clone = ctl.clone();
+        // Flip in_progress through the original; the clone observes
+        // the same shared flag.
+        ctl.in_progress.store(true, Ordering::Relaxed);
+        assert!(clone.is_in_progress());
+        ctl.in_progress.store(false, Ordering::Relaxed);
+        assert!(!clone.is_in_progress());
+    }
+
+    // ====================================================================
+    // Trigger metric accounting.
+    // ====================================================================
+
+    #[test]
+    fn trigger_with_nonexistent_candidate_path_returns_invalid_and_bumps_failure_counter() {
+        // No candidate file at all → Run 069 validation fails with
+        // a `TrustBundleError::Io`. The controller surfaces
+        // `Invalid` and bumps `live_reload_apply_failure_total`.
+        let dir = tmpdir("nofile");
+        let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(
+            &load_bundle(&write_helper_bundle(&dir, "baseline.json", 1, 100).0),
+        ));
+        let metrics = Arc::new(P2pMetrics::new());
+        let mock: Arc<dyn P2pSessionEvictor> = Arc::new(MockP2pSessionEvictor::new(2));
+        let ctl = LiveReloadController::new(
+            live,
+            mock,
+            metrics.clone(),
+            devnet_config(dir.join("does-not-exist.json"), None),
+        );
+
+        let out = ctl.try_trigger_with_now(200);
+        assert!(matches!(out, LiveReloadOutcome::Invalid(_)));
+        assert!(!ctl.is_in_progress());
+        assert_eq!(metrics.live_reload_trigger_total(), 1);
+        assert_eq!(metrics.live_reload_apply_success_total(), 0);
+        assert_eq!(metrics.live_reload_apply_failure_total(), 1);
+        assert_eq!(metrics.live_reload_already_in_progress_total(), 0);
+        assert_eq!(metrics.live_reload_sessions_evicted_total(), 0);
+        assert_eq!(metrics.live_reload_last_applied_sequence(), 0);
+    }
+
+    // ====================================================================
+    // Outcome log-line shape.
+    // ====================================================================
+
+    #[test]
+    fn outcome_log_line_marks_each_branch_with_run_074_prefix() {
+        // AlreadyInProgress branch.
+        let s = LiveReloadOutcome::AlreadyInProgress.log_line();
+        assert!(s.starts_with("[binary] Run 074:"), "{}", s);
+        assert!(s.contains("VERDICT=already-in-progress"), "{}", s);
+        assert!(s.contains("without touching live trust state"), "{}", s);
+
+        // Invalid branch with a synthetic error.
+        let e = ReloadApplyError::UnsupportedRuntimeContext("test".into());
+        let s = LiveReloadOutcome::Invalid(e).log_line();
+        assert!(s.starts_with("[binary] Run 074:"), "{}", s);
+        assert!(s.contains("VERDICT=invalid"), "{}", s);
+        assert!(s.contains("rolled back"), "{}", s);
+
+        // Fatal branch with a synthetic error.
+        let e = ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed {
+            commit_message: "c".into(),
+            rollback_message: "r".into(),
+        };
+        let s = LiveReloadOutcome::Fatal(e).log_line();
+        assert!(s.starts_with("[binary] Run 074:"), "{}", s);
+        assert!(s.contains("VERDICT=FATAL"), "{}", s);
+        assert!(s.contains("recover offline"), "{}", s);
+    }
+
+    // ====================================================================
+    // Unsupported-evictor surfaces a clean Invalid (no panic).
+    // ====================================================================
+
+    #[test]
+    fn always_unsupported_evictor_surfaces_invalid_not_fatal() {
+        // A misconfigured evictor that returns
+        // `UnsupportedSessionEviction` from every call MUST be
+        // surfaced as `Invalid` (rollback succeeded — live state
+        // matches pre-trigger). The fatal branch is reserved for
+        // SequenceCommitFailedRollbackAlsoFailed.
+        let dir = tmpdir("unsup");
+        let (baseline_path, _id, _pk) = write_helper_bundle(&dir, "baseline.json", 1, 100);
+        let baseline_loaded = load_bundle(&baseline_path);
+        let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(
+            &baseline_loaded,
+        ));
+        let pre_swap_arc = live.snapshot().expect("snap");
+        let metrics = Arc::new(P2pMetrics::new());
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(AlwaysUnsupportedEvictor);
+        // Candidate at sequence=2 (genuine forward step) so the
+        // pipeline reaches the swap+evict stage before failing.
+        let (candidate_path, _, _) = write_helper_bundle(&dir, "candidate.json", 2, 200);
+        let ctl = LiveReloadController::new(
+            live.clone(),
+            evictor,
+            metrics.clone(),
+            devnet_config(candidate_path, None),
+        );
+
+        let out = ctl.try_trigger_with_now(200);
+        match out {
+            LiveReloadOutcome::Invalid(ReloadApplyError::SessionEvictionFailed {
+                rollback_ok,
+                ..
+            }) => {
+                assert!(rollback_ok, "rollback must succeed on this branch");
+            }
+            other => panic!("expected Invalid(SessionEvictionFailed), got {:?}", other),
+        }
+        // Rollback installs a fresh `Arc` whose contents match the
+        // pre-swap snapshot (the Run 073 adapter deep-clones the
+        // captured snapshot via `swap_snapshot`); assert the
+        // operator-visible metadata reverted truthfully rather than
+        // requiring Arc pointer equality.
+        let post = live.snapshot().expect("snap");
+        assert_eq!(post.fingerprint(), pre_swap_arc.fingerprint());
+        assert_eq!(post.sequence(), pre_swap_arc.sequence());
+        assert_eq!(metrics.live_reload_trigger_total(), 1);
+        assert_eq!(metrics.live_reload_apply_success_total(), 0);
+        assert_eq!(metrics.live_reload_apply_failure_total(), 1);
+        assert_eq!(metrics.live_reload_sessions_evicted_total(), 0);
+    }
+}

@@ -469,6 +469,51 @@ pub struct CliArgs {
     #[arg(long = "p2p-trust-bundle-reload-apply-path", hide = true)]
     pub p2p_trust_bundle_reload_apply_path: Option<PathBuf>,
 
+    /// Run 074 — disabled-by-default operator opt-in flag for the
+    /// **long-running-node** live trust-bundle reload-apply trigger.
+    /// Without this flag, supplying
+    /// `--p2p-trust-bundle-live-reload-path` is refused as a
+    /// configuration error so the operator can never accidentally
+    /// "arm" the trigger by typing the path flag alone. With this
+    /// flag, the running node installs a SIGHUP handler that, on
+    /// each signal, validates the configured candidate path through
+    /// the SAME Run 069 pipeline and applies it through the SAME
+    /// Run 073 `ProductionLiveTrustApplyContext` against the running
+    /// node's live `LivePqcTrustState` + live `TcpKemTlsP2pService`
+    /// session-evictor. Disabled by default. Hidden because Run 074
+    /// is evidence-only.
+    ///
+    /// **This is NOT peer-supplied / gossiped bundle acceptance,
+    /// NOT a remote unauthenticated endpoint, NOT KMS / HSM, NOT
+    /// activation_epoch runtime sourcing, NOT signing-key
+    /// ratification, NOT a filesystem watcher.** It is the smallest
+    /// safe long-running-node trigger built on top of the Run 073
+    /// adapter. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md`
+    /// and `docs/whitepaper/contradiction.md` C4.
+    #[arg(long = "p2p-trust-bundle-live-reload-enabled", hide = true)]
+    pub p2p_trust_bundle_live_reload_enabled: bool,
+
+    /// Run 074 — operator-supplied local file path of a candidate
+    /// trust bundle to apply live on each SIGHUP. Requires
+    /// `--p2p-trust-bundle-live-reload-enabled`. Disabled by
+    /// default. Local file only — no peer / gossip input. The
+    /// candidate is re-read from disk on every trigger, validated
+    /// through the same Run 069 pipeline, and applied through the
+    /// Run 073 `ProductionLiveTrustApplyContext` against the
+    /// running node's live trust handle and live session-evictor.
+    ///
+    /// Concurrent triggers (e.g. two SIGHUPs arriving while an
+    /// apply is in progress) are rejected via an in-process
+    /// "in progress" flag — they do NOT queue and do NOT cause
+    /// re-entry. An invalid candidate logs `VERDICT=invalid` and
+    /// leaves the live trust state, the persisted sequence
+    /// record, and all P2P sessions UNCHANGED. A successful
+    /// apply logs `VERDICT=applied`, swaps the live trust state,
+    /// evicts all P2P sessions via the Run 072 hook, and commits
+    /// the new sequence. The node continues running afterwards.
+    #[arg(long = "p2p-trust-bundle-live-reload-path", hide = true)]
+    pub p2p_trust_bundle_live_reload_path: Option<PathBuf>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

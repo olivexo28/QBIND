@@ -5833,6 +5833,62 @@ pub struct P2pMetrics {
     session_eviction_success_total: AtomicU64,
     session_eviction_failure_total: AtomicU64,
     session_eviction_sessions_evicted_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 074 — long-running local operator-triggered live trust-bundle
+    // reload-apply trigger metrics.
+    //
+    //   qbind_p2p_trust_bundle_live_reload_trigger_total
+    //       (counter; +1 per SIGHUP / programmatic trigger entry to
+    //       the Run 074 controller, regardless of outcome. A trigger
+    //       that is short-circuited by the "already in progress"
+    //       guard still counts as a trigger here.)
+    //   qbind_p2p_trust_bundle_live_reload_apply_success_total
+    //       (counter; +1 per trigger that reached
+    //       `apply_validated_candidate_with_previous(ApplyLive)`
+    //       returning `Ok(AppliedCandidate)`)
+    //   qbind_p2p_trust_bundle_live_reload_apply_failure_total
+    //       (counter; +1 per trigger that ended with a
+    //       `ReloadApplyError` of any kind, INCLUDING fatal
+    //       rollback-also-failed. Validation failures, swap
+    //       failures, eviction failures, and commit failures are
+    //       all counted here.)
+    //   qbind_p2p_trust_bundle_live_reload_already_in_progress_total
+    //       (counter; +1 per trigger that the "in progress" guard
+    //       rejected because a previous trigger had not yet
+    //       returned. This is the truthful concurrency-rejection
+    //       counter the operator monitors for two-SIGHUPs-too-close
+    //       cases.)
+    //   qbind_p2p_trust_bundle_live_reload_sessions_evicted_total
+    //       (counter; +N per successful trigger, where N is the
+    //       Run 072 `AppliedCandidate::session_evictions` for that
+    //       call. The matching Run 072
+    //       `qbind_p2p_session_eviction_*` counters are also bumped
+    //       by the underlying `TcpKemTlsP2pService` eviction call
+    //       — Run 074 does not double-count there; this counter is
+    //       a Run-074-specific cross-check that the eviction
+    //       happened on the live-reload path specifically.)
+    //   qbind_p2p_trust_bundle_live_reload_last_applied_sequence
+    //       (gauge; set to the candidate's `sequence` on each
+    //       successful apply. Reads zero if no successful apply has
+    //       occurred yet in this process lifetime.)
+    //
+    // Discipline:
+    // - These counters are bumped ONLY by code paths that actually
+    //   invoke the Run 074 long-running-node trigger. Run 069
+    //   reload-check, Run 070 validate-only, and the Run 073
+    //   at-startup-time `--p2p-trust-bundle-reload-apply-path` hook
+    //   never bump them.
+    // - No label cardinality: per-reason and per-environment
+    //   breakdowns are intentionally omitted (single source of
+    //   truth: the operator log line printed by the controller).
+    // ------------------------------------------------------------------
+    live_reload_trigger_total: AtomicU64,
+    live_reload_apply_success_total: AtomicU64,
+    live_reload_apply_failure_total: AtomicU64,
+    live_reload_already_in_progress_total: AtomicU64,
+    live_reload_sessions_evicted_total: AtomicU64,
+    live_reload_last_applied_sequence: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6699,6 +6755,35 @@ impl P2pMetrics {
             self.session_eviction_sessions_evicted_total()
         ));
 
+        // Run 074 — long-running local operator-triggered live
+        // trust-bundle reload-apply trigger counters. Each name
+        // appears exactly once in the rendered body (asserted by
+        // `live_reload_metrics_render_once_in_format_metrics`).
+        output.push_str(&format!(
+            "qbind_p2p_trust_bundle_live_reload_trigger_total {}\n",
+            self.live_reload_trigger_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_trust_bundle_live_reload_apply_success_total {}\n",
+            self.live_reload_apply_success_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_trust_bundle_live_reload_apply_failure_total {}\n",
+            self.live_reload_apply_failure_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_trust_bundle_live_reload_already_in_progress_total {}\n",
+            self.live_reload_already_in_progress_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_trust_bundle_live_reload_sessions_evicted_total {}\n",
+            self.live_reload_sessions_evicted_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_trust_bundle_live_reload_last_applied_sequence {}\n",
+            self.live_reload_last_applied_sequence()
+        ));
+
         output
     }
 
@@ -7098,6 +7183,90 @@ impl P2pMetrics {
         // demands a dedicated `failed_total` counter, add it
         // alongside (do not rename).
         let _ = failed;
+    }
+
+    // ------------------------------------------------------------------
+    // Run 074 — long-running local operator-triggered live trust-bundle
+    // reload-apply trigger metric accessors.
+    // ------------------------------------------------------------------
+
+    /// Run 074 — total triggers received by the long-running-node
+    /// live-reload controller (every SIGHUP / programmatic entry,
+    /// regardless of outcome).
+    pub fn live_reload_trigger_total(&self) -> u64 {
+        self.live_reload_trigger_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 074 — successful Run 070 `apply_validated_candidate`
+    /// calls on the long-running-node trigger path.
+    pub fn live_reload_apply_success_total(&self) -> u64 {
+        self.live_reload_apply_success_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 074 — failed Run 070 `apply_validated_candidate` calls
+    /// on the long-running-node trigger path (any
+    /// `ReloadApplyError`, including fatal rollback-also-failed).
+    pub fn live_reload_apply_failure_total(&self) -> u64 {
+        self.live_reload_apply_failure_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 074 — triggers rejected by the "in progress" guard
+    /// because a previous trigger had not yet returned.
+    pub fn live_reload_already_in_progress_total(&self) -> u64 {
+        self.live_reload_already_in_progress_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 074 — sum of `AppliedCandidate::session_evictions` across
+    /// every successful long-running-node trigger.
+    pub fn live_reload_sessions_evicted_total(&self) -> u64 {
+        self.live_reload_sessions_evicted_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 074 — last applied bundle sequence on the long-running
+    /// node trigger path. Zero if no successful apply has occurred
+    /// in this process lifetime.
+    pub fn live_reload_last_applied_sequence(&self) -> u64 {
+        self.live_reload_last_applied_sequence
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 074 — record a trigger entry. Bumps
+    /// `live_reload_trigger_total` unconditionally; this is the
+    /// truthful "operator sent a trigger" counter, BEFORE the
+    /// in-progress guard is consulted.
+    pub fn record_live_reload_trigger(&self) {
+        self.live_reload_trigger_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 074 — record that an in-progress guard rejected the
+    /// current trigger.
+    pub fn record_live_reload_already_in_progress(&self) {
+        self.live_reload_already_in_progress_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 074 — record a successful apply: bump success counter,
+    /// add `evicted` to the sessions-evicted counter, store
+    /// `new_sequence` in the last-applied-sequence gauge.
+    pub fn record_live_reload_apply_success(&self, evicted: u64, new_sequence: u64) {
+        self.live_reload_apply_success_total
+            .fetch_add(1, Ordering::Relaxed);
+        if evicted > 0 {
+            self.live_reload_sessions_evicted_total
+                .fetch_add(evicted, Ordering::Relaxed);
+        }
+        self.live_reload_last_applied_sequence
+            .store(new_sequence, Ordering::Relaxed);
+    }
+
+    /// Run 074 — record a failed apply (any `ReloadApplyError`
+    /// surface, including fatal rollback-also-failed).
+    pub fn record_live_reload_apply_failure(&self) {
+        self.live_reload_apply_failure_total
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -11176,5 +11345,97 @@ mod tests {
         // Run 050/051/055/057 metrics still present (no displacement).
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_activation_rejected_total "));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 074 — long-running local operator-triggered live trust-bundle
+    // reload-apply trigger metrics.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn live_reload_metrics_start_at_zero_and_record_outcomes_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.live_reload_trigger_total(), 0);
+        assert_eq!(p.live_reload_apply_success_total(), 0);
+        assert_eq!(p.live_reload_apply_failure_total(), 0);
+        assert_eq!(p.live_reload_already_in_progress_total(), 0);
+        assert_eq!(p.live_reload_sessions_evicted_total(), 0);
+        assert_eq!(p.live_reload_last_applied_sequence(), 0);
+
+        // Trigger accepted → successful apply with 3 evictions and
+        // new sequence=7.
+        p.record_live_reload_trigger();
+        p.record_live_reload_apply_success(3, 7);
+        assert_eq!(p.live_reload_trigger_total(), 1);
+        assert_eq!(p.live_reload_apply_success_total(), 1);
+        assert_eq!(p.live_reload_apply_failure_total(), 0);
+        assert_eq!(p.live_reload_already_in_progress_total(), 0);
+        assert_eq!(p.live_reload_sessions_evicted_total(), 3);
+        assert_eq!(p.live_reload_last_applied_sequence(), 7);
+
+        // Trigger received → already-in-progress rejection (trigger
+        // counter ALSO bumps; this is the truthful "operator sent
+        // a signal" counter regardless of guard outcome).
+        p.record_live_reload_trigger();
+        p.record_live_reload_already_in_progress();
+        assert_eq!(p.live_reload_trigger_total(), 2);
+        assert_eq!(p.live_reload_already_in_progress_total(), 1);
+        // Apply counters unchanged.
+        assert_eq!(p.live_reload_apply_success_total(), 1);
+        assert_eq!(p.live_reload_apply_failure_total(), 0);
+
+        // Trigger accepted → apply failure (validation, swap,
+        // eviction, or commit). last_applied_sequence does NOT
+        // advance on failure; sessions-evicted does NOT advance on
+        // failure.
+        p.record_live_reload_trigger();
+        p.record_live_reload_apply_failure();
+        assert_eq!(p.live_reload_trigger_total(), 3);
+        assert_eq!(p.live_reload_apply_success_total(), 1);
+        assert_eq!(p.live_reload_apply_failure_total(), 1);
+        assert_eq!(p.live_reload_sessions_evicted_total(), 3);
+        assert_eq!(p.live_reload_last_applied_sequence(), 7);
+
+        // Subsequent successful apply with no live sessions still
+        // advances the sequence gauge truthfully and does NOT touch
+        // sessions-evicted (evicted=0).
+        p.record_live_reload_trigger();
+        p.record_live_reload_apply_success(0, 9);
+        assert_eq!(p.live_reload_trigger_total(), 4);
+        assert_eq!(p.live_reload_apply_success_total(), 2);
+        assert_eq!(p.live_reload_sessions_evicted_total(), 3);
+        assert_eq!(p.live_reload_last_applied_sequence(), 9);
+    }
+
+    #[test]
+    fn live_reload_metrics_render_once_in_format_metrics() {
+        let p = P2pMetrics::new();
+        p.record_live_reload_trigger();
+        p.record_live_reload_apply_success(5, 12);
+        let out = p.format_metrics();
+        for name in [
+            "qbind_p2p_trust_bundle_live_reload_trigger_total ",
+            "qbind_p2p_trust_bundle_live_reload_apply_success_total ",
+            "qbind_p2p_trust_bundle_live_reload_apply_failure_total ",
+            "qbind_p2p_trust_bundle_live_reload_already_in_progress_total ",
+            "qbind_p2p_trust_bundle_live_reload_sessions_evicted_total ",
+            "qbind_p2p_trust_bundle_live_reload_last_applied_sequence ",
+        ] {
+            let n = out.matches(name).count();
+            assert_eq!(
+                n, 1,
+                "Run 074 metric {} must appear exactly once in P2pMetrics::format_metrics (got {})",
+                name, n
+            );
+        }
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_trigger_total 1"));
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_apply_success_total 1"));
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_apply_failure_total 0"));
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_already_in_progress_total 0"));
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_sessions_evicted_total 5"));
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_last_applied_sequence 12"));
+        // Run 050/051/055/072 metrics still present (no displacement).
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
+        assert!(out.contains("qbind_p2p_session_eviction_attempt_total "));
     }
 }

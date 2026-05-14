@@ -666,6 +666,76 @@ async fn main() {
         }
     }
 
+    // Run 074 — top-level partial-config refusal for the long-
+    // running-node live trust-bundle reload-apply trigger.
+    //
+    // The actual SIGHUP handler is spawned later, inside
+    // `run_p2p_node` (the only mode where a live
+    // `LivePqcTrustState` + live `TcpKemTlsP2pService` evictor
+    // exist). This top-level check fires in every mode so an
+    // operator who supplies `--p2p-trust-bundle-live-reload-path`
+    // on `--p2p-mode local-mesh` (or with no `--p2p-mode` flag at
+    // all) gets a clean fail-closed startup error instead of a
+    // silent no-op.
+    //
+    // - `--p2p-trust-bundle-live-reload-path <PATH>` without
+    //   `--p2p-trust-bundle-live-reload-enabled` → refused (the
+    //   operator-confusion preventer);
+    // - `--p2p-trust-bundle-live-reload-enabled` without
+    //   `--p2p-trust-bundle-live-reload-path <PATH>` → refused
+    //   (the trigger has nothing to read on each SIGHUP);
+    // - either flag without `--p2p-trust-bundle <BASELINE-PATH>`
+    //   → refused (the running node needs a baseline to seed the
+    //   live trust handle; the same precondition the Run 073 hook
+    //   enforces);
+    // - either flag without `--p2p-mode p2p` → refused (LocalMesh
+    //   has no live `TcpKemTlsP2pService` to evict sessions on).
+    //
+    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md` and
+    // `docs/whitepaper/contradiction.md` C4.
+    if args.p2p_trust_bundle_live_reload_path.is_some()
+        || args.p2p_trust_bundle_live_reload_enabled
+    {
+        match (
+            args.p2p_trust_bundle_live_reload_path.as_ref(),
+            args.p2p_trust_bundle_live_reload_enabled,
+        ) {
+            (Some(_), true) => {
+                // Valid pair — defer to in-P2P wiring below.
+            }
+            (Some(_), false) => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-live-reload-path requires \
+                     --p2p-trust-bundle-live-reload-enabled. The Run 074 \
+                     long-running-node live trust-bundle reload-apply trigger is \
+                     disabled by default. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md."
+                );
+                std::process::exit(1);
+            }
+            (None, true) => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-live-reload-enabled requires \
+                     --p2p-trust-bundle-live-reload-path <PATH> (the trigger needs a \
+                     candidate path to re-read on each SIGHUP). See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md."
+                );
+                std::process::exit(1);
+            }
+            (None, false) => unreachable!(),
+        }
+        if args.p2p_trust_bundle.is_none() {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-live-reload-enabled requires \
+                 --p2p-trust-bundle <BASELINE-PATH> (the long-running-node trigger needs \
+                 a baseline to seed the live trust handle; no implicit fallback to \
+                 --p2p-trusted-root is introduced). See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md."
+            );
+            std::process::exit(1);
+        }
+    }
+
     // Validate P2P configuration (may modify config)
     let p2p_enabled = config.validate_p2p_config();
 
@@ -1940,6 +2010,15 @@ async fn run_p2p_node(
             }
     }
 
+    // Run 074: extract the local leaf cert bytes (if any) NOW,
+    // before `leaf_credentials` is moved into `PqcStaticRootConfig`.
+    // We can't keep a borrow because the SIGHUP task lives across
+    // an await boundary; an owned `Option<Vec<u8>>` is the smallest
+    // clone we can make.
+    let live_reload_leaf_bytes: Option<Vec<u8>> = leaf_credentials
+        .as_ref()
+        .map(|c| c.cert_bytes.clone());
+
     let pqc_config = PqcStaticRootConfig {
         mode: pqc_root_mode,
         trusted_roots: trusted_roots.clone(),
@@ -2005,25 +2084,37 @@ async fn run_p2p_node(
     // `TrustedClientRoots` resolver and the bidirectional
     // `LeafCertRevocationList` continue to verify against
     // **byte-identical** trust material as before. Run 071 NEVER
-    // mutates the live handle after this point — that remains for
-    // a future Run 072+ once a production session-eviction hook
-    // exists.
-    let builder = if let Some(loaded) = trust_bundle_loaded.as_ref() {
-        let live = qbind_node::pqc_live_trust::LivePqcTrustState::initialize_from_loaded_bundle(
-            loaded,
-        );
-        eprintln!(
-            "[binary] Run 071: live PQC trust-state initialized \
-             (env={} sequence={} fingerprint={} active_roots={} \
-             revoked_roots_active={} revoked_leaves_active={})",
-            loaded.environment(),
-            loaded.bundle.sequence,
-            loaded.fingerprint_hex(),
-            loaded.active_root_count(),
-            loaded.revoked_root_count(),
-            loaded.revoked_leaf_fingerprint_count(),
-        );
-        builder.with_live_pqc_trust(live)
+    // mutates the live handle after this point on the binary path
+    // — Run 074's long-running-node SIGHUP trigger (below) drives
+    // mutation through `LivePqcTrustState::swap_snapshot` only on
+    // explicit operator action.
+    //
+    // Run 074: clone the freshly-initialized `LivePqcTrustState`
+    // here so the SIGHUP signal-handler task spawned below can hold
+    // an `Arc` on the SAME handle the builder consumes (the inner
+    // RwLock is what every handshake reads from; cloning the
+    // wrapper here merely Arc-bumps the shared lock).
+    let live_for_reload_apply: Option<qbind_node::pqc_live_trust::LivePqcTrustState> =
+        trust_bundle_loaded.as_ref().map(|loaded| {
+            let live =
+                qbind_node::pqc_live_trust::LivePqcTrustState::initialize_from_loaded_bundle(
+                    loaded,
+                );
+            eprintln!(
+                "[binary] Run 071: live PQC trust-state initialized \
+                 (env={} sequence={} fingerprint={} active_roots={} \
+                 revoked_roots_active={} revoked_leaves_active={})",
+                loaded.environment(),
+                loaded.bundle.sequence,
+                loaded.fingerprint_hex(),
+                loaded.active_root_count(),
+                loaded.revoked_root_count(),
+                loaded.revoked_leaf_fingerprint_count(),
+            );
+            live
+        });
+    let builder = if let Some(live) = live_for_reload_apply.as_ref() {
+        builder.with_live_pqc_trust(live.clone())
     } else {
         builder
     };
@@ -2099,6 +2190,68 @@ async fn run_p2p_node(
         config.chain_id().as_u64(),
         shutdown_rx.clone(),
     );
+
+    // ------------------------------------------------------------------
+    // Run 074 — long-running local operator-triggered live trust-bundle
+    // reload-apply trigger: install SIGHUP handler against the running
+    // node's live `LivePqcTrustState` + live `TcpKemTlsP2pService`
+    // session-evictor + on-disk sequence persistence + `/metrics`
+    // surface.
+    //
+    // Gating: disabled by default. The pair
+    //   --p2p-trust-bundle-live-reload-enabled
+    //   --p2p-trust-bundle-live-reload-path <PATH>
+    // is enforced as required-together at the top of `main()` so an
+    // operator cannot accidentally arm the trigger by setting only
+    // one flag. This block fires only when BOTH flags are present AND
+    // the runtime mode has a live `TcpKemTlsP2pService` (the P2P mode
+    // — the only mode that reaches this block).
+    //
+    // On every SIGHUP the controller validates the candidate file
+    // through the SAME Run 069 pipeline, applies it through the SAME
+    // Run 073 `ProductionLiveTrustApplyContext` against the running
+    // node's live trust handle, and evicts every authenticated
+    // KEMTLS session via the live `TcpKemTlsP2pService` (Run 072).
+    // The atomic sequence writer ensures the on-disk record advances
+    // only on full success. Concurrent triggers are serialised by
+    // the controller's `Arc<AtomicBool>` in-progress guard.
+    //
+    // Fatal-branch policy: if `SequenceCommitFailedRollbackAlsoFailed`
+    // ever surfaces, the live trust state may be ahead of the
+    // on-disk sequence record. This handler signals graceful shutdown
+    // via `shutdown_tx` so the operator can intervene offline.
+    //
+    // See `crates/qbind-node/src/pqc_live_trust_reload.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md`, and
+    // `docs/whitepaper/contradiction.md` C4.
+    #[cfg(unix)]
+    let _live_reload_handle: Option<tokio::task::JoinHandle<()>> = {
+        let evictor: Arc<dyn qbind_node::p2p_session_eviction::P2pSessionEvictor> =
+            node_context.p2p_service.clone();
+        spawn_run074_live_reload_task(
+            args,
+            config,
+            &bundle_signing_keys,
+            live_reload_leaf_bytes,
+            live_for_reload_apply.clone(),
+            evictor,
+            node_metrics.p2p_arc(),
+            shutdown_rx.clone(),
+            shutdown_tx.clone(),
+        )
+    };
+    #[cfg(not(unix))]
+    let _live_reload_handle: Option<tokio::task::JoinHandle<()>> = {
+        if args.p2p_trust_bundle_live_reload_enabled {
+            eprintln!(
+                "[binary] Run 074: SIGHUP-driven live trust-bundle reload-apply trigger is \
+                 only supported on Unix runtimes; ignoring \
+                 --p2p-trust-bundle-live-reload-enabled on this platform."
+            );
+        }
+        None
+    };
+
     // B9: late-peer-connect proposal re-emission.
     //
     // The same `Arc<dyn P2pService>` that backs both the inbound demuxer
@@ -2635,6 +2788,161 @@ fn maybe_spawn_run035_forged_injection_harness(
         fixture,
         std::time::Duration::from_secs(1),
     ))
+}
+
+#[cfg(unix)]
+fn spawn_run074_live_reload_task(
+    args: &qbind_node::cli::CliArgs,
+    config: &qbind_node::NodeConfig,
+    bundle_signing_keys: &qbind_node::pqc_trust_bundle::BundleSigningKeySet,
+    local_leaf_cert_bytes: Option<Vec<u8>>,
+    live_state: Option<qbind_node::pqc_live_trust::LivePqcTrustState>,
+    p2p_service: Arc<dyn qbind_node::p2p_session_eviction::P2pSessionEvictor>,
+    p2p_metrics: Arc<qbind_node::metrics::P2pMetrics>,
+    mut shutdown_rx: watch::Receiver<()>,
+    shutdown_tx: watch::Sender<()>,
+) -> Option<tokio::task::JoinHandle<()>> {
+    use qbind_node::pqc_live_trust_reload::{LiveReloadConfig, LiveReloadController};
+    use qbind_node::pqc_trust_activation::ActivationContext;
+
+    // Disabled by default.
+    if !args.p2p_trust_bundle_live_reload_enabled
+        || args.p2p_trust_bundle_live_reload_path.is_none()
+    {
+        return None;
+    }
+    let candidate_path = args
+        .p2p_trust_bundle_live_reload_path
+        .clone()
+        .expect("guarded by .is_none() check");
+
+    // Without a baseline live state the controller would always
+    // fail closed (no live handle to swap). Refuse to install the
+    // handler and tell the operator explicitly. This branch is
+    // also unreachable because the top-level main() validator
+    // requires `--p2p-trust-bundle` whenever the live-reload flags
+    // are set, but defence-in-depth.
+    let live_state = match live_state {
+        Some(l) => l,
+        None => {
+            eprintln!(
+                "[binary] Run 074: SIGHUP trigger disabled — no baseline \
+                 `--p2p-trust-bundle` is present on the live binary path \
+                 (no `LivePqcTrustState` to drive). Refusing to install a \
+                 handler that would always fail-closed. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md."
+            );
+            return None;
+        }
+    };
+
+    let sequence_path = config
+        .data_dir
+        .as_ref()
+        .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
+    let local_leaf_bytes: Option<Vec<u8>> = local_leaf_cert_bytes;
+    let cfg = LiveReloadConfig {
+        candidate_path: candidate_path.clone(),
+        environment: config.environment,
+        chain_id: config.chain_id(),
+        signing_keys: bundle_signing_keys.clone(),
+        // Height-only activation context: this matches the
+        // startup-time `--p2p-trust-bundle` activation gate
+        // because the runtime height-source for a live node is
+        // not currently wired through `ActivationContext` (the
+        // same scope boundary documented in
+        // `docs/whitepaper/contradiction.md` C4). A future run
+        // that lands a live height source can extend this without
+        // changing the SIGHUP trigger surface.
+        activation_ctx: ActivationContext::height_only(0),
+        sequence_path: sequence_path.clone(),
+        local_leaf_cert_bytes: local_leaf_bytes,
+    };
+    let controller = LiveReloadController::new(
+        Arc::new(live_state),
+        p2p_service,
+        p2p_metrics,
+        cfg,
+    );
+    eprintln!(
+        "[binary] Run 074: SIGHUP-driven live trust-bundle reload-apply trigger \
+         ENABLED. Candidate path: {}. Sequence persistence: {}. On each SIGHUP \
+         the candidate is validated through Run 069, applied through Run 073, \
+         sessions are evicted via Run 072, and the sequence record is committed \
+         atomically. Local file only; no peer / gossip input; concurrent \
+         triggers are rejected by an in-process guard. See \
+         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md.",
+        candidate_path.display(),
+        sequence_path
+            .as_ref()
+            .map(|p: &std::path::PathBuf| p.display().to_string())
+            .unwrap_or_else(|| "<no --data-dir; commit will fail-closed>".to_string()),
+    );
+
+    let mut sighup =
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup()) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[binary] Run 074: ERROR installing SIGHUP signal handler: {}. \
+                     Live trust-bundle reload-apply trigger is NOT active. The node \
+                     continues running with the baseline trust bundle.",
+                    e
+                );
+                return None;
+            }
+        };
+
+    let handle = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = shutdown_rx.changed() => {
+                    eprintln!(
+                        "[binary] Run 074: SIGHUP trigger task stopping (shutdown signalled)."
+                    );
+                    break;
+                }
+                sig = sighup.recv() => {
+                    if sig.is_none() {
+                        // Signal stream closed (shouldn't happen
+                        // for unix signals on a normal runtime,
+                        // but treat as graceful stop).
+                        break;
+                    }
+                    eprintln!(
+                        "[binary] Run 074: SIGHUP received — running live trust-bundle \
+                         reload-apply trigger."
+                    );
+                    let controller_for_trigger = controller.clone();
+                    let outcome = tokio::task::spawn_blocking(move || {
+                        controller_for_trigger.try_trigger()
+                    })
+                    .await;
+                    match outcome {
+                        Ok(out) => {
+                            eprintln!("{}", out.log_line());
+                            if out.is_fatal() {
+                                eprintln!(
+                                    "[binary] Run 074: FATAL outcome surfaced — signalling \
+                                     graceful shutdown. The live trust state may be ahead \
+                                     of the on-disk sequence record; recover offline."
+                                );
+                                let _ = shutdown_tx.send(());
+                            }
+                        }
+                        Err(join_err) => {
+                            eprintln!(
+                                "[binary] Run 074: trigger task join error: {}. Treating as \
+                                 non-fatal; node continues running with current live trust state.",
+                                join_err
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    });
+    Some(handle)
 }
 
 #[cfg(unix)]
