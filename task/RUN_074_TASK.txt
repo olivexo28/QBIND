@@ -1,0 +1,399 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened PQC transport.
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Runs 050–068 completed the signed trust-bundle lifecycle path:
+  - structured PQC trust bundles
+  - signed ML-DSA-44 bundle verification
+  - chain_id crosscheck
+  - sequence anti-rollback persistence
+  - activation-height gating
+  - minimum activation-height policy
+  - root/leaf revocation
+  - per-entry revocation activation_height
+  - local revoked-leaf startup self-check
+  - local revoked issuer-root startup self-check
+  - DevNet/TestNet/MainNet evidence
+  - N=4 MainNet signed-bundle peer-connection evidence
+- Run 069 landed validation-only trust-bundle reload-check:
+  - hidden --p2p-trust-bundle-reload-check <PATH>
+  - validates candidate bundles using startup security pipeline
+  - does not apply live trust changes
+  - does not mutate active roots/revocations/sessions
+  - does not persist sequence or burn sequence numbers
+- Run 070 landed reload-apply contract and rollback semantics.
+- Run 071 introduced LivePqcTrustState and live snapshot reads.
+- Run 072 added production P2P session eviction.
+- Run 073 partial-positive / strong scoped result:
+  - added ProductionLiveTrustApplyContext
+  - composed Run 069 validation + Run 070 apply contract + Run 071 LivePqcTrustState + Run 072 P2pSessionEvictor + Run 055 sequence persistence
+  - removed UnsupportedRuntimeContext from explicit local-file reload-apply path
+  - binary reload-apply hook emits VERDICT=applied or VERDICT=invalid
+  - validation-only reload-check remains non-mutating
+  - boundary: hook still runs at process-start time and exits; node does not continue running in that mode
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust/lifecycle blockers:
+- long-running-node local operator-triggered live apply
+- peer/gossiped bundle acceptance
+- activation_epoch runtime source
+- in-binary / on-chain bundle-signing-key ratification
+- external KMS/HSM custody integration
+- selective session retention if ever wanted
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+
+Task:
+Run 074. Implement and prove long-running local operator-triggered live trust-bundle apply using the existing ProductionLiveTrustApplyContext.
+
+Primary objective:
+Allow a running qbind-node process to apply a local operator-supplied signed trust-bundle candidate without restarting the process, using the already-proven Run 073 adapter.
+
+Target pipeline while node remains alive:
+
+operator trigger
+→ read configured local candidate path
+→ validate candidate through Run 069/073 pipeline
+→ snapshot old LivePqcTrustState
+→ swap LivePqcTrustState to candidate state
+→ evict current P2P sessions using Run 072 evictor
+→ commit sequence persistence
+→ continue running
+
+Important framing:
+This is local operator-triggered live apply only.
+This is NOT peer-supplied/gossiped bundle acceptance.
+This is NOT automatic remote admin trust mutation.
+This is NOT activation_epoch implementation.
+This is NOT KMS/HSM.
+This is NOT signing-key ratification.
+This is NOT fast-sync restore.
+Do not redesign KEMTLS.
+Do not redesign consensus.
+Do not weaken startup trust-bundle validation.
+Do not weaken Run 069 reload-check.
+Do not weaken Run 073 apply adapter.
+Do not weaken Run 072 session eviction semantics.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Add a local-only long-running trigger around ProductionLiveTrustApplyContext.
+- Trigger must be disabled by default.
+- Trigger must use a local file path only.
+- Trigger must not accept peer/gossiped bundle input.
+- Trigger must not expose unauthenticated remote mutation.
+- Trigger must not apply unsigned TestNet/MainNet bundles.
+- Trigger must not burn sequence on invalid candidates.
+- Trigger must not mutate live trust state on invalid candidates.
+- Existing startup behavior must remain unchanged.
+- Existing process-start reload-apply mode from Run 073 must remain correct.
+- Existing validation-only reload-check from Run 069 must remain non-mutating.
+- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Preferred trigger design:
+Use the safest project-consistent local trigger.
+
+Acceptable options:
+A. SIGHUP + configured reload candidate path:
+   - --p2p-trust-bundle-live-reload-enabled
+   - --p2p-trust-bundle-live-reload-path <PATH>
+   - on SIGHUP, validate/apply that path
+   - local operator only
+B. Localhost-only admin endpoint:
+   - disabled by default
+   - must bind only 127.0.0.1
+   - must not be remotely reachable
+C. Internal test harness only if production trigger is not safe yet:
+   - this would be partial-positive, not strongest-positive
+
+Recommendation:
+Prefer SIGHUP + explicit configured reload path if the codebase already uses signal handling safely. It avoids remote admin exposure.
+
+Required investigation:
+
+1. Inspect current runtime process and signal/control paths
+   Inspect:
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/src/cli.rs
+   - crates/qbind-node/src/pqc_live_trust_apply.rs
+   - crates/qbind-node/src/pqc_trust_reload.rs
+   - crates/qbind-node/src/pqc_live_trust.rs
+   - crates/qbind-node/src/p2p_session_eviction.rs
+   - crates/qbind-node/src/p2p_tcp.rs
+   - crates/qbind-node/src/metrics.rs
+   - Run 069 / 070 / 071 / 072 / 073 tests and evidence docs
+   - docs/whitepaper/contradiction.md
+
+   Determine:
+   - whether signal handling already exists
+   - whether a long-running node can safely access ProductionLiveTrustApplyContext
+   - whether the evictor handle survives after startup
+   - how metrics are updated after apply
+   - how to prevent concurrent reload applies
+   - how to report apply result without leaking private material
+
+2. Define trigger semantics
+   Required:
+   - disabled by default.
+   - explicit opt-in flag required.
+   - local candidate file path required.
+   - one apply at a time.
+   - concurrent triggers while apply is in progress must be rejected or coalesced safely.
+   - failed reload does not kill the node unless rollback fails fatally.
+   - rollback failure must fail closed, preferably by exiting with FATAL because trust state may be ambiguous.
+   - successful reload must evict sessions.
+   - node must continue running after successful reload.
+
+3. Define concurrency semantics
+   Required:
+   - LivePqcTrustState swap must be atomic.
+   - handshake reads see old complete snapshot or new complete snapshot, never partial state.
+   - reload apply must not hold locks across network I/O except where unavoidable.
+   - session eviction must happen after trust-state swap.
+   - sequence commit must happen after successful swap and eviction.
+   - invalid candidate must not take write lock for live state.
+   - invalid candidate must not evict sessions.
+   - invalid candidate must not update sequence.
+
+4. Define metrics/logging
+   Add or wire metrics if not already present:
+   - live reload trigger total
+   - live reload apply success total
+   - live reload apply failure total
+   - live reload already in progress total
+   - live reload last applied sequence
+   - live reload session evictions total
+   - reuse Run 072 session eviction counters truthfully
+
+   Requirements:
+   - no fabricated metrics
+   - no duplicate families
+   - reload-check validation-only must not increment live-apply success metrics
+   - process-start apply mode must not be confused with long-running trigger metrics unless explicitly documented
+   - logs must include:
+     - trigger source
+     - old/new fingerprint prefix
+     - old/new sequence
+     - validation result
+     - swap result
+     - eviction report
+     - sequence commit result
+     - rollback result if any
+   - no private material
+
+Required implementation:
+
+1. Add live reload trigger support
+   Add CLI/config:
+   - --p2p-trust-bundle-live-reload-enabled
+   - --p2p-trust-bundle-live-reload-path <PATH>
+
+   Or equivalent naming consistent with existing flags.
+
+   Requirements:
+   - hidden or clearly experimental if project style supports hidden flags.
+   - disabled by default.
+   - path must be local file.
+   - no automatic apply unless trigger occurs.
+
+2. Wire trigger to ProductionLiveTrustApplyContext
+   The running node must retain:
+   - LivePqcTrustState handle
+   - P2pSessionEvictor handle
+   - sequence persistence path
+   - environment / chain_id / activation context / signing key context needed by validator
+   - metrics sink
+
+   On trigger:
+   - call the same adapter used in Run 073
+   - log VERDICT=applied or VERDICT=invalid
+   - do not exit on ordinary invalid candidate
+   - exit only on fatal ambiguous rollback failure
+
+3. Preserve existing modes
+   - --p2p-trust-bundle-reload-check remains validation-only and exits.
+   - process-start local-file reload-apply from Run 073 remains correct.
+   - normal startup without live-reload flag is unchanged.
+
+4. Tests
+   Add tests proving:
+   - live reload trigger disabled by default.
+   - configured trigger path is required when enabled.
+   - valid trigger applies candidate and updates LivePqcTrustState.
+   - invalid trigger does not mutate LivePqcTrustState.
+   - invalid trigger does not evict sessions.
+   - invalid trigger does not update sequence.
+   - successful trigger evicts sessions.
+   - sequence commit happens only after successful apply.
+   - concurrent trigger rejected/coalesced safely.
+   - reload-check remains non-mutating.
+   - startup behavior unchanged.
+
+Required regression commands:
+- cargo test -p qbind-node --lib pqc_live_trust_apply
+- cargo test -p qbind-node --lib pqc_trust_reload
+- cargo test -p qbind-node --lib pqc_live_trust
+- cargo test -p qbind-node --lib p2p_session_eviction
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --lib pqc_trust_activation
+- new Run 074 tests
+- cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
+- cargo test -p qbind-node --test run_070_pqc_trust_bundle_reload_apply_tests
+- cargo test -p qbind-node --test run_071_pqc_live_trust_tests
+- cargo test -p qbind-node --test run_072_p2p_session_eviction_tests
+- cargo test -p qbind-node --test run_073_pqc_trust_bundle_reload_apply_runtime_tests
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-node --test run_061_pqc_local_leaf_self_check_tests
+- cargo test -p qbind-node --test run_062_pqc_revocation_activation_tests
+- cargo test -p qbind-node --test run_063_pqc_local_issuer_root_self_check_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Positive N=2 baseline
+   - start two nodes with signed trust bundle sequence 1
+   - enable live reload on at least one node
+   - prove peer connection works
+   - prove cert accepted counters move
+   - prove sequence=1 persisted
+   - no fallback
+   - no Dummy crypto
+
+2. Positive long-running live apply sequence 2
+   - while node is running, trigger reload apply with valid candidate sequence 2
+   - prove node does not exit
+   - prove VERDICT=applied
+   - prove LivePqcTrustState changes to sequence 2 / fingerprint 2
+   - prove sessions are evicted
+   - prove sequence persistence updates to 2 after apply
+   - prove reload apply success metrics move
+   - prove Run 072 eviction counters move
+   - prove no fallback
+   - prove no Dummy crypto
+
+3. Reconnect behavior
+   - if reconnect automatic:
+     - prove peers reconnect under new trust context
+     - document cert accepted counter movement
+   - if reconnect not automatic:
+     - prove old sessions close and node remains healthy
+     - document boundary honestly
+
+4. Negative invalid live apply
+   - while node is running, trigger reload apply with rollback/tampered/wrong-chain/local-revoked candidate
+   - prove VERDICT=invalid
+   - prove node keeps running
+   - prove live trust state remains unchanged
+   - prove sequence remains unchanged
+   - prove sessions are not evicted
+   - prove no fallback
+
+5. Reload-check remains validation-only
+   - run --p2p-trust-bundle-reload-check valid higher-sequence candidate
+   - prove sequence file remains unchanged
+   - prove no live-apply metrics move
+   - prove no session eviction
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_074.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence run and pass/fail status
+- trigger design and safety rationale
+- long-running live apply pipeline
+- concurrency/reentrancy policy
+- validation pipeline reuse
+- state-swap semantics
+- session eviction behavior
+- sequence commit ordering
+- rollback behavior
+- reconnect behavior
+- metrics/logging behavior
+- proof reload-check remains validation-only
+- proof startup behavior preserved
+- release-binary evidence
+- proof invalid candidates do not alter state
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- exact boundaries:
+  - peer/gossiped bundles still absent
+  - activation_epoch still absent
+  - KMS/HSM still absent
+  - signing-key ratification still absent
+- exact immediate next action
+
+contradiction.md update rules:
+- If long-running local operator-triggered live apply lands and is proven, update C4 to record hot reload narrowed to local long-running apply.
+- If apply works only at process start but not while node remains running, record partial positive and exact boundary.
+- Keep C4 open for:
+  - peer/gossiped bundle acceptance
+  - activation_epoch runtime source
+  - in-binary/on-chain bundle-signing-key ratification
+  - KMS/HSM custody
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- Do not close full C4.
+- Do not claim C5 closure.
+- If live apply burns sequence before successful swap + eviction, record contradiction/regression.
+- If invalid candidate mutates live trust state, record contradiction/regression.
+- If invalid candidate evicts sessions, record contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  long-running local operator-triggered live apply lands; valid candidate applies while node remains running; sessions are evicted; sequence commits after success; invalid candidates do not mutate trust/sequence/session state; reload-check remains non-mutating; no fallback; no Dummy crypto; tests and release evidence pass.
+- Partial positive:
+  trigger/tests land but release-binary long-running evidence or reconnect behavior remains incomplete. State exact boundary.
+- Negative:
+  invalid candidate mutates state, apply burns sequence too early, sessions remain alive after apply success, node exits unexpectedly, fallback/Dummy crypto activates, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended

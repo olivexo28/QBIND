@@ -338,47 +338,80 @@ async fn main() {
         }
     }
 
-    // Run 070 — disabled-by-default trust-bundle live-apply hook
+    // Run 073 — production adapter wiring (composes Run 069
+    // validation + Run 070 apply contract + Run 071
+    // `LivePqcTrustState` + Run 072 `P2pSessionEvictor` +
+    // `pqc_trust_sequence::check_and_update_sequence`) into a
+    // production-honest local operator-triggered live-apply path
     // (positioned BEFORE the network-mode dispatch so it fires for
     // any startup invocation, immediately after the Run 069
     // validation-only hook). When
-    // `--p2p-trust-bundle-reload-apply-path <PATH>` is supplied with
-    // `--p2p-trust-bundle-reload-apply-enabled`, run the same
-    // Run 050–065 validation pipeline that Run 069 uses against
-    // `<PATH>`, then attempt the live apply via
-    // `pqc_trust_reload::apply_validated_candidate`. Because the
-    // currently-running `qbind-node` binary has **no** mutable
-    // runtime trust-context handle (active roots, leaf-revocation
-    // list, and session manager are baked into the immutable
-    // `ClientHandshakeConfig` / `ServerHandshakeConfig` constructed
-    // once in `crates/qbind-node/src/p2p_node_builder.rs`), the
-    // apply step surfaces `ReloadApplyError::UnsupportedRuntimeContext`
-    // honestly. This is the smallest safe boundary required by
-    // `task/RUN_070_TASK.txt` §"If current code does not support
-    // mutable live trust context safely". A future run that lands
-    // a mutable runtime handle + session-eviction hook will replace
-    // the `None` apply-context below with a concrete implementation
-    // of the `LiveTrustApplyContext` trait and the apply itself
-    // will start working without changing this surface.
+    // `--p2p-trust-bundle-reload-apply-path <PATH>` is supplied
+    // with `--p2p-trust-bundle-reload-apply-enabled`, the binary:
+    //
+    //   1. Loads the BASELINE bundle from `--p2p-trust-bundle`
+    //      using the SAME loader the normal startup path uses (so
+    //      validation parity with startup is preserved by
+    //      construction).
+    //   2. Initializes a Run 071 `LivePqcTrustState` from the
+    //      baseline.
+    //   3. Constructs a Run 072 `NoActiveSessionsEvictor` because
+    //      the binary's reload-apply hook runs at process-start
+    //      time before any P2P listener / dialer is created — the
+    //      session registry is genuinely empty, so a truthful
+    //      zero-eviction report is the honest answer (Run 072
+    //      invariant trivially holds).
+    //   4. Builds a Run 073 `ProductionLiveTrustApplyContext` from
+    //      (2), (3), and the on-disk sequence file path.
+    //   5. Calls the same `apply_validated_candidate_with_previous`
+    //      entry point Run 070 tests drive against the in-memory
+    //      `FakeLiveTrustApplyContext`.
+    //
+    // Because `--p2p-trust-bundle` is REQUIRED for the production
+    // adapter (no baseline → no mutable trust state to swap
+    // against), the hook refuses cleanly with a config error when
+    // it is absent. `ReloadApplyError::UnsupportedRuntimeContext`
+    // is no longer surfaced on the local-operator-triggered path —
+    // that variant remains in the library only as a fail-closed
+    // boundary for callers that omit the apply context entirely.
     //
     // The node does NOT start in this mode (the binary exits with
     // `0` on apply success and `1` on any failure or boundary).
     // No /metrics family is bound by this hook — the process exits
     // before `/metrics` would be served — matching the discipline
     // documented in `crates/qbind-node/src/pqc_trust_reload.rs`
-    // module comment.
+    // module comment. Session-eviction counters
+    // (`qbind_p2p_session_eviction_*`) are also untouched in this
+    // mode because the `NoActiveSessionsEvictor` performs zero
+    // session work; this is the truthful answer for the
+    // at-startup-time scope.
     //
-    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md` and
+    // What remains open (deferred to a future run, recorded in
+    // `docs/whitepaper/contradiction.md` C4): operator-triggered
+    // live apply ON A RUNNING NODE (SIGHUP / admin-API trigger
+    // that calls the same `ProductionLiveTrustApplyContext`
+    // against the live `TcpKemTlsP2pService` evictor instead of
+    // `NoActiveSessionsEvictor`). Wiring that surface does NOT
+    // change the Run 073 adapter or its tests.
+    //
+    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md` and
     // `docs/whitepaper/contradiction.md` C4 for the exact
     // boundaries that remain open.
     if args.p2p_trust_bundle_reload_apply_path.is_some()
         || args.p2p_trust_bundle_reload_apply_enabled
     {
+        use qbind_node::p2p_session_eviction::P2pSessionEvictor;
+        use qbind_node::pqc_live_trust::LivePqcTrustState;
+        use qbind_node::pqc_live_trust_apply::{
+            NoActiveSessionsEvictor, ProductionLiveTrustApplyContext,
+        };
         use qbind_node::pqc_root_config::PqcLeafCredentialPaths;
         use qbind_node::pqc_trust_reload::{
-            apply_validated_candidate, ApplyMode, ReloadApplyError, ReloadCheckInputs,
+            apply_validated_candidate_with_previous, ApplyMode, ReloadApplyError,
+            ReloadCheckInputs,
         };
         use qbind_types::NetworkEnvironment;
+        use std::sync::Arc;
 
         // Operator confusion preventer: either both flags or
         // neither. Refuse the partial-config shapes explicitly so
@@ -521,53 +554,110 @@ async fn main() {
             local_leaf_cert_bytes: local_leaf_bytes_opt,
         };
 
-        // Run 070 live-apply: validation reuses Run 069; the live
-        // apply itself surfaces `UnsupportedRuntimeContext` honestly
-        // on the current binary because there is no mutable runtime
-        // trust handle to swap against. We deliberately pass `None`
-        // for the context here so the boundary is explicit; a future
-        // run wires in a concrete implementation.
-        match apply_validated_candidate(inputs, ApplyMode::ApplyLive, None) {
+        // Run 073 — production adapter: load baseline, build live
+        // state, build zero-session evictor, build adapter, run
+        // apply pipeline through the same Run 070 entry point the
+        // integration tests use. `--p2p-trust-bundle` MUST be set
+        // because we need a baseline to seed the mutable live
+        // trust handle (no implicit fallback to `--p2p-trusted-root`
+        // — Run 073 only applies on the strict signed-bundle path).
+        let baseline_path = match args.p2p_trust_bundle.as_ref() {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-reload-apply-path requires \
+                     --p2p-trust-bundle <BASELINE-PATH> so the Run 073 adapter can seed \
+                     the mutable live trust handle from the same signed-bundle path the \
+                     normal startup loader validates. No fallback. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md."
+                );
+                std::process::exit(1);
+            }
+        };
+        let baseline_activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+            current_height: Some(activation_current_height),
+            current_epoch: None,
+        };
+        let baseline_loaded = match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+            baseline_path,
+            config.environment,
+            config.chain_id(),
+            now_secs,
+            &bundle_signing_keys,
+            baseline_activation_ctx,
+        ) {
+            Ok((loaded, _activation_outcome)) => loaded,
+            Err(e) => {
+                eprintln!(
+                    "[binary] FATAL: Run 073 adapter could not load the baseline bundle \
+                     from --p2p-trust-bundle {}: {}. The same validator the normal \
+                     startup path uses refused the baseline; no live trust handle \
+                     constructed; no live apply performed. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.",
+                    baseline_path.display(),
+                    e
+                );
+                std::process::exit(1);
+            }
+        };
+        let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(
+            &baseline_loaded,
+        ));
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(NoActiveSessionsEvictor::new());
+        let mut apply_ctx = ProductionLiveTrustApplyContext::new(
+            live.clone(),
+            evictor,
+            config.environment,
+            config.chain_id(),
+            seq_path_buf.clone(),
+            now_secs,
+        );
+        let (prev_fp_prefix, prev_seq) = apply_ctx.snapshot_previous_metadata();
+
+        match apply_validated_candidate_with_previous(
+            inputs,
+            ApplyMode::ApplyLive,
+            Some(&mut apply_ctx),
+            prev_fp_prefix.clone(),
+            prev_seq,
+        ) {
             Ok(applied) => {
-                // This branch is currently unreachable on the
-                // production binary because the apply pipeline
-                // returns `UnsupportedRuntimeContext` when no
-                // context is provided. We still emit the success
-                // log line so a future run that wires in a real
-                // context produces the canonical operator-log line
-                // documented in `AppliedCandidate::applied_log_line`.
+                // Canonical operator-log line — single source of
+                // truth via `AppliedCandidate::applied_log_line`
+                // (Run 070).
                 eprintln!("{}", applied.applied_log_line());
                 eprintln!(
-                    "[binary] Run 070: VERDICT=applied (live trust state swapped; sessions \
-                     evicted; sequence committed). Candidate path={}. See \
-                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
-                    candidate_path.display()
+                    "[binary] Run 073: VERDICT=applied (baseline={} candidate={} \
+                     live trust state swapped; session_evictions={} (no-active-sessions \
+                     at startup-time); sequence committed). See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.",
+                    baseline_path.display(),
+                    candidate_path.display(),
+                    applied.session_evictions
                 );
                 std::process::exit(0);
             }
             Err(ReloadApplyError::UnsupportedRuntimeContext(msg)) => {
+                // Should not happen on the Run 073 path because we
+                // always supply a real `ProductionLiveTrustApplyContext`,
+                // but surface it honestly if the apply pipeline ever
+                // produces it on this code path.
                 eprintln!(
-                    "[binary] Run 070: VERDICT=unsupported-runtime-context (candidate \
-                     validated against the same Run 050/051/052/053/057/061/062/063/065 \
-                     pipeline as startup; no live trust apply performed because the running \
-                     qbind-node binary has no mutable runtime trust-context handle yet; no \
-                     sequence persistence write; no peer/session mutation; no /metrics \
-                     mutation). Candidate path={}. Reason: {}. See \
-                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                    "[binary] Run 073: VERDICT=unsupported-runtime-context (unexpected on \
+                     the production adapter path; candidate path={}; reason: {}). See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.",
                     candidate_path.display(),
                     msg
                 );
                 std::process::exit(1);
             }
             Err(e) => {
-                // Any other apply error is a fail-closed outcome
-                // with no mutation; surface the reason verbatim.
                 eprintln!(
-                    "[binary] Run 070: VERDICT=invalid (candidate rejected at validation or \
-                     apply stage; no live trust apply performed; no sequence persistence \
-                     write; no peer/session mutation; no /metrics mutation). Candidate \
-                     path={}. Reason: {}. See \
-                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                    "[binary] Run 073: VERDICT=invalid (candidate rejected at validation, \
+                     swap, eviction, or commit stage; live trust state rolled back to \
+                     baseline where applicable; on-disk sequence record preserved on \
+                     fail-closed branches). Candidate path={}. Reason: {}. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.",
                     candidate_path.display(),
                     e
                 );

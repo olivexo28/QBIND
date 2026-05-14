@@ -150,6 +150,18 @@ pub mod pqc_trust_reload;
 // redesigning the builder or handshake configs. See module docs and
 // `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_live_trust;
+// Run 073 — production-honest concrete `LiveTrustApplyContext` adapter.
+// Composes Run 071 `LivePqcTrustState` (`swap_snapshot`),
+// Run 072 `P2pSessionEvictor` (`evict_all_sessions`), and Run 055
+// `pqc_trust_sequence::check_and_update_sequence` into the smallest
+// safe concrete implementation of
+// `pqc_trust_reload::LiveTrustApplyContext`, so the Run 070 apply
+// pipeline can run end-to-end against the production trust + session
+// + sequence layers without redesigning Run 069 / Run 070. Also
+// hosts `NoActiveSessionsEvictor`, the truthful zero-session evictor
+// used by the binary's at-startup-time reload-apply hook. See module
+// docs and `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_live_trust_apply;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
