@@ -138,6 +138,16 @@ pub mod pqc_trust_activation;
 // sets, peer sessions, and KEMTLS sessions are untouched. See module
 // docs and `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_trust_reload;
+// Run 071 — mutable live PQC trust-context handle (initialize-only).
+// Replaces the immutable startup-only PQC trust material used by
+// handshake verification with a safe shared live trust context that
+// initially contains the exact same trust state as startup. NOT a
+// hot-reload path; the handle is NEVER mutated after startup in
+// Run 071. The handle exists so a future Run 072+ live reload-apply
+// path can swap the inner snapshot under a write lock without
+// redesigning the builder or handshake configs. See module docs and
+// `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_live_trust;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;

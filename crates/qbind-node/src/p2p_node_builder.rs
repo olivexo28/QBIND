@@ -80,6 +80,7 @@ use qbind_net::{
     MutualAuthMode, ServerConnectionConfig, ServerHandshakeConfig, TrustedClientRoots,
 };
 
+use crate::pqc_live_trust::LivePqcTrustState;
 use crate::pqc_root_config::{
     decode_network_delegation_cert, validate_ml_kem_768_leaf_cert_shape,
     validate_ml_kem_768_leaf_material, PqcRootMode, PqcStaticRootConfig,
@@ -676,6 +677,23 @@ pub struct P2pNodeBuilder {
     /// flows into both client- and server-side handshake configs
     /// without re-allocation.
     pqc_revoked_leaf_fingerprints: Option<Arc<HashSet<[u8; 32]>>>,
+    /// Run 071: optional shared live PQC trust-state handle.
+    ///
+    /// When set on the production-honest PQC mutual-auth path
+    /// (`MutualAuthMode::Required | Optional` + `PqcStaticRoot`), the
+    /// builder routes the listener-side `TrustedClientRoots` resolver
+    /// and the bidirectional `LeafCertRevocationList` through this
+    /// live handle instead of through cloned-into-closure snapshots of
+    /// `pqc_root_config` / `pqc_revoked_leaf_fingerprints`. The
+    /// startup snapshot inside the handle is initialized by `main.rs`
+    /// from the already-validated `LoadedTrustBundle`, so the
+    /// resulting verification surface is **byte-identical** to the
+    /// pre-Run-071 path. Run 071 NEVER mutates the live handle after
+    /// startup — a future Run 072+ swap will land separately.
+    ///
+    /// Default `None` preserves pre-Run-071 builder behaviour
+    /// bit-for-bit for tests / non-binary callers.
+    pqc_live_trust: Option<LivePqcTrustState>,
 }
 
 impl Default for P2pNodeBuilder {
@@ -712,6 +730,11 @@ impl P2pNodeBuilder {
             // pre-Run-052 builders behave bit-for-bit identically.
             // The live binary wires this from the loaded trust bundle.
             pqc_revoked_leaf_fingerprints: None,
+            // Run 071: live PQC trust-state handle defaults to None so
+            // pre-Run-071 builders / tests behave bit-for-bit. The
+            // live binary wires this via `with_live_pqc_trust(...)`
+            // after the startup trust-bundle pipeline has finished.
+            pqc_live_trust: None,
         }
     }
 
@@ -821,6 +844,43 @@ impl P2pNodeBuilder {
         revoked_leaf_fingerprints: Arc<HashSet<[u8; 32]>>,
     ) -> Self {
         self.pqc_revoked_leaf_fingerprints = Some(revoked_leaf_fingerprints);
+        self
+    }
+
+    /// Run 071: install a shared live PQC trust-state handle.
+    ///
+    /// When called on the production-honest PQC mutual-auth path
+    /// (`MutualAuthMode::Required | Optional` + `PqcStaticRoot`), the
+    /// builder routes the listener-side `TrustedClientRoots` resolver
+    /// and the bidirectional `LeafCertRevocationList` closures
+    /// through `live.snapshot()` — i.e. through a short read lock +
+    /// Arc clone — instead of through cloned-into-closure snapshots
+    /// of `PqcStaticRootConfig` / `Arc<HashSet<[u8;32]>>`.
+    ///
+    /// The startup snapshot inside `live` MUST already mirror the
+    /// `with_pqc_root_config` / `with_pqc_leaf_revocations` inputs
+    /// (the production binary builds the handle from the same
+    /// validated `LoadedTrustBundle`), so the resulting verification
+    /// surface is byte-identical to pre-Run-071. Mismatched inputs
+    /// would not silently regress safety: an active revoked leaf
+    /// remains revoked under either path because the live snapshot
+    /// is the authoritative source for the live closures.
+    ///
+    /// Concurrency / fail-closed contract:
+    /// - The closures take a short read lock via
+    ///   `LivePqcTrustState::snapshot()` and drop it after Arc-cloning
+    ///   the inner snapshot — no lock is held across network I/O or
+    ///   crypto.
+    /// - On `Err(LockPoisoned)` the `TrustedClientRoots` resolver
+    ///   returns `None` (untrusted root → fail closed) and the
+    ///   `LeafCertRevocationList` returns `true` (revoked → fail
+    ///   closed). A poisoned lock therefore degrades availability
+    ///   without leaking past trust state.
+    ///
+    /// Run 071 NEVER mutates the live handle after startup — a future
+    /// Run 072+ swap will land under a separate review.
+    pub fn with_live_pqc_trust(mut self, live: LivePqcTrustState) -> Self {
+        self.pqc_live_trust = Some(live);
         self
     }
 
@@ -1427,10 +1487,28 @@ impl P2pNodeBuilder {
             (MutualAuthMode::Required | MutualAuthMode::Optional, Some(cfg))
                 if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) =>
             {
-                let cfg = cfg.clone();
-                Some(TrustedClientRoots::new(move |root_key_id: &[u8; 32]| {
-                    cfg.lookup_root_pk(root_key_id).map(|r| r.root_pk.clone())
-                }))
+                // Run 071: prefer the live trust handle when wired,
+                // so the listener-side `TrustedClientRoots` resolver
+                // reads through the shared live snapshot instead of
+                // a closure-captured clone of `PqcStaticRootConfig`.
+                // The byte-level resolution is identical because the
+                // live snapshot was built from the same validated
+                // bundle at startup. Fail-closed on lock poisoning.
+                if let Some(live) = self.pqc_live_trust.clone() {
+                    Some(TrustedClientRoots::new(move |root_key_id: &[u8; 32]| {
+                        match live.lookup_active_root_pk(root_key_id) {
+                            Ok(opt) => opt,
+                            // Poisoned lock → fail closed (treat as
+                            // untrusted root).
+                            Err(_) => None,
+                        }
+                    }))
+                } else {
+                    let cfg = cfg.clone();
+                    Some(TrustedClientRoots::new(move |root_key_id: &[u8; 32]| {
+                        cfg.lookup_root_pk(root_key_id).map(|r| r.root_pk.clone())
+                    }))
+                }
             }
             (MutualAuthMode::Required | MutualAuthMode::Optional, _) => {
                 Some(TrustedClientRoots::new(|_root_key_id: &[u8; 32]| {
@@ -1480,11 +1558,54 @@ impl P2pNodeBuilder {
         let leaf_cert_revocations: Option<LeafCertRevocationList> = match (
             mutual_auth_mode,
             self.pqc_root_config.as_ref(),
+            self.pqc_live_trust.as_ref(),
             self.pqc_revoked_leaf_fingerprints.as_ref(),
         ) {
+            // Run 071: live trust handle wired on the production-honest
+            // PQC mutual-auth path. The revocation closure reads the
+            // active leaf-revocation set through the shared live
+            // snapshot instead of a closure-captured Arc<HashSet>.
+            // The construction-time `active_count` is the active leaf
+            // count in the current snapshot, which matches what the
+            // `Arc<HashSet>` path would report (both are sourced from
+            // the same validated bundle). Fail-closed on lock
+            // poisoning (a poisoned lock is treated as "revoked"
+            // rather than "not revoked", which is the safe direction
+            // for a defence-in-depth check).
             (
                 MutualAuthMode::Required | MutualAuthMode::Optional,
                 Some(cfg),
+                Some(live),
+                _,
+            ) if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) => {
+                let active_count = live.active_leaf_revocation_count().unwrap_or(0);
+                if active_count == 0 {
+                    // Preserve the pre-Run-052 zero-cost no-op path
+                    // when the live snapshot has no active leaf
+                    // revocations. This keeps the verification
+                    // surface byte-identical to the pre-Run-071
+                    // empty-set path.
+                    None
+                } else {
+                    let live_for_closure = live.clone();
+                    Some(LeafCertRevocationList::new(
+                        active_count,
+                        move |fp: &[u8; 32]| match live_for_closure.is_leaf_revoked(fp) {
+                            Ok(v) => v,
+                            // Poisoned lock → fail closed (treat as
+                            // revoked).
+                            Err(_) => true,
+                        },
+                    ))
+                }
+            }
+            // Pre-Run-071 path: builders that did not call
+            // `with_live_pqc_trust(...)` keep using the cloned
+            // `Arc<HashSet>` exactly as before Run 052.
+            (
+                MutualAuthMode::Required | MutualAuthMode::Optional,
+                Some(cfg),
+                None,
                 Some(revoked_set),
             ) if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) && !revoked_set.is_empty() => {
                 let active_count = revoked_set.len();

@@ -1906,6 +1906,38 @@ async fn run_p2p_node(
         builder
     };
 
+    // Run 071 — install the shared live PQC trust-state handle.
+    //
+    // The handle is initialized once from the already-validated
+    // `LoadedTrustBundle` (the same value that drives Run 052's
+    // `with_pqc_leaf_revocations` above and Run 037's
+    // `with_pqc_root_config`), so the listener-side
+    // `TrustedClientRoots` resolver and the bidirectional
+    // `LeafCertRevocationList` continue to verify against
+    // **byte-identical** trust material as before. Run 071 NEVER
+    // mutates the live handle after this point — that remains for
+    // a future Run 072+ once a production session-eviction hook
+    // exists.
+    let builder = if let Some(loaded) = trust_bundle_loaded.as_ref() {
+        let live = qbind_node::pqc_live_trust::LivePqcTrustState::initialize_from_loaded_bundle(
+            loaded,
+        );
+        eprintln!(
+            "[binary] Run 071: live PQC trust-state initialized \
+             (env={} sequence={} fingerprint={} active_roots={} \
+             revoked_roots_active={} revoked_leaves_active={})",
+            loaded.environment(),
+            loaded.bundle.sequence,
+            loaded.fingerprint_hex(),
+            loaded.active_root_count(),
+            loaded.revoked_root_count(),
+            loaded.revoked_leaf_fingerprint_count(),
+        );
+        builder.with_live_pqc_trust(live)
+    } else {
+        builder
+    };
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {
