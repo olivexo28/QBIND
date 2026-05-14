@@ -338,6 +338,244 @@ async fn main() {
         }
     }
 
+    // Run 070 — disabled-by-default trust-bundle live-apply hook
+    // (positioned BEFORE the network-mode dispatch so it fires for
+    // any startup invocation, immediately after the Run 069
+    // validation-only hook). When
+    // `--p2p-trust-bundle-reload-apply-path <PATH>` is supplied with
+    // `--p2p-trust-bundle-reload-apply-enabled`, run the same
+    // Run 050–065 validation pipeline that Run 069 uses against
+    // `<PATH>`, then attempt the live apply via
+    // `pqc_trust_reload::apply_validated_candidate`. Because the
+    // currently-running `qbind-node` binary has **no** mutable
+    // runtime trust-context handle (active roots, leaf-revocation
+    // list, and session manager are baked into the immutable
+    // `ClientHandshakeConfig` / `ServerHandshakeConfig` constructed
+    // once in `crates/qbind-node/src/p2p_node_builder.rs`), the
+    // apply step surfaces `ReloadApplyError::UnsupportedRuntimeContext`
+    // honestly. This is the smallest safe boundary required by
+    // `task/RUN_070_TASK.txt` §"If current code does not support
+    // mutable live trust context safely". A future run that lands
+    // a mutable runtime handle + session-eviction hook will replace
+    // the `None` apply-context below with a concrete implementation
+    // of the `LiveTrustApplyContext` trait and the apply itself
+    // will start working without changing this surface.
+    //
+    // The node does NOT start in this mode (the binary exits with
+    // `0` on apply success and `1` on any failure or boundary).
+    // No /metrics family is bound by this hook — the process exits
+    // before `/metrics` would be served — matching the discipline
+    // documented in `crates/qbind-node/src/pqc_trust_reload.rs`
+    // module comment.
+    //
+    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md` and
+    // `docs/whitepaper/contradiction.md` C4 for the exact
+    // boundaries that remain open.
+    if args.p2p_trust_bundle_reload_apply_path.is_some()
+        || args.p2p_trust_bundle_reload_apply_enabled
+    {
+        use qbind_node::pqc_root_config::PqcLeafCredentialPaths;
+        use qbind_node::pqc_trust_reload::{
+            apply_validated_candidate, ApplyMode, ReloadApplyError, ReloadCheckInputs,
+        };
+        use qbind_types::NetworkEnvironment;
+
+        // Operator confusion preventer: either both flags or
+        // neither. Refuse the partial-config shapes explicitly so
+        // an operator cannot mistakenly "arm" the apply path by
+        // setting only one of them.
+        let candidate_path = match (
+            args.p2p_trust_bundle_reload_apply_path.as_ref(),
+            args.p2p_trust_bundle_reload_apply_enabled,
+        ) {
+            (Some(p), true) => p,
+            (Some(_), false) => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-reload-apply-path requires \
+                     --p2p-trust-bundle-reload-apply-enabled. Live reload-apply is \
+                     disabled by default. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md."
+                );
+                std::process::exit(1);
+            }
+            (None, true) => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-trust-bundle-reload-apply-enabled requires \
+                     --p2p-trust-bundle-reload-apply-path <PATH>. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md."
+                );
+                std::process::exit(1);
+            }
+            (None, false) => unreachable!(),
+        };
+
+        // Reuse the EXACT same preconditions the Run 069
+        // validation hook applies — same signing-key parse, same
+        // TestNet/MainNet refuse-unsigned policy, same data-dir
+        // requirement for the sequence peek, same local leaf
+        // self-check inputs. Any divergence would let an operator
+        // accidentally apply a candidate that the live startup
+        // path would reject (or vice versa) — that would be a
+        // silent regression on Run 069's "apply parity with
+        // startup" invariant.
+        let bundle_signing_keys =
+            match qbind_node::pqc_trust_bundle::BundleSigningKeySet::parse_specs(
+                &args.p2p_trust_bundle_signing_keys,
+            ) {
+                Ok(set) => set,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: --p2p-trust-bundle-signing-key parse error: {}. \
+                         See docs/whitepaper/contradiction.md C4.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
+        if !matches!(config.environment, NetworkEnvironment::Devnet)
+            && bundle_signing_keys.is_empty()
+        {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-reload-apply-path {} on environment={} \
+                 requires at least one --p2p-trust-bundle-signing-key (TestNet/MainNet refuse \
+                 unsigned bundles). No fallback. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                candidate_path.display(),
+                config.environment
+            );
+            std::process::exit(1);
+        }
+        let leaf_credentials_opt = match (
+            args.p2p_leaf_cert.as_ref(),
+            args.p2p_leaf_cert_key.as_ref(),
+        ) {
+            (Some(cert), Some(sk)) => {
+                let paths = PqcLeafCredentialPaths {
+                    cert_path: cert.clone(),
+                    kem_sk_path: sk.clone(),
+                };
+                match paths.load() {
+                    Ok(creds) => Some(creds),
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] FATAL: --p2p-trust-bundle-reload-apply-path {} could not \
+                             load local PQC leaf credentials for the Run 061/063 self-checks: \
+                             {}. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                            candidate_path.display(),
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+            (None, None) => None,
+            _ => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set \
+                     together (--p2p-trust-bundle-reload-apply-path inherits the same \
+                     precondition)."
+                );
+                std::process::exit(1);
+            }
+        };
+        let seq_path_buf = config
+            .data_dir
+            .as_ref()
+            .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
+        let seq_path_ref = seq_path_buf.as_deref();
+        if seq_path_ref.is_none()
+            && !matches!(config.environment, NetworkEnvironment::Devnet)
+        {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-reload-apply-path {} on environment={} \
+                 requires --data-dir so the candidate's sequence can be peeked against the \
+                 persisted record. No fallback. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                candidate_path.display(),
+                config.environment
+            );
+            std::process::exit(1);
+        }
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let activation_current_height: u64 = restore_baseline
+            .as_ref()
+            .map(|b| b.snapshot_height)
+            .unwrap_or(0);
+        let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+            current_height: Some(activation_current_height),
+            current_epoch: None,
+        };
+        let local_leaf_bytes_opt =
+            leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
+        let inputs = ReloadCheckInputs {
+            candidate_path: candidate_path.as_path(),
+            environment: config.environment,
+            chain_id: config.chain_id(),
+            validation_time_secs: now_secs,
+            signing_keys: &bundle_signing_keys,
+            activation_ctx,
+            sequence_persistence_path: seq_path_ref,
+            local_leaf_cert_bytes: local_leaf_bytes_opt,
+        };
+
+        // Run 070 live-apply: validation reuses Run 069; the live
+        // apply itself surfaces `UnsupportedRuntimeContext` honestly
+        // on the current binary because there is no mutable runtime
+        // trust handle to swap against. We deliberately pass `None`
+        // for the context here so the boundary is explicit; a future
+        // run wires in a concrete implementation.
+        match apply_validated_candidate(inputs, ApplyMode::ApplyLive, None) {
+            Ok(applied) => {
+                // This branch is currently unreachable on the
+                // production binary because the apply pipeline
+                // returns `UnsupportedRuntimeContext` when no
+                // context is provided. We still emit the success
+                // log line so a future run that wires in a real
+                // context produces the canonical operator-log line
+                // documented in `AppliedCandidate::applied_log_line`.
+                eprintln!("{}", applied.applied_log_line());
+                eprintln!(
+                    "[binary] Run 070: VERDICT=applied (live trust state swapped; sessions \
+                     evicted; sequence committed). Candidate path={}. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                    candidate_path.display()
+                );
+                std::process::exit(0);
+            }
+            Err(ReloadApplyError::UnsupportedRuntimeContext(msg)) => {
+                eprintln!(
+                    "[binary] Run 070: VERDICT=unsupported-runtime-context (candidate \
+                     validated against the same Run 050/051/052/053/057/061/062/063/065 \
+                     pipeline as startup; no live trust apply performed because the running \
+                     qbind-node binary has no mutable runtime trust-context handle yet; no \
+                     sequence persistence write; no peer/session mutation; no /metrics \
+                     mutation). Candidate path={}. Reason: {}. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                    candidate_path.display(),
+                    msg
+                );
+                std::process::exit(1);
+            }
+            Err(e) => {
+                // Any other apply error is a fail-closed outcome
+                // with no mutation; surface the reason verbatim.
+                eprintln!(
+                    "[binary] Run 070: VERDICT=invalid (candidate rejected at validation or \
+                     apply stage; no live trust apply performed; no sequence persistence \
+                     write; no peer/session mutation; no /metrics mutation). Candidate \
+                     path={}. Reason: {}. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md.",
+                    candidate_path.display(),
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Validate P2P configuration (may modify config)
     let p2p_enabled = config.validate_p2p_config();
 

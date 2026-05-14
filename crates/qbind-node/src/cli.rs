@@ -427,6 +427,48 @@ pub struct CliArgs {
     #[arg(long = "p2p-trust-bundle-reload-check", hide = true)]
     pub p2p_trust_bundle_reload_check: Option<PathBuf>,
 
+    /// Run 070 — disabled-by-default operator opt-in flag for the
+    /// `--p2p-trust-bundle-reload-apply-path` candidate. Without
+    /// this flag, supplying `--p2p-trust-bundle-reload-apply-path`
+    /// is refused as a configuration error so the operator can
+    /// never accidentally trigger a live trust swap by typing the
+    /// path flag alone. With this flag, the validation pipeline
+    /// runs; whether the live apply itself proceeds depends on
+    /// whether the running binary has a mutable trust-context
+    /// handle to swap against — see
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md` and the
+    /// `ReloadApplyError::UnsupportedRuntimeContext` boundary in
+    /// `crates/qbind-node/src/pqc_trust_reload.rs`. This flag is
+    /// hidden because Run 070 is evidence-only.
+    ///
+    /// **This is NOT peer-supplied / gossiped bundle acceptance,
+    /// NOT KMS / HSM, NOT activation_epoch runtime sourcing, NOT
+    /// signing-key ratification, NOT a filesystem watcher.** It is
+    /// the smallest safe local-operator-triggered apply primitive
+    /// the library supports, exposed on the binary surface for
+    /// evidence. See `docs/whitepaper/contradiction.md` C4.
+    #[arg(long = "p2p-trust-bundle-reload-apply-enabled", hide = true)]
+    pub p2p_trust_bundle_reload_apply_enabled: bool,
+
+    /// Run 070 — operator-supplied local file path of a candidate
+    /// trust bundle to apply live. Requires
+    /// `--p2p-trust-bundle-reload-apply-enabled`. Disabled by
+    /// default. The candidate is validated using the exact Run 069
+    /// pipeline; on the production-honest path the live apply is
+    /// then attempted. The current `qbind-node` binary surfaces
+    /// `ReloadApplyError::UnsupportedRuntimeContext` honestly
+    /// because no mutable runtime trust handle exists yet — see
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md`. The node
+    /// does **not** start in this mode (the process exits with
+    /// `0` on a successful apply and `1` on any failure or
+    /// unsupported-context boundary).
+    ///
+    /// **No peer / gossip input. No automatic apply. No remote
+    /// unauthenticated endpoint.** Local file only, operator-
+    /// triggered only.
+    #[arg(long = "p2p-trust-bundle-reload-apply-path", hide = true)]
+    pub p2p_trust_bundle_reload_apply_path: Option<PathBuf>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================
