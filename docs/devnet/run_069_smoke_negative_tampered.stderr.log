@@ -1,0 +1,2 @@
+[restore] no --restore-from-snapshot requested; normal startup.
+[binary] Run 069: VERDICT=invalid (candidate rejected; no live trust apply; no sequence persistence write; no peer/session mutation; no /metrics mutation). Candidate path=/tmp/run069/mat/trust-bundle.tampered.json. Reason: candidate bundle invalid: trust bundle ML-DSA-44 signature verification failed for signing_key_id 43b6a060219216ad4290dcab3eaf7b81d1af89156fc562f994ea3d8ddfdc7355 (tampered bundle or forged envelope — fail closed). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.

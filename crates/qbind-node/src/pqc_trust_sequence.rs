@@ -610,6 +610,157 @@ pub fn check_and_update_sequence(
     }
 }
 
+/// Outcome of a Run 069 read-only sequence peek — the validation-only
+/// analogue of [`SequenceCheckOutcome`]. Distinguishes the three
+/// accept-classifications without performing any persistence write.
+///
+/// The persisted on-disk record is read but never modified. Callers
+/// that need to advance the persisted sequence MUST use
+/// [`check_and_update_sequence`] instead — `peek_sequence` exists
+/// specifically so a candidate trust bundle can be validated against
+/// the current persisted state without "burning" a sequence number on
+/// rejection or on a validation-only dry run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequencePeekOutcome {
+    /// No prior record exists on disk for this trust domain. The
+    /// candidate would be a first-load on `check_and_update_sequence`.
+    /// Reported separately so callers can surface "no anti-rollback
+    /// baseline yet" honestly.
+    NoPriorRecord {
+        candidate_sequence: u64,
+        candidate_fingerprint_hex: String,
+    },
+    /// A prior record exists and the candidate's sequence is strictly
+    /// higher. On a real `check_and_update_sequence` call this would
+    /// be an `Upgraded { .. }` outcome and the record would be
+    /// rewritten — but `peek_sequence` deliberately performs NO
+    /// write.
+    WouldUpgrade {
+        previous_sequence: u64,
+        candidate_sequence: u64,
+        previous_fingerprint_hex: String,
+        candidate_fingerprint_hex: String,
+    },
+    /// A prior record exists and the candidate's sequence equals it
+    /// AND the canonical fingerprints match. On a real call this
+    /// would be an `EqualSequenceSameFingerprint` no-op acceptance.
+    EqualSequenceSameFingerprint {
+        sequence: u64,
+        fingerprint_hex: String,
+    },
+}
+
+impl SequencePeekOutcome {
+    /// Returns the candidate sequence reported by this peek.
+    pub fn candidate_sequence(&self) -> u64 {
+        match self {
+            Self::NoPriorRecord {
+                candidate_sequence, ..
+            } => *candidate_sequence,
+            Self::WouldUpgrade {
+                candidate_sequence, ..
+            } => *candidate_sequence,
+            Self::EqualSequenceSameFingerprint { sequence, .. } => *sequence,
+        }
+    }
+
+    /// Returns the persisted sequence value as observed on disk before
+    /// this peek (i.e. what would still be on disk after the peek,
+    /// since the peek never writes). `None` when no record exists.
+    pub fn persisted_sequence_before(&self) -> Option<u64> {
+        match self {
+            Self::NoPriorRecord { .. } => None,
+            Self::WouldUpgrade {
+                previous_sequence, ..
+            } => Some(*previous_sequence),
+            Self::EqualSequenceSameFingerprint { sequence, .. } => Some(*sequence),
+        }
+    }
+}
+
+/// Run 069 read-only counterpart of [`check_and_update_sequence`].
+///
+/// Validates a candidate bundle's `(sequence, fingerprint)` against
+/// the persisted anti-rollback record at `path` using the exact same
+/// fail-closed policy as [`check_and_update_sequence`], but performs
+/// **no** persistence write:
+///
+/// - never calls [`atomic_write_record`];
+/// - never creates or modifies `<data_dir>/pqc_trust_bundle_sequence.json`;
+/// - never creates parent directories;
+/// - returns an `Err(...)` for the rejection cases without burning a
+///   sequence number;
+/// - returns a [`SequencePeekOutcome`] variant for the three accept
+///   classifications so a caller can report the "what would happen
+///   if applied" status honestly.
+///
+/// This is the foundational primitive for the Run 069
+/// disabled-by-default trust-bundle hot-reload validation/staging
+/// boundary. It is reused by [`crate::pqc_trust_reload`] which adds
+/// the bundle / activation / local-revocation checks on top.
+///
+/// Fail-closed parity with [`check_and_update_sequence`]:
+///
+/// - corrupt or wrong-schema persistence file
+///   → [`TrustBundleSequenceError::Malformed`] /
+///     [`TrustBundleSequenceError::UnsupportedRecordVersion`];
+/// - wrong environment / wrong chain id record on disk
+///   → [`TrustBundleSequenceError::WrongEnvironment`] /
+///     [`TrustBundleSequenceError::WrongChainId`];
+/// - candidate sequence strictly lower than persisted
+///   → [`TrustBundleSequenceError::SequenceRollback`];
+/// - equal candidate sequence + different fingerprint
+///   → [`TrustBundleSequenceError::EqualSequenceFingerprintMismatch`];
+/// - I/O error reading the persisted file
+///   → [`TrustBundleSequenceError::Io`].
+///
+/// In none of those cases is the persisted file modified.
+pub fn peek_sequence(
+    path: &Path,
+    expected_env: NetworkEnvironment,
+    expected_chain_id: ChainId,
+    candidate_sequence: u64,
+    candidate_fingerprint: &[u8; 32],
+) -> Result<SequencePeekOutcome, TrustBundleSequenceError> {
+    let new_fp_hex = fingerprint_hex(candidate_fingerprint);
+    match load_record(path)? {
+        None => Ok(SequencePeekOutcome::NoPriorRecord {
+            candidate_sequence,
+            candidate_fingerprint_hex: new_fp_hex,
+        }),
+        Some(record) => {
+            validate_record_for_domain(&record, expected_env, expected_chain_id)?;
+            if candidate_sequence < record.highest_sequence {
+                return Err(TrustBundleSequenceError::SequenceRollback {
+                    attempted_sequence: candidate_sequence,
+                    persisted_highest_sequence: record.highest_sequence,
+                });
+            }
+            if candidate_sequence == record.highest_sequence {
+                if record.bundle_fingerprint == new_fp_hex {
+                    return Ok(SequencePeekOutcome::EqualSequenceSameFingerprint {
+                        sequence: candidate_sequence,
+                        fingerprint_hex: new_fp_hex,
+                    });
+                }
+                return Err(
+                    TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
+                        sequence: candidate_sequence,
+                        persisted_fingerprint_hex: record.bundle_fingerprint.clone(),
+                        new_fingerprint_hex: new_fp_hex,
+                    },
+                );
+            }
+            Ok(SequencePeekOutcome::WouldUpgrade {
+                previous_sequence: record.highest_sequence,
+                candidate_sequence,
+                previous_fingerprint_hex: record.bundle_fingerprint.clone(),
+                candidate_fingerprint_hex: new_fp_hex,
+            })
+        }
+    }
+}
+
 fn is_lower_hex(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
@@ -1162,5 +1313,211 @@ mod tests {
             assert!(!s.is_empty());
             assert!(s.len() > 10, "message too short: {}", s);
         }
+    }
+
+    // Run 069 — peek_sequence (read-only) unit tests.
+    //
+    // The whole point of the peek is to *never* write the persistence
+    // file. Each test below asserts both the returned variant and
+    // that the on-disk record is unchanged after the peek.
+
+    #[test]
+    fn peek_sequence_no_prior_record_returns_no_prior_record() {
+        let dir = tmpdir("peek-noprior");
+        let path = sequence_file_path(&dir);
+        let out = peek_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            5,
+            &fp(0xaa),
+        )
+        .expect("peek ok");
+        assert!(matches!(
+            out,
+            SequencePeekOutcome::NoPriorRecord { candidate_sequence: 5, .. }
+        ));
+        assert!(out.persisted_sequence_before().is_none());
+        // File must NOT have been created by the peek.
+        assert!(!path.exists(), "peek must not create persistence file");
+    }
+
+    #[test]
+    fn peek_sequence_would_upgrade_for_higher_seq() {
+        let dir = tmpdir("peek-upgrade");
+        let path = sequence_file_path(&dir);
+        // Establish baseline at seq=1, fingerprint=aa.
+        check_and_update_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            1,
+            &fp(0xaa),
+            0,
+        )
+        .unwrap();
+        let mtime_before = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let bytes_before = std::fs::read(&path).unwrap();
+
+        let out = peek_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            2,
+            &fp(0xbb),
+        )
+        .expect("peek ok");
+        assert!(matches!(
+            out,
+            SequencePeekOutcome::WouldUpgrade {
+                previous_sequence: 1,
+                candidate_sequence: 2,
+                ..
+            }
+        ));
+        assert_eq!(out.persisted_sequence_before(), Some(1));
+        // File MUST NOT have been rewritten.
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(bytes_before, bytes_after, "peek must not rewrite record");
+        let mtime_after = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(mtime_before, mtime_after, "peek must not touch mtime");
+        // Reload to be 100% sure the *content* did not change.
+        let record = load_record(&path).unwrap().unwrap();
+        assert_eq!(record.highest_sequence, 1);
+        assert_eq!(record.bundle_fingerprint, fingerprint_hex(&fp(0xaa)));
+    }
+
+    #[test]
+    fn peek_sequence_equal_same_fingerprint_returns_equal_no_op() {
+        let dir = tmpdir("peek-equal");
+        let path = sequence_file_path(&dir);
+        check_and_update_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            7,
+            &fp(0xcc),
+            0,
+        )
+        .unwrap();
+        let bytes_before = std::fs::read(&path).unwrap();
+
+        let out = peek_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            7,
+            &fp(0xcc),
+        )
+        .expect("peek ok");
+        assert!(matches!(
+            out,
+            SequencePeekOutcome::EqualSequenceSameFingerprint { sequence: 7, .. }
+        ));
+        assert_eq!(out.persisted_sequence_before(), Some(7));
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(bytes_before, bytes_after);
+    }
+
+    #[test]
+    fn peek_sequence_rejects_rollback_without_mutation() {
+        let dir = tmpdir("peek-rollback");
+        let path = sequence_file_path(&dir);
+        check_and_update_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            5,
+            &fp(0xaa),
+            0,
+        )
+        .unwrap();
+        let bytes_before = std::fs::read(&path).unwrap();
+
+        let err = peek_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            4,
+            &fp(0xbb),
+        )
+        .err()
+        .expect("err");
+        assert!(matches!(
+            err,
+            TrustBundleSequenceError::SequenceRollback {
+                attempted_sequence: 4,
+                persisted_highest_sequence: 5,
+            }
+        ));
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(bytes_before, bytes_after, "peek rollback must not write");
+    }
+
+    #[test]
+    fn peek_sequence_rejects_equal_seq_fingerprint_mismatch_without_mutation() {
+        let dir = tmpdir("peek-equivocation");
+        let path = sequence_file_path(&dir);
+        check_and_update_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            5,
+            &fp(0xaa),
+            0,
+        )
+        .unwrap();
+        let bytes_before = std::fs::read(&path).unwrap();
+
+        let err = peek_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            5,
+            &fp(0xbb),
+        )
+        .err()
+        .expect("err");
+        assert!(matches!(
+            err,
+            TrustBundleSequenceError::EqualSequenceFingerprintMismatch {
+                sequence: 5,
+                ..
+            }
+        ));
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(bytes_before, bytes_after);
+    }
+
+    #[test]
+    fn peek_sequence_rejects_wrong_environment_without_mutation() {
+        let dir = tmpdir("peek-wrong-env");
+        let path = sequence_file_path(&dir);
+        check_and_update_sequence(
+            &path,
+            NetworkEnvironment::Devnet,
+            devnet_chain_id(),
+            1,
+            &fp(0xaa),
+            0,
+        )
+        .unwrap();
+        let bytes_before = std::fs::read(&path).unwrap();
+        // Peek against TestNet against a Devnet record.
+        let err = peek_sequence(
+            &path,
+            NetworkEnvironment::Testnet,
+            NetworkEnvironment::Testnet.chain_id(),
+            2,
+            &fp(0xbb),
+        )
+        .err()
+        .expect("err");
+        assert!(matches!(
+            err,
+            TrustBundleSequenceError::WrongEnvironment { .. }
+        ));
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(bytes_before, bytes_after);
     }
 }

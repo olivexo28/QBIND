@@ -1,0 +1,2 @@
+[restore] no --restore-from-snapshot requested; normal startup.
+[binary] Run 069: VERDICT=invalid (candidate rejected; no live trust apply; no sequence persistence write; no peer/session mutation; no /metrics mutation). Candidate path=/tmp/run069/mat/trust-bundle.json. Reason: candidate bundle invalid: trust bundle environment mismatch (expected testnet, bundle declares devnet). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.

@@ -387,6 +387,46 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_signing_keys: Vec<String>,
 
+    /// Run 069 — disabled-by-default trust-bundle hot-reload
+    /// **validation-only** check.
+    ///
+    /// When supplied, the binary runs the full Run 050–065 trust-bundle
+    /// validation pipeline against the candidate JSON bundle at
+    /// `<PATH>` using the same security checks as startup
+    /// (parse + ML-DSA-44 signature verification + environment +
+    /// chain_id + bundle activation_height + Run 065 minimum
+    /// activation-height policy + per-entry revocation activation +
+    /// Run 055 anti-rollback peek against the persisted sequence
+    /// record + Run 061 local-leaf revocation self-check +
+    /// Run 063 local-issuer-root revocation self-check), prints the
+    /// verdict to stderr, and exits with `0` on a valid candidate or
+    /// `1` on any failure. The node does **not** start in this mode.
+    ///
+    /// **This is NOT hot reload.** No live trust state, no peer
+    /// sessions, no KEMTLS sessions, and no on-disk sequence record
+    /// are modified. The candidate is **never applied**. A rejected
+    /// candidate **never** burns a sequence number. Peer-supplied /
+    /// gossiped bundles are **not** accepted. KMS/HSM custody,
+    /// bundle-signing-key ratification, and `activation_epoch`
+    /// runtime sourcing remain open under
+    /// `docs/whitepaper/contradiction.md` C4.
+    ///
+    /// Use cases (evidence / operator dry-run):
+    /// - prove a new candidate signed bundle would be accepted on
+    ///   this node before rolling it out to production;
+    /// - prove a rotated bundle-signing-key configuration is
+    ///   correctly distributed before activating the new key on the
+    ///   live path;
+    /// - prove a candidate's `activation_height` margin satisfies
+    ///   the Run 065 per-environment minimum policy at the current
+    ///   local committed height.
+    ///
+    /// This flag is hidden because it is evidence-only. Operators
+    /// who use it MUST read `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md`
+    /// for the staging-vs-apply boundary.
+    #[arg(long = "p2p-trust-bundle-reload-check", hide = true)]
+    pub p2p_trust_bundle_reload_check: Option<PathBuf>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

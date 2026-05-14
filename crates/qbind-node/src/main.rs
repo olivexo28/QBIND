@@ -182,6 +182,162 @@ async fn main() {
         );
     }
 
+    // Run 069 — disabled-by-default trust-bundle hot-reload
+    // **validation-only** check (positioned BEFORE the network-mode
+    // dispatch so it fires for any startup invocation, not only for
+    // `--network-mode p2p`).
+    //
+    // When `--p2p-trust-bundle-reload-check <PATH>` is supplied, run
+    // the full Run 050–065 trust-bundle validation pipeline against
+    // the candidate bundle at `<PATH>` (same checks as startup) but
+    // perform NO live trust apply, NO sequence persistence write,
+    // NO peer/session mutation, and NO `/metrics` mutation; print
+    // the verdict to stderr and exit (`0` valid, `1` invalid). The
+    // node does NOT start in this mode.
+    //
+    // See `crates/qbind-node/src/pqc_trust_reload.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md`, and
+    // `docs/whitepaper/contradiction.md` C4.
+    if let Some(candidate_path) = args.p2p_trust_bundle_reload_check.as_ref() {
+        use qbind_node::pqc_root_config::PqcLeafCredentialPaths;
+        use qbind_types::NetworkEnvironment;
+        // Same signing-key parse as the live `--p2p-trust-bundle`
+        // path inside `run_p2p_node` (no fallback; identical fail-
+        // closed errors).
+        let bundle_signing_keys =
+            match qbind_node::pqc_trust_bundle::BundleSigningKeySet::parse_specs(
+                &args.p2p_trust_bundle_signing_keys,
+            ) {
+                Ok(set) => set,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: --p2p-trust-bundle-signing-key parse error: {}. See \
+                         docs/whitepaper/contradiction.md C4.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
+        // TestNet/MainNet require an explicit signing-key set, mirroring
+        // the live `--p2p-trust-bundle` startup precondition.
+        if !matches!(config.environment, NetworkEnvironment::Devnet)
+            && bundle_signing_keys.is_empty()
+        {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-reload-check {} on environment={} requires at \
+                 least one --p2p-trust-bundle-signing-key (TestNet/MainNet refuse unsigned \
+                 bundles). No fallback. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.",
+                candidate_path.display(),
+                config.environment
+            );
+            std::process::exit(1);
+        }
+        // Optional local-leaf bytes drive the Run 061 / Run 063 self-
+        // checks. Same loader as the live path so the verdict matches.
+        let leaf_credentials_opt = match (
+            args.p2p_leaf_cert.as_ref(),
+            args.p2p_leaf_cert_key.as_ref(),
+        ) {
+            (Some(cert), Some(sk)) => {
+                let paths = PqcLeafCredentialPaths {
+                    cert_path: cert.clone(),
+                    kem_sk_path: sk.clone(),
+                };
+                match paths.load() {
+                    Ok(creds) => Some(creds),
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] FATAL: --p2p-trust-bundle-reload-check {} could not load \
+                             local PQC leaf credentials for the Run 061/063 self-checks: {}. \
+                             See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.",
+                            candidate_path.display(),
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+            (None, None) => None,
+            _ => {
+                eprintln!(
+                    "[binary] FATAL: --p2p-leaf-cert and --p2p-leaf-cert-key must be set \
+                     together (--p2p-trust-bundle-reload-check inherits the same precondition)."
+                );
+                std::process::exit(1);
+            }
+        };
+        // Anti-rollback persistence parity with startup: TestNet/MainNet
+        // require --data-dir so the candidate's sequence can be peeked
+        // against the persisted record.
+        let seq_path_buf = config
+            .data_dir
+            .as_ref()
+            .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
+        let seq_path_ref = seq_path_buf.as_deref();
+        if seq_path_ref.is_none()
+            && !matches!(config.environment, NetworkEnvironment::Devnet)
+        {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-reload-check {} on environment={} requires \
+                 --data-dir so the candidate's sequence can be peeked against the persisted \
+                 record. No fallback. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.",
+                candidate_path.display(),
+                config.environment
+            );
+            std::process::exit(1);
+        }
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let activation_current_height: u64 = restore_baseline
+            .as_ref()
+            .map(|b| b.snapshot_height)
+            .unwrap_or(0);
+        let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+            current_height: Some(activation_current_height),
+            current_epoch: None,
+        };
+        let local_leaf_bytes_opt =
+            leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
+        let inputs = qbind_node::pqc_trust_reload::ReloadCheckInputs {
+            candidate_path: candidate_path.as_path(),
+            environment: config.environment,
+            chain_id: config.chain_id(),
+            validation_time_secs: now_secs,
+            signing_keys: &bundle_signing_keys,
+            activation_ctx,
+            sequence_persistence_path: seq_path_ref,
+            local_leaf_cert_bytes: local_leaf_bytes_opt,
+        };
+        match qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs) {
+            Ok(candidate) => {
+                eprintln!("{}", candidate.staged_metadata_log_line());
+                eprintln!(
+                    "[binary] Run 069: VERDICT=valid (validation-only; no live trust apply; \
+                     no sequence persistence write; no peer/session mutation; no /metrics \
+                     mutation). Candidate path={}. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.",
+                    candidate_path.display()
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[binary] Run 069: VERDICT=invalid (candidate rejected; no live trust apply; \
+                     no sequence persistence write; no peer/session mutation; no /metrics \
+                     mutation). Candidate path={}. Reason: {}. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.",
+                    candidate_path.display(),
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Validate P2P configuration (may modify config)
     let p2p_enabled = config.validate_p2p_config();
 
@@ -804,6 +960,14 @@ async fn run_p2p_node(
              --p2p-trust-bundle; signing keys have no effect and will be ignored."
         );
     }
+
+    // Run 069 — disabled-by-default trust-bundle hot-reload
+    // **validation-only** check executes in `main()` BEFORE the
+    // network-mode dispatch (so it fires regardless of LocalMesh /
+    // P2P selection). When the flag is supplied the process exits
+    // before reaching this point, so no additional wiring is needed
+    // here. See `main.rs` reload-check block and
+    // `crates/qbind-node/src/pqc_trust_reload.rs`.
 
     let trust_bundle_loaded: Option<qbind_node::pqc_trust_bundle::LoadedTrustBundle> = match args
         .p2p_trust_bundle

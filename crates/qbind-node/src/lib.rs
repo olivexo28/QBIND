@@ -128,6 +128,16 @@ pub mod pqc_trust_sequence;
 // chain_id/revocation/window validation and BEFORE sequence
 // persistence + root merge.
 pub mod pqc_trust_activation;
+// Run 069 — disabled-by-default trust-bundle hot-reload validation/
+// staging boundary. Reuses every Run 050–065 startup security check
+// (bundle parse + ML-DSA-44 signature + environment + chain_id +
+// activation gate + min-activation-margin policy + revocation
+// activation gate + Run 055 anti-rollback peek + Run 061/063 local
+// self-checks) but applies NO live trust changes and never burns a
+// sequence number. The active P2P trust state, active revocation
+// sets, peer sessions, and KEMTLS sessions are untouched. See module
+// docs and `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_trust_reload;
 
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
