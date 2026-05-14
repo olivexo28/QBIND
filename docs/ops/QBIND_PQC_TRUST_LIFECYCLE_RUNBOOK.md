@@ -1,18 +1,23 @@
 # QBIND PQC Trust Lifecycle Operator Runbook
 
-**Run:** 064 (prose update of the Run 060 playbook for Runs 061–063)
-**Status:** Operator playbook landed and updated for Runs 050–063; full C4 remains OPEN
+**Run:** 066 (prose update of the Run 064 playbook for Run 065)
+**Status:** Operator playbook landed and updated for Runs 050–065; full C4 remains OPEN
 **Scope owner:** transport trust-anchor + bundle-signing lifecycle
 **Date:** 2026-05-13
 
 This runbook converts the PQC trust-bundle machinery proven by
-Runs 050–063 into a concrete operator playbook for production
+Runs 050–065 into a concrete operator playbook for production
 custody, rotation, revocation, and bundle-signing-key rotation.
-Run 064 is a documentation-only update of the Run 060 playbook
-that incorporates Runs 061 (local revoked-leaf startup self-check),
-062 (per-entry revocation `activation_height`), and 063 (local
-revoked-issuer-root startup self-check). No runtime code, no
-test source, and no helper source is changed by Run 064.
+Run 066 is a documentation-only update of the Run 064 playbook
+that incorporates Run 065 (per-environment minimum activation-
+height policy enforced at bundle load on the `--p2p-trust-bundle`
+path: DevNet 0 / TestNet 8 / MainNet 32 blocks; half-open
+`[current_height, current_height + margin)` reject window; applies
+to bundle-level `activation_height`, per-active-root
+`activation_height`, and per-entry revocation `activation_height`
+when `Some(_)`; `activation_height = None` immediate revocations
+preserved). No runtime code, no test source, and no helper source
+is changed by Run 066.
 
 It is **operator documentation**. It is **not** a redesign of any
 runtime layer. It does **not** introduce new bypass flags, does
@@ -35,7 +40,17 @@ References to behaviour are anchored in:
 - `crates/qbind-node/src/pqc_trust_sequence.rs` (sequence anti-
   rollback persistence — Run 055).
 - `crates/qbind-node/src/pqc_trust_activation.rs` (bundle-level
-  activation height / epoch gating — Run 057).
+  activation height / epoch gating — Run 057; per-environment
+  minimum activation-margin constants and policy helper — Run 065:
+  `MIN_DEVNET_ACTIVATION_MARGIN = 0`,
+  `MIN_TESTNET_ACTIVATION_MARGIN = 8`,
+  `MIN_MAINNET_ACTIVATION_MARGIN = 32`;
+  `ActivationPolicy::for_environment`;
+  `minimum_activation_margin_for_environment`;
+  `check_min_activation_height_policy`;
+  `TrustBundleActivationError::ActivationHeightBelowMinimumMargin`;
+  `TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin`;
+  `RevocationScope`).
 - `crates/qbind-node/src/pqc_root_config.rs` (root parsing,
   `PQC_TRANSPORT_SUITE_ML_DSA_44 = 100`).
 - `crates/qbind-node/src/p2p_node_builder.rs::make_pqc_static_root_crypto_provider`
@@ -46,11 +61,22 @@ References to behaviour are anchored in:
   then `check_and_update_sequence` BEFORE root merge; emits the
   Run 062 revocation-activation banner; runs the Run 061
   local-leaf-fingerprint and Run 063 local-issuer-root startup
-  self-checks BEFORE `PqcStaticRootConfig` construction).
+  self-checks BEFORE `PqcStaticRootConfig` construction; the
+  Run 065 per-environment minimum activation-margin policy is
+  applied AFTER signature/chain_id/environment/revocation
+  structural validation and BEFORE Run 057's future-height gate,
+  Run 055's sequence persistence, and Run 050's root merge — its
+  two new error variants
+  `TrustBundleActivationError::ActivationHeightBelowMinimumMargin`
+  and
+  `TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin`
+  flow through the existing `TrustBundleError::Activation(..)`
+  FATAL printer with the static "No fallback to
+  --p2p-trusted-root" marker).
 - `crates/qbind-node/examples/devnet_pqc_root_helper.rs` and
   `crates/qbind-node/examples/devnet_pqc_trust_bundle_helper.rs`
   (DevNet evidence tooling only — not production custody).
-- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md` through `RUN_063.md`
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md` through `RUN_065.md`
   (live-binary smoke evidence for every fail-closed boundary cited
   below).
 
@@ -101,10 +127,17 @@ Per-environment chain ids (`crates/qbind-types/src/primitives.rs`):
   declare `activation_epoch` continue to fail closed with
   `TrustBundleActivationError::CurrentEpochUnavailable`).
 - A per-environment minimum-activation-height policy enforced by
-  the binary (this runbook recommends one in §5.3 but the binary
-  does not yet enforce it). This applies both to the bundle-level
-  `activation_height` (Run 057) and to the per-entry revocation
-  `activation_height` (Run 062).
+  the binary on a **gossiped / peer-supplied** bundle path. Run 065
+  enforces this policy on the binary's `--p2p-trust-bundle` load
+  path (DevNet 0 / TestNet 8 / MainNet 32 blocks; half-open
+  `[current_height, current_height + margin)` reject window;
+  applies to bundle-level `activation_height`, per-active-root
+  `activation_height`, and per-entry revocation `activation_height`
+  when `Some(_)`); the bundle is not yet gossiped between peers,
+  and when on-the-fly trust-bundle distribution lands the same
+  `check_min_activation_height_policy` helper must be threaded
+  through that path. The Run 065 helper itself is reusable today
+  (`crates/qbind-node/src/pqc_trust_activation.rs::check_min_activation_height_policy`).
 - On-the-fly trust-bundle hot reload. The bundle is loaded exactly
   once per process lifetime; the Run 062 active/pending gauges are
   sticky-at-startup snapshots. Rotation today requires a validator
@@ -140,6 +173,7 @@ and must not be weakened by any operator procedure described here:
 | **Local-leaf startup self-check (Run 061).** If a configured `--p2p-leaf-cert` has a canonical leaf fingerprint (SHA3-256 of `b"QBIND:pqc-trust-bundle-leaf-fp:v1" \|\| cert.encode()`) that appears in the loaded bundle's currently-**active** `revoked_leaf_fingerprints` set, the binary emits one `[binary] FATAL: Run 061 local leaf certificate revoked …` line and exits 1 BEFORE `PqcStaticRootConfig` is built and BEFORE any peer handshake. The Run 052 peer-handshake counter `qbind_p2p_pqc_cert_verify_rejected_revoked_total` is NOT bumped. | `pqc_trust_bundle::check_local_leaf_not_revoked`, wired in `main.rs` between Run 050/051/062 banners and `pqc_config` construction | RUN_061 |
 | **Per-entry revocation activation gate (Run 062).** A `revocations[]` entry with `activation_height: None` is immediate. A signature-valid entry with `activation_height > current_height` is **PENDING** — surfaced via `pending_revoked_root_ids` / `pending_revoked_leaf_fingerprints` and the `_revocations_*_pending` gauges, but NOT enforced anywhere (not in `active_roots`, not in the Run 061 startup self-check, not in the Run 052 peer-handshake context). An entry with `activation_height <= current_height` is **ACTIVE** and enforced bit-for-bit as the legacy immediate revocation. Tampering `activation_height` after signing invalidates the ML-DSA-44 bundle signature (canonical preimage coverage). | `pqc_trust_bundle::TrustBundle::validate_at_with_signing_keys_chain_id_and_revocation_activation`; gauges in `metrics.rs` (`qbind_p2p_pqc_trust_bundle_revocations_{configured,active,pending}_total`, `_revocations_{root,leaf}_{active,pending}`) | RUN_062 |
 | **Local-issuer-root startup self-check (Run 063).** If a configured `--p2p-leaf-cert` decodes to a `root_key_id` that appears in the loaded bundle's currently-**active** `revoked_root_ids` set, the binary emits one `[binary] FATAL: Run 063 local leaf certificate issuer root revoked …` line and exits 1 BEFORE `PqcStaticRootConfig` is built. The Run 062 pending set is explicitly NOT consulted. Independent of the Run 061 check; either failing fails closed. | `pqc_trust_bundle::check_local_leaf_issuer_root_not_revoked`, wired in `main.rs` immediately after the Run 061 call site and BEFORE `pqc_config` is moved into the builder | RUN_063 |
+| **Per-environment minimum activation-margin policy (Run 065).** A bundle whose declared `activation_height` (bundle-level OR per-active-root) falls in the half-open window `[current_height, current_height + margin)` fails closed at load with `TrustBundleActivationError::ActivationHeightBelowMinimumMargin`. A scheduled per-entry revocation whose `activation_height` is `Some(h)` and falls in the same window fails closed with `TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin`. Constants: DevNet `MIN_DEVNET_ACTIVATION_MARGIN = 0`, TestNet `MIN_TESTNET_ACTIVATION_MARGIN = 8`, MainNet `MIN_MAINNET_ACTIVATION_MARGIN = 32` (strict ordering DevNet < TestNet < MainNet). The reject window is half-open: bundles whose `activation_height` equals `current_height + margin` pass Run 065 and fall through to Run 057's "not yet reached" gate; bundles whose `activation_height` is strictly less than `current_height` are already-effective and are NOT retroactively rejected (snapshot-rejoin semantics). Per-entry revocations with `activation_height = None` are immediate and NEVER subject to Run 065 (preserves the emergency-revocation path). The policy runs AFTER signature / chain_id / environment / revocation structural validation and BEFORE Run 057's future-height gate, Run 055's sequence persistence, and Run 050's root merge — a rejected too-soon bundle does NOT create `pqc_trust_bundle_sequence.json` and does NOT update `loaded.active_roots`. `required_min_height = current_height.saturating_add(margin)` defends against `u64::MAX` wrap. | `pqc_trust_activation::check_min_activation_height_policy`, `MIN_{DEVNET,TESTNET,MAINNET}_ACTIVATION_MARGIN` constants, `ActivationPolicy::for_environment`; called from `pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation`; errors flow through the existing `TrustBundleError::Activation(..)` FATAL printer in `main.rs` with the static "No fallback to --p2p-trusted-root" marker | RUN_065 |
 
 If any procedure in this runbook appears to require violating one
 of the above, the procedure is wrong, not the implementation. Open
@@ -374,12 +408,14 @@ handling, backup/recovery notes, logging rules.
   are NOT enforced anywhere (not in `active_roots`, not in the
   Run 061 startup self-check, not in the Run 052 peer-handshake
   context, not in the Run 063 issuer-root startup self-check).
-- **`current_height` source (Run 062, mirrors Run 057).** If
-  `--restore-from-snapshot` is used, `current_height` is the
-  restore baseline `snapshot_height`. Otherwise `current_height`
-  is `0` at startup. There is no production runtime epoch source;
-  per-entry `activation_epoch` is intentionally NOT supported
-  (Run 057 boundary stands).
+- **`current_height` source (Run 062, mirrors Run 057, consumed
+  by Run 065).** If `--restore-from-snapshot` is used,
+  `current_height` is the restore baseline `snapshot_height`.
+  Otherwise `current_height` is `0` at startup. There is no
+  production runtime epoch source; per-entry `activation_epoch`
+  is intentionally NOT supported (Run 057 boundary stands). The
+  same `Option<u64>` `current_height` source feeds the Run 065
+  minimum-margin policy.
 - **Bundle-level vs per-entry activation.** DO NOT confuse:
   - bundle-level `activation_height` (Run 057) gates whether the
     whole bundle may take effect (sequence persist + root merge);
@@ -401,7 +437,13 @@ handling, backup/recovery notes, logging rules.
   cutover (and have already issued replacement credentials to any
   validator that would otherwise fail closed at activation).
   Emergency-compromise revocations SHOULD be immediate (omit
-  `activation_height` or set it `<= current_height`).
+  `activation_height`; `activation_height = None` is exempt from
+  the Run 065 minimum-margin policy and remains available on
+  MainNet for emergency response). Scheduled revocations with
+  `activation_height = Some(h)` on TestNet/MainNet MUST respect
+  the Run 065 minimum margin (§3.10): `h >= current_height +
+  minimum_activation_margin` or the bundle is rejected at load
+  with `RevocationActivationHeightBelowMinimumMargin`.
 - **Logging:** safe to log root_id prefix + reason; never log
   the `leaf_cert_fingerprint` of a compromised validator more
   noisily than the rest of the run log requires.
@@ -409,16 +451,43 @@ handling, backup/recovery notes, logging rules.
 ### 3.10 Activation height / epoch field
 
 - **Where:** `activation_height` / `activation_epoch` on the bundle
-  envelope and on each root entry (RUN_057).
+  envelope and on each root entry (RUN_057). Per-entry revocations
+  also carry an optional `activation_height` (RUN_062).
 - **Semantics:** inclusive `current >= required`. Missing field =
-  no restriction.
-- **Operator policy:** RECOMMENDED for every planned rotation on
-  TestNet/MainNet; SET to a height comfortably past the current
-  finalised height so all live validators see and persist the
-  bundle before it takes effect.
+  no restriction (subject to the Run 065 minimum-margin policy
+  below for `activation_height`).
+- **Minimum-margin policy (Run 065).** The binary enforces a
+  per-environment minimum activation margin on the bundle-level
+  `activation_height`, on each active root's `activation_height`,
+  and on every per-entry revocation whose `activation_height` is
+  `Some(_)`:
+  - DevNet: `MIN_DEVNET_ACTIVATION_MARGIN = 0` blocks.
+  - TestNet: `MIN_TESTNET_ACTIVATION_MARGIN = 8` blocks.
+  - MainNet: `MIN_MAINNET_ACTIVATION_MARGIN = 32` blocks.
+  The reject window is the half-open interval
+  `[current_height, current_height + margin)`:
+  `activation_height >= current_height + margin` passes Run 065
+  (and then reaches Run 057's "not yet reached" gate until
+  `current_height` catches up); `activation_height < current_height`
+  is already-effective and not retroactively rejected (preserves
+  snapshot-rejoin semantics).
+- **Operator policy:** REQUIRED for every planned rotation on
+  TestNet/MainNet; SET `activation_height` to a height comfortably
+  past the current finalised height. `activation_height ==
+  current_height` is rejected at load on TestNet/MainNet by the
+  Run 065 policy (and is the intentional `--data-dir`/sequence-
+  safe behaviour: a rejected too-soon bundle does not burn the
+  persisted sequence number).
+- **Emergency immediate revocation.** Per-entry revocations whose
+  `activation_height = None` are NEVER subject to the Run 065
+  minimum-margin policy and remain available on every environment,
+  including MainNet, regardless of `current_height` (§6.B / §6.C
+  variant 2).
 - **Boundary:** `activation_epoch` is rejected today with
   `CurrentEpochUnavailable` (Run 057 boundary — recorded in §10).
   Operators MUST NOT set `activation_epoch` on a production bundle.
+  Run 065 does NOT introduce a minimum-margin policy on the epoch
+  axis (the epoch runtime source itself remains open).
 
 ### 3.11 Chain_id field
 
@@ -521,6 +590,11 @@ Performed by the transport root authority for each validator:
   fail-closed semantics are preserved (RUN_055/056).
 - **Activation gating:** the `activation_height` field is
   honoured on DevNet (RUN_057/058 smokes were DevNet).
+- **Minimum activation-margin (Run 065):**
+  `MIN_DEVNET_ACTIVATION_MARGIN = 0` blocks. This preserves the
+  DevNet immediate-cutover shape used by every Run 050–064 DevNet
+  smoke: `activation_height = current_height` (and
+  `activation_height = 0`) remain accepted on DevNet.
 - **Operators MUST NOT** treat any DevNet helper output as
   production-safe material.
 
@@ -539,6 +613,14 @@ Performed by the transport root authority for each validator:
   `activation_height` to a height past the current finalised
   height so every honest validator persists the bundle before it
   takes effect.
+- **Minimum activation-margin (Run 065):**
+  `MIN_TESTNET_ACTIVATION_MARGIN = 8` blocks. Every bundle whose
+  bundle-level `activation_height`, per-active-root
+  `activation_height`, or per-entry revocation `activation_height`
+  (when `Some(_)`) falls in `[current_height, current_height + 8)`
+  is rejected at load with the Run 065 FATAL. Operators MUST set
+  `activation_height >= current_height + 8` on TestNet; emergency
+  revocations may instead omit `activation_height` (immediate).
 - **`activation_epoch` MUST NOT be set** (Run 057 boundary).
 - **Negative smokes expected before promotion to MainNet:** see
   §7 promotion checklist.
@@ -560,10 +642,20 @@ All TestNet requirements PLUS:
   bundle failure.
 - **Recommended minimum activation-height margin:** set
   `activation_height = last_finalised_height + N` where N is the
-  expected maximum operator rollout window (at least one finality
-  block; recommended ≥ 100 blocks). Note: the **binary does not
-  enforce a minimum margin today** (recorded in §10); this is an
-  operator policy.
+  expected maximum operator rollout window. Run 065 enforces a
+  hard floor of `MIN_MAINNET_ACTIVATION_MARGIN = 32` blocks on
+  MainNet: every bundle whose bundle-level `activation_height`,
+  per-active-root `activation_height`, or per-entry revocation
+  `activation_height` (when `Some(_)`) falls in
+  `[current_height, current_height + 32)` is rejected at load
+  with the Run 065 FATAL `pqc trust-bundle minimum activation-
+  height policy violation (… environment=mainnet, …
+  minimum_margin=32, required_min_height=<current+32>); …
+  Reschedule the bundle with activation_height >= <current+32>`.
+  Operators MAY (and SHOULD) choose `N` strictly greater than 32
+  for additional operator-rollout headroom; 32 is the binary
+  floor, not the operator target. Emergency revocations remain
+  available without `activation_height` (immediate).
 
 ---
 
@@ -597,7 +689,9 @@ Steps:
    - `roots[]` = `[R_old(status=active), R_new(status=active)]`.
    - `revocations[]` unchanged.
    - `activation_height` = current_finalised_height + safety margin
-     (§5.3).
+     (§5.3; MUST be `>= current_finalised_height + 8` on TestNet
+     and `>= current_finalised_height + 32` on MainNet, the
+     binary-enforced Run 065 floors).
    - `valid_from` / `valid_until` as policy dictates.
    - `chain_id` MUST match the runtime chain id (§3.11).
    - Sign with BSK offline.
@@ -677,9 +771,20 @@ Steps:
    - `roots[]` = `[R_bad(status=revoked), R_new(status=active),
      …]`.
    - `revocations[]` += `{root_id: R_bad, reason: "compromise",
-     effective_from: now}`.
-   - `activation_height` = current_finalised_height (no margin —
-     emergency).
+     effective_from: now, activation_height: None}`.
+     `activation_height = None` (immediate) is the correct emergency
+     shape and is NEVER subject to the Run 065 minimum-margin
+     policy regardless of environment.
+   - The bundle-level `activation_height` MAY be omitted entirely
+     for the fastest emergency rotation. If set on TestNet/MainNet,
+     it MUST satisfy the Run 065 floor (`>= current_finalised_height
+     + 8` on TestNet, `+ 32` on MainNet); a bundle-level
+     `activation_height = current_finalised_height` on MainNet is
+     rejected at load by the Run 065 policy. Omitting the
+     bundle-level `activation_height` (no restriction) is the
+     emergency-correct shape because it makes the new bundle
+     effective at every restarted validator immediately while
+     preserving the per-entry immediate revocation.
    - Sign with BSK offline.
 2. **Publish bundle N+1.** Validators restart with the new bundle.
    Any validator whose leaf cert chains to R_bad MUST already have
@@ -841,9 +946,18 @@ Steps:
 1. **Decide the target activation height.** Pick
    `activation_height_target = current_finalised_height + N` where
    N is large enough that every validator restart window
-   completes before the entry becomes active. The binary does not
-   today enforce a minimum margin (§10); the recommended floor is
-   the same as §5.3 for the bundle-level `activation_height`.
+   completes before the entry becomes active. The binary enforces
+   a per-environment floor (Run 065, §3.10 / §5):
+   `activation_height_target >= current_finalised_height + 0` on
+   DevNet, `+ 8` on TestNet, and `+ 32` on MainNet. Operators
+   SHOULD pick `N` strictly greater than the floor for additional
+   operator-rollout headroom; the floor is what the binary will
+   refuse at load, not the operator target. A bundle with a
+   per-entry revocation `activation_height` in the half-open
+   reject window `[current_finalised_height, current_finalised_height
+   + margin)` is rejected at load with
+   `RevocationActivationHeightBelowMinimumMargin` and never
+   updates the persisted sequence or merges any root.
 2. **Mint the bundle (sequence = N+1)** with the revocation entry
    carrying `activation_height = activation_height_target`. Sign
    with BSK offline.
@@ -915,8 +1029,14 @@ item blocks promotion.
       MainNet `0x51424E444D41494E`).
 - [ ] Bundle `sequence` is strictly greater than the previously
       published bundle's `sequence` for this trust domain.
-- [ ] Bundle `activation_height` (if set) is at least the current
-      finalised height plus the operator margin (§5.3).
+- [ ] Bundle `activation_height` (if set) satisfies the Run 065
+      per-environment minimum margin against `current_height`
+      (§3.10 / §5): `activation_height >= current_height` on
+      DevNet, `>= current_height + 8` on TestNet, `>= current_height
+      + 32` on MainNet. A bundle with `activation_height` in the
+      half-open reject window `[current_height, current_height +
+      margin)` will be refused at load and will NOT advance the
+      persisted sequence file.
 - [ ] Bundle `activation_epoch` is **NOT** set (Run 057 boundary).
 - [ ] Bundle `valid_from <= now <= valid_until`.
 - [ ] Every `roots[i]` has `suite_id == 100`, valid ML-DSA-44
@@ -925,10 +1045,16 @@ item blocks promotion.
 - [ ] `revocations[i].effective_from` is at most the current time
       for any entry intended to be active immediately.
 - [ ] For each `revocations[i]`, `activation_height` (Run 062) is
-      EITHER absent (immediate) OR satisfies the §5.3 operator
-      margin against the current finalised height. Emergency
-      compromise revocations MUST NOT carry an `activation_height`
-      that postpones enforcement past the next validator restart.
+      EITHER absent (immediate; exempt from Run 065) OR satisfies
+      the Run 065 per-environment minimum margin (§3.10 / §5.3)
+      against the current finalised height. Emergency compromise
+      revocations MUST NOT carry an `activation_height` that
+      postpones enforcement past the next validator restart — set
+      `activation_height = None` for immediate compromise
+      revocations. A scheduled-revocation `activation_height` in
+      the half-open reject window
+      `[current_height, current_height + margin)` will be refused
+      at load with `RevocationActivationHeightBelowMinimumMargin`.
 - [ ] `signing_key_id` does NOT equal any `roots[i].root_id`.
 - [ ] Bundle ML-DSA-44 signature verifies against the operator's
       configured `--p2p-trust-bundle-signing-key` set.
@@ -937,6 +1063,41 @@ item blocks promotion.
       artifact-inventory log. Per-entry `activation_height` is
       covered by the canonical preimage (Run 062): tampering it
       after signing must invalidate the bundle signature.
+- [ ] Confirm `current_height` source for the validator fleet
+      (Run 057 / Run 065): with `--restore-from-snapshot`,
+      `current_height = restore_baseline.snapshot_height`; otherwise
+      `current_height = 0`. Operator margin choice for
+      `activation_height` MUST be computed against this value.
+- [ ] Confirm the chosen `activation_height` (bundle-level,
+      per-active-root, AND any per-entry scheduled revocation) is
+      OUTSIDE the Run 065 half-open reject window
+      `[current_height, current_height + minimum_activation_margin)`
+      on the target environment, OR is `None` (immediate
+      revocation only).
+- [ ] Confirm a rejected too-soon bundle would NOT burn the
+      persisted sequence number (Run 065 ordering: the policy
+      runs BEFORE `check_and_update_sequence`; rejected bundles
+      leave `pqc_trust_bundle_sequence.json` and `loaded.active_roots`
+      untouched).
+- [ ] If the bundle is for TestNet/MainNet, a Run 065 too-soon
+      negative smoke passes for that environment (RUN_065 Smoke 2
+      shape for TestNet, Smoke 4 shape for MainNet): mint a
+      same-shape bundle with `activation_height = current_height +
+      (margin - 1)`, attempt to load, observe the FATAL `pqc
+      trust-bundle minimum activation-height policy violation
+      (… environment=<env>, … minimum_margin=<8|32>, …)`, AND
+      verify the data directory is NOT created.
+- [ ] Sufficient-margin smoke passes: mint a same-shape bundle
+      with `activation_height = current_height + margin` (exactly
+      at the inclusive upper boundary); the live binary passes
+      the Run 065 policy and falls through to Run 057's
+      "activation height not yet reached" FATAL (RUN_065 Smoke 3
+      shape for TestNet, Smoke 5 shape for MainNet). This proves
+      orthogonal composition of Run 065 and Run 057.
+- [ ] If immediate emergency revocation is intentional, confirm
+      every `revocations[i].activation_height` is `None` (the
+      Run 065 emergency-revocation-preserved boundary, pinned by
+      `run065_immediate_revocation_preserved_on_signed_mainnet`).
 - [ ] Negative tamper test passes (flip any byte of
       `roots[0].not_after`; the test fixture must fail closed —
       RUN_059 Smoke 3 shape).
@@ -970,6 +1131,10 @@ item blocks promotion.
       and ends with the Run 040 `[Run040] P2pNodeBuilder: ...
       dummy_kem_registered=false dummy_aead_registered=false ...`
       banner — confirming no fallback to test-grade primitives.
+      On a too-soon TestNet/MainNet bundle the binary instead
+      emits the Run 065 FATAL `pqc trust-bundle minimum
+      activation-height policy violation` and exits 1 BEFORE any
+      of the post-load banners.
 - [ ] No `--p2p-trusted-root` line on TestNet/MainNet validators.
 - [ ] Archive: bundle fingerprint, signing_key_id, release
       `qbind-node` `sha256` + `ELF BuildID`, helper `sha256` if
@@ -993,7 +1158,33 @@ compromise, observed rollback / equivocation attempt.
       MUST be immediate.
 - [ ] Identify, for each candidate revocation entry, what
       `activation_height` (if any) is appropriate. For an
-      emergency compromise event the answer is "none / immediate".
+      emergency compromise event the answer is "none / immediate"
+      (`activation_height = None`); per-entry `activation_height
+      = None` is the only way to publish an immediate revocation
+      on TestNet/MainNet within the Run 065 minimum-margin policy
+      (any `Some(h)` with `h` in the half-open reject window is
+      refused at load). Distinguish a planned scheduled revocation
+      (`activation_height = Some(h)`, `h >= current_height +
+      minimum_activation_margin`) from an emergency immediate
+      revocation (`activation_height = None`); they are not
+      interchangeable.
+- [ ] Confirm the liveness impact BEFORE publishing an immediate
+      root revocation: every validator whose local
+      `--p2p-leaf-cert` is chained to the revoked root will fail
+      closed at next restart (Run 063 startup self-check) and
+      every handshake to that validator will fail closed (Run 050
+      / Run 052 peer-handshake context). If a non-trivial
+      fraction of validators are in that set, the validator drop-
+      out is the correct fail-closed behaviour but it must be a
+      conscious operator decision.
+- [ ] If a root revocation is being scheduled (not immediate),
+      confirm every affected validator has a replacement leaf
+      cert chained to a non-revoked root deployed on disk BEFORE
+      the entry's `activation_height` is reached. The Run 065
+      minimum margin on TestNet (8 blocks) and MainNet (32
+      blocks) is a hard floor, not a sufficient operator window —
+      operators SHOULD use a comfortably larger margin when the
+      replacement-cert distribution is operator-bound.
 - [ ] Identify which validators will fail closed at startup once
       the revocation activates. For a leaf revocation: validators
       whose local `--p2p-leaf-cert` matches the revoked
@@ -1005,9 +1196,14 @@ compromise, observed rollback / equivocation attempt.
 - [ ] Mint replacement material on a clean offline / HSM host
       (§4).
 - [ ] Mint an `(N+1)` bundle that excludes the compromised
-      material, with `activation_height = current_finalised_height`
-      (no margin — emergency). Sign with the currently-trusted
-      bundle-signing authority.
+      material. For an emergency compromise the per-entry
+      revocation MUST carry `activation_height = None` (immediate;
+      exempt from Run 065). The bundle-level `activation_height`
+      SHOULD be omitted (no restriction) for the fastest emergency
+      rotation; if set on TestNet/MainNet it MUST satisfy the
+      Run 065 minimum margin (`>= current_height + 8` on TestNet,
+      `+ 32` on MainNet) or the bundle is rejected at load.
+      Sign with the currently-trusted bundle-signing authority.
 - [ ] Distribute the new bundle out-of-band on the same channel
       as steady-state bundles.
 - [ ] Confirm every validator reports `qbind_p2p_pqc_trust_bundle_sequence_highest`
@@ -1076,6 +1272,30 @@ every bundle change. The directory layout MAY follow the existing
       leaf-scope OR Smoke 3 for root-scope) — exit non-FATAL, the
       `_revocations_*_pending` gauge shows the entry, and NEITHER
       the Run 061 nor the Run 063 startup self-check fires.
+- [ ] If the bundle targets TestNet or MainNet: a Run 065 too-soon
+      negative smoke transcript (RUN_065 Smoke 2 shape for
+      TestNet, Smoke 4 shape for MainNet) — exit 1; the FATAL
+      contains `pqc trust-bundle minimum activation-height policy
+      violation (scope=bundle, environment=<env>, current_height=<h>,
+      activation_height=<a>, minimum_margin=<8|32>,
+      required_min_height=<h+margin>)`; the explicit "No fallback
+      to --p2p-trusted-root" marker; AND a filesystem check
+      confirming `pqc_trust_bundle_sequence.json` is NOT present
+      under the `--data-dir` (i.e. the rejected bundle did not
+      touch the loader outcome).
+- [ ] Sufficient-margin / Run-057 boundary smoke transcript
+      (RUN_065 Smoke 3 shape for TestNet at `activation_height =
+      current + 8`, OR RUN_065 Smoke 5 shape for MainNet at
+      `activation_height = current + 32`) — exit 1; the FATAL
+      contains Run 057's `activation height not yet reached
+      (scope=bundle, current_height=<h>, required_height=<h+margin>)`,
+      NOT the Run 065 marker phrase. This proves Run 065 passed
+      at the inclusive upper boundary and Run 057 took over.
+- [ ] If a SCHEDULED revocation with `activation_height = Some(h)`
+      is being introduced on TestNet/MainNet: confirmation that
+      `h >= current_height + minimum_activation_margin` was used
+      (otherwise the bundle would have been rejected at load with
+      `RevocationActivationHeightBelowMinimumMargin`).
 - [ ] Confirmation that no `--p2p-trusted-root` line was supplied
       on any validator.
 - [ ] Confirmation that `pqc_root_mode=pqc-static-root` and no
@@ -1088,11 +1308,12 @@ every bundle change. The directory layout MAY follow the existing
 ## 10. Residual risks (NOT solved by this runbook)
 
 This runbook narrows the C4 "production CA / certificate rotation
-/ signing-key rotation operator playbook" item, and Runs 061–063
+/ signing-key rotation operator playbook" item; Runs 061–063
 closed three previously-open boundaries (local-leaf-fingerprint
 startup self-check, per-entry revocation `activation_height`, and
-local-issuer-root startup self-check). The following remain open
-under C4:
+local-issuer-root startup self-check); and Run 065 closed the
+per-environment minimum-activation-margin boundary on the binary
+`--p2p-trust-bundle` load path. The following remain open under C4:
 
 1. **Epoch-gating runtime source.** Bundle-level `activation_epoch`
    continues to fail closed with
@@ -1100,22 +1321,30 @@ under C4:
    Per-entry `activation_epoch` on revocations is intentionally
    NOT supported either (Run 062 boundary). Operators MUST NOT
    set `activation_epoch` on production bundles or on revocation
-   entries.
-2. **Per-environment minimum activation-height policy.** The
-   binary does not enforce a minimum margin between
-   `activation_height` (bundle-level OR per-entry revocation) and
-   the current finalised height. This runbook RECOMMENDS one in
-   §5.3 and §6.E but the enforcement is operator policy, not
-   binary policy.
+   entries. Run 065 does NOT introduce a minimum-margin policy on
+   the epoch axis (the epoch runtime source itself remains open).
+2. **Per-environment minimum activation-margin policy on the
+   gossiped / peer-supplied trust-bundle path.** Run 065 enforces
+   the policy at
+   `pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation`
+   — the path the binary uses for `--p2p-trust-bundle`. The
+   bundle is not currently gossiped between peers (operator-
+   distributed); when on-the-fly trust-bundle distribution lands,
+   the same `pqc_trust_activation::check_min_activation_height_policy`
+   helper must be threaded through that path.
 3. **On-the-fly trust-bundle hot reload.** The bundle is loaded
    exactly once per process lifetime. The Run 062 active/pending
    gauges are sticky-at-startup snapshots; a scheduled revocation
    does NOT transition from PENDING to ACTIVE inside a running
    validator without a restart. The Run 061 and Run 063 startup
    self-checks therefore observe only the trust state present at
-   process boot.
+   process boot, and the Run 065 policy fires at that single load.
 4. **Production fast-sync / consensus-storage restore.** Separate
-   C4 piece; trust-bundle persistence is independent.
+   C4 piece; trust-bundle persistence is independent. The
+   `--restore-from-snapshot` `snapshot_height` already feeds the
+   Run 057 + Run 065 `current_height` source via
+   `ActivationContext::height_only`; a fully-fledged production
+   fast-sync surface is a separate boundary.
 5. **Per-environment production trust-anchor operation.** Not
    fully solved by documentation alone; depends on the operator
    actually using offline / HSM custody for the secrets in §3.2
@@ -1135,7 +1364,7 @@ under C4:
    signing-key custody surface as an interface boundary; full
    KMS integration is not in scope.
 
-**Closed by Runs 061–063 (no longer in §10):**
+**Closed by Runs 061–063 and Run 065 (no longer in §10):**
 
 - Local-leaf-fingerprint startup self-check — closed by Run 061
   (`pqc_trust_bundle::check_local_leaf_not_revoked` + the FATAL
@@ -1151,12 +1380,22 @@ under C4:
   the FATAL call site immediately after Run 061). The binary now
   fails closed at startup if the local leaf cert decodes to a
   `root_key_id` in the bundle's active `revoked_root_ids`.
+- Per-environment minimum activation-margin policy on the binary
+  `--p2p-trust-bundle` load path — closed by Run 065
+  (`pqc_trust_activation::check_min_activation_height_policy` +
+  `MIN_{DEVNET,TESTNET,MAINNET}_ACTIVATION_MARGIN` constants
+  (`0` / `8` / `32`)). The binary now fails closed at load if a
+  bundle's `activation_height` (bundle-level, per-active-root, or
+  per-entry revocation when `Some(_)`) is in the half-open reject
+  window `[current_height, current_height + margin)` on the
+  configured environment. Emergency immediate revocations
+  (`activation_height = None`) remain exempt.
 
 **Full C4 remains OPEN. C5 is NOT closed by this runbook.**
 
 ---
 
-## 11. Mapping to Runs 050–063
+## 11. Mapping to Runs 050–065
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -1174,6 +1413,9 @@ under C4:
 | 061 | Local-leaf-fingerprint startup self-check: binary fails closed before P2P startup if `--p2p-leaf-cert` is in the bundle's active `revoked_leaf_fingerprints`. | §1.3, §3.9, §6.C variant 2, §7, §9, §10 (closed item). |
 | 062 | Per-entry revocation `activation_height`: signature-covered, active/pending split, seven new `qbind_p2p_pqc_trust_bundle_revocations_*` gauges. | §1.3, §3.9, §3.10, §6.A, §6.B, §6.C, §6.E, §7, §9, §10 (closed item). |
 | 063 | Local-issuer-root startup self-check: binary fails closed before P2P startup if the local leaf cert decodes to a `root_key_id` in the bundle's active `revoked_root_ids`. Independent of Run 061. | §1.3, §6.A, §6.B, §6.E, §7, §9, §10 (closed item). |
+| 064 | Operator-playbook prose update for Runs 061–063 (docs-only). | All §sections. |
+| 065 | Per-environment minimum activation-margin policy on the `--p2p-trust-bundle` load path: `MIN_DEVNET_ACTIVATION_MARGIN = 0`, `MIN_TESTNET_ACTIVATION_MARGIN = 8`, `MIN_MAINNET_ACTIVATION_MARGIN = 32`. Half-open `[current_height, current_height + margin)` reject window covers bundle-level, per-active-root, and per-entry revocation `activation_height` when `Some(_)`. Already-effective bundles are NOT retroactively rejected (snapshot-rejoin). Per-entry revocations with `activation_height = None` are immediate and exempt (emergency-revocation path preserved on MainNet). Policy runs BEFORE Run 057's future-height gate, Run 055's sequence persistence, and Run 050's root merge — rejected too-soon bundles do not touch the persisted sequence or the live trust set. Proved on the live release binary by RUN_065 Smokes 1 (DevNet positive at activation_height=0), 2 (TestNet too-soon negative, Run 065 fires), 3 (TestNet at-margin = Run 057 boundary), 4 (MainNet too-soon negative, Run 065 fires with margin=32), 5 (MainNet at-margin = Run 057 boundary with required_height=32). | §1.3, §3.9, §3.10, §5.1, §5.2, §5.3, §6.A, §6.B, §6.E, §7, §8, §9, §10 (closed item). |
+| 066 | Operator-playbook prose update for Run 065 (docs-only). | All §sections. |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---
