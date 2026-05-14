@@ -44,22 +44,24 @@ Current state:
     - evict sessions
     - commit sequence
     - rollback on post-swap failure
-  - production binary still returns UnsupportedRuntimeContext
-  - reason: no mutable runtime trust-state handle or production session-eviction hook existed
+  - production binary still returned UnsupportedRuntimeContext because runtime adapter and session eviction were missing
 - Run 071 positive-narrow:
   - introduced LivePqcTrustState = Arc<RwLock<Arc<LivePqcTrustSnapshot>>>
-  - initialized from the already validated LoadedTrustBundle
   - production-honest PQC handshake root resolver and leaf-revocation closure now read through live snapshots
   - startup behavior preserved
   - active/pending revocation semantics preserved
-  - Run 069 reload-check remains non-mutating
-  - Run 070 apply still unsupported because production session eviction is missing
+- Run 072 strongest-positive:
+  - added production-honest P2P session eviction hook
+  - TcpKemTlsP2pService implements P2pSessionEvictor
+  - evict_all_sessions drains peer registry, drops outbound mpsc senders, aborts read/write JoinHandles
+  - truthful EvictionReport invariant: attempted == evicted + failed
+  - eviction metrics added
+  - trust state and sequence state remain unchanged by eviction
+  - Run 070 evict_sessions callback can now be satisfied
 - C4 remains OPEN.
 - C5 remains OPEN / narrowed.
 
 Current remaining C4 trust/lifecycle blockers:
-- production session-eviction hook
-- LiveTrustApplyContext runtime adapter
 - actual live trust-bundle apply
 - peer/gossiped bundle acceptance
 - activation_epoch runtime source
@@ -69,186 +71,222 @@ Current remaining C4 trust/lifecycle blockers:
 - per-environment production trust-anchor operation
 
 Task:
-Run 072. Implement and prove a production session-eviction hook for the honest PQC P2P path, without enabling full reload apply yet.
+Run 073. Wire the LiveTrustApplyContext runtime adapter and prove full local operator-triggered live trust-bundle apply.
 
 Primary objective:
-Add a safe internal session-eviction handle that can close existing P2P sessions on demand so future trust-bundle live apply can evict sessions authenticated under old trust state.
+Compose Run 069 validation, Run 070 apply contract, Run 071 LivePqcTrustState, Run 072 P2pSessionEvictor, and pqc_trust_sequence::commit_sequence into a real production binary local-operator live-apply path.
+
+The target pipeline is:
+
+validate candidate
+→ snapshot old live trust state
+→ swap LivePqcTrustState to candidate trust state
+→ evict existing P2P sessions
+→ commit sequence persistence
+→ report success
 
 Important framing:
-This is NOT full trust-bundle live apply.
+This is local operator-triggered live apply only.
 This is NOT peer-supplied/gossiped bundle acceptance.
-This is NOT automatic hot reload.
+This is NOT automatic filesystem watcher hot reload.
+This is NOT activation_epoch implementation.
 This is NOT KMS/HSM.
 This is NOT signing-key ratification.
-This is NOT activation_epoch implementation.
 This is NOT fast-sync restore.
 Do not redesign KEMTLS.
 Do not redesign consensus.
 Do not weaken startup trust-bundle validation.
 Do not weaken Run 069 reload-check.
-Do not weaken Run 070 apply contract.
-Do not weaken Run 071 live trust snapshot behavior.
+Do not weaken Run 070 rollback contract.
+Do not weaken Run 071 live trust snapshot semantics.
+Do not weaken Run 072 session eviction semantics.
 Do not silently fall back to --p2p-trusted-root.
 Do not silently fall back to DummySig, DummyKem, or DummyAead.
 Do not claim full C4 or C5 closure.
 
 Strict scope:
-- Add a production-honest internal session eviction hook for the existing P2P session manager / peer connection layer.
-- The hook should be callable by future reload-apply logic.
-- It must close or evict all currently authenticated P2P sessions conservatively.
-- It must not selectively retain sessions in Run 072.
-- It must not change trust state.
-- It must not commit sequence.
-- It must not apply reload candidates.
-- It must not accept peer/gossiped bundles.
-- It must preserve normal startup and steady-state P2P behavior when not called.
-- Existing sessions should only be evicted when the explicit internal hook/test path is invoked.
-- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+- Enable local operator-triggered live apply from a local file only.
+- Candidate must pass the same checks as Run 069:
+  - parse trust bundle
+  - verify ML-DSA-44 bundle signature
+  - validate environment
+  - validate chain_id
+  - validate root status/windows
+  - validate bundle activation_height
+  - validate Run 065 minimum activation-height policy
+  - validate per-entry revocation activation_height
+  - validate sequence monotonicity against persisted accepted sequence
+  - check local leaf fingerprint revocation
+  - check local issuer-root revocation
+- Only after successful validation:
+  - atomically swap LivePqcTrustState
+  - evict P2P sessions using Run 072 hook
+  - commit sequence persistence
+- If validation fails:
+  - do not swap
+  - do not evict
+  - do not commit sequence
+- If swap fails:
+  - old live trust state remains active
+  - do not evict
+  - do not commit sequence
+- If eviction fails after swap:
+  - roll back LivePqcTrustState to old snapshot
+  - do not commit sequence
+  - report reload failure
+- If sequence commit fails after swap and eviction:
+  - roll back LivePqcTrustState to old snapshot
+  - report reload failure
+  - if rollback fails, fail closed with a fatal reload error
+- Existing startup behavior must remain unchanged.
+- Run 069 reload-check must remain validation-only and non-mutating.
+- No peer/gossip input.
+- No unsigned TestNet/MainNet reload.
+- No static-root fallback.
 
 Required investigation:
 
-1. Inspect current P2P/session ownership
+1. Inspect existing pieces
    Inspect:
+   - crates/qbind-node/src/pqc_trust_reload.rs
+   - crates/qbind-node/src/pqc_live_trust.rs
+   - crates/qbind-node/src/p2p_session_eviction.rs
+   - crates/qbind-node/src/pqc_trust_sequence.rs
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - crates/qbind-node/src/pqc_trust_activation.rs
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/src/cli.rs
+   - crates/qbind-node/src/p2p_tcp.rs
    - crates/qbind-node/src/p2p_node_builder.rs
-   - qbind-net connection/session types
-   - KEMTLS session storage / connection registry
-   - peer manager / dialer / listener loops
-   - metrics for connected peers / sessions
-   - any existing shutdown/close/disconnect method
-   - Run 071 evidence doc
-   - Run 070 apply contract code
+   - crates/qbind-node/src/metrics.rs
+   - Run 069 / Run 070 / Run 071 / Run 072 tests and evidence docs
    - docs/whitepaper/contradiction.md
 
-   Determine:
-   - where authenticated sessions are stored
-   - how sessions are closed today
-   - whether a peer connection can be dropped cleanly
-   - whether reconnect behavior is automatic
-   - how to count evicted sessions truthfully
-   - whether eviction can race with accept/dial loops
-   - whether listener/dialer continue accepting new sessions after eviction
+   Document exact file/function references in the evidence document.
 
-   Document exact file/function references in the evidence doc.
+2. Define runtime adapter
+   Implement a concrete LiveTrustApplyContext adapter that provides the callbacks required by the Run 070 apply contract:
+   - snapshot live trust state
+   - swap live trust state
+   - rollback live trust state
+   - evict sessions
+   - commit sequence
 
-2. Define session-eviction semantics
-   Required policy:
-   - Evict all authenticated P2P sessions.
-   - Close/drop transport/session handles so old AEAD keys are no longer used.
-   - Allow normal reconnect under current trust state after eviction if the node’s existing dialer/accept loops do so.
-   - If reconnect does not happen automatically, document boundary honestly.
-   - Do not evict only some peers.
-   - Do not leave stale KEMTLS sessions alive after a successful eviction call.
-   - Do not change the active trust bundle or sequence state in Run 072.
-   - If eviction fails partially, report failure; do not claim success.
-   - If eviction is unsupported by current runtime, implement the smallest safe boundary and report UnsupportedSessionEviction.
-
-3. Define hook/API shape
-   Preferred:
-   - internal trait/handle such as:
-     - P2pSessionEvictor
-     - SessionEvictionHandle
-     - evict_all_sessions(reason) -> Result<EvictionReport>
-   - returns:
-     - attempted count
-     - evicted count
-     - failed count
-     - reason
-   - reason should include a safe enum/string:
-     - trust_bundle_reload_apply
-     - operator_test
-   - no private material.
-
-4. Define how future Run 070 apply will use it
-   Add no full apply in Run 072, but ensure the hook can be passed into the Run 070 apply contract later.
    Required:
-   - do not wire live apply yet.
-   - do not remove UnsupportedRuntimeContext from production apply unless all other requirements are met.
-   - if Run 070 tests need a mock evictor, update them narrowly.
-   - evidence doc must explain that Run 072 resolves only the session-eviction blocker, leaving LiveTrustApplyContext adapter for Run 073.
+   - use LivePqcTrustState::snapshot and swap_snapshot
+   - use P2pSessionEvictor::evict_all_sessions
+   - use pqc_trust_sequence commit path
+   - do not duplicate sequence logic
+   - do not bypass validation
+   - do not mutate state before validation succeeds
+
+3. Define live apply trigger
+   Use the existing hidden opt-in apply flag from Run 070 if available:
+   - --p2p-trust-bundle-reload-apply-enabled
+   - and a local candidate path flag if already present
+
+   If the flag exists but currently returns UnsupportedRuntimeContext, wire it to the runtime adapter.
+
+   Requirements:
+   - disabled by default
+   - local file only
+   - no remote unauthenticated endpoint
+   - no peer-supplied bundle
+   - logs must clearly state operator-triggered local reload apply
+   - validation-only --p2p-trust-bundle-reload-check remains unchanged
+
+4. Define session behavior
+   Required v0 policy:
+   - evict all current P2P sessions on successful trust-state swap
+   - allow reconnect under the new trust context if existing dial/listener loops do so
+   - if reconnect is not automatic, document boundary
+   - do not selectively retain sessions
+   - do not keep sessions authenticated under old trust after successful reload
 
 5. Define metrics/logs
-   Add metrics if meaningful:
-   - qbind_p2p_session_eviction_attempt_total
-   - qbind_p2p_session_eviction_success_total
-   - qbind_p2p_session_eviction_failure_total
-   - qbind_p2p_session_eviction_sessions_evicted_total
-   - qbind_p2p_session_eviction_last_reason maybe omitted if labels are unsupported
+   Add or wire metrics if not already complete:
+   - reload apply attempt total
+   - reload apply success total
+   - reload apply failure total
+   - reload apply rollback total
+   - reload apply sequence commit failure total
+   - reload apply active sequence
+   - reload apply session evictions total
+   - existing Run 072 session eviction counters must move truthfully
 
    Requirements:
    - no fabricated metrics
    - no duplicate families
-   - metrics count only real eviction attempts
-   - no reload-check validation-only path should increment eviction metrics
+   - validation-only reload-check must not increment apply-success metrics
    - logs must include:
-     - reason
-     - attempted count
-     - evicted count
-     - failed count
-   - no private material.
+     - old fingerprint prefix
+     - new fingerprint prefix
+     - old sequence
+     - new sequence
+     - eviction attempted/evicted/failed
+     - sequence commit success/failure
+     - rollback success/failure
+   - no private material
 
 Required implementation:
 
-1. Add session-eviction handle
-   Implement in the narrowest appropriate module:
-   - qbind-net session/peer manager if session ownership is there
-   - or qbind-node P2P wrapper if node owns session registry
-   - expose a handle to qbind-node without circular dependencies
+1. Wire LiveTrustApplyContext adapter
+   Add narrow runtime adapter in qbind-node, likely:
+   - pqc_trust_reload.rs
+   - or a small new module if cleaner
 
-2. Preserve normal behavior
-   When the hook is not called:
-   - N=2/N=4 peer connection behavior unchanged
-   - cert accepted/rejected metrics unchanged
-   - consensus traffic unchanged
-   - no sessions evicted
+   It should compose:
+   - LivePqcTrustState
+   - P2pSessionEvictor
+   - sequence persistence path
+   - metrics sink if available
 
-3. Add test-only/operator-trigger path
-   For Run 072 evidence, provide a safe way to trigger eviction:
-   - internal test harness API preferred
-   - hidden/dev-only local CLI or admin trigger acceptable only if disabled by default and local-only
-   - no unauthenticated remote endpoint
-   - no automatic eviction
+2. Remove UnsupportedRuntimeContext from the live production path
+   Only for the explicit local operator-triggered apply path.
+   Keep UnsupportedRuntimeContext for unsupported modes if appropriate.
 
-   The trigger must not imply trust-bundle live apply is implemented.
+3. Preserve reload-check
+   Existing:
+   - --p2p-trust-bundle-reload-check <PATH>
+   must remain:
+   - non-mutating
+   - no sequence persistence
+   - no live trust update
+   - no session eviction
+   - exits 0/1 as before
 
-4. Preserve Run 070 apply contract
-   If updating Run 070 apply tests:
-   - show that a mock/session-evictor can satisfy the contract
-   - keep production apply unsupported until LiveTrustApplyContext adapter is wired
-   - do not accidentally enable full live reload apply.
+4. Preserve startup path
+   Normal startup with signed trust bundle must behave exactly as before.
+   Startup must still persist sequence normally.
+   Startup must not invoke reload-apply metrics or session eviction.
 
-Required tests:
+5. Tests
+   Add tests proving:
+   - valid candidate apply swaps LivePqcTrustState.
+   - sequence commits only after successful swap and eviction.
+   - validation failure does not swap/evict/commit.
+   - swap failure does not evict/commit.
+   - eviction failure rolls back and does not commit.
+   - sequence commit failure rolls back.
+   - rollback failure after commit failure reports fatal/critical variant.
+   - reload-check remains non-mutating.
+   - startup path unchanged.
+   - Run 072 eviction report is consumed truthfully.
+   - metrics count attempts/success/failure/rollback truthfully.
+   - invalid rollback/tampered/wrong-chain/local-revoked candidates do not alter state.
 
-1. Unit tests
-   - empty session set eviction returns success with evicted=0.
-   - one active session evicted.
-   - multiple active sessions evicted.
-   - partial failure reports failure.
-   - repeated eviction is idempotent or returns evicted=0 after first call.
-   - eviction reason logged/reportable.
-   - no sequence persistence changes during eviction.
-   - no trust snapshot changes during eviction.
-
-2. Integration tests
-   - N=2 nodes connect normally.
-   - explicit eviction hook closes existing session(s).
-   - after eviction, connected peer/session count drops or eviction report shows sessions closed.
-   - if reconnect happens automatically, show reconnect under same trust state.
-   - if reconnect does not happen automatically, document and test the stable disconnected state.
-   - cert verification metrics do not fabricate new accepts/rejects during eviction.
-   - Run 071 live trust snapshot still readable before/after eviction.
-   - Run 069 reload-check remains non-mutating.
-   - Run 070 apply contract can call evictor in mock/contract tests without enabling production apply.
-
-Required regression commands:
-- cargo test -p qbind-node --lib pqc_live_trust
+Required regression tests:
 - cargo test -p qbind-node --lib pqc_trust_reload
+- cargo test -p qbind-node --lib pqc_live_trust
+- cargo test -p qbind-node --lib p2p_session_eviction
 - cargo test -p qbind-node --lib pqc_trust_bundle
 - cargo test -p qbind-node --lib pqc_trust_sequence
 - cargo test -p qbind-node --lib pqc_trust_activation
-- new Run 072 session-eviction tests
+- new Run 073 reload-apply runtime tests
 - cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
 - cargo test -p qbind-node --test run_070_pqc_trust_bundle_reload_apply_tests
 - cargo test -p qbind-node --test run_071_pqc_live_trust_tests
+- cargo test -p qbind-node --test run_072_p2p_session_eviction_tests
 - cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
 - cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
 - cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
@@ -278,38 +316,62 @@ If source touches timeout verification or binary consensus loop, also run:
 
 Release-binary evidence:
 
-1. Positive N=2 baseline
-   - start two nodes with signed trust bundle
+1. Positive baseline N=2 startup
+   - start two nodes with signed trust bundle sequence 1
    - prove peer connection works
-   - prove session/peer count > 0
    - prove cert accepted counters move
+   - prove sequence=1 persisted
    - no fallback
    - no Dummy crypto
 
-2. Eviction trigger smoke
-   - invoke explicit session-eviction hook/test trigger
-   - prove eviction attempted count / evicted count is truthful
-   - prove old sessions close
-   - prove no trust-state change
-   - prove no sequence-file change
-   - prove no fallback
-   - prove no Dummy crypto
+2. Positive live apply sequence 2
+   - operator-trigger local reload apply using valid candidate sequence 2
+   - prove candidate validates
+   - prove LivePqcTrustState changes to sequence 2 / fingerprint 2
+   - prove sessions are evicted
+   - prove sequence persistence updates to 2 after apply
+   - prove reload apply success metric increments
+   - prove Run 072 eviction counters move
+   - no fallback
+   - no Dummy crypto
 
 3. Reconnect behavior
    - if reconnect automatic:
-     - prove peers reconnect under same trust state
-     - accepted counters may move again; document exact behavior
+     - prove peers reconnect under new trust context
+     - cert accepted counters may move again; document exact behavior
    - if reconnect not automatic:
-     - prove session remains closed and node remains healthy
-     - document boundary
+     - prove old sessions close and node remains healthy
+     - document boundary honestly
 
-4. Negative no-trigger smoke
-   - normal startup without trigger does not evict sessions
-   - eviction metrics remain zero
+4. Negative rollback apply candidate
+   - attempt sequence 1 after sequence 2 accepted
+   - prove rejected
+   - prove live trust state remains sequence 2
+   - prove sequence persistence remains 2
+   - prove no session eviction
+   - no fallback
+
+5. Negative tampered/wrong-chain candidate
+   - prove rejected
+   - prove no live state mutation
+   - prove sequence unchanged
+   - prove no eviction
+
+6. Negative local-revoked candidate
+   - prove rejected
+   - prove no live state mutation
+   - prove sequence unchanged
+   - prove no eviction
+
+7. Proof reload-check remains validation-only
+   - run --p2p-trust-bundle-reload-check valid seq 3 candidate
+   - prove sequence file remains at 2
+   - prove no live apply metrics move
+   - prove no eviction
 
 Evidence document:
 Create:
-- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_072.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md
 
 Evidence document must include:
 - exact objective
@@ -318,24 +380,32 @@ Evidence document must include:
 - exact commands run
 - tests/evidence run and pass/fail status
 - investigation findings with file/function references
-- session ownership model
-- eviction hook/API semantics
-- metrics/logging
+- runtime adapter design
+- apply trigger
+- validation pipeline reuse
+- atomic state swap semantics
+- sequence commit ordering
+- rollback behavior
+- session eviction behavior
 - reconnect behavior
-- interaction with Run 070 apply contract
-- proof Run 069 reload-check remains non-mutating
-- proof Run 071 live trust context remains unchanged
+- metrics/logging behavior
+- proof reload-check remains validation-only
+- proof startup behavior preserved
 - release-binary evidence
+- proof invalid candidates do not alter state
 - proof no fallback to --p2p-trusted-root
 - proof no DummySig/DummyKem/DummyAead fallback
-- remaining open items
+- exact boundaries:
+  - peer/gossiped bundles still absent
+  - activation_epoch still absent
+  - KMS/HSM still absent
+  - signing-key ratification still absent
 - exact immediate next action
 
 contradiction.md update rules:
-- If session-eviction hook lands and is proven, update C4 to record that the production session-eviction blocker is narrowed/closed.
-- If eviction is not available in production runtime, record partial positive and exact boundary.
+- If live apply lands and is proven, update C4 to record hot reload narrowed from validation-only/session-ready to local operator-triggered live apply.
+- If reload apply works only in tests but not production binary, record partial positive and exact boundary.
 - Keep C4 open for:
-  - actual live trust-bundle apply
   - peer/gossiped bundle acceptance
   - activation_epoch runtime source
   - in-binary/on-chain bundle-signing-key ratification
@@ -344,17 +414,18 @@ contradiction.md update rules:
   - per-environment production trust-anchor operation
 - Do not close full C4.
 - Do not claim C5 closure.
-- If sessions remain alive after an eviction success report, record contradiction/regression.
-- If eviction mutates trust state or sequence state, record contradiction/regression.
-- If eviction triggers fallback/Dummy crypto, record contradiction/regression.
+- If apply burns sequence before successful state swap + eviction, record contradiction/regression.
+- If invalid candidate mutates live trust state, record contradiction/regression.
+- If session eviction is skipped while live trust changes, record contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record contradiction/regression.
 
 Expected verdict options:
 - Strongest positive:
-  production session-eviction hook lands; sessions can be evicted on demand; old sessions close; trust state and sequence state remain unchanged; reconnect behavior is proven or honestly bounded; Run 069/070/071 semantics preserved; no fallback; no Dummy crypto.
+  local operator-triggered live apply lands in production binary; valid candidate validates, swaps live trust state, evicts sessions, commits sequence after success; invalid candidates do not mutate state or sequence; reload-check remains non-mutating; no fallback; no Dummy crypto; tests and release evidence pass.
 - Partial positive:
-  eviction API lands but production runtime cannot expose or prove session closure. State exact boundary.
+  adapter/tests land but production live evidence or reconnect behavior is incomplete. State exact boundary.
 - Negative:
-  eviction reports success while sessions remain alive, mutates trust/sequence state, breaks normal P2P, fallback/Dummy crypto activates, or regressions fail.
+  apply burns sequence before swap/eviction, invalid candidate mutates state, session eviction is skipped, fallback/Dummy crypto activates, or regressions fail.
 
 Required final response:
 1. Exact verdict
