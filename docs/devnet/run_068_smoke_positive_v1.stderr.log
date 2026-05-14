@@ -1,0 +1,192 @@
+nohup: ignoring input
+[restore] no --restore-from-snapshot requested; normal startup.
+[metrics_http] Enabling metrics HTTP server on 127.0.0.1:9171 (from QBIND_METRICS_HTTP_ADDR)
+[metrics] Spawning metrics HTTP server on 127.0.0.1:9171 (set via QBIND_METRICS_HTTP_ADDR)
+[binary] P2P mode: starting transport + consensus loop. environment=MainNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 037: --p2p-mutual-auth=required on environment=mainnet is using the production-honest PQC static-root cert-verification path. NOTE: KEM/AEAD primitives on the binary path are still test-grade and remain a separate C4 piece (not C4(c)); MainNet readiness is therefore not yet implied. See docs/whitepaper/contradiction.md C4.
+[metrics_http] Listening on 127.0.0.1:9171
+[binary] Run 057: trust-bundle activation gate satisfied (required_height=None current_height=Some(0) required_epoch=None current_epoch=None)
+[binary] Run 055: trust-bundle sequence persistence env=mainnet chain_id=51424e444d41494e path=/tmp/run068/data_v1/pqc_trust_bundle_sequence.json first-load persisted_sequence=1 fp=1372726f
+[binary] Run 050/051: trust bundle loaded path=/tmp/run068/mat/trust-bundle.json env=mainnet fp=1372726f3490ed347547fce4ffcd93bc8ee132d6c397edba83461a983f2665da active_roots=1 revoked_roots=0 sequence=1 valid_from=0 valid_until=18446744073709551615 signature=verified(signing_key_id=e7456cca..) signing_keys_configured=1. Bundle root IDs: [c550f13d..]
+[binary] Run 062: trust-bundle revocation activation (configured=0 active=0 pending=0 root_active=0 root_pending=0 leaf_active=0 leaf_pending=0)
+[binary] Run 063: local-leaf issuer-root startup self-check passed (local_issuer_root_id=c550f13d.. bundle_fp=1372726f.. active_revoked_root_ids=0)
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=3 (root fingerprints: [id=c550f13d.. suite=100 fp=cc96a2c7])
+[binary] Run 052: revoked_leaf_fingerprints=0 (from trust bundle env=mainnet sequence=1)
+[Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
+[binary] P2P transport up. Listen address: 127.0.0.1:19471, static peers: 3
+[binary] Consensus loop config: local_validator_id=ValidatorId(1) num_validators=4 restore_baseline=false interconnect=p2p
+[binary] Multi-validator P2P (4 validators): inbound P2P consensus messages are routed into BasicHotStuffEngine via on_proposal_event / on_vote_event; engine actions flow back out through P2pConsensusNetwork.
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[binary] Run 032: validator signer not loaded — config.signer_keystore_path is not set; Run 030 bit-equivalent path (no outbound timeout signing). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_032.md.
+[binary] Run 033: SuiteAwareValidatorKeyProvider NOT built — network.static_peer_consensus_keys is empty (no --validator-consensus-key entries). Preserving Run 032 SignerPresentKeyProviderUnavailable disabled behaviour. See docs/whitepaper/contradiction.md C5.
+[binary] Run 033: timeout-verification probe: active=false reason=production pieces unavailable in current qbind-node binary path: qbind-node main.rs does not yet load validator keystore (signer_keystore_path unread on startup), NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes), and --p2p-mutual-auth runs on test-grade TrustedClientRoots/DummySig — see docs/whitepaper/contradiction.md C4/C5 policy=OptionalActivate validators=4 chain_id=chain_51424e444d41494e supported_suite_ids=[100] local_signer=absent(keystore_path_not_configured) peer_key_provider=absent(no_configured_keys)
+[binary] Run 033: timeout verification DISABLED — BinaryConsensusLoopIo::verification_ctx=None (Run 030 bit-equivalent path). Inbound timeout/new-view crypto verification and outbound timeout signing remain off until production pieces land. See docs/whitepaper/contradiction.md C5.
+[binary] P2P node started. Press Ctrl+C to exit.
+[binary-consensus] Starting consensus loop: local_id=ValidatorId(1) num_validators=4 tick=100ms restore_baseline=false interconnect=p2p late_peer_reemit=on timeout_verification=off
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[binary-consensus] B14: emitted TimeoutMsg for view=0 after 50 ticks of no progress (Run 046 pacer: threshold=50 ticks, level=1, next_threshold=100 ticks)
+[binary-consensus] B14: TimeoutCertificate advanced view 0 -> 1
+[binary-consensus] committed_anchor height=0 block_id=01000000000000000100000000000000ffffffffffffffffffffffffffffffff
+[snapshot] periodic snapshot skipped: committed height is zero
+[binary-consensus] committed_anchor height=1 block_id=0200000000000000020000000000000001000000000000000100000000000000
+[binary-consensus] committed_anchor height=2 block_id=0300000000000000030000000000000002000000000000000200000000000000
+[binary-consensus] committed_anchor height=3 block_id=0000000000000000040000000000000003000000000000000300000000000000
+[binary-consensus] committed_anchor height=4 block_id=0100000000000000050000000000000000000000000000000400000000000000
+[binary-consensus] committed_anchor height=5 block_id=0200000000000000060000000000000001000000000000000500000000000000
+[binary-consensus] committed_anchor height=6 block_id=0300000000000000070000000000000002000000000000000600000000000000
+[binary-consensus] committed_anchor height=7 block_id=0000000000000000080000000000000003000000000000000700000000000000
+[binary-consensus] committed_anchor height=8 block_id=0100000000000000090000000000000000000000000000000800000000000000
+[binary-consensus] committed_anchor height=9 block_id=02000000000000000a0000000000000001000000000000000900000000000000
+[binary-consensus] committed_anchor height=10 block_id=03000000000000000b0000000000000002000000000000000a00000000000000
+[binary-consensus] committed_anchor height=11 block_id=00000000000000000c0000000000000003000000000000000b00000000000000
+[binary-consensus] committed_anchor height=12 block_id=01000000000000000d0000000000000000000000000000000c00000000000000
+[binary-consensus] committed_anchor height=13 block_id=02000000000000000e0000000000000001000000000000000d00000000000000
+[binary-consensus] committed_anchor height=14 block_id=03000000000000000f0000000000000002000000000000000e00000000000000
+[binary-consensus] committed_anchor height=15 block_id=0000000000000000100000000000000003000000000000000f00000000000000
+[binary-consensus] committed_anchor height=16 block_id=0100000000000000110000000000000000000000000000001000000000000000
+[binary-consensus] committed_anchor height=17 block_id=0200000000000000120000000000000001000000000000001100000000000000
+[binary-consensus] committed_anchor height=18 block_id=0300000000000000130000000000000002000000000000001200000000000000
+[binary-consensus] committed_anchor height=19 block_id=0000000000000000140000000000000003000000000000001300000000000000
+[binary-consensus] committed_anchor height=20 block_id=0100000000000000150000000000000000000000000000001400000000000000
+[binary-consensus] committed_anchor height=21 block_id=0200000000000000160000000000000001000000000000001500000000000000
+[binary-consensus] committed_anchor height=22 block_id=0300000000000000170000000000000002000000000000001600000000000000
+[binary-consensus] committed_anchor height=23 block_id=0000000000000000180000000000000003000000000000001700000000000000
+[binary-consensus] committed_anchor height=24 block_id=0100000000000000190000000000000000000000000000001800000000000000
+[binary-consensus] committed_anchor height=25 block_id=02000000000000001a0000000000000001000000000000001900000000000000
+[binary-consensus] committed_anchor height=26 block_id=03000000000000001b0000000000000002000000000000001a00000000000000
+[binary-consensus] committed_anchor height=27 block_id=00000000000000001c0000000000000003000000000000001b00000000000000
+[binary-consensus] committed_anchor height=28 block_id=01000000000000001d0000000000000000000000000000001c00000000000000
+[binary-consensus] committed_anchor height=29 block_id=02000000000000001e0000000000000001000000000000001d00000000000000
+[binary-consensus] committed_anchor height=30 block_id=03000000000000001f0000000000000002000000000000001e00000000000000
+[binary-consensus] committed_anchor height=31 block_id=0000000000000000200000000000000003000000000000001f00000000000000
+[binary-consensus] committed_anchor height=32 block_id=0100000000000000210000000000000000000000000000002000000000000000
+[binary-consensus] committed_anchor height=33 block_id=0200000000000000220000000000000001000000000000002100000000000000
+[binary-consensus] committed_anchor height=34 block_id=0300000000000000230000000000000002000000000000002200000000000000
+[binary-consensus] committed_anchor height=35 block_id=0000000000000000240000000000000003000000000000002300000000000000
+[binary-consensus] committed_anchor height=36 block_id=0100000000000000250000000000000000000000000000002400000000000000
+[binary-consensus] committed_anchor height=37 block_id=0200000000000000260000000000000001000000000000002500000000000000
+[binary-consensus] committed_anchor height=38 block_id=0300000000000000270000000000000002000000000000002600000000000000
+[binary-consensus] committed_anchor height=39 block_id=0000000000000000280000000000000003000000000000002700000000000000
+[binary-consensus] committed_anchor height=40 block_id=0100000000000000290000000000000000000000000000002800000000000000
+[binary-consensus] committed_anchor height=41 block_id=02000000000000002a0000000000000001000000000000002900000000000000
+[binary-consensus] committed_anchor height=42 block_id=03000000000000002b0000000000000002000000000000002a00000000000000
+[binary-consensus] committed_anchor height=43 block_id=00000000000000002c0000000000000003000000000000002b00000000000000
+[binary-consensus] committed_anchor height=44 block_id=00000000000000005c0000000000000003000000000000005b00000000000000
+[binary-consensus] committed_anchor height=45 block_id=01000000000000005d0000000000000000000000000000005c00000000000000
+[binary-consensus] committed_anchor height=46 block_id=02000000000000005e0000000000000001000000000000005d00000000000000
+[binary-consensus] committed_anchor height=47 block_id=03000000000000005f0000000000000002000000000000005e00000000000000
+[binary-consensus] committed_anchor height=48 block_id=0000000000000000600000000000000003000000000000005f00000000000000
+[binary-consensus] committed_anchor height=49 block_id=0100000000000000610000000000000000000000000000006000000000000000
+[binary-consensus] committed_anchor height=50 block_id=0200000000000000620000000000000001000000000000006100000000000000
+[binary-consensus] committed_anchor height=51 block_id=0300000000000000630000000000000002000000000000006200000000000000
+[binary-consensus] committed_anchor height=52 block_id=0000000000000000640000000000000003000000000000006300000000000000
+[binary-consensus] committed_anchor height=53 block_id=0100000000000000650000000000000000000000000000006400000000000000
+[binary-consensus] committed_anchor height=54 block_id=0200000000000000660000000000000001000000000000006500000000000000
+[binary-consensus] committed_anchor height=55 block_id=0300000000000000670000000000000002000000000000006600000000000000
+[binary-consensus] committed_anchor height=56 block_id=0000000000000000680000000000000003000000000000006700000000000000
+[binary-consensus] committed_anchor height=57 block_id=0100000000000000690000000000000000000000000000006800000000000000
+[binary-consensus] committed_anchor height=58 block_id=02000000000000006a0000000000000001000000000000006900000000000000
+[binary-consensus] committed_anchor height=59 block_id=03000000000000006b0000000000000002000000000000006a00000000000000
+[binary-consensus] committed_anchor height=60 block_id=00000000000000006c0000000000000003000000000000006b00000000000000
+[binary-consensus] committed_anchor height=61 block_id=01000000000000006d0000000000000000000000000000006c00000000000000
+[binary-consensus] committed_anchor height=62 block_id=02000000000000006e0000000000000001000000000000006d00000000000000
+[binary-consensus] committed_anchor height=63 block_id=03000000000000006f0000000000000002000000000000006e00000000000000
+[binary-consensus] committed_anchor height=64 block_id=0000000000000000700000000000000003000000000000006f00000000000000
+[binary-consensus] committed_anchor height=65 block_id=0100000000000000710000000000000000000000000000007000000000000000
+[binary-consensus] committed_anchor height=66 block_id=0200000000000000720000000000000001000000000000007100000000000000
+[binary-consensus] committed_anchor height=67 block_id=0300000000000000730000000000000002000000000000007200000000000000
+[binary-consensus] committed_anchor height=68 block_id=0000000000000000740000000000000003000000000000007300000000000000
+[binary-consensus] committed_anchor height=69 block_id=0100000000000000750000000000000000000000000000007400000000000000
+[binary-consensus] committed_anchor height=70 block_id=0200000000000000760000000000000001000000000000007500000000000000
+[binary-consensus] committed_anchor height=71 block_id=0300000000000000770000000000000002000000000000007600000000000000
+[binary-consensus] committed_anchor height=72 block_id=0000000000000000780000000000000003000000000000007700000000000000
+[binary-consensus] committed_anchor height=73 block_id=0100000000000000790000000000000000000000000000007800000000000000
+[binary-consensus] committed_anchor height=74 block_id=02000000000000007a0000000000000001000000000000007900000000000000
+[binary-consensus] committed_anchor height=75 block_id=03000000000000007b0000000000000002000000000000007a00000000000000
+[binary-consensus] committed_anchor height=76 block_id=00000000000000007c0000000000000003000000000000007b00000000000000
+[binary-consensus] committed_anchor height=77 block_id=01000000000000007d0000000000000000000000000000007c00000000000000
+[binary-consensus] committed_anchor height=78 block_id=02000000000000007e0000000000000001000000000000007d00000000000000
+[binary-consensus] committed_anchor height=79 block_id=03000000000000007f0000000000000002000000000000007e00000000000000
+[binary-consensus] committed_anchor height=80 block_id=0000000000000000800000000000000003000000000000007f00000000000000
+[binary-consensus] committed_anchor height=81 block_id=0100000000000000810000000000000000000000000000008000000000000000
+[binary-consensus] committed_anchor height=82 block_id=0200000000000000820000000000000001000000000000008100000000000000
+[binary-consensus] committed_anchor height=83 block_id=0300000000000000830000000000000002000000000000008200000000000000
+[binary-consensus] committed_anchor height=84 block_id=0000000000000000840000000000000003000000000000008300000000000000
+[binary-consensus] committed_anchor height=85 block_id=0100000000000000850000000000000000000000000000008400000000000000
+[binary-consensus] committed_anchor height=86 block_id=0200000000000000860000000000000001000000000000008500000000000000
+[binary-consensus] committed_anchor height=87 block_id=0300000000000000870000000000000002000000000000008600000000000000
+[binary-consensus] committed_anchor height=88 block_id=0000000000000000880000000000000003000000000000008700000000000000
+[binary-consensus] committed_anchor height=89 block_id=0100000000000000890000000000000000000000000000008800000000000000
+[binary-consensus] committed_anchor height=90 block_id=02000000000000008a0000000000000001000000000000008900000000000000
+[binary-consensus] committed_anchor height=91 block_id=03000000000000008b0000000000000002000000000000008a00000000000000
+[binary-consensus] committed_anchor height=92 block_id=00000000000000008c0000000000000003000000000000008b00000000000000
+[binary-consensus] committed_anchor height=93 block_id=01000000000000008d0000000000000000000000000000008c00000000000000
+[binary-consensus] committed_anchor height=94 block_id=02000000000000008e0000000000000001000000000000008d00000000000000
+[binary-consensus] committed_anchor height=95 block_id=03000000000000008f0000000000000002000000000000008e00000000000000
+[binary-consensus] committed_anchor height=96 block_id=0000000000000000900000000000000003000000000000008f00000000000000
+[binary-consensus] committed_anchor height=97 block_id=0100000000000000910000000000000000000000000000009000000000000000
+[binary-consensus] committed_anchor height=98 block_id=0200000000000000920000000000000001000000000000009100000000000000
+[binary-consensus] committed_anchor height=99 block_id=0300000000000000930000000000000002000000000000009200000000000000
+[binary-consensus] committed_anchor height=100 block_id=0000000000000000940000000000000003000000000000009300000000000000
+[binary-consensus] committed_anchor height=101 block_id=0100000000000000950000000000000000000000000000009400000000000000
+[binary-consensus] committed_anchor height=102 block_id=0200000000000000960000000000000001000000000000009500000000000000
+[binary-consensus] committed_anchor height=103 block_id=0300000000000000970000000000000002000000000000009600000000000000
+[binary-consensus] committed_anchor height=104 block_id=0000000000000000980000000000000003000000000000009700000000000000
+[binary-consensus] committed_anchor height=105 block_id=0100000000000000990000000000000000000000000000009800000000000000
+[binary-consensus] committed_anchor height=106 block_id=02000000000000009a0000000000000001000000000000009900000000000000
+[binary-consensus] committed_anchor height=107 block_id=03000000000000009b0000000000000002000000000000009a00000000000000
+[binary-consensus] committed_anchor height=108 block_id=00000000000000009c0000000000000003000000000000009b00000000000000
+[binary-consensus] committed_anchor height=109 block_id=01000000000000009d0000000000000000000000000000009c00000000000000
+[binary-consensus] committed_anchor height=110 block_id=02000000000000009e0000000000000001000000000000009d00000000000000
+[binary-consensus] committed_anchor height=111 block_id=03000000000000009f0000000000000002000000000000009e00000000000000
+[binary-consensus] committed_anchor height=112 block_id=0000000000000000a00000000000000003000000000000009f00000000000000
+[binary-consensus] committed_anchor height=113 block_id=0100000000000000a1000000000000000000000000000000a000000000000000
+[binary-consensus] committed_anchor height=114 block_id=0200000000000000a2000000000000000100000000000000a100000000000000
+[binary-consensus] committed_anchor height=115 block_id=0300000000000000a3000000000000000200000000000000a200000000000000
+[binary-consensus] committed_anchor height=116 block_id=0000000000000000a4000000000000000300000000000000a300000000000000
+[binary-consensus] committed_anchor height=117 block_id=0100000000000000a5000000000000000000000000000000a400000000000000
+[binary-consensus] committed_anchor height=118 block_id=0200000000000000a6000000000000000100000000000000a500000000000000
+[binary-consensus] committed_anchor height=119 block_id=0300000000000000a7000000000000000200000000000000a600000000000000
+[binary-consensus] committed_anchor height=120 block_id=0000000000000000a8000000000000000300000000000000a700000000000000
+[binary-consensus] committed_anchor height=121 block_id=0100000000000000a9000000000000000000000000000000a800000000000000
+[binary-consensus] committed_anchor height=122 block_id=0200000000000000aa000000000000000100000000000000a900000000000000
+[binary-consensus] committed_anchor height=123 block_id=0300000000000000ab000000000000000200000000000000aa00000000000000
+[binary-consensus] committed_anchor height=124 block_id=0000000000000000ac000000000000000300000000000000ab00000000000000
+[binary-consensus] committed_anchor height=125 block_id=0100000000000000ad000000000000000000000000000000ac00000000000000
+[binary-consensus] committed_anchor height=126 block_id=0200000000000000ae000000000000000100000000000000ad00000000000000
+[binary-consensus] committed_anchor height=127 block_id=0300000000000000af000000000000000200000000000000ae00000000000000
+[binary-consensus] committed_anchor height=128 block_id=0000000000000000b0000000000000000300000000000000af00000000000000
+[binary-consensus] committed_anchor height=129 block_id=0100000000000000b1000000000000000000000000000000b000000000000000
+[binary-consensus] committed_anchor height=130 block_id=0200000000000000b2000000000000000100000000000000b100000000000000
+[binary-consensus] committed_anchor height=131 block_id=0300000000000000b3000000000000000200000000000000b200000000000000
+[binary-consensus] committed_anchor height=132 block_id=0000000000000000b4000000000000000300000000000000b300000000000000
+[binary-consensus] committed_anchor height=133 block_id=0100000000000000b5000000000000000000000000000000b400000000000000
+[binary-consensus] committed_anchor height=134 block_id=0200000000000000b6000000000000000100000000000000b500000000000000
+[binary-consensus] committed_anchor height=135 block_id=0300000000000000b7000000000000000200000000000000b600000000000000
+[binary-consensus] committed_anchor height=136 block_id=0000000000000000b8000000000000000300000000000000b700000000000000
+[binary-consensus] committed_anchor height=137 block_id=0100000000000000b9000000000000000000000000000000b800000000000000
+[binary-consensus] committed_anchor height=138 block_id=0200000000000000ba000000000000000100000000000000b900000000000000
+[binary-consensus] committed_anchor height=139 block_id=0300000000000000bb000000000000000200000000000000ba00000000000000
+[binary-consensus] committed_anchor height=140 block_id=0000000000000000bc000000000000000300000000000000bb00000000000000
+[binary-consensus] committed_anchor height=141 block_id=0100000000000000bd000000000000000000000000000000bc00000000000000
+[binary-consensus] committed_anchor height=142 block_id=0200000000000000be000000000000000100000000000000bd00000000000000
+[binary-consensus] committed_anchor height=143 block_id=0300000000000000bf000000000000000200000000000000be00000000000000
+[binary-consensus] committed_anchor height=144 block_id=0000000000000000c0000000000000000300000000000000bf00000000000000
+[binary-consensus] committed_anchor height=145 block_id=0100000000000000c1000000000000000000000000000000c000000000000000
+[binary-consensus] committed_anchor height=146 block_id=0200000000000000c2000000000000000100000000000000c100000000000000
+[binary-consensus] committed_anchor height=147 block_id=0300000000000000c3000000000000000200000000000000c200000000000000
+[binary-consensus] committed_anchor height=148 block_id=0000000000000000c4000000000000000300000000000000c300000000000000
+[binary-consensus] committed_anchor height=149 block_id=0100000000000000c5000000000000000000000000000000c400000000000000
+[binary-consensus] committed_anchor height=150 block_id=0200000000000000c6000000000000000100000000000000c500000000000000
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Read error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Write error: channel error: Io(Os { code: 32, kind: BrokenPipe, message: "Broken pipe" })
+[binary-consensus] committed_anchor height=151 block_id=0300000000000000c7000000000000000200000000000000c600000000000000
+[P2P] Failed to broadcast to NodeId(0fe946fae4a274be): channel closed
+[binary-consensus] committed_anchor height=152 block_id=0000000000000000c8000000000000000300000000000000c700000000000000
+[P2P] Failed to broadcast to NodeId(0fe946fae4a274be): channel closed
+[binary-consensus] committed_anchor height=153 block_id=0100000000000000c9000000000000000000000000000000c800000000000000
