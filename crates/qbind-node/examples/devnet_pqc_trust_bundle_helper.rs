@@ -155,14 +155,24 @@
 //!   `build_helper_bundle` would have produced).
 //!
 //! Optional 5th positional argument: `[activation_height_override]`
-//!   Decimal `u64`. If supplied, the bundle's bundle-level
-//!   `activation_height` field is set to this value BEFORE signing
-//!   and before the canonical fingerprint is computed. Defaults to
-//!   `None` (no bundle-level activation gate). This is an
-//!   evidence-tooling knob used by Run 057 to mint
+//!   Decimal `u64` or the literal string `none`. If supplied as a
+//!   decimal `u64`, the bundle's bundle-level `activation_height`
+//!   field is set to this value BEFORE signing and before the
+//!   canonical fingerprint is computed. The literal string `none`
+//!   forces `activation_height = null` explicitly (equivalent to
+//!   omitting this argument when no later positional argument is
+//!   needed). Defaults to `None` (no bundle-level activation gate).
+//!   This is an evidence-tooling knob used by Run 057 to mint
 //!   "future-activation" fixtures on the same DevNet trust domain
-//!   shape; it does NOT change signing semantics (the field is part
-//!   of the signed preimage and canonical fingerprint, as
+//!   shape and extended by Run 067 to allow minting a MainNet
+//!   signed bundle WITHOUT a bundle-level `activation_height` while
+//!   still pinning a non-default `chain_id_override` (the Run 065
+//!   per-environment minimum activation-margin policy rejects any
+//!   in-window positive `activation_height` on a fresh MainNet data
+//!   dir, so the positive Run 067 smoke needs `activation_height =
+//!   None` paired with an explicit MainNet `chain_id`). It does NOT
+//!   change signing semantics (the field is part of the signed
+//!   preimage and canonical fingerprint, as
 //!   `pqc_trust_bundle::canonical_signing_bytes` /
 //!   `canonical_fingerprint` already include it).
 //!
@@ -503,9 +513,21 @@ fn main() {
         s.parse::<u64>()
             .expect("optional [sequence_override] must be a u64 decimal")
     });
-    let activation_height_override: Option<u64> = args.next().map(|s| {
-        s.parse::<u64>()
-            .expect("optional [activation_height_override] must be a u64 decimal")
+    // Run 067: accept either `none` (forces `activation_height = null`
+    // explicitly, equivalent to omitting this positional when no later
+    // positional is needed) or a decimal `u64`. The outer `Option<...>`
+    // wraps whether the positional was supplied; the inner
+    // `Option<u64>` is the value to write into
+    // `bundle.activation_height`.
+    let activation_height_override: Option<Option<u64>> = args.next().map(|s| {
+        if s.eq_ignore_ascii_case("none") {
+            None
+        } else {
+            Some(
+                s.parse::<u64>()
+                    .expect("optional [activation_height_override] must be a u64 decimal or 'none'"),
+            )
+        }
     });
     // Run 059: optional bundle `chain_id` override. The string `none`
     // forces `chain_id = null` explicitly; any other value is written
@@ -587,11 +609,12 @@ fn main() {
             if let Some(seq) = sequence_override {
                 b.sequence = seq;
             }
-            if let Some(h) = activation_height_override {
-                // Run 057: bundle-level activation_height set before
+            if let Some(maybe_h) = activation_height_override {
+                // Run 057/067: bundle-level activation_height set before
                 // fingerprint computation; unsigned paths still cover
-                // the field via the canonical fingerprint.
-                b.activation_height = Some(h);
+                // the field via the canonical fingerprint. `None`
+                // explicitly clears the field.
+                b.activation_height = maybe_h;
             }
             // Run 059: bundle.chain_id override before fingerprint
             // computation.
@@ -613,10 +636,13 @@ fn main() {
                 // signed preimage covers the requested sequence.
                 b.sequence = seq;
             }
-            if let Some(h) = activation_height_override {
-                // Run 057: override bundle-level activation_height
+            if let Some(maybe_h) = activation_height_override {
+                // Run 057/067: override bundle-level activation_height
                 // BEFORE signing so the signed preimage covers it.
-                b.activation_height = Some(h);
+                // `None` explicitly clears the field (Run 067 positive
+                // MainNet smoke needs this combined with
+                // `chain_id_override` on a fresh data dir).
+                b.activation_height = maybe_h;
             }
             // Run 059: override bundle.chain_id BEFORE signing so
             // the signed preimage covers the declared chain_id.

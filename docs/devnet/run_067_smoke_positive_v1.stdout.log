@@ -1,0 +1,9 @@
+qbind-node[validator=V1]: starting in environment=MainNet chain_id=0x51424e444d41494e scope=MAIN profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:19471 peers=1 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:19471 (node_id=NodeId(55634f4bb80ab655))
+[T175] P2P node builder: validator=ValidatorId(1) node_id=NodeId(55634f4bb80ab655) num_validators=2 peer_kem_overrides=1 mutual_auth=Required
+[P2P] Dial 127.0.0.1:19470: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Peer NodeId(abe4026b35ec0e11) connected
+[P2P] Accepted connection from 127.0.0.1:46562
+[P2P] Accepted connection from 127.0.0.1:46576
+[P2P] Inbound connection from 127.0.0.1:46576 bound to deterministic NodeId NodeId(abe4026b35ec0e11) via inbound identity resolver (B8, test-grade)
+[P2P] Peer NodeId(abe4026b35ec0e11) connected

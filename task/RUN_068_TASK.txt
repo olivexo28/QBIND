@@ -32,30 +32,31 @@ Current state:
 - Run 062 implemented per-entry revocation activation_height active/pending behavior.
 - Run 063 implemented local issuer-root revocation startup self-check.
 - Run 064 updated the operator runbook for Runs 061–063.
-- Run 065 implemented deterministic per-environment minimum activation-height policy:
-  - DevNet = 0 blocks
-  - TestNet = 8 blocks
-  - MainNet = 32 blocks
-  - too-soon TestNet/MainNet activation fails closed before sequence update, root merge, or P2P start
-  - emergency immediate revocation remains available when revocation activation_height is None
+- Run 065 implemented deterministic per-environment minimum activation-height policy.
 - Run 066 updated the operator runbook for Run 065.
-- Current remaining C4 trust/lifecycle items include:
-  - multi-validator MainNet peer-connection evidence
-  - activation_epoch runtime source
-  - minimum-margin enforcement on future gossiped / peer-supplied trust-bundle path
-  - on-the-fly trust-bundle hot reload
-  - in-binary / on-chain bundle-signing-key ratification
-  - KMS/HSM custody integration
-  - production fast-sync / consensus-storage restore
-  - per-environment production trust-anchor operation
+- Run 067 strongest-positive:
+  - produced N=2 MainNet signed-bundle peer-connection evidence
+  - release qbind-node binary unchanged
+  - two MainNet validators loaded the same signed MainNet trust bundle
+  - chain_id = 0x51424e444d41494e accepted
+  - sequence=1 first-load persistence worked on both data dirs
+  - real ML-DSA-44 transport certs, real ML-KEM-768, real ChaCha20-Poly1305
+  - cert verify accepted_total=2 and rejected_total=0 on both nodes
+  - no --p2p-trusted-root fallback
+  - no DummySig / DummyKem / DummyAead fallback
+  - validators committed at least 200 byte-identical consensus anchors in lockstep
+- Run 067 boundary:
+  - only N=2 MainNet peer-connection evidence
+  - no N>=4 MainNet peer-connection evidence yet
+  - no MainNet peer-connection evidence under revocation gates
 - C4 remains OPEN.
 - C5 remains OPEN / narrowed.
 
 Task:
-Run 067. Produce multi-validator MainNet signed-bundle peer-connection evidence on the release binary.
+Run 068. Produce N=4 MainNet signed-bundle peer-connection evidence on the release binary.
 
 Primary objective:
-Prove that multiple qbind-node validators running in MainNet mode can establish real PQC mutual-auth peer connections using the signed trust-bundle path, not static-root fallback or test-grade crypto.
+Prove that four qbind-node validators running in MainNet mode can establish real PQC mutual-auth peer connections using the signed trust-bundle path, with consensus progress and no fallback to static roots or test-grade crypto.
 
 Important framing:
 This is an evidence-first run.
@@ -73,6 +74,7 @@ Do not weaken signed-bundle verification.
 Do not weaken chain_id enforcement.
 Do not weaken sequence anti-rollback persistence.
 Do not weaken activation-height or minimum-margin policy.
+Do not weaken local or peer revocation checks.
 Do not silently fall back to --p2p-trusted-root.
 Do not silently fall back to DummySig, DummyKem, or DummyAead.
 Do not claim full C4 or C5 closure.
@@ -91,21 +93,27 @@ Required active stack:
 - signed MainNet trust bundle with:
   - environment = MainNet
   - chain_id matching runtime MainNet NodeConfig.chain_id()
-  - sequence valid for each node data dir
+  - sequence valid for each fresh node data dir
   - activation_height satisfying MainNet minimum-margin policy or absent if allowed
   - valid active root(s)
-  - no local/peer leaf revocation that would block the intended positive connection
-- metrics enabled
+  - no active local/peer leaf or issuer-root revocation that would block the intended positive connection
+- complete --p2p-peer-leaf-cert mapping for each node
+- metrics enabled on every node
 - no --p2p-trusted-root
 - no DummySig
 - no DummyKem
 - no DummyAead
 
 Strict scope:
-- Prefer N=2 release-binary MainNet peer-connection smoke as the smallest evidence shape.
-- If N=2 is insufficient due current node topology requirements, use N=4 but keep the run short.
-- Do not require a full long B14 recovery run unless the binary naturally reaches it and it is cheap.
-- Existing Run 050–066 behavior must be preserved.
+- Prefer N=4 release-binary MainNet peer-connection smoke as the primary evidence shape.
+- Keep the run short but long enough to prove:
+  - peer connectivity,
+  - cert accepted counters,
+  - zero rejection counters under honest traffic,
+  - consensus anchor progress on all nodes.
+- Do not require long B14 absent-leader recovery unless it naturally occurs and is cheap.
+- Do not add revocation gates to this run unless trivial; no-revocation positive evidence is the primary target.
+- Existing Run 050–067 behavior must be preserved.
 - Crosscheck all evidence against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
 
 Required evidence cases:
@@ -135,77 +143,72 @@ Required evidence cases:
      - --data-dir
 
 2. Generate MainNet trust material
-   Create material for at least two validators:
+   Create material for four validators:
    - one signed MainNet trust bundle
    - one ML-DSA-44 transport root
    - one trust-bundle signing key
-   - validator leaf delegation certs
-   - ML-KEM-768 leaf secret files
-   - all peer leaf cert mappings required by qbind-node
+   - four validator leaf delegation certs
+   - four ML-KEM-768 leaf secret files
+   - all peer leaf cert mappings required by each qbind-node instance
    - no private key material in logs
 
    Required:
    - bundle chain_id must match runtime MainNet chain_id.
    - bundle signature must verify.
    - sequence persistence must be valid for each fresh data dir.
-   - activation policy must not block the positive smoke.
+   - activation/minimum-margin policy must not block the positive smoke.
    - if activation_height is included, it must respect MainNet minimum margin and Run 057 current-height behavior.
    - if activation_height is omitted, document why that is valid under current policy.
 
-3. Positive N=2 MainNet peer-connection smoke
-   Run V0 and V1 with:
+3. Positive N=4 MainNet peer-connection smoke
+   Run V0, V1, V2, and V3 with:
    - --env mainnet
    - signed MainNet trust bundle
-   - signing key flag
-   - required pqc-static-root mutual auth
+   - trust-bundle signing key flag
+   - Required pqc-static-root mutual auth
    - real PQC leaf cert/KEM material
    - metrics endpoints
+   - complete peer cert mappings
 
    Prove:
-   - both nodes start.
-   - signed bundle verifies on both nodes.
+   - all four nodes start.
+   - signed bundle verifies on all four nodes.
    - MainNet environment is accepted only because bundle environment is MainNet.
-   - chain_id check passes.
+   - chain_id check passes on all nodes.
    - sequence persistence record is written for each node.
    - activation/minimum-margin policy does not reject the bundle.
-   - P2P mutual-auth connection succeeds.
+   - P2P mutual-auth connections succeed.
    - newly_connected_peers or equivalent peer-connected signal appears.
-   - cert verify accepted counter moves.
-   - cert rejected counters remain zero.
+   - cert verify accepted counters move on all nodes.
+   - cert rejected counters remain zero on all nodes.
    - qbind_p2p_pqc_root_mode = pqc-static-root / expected numeric value.
    - qbind_p2p_pqc_roots_configured > 0.
    - qbind_p2p_pqc_trust_bundle_loaded = 1.
    - qbind_p2p_pqc_trust_bundle_signature_verified_total = 1 per node, if metrics expose it.
+   - consensus anchors progress on all four nodes.
+   - at least several committed anchors are byte-identical across all four nodes.
    - no --p2p-trusted-root was supplied.
    - no DummySig / DummyKem / DummyAead fallback.
 
-4. Negative MainNet unsigned bundle peer-connection smoke
-   If low-cost:
-   - attempt the same N=2 setup with unsigned MainNet bundle.
+4. Negative unsigned MainNet N=4 startup check
+   Optional if low-cost:
+   - attempt one node or N=4 setup with unsigned MainNet bundle.
    - startup must fail closed before peer connection.
    - no sequence persistence file created/updated.
    - no fallback.
    - no Dummy crypto.
 
-   If this was already strongly covered by Run 059 and not rerun, state boundary honestly.
+   If not rerun because Run 059 already covers it, document that boundary honestly.
 
-5. Negative MainNet revoked-peer smoke
-   If low-cost:
-   - signed MainNet bundle revokes V1 leaf fingerprint or issuer root.
-   - V0/V1 connection must fail closed.
+5. Optional N=4 MainNet revoked-peer check
+   Optional if low-cost:
+   - signed MainNet bundle revokes one peer leaf fingerprint or issuer root.
+   - affected peer connection must fail closed.
    - rejected_revoked counter moves where observable.
    - no fallback.
    - no Dummy crypto.
 
-   Do not block the primary positive peer-connection proof on this if it becomes expensive; Run 054/061/063 already cover DevNet revocation paths.
-
-6. Optional N=4 MainNet smoke
-   If N=2 passes and N=4 is cheap:
-   - run a short N=4 MainNet signed-bundle cluster.
-   - prove all expected peers connect.
-   - prove cert accepted counters move.
-   - prove no rejection counters under honest traffic.
-   - no need for long B14 unless naturally available.
+   Do not block the primary N=4 positive proof on this; Run 054/061/063 already cover revocation paths.
 
 Required tests to rerun:
 - cargo test -p qbind-node --lib pqc_trust_bundle
@@ -240,7 +243,7 @@ If source touches timeout verification or binary consensus loop, also run:
 
 Evidence document:
 Create:
-- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_067.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_068.md
 
 Evidence document must include:
 - exact objective
@@ -253,22 +256,24 @@ Evidence document must include:
 - MainNet trust-bundle material procedure
 - MainNet chain_id expected/used
 - signed-bundle verification proof
-- sequence persistence record contents for each node
+- sequence persistence record contents for all four nodes
 - activation/minimum-margin status for bundle used
-- positive N=2 MainNet peer-connection smoke
+- positive N=4 MainNet peer-connection smoke
 - optional negative unsigned/revoked MainNet smokes if run
-- optional N=4 smoke if run
-- /metrics excerpts from both nodes
+- /metrics excerpts from all four nodes
+- peer-connection evidence from logs
+- consensus anchor progression evidence
+- byte-identical anchor evidence across all four nodes
 - proof no --p2p-trusted-root supplied
 - proof no DummySig/DummyKem/DummyAead fallback
-- exact boundary if full MainNet cluster or N=4 is not run
+- exact boundary if long B14 or revoked peer test is not run
 - remaining open items
 - exact immediate next action
 
 contradiction.md update rules:
-- If MainNet N=2 signed-bundle peer connection succeeds, update C4 to record multi-validator MainNet peer-connection evidence narrowed/closed for scoped N=2.
-- If N=4 is also run successfully, record that separately.
-- If only startup/load passes but peer connection fails for unrelated config, state the exact boundary.
+- If N=4 MainNet signed-bundle peer connection succeeds, update C4 to record multi-validator MainNet peer-connection evidence narrowed/closed for scoped N=4.
+- If N=4 also shows consensus anchor lockstep, record that separately.
+- If only N=2 remains successful and N=4 fails for unrelated topology config, state the exact boundary.
 - Keep C4 open for:
   - activation_epoch runtime source
   - minimum-margin enforcement on future gossiped / peer-supplied trust-bundle path
@@ -285,11 +290,11 @@ contradiction.md update rules:
 
 Expected verdict options:
 - Strongest positive:
-  N=2 MainNet release-binary signed-bundle peer connection succeeds with real PQC transport, signed bundle verification, chain_id enforcement, sequence persistence, no static-root fallback, no Dummy crypto, and required regressions pass.
+  N=4 MainNet release-binary signed-bundle peer connection succeeds with real PQC transport, signed bundle verification, chain_id enforcement, sequence persistence, no static-root fallback, no Dummy crypto, consensus anchor lockstep, and required regressions pass.
 - Partial positive:
-  MainNet signed-bundle startup/load succeeds but peer connection is blocked by unrelated config. State boundary.
+  MainNet signed-bundle startup/load succeeds but N=4 peer connection or anchor lockstep is blocked by unrelated config. State boundary.
 - Negative:
-  unsigned/tampered/wrong-chain MainNet bundle is accepted, peer connection falls back to static roots/Dummy crypto, or regressions fail.
+  unsigned/tampered/wrong-chain MainNet bundle is accepted, peer connection falls back to static roots/Dummy crypto, N=4 cannot connect due trust-bundle regression, or regressions fail.
 
 Required final response:
 1. Exact verdict
