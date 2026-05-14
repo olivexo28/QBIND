@@ -1050,6 +1050,120 @@ impl TcpKemTlsP2pService {
     pub fn bytes_received_total(&self) -> u64 {
         self.bytes_received.load(Ordering::Relaxed)
     }
+
+    // ------------------------------------------------------------------
+    // Run 072 — production-honest synchronous P2P session-eviction hook.
+    //
+    // See `crate::p2p_session_eviction` for the policy contract. This
+    // method is also surfaced via the
+    // `crate::p2p_session_eviction::P2pSessionEvictor` impl below so a
+    // future Run 073 `LiveTrustApplyContext` adapter can hold a
+    // `&dyn P2pSessionEvictor` without depending on `TcpKemTlsP2pService`.
+    // ------------------------------------------------------------------
+
+    /// Run 072 helper: number of currently authenticated peer
+    /// sessions in the registry. Cheap (single read lock).
+    pub fn live_session_count(&self) -> usize {
+        self.peers.read().len()
+    }
+
+    /// Run 072 entry point: synchronously evict every currently
+    /// authenticated P2P session.
+    ///
+    /// Semantics: see `crate::p2p_session_eviction` module docs.
+    ///
+    /// Implementation notes (race safety):
+    /// - The full peer map is drained under a single
+    ///   `parking_lot::RwLock` write guard via `std::mem::take`. After
+    ///   the guard drops, the listener / dialer may immediately
+    ///   register new peers under fresh KEMTLS handshakes — these new
+    ///   peers are NOT part of the eviction call's `attempted` count
+    ///   and remain alive after this returns.
+    /// - For each drained `PeerConnection`, we drop `tx` (this closes
+    ///   the write loop's mpsc; the write task then exits and releases
+    ///   the `AeadSession` that holds the c2s/s2c keys) and abort the
+    ///   `read_handle` / `write_handle` task handles (this terminates
+    ///   the per-peer read loop synchronously without an `.await`).
+    /// - `connections_current` is reset to the post-eviction registry
+    ///   size, observed under the same write guard.
+    /// - The listener task handle and the B8 initial-dial-with-retry
+    ///   handles are deliberately NOT touched — Run 072 is a session
+    ///   eviction, not a transport shutdown.
+    ///
+    /// Returns:
+    /// - `Ok(EvictionReport)` with `attempted == evicted` in the
+    ///   happy path. The current implementation has no failure mode
+    ///   short of a `RwLock` panic; partial failure would be reported
+    ///   truthfully on a future implementation that gains one.
+    /// - `Err(EvictionError::UnsupportedSessionEviction(_))` is never
+    ///   produced by this implementation (the registry is always
+    ///   available); it is reserved for stub transports like
+    ///   `NullP2pService`.
+    pub fn evict_all_sessions(
+        &self,
+        reason: crate::p2p_session_eviction::EvictionReason,
+    ) -> Result<
+        crate::p2p_session_eviction::EvictionReport,
+        crate::p2p_session_eviction::EvictionError,
+    > {
+        let drained: Vec<(NodeId, PeerConnection)> = {
+            let mut guard = self.peers.write();
+            let taken: HashMap<NodeId, PeerConnection> = std::mem::take(&mut *guard);
+            taken.into_iter().collect()
+        };
+        let attempted = drained.len();
+        let mut evicted = 0usize;
+        for (_node_id, conn) in drained {
+            // Dropping `tx` closes the outbound mpsc so the write
+            // loop's `recv()` returns `None` and the task exits,
+            // releasing the AEAD session. `abort()` on both handles
+            // ensures neither loop continues to read/write encrypted
+            // bytes if it was blocked on `read()` / `recv()`.
+            let PeerConnection {
+                tx,
+                read_handle,
+                write_handle,
+                node_id: _node_id_field,
+            } = conn;
+            drop(tx);
+            read_handle.abort();
+            write_handle.abort();
+            evicted += 1;
+        }
+        // The eviction loop above has no fallible step in Run 072;
+        // every drained peer is counted as evicted. `failed=0` is
+        // truthful here. (If a future implementation gains a fallible
+        // close path, it MUST flip individual entries into `failed`
+        // instead of silently claiming success.)
+        let failed = attempted - evicted;
+        self.connections_current
+            .store(self.peers.read().len() as u64, Ordering::Relaxed);
+        Ok(crate::p2p_session_eviction::EvictionReport::new(
+            reason, attempted, evicted, failed,
+        ))
+    }
+}
+
+// ------------------------------------------------------------------
+// Run 072 — `P2pSessionEvictor` impl forwards to the sync method.
+//
+// Living on the concrete type lets a future Run 073 adapter accept a
+// generic `&dyn P2pSessionEvictor` (or `Arc<dyn P2pSessionEvictor>`)
+// without coupling to `TcpKemTlsP2pService`.
+// ------------------------------------------------------------------
+impl crate::p2p_session_eviction::P2pSessionEvictor for TcpKemTlsP2pService {
+    fn connected_session_count(&self) -> usize {
+        self.live_session_count()
+    }
+    fn evict_all_sessions(
+        &self,
+        reason: crate::p2p_session_eviction::EvictionReason,
+    ) -> Result<
+        crate::p2p_session_eviction::EvictionReport,
+        crate::p2p_session_eviction::EvictionError,
+    > {
+        TcpKemTlsP2pService::evict_all_sessions(self, reason)
+    }
 }
 
 // ============================================================================

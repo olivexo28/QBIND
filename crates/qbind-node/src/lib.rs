@@ -105,6 +105,8 @@ pub mod node_config;
 pub mod p2p;
 pub mod p2p_inbound;
 pub mod p2p_node_builder;
+/// Run 072 — production-honest internal P2P session-eviction hook.
+pub mod p2p_session_eviction;
 pub mod p2p_tcp;
 pub mod peer_key_provider;
 // Run 037 — production-honest PQC KEMTLS root-key distribution config.

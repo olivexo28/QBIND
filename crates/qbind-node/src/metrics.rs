@@ -5798,6 +5798,41 @@ pub struct P2pMetrics {
     pqc_trust_bundle_activation_epoch_required: AtomicU64,
     pqc_trust_bundle_activation_epoch_current: AtomicU64,
     pqc_trust_bundle_activation_rejected_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 072 — production-honest P2P session-eviction hook metrics.
+    //
+    //   qbind_p2p_session_eviction_attempt_total
+    //       (counter; +1 per `P2pSessionEvictor::evict_all_sessions`
+    //       call, regardless of outcome — including calls that
+    //       return `EvictionError::UnsupportedSessionEviction`)
+    //   qbind_p2p_session_eviction_success_total
+    //       (counter; +1 per call that returned
+    //       `Ok(EvictionReport)` AND `report.is_full_success()`)
+    //   qbind_p2p_session_eviction_failure_total
+    //       (counter; +1 per call that returned `Err(_)` OR
+    //       `Ok(EvictionReport)` with `report.failed > 0`)
+    //   qbind_p2p_session_eviction_sessions_evicted_total
+    //       (counter; +N per call, where N is `report.evicted`)
+    //
+    // Discipline:
+    // - These counters are bumped ONLY by code paths that actually
+    //   invoke the Run 072 eviction hook. Run 069 reload-check and
+    //   Run 070 validate-only never bump them (proven by the
+    //   integration tests added in
+    //   `tests/run_072_p2p_session_eviction_tests.rs`).
+    // - The Run 070 production binary path still surfaces
+    //   `ReloadApplyError::UnsupportedRuntimeContext` and exits before
+    //   `/metrics` is bound, so these counters stay at zero in that
+    //   path.
+    // - No label cardinality: per-reason breakdowns are intentionally
+    //   omitted in Run 072 (single source of truth: the operator log
+    //   line printed via `EvictionReport::log_line`).
+    // ------------------------------------------------------------------
+    session_eviction_attempt_total: AtomicU64,
+    session_eviction_success_total: AtomicU64,
+    session_eviction_failure_total: AtomicU64,
+    session_eviction_sessions_evicted_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6644,6 +6679,26 @@ impl P2pMetrics {
             self.pqc_trust_bundle_activation_rejected_total()
         ));
 
+        // Run 072 — P2P session-eviction hook counters.
+        // Each name appears exactly once in the rendered body
+        // (asserted by `session_eviction_metrics_render_once_in_format_metrics`).
+        output.push_str(&format!(
+            "qbind_p2p_session_eviction_attempt_total {}\n",
+            self.session_eviction_attempt_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_session_eviction_success_total {}\n",
+            self.session_eviction_success_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_session_eviction_failure_total {}\n",
+            self.session_eviction_failure_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_session_eviction_sessions_evicted_total {}\n",
+            self.session_eviction_sessions_evicted_total()
+        ));
+
         output
     }
 
@@ -6981,6 +7036,68 @@ impl P2pMetrics {
     pub fn inc_pqc_trust_bundle_activation_rejected(&self) {
         self.pqc_trust_bundle_activation_rejected_total
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------
+    // Run 072 — P2P session-eviction hook metric accessors.
+    //
+    // Bumped only by code paths that actually invoke the
+    // `P2pSessionEvictor::evict_all_sessions` hook (Run 072 entry
+    // point); Run 069 reload-check and Run 070 validate-only do NOT
+    // bump these. See module comment on the struct fields for the full
+    // discipline statement.
+    // ------------------------------------------------------------------
+
+    /// Total Run 072 eviction-hook invocations seen by this process,
+    /// regardless of outcome.
+    pub fn session_eviction_attempt_total(&self) -> u64 {
+        self.session_eviction_attempt_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 072 eviction-hook invocations that returned
+    /// `Ok(EvictionReport)` with `report.is_full_success()`.
+    pub fn session_eviction_success_total(&self) -> u64 {
+        self.session_eviction_success_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 072 eviction-hook invocations that returned `Err(_)` or
+    /// `Ok(EvictionReport)` with `report.failed > 0`.
+    pub fn session_eviction_failure_total(&self) -> u64 {
+        self.session_eviction_failure_total.load(Ordering::Relaxed)
+    }
+
+    /// Total sessions reported `evicted` across all Run 072
+    /// eviction-hook invocations. `report.failed` sessions are NOT
+    /// counted here — only sessions the implementation believes
+    /// it actually closed.
+    pub fn session_eviction_sessions_evicted_total(&self) -> u64 {
+        self.session_eviction_sessions_evicted_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Record a Run 072 eviction-hook outcome on all four counters.
+    /// Single source of truth so every call site emits a consistent
+    /// row of counter updates. `failed > 0` or `Err(_)` upstream
+    /// MUST land here with `success=false`.
+    pub fn record_session_eviction(&self, evicted: u64, failed: u64, success: bool) {
+        self.session_eviction_attempt_total
+            .fetch_add(1, Ordering::Relaxed);
+        if success {
+            self.session_eviction_success_total
+                .fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.session_eviction_failure_total
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        if evicted > 0 {
+            self.session_eviction_sessions_evicted_total
+                .fetch_add(evicted, Ordering::Relaxed);
+        }
+        // `failed` is currently observable indirectly via
+        // `failure_total - error_only_calls`; if a future run
+        // demands a dedicated `failed_total` counter, add it
+        // alongside (do not rename).
+        let _ = failed;
     }
 }
 
@@ -10989,5 +11106,75 @@ mod tests {
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_signature_verified_total "));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 072 — P2P session-eviction hook metrics.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn session_eviction_metrics_start_at_zero_and_record_outcome_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.session_eviction_attempt_total(), 0);
+        assert_eq!(p.session_eviction_success_total(), 0);
+        assert_eq!(p.session_eviction_failure_total(), 0);
+        assert_eq!(p.session_eviction_sessions_evicted_total(), 0);
+
+        // Full-success call: attempt +1, success +1, evicted +N.
+        p.record_session_eviction(3, 0, true);
+        assert_eq!(p.session_eviction_attempt_total(), 1);
+        assert_eq!(p.session_eviction_success_total(), 1);
+        assert_eq!(p.session_eviction_failure_total(), 0);
+        assert_eq!(p.session_eviction_sessions_evicted_total(), 3);
+
+        // Partial failure: attempt +1, failure +1, evicted += partial count.
+        p.record_session_eviction(2, 1, false);
+        assert_eq!(p.session_eviction_attempt_total(), 2);
+        assert_eq!(p.session_eviction_success_total(), 1);
+        assert_eq!(p.session_eviction_failure_total(), 1);
+        assert_eq!(p.session_eviction_sessions_evicted_total(), 5);
+
+        // Empty call (no sessions, full success): attempt +1,
+        // success +1, no change to evicted counter.
+        p.record_session_eviction(0, 0, true);
+        assert_eq!(p.session_eviction_attempt_total(), 3);
+        assert_eq!(p.session_eviction_success_total(), 2);
+        assert_eq!(p.session_eviction_failure_total(), 1);
+        assert_eq!(p.session_eviction_sessions_evicted_total(), 5);
+
+        // Hard error (unsupported runtime): attempt +1, failure +1,
+        // no change to evicted counter.
+        p.record_session_eviction(0, 0, false);
+        assert_eq!(p.session_eviction_attempt_total(), 4);
+        assert_eq!(p.session_eviction_success_total(), 2);
+        assert_eq!(p.session_eviction_failure_total(), 2);
+        assert_eq!(p.session_eviction_sessions_evicted_total(), 5);
+    }
+
+    #[test]
+    fn session_eviction_metrics_render_once_in_format_metrics() {
+        let p = P2pMetrics::new();
+        p.record_session_eviction(4, 0, true);
+        let out = p.format_metrics();
+        for name in [
+            "qbind_p2p_session_eviction_attempt_total ",
+            "qbind_p2p_session_eviction_success_total ",
+            "qbind_p2p_session_eviction_failure_total ",
+            "qbind_p2p_session_eviction_sessions_evicted_total ",
+        ] {
+            let n = out.matches(name).count();
+            assert_eq!(
+                n, 1,
+                "Run 072 metric {} must appear exactly once in P2pMetrics::format_metrics (got {})",
+                name, n
+            );
+        }
+        assert!(out.contains("qbind_p2p_session_eviction_attempt_total 1"));
+        assert!(out.contains("qbind_p2p_session_eviction_success_total 1"));
+        assert!(out.contains("qbind_p2p_session_eviction_failure_total 0"));
+        assert!(out.contains("qbind_p2p_session_eviction_sessions_evicted_total 4"));
+        // Run 050/051/055/057 metrics still present (no displacement).
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_activation_rejected_total "));
     }
 }
