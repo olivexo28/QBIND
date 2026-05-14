@@ -1,0 +1,399 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened PQC transport:
+  - ML-DSA-44 delegation cert verification
+  - ML-KEM-768 transport KEM
+  - ChaCha20-Poly1305 transport AEAD
+  - PQC cert metrics
+  - cert validity-window enforcement
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Run 050 landed structured PQC trust bundles.
+- Run 051 landed signed ML-DSA-44 trust-bundle verification.
+- Run 052 landed leaf-level certificate revocation enforcement.
+- Run 053 landed trust-bundle chain_id crosscheck.
+- Run 054 produced release-binary revoked-peer leaf evidence.
+- Run 055 landed sequence-number monotonicity persistence.
+- Run 056 produced release-binary anti-rollback evidence.
+- Run 057 implemented activation-height gating.
+- Run 058 produced release-binary activation-height evidence.
+- Run 059 produced MainNet signed-bundle release-binary startup/load evidence.
+- Run 060 landed the production PQC trust lifecycle operator playbook.
+- Run 061 implemented local revoked-leaf startup self-check.
+- Run 062 implemented per-entry revocation activation_height active/pending behavior.
+- Run 063 implemented local issuer-root revocation startup self-check.
+- Run 064 updated the operator runbook for Runs 061–063.
+- Run 065 implemented deterministic per-environment minimum activation-height policy.
+- Run 066 updated the operator runbook for Run 065.
+- Run 067 produced N=2 MainNet signed-bundle peer-connection evidence.
+- Run 068 produced N=4 MainNet signed-bundle peer-connection evidence.
+- Run 069 strongest-positive:
+  - added validation-only trust-bundle reload-check boundary
+  - new pqc_trust_reload module
+  - hidden --p2p-trust-bundle-reload-check <PATH>
+  - validates candidate bundles using the startup security pipeline
+  - does NOT apply live trust changes
+  - does NOT mutate active roots/revocations/sessions
+  - does NOT persist sequence or burn sequence numbers
+  - valid candidate validates and exits 0
+  - invalid rollback/tampered/wrong-env/local-revoked candidates fail closed and exit 1
+  - sequence file bytes + mtime remain unchanged during reload-check
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust/lifecycle items include:
+- actual live trust-bundle apply
+- peer/gossiped bundle acceptance
+- activation_epoch runtime source
+- in-binary / on-chain bundle-signing-key ratification
+- external KMS/HSM custody integration
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+
+Task:
+Run 070. Implement local operator-triggered live apply for a validated trust-bundle reload candidate.
+
+Primary objective:
+Add the first safe live trust-bundle apply path for a local operator-supplied candidate file, reusing Run 069 validation as the prefix, then atomically replacing active trust state and committing sequence only after a successful state swap.
+
+Important framing:
+This is still NOT peer-supplied/gossiped bundle acceptance.
+This is NOT automatic filesystem watcher hot reload.
+This is NOT KMS/HSM.
+This is NOT signing-key ratification.
+This is NOT activation_epoch implementation.
+This is NOT fast-sync restore.
+Do not redesign KEMTLS.
+Do not redesign consensus.
+Do not weaken startup trust-bundle validation.
+Do not weaken Run 069 validation-only reload-check.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Implement local operator-triggered live apply from a local file only.
+- Candidate must pass the same security checks as Run 069:
+  - parse trust bundle
+  - verify ML-DSA-44 bundle signature
+  - validate environment
+  - validate chain_id
+  - validate root status/windows
+  - validate bundle activation_height
+  - validate Run 065 minimum activation-height policy
+  - validate per-entry revocation activation_height
+  - validate sequence monotonicity against persisted accepted sequence
+  - check local leaf fingerprint revocation
+  - check local issuer-root revocation
+- Only after successful validation:
+  - atomically replace active trust-bundle / root / revocation context
+  - update metrics
+  - then commit sequence persistence
+- If state swap fails:
+  - do not commit sequence
+  - leave old trust state active
+  - fail closed for the reload operation
+- If sequence commit fails after swap:
+  - safest policy required:
+    - either rollback live trust state to previous snapshot and report reload failed;
+    - or fail closed by stopping P2P/node if rollback is impossible.
+  - Do not continue with new live trust state and old sequence record.
+- Existing startup behavior must remain unchanged.
+- Run 069 reload-check behavior must remain validation-only and non-mutating.
+- No peer/gossip input.
+- No unsigned MainNet/TestNet reload.
+- No static-root fallback.
+
+Required session policy:
+Use conservative v0 policy:
+- On successful live trust-state swap, close/evict existing P2P sessions and force reconnect under the new trust context.
+- Rationale: existing sessions may have been authenticated under roots/leaves now revoked or removed.
+- Do not attempt selective session retention in Run 070 unless already trivial and well-proven.
+- The evidence doc must state that this may cause a short liveness interruption but is safer than retaining possibly stale trust.
+
+Required investigation:
+
+1. Inspect Run 069 reload-check implementation
+   Inspect:
+   - crates/qbind-node/src/pqc_trust_reload.rs
+   - crates/qbind-node/src/pqc_trust_sequence.rs
+   - crates/qbind-node/src/pqc_trust_bundle.rs
+   - crates/qbind-node/src/pqc_trust_activation.rs
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/src/p2p_node_builder.rs
+   - crates/qbind-node/src/metrics.rs
+   - Run 069 tests and evidence doc
+   - docs/whitepaper/contradiction.md
+
+   Document exact file/function references in the evidence doc.
+
+2. Identify active trust-state ownership
+   Determine where active PQC trust material lives after startup:
+   - active roots
+   - active revoked leaf set
+   - active revoked root set
+   - local leaf self-check state
+   - P2P trust context used by handshake verifier
+   - metrics source for trust-bundle loaded/root/revocation counts
+   - active peer/session manager
+
+   If current code does not support mutable live trust context safely:
+   - do not fake hot reload.
+   - implement the smallest safe “reload apply unsupported because immutable trust context” boundary and document it.
+   - But prefer a minimal safe live apply if there is a clear state handle.
+
+3. Define reload apply trigger
+   Choose safest local operator trigger:
+   - hidden CLI command/mode is acceptable only if it can interact with a running node.
+   - If no IPC/admin endpoint exists, add a local-only operator mechanism if already consistent with project style.
+   - Recommended options, in order:
+     A. Local admin HTTP endpoint bound only to localhost and disabled by default.
+     B. Unix signal + configured reload file path.
+     C. Internal test harness API only, if live binary proof is not feasible yet.
+
+   Requirements:
+   - disabled by default.
+   - explicit opt-in flag, for example:
+     - --p2p-trust-bundle-reload-apply-enabled
+     - --p2p-trust-bundle-reload-path <PATH>
+   - no remote unauthenticated endpoint.
+   - no peer-supplied reload.
+   - no automatic apply without operator action.
+   - logs must clearly state operator-triggered local reload apply.
+
+4. Define atomic apply semantics
+   Required:
+   - validate candidate first using Run 069 helper.
+   - do not mutate active trust state during validation.
+   - prepare new trust context.
+   - take write lock / pause acceptor if needed.
+   - atomically swap active trust state.
+   - evict/close existing sessions.
+   - commit sequence persistence only after successful swap, or use a two-phase design with rollback guarantee.
+   - update metrics after successful apply.
+   - on any failure, old trust state remains active or node fails closed.
+   - no partial root/revocation updates.
+
+5. Define metrics/logs
+   Add metrics if meaningful:
+   - qbind_p2p_pqc_trust_bundle_reload_apply_attempt_total
+   - qbind_p2p_pqc_trust_bundle_reload_apply_success_total
+   - qbind_p2p_pqc_trust_bundle_reload_apply_failure_total
+   - qbind_p2p_pqc_trust_bundle_reload_session_evictions_total
+   - qbind_p2p_pqc_trust_bundle_reload_active_sequence
+   - qbind_p2p_pqc_trust_bundle_reload_last_candidate_sequence
+
+   Requirements:
+   - no fabricated metrics
+   - no duplicate families
+   - reload-check validation-only metrics must not be counted as apply success
+   - logs must include:
+     - old fingerprint prefix
+     - new fingerprint prefix
+     - old sequence
+     - new sequence
+     - session eviction count
+     - sequence commit result
+   - no private material
+
+Required implementation:
+
+1. Extend reload module
+   Add live-apply structures/functions:
+   - ReloadApplyPlan or ValidatedApplyCandidate
+   - apply_validated_candidate(...)
+   - explicit ApplyMode: ValidateOnly vs ApplyLive
+   - precise error enum:
+     - validation failed
+     - state swap failed
+     - sequence commit failed
+     - session eviction failed
+     - live reload disabled
+     - unsupported runtime context
+
+2. Preserve Run 069 validation-only behavior
+   Existing:
+   - --p2p-trust-bundle-reload-check <PATH>
+   must remain:
+   - non-mutating
+   - no sequence persistence
+   - no live trust update
+   - exits 0/1 as before
+
+3. Add operator-triggered apply path
+   Implement the smallest safe path selected during investigation.
+   It must be disabled by default.
+   It must not expose remote unauthenticated mutation.
+
+4. Session eviction
+   Implement conservative session eviction if live P2P session manager supports it.
+   If session eviction is not available:
+   - fail closed and do not apply; or
+   - apply only in a mode that stops/restarts P2P safely.
+   Do not keep existing sessions silently after trust change.
+
+5. Tests
+   Add tests proving:
+   - valid candidate apply swaps trust state.
+   - apply commits sequence only after swap.
+   - apply failure does not commit sequence.
+   - sequence commit failure rolls back or fails closed.
+   - reload-check remains non-mutating.
+   - existing sessions are evicted or reload apply is rejected if eviction unsupported.
+   - rejected candidate does not alter state.
+   - rollback/tampered/wrong-chain/local-revoked candidate does not alter state.
+   - metrics count apply attempts/success/failure truthfully.
+   - startup path unchanged.
+
+Required regression tests:
+- cargo test -p qbind-node --lib pqc_trust_reload
+- cargo test -p qbind-node --lib pqc_trust_bundle
+- cargo test -p qbind-node --lib pqc_trust_sequence
+- cargo test -p qbind-node --lib pqc_trust_activation
+- new Run 070 reload-apply tests
+- cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
+- cargo test -p qbind-node --test run_050_pqc_trust_bundle_tests
+- cargo test -p qbind-node --test run_051_pqc_trust_bundle_signing_tests
+- cargo test -p qbind-node --test run_052_pqc_leaf_revocation_tests
+- cargo test -p qbind-node --test run_055_pqc_trust_bundle_sequence_tests
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-node --test run_061_pqc_local_leaf_self_check_tests
+- cargo test -p qbind-node --test run_062_pqc_revocation_activation_tests
+- cargo test -p qbind-node --test run_063_pqc_local_issuer_root_self_check_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-node --test run_044_pqc_cert_verify_metrics_adapter_tests
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Positive startup baseline
+   - start node with signed trust bundle sequence 1
+   - prove normal startup works
+   - prove peer connection if using N=2
+   - prove sequence=1 persisted
+   - no fallback
+   - no Dummy crypto
+
+2. Positive reload apply candidate sequence 2
+   - operator-trigger reload apply using local candidate sequence 2
+   - prove candidate validates
+   - prove live trust state changes to sequence 2/fingerprint 2
+   - prove sequence persistence updates to 2 only after apply success
+   - prove existing sessions are evicted/reconnected or reload apply refuses if eviction unsupported
+   - prove metrics apply_success increments
+   - no fallback
+   - no Dummy crypto
+
+3. Negative rollback apply candidate
+   - attempt sequence 1 after sequence 2 accepted
+   - prove rejected
+   - prove live trust state remains sequence 2
+   - prove sequence persistence remains 2
+   - no fallback
+
+4. Negative tampered/wrong-chain candidate
+   - prove rejected
+   - prove no live state mutation
+   - prove sequence unchanged
+
+5. Negative local-revoked candidate
+   - prove rejected
+   - prove no live state mutation
+   - prove sequence unchanged
+
+6. Session policy evidence
+   - if sessions evicted:
+     - show eviction log/metric
+     - show reconnection under new trust if feasible
+   - if reload apply refused due eviction unsupported:
+     - document exact boundary
+     - do not claim full live apply
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_070.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence run and pass/fail status
+- investigation findings with file/function references
+- chosen apply trigger
+- validation pipeline reuse
+- atomic state swap semantics
+- sequence commit ordering
+- session eviction policy
+- metrics/logging
+- release-binary evidence
+- proof reload-check remains validation-only
+- proof invalid candidates do not alter state
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- exact boundaries:
+  - peer/gossiped bundles still absent
+  - activation_epoch still absent
+  - KMS/HSM still absent
+  - signing-key ratification still absent
+- exact immediate next action
+
+contradiction.md update rules:
+- If live apply lands and is proven, update C4 to record hot reload narrowed from validation-only to local operator-triggered live apply.
+- If apply is blocked because active trust state is immutable or session eviction is unavailable, record partial positive and exact boundary.
+- Keep C4 open for:
+  - peer/gossiped bundle acceptance
+  - activation_epoch runtime source
+  - in-binary/on-chain bundle-signing-key ratification
+  - KMS/HSM custody
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- Do not close full C4.
+- Do not claim C5 closure.
+- If apply burns sequence before successful state swap, record contradiction/regression.
+- If apply keeps sessions alive under revoked/removed trust, record contradiction/regression unless formally justified and proven.
+- If invalid candidate mutates live trust state, record contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  local operator-triggered live apply lands; valid candidate swaps active trust state atomically; sequence commits only after successful apply; sessions are conservatively evicted/reconnected or safely handled; invalid candidates do not mutate state; reload-check remains non-mutating; no fallback; no Dummy crypto.
+- Partial positive:
+  validation/reload infrastructure is extended but live apply is blocked by missing mutable trust context or session eviction support. State exact boundary.
+- Negative:
+  apply burns sequence before swap, invalid candidate mutates state, sessions remain trusted under revoked roots, fallback/Dummy crypto activates, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
