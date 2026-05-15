@@ -5889,6 +5889,65 @@ pub struct P2pMetrics {
     live_reload_already_in_progress_total: AtomicU64,
     live_reload_sessions_evicted_total: AtomicU64,
     live_reload_last_applied_sequence: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 076 — disabled-by-default peer/gossiped trust-bundle
+    // candidate validation boundary counters. Every counter here
+    // corresponds to the matching `PeerCandidateOutcome` variant of
+    // `pqc_trust_peer_candidate::PeerCandidateValidator::try_accept`.
+    // None of these counters can ever indicate that a peer-supplied
+    // candidate was APPLIED to live trust state — by construction
+    // (`PeerCandidateValidator` exposes no apply function and never
+    // calls `LiveTrustApplyContext::*`). Per
+    // `task/RUN_076_TASK.txt` §"Required metrics", there is
+    // INTENTIONALLY NO `_applied_total` family on the Run 076 surface
+    // so a future operator dashboard cannot mistake a validated
+    // peer candidate for an applied one.
+    //
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_received_total
+    //       (counter; +1 per `try_accept` entry, regardless of
+    //       outcome. Bumped unconditionally — this is the truthful
+    //       "we observed a candidate" signal, the same discipline as
+    //       the Run 074 `trigger_total` counter.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total
+    //       (counter; +1 on `PeerCandidateOutcome::Validated`. Does
+    //       NOT imply "applied"; the validator never applies. See
+    //       the Run 076 evidence doc.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total
+    //       (counter; +1 on `PeerCandidateOutcome::Rejected` —
+    //       envelope-layer pre-crypto rejection, loader-layer
+    //       validation failure, or declared-metadata mismatch.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_dropped_oversize_total
+    //       (counter; +1 on `PeerCandidateOutcome::Oversize`. The
+    //       drop happens BEFORE any crypto runs and BEFORE any
+    //       temp file is written.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_rate_limited_total
+    //       (counter; +1 on `PeerCandidateOutcome::RateLimited`.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total
+    //       (counter; +1 on `PeerCandidateOutcome::DuplicateSuppressed`.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total
+    //       (counter; +1 on `PeerCandidateOutcome::Disabled`. The
+    //       disabled-by-default outcome of the default-constructed
+    //       validator. Operators monitoring this counter can confirm
+    //       no caller mistakenly invoked the validator before opt-in.)
+    //
+    // Discipline:
+    // - These counters are bumped ONLY by code paths that explicitly
+    //   call `PeerCandidateValidator::record_outcome_on` (the
+    //   matching `P2pMetrics` helper). The validator itself does NOT
+    //   hold a `P2pMetrics` reference (Run 076 is library-pure); the
+    //   caller (a future wire integration or a test harness) is
+    //   responsible for the bump.
+    // - No label cardinality.
+    // - No `_applied_total` (intentional). See module doc.
+    // ------------------------------------------------------------------
+    peer_candidate_received_total: AtomicU64,
+    peer_candidate_validated_total: AtomicU64,
+    peer_candidate_rejected_total: AtomicU64,
+    peer_candidate_dropped_oversize_total: AtomicU64,
+    peer_candidate_rate_limited_total: AtomicU64,
+    peer_candidate_duplicate_total: AtomicU64,
+    peer_candidate_disabled_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6784,6 +6843,41 @@ impl P2pMetrics {
             self.live_reload_last_applied_sequence()
         ));
 
+        // Run 076 — disabled-by-default peer/gossiped trust-bundle
+        // candidate validation boundary counters. Each name appears
+        // exactly once in the rendered body (asserted by
+        // `peer_candidate_metrics_render_once_in_format_metrics`).
+        // Intentional absence of `_applied_total` — see
+        // P2pMetrics doc comment on the Run 076 block.
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_received_total {}\n",
+            self.peer_candidate_received_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total {}\n",
+            self.peer_candidate_validated_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total {}\n",
+            self.peer_candidate_rejected_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_dropped_oversize_total {}\n",
+            self.peer_candidate_dropped_oversize_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_rate_limited_total {}\n",
+            self.peer_candidate_rate_limited_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total {}\n",
+            self.peer_candidate_duplicate_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total {}\n",
+            self.peer_candidate_disabled_total()
+        ));
+
         output
     }
 
@@ -7266,6 +7360,103 @@ impl P2pMetrics {
     /// surface, including fatal rollback-also-failed).
     pub fn record_live_reload_apply_failure(&self) {
         self.live_reload_apply_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------
+    // Run 076 — disabled-by-default peer/gossiped trust-bundle
+    // candidate validation boundary metric accessors and recorders.
+    // ------------------------------------------------------------------
+
+    /// Run 076 — total peer-supplied candidate envelopes observed by
+    /// `pqc_trust_peer_candidate::PeerCandidateValidator::try_accept`
+    /// (every entry, regardless of outcome). Bumped via
+    /// [`record_peer_candidate_received`](Self::record_peer_candidate_received).
+    pub fn peer_candidate_received_total(&self) -> u64 {
+        self.peer_candidate_received_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — candidates that passed the reused Run 069 pipeline
+    /// without being applied. **This is NOT an "applied" counter.**
+    pub fn peer_candidate_validated_total(&self) -> u64 {
+        self.peer_candidate_validated_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — candidates rejected at envelope-layer or by the
+    /// reused Run 069 loader, or declared-metadata mismatch.
+    pub fn peer_candidate_rejected_total(&self) -> u64 {
+        self.peer_candidate_rejected_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — candidates dropped before any crypto because of
+    /// `MAX_PEER_CANDIDATE_BUNDLE_BYTES`.
+    pub fn peer_candidate_dropped_oversize_total(&self) -> u64 {
+        self.peer_candidate_dropped_oversize_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — candidates blocked by the validator's fixed-window
+    /// rate limiter before crypto.
+    pub fn peer_candidate_rate_limited_total(&self) -> u64 {
+        self.peer_candidate_rate_limited_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — candidates suppressed by the duplicate-fingerprint
+    /// LRU before crypto.
+    pub fn peer_candidate_duplicate_total(&self) -> u64 {
+        self.peer_candidate_duplicate_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — candidates that hit the disabled-by-default
+    /// short-circuit. Operators can confirm this counter stays at
+    /// zero on a node that explicitly opted into the validator.
+    pub fn peer_candidate_disabled_total(&self) -> u64 {
+        self.peer_candidate_disabled_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 076 — record entry to `try_accept` (every call). Bumped
+    /// BEFORE the disabled / oversize / rate-limit / duplicate
+    /// checks, mirroring the Run 074 `record_live_reload_trigger`
+    /// discipline.
+    pub fn record_peer_candidate_received(&self) {
+        self.peer_candidate_received_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 076 — record `PeerCandidateOutcome::Validated`.
+    pub fn record_peer_candidate_validated(&self) {
+        self.peer_candidate_validated_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 076 — record `PeerCandidateOutcome::Rejected`.
+    pub fn record_peer_candidate_rejected(&self) {
+        self.peer_candidate_rejected_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 076 — record `PeerCandidateOutcome::Oversize`.
+    pub fn record_peer_candidate_dropped_oversize(&self) {
+        self.peer_candidate_dropped_oversize_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 076 — record `PeerCandidateOutcome::RateLimited`.
+    pub fn record_peer_candidate_rate_limited(&self) {
+        self.peer_candidate_rate_limited_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 076 — record `PeerCandidateOutcome::DuplicateSuppressed`.
+    pub fn record_peer_candidate_duplicate(&self) {
+        self.peer_candidate_duplicate_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 076 — record `PeerCandidateOutcome::Disabled`.
+    pub fn record_peer_candidate_disabled(&self) {
+        self.peer_candidate_disabled_total
             .fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -11437,5 +11628,122 @@ mod tests {
         // Run 050/051/055/072 metrics still present (no displacement).
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
         assert!(out.contains("qbind_p2p_session_eviction_attempt_total "));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 076 — disabled-by-default peer/gossiped trust-bundle
+    // candidate validation boundary metrics.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn peer_candidate_metrics_start_at_zero_and_record_outcomes_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.peer_candidate_received_total(), 0);
+        assert_eq!(p.peer_candidate_validated_total(), 0);
+        assert_eq!(p.peer_candidate_rejected_total(), 0);
+        assert_eq!(p.peer_candidate_dropped_oversize_total(), 0);
+        assert_eq!(p.peer_candidate_rate_limited_total(), 0);
+        assert_eq!(p.peer_candidate_duplicate_total(), 0);
+        assert_eq!(p.peer_candidate_disabled_total(), 0);
+
+        // Disabled-by-default outcome bumps received+disabled only;
+        // every other counter remains zero.
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_disabled();
+        assert_eq!(p.peer_candidate_received_total(), 1);
+        assert_eq!(p.peer_candidate_disabled_total(), 1);
+        assert_eq!(p.peer_candidate_validated_total(), 0);
+        assert_eq!(p.peer_candidate_rejected_total(), 0);
+        assert_eq!(p.peer_candidate_dropped_oversize_total(), 0);
+        assert_eq!(p.peer_candidate_rate_limited_total(), 0);
+        assert_eq!(p.peer_candidate_duplicate_total(), 0);
+
+        // Oversize: received +1, oversize +1, no apply / validate.
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_dropped_oversize();
+        assert_eq!(p.peer_candidate_received_total(), 2);
+        assert_eq!(p.peer_candidate_dropped_oversize_total(), 1);
+
+        // Rate-limited: received +1, rate_limited +1.
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_rate_limited();
+        assert_eq!(p.peer_candidate_received_total(), 3);
+        assert_eq!(p.peer_candidate_rate_limited_total(), 1);
+
+        // Duplicate: received +1, duplicate +1.
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_duplicate();
+        assert_eq!(p.peer_candidate_received_total(), 4);
+        assert_eq!(p.peer_candidate_duplicate_total(), 1);
+
+        // Validated: received +1, validated +1. NOT applied.
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_validated();
+        assert_eq!(p.peer_candidate_received_total(), 5);
+        assert_eq!(p.peer_candidate_validated_total(), 1);
+
+        // Rejected: received +1, rejected +1.
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_rejected();
+        assert_eq!(p.peer_candidate_received_total(), 6);
+        assert_eq!(p.peer_candidate_rejected_total(), 1);
+
+        // Apply-related counters (Run 074) MUST be untouched by any
+        // Run 076 outcome — peer-candidate path never applies.
+        assert_eq!(p.live_reload_apply_success_total(), 0);
+        assert_eq!(p.live_reload_apply_failure_total(), 0);
+        assert_eq!(p.live_reload_sessions_evicted_total(), 0);
+        assert_eq!(p.live_reload_last_applied_sequence(), 0);
+    }
+
+    #[test]
+    fn peer_candidate_metrics_render_once_in_format_metrics() {
+        let p = P2pMetrics::new();
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_validated();
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_rejected();
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_dropped_oversize();
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_rate_limited();
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_duplicate();
+        p.record_peer_candidate_received();
+        p.record_peer_candidate_disabled();
+        let out = p.format_metrics();
+        for name in [
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_received_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_dropped_oversize_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_rate_limited_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total ",
+        ] {
+            let n = out.matches(name).count();
+            assert_eq!(
+                n, 1,
+                "Run 076 metric {} must appear exactly once in format_metrics (got {})",
+                name, n
+            );
+        }
+        // `_applied_total` MUST NOT exist on the peer-candidate path
+        // — peer-supplied candidates are never applied by Run 076.
+        assert!(
+            !out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_applied_total"),
+            "Run 076 must NOT emit a peer-candidate _applied_total family"
+        );
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_received_total 6"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_dropped_oversize_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_rate_limited_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total 1"));
+        // Existing Run 050/051/055/072/074 metrics still present.
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
+        assert!(out.contains("qbind_p2p_session_eviction_attempt_total "));
+        assert!(out.contains("qbind_p2p_trust_bundle_live_reload_trigger_total "));
     }
 }

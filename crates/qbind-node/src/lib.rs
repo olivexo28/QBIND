@@ -176,6 +176,18 @@ pub mod pqc_live_trust_apply;
 // `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_live_trust_reload;
 
+// Run 076 — disabled-by-default peer/gossiped trust-bundle candidate
+// validation boundary. Library-level surface that can parse and
+// validate a peer-supplied trust-bundle candidate using the same
+// Run 069 pipeline used by startup, the local reload-check, the
+// Run 073 process-start apply, and the Run 074 SIGHUP live reload-
+// apply. NOT an apply path: the module exposes no `apply` function
+// and never mutates `LivePqcTrustState`, P2P sessions, or the
+// on-disk sequence record. Disabled by default; no CLI / wire
+// integration in this run. See module docs and
+// `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_trust_peer_candidate;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;
