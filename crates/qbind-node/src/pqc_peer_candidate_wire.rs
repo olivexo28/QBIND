@@ -114,11 +114,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
+use crate::p2p::NodeId;
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
 use crate::pqc_trust_peer_candidate::{
@@ -1062,6 +1064,291 @@ pub fn read_loop_dispatch_peer_candidate_wire_frame(
     }
 }
 
+// ---------------------------------------------------------------------
+// Run 080: disabled-by-default production send-side publisher for the
+// peer-candidate wire frame (0x05).
+// ---------------------------------------------------------------------
+
+/// Run 080 sender-side abstraction: the smallest interface needed by
+/// the publisher to (a) observe currently authenticated peers and (b)
+/// enqueue one already-framed raw P2P frame to all currently connected
+/// peers.
+pub trait PeerCandidateWireFrameSender: Send + Sync + 'static {
+    /// Snapshot currently authenticated peers.
+    fn connected_peer_node_ids(&self) -> Vec<NodeId>;
+    /// Enqueue one already-framed raw P2P frame to all currently
+    /// authenticated peers.
+    fn send_raw_frame_to_all_peers(&self, frame_bytes: Vec<u8>) -> RawFrameSendReport;
+}
+
+/// Run 080 per-peer raw-frame send outcome.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawFramePeerSendOutcome {
+    Enqueued,
+    QueueFull,
+    ChannelClosed,
+}
+
+impl RawFramePeerSendOutcome {
+    pub fn short_label(self) -> &'static str {
+        match self {
+            Self::Enqueued => "enqueued",
+            Self::QueueFull => "queue_full",
+            Self::ChannelClosed => "channel_closed",
+        }
+    }
+    pub fn is_enqueued(self) -> bool {
+        matches!(self, Self::Enqueued)
+    }
+}
+
+/// Run 080 raw-frame send aggregate result over the currently
+/// authenticated peer snapshot.
+#[derive(Debug, Clone, Default)]
+pub struct RawFrameSendReport {
+    per_peer: Vec<(NodeId, RawFramePeerSendOutcome)>,
+}
+
+impl RawFrameSendReport {
+    pub fn from_per_peer(per_peer: Vec<(NodeId, RawFramePeerSendOutcome)>) -> Self {
+        Self { per_peer }
+    }
+    pub fn attempted(&self) -> usize {
+        self.per_peer.len()
+    }
+    pub fn sent(&self) -> usize {
+        self.per_peer
+            .iter()
+            .filter(|(_, o)| o.is_enqueued())
+            .count()
+    }
+    pub fn failed(&self) -> usize {
+        self.per_peer
+            .iter()
+            .filter(|(_, o)| !o.is_enqueued())
+            .count()
+    }
+    pub fn per_peer(&self) -> &[(NodeId, RawFramePeerSendOutcome)] {
+        &self.per_peer
+    }
+}
+
+/// Run 080 publish-once policy knobs.
+#[derive(Debug, Clone)]
+pub struct PeerCandidateWirePublishConfig {
+    /// Master switch, disabled by default.
+    pub enabled: bool,
+    /// Required local operator envelope path.
+    pub envelope_path: Option<PathBuf>,
+    /// Publish exactly once when triggered.
+    pub publish_once: bool,
+    /// Bounded wait for at least one authenticated peer.
+    pub wait_for_peer_timeout: Duration,
+    /// Poll cadence while waiting for peers.
+    pub wait_poll_interval: Duration,
+}
+
+impl Default for PeerCandidateWirePublishConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            envelope_path: None,
+            publish_once: false,
+            wait_for_peer_timeout: Duration::from_secs(10),
+            wait_poll_interval: Duration::from_millis(200),
+        }
+    }
+}
+
+/// Run 080 publish refusal paths.
+#[derive(Debug)]
+pub enum PeerCandidateWirePublishError {
+    Disabled,
+    EnvelopePathMissing,
+    EnvelopeIo {
+        path: PathBuf,
+        message: String,
+    },
+    EnvelopeParse {
+        path: PathBuf,
+        message: String,
+    },
+    FrameOversize {
+        declared: usize,
+        cap: usize,
+    },
+    NoPeerWithinTimeout {
+        timeout: Duration,
+    },
+}
+
+impl std::fmt::Display for PeerCandidateWirePublishError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Disabled => write!(
+                f,
+                "Run 080 publisher disabled-by-default (set --p2p-trust-bundle-peer-candidate-wire-publish-enabled to opt in)"
+            ),
+            Self::EnvelopePathMissing => write!(
+                f,
+                "Run 080 publish enabled but no --p2p-trust-bundle-peer-candidate-wire-publish-path was supplied"
+            ),
+            Self::EnvelopeIo { path, message } => write!(
+                f,
+                "Run 080 publish could not read envelope fixture at {}: {}",
+                path.display(),
+                message
+            ),
+            Self::EnvelopeParse { path, message } => write!(
+                f,
+                "Run 080 publish could not parse envelope fixture at {} as PeerCandidateEnvelope JSON: {}",
+                path.display(),
+                message
+            ),
+            Self::FrameOversize { declared, cap } => write!(
+                f,
+                "Run 080 publish refused oversize frame before send (declared={} cap={})",
+                declared, cap
+            ),
+            Self::NoPeerWithinTimeout { timeout } => write!(
+                f,
+                "Run 080 publish observed no authenticated peers within {:?}",
+                timeout
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PeerCandidateWirePublishError {}
+
+/// Run 080 publish report (single publish-once attempt).
+#[derive(Debug, Clone)]
+pub struct PeerCandidateWirePublishReport {
+    pub candidate_sequence: u64,
+    pub candidate_fingerprint_prefix: String,
+    pub raw_send: RawFrameSendReport,
+}
+
+impl PeerCandidateWirePublishReport {
+    pub fn attempted(&self) -> usize {
+        self.raw_send.attempted()
+    }
+    pub fn sent(&self) -> usize {
+        self.raw_send.sent()
+    }
+    pub fn failed(&self) -> usize {
+        self.raw_send.failed()
+    }
+}
+
+/// Run 080 production publisher.
+pub struct LivePeerCandidateWirePublisher {
+    sender: Arc<dyn PeerCandidateWireFrameSender>,
+    metrics: Arc<P2pMetrics>,
+}
+
+impl LivePeerCandidateWirePublisher {
+    pub fn new(
+        sender: Arc<dyn PeerCandidateWireFrameSender>,
+        metrics: Arc<P2pMetrics>,
+    ) -> Self {
+        Self { sender, metrics }
+    }
+
+    pub async fn publish_once_from_config(
+        &self,
+        cfg: &PeerCandidateWirePublishConfig,
+    ) -> Result<PeerCandidateWirePublishReport, PeerCandidateWirePublishError> {
+        if !cfg.enabled {
+            return Err(PeerCandidateWirePublishError::Disabled);
+        }
+        let envelope_path = cfg
+            .envelope_path
+            .as_ref()
+            .ok_or(PeerCandidateWirePublishError::EnvelopePathMissing)?;
+        let envelope = load_run076_envelope_file(envelope_path)?;
+        let wire_envelope = PeerCandidateWireEnvelopeV1::from_run076_envelope(&envelope);
+        let frame = match encode_peer_candidate_wire_frame(&wire_envelope) {
+            Ok(f) => f,
+            Err(PeerCandidateWireFrameError::DeclaredPayloadOversize { declared, cap }) => {
+                self.metrics.record_peer_candidate_send_oversize();
+                return Err(PeerCandidateWirePublishError::FrameOversize { declared, cap });
+            }
+            Err(other) => {
+                self.metrics.record_peer_candidate_send_failure();
+                return Err(PeerCandidateWirePublishError::EnvelopeParse {
+                    path: envelope_path.clone(),
+                    message: format!("wire frame encode error: {}", other),
+                });
+            }
+        };
+
+        self.wait_for_peer(cfg.wait_for_peer_timeout, cfg.wait_poll_interval)
+            .await?;
+
+        let raw = self.sender.send_raw_frame_to_all_peers(frame);
+        for (_, o) in raw.per_peer() {
+            if o.is_enqueued() {
+                self.metrics.record_peer_candidate_sent();
+            } else {
+                self.metrics.record_peer_candidate_send_failure();
+            }
+        }
+        Ok(PeerCandidateWirePublishReport {
+            candidate_sequence: envelope.declared_sequence,
+            candidate_fingerprint_prefix: envelope.declared_fingerprint_prefix,
+            raw_send: raw,
+        })
+    }
+
+    async fn wait_for_peer(
+        &self,
+        timeout: Duration,
+        poll: Duration,
+    ) -> Result<(), PeerCandidateWirePublishError> {
+        let start = Instant::now();
+        loop {
+            if !self.sender.connected_peer_node_ids().is_empty() {
+                return Ok(());
+            }
+            if start.elapsed() >= timeout {
+                self.metrics.record_peer_candidate_send_no_peer();
+                return Err(PeerCandidateWirePublishError::NoPeerWithinTimeout { timeout });
+            }
+            tokio::time::sleep(poll).await;
+        }
+    }
+}
+
+/// Stable Run 080 operator log line.
+pub fn wire_publish_log_line(
+    report: &PeerCandidateWirePublishReport,
+    target_count: usize,
+) -> String {
+    format!(
+        "[binary] Run 080: peer-candidate wire publish attempt complete; targets={} attempted={} sent={} failed={} seq={} fp_prefix={} outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction",
+        target_count,
+        report.attempted(),
+        report.sent(),
+        report.failed(),
+        report.candidate_sequence,
+        report.candidate_fingerprint_prefix
+    )
+}
+
+fn load_run076_envelope_file(
+    envelope_path: &Path,
+) -> Result<PeerCandidateEnvelope, PeerCandidateWirePublishError> {
+    let bytes = std::fs::read(envelope_path).map_err(|e| PeerCandidateWirePublishError::EnvelopeIo {
+        path: envelope_path.to_path_buf(),
+        message: e.to_string(),
+    })?;
+    serde_json::from_slice(&bytes).map_err(|e| PeerCandidateWirePublishError::EnvelopeParse {
+        path: envelope_path.to_path_buf(),
+        message: e.to_string(),
+    })
+}
+
 
 // ---------------------------------------------------------------------
 // Unit tests (frame codec / disabled-by-default / metrics +
@@ -1611,5 +1898,161 @@ mod tests {
             clock_counter.load(std::sync::atomic::Ordering::Relaxed),
             3
         );
+    }
+
+    struct FakeRun080Sender {
+        peers: Vec<NodeId>,
+        outcome: RawFramePeerSendOutcome,
+        sent_frames: Mutex<Vec<Vec<u8>>>,
+    }
+    impl FakeRun080Sender {
+        fn with(peers: Vec<NodeId>, outcome: RawFramePeerSendOutcome) -> Arc<Self> {
+            Arc::new(Self {
+                peers,
+                outcome,
+                sent_frames: Mutex::new(Vec::new()),
+            })
+        }
+    }
+    impl PeerCandidateWireFrameSender for FakeRun080Sender {
+        fn connected_peer_node_ids(&self) -> Vec<NodeId> {
+            self.peers.clone()
+        }
+
+        fn send_raw_frame_to_all_peers(&self, frame_bytes: Vec<u8>) -> RawFrameSendReport {
+            self.sent_frames.lock().push(frame_bytes);
+            RawFrameSendReport::from_per_peer(
+                self.peers
+                    .iter()
+                    .copied()
+                    .map(|p| (p, self.outcome))
+                    .collect(),
+            )
+        }
+    }
+
+    fn run080_envelope() -> PeerCandidateEnvelope {
+        let bytes = vec![1, 2, 3, 4];
+        PeerCandidateEnvelope {
+            envelope_version: PeerCandidateEnvelope::ENVELOPE_VERSION,
+            domain_tag: PeerCandidateEnvelope::DOMAIN_TAG.to_string(),
+            peer_id: Some("peer-run080".to_string()),
+            environment: TrustBundleEnvironment::Devnet,
+            chain_id_hex: crate::pqc_trust_sequence::chain_id_hex(
+                NetworkEnvironment::Devnet.chain_id(),
+            ),
+            declared_sequence: 11,
+            declared_fingerprint_prefix: "deadbeef".to_string(),
+            declared_length: bytes.len(),
+            bundle_bytes: bytes,
+        }
+    }
+
+    fn write_envelope_file(env: &PeerCandidateEnvelope) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "qbind-run080-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("candidate.json");
+        std::fs::write(&path, serde_json::to_vec(env).unwrap()).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn run080_publish_disabled_fails_closed() {
+        let sender = FakeRun080Sender::with(
+            vec![NodeId::new([1u8; 32])],
+            RawFramePeerSendOutcome::Enqueued,
+        );
+        let sender_trait: Arc<dyn PeerCandidateWireFrameSender> = sender;
+        let metrics = Arc::new(P2pMetrics::default());
+        let p = LivePeerCandidateWirePublisher::new(sender_trait, Arc::clone(&metrics));
+        let out = p
+            .publish_once_from_config(&PeerCandidateWirePublishConfig::default())
+            .await
+            .unwrap_err();
+        assert!(matches!(out, PeerCandidateWirePublishError::Disabled));
+        assert_eq!(metrics.peer_candidate_sent_total(), 0);
+        assert_eq!(metrics.peer_candidate_send_failure_total(), 0);
+    }
+
+    #[tokio::test]
+    async fn run080_publish_no_peer_times_out_and_bumps_no_peer_counter() {
+        let sender = FakeRun080Sender::with(vec![], RawFramePeerSendOutcome::Enqueued);
+        let sender_trait: Arc<dyn PeerCandidateWireFrameSender> = sender;
+        let metrics = Arc::new(P2pMetrics::default());
+        let p = LivePeerCandidateWirePublisher::new(sender_trait, Arc::clone(&metrics));
+        let path = write_envelope_file(&run080_envelope());
+        let cfg = PeerCandidateWirePublishConfig {
+            enabled: true,
+            envelope_path: Some(path),
+            publish_once: true,
+            wait_for_peer_timeout: Duration::from_millis(20),
+            wait_poll_interval: Duration::from_millis(5),
+        };
+        let out = p.publish_once_from_config(&cfg).await.unwrap_err();
+        assert!(matches!(
+            out,
+            PeerCandidateWirePublishError::NoPeerWithinTimeout { .. }
+        ));
+        assert_eq!(metrics.peer_candidate_send_no_peer_total(), 1);
+        assert_eq!(metrics.peer_candidate_sent_total(), 0);
+    }
+
+    #[tokio::test]
+    async fn run080_publish_success_bumps_sent_counter_per_peer() {
+        let peers = vec![NodeId::new([9u8; 32]), NodeId::new([7u8; 32])];
+        let sender = FakeRun080Sender::with(peers.clone(), RawFramePeerSendOutcome::Enqueued);
+        let sender_trait: Arc<dyn PeerCandidateWireFrameSender> = sender.clone();
+        let metrics = Arc::new(P2pMetrics::default());
+        let p = LivePeerCandidateWirePublisher::new(sender_trait, Arc::clone(&metrics));
+        let path = write_envelope_file(&run080_envelope());
+        let cfg = PeerCandidateWirePublishConfig {
+            enabled: true,
+            envelope_path: Some(path),
+            publish_once: true,
+            wait_for_peer_timeout: Duration::from_secs(1),
+            wait_poll_interval: Duration::from_millis(10),
+        };
+        let report = p.publish_once_from_config(&cfg).await.expect("publish");
+        assert_eq!(report.attempted(), 2);
+        assert_eq!(report.sent(), 2);
+        assert_eq!(report.failed(), 0);
+        assert_eq!(metrics.peer_candidate_sent_total(), 2);
+        assert_eq!(metrics.peer_candidate_send_failure_total(), 0);
+        assert_eq!(sender.sent_frames.lock().len(), 1);
+        let log = wire_publish_log_line(&report, peers.len());
+        assert!(log.contains("validation-only/not-applied"));
+        assert!(log.contains("seq=11"));
+    }
+
+    #[tokio::test]
+    async fn run080_publish_queue_full_bumps_send_failure_counter() {
+        let sender = FakeRun080Sender::with(
+            vec![NodeId::new([5u8; 32]), NodeId::new([6u8; 32])],
+            RawFramePeerSendOutcome::QueueFull,
+        );
+        let sender_trait: Arc<dyn PeerCandidateWireFrameSender> = sender;
+        let metrics = Arc::new(P2pMetrics::default());
+        let p = LivePeerCandidateWirePublisher::new(sender_trait, Arc::clone(&metrics));
+        let path = write_envelope_file(&run080_envelope());
+        let cfg = PeerCandidateWirePublishConfig {
+            enabled: true,
+            envelope_path: Some(path),
+            publish_once: true,
+            wait_for_peer_timeout: Duration::from_secs(1),
+            wait_poll_interval: Duration::from_millis(10),
+        };
+        let report = p.publish_once_from_config(&cfg).await.expect("publish");
+        assert_eq!(report.attempted(), 2);
+        assert_eq!(report.sent(), 0);
+        assert_eq!(report.failed(), 2);
+        assert_eq!(metrics.peer_candidate_sent_total(), 0);
+        assert_eq!(metrics.peer_candidate_send_failure_total(), 2);
     }
 }

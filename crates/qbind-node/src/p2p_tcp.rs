@@ -325,17 +325,51 @@ struct PeerConnection {
     node_id: NodeId,
     /// Channel for sending outbound messages to this peer.
     tx: mpsc::Sender<P2pMessage>,
+    /// Run 080: bounded channel for sending OUT-OF-BAND raw P2P
+    /// frame bytes that the existing `encode_frame` consensus/DAG/
+    /// control encoder cannot produce.
+    ///
+    /// The transport accepts bytes here verbatim and writes them to
+    /// the per-peer KEMTLS-encrypted secure channel. The caller is
+    /// responsible for the framing header (discriminator + u32-BE
+    /// length + payload) — by construction the only producer in the
+    /// production binary is the Run 080
+    /// `LivePeerCandidateWirePublisher`, which encodes through
+    /// `crate::pqc_peer_candidate_wire::encode_peer_candidate_wire_frame`
+    /// and enforces the wire-frame size cap BEFORE enqueueing.
+    ///
+    /// Bounded capacity (small, see `RAW_FRAME_CHANNEL_CAPACITY`)
+    /// so a slow / unhealthy peer cannot accumulate an unbounded
+    /// backlog of out-of-band frames. `try_send` is used at the
+    /// producer; queue-full surfaces as a per-peer send failure to
+    /// the caller, never as backpressure on the consensus/DAG/
+    /// control encoder path.
+    raw_tx: mpsc::Sender<Vec<u8>>,
     /// Task handle for the write loop.
     write_handle: JoinHandle<()>,
     /// Task handle for the read loop.
     read_handle: JoinHandle<()>,
 }
 
+/// Run 080 — bounded outbound raw-frame channel capacity per peer.
+/// Small by design: the publisher today is operator-triggered
+/// publish-once; the only legitimate burst is "one frame to one
+/// peer". A small cap also lets `try_send` honestly surface
+/// queue-full as a per-peer failure on an unhealthy peer instead of
+/// silently absorbing the frame into a long queue.
+const RAW_FRAME_CHANNEL_CAPACITY: usize = 8;
+
+
 impl PeerConnection {
     /// Shutdown the peer connection gracefully.
     async fn shutdown(self) {
-        // Close the write channel
+        // Close BOTH outbound channels (structured + raw). Dropping
+        // either alone would not exit the multiplexed write loop;
+        // dropping both causes both `recv()`s inside the select! to
+        // resolve to `None`, the loop exits, and the AEAD session
+        // is released.
         drop(self.tx);
+        drop(self.raw_tx);
 
         // Wait for tasks to complete
         let _ = self.write_handle.await;
@@ -606,6 +640,95 @@ impl TcpKemTlsP2pService {
     /// just a boolean to avoid leaking the trait object.
     pub fn has_peer_candidate_wire_frame_sink(&self) -> bool {
         self.peer_candidate_wire_sink.read().is_some()
+    }
+
+    // ------------------------------------------------------------------
+    // Run 080 — out-of-band raw frame send surface.
+    //
+    // The methods below are the smallest honest "send a raw,
+    // already-framed P2P frame to authenticated peers" path that
+    // does NOT introduce a new transport, a new listener, a new
+    // gossip subscription, or a parallel networking architecture.
+    // They are the production-binary entry points used by the
+    // `LivePeerCandidateWirePublisher` in
+    // `crate::pqc_peer_candidate_wire`.
+    //
+    // Strict scope:
+    // - the caller MUST have already produced a valid 5-byte
+    //   length-prefixed wire frame (discriminator + u32-BE length
+    //   + payload). The transport writes the bytes verbatim to the
+    //   per-peer KEMTLS-encrypted channel.
+    // - the caller MUST have enforced its own size cap. The
+    //   transport does NOT inspect the bytes, does NOT bump any
+    //   `peer_candidate_*` metric, does NOT touch any
+    //   `LivePqcTrustState` or sequence file.
+    // - the methods are non-blocking on the producer side: they
+    //   call `mpsc::Sender::try_send` against the bounded per-peer
+    //   raw-frame channel. `Err(_)` is surfaced truthfully via
+    //   `RawFrameSendOutcome` so the publisher's send-failure
+    //   counter can bump on a per-peer basis without coupling the
+    //   transport to publisher-side accounting.
+    // ------------------------------------------------------------------
+
+    /// Run 080 — number of currently authenticated peers in the
+    /// session registry. Same as [`live_session_count`] but kept
+    /// under a Run-080-stable name so the publisher does not bind
+    /// to a Run 072 method that may evolve independently.
+    pub fn connected_peer_count(&self) -> usize {
+        self.peers.read().len()
+    }
+
+    /// Run 080 — snapshot the currently authenticated peer NodeIds
+    /// in registration order. Cheap (single read lock).
+    pub fn connected_peer_node_ids(&self) -> Vec<NodeId> {
+        self.peers.read().keys().copied().collect()
+    }
+
+    /// Run 080 — enqueue `frame_bytes` for asynchronous transmission
+    /// to **every** currently authenticated peer.
+    ///
+    /// The frame is **not** validated by the transport (the
+    /// publisher is responsible for the wire format and the size
+    /// cap). For each peer, a non-blocking `try_send` is performed
+    /// against the per-peer bounded raw-frame channel and a single
+    /// [`RawFramePeerSendOutcome`] is recorded in the returned
+    /// [`RawFrameSendReport`].
+    ///
+    /// **Non-mutation contract:** this method never mutates any
+    /// trust state, sequence file, P2P session, or `peer_candidate_*`
+    /// metric. It only enqueues bytes onto already-established
+    /// per-peer outbound channels.
+    pub fn send_raw_frame_to_all_peers(
+        &self,
+        frame_bytes: Vec<u8>,
+    ) -> crate::pqc_peer_candidate_wire::RawFrameSendReport {
+        // Snapshot the peer set under the registry's read lock so
+        // we don't hold the lock across the per-peer `try_send`
+        // calls (a slow / contended channel must not block the
+        // registry).
+        let peer_snapshot: Vec<(NodeId, mpsc::Sender<Vec<u8>>)> = {
+            let guard = self.peers.read();
+            guard
+                .iter()
+                .map(|(id, conn)| (*id, conn.raw_tx.clone()))
+                .collect()
+        };
+
+        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
+            Vec::with_capacity(peer_snapshot.len());
+        for (peer, tx) in peer_snapshot {
+            let outcome = match tx.try_send(frame_bytes.clone()) {
+                Ok(()) => crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::Enqueued,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::QueueFull
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::ChannelClosed
+                }
+            };
+            per_peer.push((peer, outcome));
+        }
+        crate::pqc_peer_candidate_wire::RawFrameSendReport::from_per_peer(per_peer)
     }
 
     /// Start the P2P service: listen on configured address and dial static peers.
@@ -949,11 +1072,19 @@ impl TcpKemTlsP2pService {
     ) {
         // Create outbound channel for this peer
         let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
+        // Run 080 — bounded raw-frame outbound channel. Small
+        // capacity so a slow / unhealthy peer cannot accumulate an
+        // unbounded backlog of out-of-band frames (the producer
+        // uses `try_send` and treats queue-full as a per-peer
+        // failure rather than backpressure on the structured
+        // consensus/DAG/control encoder path).
+        let (peer_raw_tx, peer_raw_rx) =
+            mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
 
         // Spawn write loop
         let channel_write = channel.clone();
         let write_handle = tokio::spawn(async move {
-            Self::write_loop(channel_write, peer_rx).await;
+            Self::write_loop(channel_write, peer_rx, peer_raw_rx).await;
         });
 
         // Spawn read loop
@@ -975,6 +1106,7 @@ impl TcpKemTlsP2pService {
         let conn = PeerConnection {
             node_id,
             tx: peer_tx,
+            raw_tx: peer_raw_tx,
             write_handle,
             read_handle,
         };
@@ -1051,18 +1183,113 @@ impl TcpKemTlsP2pService {
     }
 
     /// Write loop: receive messages from channel and write frames.
-    async fn write_loop(channel: SecureChannelAsync, mut rx: mpsc::Receiver<P2pMessage>) {
-        while let Some(msg) = rx.recv().await {
-            match encode_frame(&msg) {
-                Ok(frame) => {
-                    if let Err(e) = channel.send(&frame).await {
-                        eprintln!("[P2P] Write error: {}", e);
-                        break;
+    ///
+    /// # Run 080 raw-frame multiplexing
+    ///
+    /// The loop multiplexes two outbound channels via `tokio::select!`:
+    /// the existing structured `mpsc::Receiver<P2pMessage>` (whose
+    /// items are encoded through `encode_frame`) AND a new bounded
+    /// `mpsc::Receiver<Vec<u8>>` carrying RAW already-framed bytes.
+    ///
+    /// Raw bytes are written to the secure channel verbatim — the
+    /// transport does NOT inspect, re-encode, or re-frame them. The
+    /// only production caller of the raw channel is the Run 080
+    /// `LivePeerCandidateWirePublisher`, which enforces the wire
+    /// frame's 5-byte length-prefixed framing AND the
+    /// `MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES` cap BEFORE it ever
+    /// reaches this loop.
+    ///
+    /// The loop exits when BOTH channels are closed (both `recv()`s
+    /// return `None`). A single closed channel does NOT terminate
+    /// the loop because legitimate Run 080 usage opens the raw
+    /// channel for the lifetime of the connection while the
+    /// structured channel keeps flowing consensus traffic (and vice
+    /// versa).
+    async fn write_loop(
+        channel: SecureChannelAsync,
+        mut rx: mpsc::Receiver<P2pMessage>,
+        mut raw_rx: mpsc::Receiver<Vec<u8>>,
+    ) {
+        loop {
+            tokio::select! {
+                maybe_msg = rx.recv() => {
+                    match maybe_msg {
+                        Some(msg) => {
+                            match encode_frame(&msg) {
+                                Ok(frame) => {
+                                    if let Err(e) = channel.send(&frame).await {
+                                        eprintln!("[P2P] Write error: {}", e);
+                                        break;
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[P2P] Frame encode error: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        None => {
+                            // Structured channel closed. Continue to
+                            // drain raw frames until the raw channel
+                            // is also closed.
+                            if raw_rx.is_closed() {
+                                break;
+                            }
+                            // Replace `rx` with a closed receiver
+                            // (drop) so the next iteration only
+                            // observes `raw_rx`.
+                            // We use a future that never resolves
+                            // by re-entering select: rx is now
+                            // disabled by checking `is_closed`
+                            // via a noop path below.
+                            // Simpler: just drain raw_rx to
+                            // completion in a tight loop here.
+                            while let Some(raw) = raw_rx.recv().await {
+                                if let Err(e) = channel.send(&raw).await {
+                                    eprintln!("[P2P] Write error (raw): {}", e);
+                                    return;
+                                }
+                            }
+                            break;
+                        }
                     }
                 }
-                Err(e) => {
-                    eprintln!("[P2P] Frame encode error: {}", e);
-                    break;
+                maybe_raw = raw_rx.recv() => {
+                    match maybe_raw {
+                        Some(frame) => {
+                            // Raw frame: write the bytes verbatim.
+                            // The producer is responsible for
+                            // discriminator + u32-BE length +
+                            // payload framing (Run 080
+                            // `encode_peer_candidate_wire_frame`).
+                            if let Err(e) = channel.send(&frame).await {
+                                eprintln!("[P2P] Write error (raw): {}", e);
+                                break;
+                            }
+                        }
+                        None => {
+                            // Raw channel closed. Continue to drain
+                            // the structured channel to completion.
+                            if rx.is_closed() {
+                                break;
+                            }
+                            while let Some(msg) = rx.recv().await {
+                                match encode_frame(&msg) {
+                                    Ok(frame) => {
+                                        if let Err(e) = channel.send(&frame).await {
+                                            eprintln!("[P2P] Write error: {}", e);
+                                            return;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[P2P] Frame encode error: {}", e);
+                                        return;
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -1228,11 +1455,13 @@ impl TcpKemTlsP2pService {
             // bytes if it was blocked on `read()` / `recv()`.
             let PeerConnection {
                 tx,
+                raw_tx,
                 read_handle,
                 write_handle,
                 node_id: _node_id_field,
             } = conn;
             drop(tx);
+            drop(raw_tx);
             read_handle.abort();
             write_handle.abort();
             evicted += 1;
@@ -1270,6 +1499,19 @@ impl crate::p2p_session_eviction::P2pSessionEvictor for TcpKemTlsP2pService {
         crate::p2p_session_eviction::EvictionError,
     > {
         TcpKemTlsP2pService::evict_all_sessions(self, reason)
+    }
+}
+
+impl crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSender for TcpKemTlsP2pService {
+    fn connected_peer_node_ids(&self) -> Vec<NodeId> {
+        self.connected_peer_node_ids()
+    }
+
+    fn send_raw_frame_to_all_peers(
+        &self,
+        frame_bytes: Vec<u8>,
+    ) -> crate::pqc_peer_candidate_wire::RawFrameSendReport {
+        self.send_raw_frame_to_all_peers(frame_bytes)
     }
 }
 

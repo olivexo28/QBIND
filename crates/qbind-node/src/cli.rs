@@ -610,6 +610,38 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_wire_validation_enabled: bool,
 
+    /// Run 080 — disabled-by-default operator opt-in master switch
+    /// for publishing one local peer-candidate envelope over live
+    /// authenticated P2P sessions as a real `0x05` frame.
+    ///
+    /// Required-together with
+    /// `--p2p-trust-bundle-peer-candidate-wire-publish-path`.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-wire-publish-enabled",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_wire_publish_enabled: bool,
+
+    /// Run 080 — local operator-supplied Run 076
+    /// `PeerCandidateEnvelope` JSON fixture path to publish as a
+    /// Run 078 wire envelope over live P2P sessions.
+    ///
+    /// Required-together with
+    /// `--p2p-trust-bundle-peer-candidate-wire-publish-enabled`.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-wire-publish-path",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_wire_publish_path: Option<PathBuf>,
+
+    /// Run 080 — publish exactly one candidate frame and continue
+    /// normal node runtime; no automatic resend loop.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-wire-publish-once",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_wire_publish_once: bool,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

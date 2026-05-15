@@ -5948,6 +5948,63 @@ pub struct P2pMetrics {
     peer_candidate_rate_limited_total: AtomicU64,
     peer_candidate_duplicate_total: AtomicU64,
     peer_candidate_disabled_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 080 — disabled-by-default send-side / publisher counters
+    // for the peer-candidate wire path. These are **send-side** mirror
+    // of the seven Run 076 receive-side counters above. They are
+    // bumped EXCLUSIVELY by the `LivePeerCandidateWirePublisher`
+    // surface in `pqc_peer_candidate_wire.rs` and ONLY when an
+    // operator has opted into the publisher via the required-together
+    // hidden flag pair
+    //   --p2p-trust-bundle-peer-candidate-wire-publish-enabled
+    //   --p2p-trust-bundle-peer-candidate-wire-publish-path <PATH>
+    //
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total
+    //       (counter; +1 per per-peer successful enqueue onto an
+    //       authenticated peer's outbound raw-frame channel. Does
+    //       NOT imply the peer accepted the frame — receive-side
+    //       outcome lives on the receiver's `validated_total` /
+    //       `rejected_total` Run 076 counters.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total
+    //       (counter; +1 per per-peer enqueue failure — bounded
+    //       outbound queue full, peer disconnected, write loop
+    //       terminated, raw channel closed.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total
+    //       (counter; +1 per `publish_once` call that observed
+    //       zero authenticated peers within the bounded wait
+    //       timeout. NO frame is enqueued in this case.)
+    //   qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total
+    //       (counter; +1 per `publish_once` call that refused to
+    //       send because the operator-supplied envelope encoded
+    //       to a frame that exceeded
+    //       `MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES`. The refusal
+    //       happens BEFORE the raw frame is enqueued onto ANY
+    //       peer's channel; no network traffic is emitted.)
+    //
+    // Discipline:
+    // - INTENTIONALLY NO `_applied_total` family on the send
+    //   surface — a sender that emits a frame does NOT imply the
+    //   peer applied it, NOR does it imply the local node applied
+    //   it (the publisher holds no `LiveTrustApplyContext`, no
+    //   `LiveReloadController`, no `LivePqcTrustState` handle, and
+    //   no sequence-write handle).
+    // - INTENTIONALLY NO new metric family beyond these four
+    //   send-side counters and the seven existing Run 076
+    //   receive-side counters — no `peer_candidate_wire_*` family,
+    //   no per-peer label cardinality.
+    // - Bumped ONLY by `LivePeerCandidateWirePublisher::publish_once`
+    //   and the helper `record_peer_candidate_send_*` setters
+    //   below. The transport's raw send-channel does NOT bump
+    //   these counters directly — that would couple the transport
+    //   to the publisher's accounting and risk silent double-
+    //   counting when other (non-Run-080) callers reuse the raw
+    //   send-channel.
+    // ------------------------------------------------------------------
+    peer_candidate_sent_total: AtomicU64,
+    peer_candidate_send_failure_total: AtomicU64,
+    peer_candidate_send_no_peer_total: AtomicU64,
+    peer_candidate_send_oversize_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6878,6 +6935,30 @@ impl P2pMetrics {
             self.peer_candidate_disabled_total()
         ));
 
+        // Run 080 — disabled-by-default SEND-side counters for the
+        // peer-candidate wire path. Intentionally NO `_applied_total`
+        // family: a sender that emits a frame does NOT imply the
+        // peer applied it, NOR does it imply the local node applied
+        // it. Each name appears exactly once in the rendered body
+        // (asserted by
+        // `peer_candidate_send_metrics_render_once_in_format_metrics`).
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total {}\n",
+            self.peer_candidate_sent_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total {}\n",
+            self.peer_candidate_send_failure_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total {}\n",
+            self.peer_candidate_send_no_peer_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total {}\n",
+            self.peer_candidate_send_oversize_total()
+        ));
+
         output
     }
 
@@ -7457,6 +7538,70 @@ impl P2pMetrics {
     /// Run 076 — record `PeerCandidateOutcome::Disabled`.
     pub fn record_peer_candidate_disabled(&self) {
         self.peer_candidate_disabled_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    // ------------------------------------------------------------------
+    // Run 080 — disabled-by-default send-side / publisher counters.
+    // See the field-level doc on the Run 080 block in the struct
+    // definition for the discipline. These are bumped ONLY by
+    // `LivePeerCandidateWirePublisher` in
+    // `crate::pqc_peer_candidate_wire`.
+    // ------------------------------------------------------------------
+
+    /// Run 080 — current value of
+    /// `qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total`.
+    pub fn peer_candidate_sent_total(&self) -> u64 {
+        self.peer_candidate_sent_total.load(Ordering::Relaxed)
+    }
+
+    /// Run 080 — current value of
+    /// `qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total`.
+    pub fn peer_candidate_send_failure_total(&self) -> u64 {
+        self.peer_candidate_send_failure_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 080 — current value of
+    /// `qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total`.
+    pub fn peer_candidate_send_no_peer_total(&self) -> u64 {
+        self.peer_candidate_send_no_peer_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 080 — current value of
+    /// `qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total`.
+    pub fn peer_candidate_send_oversize_total(&self) -> u64 {
+        self.peer_candidate_send_oversize_total
+            .load(Ordering::Relaxed)
+    }
+
+    /// Run 080 — record a successful per-peer enqueue onto an
+    /// authenticated peer's outbound raw-frame channel.
+    pub fn record_peer_candidate_sent(&self) {
+        self.peer_candidate_sent_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 080 — record a per-peer enqueue failure (queue full,
+    /// peer disconnected, raw channel closed).
+    pub fn record_peer_candidate_send_failure(&self) {
+        self.peer_candidate_send_failure_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 080 — record a `publish_once` call that observed zero
+    /// authenticated peers within the bounded wait timeout.
+    pub fn record_peer_candidate_send_no_peer(&self) {
+        self.peer_candidate_send_no_peer_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Run 080 — record a `publish_once` call that refused to
+    /// send because the encoded frame exceeded
+    /// `MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES`.
+    pub fn record_peer_candidate_send_oversize(&self) {
+        self.peer_candidate_send_oversize_total
             .fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -11745,5 +11890,103 @@ mod tests {
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
         assert!(out.contains("qbind_p2p_session_eviction_attempt_total "));
         assert!(out.contains("qbind_p2p_trust_bundle_live_reload_trigger_total "));
+    }
+
+    // ------------------------------------------------------------------
+    // Run 080 — disabled-by-default SEND-side peer-candidate wire
+    // publisher metrics.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn peer_candidate_send_metrics_start_at_zero_and_record_outcomes_atomically() {
+        let p = P2pMetrics::new();
+        assert_eq!(p.peer_candidate_sent_total(), 0);
+        assert_eq!(p.peer_candidate_send_failure_total(), 0);
+        assert_eq!(p.peer_candidate_send_no_peer_total(), 0);
+        assert_eq!(p.peer_candidate_send_oversize_total(), 0);
+
+        // Sent: +1 per per-peer successful enqueue.
+        p.record_peer_candidate_sent();
+        p.record_peer_candidate_sent();
+        assert_eq!(p.peer_candidate_sent_total(), 2);
+
+        // Send failure: +1 per per-peer enqueue failure (queue full,
+        // peer dropped, channel closed).
+        p.record_peer_candidate_send_failure();
+        assert_eq!(p.peer_candidate_send_failure_total(), 1);
+
+        // No-peer: +1 per publish_once with zero authenticated peers
+        // within bounded timeout.
+        p.record_peer_candidate_send_no_peer();
+        assert_eq!(p.peer_candidate_send_no_peer_total(), 1);
+
+        // Oversize: +1 per publish_once refusal BEFORE any peer
+        // enqueue.
+        p.record_peer_candidate_send_oversize();
+        assert_eq!(p.peer_candidate_send_oversize_total(), 1);
+
+        // Run 080 must NOT bump receive-side or apply-side counters
+        // by construction.
+        assert_eq!(p.peer_candidate_received_total(), 0);
+        assert_eq!(p.peer_candidate_validated_total(), 0);
+        assert_eq!(p.peer_candidate_rejected_total(), 0);
+        assert_eq!(p.live_reload_apply_success_total(), 0);
+        assert_eq!(p.live_reload_apply_failure_total(), 0);
+        assert_eq!(p.live_reload_sessions_evicted_total(), 0);
+        assert_eq!(p.live_reload_last_applied_sequence(), 0);
+        assert_eq!(p.session_eviction_attempt_total(), 0);
+    }
+
+    #[test]
+    fn peer_candidate_send_metrics_render_once_in_format_metrics() {
+        let p = P2pMetrics::new();
+        p.record_peer_candidate_sent();
+        p.record_peer_candidate_send_failure();
+        p.record_peer_candidate_send_no_peer();
+        p.record_peer_candidate_send_oversize();
+        let out = p.format_metrics();
+        for name in [
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total ",
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total ",
+        ] {
+            let n = out.matches(name).count();
+            assert_eq!(
+                n, 1,
+                "Run 080 send metric {} must appear exactly once in format_metrics (got {})",
+                name, n
+            );
+        }
+        // INTENTIONALLY NO `_applied_total` family on the send
+        // surface — a sender that emits a frame does NOT imply the
+        // peer applied it, NOR does it imply the local node applied
+        // it.
+        assert!(
+            !out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_applied_total"),
+            "Run 080 must NOT emit a peer-candidate send _applied_total family"
+        );
+        // INTENTIONALLY NO `peer_candidate_wire_*` family — the
+        // Run 080 surface reuses the seven Run 076 receive-side
+        // counters and the four Run 080 send-side counters only.
+        assert!(
+            !out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_wire_"),
+            "Run 080 must NOT introduce a peer_candidate_wire_* metric family"
+        );
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total 1"));
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total 1")
+        );
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total 1")
+        );
+        assert!(
+            out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total 1")
+        );
+        // Pre-Run-080 receive-side and pre-existing families still
+        // render exactly once each.
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_received_total "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total "));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest "));
     }
 }

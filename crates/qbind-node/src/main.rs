@@ -665,6 +665,39 @@ async fn main() {
         // `enabled = false`.
     }
 
+    // Run 080 — top-level partial-config refusal for the disabled-by-
+    // default peer-candidate wire publisher.
+    match (
+        args.p2p_trust_bundle_peer_candidate_wire_publish_enabled,
+        args.p2p_trust_bundle_peer_candidate_wire_publish_path.as_ref(),
+    ) {
+        (true, Some(_)) => {}
+        (true, None) => {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-peer-candidate-wire-publish-enabled \
+                 requires --p2p-trust-bundle-peer-candidate-wire-publish-path <PATH>."
+            );
+            std::process::exit(1);
+        }
+        (false, Some(_)) => {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-peer-candidate-wire-publish-path requires \
+                 --p2p-trust-bundle-peer-candidate-wire-publish-enabled."
+            );
+            std::process::exit(1);
+        }
+        (false, None) => {}
+    }
+    if args.p2p_trust_bundle_peer_candidate_wire_publish_once
+        && !args.p2p_trust_bundle_peer_candidate_wire_publish_enabled
+    {
+        eprintln!(
+            "[binary] FATAL: --p2p-trust-bundle-peer-candidate-wire-publish-once requires \
+             --p2p-trust-bundle-peer-candidate-wire-publish-enabled."
+        );
+        std::process::exit(1);
+    }
+
 
     // Run 073 — production adapter wiring (composes Run 069
     // validation + Run 070 apply contract + Run 071
@@ -2594,6 +2627,41 @@ async fn run_p2p_node(
         config.network.listen_addr.as_deref().unwrap_or("unknown"),
         config.network.static_peers.len()
     );
+
+    // Run 080 — disabled-by-default operator-triggered publish-once
+    // send-side counterpart for peer-candidate wire frame 0x05.
+    if args.p2p_trust_bundle_peer_candidate_wire_publish_enabled
+        && args.p2p_trust_bundle_peer_candidate_wire_publish_once
+    {
+        use qbind_node::pqc_peer_candidate_wire::{
+            wire_publish_log_line, LivePeerCandidateWirePublisher,
+            PeerCandidateWireFrameSender, PeerCandidateWirePublishConfig,
+        };
+        let sender: Arc<dyn PeerCandidateWireFrameSender> = node_context.p2p_service.clone();
+        let publisher =
+            LivePeerCandidateWirePublisher::new(sender, Arc::clone(&node_context.metrics));
+        let publish_cfg = PeerCandidateWirePublishConfig {
+            enabled: true,
+            envelope_path: args
+                .p2p_trust_bundle_peer_candidate_wire_publish_path
+                .clone(),
+            publish_once: true,
+            ..PeerCandidateWirePublishConfig::default()
+        };
+        match publisher.publish_once_from_config(&publish_cfg).await {
+            Ok(report) => {
+                eprintln!("{}", wire_publish_log_line(&report, report.attempted()));
+            }
+            Err(e) => {
+                eprintln!(
+                    "[binary] Run 080: publish-once attempt failed closed: {} \
+                     (validation-only boundary preserved; no apply; no sequence write; \
+                     no live trust mutation; no session eviction).",
+                    e
+                );
+            }
+        }
+    }
 
     // C4/B6: outbound consensus path. Reuse the existing
     // `P2pConsensusNetwork` already created by the builder so that
