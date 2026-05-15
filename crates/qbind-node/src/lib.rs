@@ -199,6 +199,22 @@ pub mod pqc_trust_peer_candidate;
 // `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_peer_candidate_binary;
 
+// Run 078 (C4 piece: production-binary-facing, disabled-by-default
+// **P2P wire** receive path for peer-candidate validation only).
+// Defines the typed/versioned/bounded wire envelope
+// `PeerCandidateWireEnvelopeV1`, the dedicated frame discriminator
+// `DISCRIMINATOR_PEER_CANDIDATE_WIRE = 0x05` (distinct from the
+// existing `p2p_tcp.rs` consensus / DAG / control discriminators),
+// the strict frame-layer decoder `decode_peer_candidate_wire_frame`,
+// and the `PeerCandidateWireReceiver` that wraps a Run 076
+// `PeerCandidateValidator` one-to-one. Disabled by default; even
+// when armed, the receiver has no apply / propagation / session-
+// eviction / `LivePqcTrustState` handle by construction. Reuses
+// the SAME seven Run 076 `qbind_p2p_pqc_trust_bundle_peer_candidate_*`
+// metric counters (no new metric family; no `_applied_total`).
+// See module docs and `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_peer_candidate_wire;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;

@@ -44,22 +44,36 @@ Current state:
   - no session evictor
   - no sequence mutation
   - no _applied_total metric
-- Run 077 positive-narrow:
-  - added production-binary-facing local peer-candidate check mode
+- Run 077 added production-binary-facing local peer-candidate check mode:
   - hidden required-together flags:
     - --p2p-trust-bundle-peer-candidate-validation-enabled
     - --p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>
-  - local JSON PeerCandidateEnvelope fixture validation through release qbind-node
-  - valid fixture validates but is not applied
+  - valid local fixture validates but is not applied
   - invalid fixtures fail closed
   - sequence/live trust/session state remains unchanged
   - no node start in this mode
-  - no P2P wire/gossip integration yet
+- Run 078 positive-narrow:
+  - added typed/versioned/bounded P2P peer-candidate wire envelope
+  - PeerCandidateWireEnvelopeV1
+  - domain tag QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1
+  - version 1
+  - reserved frame discriminator 0x05
+  - no collision with p2p_tcp.rs frame types 0x01/0x02/0x03
+  - strict fail-closed codec
+  - MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES enforced on declared payload_len before allocation
+  - disabled-by-default PeerCandidateWireReceiver
+  - wraps Run 076 → Run 069 validation pipeline
+  - reuses seven Run 076 peer-candidate metrics
+  - no _applied_total
+  - no peer_candidate_wire_* metrics
+  - startup banner hook only
+  - no production listener/gossip subscription/admin API/filesystem watcher
+  - no live receive-loop integration yet
 - C4 remains OPEN.
 - C5 remains OPEN / narrowed.
 
 Current remaining C4 trust/lifecycle blockers include:
-- true P2P wire/gossip peer-candidate receive path
+- live P2P receive-loop integration for peer-candidate validation
 - peer-driven live apply / propagation
 - activation_epoch runtime source
 - in-binary / on-chain bundle-signing-key ratification
@@ -70,13 +84,14 @@ Current remaining C4 trust/lifecycle blockers include:
 - admin-API or filesystem-watcher triggers if ever desired
 
 Task:
-Run 078. Add a disabled-by-default P2P wire receive path for peer-candidate validation only.
+Run 079. Wire the disabled-by-default peer-candidate wire receiver into the live P2P frame dispatch path, while preserving validation-only semantics.
 
 Primary objective:
-Allow a running qbind-node to receive a bounded trust-bundle peer-candidate envelope over the P2P layer and validate it through the Run 076 PeerCandidateValidator, without applying it, propagating it, persisting sequence, mutating LivePqcTrustState, or evicting sessions.
+A running qbind-node should be able to receive a bounded peer-candidate wire frame over the live P2P transport and validate it through the Run 078 PeerCandidateWireReceiver, without applying it, propagating it, persisting sequence, mutating LivePqcTrustState, or evicting sessions.
 
 Important framing:
-This is validation-only P2P receive.
+This is live P2P receive integration only.
+This is validation-only.
 This is NOT peer-driven live apply.
 This is NOT automatic gossip propagation.
 This is NOT trust-bundle synchronization.
@@ -94,108 +109,78 @@ Do not silently fall back to DummySig, DummyKem, or DummyAead.
 Do not claim full C4 or C5 closure.
 
 Strict scope:
-- Add a disabled-by-default P2P receive surface for peer-candidate validation.
-- Use a typed, versioned, bounded envelope.
-- Reuse Run 076 PeerCandidateValidator.
-- Reuse Run 077 local fixture encoding only if it is safe for wire use; otherwise define a separate wire envelope.
+- Add live receive-loop dispatch for the reserved peer-candidate frame discriminator 0x05.
+- Gate the handler behind the existing hidden Run 078 wire-validation flag.
+- Default behavior unchanged when the flag is absent.
+- Decode and size-bound the frame before expensive validation.
+- Call PeerCandidateWireReceiver / PeerCandidateValidator only after cheap pre-checks.
 - Do not call ProductionLiveTrustApplyContext.
 - Do not call LiveReloadController.
 - Do not call LivePqcTrustState::swap_snapshot.
 - Do not call P2pSessionEvictor.
 - Do not call check_and_update_sequence.
-- Do not rebroadcast or forward peer candidates.
-- Do not accept unsigned TestNet/MainNet bundles.
-- Do not enable by default.
+- Do not rebroadcast or forward peer candidate frames.
+- Do not disconnect honest peers for invalid candidates unless the existing frame policy already requires it.
 - Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
 
 Required investigation:
 
-1. Inspect existing P2P wire/message surfaces
+1. Inspect live P2P receive loop
    Inspect:
-   - crates/qbind-node/src/p2p_node_builder.rs
    - crates/qbind-node/src/p2p_tcp.rs
-   - qbind-net message/framing types
-   - any peer message dispatch loop
-   - any existing broadcast/gossip/injection envelope
+   - crates/qbind-node/src/p2p_node_builder.rs
+   - qbind-net frame/message types
+   - existing frame discriminator handling for 0x01 / 0x02 / 0x03
+   - read-loop error behavior
+   - peer registry / connection handling
+   - metrics hooks
+   - crates/qbind-node/src/pqc_peer_candidate_wire.rs
    - crates/qbind-node/src/pqc_trust_peer_candidate.rs
-   - crates/qbind-node/src/pqc_peer_candidate_binary.rs
-   - crates/qbind-node/src/metrics.rs
    - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_076.md
    - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md
    - docs/whitepaper/contradiction.md
 
    Determine:
-   - whether there is an existing safe typed P2P message channel.
-   - whether candidate validation can be added without changing consensus messages.
-   - how to bound payload size before allocation/crypto.
-   - how to rate-limit per peer or globally.
-   - whether validation runs synchronously or through a bounded queue.
-   - whether test harness can inject a P2P frame through the same receive path.
+   - exact live read-loop insertion point.
+   - how frame type 0x05 can be recognized without disturbing 0x01/0x02/0x03.
+   - how to pass peer identity/source metadata into the validator if available.
+   - whether invalid peer-candidate frames should be ignored, counted, or treated as protocol violations.
+   - whether frame size is already bounded before read allocation.
+   - whether a second pre-allocation bound is needed.
 
-2. Define wire/envelope semantics
+2. Define live receive semantics
    Required:
-   - version/domain tag, e.g. QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE:v1.
-   - explicit payload length.
-   - max payload length <= Run 076 cap.
-   - environment.
-   - chain_id.
-   - sequence.
-   - bundle_fingerprint.
-   - bundle bytes or a strict envelope containing bundle bytes.
-   - peer identity if available for rate-limit attribution.
-   - strict decode errors.
-   - reject unknown version.
-   - reject oversize before expensive verification.
-   - reject malformed before signature verification.
-   - do not dump bundle bytes to logs.
-
-3. Define enablement
-   Add hidden or clearly experimental flag:
-   - --p2p-trust-bundle-peer-candidate-wire-validation-enabled
-   or equivalent.
-
-   Requirements:
-   - disabled by default.
-   - no behavior change unless enabled.
-   - no partial config that silently enables receive path.
-   - if enabled without signed trust-bundle context/signing keys/data-dir, fail closed or disable safely with an explicit log.
-   - MainNet still requires signed bundle verification.
-
-4. Define validation-only behavior
-   Required:
-   - Valid candidate:
-     - increments received/validated metrics.
-     - logs safe metadata and validation-only/not-applied.
-     - does not mutate LivePqcTrustState.
-     - does not mutate sequence file.
-     - does not evict sessions.
-     - does not propagate.
-   - Invalid candidate:
-     - increments received/rejected or drop metric.
-     - logs safe rejection reason.
-     - does not mutate state.
-   - Oversize candidate:
-     - dropped before signature verification.
-   - Duplicate candidate:
-     - suppressed through Run 076 duplicate logic.
-   - Rate-limited candidate:
-     - dropped or rejected before expensive validation.
-   - Disabled path:
-     - candidate frames are ignored or rejected cheaply.
+   - When wire-validation flag is disabled:
+     - frame 0x05 is ignored or rejected cheaply.
      - no expensive validation.
+     - disabled counter increments if the frame reaches the handler.
+   - When enabled:
+     - valid frame validates and logs validation-only/not-applied.
+     - invalid frame rejects and counts rejection.
+     - oversize frame drops before expensive validation.
+     - duplicate frame suppresses repeated validation.
+     - rate-limited frame drops/rejects before expensive validation.
+   - All outcomes:
+     - no LivePqcTrustState mutation.
+     - no sequence mutation.
+     - no session eviction.
+     - no propagation.
+     - no live apply metrics.
+     - no reload-check metrics.
+     - no Dummy/static fallback.
 
-5. Define DoS controls
+3. Define safety and DoS behavior
    Required:
-   - max payload size.
-   - bounded queue if async.
-   - per-peer or global fixed-window rate limit.
-   - duplicate suppression.
-   - no unbounded task spawn.
-   - no unbounded memory allocation.
-   - no repeated expensive verification for duplicate candidate where possible.
-   - metrics for oversize/rate-limited/duplicate.
+   - max size enforced before full allocation or before expensive decode where feasible.
+   - no unbounded task spawn per frame.
+   - no unbounded buffering.
+   - rate limit applies per peer if peer ID is available; otherwise global fixed-window limit.
+   - duplicate suppression applies by candidate fingerprint/sequence or envelope fingerprint.
+   - malformed frames do not panic.
+   - malformed frames do not poison the read loop for honest traffic unless existing protocol policy says malformed frames close connection.
 
-6. Define metrics/logs
+4. Define metrics/logging
    Reuse Run 076 counters:
    - qbind_p2p_pqc_trust_bundle_peer_candidate_received_total
    - qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total
@@ -207,69 +192,77 @@ Required investigation:
 
    Requirements:
    - no _applied_total family.
+   - no new unnecessary peer_candidate_wire_* metric family.
    - local reload-check metrics must not move.
    - live-reload apply metrics must not move.
    - session eviction metrics must not move.
-   - logs must include validation-only/not-applied.
+   - logs must include:
+     - peer/source if available
+     - frame type
+     - candidate sequence/fingerprint prefix if decoded
+     - outcome
+     - validation-only/not-applied
    - no private material.
+   - no bundle bytes dumped.
 
 Required implementation:
 
-1. Add P2P wire receive hook
-   If a safe typed channel exists:
-   - add message type/envelope.
-   - gate handler behind hidden flag.
-   - decode and bound payload.
-   - call PeerCandidateValidator::try_accept.
-   - record metrics.
+1. Wire live P2P frame dispatch
+   In the live read loop:
+   - recognize frame discriminator 0x05.
+   - if disabled, call disabled/cheap path and continue according to policy.
+   - if enabled, bound/decode through PeerCandidateWireEnvelopeV1.
+   - call PeerCandidateWireReceiver.
+   - record outcome metrics.
    - do not propagate.
+   - do not apply.
 
-   If no safe typed channel exists:
-   - implement the smallest honest receive-path harness that uses the same P2P framing layer and document exact boundary.
-   - do not fake production gossip.
+2. Add flag plumbing
+   Ensure the Run 078 wire-validation flag reaches the live P2P service / receive loop.
+   If current flag only logs a banner, wire it into the service configuration.
 
-2. Add CLI/config flag
-   Add hidden flag:
-   - --p2p-trust-bundle-peer-candidate-wire-validation-enabled
-   or equivalent.
+3. Preserve existing frame behavior
+   Existing 0x01/0x02/0x03 frames must behave exactly as before.
+   Existing tests for PQC static-root mutual auth and KEMTLS real AEAD must still pass.
 
-3. Preserve Run 077 local check
-   Existing local check mode must remain:
-   - non-mutating.
-   - no node start.
-   - deterministic exit code.
-   - no P2P wire behavior.
+4. Preserve Run 077 local check
+   Local peer-candidate check mode remains:
+   - non-mutating
+   - no node start
+   - deterministic exit code
 
-4. Preserve local reload paths
+5. Preserve local reload paths
    Ensure:
    - Run 069 reload-check unchanged.
    - Run 073 process-start apply unchanged.
    - Run 074 SIGHUP live reload unchanged.
-   - peer candidate validation cannot trigger any of them.
+   - peer candidate receive cannot trigger any of them.
 
 Required tests:
 
 1. Unit tests
-   - wire envelope encode/decode roundtrip.
-   - unknown version rejected.
-   - oversize rejected before validation.
-   - malformed rejected before validation.
-   - disabled handler does not validate.
-   - enabled valid candidate validates and is not applied.
-   - invalid candidate rejected and not applied.
-   - duplicate suppressed.
+   - disabled live handler does not validate.
+   - enabled valid frame validates and is not applied.
+   - invalid frame rejects.
+   - oversize frame drops before validation.
+   - duplicate frame suppresses.
    - rate limit triggers.
+   - unknown version rejects.
+   - malformed frame rejects without panic.
+   - 0x01/0x02/0x03 frame handling unaffected if testable.
    - no sequence mutation.
    - no LivePqcTrustState mutation.
    - no session eviction.
 
 2. Integration tests
-   - N=2 P2P nodes connect normally with wire validation disabled.
-   - with wire validation enabled, injecting/sending valid candidate frame validates.
-   - injecting/sending invalid candidate frame rejects.
-   - oversize frame dropped.
+   - N=2 P2P nodes connect with wire validation disabled.
+   - sending/injecting frame 0x05 while disabled does not validate and does not break honest connection.
+   - N=2 P2P nodes connect with wire validation enabled.
+   - send valid candidate frame over live P2P path; candidate validates, not applied.
+   - send invalid candidate frame; candidate rejects, no mutation.
+   - send oversize frame; dropped before expensive validation.
    - duplicate frame suppressed.
-   - session remains alive after candidate validation.
+   - session remains alive after candidate validation/rejection.
    - sequence file unchanged.
    - live trust snapshot unchanged.
    - session eviction counters unchanged.
@@ -278,11 +271,13 @@ Required tests:
    - SIGHUP live reload from Run 074 still works.
 
 Required regression commands:
+- cargo test -p qbind-node --lib pqc_peer_candidate_wire
 - cargo test -p qbind-node --lib pqc_trust_peer_candidate
 - cargo test -p qbind-node --lib pqc_peer_candidate_binary
-- new Run 078 wire peer-candidate tests
+- new Run 079 live wire tests
 - cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
 - cargo test -p qbind-node --test run_077_pqc_peer_candidate_binary_tests
+- cargo test -p qbind-node --test run_078_pqc_peer_candidate_wire_tests
 - cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
 - cargo test -p qbind-node --test run_073_pqc_trust_bundle_reload_apply_runtime_tests
 - cargo test -p qbind-node --test run_074_pqc_trust_bundle_live_reload_tests
@@ -295,7 +290,7 @@ Required regression commands:
 - cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
 - cargo build --release -p qbind-node --example devnet_pqc_root_helper
 
-If source touches P2P wire/message handling, also run:
+Because this touches P2P wire/message handling, also run:
 - cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
 - cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
 - cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
@@ -311,13 +306,17 @@ Release-binary evidence:
 1. Disabled-by-default N=2 baseline
    - start N=2 signed-bundle nodes without wire-validation flag.
    - prove normal peer connection works.
-   - prove peer-candidate wire path inactive.
+   - send/inject 0x05 candidate frame if possible.
+   - prove disabled/cheap path or no validation.
+   - prove connection remains healthy.
+   - prove no sequence mutation.
+   - prove no session eviction.
    - no fallback.
    - no Dummy crypto.
 
 2. Enabled valid peer-candidate frame
-   - start N=2 with wire-validation enabled.
-   - send/inject valid candidate frame over the intended P2P path.
+   - start N=2 with wire-validation flag enabled.
+   - send valid 0x05 candidate frame over live P2P transport.
    - prove candidate validates.
    - prove logs/metrics say validation-only/not-applied.
    - prove sequence file unchanged.
@@ -327,20 +326,23 @@ Release-binary evidence:
    - prove no live reload apply metrics.
 
 3. Invalid peer-candidate frame
-   - tampered or wrong-chain candidate.
+   - send tampered or wrong-chain 0x05 frame.
    - prove rejected.
    - prove no sequence/live-trust/session mutation.
 
 4. Oversize frame
+   - send oversize 0x05 frame.
    - prove dropped before expensive validation.
    - prove oversize metric increments.
+   - prove no crash.
 
 5. Duplicate/rate-limit frame
-   - prove duplicate or rate-limit handling if implemented.
+   - send duplicate or burst.
+   - prove duplicate/rate-limit metric moves.
 
 Evidence document:
 Create:
-- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_079.md
 
 Evidence document must include:
 - exact objective
@@ -349,10 +351,9 @@ Evidence document must include:
 - exact commands run
 - tests/evidence run and pass/fail status
 - investigation findings with file/function references
-- chosen P2P receive surface
-- wire/envelope design
-- enablement flag
-- disabled-by-default behavior
+- live receive-loop insertion point
+- enablement flag plumbing
+- frame semantics
 - validation-only semantics
 - DoS controls
 - metrics/logging
@@ -375,8 +376,8 @@ Evidence document must include:
 - exact immediate next action
 
 contradiction.md update rules:
-- If disabled-by-default P2P wire receive validation lands, update C4 to record peer/gossiped trust-bundle acceptance narrowed to validation-only wire receive.
-- If only harness-level receive is possible, state exact boundary.
+- If disabled-by-default live P2P receive-loop integration lands, update C4 to record peer/gossiped trust-bundle acceptance narrowed to validation-only live receive.
+- If release-binary evidence cannot send a real frame and only harness injection is possible, state exact boundary.
 - Keep C4 open for:
   - peer-driven live apply / propagation
   - activation_epoch runtime source
@@ -393,9 +394,9 @@ contradiction.md update rules:
 
 Expected verdict options:
 - Strongest positive:
-  disabled-by-default P2P wire receive validation lands; valid peer candidate validates but is not applied; invalid/oversize/duplicate/rate-limited candidates fail closed; sequence, live trust, sessions, and apply metrics remain unchanged; no propagation; no fallback; no Dummy crypto; release-binary evidence passes.
+  disabled-by-default live P2P receive-loop integration lands; release binary receives real 0x05 frame over live P2P transport; valid peer candidate validates but is not applied; invalid/oversize/duplicate/rate-limited candidates fail closed; sequence, live trust, sessions, and apply metrics remain unchanged; no propagation; no fallback; no Dummy crypto.
 - Partial positive:
-  only harness-level receive lands, or release-binary wire evidence is incomplete. State exact boundary.
+  live dispatch path lands but release-binary evidence uses harness injection or cannot prove real frame delivery. State exact boundary.
 - Negative:
   peer candidate mutates state, burns sequence, bypasses validation, evicts sessions, triggers apply, causes fallback/Dummy crypto, or regressions fail.
 

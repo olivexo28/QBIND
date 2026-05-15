@@ -899,8 +899,12 @@ fn rand_suffix() -> u64 {
 /// Lowercase-hex serde codec for [`PeerCandidateEnvelope::bundle_bytes`].
 /// Run 077 binary fixtures use this so an operator-supplied JSON
 /// envelope is diff-friendly and the declared-length / declared-
-/// fingerprint cross-checks remain unambiguous. Strictly fixture-
-/// format only: Run 077 introduces no peer/gossip wire surface.
+/// fingerprint cross-checks remain unambiguous. Run 078 wire
+/// envelope payloads reuse this same encoding via the
+/// `peer_candidate_bundle_bytes_hex_pub` re-export below — both
+/// formats stay byte-for-byte identical for `bundle_bytes` so a
+/// captured wire frame is operator-inspectable using the same
+/// tooling as a Run 077 fixture.
 mod peer_candidate_bundle_bytes_hex {
     use serde::{Deserialize, Deserializer, Serializer};
 
@@ -947,6 +951,16 @@ mod peer_candidate_bundle_bytes_hex {
             _ => None,
         }
     }
+}
+
+/// Public re-export of the Run 076 lowercase-hex `bundle_bytes`
+/// codec so the Run 078 wire envelope (`pqc_peer_candidate_wire.rs`)
+/// can reuse the SAME serialisation. The wire envelope and the
+/// Run 077 fixture envelope are otherwise distinct types with
+/// different domain tags / version namespaces — only the bytes
+/// encoding is shared.
+pub mod peer_candidate_bundle_bytes_hex_pub {
+    pub use super::peer_candidate_bundle_bytes_hex::{deserialize, serialize};
 }
 
 // ---------------------------------------------------------------------

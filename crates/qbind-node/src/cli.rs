@@ -568,6 +568,48 @@ pub struct CliArgs {
     #[arg(long = "p2p-trust-bundle-peer-candidate-check", hide = true)]
     pub p2p_trust_bundle_peer_candidate_check: Option<PathBuf>,
 
+    /// Run 078 — disabled-by-default operator opt-in flag for the
+    /// **production-binary-facing P2P wire receive path** for
+    /// peer-candidate validation **only**. Without this flag, the
+    /// Run 078 wire receiver is constructed in the `Disabled`
+    /// state — even if a peer-candidate frame ever reached the
+    /// receiver (no production gossip subscription publishes such
+    /// frames today; see module docs), the disabled receiver
+    /// would short-circuit BEFORE any decode / crypto / scratch
+    /// file / validator call. With this flag, the receiver is
+    /// armed for **validation-only** acceptance of well-formed
+    /// peer-candidate frames: the candidate is routed through the
+    /// **same** Run 076 `PeerCandidateValidator::try_accept`
+    /// (which itself reuses the **same** Run 069
+    /// `validate_candidate_bundle_full` pipeline used at startup,
+    /// by the Run 069 reload-check, by the Run 073 process-start
+    /// apply, by the Run 074 SIGHUP live reload-apply, and by the
+    /// Run 077 binary-facing local check), bumps the seven
+    /// existing Run 076
+    /// `qbind_p2p_pqc_trust_bundle_peer_candidate_*` counters (no
+    /// `_applied_total` family — none exists by design), and is
+    /// end-of-line. Hidden because Run 078 is evidence-only.
+    ///
+    /// **This is NOT peer-driven live apply, NOT gossip
+    /// propagation, NOT a new network listener, NOT an admin-API
+    /// endpoint, NOT a filesystem watcher, NOT KMS/HSM, NOT
+    /// `activation_epoch` runtime sourcing, NOT signing-key
+    /// ratification, NOT fast-sync restore parity.** The receiver
+    /// holds no `LivePqcTrustState` handle, no `P2pSessionEvictor`,
+    /// no `LiveReloadController`, no `ProductionLiveTrustApplyContext`,
+    /// and no `P2pService` broadcast handle; by construction it
+    /// cannot apply the candidate, propagate it, persist its
+    /// sequence number, evict P2P / KEMTLS sessions, or
+    /// re-broadcast the frame. See
+    /// `crates/qbind-node/src/pqc_peer_candidate_wire.rs`,
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md`, and
+    /// `docs/whitepaper/contradiction.md` C4.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-wire-validation-enabled",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_wire_validation_enabled: bool,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

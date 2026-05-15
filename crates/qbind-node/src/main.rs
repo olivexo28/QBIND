@@ -612,6 +612,60 @@ async fn main() {
     }
 
 
+    // Run 078 — disabled-by-default P2P wire receive-path banner.
+    //
+    // This block is positioned AFTER the Run 077 binary-facing
+    // local check hook and BEFORE the Run 073 process-start
+    // reload-apply hook so the "armed / disabled" state of the
+    // Run 078 receiver is recorded in operator logs at the SAME
+    // place every other trust-bundle hot-reload state is recorded.
+    //
+    // When `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+    // is NOT supplied (the default), nothing is logged and the
+    // production receiver, if it were constructed elsewhere, would
+    // be in the `Disabled` state — every wire frame would be a
+    // truthful no-op `received_total` + `disabled_total` bump.
+    //
+    // When the flag IS supplied, a single safe banner line is
+    // logged so the operator audit trail records that the wire
+    // receiver was armed for this run. **The banner is the ONLY
+    // behaviour the flag adds to the production startup path in
+    // this run.** No new network listener is bound; no new gossip
+    // subscription is started; no new admin-API endpoint is
+    // exposed; no filesystem watcher is spawned. The wire-receive
+    // codec + `PeerCandidateWireReceiver` are library-level types
+    // available to a future production gossip dispatcher under a
+    // separate review once peer-driven live apply, peer/gossip
+    // propagation, `activation_epoch` runtime sourcing, KMS/HSM
+    // custody, and on-chain signing-key ratification all land.
+    //
+    // See `crates/qbind-node/src/pqc_peer_candidate_wire.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md`, and
+    // `docs/whitepaper/contradiction.md` C4 for the exact boundary
+    // that remains open.
+    if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled {
+        eprintln!(
+            "[binary] Run 078: P2P peer-candidate wire receiver armed for \
+             validation-only acceptance (NOT applied; not propagated; sequence \
+             not persisted; live trust state unchanged; sessions untouched). \
+             No production gossip dispatcher publishes peer-candidate frames \
+             on the wire in this run — the armed receiver is library-level \
+             only (frame discriminator 0x{:02x}, envelope version {}, domain \
+             tag {:?}). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.",
+            qbind_node::pqc_peer_candidate_wire::DISCRIMINATOR_PEER_CANDIDATE_WIRE,
+            qbind_node::pqc_peer_candidate_wire::PEER_CANDIDATE_WIRE_VERSION,
+            qbind_node::pqc_peer_candidate_wire::PEER_CANDIDATE_WIRE_DOMAIN_TAG,
+        );
+    } else {
+        // No log line in the default path so the existing operator
+        // banner output is byte-for-byte unchanged for every
+        // existing `qbind-node` invocation. The disabled-by-default
+        // semantics are anchored entirely by
+        // `PeerCandidateWireReceiverConfig::default()` returning
+        // `enabled = false`.
+    }
+
+
     // Run 073 — production adapter wiring (composes Run 069
     // validation + Run 070 apply contract + Run 071
     // `LivePqcTrustState` + Run 072 `P2pSessionEvictor` +
