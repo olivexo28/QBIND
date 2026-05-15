@@ -1,23 +1,58 @@
 # QBIND PQC Trust Lifecycle Operator Runbook
 
-**Run:** 066 (prose update of the Run 064 playbook for Run 065)
-**Status:** Operator playbook landed and updated for Runs 050–065; full C4 remains OPEN
+**Run:** 075 (prose update of the Run 066 playbook for Runs 069–074)
+**Status:** Operator playbook landed and updated for Runs 050–074; full C4 remains OPEN
 **Scope owner:** transport trust-anchor + bundle-signing lifecycle
-**Date:** 2026-05-13
+**Date:** 2026-05-14
 
 This runbook converts the PQC trust-bundle machinery proven by
-Runs 050–065 into a concrete operator playbook for production
-custody, rotation, revocation, and bundle-signing-key rotation.
-Run 066 is a documentation-only update of the Run 064 playbook
-that incorporates Run 065 (per-environment minimum activation-
-height policy enforced at bundle load on the `--p2p-trust-bundle`
-path: DevNet 0 / TestNet 8 / MainNet 32 blocks; half-open
-`[current_height, current_height + margin)` reject window; applies
-to bundle-level `activation_height`, per-active-root
-`activation_height`, and per-entry revocation `activation_height`
-when `Some(_)`; `activation_height = None` immediate revocations
-preserved). No runtime code, no test source, and no helper source
-is changed by Run 066.
+Runs 050–074 into a concrete operator playbook for production
+custody, rotation, revocation, bundle-signing-key rotation, **and
+the operator-triggered hot-reload lifecycle** (§6.F).
+
+Run 075 is a documentation-only update of the Run 066 playbook
+that incorporates Runs 069–074:
+
+- **Run 069** — disabled-by-default validation-only reload-check
+  hook (`--p2p-trust-bundle-reload-check <PATH>`), non-mutating
+  by construction (no live trust mutation, no sequence commit, no
+  session eviction, no `/metrics` family).
+- **Run 070** — apply contract (`ApplyMode`, `ReloadApplyError`,
+  `LiveTrustApplyContext`, `apply_validated_candidate{,_with_previous}`,
+  `AppliedCandidate`) with the strict
+  `validate → snapshot → swap → evict_sessions → commit_sequence`
+  ordering and per-stage rollback semantics.
+- **Run 071** — mutable shared `LivePqcTrustState`
+  (`Arc<RwLock<Arc<LivePqcTrustSnapshot>>>`) initialized once at
+  startup from the validated `LoadedTrustBundle`; the listener-side
+  handshake verifier and the bidirectional revocation closure now
+  read through this handle (no behavior change at startup).
+- **Run 072** — production session-eviction hook
+  (`P2pSessionEvictor` trait + `TcpKemTlsP2pService::evict_all_sessions`
+  + four `qbind_p2p_session_eviction_*` counters).
+- **Run 073** — `ProductionLiveTrustApplyContext` adapter composes
+  Runs 069/070/071/072/055 end-to-end; the binary's
+  `--p2p-trust-bundle-reload-apply-path` hook now drives a live
+  apply at process-start time (the `UnsupportedRuntimeContext`
+  boundary is removed from the local-operator path).
+- **Run 074** — long-running local operator-triggered live reload-
+  apply on a running node via SIGHUP. New hidden CLI flags
+  `--p2p-trust-bundle-live-reload-enabled` +
+  `--p2p-trust-bundle-live-reload-path <PATH>` (required together;
+  refused without `--p2p-trust-bundle <BASELINE-PATH>`). New
+  `LiveReloadController` serializes concurrent triggers via an
+  `Arc<AtomicBool>` CAS guard; only the `Fatal`
+  (`SequenceCommitFailedRollbackAlsoFailed`) arm signals
+  shutdown. Six new `qbind_p2p_trust_bundle_live_reload_*`
+  Prometheus counters/gauge.
+
+The Run 065 per-environment minimum activation-margin policy
+(DevNet 0 / TestNet 8 / MainNet 32 blocks; half-open
+`[current_height, current_height + margin)` reject window;
+`activation_height = None` immediate revocations remain exempt)
+continues to apply at every bundle-load site, including all four
+hot-reload entry points above. No runtime code, no test source,
+and no helper source is changed by Run 075.
 
 It is **operator documentation**. It is **not** a redesign of any
 runtime layer. It does **not** introduce new bypass flags, does
@@ -76,9 +111,66 @@ References to behaviour are anchored in:
 - `crates/qbind-node/examples/devnet_pqc_root_helper.rs` and
   `crates/qbind-node/examples/devnet_pqc_trust_bundle_helper.rs`
   (DevNet evidence tooling only — not production custody).
-- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md` through `RUN_065.md`
+- `crates/qbind-node/src/pqc_trust_reload.rs` (Run 069/070
+  validation/staging entry points: `ValidatedCandidate`,
+  `ReloadCheckError`, `ReloadCheckInputs`,
+  `validate_candidate_bundle{,_full}` — non-mutating by
+  construction; `ApplyMode`, `ReloadApplyError`,
+  `LiveTrustApplyContext`,
+  `apply_validated_candidate{,_with_previous}`,
+  `AppliedCandidate::applied_log_line` — Run 070 apply contract
+  with strict `validate → snapshot → swap → evict → commit`
+  ordering and per-stage rollback).
+- `crates/qbind-node/src/pqc_trust_sequence.rs::peek_sequence`
+  (Run 069 read-only equivalent of `check_and_update_sequence`;
+  never writes).
+- `crates/qbind-node/src/pqc_live_trust.rs` (Run 071 mutable
+  shared live trust handle: `LivePqcTrustState`,
+  `LivePqcTrustSnapshot`, `initialize_from_loaded_bundle`,
+  `snapshot`, `swap_snapshot`; consumed by
+  `P2pNodeBuilder::with_live_pqc_trust(...)` on the
+  listener-side `TrustedClientRoots` resolver and the
+  bidirectional `LeafCertRevocationList` revocation closure).
+- `crates/qbind-node/src/p2p_session_eviction.rs` (Run 072
+  production-honest internal session-eviction hook:
+  `EvictionReason::{TrustBundleReloadApply, …}`,
+  `EvictionReport` with `attempted == evicted + failed`
+  invariant, `EvictionError`, sync `P2pSessionEvictor` trait,
+  `MockP2pSessionEvictor`).
+- `crates/qbind-node/src/p2p_tcp.rs::TcpKemTlsP2pService::evict_all_sessions`
+  (Run 072 concrete evictor; drains the per-peer
+  `PeerConnection` registry, drops outbound `tx` channels,
+  aborts per-peer read/write `JoinHandle`s; implements
+  `P2pSessionEvictor`).
+- `crates/qbind-node/src/pqc_live_trust_apply.rs` (Run 073
+  `ProductionLiveTrustApplyContext` adapter — composes Run 069
+  validation + Run 071 `swap_snapshot` + Run 072 evictor + Run
+  055 `check_and_update_sequence`; `NoActiveSessionsEvictor`
+  for the truthful at-startup-time zero-session report).
+- `crates/qbind-node/src/pqc_live_trust_reload.rs` (Run 074
+  long-running-node controller: `LiveReloadConfig`,
+  `LiveReloadController`, `LiveReloadOutcome { Applied |
+  AlreadyInProgress | Invalid | Fatal }`, `try_trigger() /
+  try_trigger_with_now() / try_trigger_with_activation()`,
+  `Arc<AtomicBool>` CAS in-progress guard).
+- `crates/qbind-node/src/main.rs::spawn_run074_live_reload_task`
+  (Run 074 SIGHUP signal-handler task; gated behind
+  `#[cfg(unix)]`; only the `Fatal` arm sends to `shutdown_tx`).
+- `crates/qbind-node/src/cli.rs` (hidden Run 069/070/074 flags:
+  `--p2p-trust-bundle-reload-check <PATH>`,
+  `--p2p-trust-bundle-reload-apply-enabled`,
+  `--p2p-trust-bundle-reload-apply-path <PATH>`,
+  `--p2p-trust-bundle-live-reload-enabled`,
+  `--p2p-trust-bundle-live-reload-path <PATH>`).
+- `crates/qbind-node/src/metrics.rs` (Run 072 four
+  `qbind_p2p_session_eviction_*` counters; Run 074 six
+  `qbind_p2p_trust_bundle_live_reload_*` counters/gauge —
+  `trigger_total`, `apply_success_total`, `apply_failure_total`,
+  `already_in_progress_total`, `sessions_evicted_total`,
+  `last_applied_sequence`).
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md` through `RUN_074.md`
   (live-binary smoke evidence for every fail-closed boundary cited
-  below).
+  below, including reload-check / reload-apply / live-reload).
 
 Per-environment chain ids (`crates/qbind-types/src/primitives.rs`):
 
@@ -129,19 +221,26 @@ Per-environment chain ids (`crates/qbind-types/src/primitives.rs`):
 - A per-environment minimum-activation-height policy enforced by
   the binary on a **gossiped / peer-supplied** bundle path. Run 065
   enforces this policy on the binary's `--p2p-trust-bundle` load
-  path (DevNet 0 / TestNet 8 / MainNet 32 blocks; half-open
-  `[current_height, current_height + margin)` reject window;
-  applies to bundle-level `activation_height`, per-active-root
-  `activation_height`, and per-entry revocation `activation_height`
-  when `Some(_)`); the bundle is not yet gossiped between peers,
-  and when on-the-fly trust-bundle distribution lands the same
-  `check_min_activation_height_policy` helper must be threaded
-  through that path. The Run 065 helper itself is reusable today
+  path and the Run 069/070/073/074 hot-reload paths reuse the same
+  loader (so Run 065 holds for every hot-reload candidate, §6.F).
+  The bundle is not yet gossiped between peers; when on-the-fly
+  peer-supplied / gossiped trust-bundle distribution lands, the
+  same `check_min_activation_height_policy` helper must be
+  threaded through that path. The Run 065 helper itself is
+  reusable today
   (`crates/qbind-node/src/pqc_trust_activation.rs::check_min_activation_height_policy`).
-- On-the-fly trust-bundle hot reload. The bundle is loaded exactly
-  once per process lifetime; the Run 062 active/pending gauges are
-  sticky-at-startup snapshots. Rotation today requires a validator
-  restart.
+- On-the-fly **peer-supplied / gossiped** trust-bundle hot reload.
+  **Local operator-triggered hot reload IS supported** as of Runs
+  069 (validation-only reload-check), 073 (process-start local
+  reload-apply), and 074 (long-running SIGHUP live apply on a
+  running node), all driven by **operator-supplied local files**
+  through the SAME loader the startup `--p2p-trust-bundle` path
+  uses (§6.F). The candidate is never accepted from a peer, from
+  gossip, from an admin API, or from a filesystem-watcher; the
+  trigger is always an explicit operator action (CLI flag at
+  start-time, or `SIGHUP` to a long-running node armed with the
+  hidden Run 074 flags). Peer / gossiped bundle propagation
+  remains a separate C4 piece (§10).
 - Production fast-sync / consensus-storage restore (separate C4
   piece).
 
@@ -174,6 +273,14 @@ and must not be weakened by any operator procedure described here:
 | **Per-entry revocation activation gate (Run 062).** A `revocations[]` entry with `activation_height: None` is immediate. A signature-valid entry with `activation_height > current_height` is **PENDING** — surfaced via `pending_revoked_root_ids` / `pending_revoked_leaf_fingerprints` and the `_revocations_*_pending` gauges, but NOT enforced anywhere (not in `active_roots`, not in the Run 061 startup self-check, not in the Run 052 peer-handshake context). An entry with `activation_height <= current_height` is **ACTIVE** and enforced bit-for-bit as the legacy immediate revocation. Tampering `activation_height` after signing invalidates the ML-DSA-44 bundle signature (canonical preimage coverage). | `pqc_trust_bundle::TrustBundle::validate_at_with_signing_keys_chain_id_and_revocation_activation`; gauges in `metrics.rs` (`qbind_p2p_pqc_trust_bundle_revocations_{configured,active,pending}_total`, `_revocations_{root,leaf}_{active,pending}`) | RUN_062 |
 | **Local-issuer-root startup self-check (Run 063).** If a configured `--p2p-leaf-cert` decodes to a `root_key_id` that appears in the loaded bundle's currently-**active** `revoked_root_ids` set, the binary emits one `[binary] FATAL: Run 063 local leaf certificate issuer root revoked …` line and exits 1 BEFORE `PqcStaticRootConfig` is built. The Run 062 pending set is explicitly NOT consulted. Independent of the Run 061 check; either failing fails closed. | `pqc_trust_bundle::check_local_leaf_issuer_root_not_revoked`, wired in `main.rs` immediately after the Run 061 call site and BEFORE `pqc_config` is moved into the builder | RUN_063 |
 | **Per-environment minimum activation-margin policy (Run 065).** A bundle whose declared `activation_height` (bundle-level OR per-active-root) falls in the half-open window `[current_height, current_height + margin)` fails closed at load with `TrustBundleActivationError::ActivationHeightBelowMinimumMargin`. A scheduled per-entry revocation whose `activation_height` is `Some(h)` and falls in the same window fails closed with `TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin`. Constants: DevNet `MIN_DEVNET_ACTIVATION_MARGIN = 0`, TestNet `MIN_TESTNET_ACTIVATION_MARGIN = 8`, MainNet `MIN_MAINNET_ACTIVATION_MARGIN = 32` (strict ordering DevNet < TestNet < MainNet). The reject window is half-open: bundles whose `activation_height` equals `current_height + margin` pass Run 065 and fall through to Run 057's "not yet reached" gate; bundles whose `activation_height` is strictly less than `current_height` are already-effective and are NOT retroactively rejected (snapshot-rejoin semantics). Per-entry revocations with `activation_height = None` are immediate and NEVER subject to Run 065 (preserves the emergency-revocation path). The policy runs AFTER signature / chain_id / environment / revocation structural validation and BEFORE Run 057's future-height gate, Run 055's sequence persistence, and Run 050's root merge — a rejected too-soon bundle does NOT create `pqc_trust_bundle_sequence.json` and does NOT update `loaded.active_roots`. `required_min_height = current_height.saturating_add(margin)` defends against `u64::MAX` wrap. | `pqc_trust_activation::check_min_activation_height_policy`, `MIN_{DEVNET,TESTNET,MAINNET}_ACTIVATION_MARGIN` constants, `ActivationPolicy::for_environment`; called from `pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation`; errors flow through the existing `TrustBundleError::Activation(..)` FATAL printer in `main.rs` with the static "No fallback to --p2p-trusted-root" marker | RUN_065 |
+| **Validation-only reload-check is non-mutating (Run 069).** The hidden `--p2p-trust-bundle-reload-check <PATH>` flag drives `pqc_trust_reload::validate_candidate_bundle_full` over the candidate using the **same** Run 050/051/053/055/057/061/062/063/065 security pipeline as startup, BUT MUST NOT mutate `LivePqcTrustState` (Run 071), MUST NOT merge roots into the active trust set, MUST NOT call `check_and_update_sequence` (uses read-only `peek_sequence`), MUST NOT call `evict_all_sessions`, MUST NOT touch any `/metrics` family, and MUST NOT burn a sequence number on rejected or unapplied candidates. The node does NOT start in this mode (validates, prints `VERDICT=valid|invalid` + staged metadata, exits 0/1). Byte-and-mtime equality on the on-disk sequence file is asserted on every positive and every negative path. | `pqc_trust_reload::validate_candidate_bundle{,_full}`, `ValidatedCandidate`, `ReloadCheckError`, `ReloadCheckInputs`, `pqc_trust_sequence::peek_sequence`, `SequencePeekOutcome`; main.rs reload-check hook positioned BEFORE network-mode dispatch | RUN_069 |
+| **Strict reload-apply ordering (Run 070).** Every live-apply on the operator-triggered path (both the Run 073 process-start hook and the Run 074 SIGHUP trigger) follows EXACTLY the order `validate → snapshot previous → swap → evict_sessions → commit_sequence`. Failures roll back: (i) validation failure produces no swap, no eviction, no sequence commit; (ii) swap failure leaves the old live state in place with no eviction, no sequence commit; (iii) eviction failure rolls back the live state via `swap_snapshot(previous)`, no sequence commit; (iv) sequence-commit failure rolls back the live state; if rollback itself fails AFTER a successful swap the outcome is the distinct fatal variant `ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed` (live trust state may be ahead of the on-disk record). On the Run 074 long-running path this fatal variant is the ONLY path that sends to the graceful-shutdown `shutdown_tx`; invalid candidates, eviction partial failures, and commit failures with successful rollback are all non-fatal and the node keeps running. | `pqc_trust_reload::{ApplyMode, ReloadApplyError, LiveTrustApplyContext, apply_validated_candidate{,_with_previous}, AppliedCandidate::applied_log_line}` | RUN_070, RUN_073, RUN_074 |
+| **Live trust handle = `LivePqcTrustState` (Run 071).** The listener-side handshake verifier's `TrustedClientRoots` resolver AND the bidirectional `LeafCertRevocationList` revocation closure both read through `LivePqcTrustState::snapshot()`. Writers (Run 070 apply path through Run 073's `ProductionLiveTrustApplyContext`) replace the inner `Arc<LivePqcTrustSnapshot>` under a single short write lock — readers always observe an all-or-nothing snapshot transition; no torn read of active roots vs. revoked leaves is possible. At startup the handshake-verifier surface is byte-identical to pre-Run-071. | `pqc_live_trust::{LivePqcTrustState, LivePqcTrustSnapshot, initialize_from_loaded_bundle, snapshot, swap_snapshot}`; `P2pNodeBuilder::with_live_pqc_trust(...)` | RUN_071 |
+| **Session-eviction invariant (Run 072).** Every successful live-apply call invokes `P2pSessionEvictor::evict_all_sessions(EvictionReason::TrustBundleReloadApply)` and consumes an `EvictionReport` satisfying `attempted == evicted + failed`. The concrete `TcpKemTlsP2pService::evict_all_sessions` drains the per-peer `PeerConnection` registry synchronously, drops outbound `tx` channels, and aborts per-peer read/write `JoinHandle`s. The four `qbind_p2p_session_eviction_*` counters render once each on `/metrics`. Selective per-peer retention is intentionally NOT implemented — v0 evicts all conservatively because old sessions may have authenticated under old roots/leaves. | `p2p_session_eviction::{EvictionReason, EvictionReport, EvictionError, P2pSessionEvictor}`, `p2p_tcp::TcpKemTlsP2pService::evict_all_sessions`, `metrics::P2pMetrics::record_session_eviction` | RUN_072 |
+| **Process-start local reload-apply (Run 073).** When `--p2p-trust-bundle-reload-apply-enabled` + `--p2p-trust-bundle-reload-apply-path <PATH>` are supplied, the binary constructs `ProductionLiveTrustApplyContext` over the live `LivePqcTrustState` (Run 071) + a `NoActiveSessionsEvictor` (truthful zero-session report because no peer has connected at this point) + the `--data-dir`-derived sequence path, runs the full Run 070 apply pipeline, prints `AppliedCandidate::applied_log_line` (or the canonical `VERDICT=invalid …` line on a fail-closed branch), and exits 0/1. `ReloadApplyError::UnsupportedRuntimeContext` is removed from the local-operator-triggered path. The library boundary still surfaces `UnsupportedRuntimeContext` for callers that omit the apply context (defence-in-depth). | `pqc_live_trust_apply::{ProductionLiveTrustApplyContext, NoActiveSessionsEvictor}`; main.rs Run 073 hook block | RUN_073 |
+| **Long-running SIGHUP live reload-apply (Run 074).** When `--p2p-trust-bundle-live-reload-enabled` + `--p2p-trust-bundle-live-reload-path <PATH>` are supplied (required together; refused without `--p2p-trust-bundle <BASELINE-PATH>`), the binary installs a `tokio::signal::unix::signal(SignalKind::hangup())` listener that on each SIGHUP calls `LiveReloadController::try_trigger()`. The controller constructs a **fresh** `ProductionLiveTrustApplyContext` over the SAME live `LivePqcTrustState` the listener-side handshake verifier reads from + the live `TcpKemTlsP2pService` (upcast to `Arc<dyn P2pSessionEvictor>`) + the same `--data-dir`-derived sequence file, runs the full Run 070 apply pipeline, and surfaces a typed `LiveReloadOutcome { Applied | AlreadyInProgress | Invalid | Fatal }`. Concurrent SIGHUPs are serialized in-process by an `Arc<AtomicBool>` CAS guard — every second-or-later trigger returns `AlreadyInProgress` without re-entering validation. Only the `Fatal` arm (`SequenceCommitFailedRollbackAlsoFailed`) sends to `shutdown_tx`. Six new `qbind_p2p_trust_bundle_live_reload_*` counters/gauge bump only on real trigger paths and render exactly once on `/metrics`. Both flags are hidden from `--help`. Disabled by default. | `pqc_live_trust_reload::{LiveReloadConfig, LiveReloadController, LiveReloadOutcome}`; main.rs `spawn_run074_live_reload_task` (`#[cfg(unix)]`); `metrics::P2pMetrics::live_reload_*` | RUN_074 |
+| **Invalid hot-reload candidate never mutates state (Runs 069/070/073/074).** Across reload-check, reload-apply, and long-running live-reload paths, an invalid candidate (any failure class: signature, chain_id, environment, rollback, equivocation, too-soon activation, revoked-local-leaf, revoked-local-issuer-root, eviction partial failure when rollback succeeds) leaves the on-disk sequence file's BYTES AND mtime unchanged AND leaves `LivePqcTrustState`'s snapshot at the baseline `Arc`. The node remains running on Run 074 paths. | All Run 069/070/073/074 integration tests; `assert_seq_file_unchanged` snapshots; live-state-fingerprint equality checks | RUN_069/070/073/074 |
+| **No peer-supplied / gossiped / admin-API / filesystem-watcher hot reload (Runs 069–074 boundary).** Every hot-reload candidate is read from a local file path under operator control. Run 074 ships SIGHUP only — no admin RPC, no HTTP/JSON-RPC trigger, no inode-watch on the candidate path. Bundle propagation between peers, BundleAnnounce/BundleRequest gossip, and remote admin mutation surfaces are NOT implemented and remain C4-OPEN (§10). | `cli.rs` (flags hidden, no network/admin surface); `main.rs::spawn_run074_live_reload_task` (`SignalKind::hangup()` only) | RUN_074 |
 
 If any procedure in this runbook appears to require violating one
 of the above, the procedure is wrong, not the implementation. Open
@@ -1009,9 +1116,479 @@ Notes:
   `effective_from`. `effective_from` is a wall-clock validity
   window (Run 050). `activation_height` is block-height-gated
   (Run 062). Both gates must pass for an entry to be active.
-- There is no on-the-fly hot reload (§10). Validators that never
-  restart between bundle load and `activation_height` will not see
-  the transition in their in-process state; the next restart will.
+- There is operator-triggered hot reload **for local-file
+  candidates** (§6.F: Run 069 reload-check, Run 073 process-start
+  reload-apply, Run 074 long-running SIGHUP live reload-apply).
+  A scheduled-revocation bundle published via §6.F applies at the
+  triggering moment — but per-entry `activation_height` still
+  gates whether each scheduled revocation entry transitions from
+  PENDING to ACTIVE: the new bundle's `_revocations_*_pending`
+  gauges replace the prior bundle's at swap time, and only
+  validators whose `current_height >= entry.activation_height`
+  observe an ACTIVE entry. There is no peer-gossiped propagation:
+  every validator's operator must trigger reload-apply (or
+  restart) for the new bundle to be loaded on that validator.
+
+---
+
+## 6.F Operator-triggered hot-reload lifecycle (Runs 069–074)
+
+This section is the operator playbook for the local-file
+hot-reload paths landed by Runs 069–074. **All three paths are
+local-operator-controlled.** None of them accept peer-supplied,
+gossiped, admin-API, or filesystem-watcher input. Peer / gossiped
+trust-bundle propagation remains a separate C4 piece (§10).
+
+### 6.F.1 Three paths at a glance
+
+| Path | Trigger | Run | Mutates live trust? | Mutates sequence file? | Evicts sessions? | Node restarts? |
+|---|---|---|---|---|---|---|
+| **Reload-check** | `--p2p-trust-bundle-reload-check <PATH>` at process start (node exits without starting). | 069 | No | No | No | N/A (validator never enters P2P) |
+| **Process-start reload-apply** | `--p2p-trust-bundle-reload-apply-enabled` + `--p2p-trust-bundle-reload-apply-path <PATH>` at process start (node exits after the apply). | 073 | Yes (in-process, before P2P bring-up) | Yes (atomic) | No active sessions at this point — truthful zero report. | N/A (validator never enters P2P; this run produces evidence of a clean apply) |
+| **Long-running SIGHUP live reload-apply** | `--p2p-trust-bundle-live-reload-enabled` + `--p2p-trust-bundle-live-reload-path <PATH>` (required together; refused without `--p2p-trust-bundle <BASELINE-PATH>`); operator sends `SIGHUP` to the running PID. | 074 | Yes (on running node) | Yes (atomic) | Yes (`evict_all_sessions(TrustBundleReloadApply)`) | **No restart** on success or non-fatal failure; only `Fatal` (commit failed AND rollback failed) triggers graceful shutdown. |
+
+All three paths reuse the **same** Run 050/051/053/055/057/061/
+062/063/065 validation pipeline as the startup `--p2p-trust-bundle`
+loader (parity by construction; see §1.3 invariants). All three
+hidden flags are absent from `--help` and disabled by default.
+
+### 6.F.2 Validation-only reload-check (Run 069)
+
+**Purpose.** Preflight a candidate bundle on a real validator
+host using the **exact** startup security pipeline, without
+applying any change.
+
+**What it does.**
+
+- Reads the candidate from `<PATH>`.
+- Calls `pqc_trust_reload::validate_candidate_bundle_full` with
+  the same signing-key set, `--env`, chain-id constants,
+  `--data-dir`-derived sequence path (read-only via
+  `peek_sequence`), and the same optional `--p2p-leaf-cert`
+  bytes used by the startup hook.
+- Prints `VERDICT=valid` + staged metadata (`canonical_fingerprint`,
+  `sequence`, peeked previous record, active/pending revocation
+  counts) on success; `VERDICT=invalid <reason>` on any failure
+  class.
+- Exits 0 (valid) or 1 (invalid). **The node does not start in
+  this mode.**
+
+**What it MUST NOT do (invariants — pin every operator
+expectation against §1.3):**
+
+- MUST NOT mutate `LivePqcTrustState`.
+- MUST NOT merge roots into the active trust set (there is no
+  active trust set to merge into — the node does not start).
+- MUST NOT call `check_and_update_sequence`. Sequence is
+  inspected via the read-only `peek_sequence` helper.
+- MUST NOT call `evict_all_sessions`.
+- MUST NOT touch any `/metrics` family.
+- MUST NOT burn a sequence number on rejected OR unapplied
+  candidates. Byte-and-mtime equality on the on-disk sequence
+  file is asserted on every Run 069 integration test.
+
+**Use it for.**
+
+- Validating a freshly-published candidate against a target
+  validator's runtime configuration before kicking off the
+  Run 074 SIGHUP trigger.
+- Detecting a wrong-chain-id, tampered-signature, rollback-attempt,
+  equivocation, too-soon-activation, locally-revoked-leaf, or
+  locally-revoked-issuer-root failure class without disturbing
+  the running node (run reload-check on a sibling host or as a
+  pre-restart preflight).
+
+**It is NOT.**
+
+- Peer-supplied / gossiped bundle acceptance.
+- A long-running trigger surface — reload-check is process-start
+  only and exits.
+
+### 6.F.3 Process-start reload-apply (Run 073)
+
+**Purpose.** Apply a validated local candidate to a node that has
+not yet entered P2P (typically because the operator wants to
+seed the live trust state with a different bundle than the one
+on `--p2p-trust-bundle`, or wants to record clean evidence of a
+candidate's apply pipeline against the production binary).
+
+**What it does.**
+
+- Loads the `--p2p-trust-bundle <BASELINE-PATH>` baseline first
+  (initializes `LivePqcTrustState` and persists the baseline
+  sequence record if needed).
+- Constructs `ProductionLiveTrustApplyContext` over:
+  - `Arc<LivePqcTrustState>` initialized from the baseline,
+  - `Arc<NoActiveSessionsEvictor>` (no peer connections exist at
+    this point — truthful zero-session report; the Run 072
+    invariant `attempted == evicted + failed == 0` trivially
+    holds),
+  - the `--data-dir`-derived sequence path,
+  - a freshly-sampled `now_unix_secs`.
+- Drives `apply_validated_candidate_with_previous` over the
+  candidate at `--p2p-trust-bundle-reload-apply-path` using the
+  Run 070 ordering `validate → snapshot → swap → evict → commit`.
+- Prints `AppliedCandidate::applied_log_line` (single canonical
+  format) on success; `VERDICT=invalid <reason>` on failure.
+- Exits 0 (applied) or 1 (any failure).
+
+**What changed vs. Run 070.** Run 070 surfaced
+`ReloadApplyError::UnsupportedRuntimeContext` because no mutable
+runtime trust handle existed. Run 071 + Run 072 + Run 073 close
+that gap: the binary's local-operator path now has a
+production-honest `LiveTrustApplyContext` adapter, so
+`UnsupportedRuntimeContext` is removed from this path. The
+library boundary still surfaces `UnsupportedRuntimeContext` for
+callers that omit the apply context (defence-in-depth).
+
+**Use it for.**
+
+- Producing operator evidence of a clean live apply against a
+  freshly-built release binary, on a staging validator.
+- A "stop → reload-apply → restart" rotation workflow if the
+  operator chooses NOT to arm the Run 074 SIGHUP trigger.
+
+**It is NOT.**
+
+- The long-running SIGHUP trigger — for that, see §6.F.4.
+- Peer-supplied / gossiped bundle acceptance.
+
+### 6.F.4 Long-running SIGHUP live reload-apply (Run 074)
+
+**Purpose.** Apply a validated local candidate to a **running**
+node without restart. This is the strongest hot-reload primitive
+the runbook documents today.
+
+**Preconditions (operator MUST satisfy all):**
+
+1. The node is running and was started with the two hidden Run 074
+   flags AND a baseline bundle:
+   ```
+   --p2p-trust-bundle <BASELINE-PATH>
+   --p2p-trust-bundle-live-reload-enabled
+   --p2p-trust-bundle-live-reload-path <CANDIDATE-PATH>
+   ```
+   The binary refuses partial config at startup with one of three
+   `FATAL` lines (recorded in RUN_074 §6 release smokes):
+   - `--p2p-trust-bundle-live-reload-enabled` without
+     `--p2p-trust-bundle-live-reload-path` → FATAL exit 1.
+   - `--p2p-trust-bundle-live-reload-path` without
+     `--p2p-trust-bundle-live-reload-enabled` → FATAL exit 1.
+   - `--p2p-trust-bundle-live-reload-enabled` without
+     `--p2p-trust-bundle <BASELINE-PATH>` → FATAL exit 1 (no
+     implicit `--p2p-trusted-root` fallback).
+2. Each subsequent candidate is written to the SAME
+   `<CANDIDATE-PATH>` (the SIGHUP handler re-reads that exact
+   path on every trigger).
+3. The candidate is signed by an operator-distributed
+   `--p2p-trust-bundle-signing-key` on TestNet/MainNet, carries
+   the runtime chain_id, and satisfies the Run 065 minimum
+   activation-margin on the target environment. (All Run 050–
+   065 invariants apply.)
+
+**How the trigger fires.**
+
+- The operator overwrites `<CANDIDATE-PATH>` with the new
+  candidate (atomic rename recommended) and sends `SIGHUP` to
+  the validator PID (`kill -HUP <PID>`).
+- The `#[cfg(unix)]` SIGHUP handler task installed by
+  `spawn_run074_live_reload_task` wakes up and calls
+  `LiveReloadController::try_trigger()`.
+- The controller constructs a **fresh**
+  `ProductionLiveTrustApplyContext` per trigger (so each apply
+  gets a fresh `now_unix_secs`), over:
+  - the SAME `Arc<LivePqcTrustState>` the listener-side
+    handshake verifier reads from,
+  - the SAME `Arc<TcpKemTlsP2pService>` (upcast to
+    `Arc<dyn P2pSessionEvictor>`),
+  - the SAME `--data-dir`-derived sequence file used at startup,
+  - the operator's pinned signing-key set, chain_id, env, local
+    leaf bytes.
+- The pipeline runs `validate → snapshot → swap → evict_all →
+  commit_sequence` and produces a typed `LiveReloadOutcome`.
+
+**Outcome semantics.**
+
+- `Applied { evicted, new_sequence }` — success. Live trust
+  state swapped; all peer sessions drained; sequence file
+  advanced atomically. Counters:
+  `trigger_total +=1`, `apply_success_total +=1`,
+  `sessions_evicted_total += evicted`,
+  `last_applied_sequence = new_sequence`.
+- `AlreadyInProgress` — a previous trigger is still running.
+  The CAS guard rejects this trigger without entering
+  validation. No state change. Counters:
+  `trigger_total += 1`, `already_in_progress_total += 1`.
+- `Invalid(reason)` — validation, swap, eviction-partial, or
+  commit-with-successful-rollback failure. **State is unchanged
+  end-to-end**: live trust at baseline `Arc`, sequence file
+  bytes AND mtime unchanged. The node **keeps running**. Counters:
+  `trigger_total += 1`, `apply_failure_total += 1`.
+- `Fatal(reason)` — `SequenceCommitFailedRollbackAlsoFailed`
+  ONLY. Live trust state may be ahead of the on-disk record;
+  the handler sends to `shutdown_tx` so the operator can
+  recover offline. **This is the only outcome that touches
+  `shutdown_tx`**. Counters:
+  `trigger_total += 1`, `apply_failure_total += 1`.
+
+**Concurrent triggers.** An `Arc<AtomicBool>` CAS guard
+serializes triggers in-process. While an apply is in flight,
+every additional SIGHUP returns `AlreadyInProgress` and does
+NOT re-enter validation. A clone of the controller (held by the
+SIGHUP task) shares the SAME `Arc<AtomicBool>` flag with any
+other reference — there is exactly one guard process-wide.
+
+**Session-eviction impact.** A successful apply evicts ALL
+existing P2P sessions conservatively (Run 072 v0 policy). Old
+sessions may have authenticated under the prior roots / leaves;
+keeping them after a swap would re-validate stale credentials.
+Reconnect behaviour depends on the existing dial / listener
+loops:
+
+- Outbound dials retry on B8 bounded backoff against the new
+  trust set.
+- Inbound listeners accept new handshakes under the new trust
+  set.
+- **Operators should expect a short liveness disruption during a
+  successful live reload.** Do not treat reload as zero-
+  disruption. Selective per-peer retention is NOT implemented
+  and is a separate C4 open piece (§10).
+
+**Operator log lines.** Every outcome surfaces a single
+canonical log line:
+
+```
+[Run 074] LiveReloadOutcome::Applied { evicted=4, new_sequence=2 }
+[Run 074] LiveReloadOutcome::AlreadyInProgress
+[Run 074] LiveReloadOutcome::Invalid(ValidationFailed(<reason>))
+[Run 074] LiveReloadOutcome::Fatal(SequenceCommitFailedRollbackAlsoFailed)
+```
+
+`Fatal` is followed by graceful shutdown via the existing
+`shutdown_tx` watch channel.
+
+**It is NOT.**
+
+- Peer-supplied / gossiped bundle acceptance.
+- A filesystem-watcher hot reload (no inode watch — only SIGHUP).
+- An admin-API / HTTP / JSON-RPC trigger (no network surface
+  added by Run 074).
+- `activation_epoch` runtime sourcing — the controller's
+  `ActivationContext` is `height_only(0)`, the same height-only
+  stance the startup `--p2p-trust-bundle` path uses today.
+- Selective per-peer session retention — evicts all, conservatively.
+
+### 6.F.5 Apply pipeline and ordering (the single safe order)
+
+Both Run 073 and Run 074 apply paths use the SAME Run 070
+ordering. **Operators MUST NOT assume any other order.**
+
+1. **Validate candidate.** Full Run 050/051/053/055/057/061/062/
+   063/065 pipeline. Failure → `LiveReloadOutcome::Invalid` (or
+   `VERDICT=invalid` at Run 073 process-start) with the on-disk
+   sequence file and the live trust state unchanged, NO eviction.
+2. **Snapshot the previous `LivePqcTrustState`.** Capture the
+   current `Arc<LivePqcTrustSnapshot>` for rollback.
+3. **Swap to the new `LivePqcTrustState`** under
+   `LivePqcTrustState::swap_snapshot`. Readers observe an
+   all-or-nothing snapshot transition under a single short
+   write lock. Swap failure (rare; surfaces as
+   `ReloadApplyError::ApplyStateSwap`) → old state remains, NO
+   eviction, NO sequence commit.
+4. **Evict all sessions** via `P2pSessionEvictor::evict_all_sessions(
+   EvictionReason::TrustBundleReloadApply)`. Partial failure
+   (`evicted < attempted`) → rollback live state via
+   `swap_snapshot(previous)`, NO sequence commit, surface
+   `Invalid(SessionEvictionFailed { rollback_ok: true, ... })`.
+   The truthful Run 072 invariant `attempted == evicted + failed`
+   is preserved end-to-end in the surfaced error message.
+5. **Commit sequence persistence** via
+   `pqc_trust_sequence::check_and_update_sequence`. Atomic
+   write. Failure → rollback live state; if rollback succeeds
+   surface `Invalid(SequenceCommitFailedRollbackOk)` (non-fatal,
+   node keeps running); if rollback fails surface
+   `Fatal(SequenceCommitFailedRollbackAlsoFailed)` (live state
+   may be ahead of on-disk record; Run 074 binary sends to
+   `shutdown_tx` for graceful shutdown so the operator can
+   recover offline).
+6. **Report success.** `AppliedCandidate::applied_log_line`
+   (Run 073) or `LiveReloadOutcome::Applied { evicted,
+   new_sequence }` (Run 074). Metrics bump.
+
+**Invalid candidate never kills the node** on the Run 074 path —
+only the post-rollback-failure fatal branch does, and that
+branch is unreachable in normal operation against the production
+`swap_snapshot` writer (its only failure mode is a panicked
+lock guard, which itself is non-recoverable).
+
+### 6.F.6 Metrics and evidence (per hot-reload trigger)
+
+Every trigger MUST produce the following operator-visible
+artifacts. Archive each into the bundle-change evidence bundle
+(§9) when a SIGHUP trigger or process-start reload-apply
+produces a real production change.
+
+**Reload-check (Run 069):**
+
+- Single `VERDICT=valid|invalid …` log line.
+- For invalid: the specific failure class
+  (`signature_invalid`, `chain_id_mismatch`, `rollback`,
+  `equivocation`, `activation_below_min_margin`,
+  `activation_height_not_yet_reached`,
+  `local_leaf_revoked`, `local_issuer_root_revoked`, …).
+- Filesystem confirmation that `pqc_trust_bundle_sequence.json`
+  bytes AND mtime are unchanged across the reload-check run.
+
+**Process-start reload-apply (Run 073):**
+
+- `[binary] Run 073 reload-apply baseline loaded …`
+- `[binary] Run 073 reload-apply candidate validated …`
+- `AppliedCandidate::applied_log_line` with:
+  - old/new canonical fingerprint prefix,
+  - old/new `sequence`,
+  - `session_evictions=0 (no-active-sessions at startup-time)`.
+- The Run 072 `qbind_p2p_session_eviction_*` counters on
+  `/metrics` if a metrics scrape was captured.
+
+**Long-running SIGHUP live reload-apply (Run 074):**
+
+- Single `[Run 074] LiveReloadOutcome::… …` line per trigger.
+- On `Applied`: explicit `evicted=<N> new_sequence=<S>` in the
+  log line.
+- The six `qbind_p2p_trust_bundle_live_reload_*` counters/gauge
+  on `/metrics`:
+  - `qbind_p2p_trust_bundle_live_reload_trigger_total`
+  - `qbind_p2p_trust_bundle_live_reload_apply_success_total`
+  - `qbind_p2p_trust_bundle_live_reload_apply_failure_total`
+  - `qbind_p2p_trust_bundle_live_reload_already_in_progress_total`
+  - `qbind_p2p_trust_bundle_live_reload_sessions_evicted_total`
+  - `qbind_p2p_trust_bundle_live_reload_last_applied_sequence`
+- Run 072 `qbind_p2p_session_eviction_*` counters AFTER the
+  apply.
+- On-disk `pqc_trust_bundle_sequence.json` before/after the
+  apply (record canonical fingerprint and `highest_sequence`).
+- Proof that no `Dummy*` primitive is registered (the Run 040
+  banner from process startup, captured at the validator boot
+  that armed the SIGHUP trigger).
+- Proof that no `--p2p-trusted-root` line is on the validator's
+  command line.
+- For an Invalid outcome: byte-and-mtime equality on the
+  sequence file across the trigger.
+- For a concurrent-trigger test (recommended once per major
+  rotation): a captured `AlreadyInProgress` log line + the
+  `already_in_progress_total` counter increment.
+
+### 6.F.7 Normal trust-bundle rotation workflow (with live reload)
+
+When a validator is running with the Run 074 flags armed:
+
+1. **Preflight on the candidate.** On a sibling host (or on the
+   same validator host out-of-band), run the candidate through
+   `--p2p-trust-bundle-reload-check <CANDIDATE-PATH>` against
+   the SAME signing-key set, `--env`, and (optional)
+   `--p2p-leaf-cert` as the running validator. Confirm
+   `VERDICT=valid`.
+2. **Copy the signed candidate to the configured local
+   reload path.** Use an atomic rename
+   (`mv tmp.json $CANDIDATE_PATH`) so the SIGHUP handler does
+   not race a partial write.
+3. **Trigger SIGHUP.** `kill -HUP <PID>`.
+4. **Confirm apply success.** Inspect the
+   `[Run 074] LiveReloadOutcome::Applied { evicted=<N>,
+   new_sequence=<S> }` log line, the
+   `qbind_p2p_trust_bundle_live_reload_apply_success_total`
+   counter increment, and the
+   `qbind_p2p_trust_bundle_live_reload_last_applied_sequence`
+   gauge value.
+5. **Confirm sequence update.** Read
+   `pqc_trust_bundle_sequence.json` and verify
+   `highest_sequence` equals the candidate's sequence and
+   `bundle_fingerprint` matches the canonical fingerprint
+   logged by the apply line.
+6. **Confirm session eviction.** Inspect the Run 072
+   `qbind_p2p_session_eviction_*` counters AFTER the trigger
+   and confirm the per-peer reconnect behaviour returns to a
+   healthy `qbind_p2p_peers_authenticated` gauge value within
+   the expected B8 retry window. Operators should expect a
+   short liveness disruption during this period.
+7. **Archive evidence** per §6.F.6 / §9 into the bundle-change
+   evidence directory.
+
+### 6.F.8 Emergency revocation via live reload
+
+For a §6.B or §6.C variant 2 emergency-compromise event on a
+fleet that is armed with Run 074 flags:
+
+- Use the SAME emergency-revocation bundle shape as §6.B / §6.C
+  variant 2 (per-entry `activation_height = None` for immediate
+  enforcement; bundle-level `activation_height` omitted for the
+  fastest cutover, or satisfying the Run 065 minimum margin if
+  set).
+- Trigger SIGHUP on every validator armed with Run 074 flags.
+  Each successful apply evicts all sessions on that validator,
+  forcing every peer (including any compromised peer if the
+  revocation entry is leaf-scoped) to re-handshake against the
+  new trust set. Compromised peers fail closed at
+  re-handshake (Run 052 leaf path or Run 050/Run 063 root
+  path).
+- For validators NOT armed with Run 074 flags (e.g. legacy
+  configuration), use the §6.B / §6.C restart-based workflow.
+- **Do NOT bypass with `--p2p-trusted-root`.** That fallback is
+  refused on TestNet/MainNet when `--p2p-trust-bundle` is
+  supplied; live reload preserves that refusal end-to-end.
+
+### 6.F.9 Incident checklist (hot-reload-specific)
+
+When a SIGHUP trigger returns `Invalid` or `Fatal`:
+
+- **Distinguish `Invalid` from `Fatal`.** Only `Fatal`
+  (`SequenceCommitFailedRollbackAlsoFailed`) should be treated
+  as an operational incident — it indicates the live trust
+  state may be ahead of the on-disk sequence record AND
+  rollback could not restore the prior live state. The node
+  has signaled graceful shutdown via `shutdown_tx`. Recover
+  offline: inspect the on-disk record, confirm whether the
+  prior baseline bundle still validates, and restart cleanly.
+- **`Invalid` does NOT require a node restart.** Validation
+  failures, eviction partial failures with successful rollback,
+  and commit failures with successful rollback all leave the
+  node running with the prior live trust state and the prior
+  on-disk sequence record intact. Identify the failure class
+  in the log line, fix the candidate (e.g. resign with the
+  correct signing key, regenerate with the correct chain_id,
+  pick an activation height past the Run 065 floor, etc.), and
+  re-trigger SIGHUP.
+- **`AlreadyInProgress` is informational.** It means a previous
+  trigger is still running (typically waiting on the sequence-
+  file fsync or on session-eviction drain). Wait for the
+  preceding outcome line, then re-trigger.
+- **A repeating `Fatal` after restart** indicates a deeper
+  on-disk record / live-state divergence — escalate per
+  §8 incident checklist with the live-reload-specific
+  trace appended.
+
+### 6.F.10 What hot reload is NOT (consolidated boundary)
+
+- **Not peer-supplied / gossiped acceptance.** Local files only.
+  Bundle propagation between peers is C4-OPEN (§10).
+- **Not filesystem-watcher hot reload.** Operator must
+  explicitly send `SIGHUP`. The handler does not watch the
+  candidate path for inode changes.
+- **Not admin-API trigger.** No new HTTP / JSON-RPC / gRPC
+  surface is added by Runs 069–074. Only `SIGHUP`.
+- **Not `activation_epoch` runtime sourcing.** The controller's
+  `ActivationContext` is `height_only(0)` — the same height-only
+  stance the startup `--p2p-trust-bundle` path uses today.
+- **Not KMS / HSM custody integration.** Signing keys are still
+  operator-supplied via `--p2p-trust-bundle-signing-key`.
+- **Not bundle-signing-key on-chain / in-binary ratification.**
+  Out-of-band CLI overlap per §6.D continues to apply.
+- **Not fast-sync / consensus-storage restore parity.** The
+  live binary does not yet replay `TrustBundleRecord` from a
+  snapshot.
+- **Not selective per-peer session retention.** v0 is "evict
+  all on successful apply" verbatim from Run 072. Per-peer
+  retention is C4-OPEN.
 
 ---
 
@@ -1136,6 +1713,39 @@ item blocks promotion.
       activation-height policy violation` and exits 1 BEFORE any
       of the post-load banners.
 - [ ] No `--p2p-trusted-root` line on TestNet/MainNet validators.
+- [ ] **Hot-reload preflight (when an operator plans to use §6.F).**
+      Run `--p2p-trust-bundle-reload-check <CANDIDATE-PATH>` on a
+      validator-equivalent host with the SAME signing-key set,
+      `--env`, chain-id, `--data-dir`, and (optional)
+      `--p2p-leaf-cert` as the target fleet. Confirm
+      `VERDICT=valid` and confirm the on-disk
+      `pqc_trust_bundle_sequence.json` bytes AND mtime are
+      unchanged across the reload-check run (Run 069 non-mutation
+      invariant). A reload-check failure on TestNet/MainNet
+      blocks promotion.
+- [ ] **Live-reload trigger smoke (when a validator is armed with
+      Run 074 flags).** On a staging validator, arm the Run 074
+      flags, trigger SIGHUP with the candidate, confirm the
+      `[Run 074] LiveReloadOutcome::Applied { evicted=…,
+      new_sequence=… }` log line, confirm
+      `qbind_p2p_trust_bundle_live_reload_apply_success_total`
+      increments by 1, confirm
+      `qbind_p2p_trust_bundle_live_reload_last_applied_sequence`
+      matches the candidate's `sequence`, confirm
+      `qbind_p2p_session_eviction_*` counters reflect the drain,
+      and confirm `pqc_trust_bundle_sequence.json`'s
+      `highest_sequence` + `bundle_fingerprint` match the
+      candidate. Then trigger SIGHUP a second time with the SAME
+      candidate and confirm the persistence file's bytes AND
+      mtime are unchanged (idempotent re-apply at the
+      `EqualSequenceSameFingerprint` branch).
+- [ ] **Live-reload concurrent-trigger smoke (recommended once
+      per major rotation).** On a staging validator armed with
+      Run 074 flags, send two SIGHUPs in rapid succession and
+      capture an `[Run 074] LiveReloadOutcome::AlreadyInProgress`
+      line + the
+      `qbind_p2p_trust_bundle_live_reload_already_in_progress_total`
+      counter increment. Confirms the `Arc<AtomicBool>` CAS guard.
 - [ ] Archive: bundle fingerprint, signing_key_id, release
       `qbind-node` `sha256` + `ELF BuildID`, helper `sha256` if
       one was used to mint the bundle.
@@ -1219,6 +1829,23 @@ compromise, observed rollback / equivocation attempt.
       before the next steady-state bundle, mint bundle N+2 under
       BSK_new, then remove BSK_old in N+3 once rollout is
       confirmed.
+- [ ] **If validators are armed with Run 074 SIGHUP live reload-
+      apply flags:** trigger the emergency revocation bundle via
+      SIGHUP on every armed validator INSTEAD of restarting (see
+      §6.F.8). Confirm `[Run 074] LiveReloadOutcome::Applied …`
+      on each trigger and confirm the
+      `qbind_p2p_trust_bundle_live_reload_apply_success_total`
+      counter increments by 1 on each. For un-armed validators,
+      fall through to the restart-based workflow.
+- [ ] **Hot-reload trigger MUST NOT return `Fatal` on a healthy
+      validator.** `LiveReloadOutcome::Fatal(SequenceCommitFailedRollbackAlsoFailed)`
+      indicates the live trust state may be ahead of the on-disk
+      sequence record AND rollback could not restore the prior
+      state. Treat as a separate incident: capture the trigger
+      log line + the `pqc_trust_bundle_sequence.json` contents +
+      the live `/metrics` snapshot + the running PID's
+      `--p2p-trust-bundle` baseline before the graceful shutdown
+      completes, then recover offline per §6.F.9.
 - [ ] Update `docs/whitepaper/contradiction.md` with the incident
       narrative if the incident revealed a missing fail-closed
       check.
@@ -1302,6 +1929,35 @@ every bundle change. The directory layout MAY follow the existing
       `Dummy*` is registered on every validator (Run 040 banner).
 - [ ] Release binary identity: `sha256` and `ELF BuildID` of the
       `qbind-node` binary that ran the smokes.
+- [ ] **If the change was delivered via Run 074 live reload-apply
+      (SIGHUP) on a running validator:** captured operator log
+      lines for every trigger
+      (`[Run 074] LiveReloadOutcome::Applied { evicted=…,
+      new_sequence=… }` on success, `… AlreadyInProgress` on
+      every captured concurrent trigger, `… Invalid(…)` on every
+      rejected candidate). Captured `/metrics` scrape with the
+      six `qbind_p2p_trust_bundle_live_reload_*` counters/gauge
+      AND the four `qbind_p2p_session_eviction_*` counters,
+      taken AFTER the apply settled. On-disk
+      `pqc_trust_bundle_sequence.json` (`highest_sequence` +
+      `bundle_fingerprint`) captured BEFORE and AFTER the
+      apply. Filesystem proof that the candidate file's
+      `<CANDIDATE-PATH>` and the sequence file are inside the
+      validator-local `--data-dir`. Optional Run 069 reload-check
+      preflight transcript on the same candidate against a
+      sibling host.
+- [ ] **If the change was delivered via Run 073 process-start
+      reload-apply:** captured operator log line
+      (`AppliedCandidate::applied_log_line` on success, or
+      `VERDICT=invalid …` on a fail-closed branch). Filesystem
+      proof that the on-disk `pqc_trust_bundle_sequence.json`
+      reflects the new candidate's `highest_sequence` +
+      `bundle_fingerprint`.
+- [ ] **If a hot-reload candidate was rejected as invalid (Run
+      069/070/073/074):** filesystem proof of bytes-and-mtime
+      equality on `pqc_trust_bundle_sequence.json` across the
+      rejection (the rejected candidate MUST NOT have advanced
+      the persisted sequence record).
 
 ---
 
@@ -1311,9 +1967,13 @@ This runbook narrows the C4 "production CA / certificate rotation
 / signing-key rotation operator playbook" item; Runs 061–063
 closed three previously-open boundaries (local-leaf-fingerprint
 startup self-check, per-entry revocation `activation_height`, and
-local-issuer-root startup self-check); and Run 065 closed the
+local-issuer-root startup self-check); Run 065 closed the
 per-environment minimum-activation-margin boundary on the binary
-`--p2p-trust-bundle` load path. The following remain open under C4:
+`--p2p-trust-bundle` load path; and Runs 069–074 closed the
+local-operator hot-reload lifecycle (validation-only reload-check,
+process-start reload-apply, and long-running SIGHUP live reload-
+apply on a running node — see §6.F). The following remain open
+under C4:
 
 1. **Epoch-gating runtime source.** Bundle-level `activation_epoch`
    continues to fail closed with
@@ -1323,48 +1983,61 @@ per-environment minimum-activation-margin boundary on the binary
    set `activation_epoch` on production bundles or on revocation
    entries. Run 065 does NOT introduce a minimum-margin policy on
    the epoch axis (the epoch runtime source itself remains open).
-2. **Per-environment minimum activation-margin policy on the
-   gossiped / peer-supplied trust-bundle path.** Run 065 enforces
-   the policy at
-   `pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation`
-   — the path the binary uses for `--p2p-trust-bundle`. The
-   bundle is not currently gossiped between peers (operator-
-   distributed); when on-the-fly trust-bundle distribution lands,
-   the same `pqc_trust_activation::check_min_activation_height_policy`
-   helper must be threaded through that path.
-3. **On-the-fly trust-bundle hot reload.** The bundle is loaded
-   exactly once per process lifetime. The Run 062 active/pending
-   gauges are sticky-at-startup snapshots; a scheduled revocation
-   does NOT transition from PENDING to ACTIVE inside a running
-   validator without a restart. The Run 061 and Run 063 startup
-   self-checks therefore observe only the trust state present at
-   process boot, and the Run 065 policy fires at that single load.
-4. **Production fast-sync / consensus-storage restore.** Separate
+   Run 074's `LiveReloadController` initializes its
+   `ActivationContext` to `height_only(0)` — the same height-only
+   stance the startup `--p2p-trust-bundle` path uses today; a
+   future run that lands a live height source can extend
+   `LiveReloadConfig` without changing the SIGHUP surface.
+2. **Peer-supplied / gossiped trust-bundle acceptance.** Runs
+   069/073/074 accept **local files only**. There is no
+   `BundleAnnounce` / `BundleRequest` over the wire, no admin-API
+   trigger, and no filesystem-watcher trigger. When peer
+   propagation lands, the same Run 065
+   `pqc_trust_activation::check_min_activation_height_policy`
+   helper, the same Run 050/051/053 validator pipeline, and the
+   same Run 070 `validate → swap → evict → commit` ordering MUST
+   be threaded through the peer-input path.
+3. **Selective per-peer session retention.** Runs 072/073/074
+   evict all sessions conservatively on a successful live apply.
+   A future run that lands per-peer policy (e.g. retain peers
+   whose leaf certs are still in the new bundle's active set)
+   can refine `P2pSessionEvictor` without changing the Run 074
+   SIGHUP surface or its tests.
+4. **Admin-API / filesystem-watcher trigger surface.** Run 074
+   ships SIGHUP only. A future run can add an authenticated
+   admin RPC or a filesystem-watcher trigger without changing
+   the `LiveReloadController` semantics or the
+   `LiveReloadOutcome` types — but until such a run lands, the
+   only operator trigger surface is process-start CLI flags
+   (Runs 069/073) and `SIGHUP` to a running node (Run 074).
+5. **Production fast-sync / consensus-storage restore.** Separate
    C4 piece; trust-bundle persistence is independent. The
    `--restore-from-snapshot` `snapshot_height` already feeds the
    Run 057 + Run 065 `current_height` source via
-   `ActivationContext::height_only`; a fully-fledged production
-   fast-sync surface is a separate boundary.
-5. **Per-environment production trust-anchor operation.** Not
+   `ActivationContext::height_only`; the live binary does not
+   yet replay `TrustBundleRecord` from a snapshot, and live apply
+   on a partially-restored node is not separately proven.
+6. **Per-environment production trust-anchor operation.** Not
    fully solved by documentation alone; depends on the operator
    actually using offline / HSM custody for the secrets in §3.2
    and §3.4.
-6. **In-binary / on-chain bundle-signing-key rotation /
+7. **In-binary / on-chain bundle-signing-key rotation /
    ratification.** The binary does NOT ratify a new bundle-signing
    key on-chain or in-binary. §6.D is an out-of-band CLI overlap
    procedure. If a future runtime adds on-chain ratification,
    this runbook MUST be updated.
-7. **Two-node / N-node MainNet release-binary peer-connection
+8. **Two-node / N-node MainNet release-binary peer-connection
    smoke evidence.** RUN_059 produced a single-validator MainNet
    release-binary smoke; a multi-validator MainNet
    peer-connection smoke remains on the C4 list (blocked by
    unrelated production-config items — validator keystore loading
    on startup, per-peer consensus-key distribution).
-8. **External KMS / HSM integration.** This runbook treats the
+9. **External KMS / HSM integration.** This runbook treats the
    signing-key custody surface as an interface boundary; full
    KMS integration is not in scope.
 
-**Closed by Runs 061–063 and Run 065 (no longer in §10):**
+**Closed by Runs 061–063, Run 065, and Runs 069–074 (no longer
+in §10):**
 
 - Local-leaf-fingerprint startup self-check — closed by Run 061
   (`pqc_trust_bundle::check_local_leaf_not_revoked` + the FATAL
@@ -1390,12 +2063,54 @@ per-environment minimum-activation-margin boundary on the binary
   window `[current_height, current_height + margin)` on the
   configured environment. Emergency immediate revocations
   (`activation_height = None`) remain exempt.
+- **Validation-only operator-triggered trust-bundle reload-check
+  on a local file** — closed by Run 069
+  (`--p2p-trust-bundle-reload-check <PATH>` +
+  `pqc_trust_reload::validate_candidate_bundle_full` +
+  `pqc_trust_sequence::peek_sequence`). Non-mutating by
+  construction: no live trust mutation, no sequence commit, no
+  session eviction, no `/metrics` family.
+- **Apply contract + rollback semantics for live trust apply** —
+  closed by Run 070 (`ApplyMode`, `ReloadApplyError`,
+  `LiveTrustApplyContext`, `apply_validated_candidate{,_with_previous}`,
+  `AppliedCandidate::applied_log_line`). Strict
+  `validate → snapshot → swap → evict → commit` ordering;
+  per-stage rollback; distinct fatal variant when post-rollback
+  fails.
+- **Mutable shared live trust handle** — closed by Run 071
+  (`LivePqcTrustState` = `Arc<RwLock<Arc<LivePqcTrustSnapshot>>>`;
+  `P2pNodeBuilder::with_live_pqc_trust(...)` routes the
+  listener-side `TrustedClientRoots` resolver and the
+  bidirectional `LeafCertRevocationList` revocation closure
+  through `snapshot()`).
+- **Production internal P2P session-eviction hook** — closed by
+  Run 072 (`P2pSessionEvictor` trait +
+  `TcpKemTlsP2pService::evict_all_sessions` + four
+  `qbind_p2p_session_eviction_*` counters with the truthful
+  `attempted == evicted + failed` invariant).
+- **Process-start operator-triggered local-file reload-apply
+  against the running binary's live trust handle** — closed by
+  Run 073 (`ProductionLiveTrustApplyContext` composes Runs
+  069/070/071/072/055 end-to-end; the binary's
+  `--p2p-trust-bundle-reload-apply-path` hook removes
+  `ReloadApplyError::UnsupportedRuntimeContext` from the local-
+  operator path).
+- **Long-running local operator-triggered live trust-bundle
+  reload-apply via SIGHUP** — closed by Run 074
+  (`LiveReloadController` + `spawn_run074_live_reload_task` +
+  two hidden CLI flags + `Arc<AtomicBool>` CAS in-progress
+  guard + six `qbind_p2p_trust_bundle_live_reload_*`
+  counters/gauge). Valid candidates apply while the node remains
+  running; invalid candidates do not mutate trust state,
+  sequence, or sessions; concurrent triggers serialize as
+  `AlreadyInProgress`; only the fatal post-rollback-failure arm
+  signals shutdown.
 
 **Full C4 remains OPEN. C5 is NOT closed by this runbook.**
 
 ---
 
-## 11. Mapping to Runs 050–065
+## 11. Mapping to Runs 050–075
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -1416,6 +2131,13 @@ per-environment minimum-activation-margin boundary on the binary
 | 064 | Operator-playbook prose update for Runs 061–063 (docs-only). | All §sections. |
 | 065 | Per-environment minimum activation-margin policy on the `--p2p-trust-bundle` load path: `MIN_DEVNET_ACTIVATION_MARGIN = 0`, `MIN_TESTNET_ACTIVATION_MARGIN = 8`, `MIN_MAINNET_ACTIVATION_MARGIN = 32`. Half-open `[current_height, current_height + margin)` reject window covers bundle-level, per-active-root, and per-entry revocation `activation_height` when `Some(_)`. Already-effective bundles are NOT retroactively rejected (snapshot-rejoin). Per-entry revocations with `activation_height = None` are immediate and exempt (emergency-revocation path preserved on MainNet). Policy runs BEFORE Run 057's future-height gate, Run 055's sequence persistence, and Run 050's root merge — rejected too-soon bundles do not touch the persisted sequence or the live trust set. Proved on the live release binary by RUN_065 Smokes 1 (DevNet positive at activation_height=0), 2 (TestNet too-soon negative, Run 065 fires), 3 (TestNet at-margin = Run 057 boundary), 4 (MainNet too-soon negative, Run 065 fires with margin=32), 5 (MainNet at-margin = Run 057 boundary with required_height=32). | §1.3, §3.9, §3.10, §5.1, §5.2, §5.3, §6.A, §6.B, §6.E, §7, §8, §9, §10 (closed item). |
 | 066 | Operator-playbook prose update for Run 065 (docs-only). | All §sections. |
+| 069 | Validation-only operator-triggered trust-bundle reload-check on a local file: `--p2p-trust-bundle-reload-check <PATH>` (hidden) drives `pqc_trust_reload::validate_candidate_bundle_full` over the candidate using the same startup security pipeline; non-mutating by construction (no `LivePqcTrustState` mutation, no `check_and_update_sequence` call — uses read-only `peek_sequence`, no `evict_all_sessions`, no `/metrics` family, no sequence number burned on rejected or unapplied candidates). Hook positioned BEFORE network-mode dispatch; node does not start in this mode (exits 0/1). | §1.2, §1.3, §6.F.2, §6.F.5, §6.F.6, §7, §9, §10 (closed item). |
+| 070 | Apply contract + rollback semantics: `ApplyMode`, `ReloadApplyError`, `LiveTrustApplyContext`, `apply_validated_candidate{,_with_previous}`, `AppliedCandidate::applied_log_line`. Strict `validate → snapshot → swap → evict → commit` ordering; per-stage rollback; distinct `SequenceCommitFailedRollbackAlsoFailed` fatal variant. Library boundary still surfaces `UnsupportedRuntimeContext` for callers omitting the apply context. | §1.3, §6.F.5, §6.F.9. |
+| 071 | Mutable shared live trust handle `LivePqcTrustState = Arc<RwLock<Arc<LivePqcTrustSnapshot>>>`; `P2pNodeBuilder::with_live_pqc_trust(...)` routes the listener-side `TrustedClientRoots` resolver + bidirectional `LeafCertRevocationList` revocation closure through `snapshot()`. Byte-identical startup behaviour. No live mutation introduced by Run 071. | §1.3, §6.F.4, §6.F.5. |
+| 072 | Production internal P2P session-eviction hook: `EvictionReason`, `EvictionReport` with truthful `attempted == evicted + failed` invariant, `EvictionError`, sync `P2pSessionEvictor` trait, `TcpKemTlsP2pService::evict_all_sessions` (drains per-peer registry, drops `tx`, aborts `JoinHandle`s), four `qbind_p2p_session_eviction_*` counters. v0 policy = "evict all"; selective retention remains OPEN. | §1.3, §6.F.4, §6.F.5, §6.F.6, §6.F.10, §10 (closed item; selective retention still open). |
+| 073 | `ProductionLiveTrustApplyContext` adapter composes Runs 069/070/071/072/055 end-to-end. Binary's `--p2p-trust-bundle-reload-apply-enabled` + `--p2p-trust-bundle-reload-apply-path <PATH>` hook (hidden, required-together) drives a live apply at process-start time over `NoActiveSessionsEvictor` (truthful zero-session report); `ReloadApplyError::UnsupportedRuntimeContext` removed from the local-operator path. Library boundary preserved for callers omitting apply context. | §1.2, §1.3, §6.F.3, §6.F.5, §6.F.6, §7, §9, §10 (closed item). |
+| 074 | Long-running local operator-triggered live trust-bundle reload-apply via SIGHUP: hidden `--p2p-trust-bundle-live-reload-enabled` + `--p2p-trust-bundle-live-reload-path <PATH>` (required-together; refused without `--p2p-trust-bundle <BASELINE-PATH>`). `LiveReloadController` constructs a fresh `ProductionLiveTrustApplyContext` per trigger; `Arc<AtomicBool>` CAS guard serializes concurrent triggers as `AlreadyInProgress`. Six new `qbind_p2p_trust_bundle_live_reload_*` counters/gauge. Only the `Fatal` (`SequenceCommitFailedRollbackAlsoFailed`) arm signals shutdown; valid candidates apply while the node remains running; invalid candidates do not mutate trust, sequence, or sessions. | §1.2, §1.3, §6.F.4, §6.F.5, §6.F.6, §6.F.7, §6.F.8, §6.F.9, §6.F.10, §9, §10 (closed item). |
+| 075 | Operator-playbook prose update for Runs 069–074 (docs-only). | All §sections (esp. §1, §6.F, §7, §9, §10, §11, §12). |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---
@@ -1436,6 +2158,29 @@ per-environment minimum-activation-margin boundary on the binary
 - `--p2p-mutual-auth required` — production setting.
 - `--data-dir <PATH>` — REQUIRED for the sequence persistence file
   on TestNet/MainNet.
+- `--p2p-trust-bundle-reload-check <PATH>` *(hidden; Run 069)* —
+  validates the candidate bundle at `<PATH>` against the same
+  startup security pipeline; node does NOT start; prints
+  `VERDICT=valid|invalid` and exits 0/1. Non-mutating by
+  construction. See §6.F.2.
+- `--p2p-trust-bundle-reload-apply-enabled` *(hidden; Run 073)* —
+  enables the process-start local-file reload-apply path.
+  Required together with `--p2p-trust-bundle-reload-apply-path`.
+  TestNet/MainNet preconditions are identical to the startup
+  `--p2p-trust-bundle` path (signed bundle, `--data-dir`
+  required). See §6.F.3.
+- `--p2p-trust-bundle-reload-apply-path <PATH>` *(hidden; Run 073)* —
+  candidate bundle to apply at process start. Required together
+  with `--p2p-trust-bundle-reload-apply-enabled`. See §6.F.3.
+- `--p2p-trust-bundle-live-reload-enabled` *(hidden; Run 074)* —
+  arms the long-running SIGHUP live reload-apply trigger.
+  Required together with `--p2p-trust-bundle-live-reload-path`;
+  refused without `--p2p-trust-bundle <BASELINE-PATH>`. See
+  §6.F.4. Disabled by default.
+- `--p2p-trust-bundle-live-reload-path <PATH>` *(hidden; Run 074)* —
+  local file the SIGHUP handler re-reads on every trigger.
+  Required together with `--p2p-trust-bundle-live-reload-enabled`.
+  See §6.F.4.
 
 ---
 
