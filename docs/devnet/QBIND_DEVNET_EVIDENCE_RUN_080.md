@@ -111,3 +111,16 @@ Publisher and transport send path do **not**:
 ## Exact immediate next action
 
 Run a two-process release-binary DevNet capture with sender publish-once + receiver wire-validation enabled, collect sender/receiver logs + `/metrics` + sequence file checks, and append those artifacts here to upgrade verdict from partial positive to strongest positive.
+
+## Run 081 follow-up evidence (2026-05-15)
+
+Run 081 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_081.md`) completed the requested release-binary N=2 live `0x05` exchange artifact capture:
+
+- valid sender publish-once + receiver wire-validation-enabled exchange proven on release `qbind-node` with sender `qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total=1`, receiver `received_total=1`, `validated_total=1`;
+- receiver-disabled cheap-ignore case captured (sender sends; receiver peer-candidate validation counters remain zero);
+- invalid wrong-chain candidate captured (receiver `rejected_total=1`);
+- duplicate case captured (receiver `duplicate_total=1`);
+- receiver sequence-file hash remained unchanged across all wire scenarios;
+- session-eviction and live-reload-apply metrics remained unchanged (all zero).
+
+Run 081 remains **partial positive** (not strongest positive) because the captured logs still include the existing Run 033 timeout-verification probe line containing `TrustedClientRoots/DummySig`, so the strict “no DummySig” claim is not yet closed. Run 081 does, however, narrow the Run 080 boundary from “send plumbing landed without release N=2 exchange proof” to “release-binary N=2 validation-only wire exchange proven with non-mutation invariants preserved.”
