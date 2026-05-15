@@ -514,6 +514,60 @@ pub struct CliArgs {
     #[arg(long = "p2p-trust-bundle-live-reload-path", hide = true)]
     pub p2p_trust_bundle_live_reload_path: Option<PathBuf>,
 
+    /// Run 077 — disabled-by-default operator opt-in flag for the
+    /// **production-binary-facing local peer-candidate validation
+    /// check mode**. Without this flag, supplying
+    /// `--p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>` is
+    /// refused as a configuration error so the operator can never
+    /// accidentally "arm" the check by typing the path flag alone.
+    /// With this flag plus a path, the binary parses the local
+    /// JSON envelope fixture, runs the **same** Run 076
+    /// `PeerCandidateValidator::try_accept` (which itself reuses
+    /// the **same** Run 069 `validate_candidate_bundle_full`
+    /// pipeline used at startup, by the Run 069 reload-check, by
+    /// the Run 073 process-start apply, and by the Run 074 SIGHUP
+    /// live reload-apply), bumps the seven existing Run 076
+    /// `qbind_p2p_pqc_trust_bundle_peer_candidate_*` metric
+    /// counters (no `_applied_total` family — none exists by
+    /// design), prints the canonical `VERDICT=...` log line, and
+    /// exits (`0` only on `Validated`; `1` on every fail-closed
+    /// outcome including partial-config / I/O / parse refusal).
+    /// The node does **not** start in this mode. Hidden because
+    /// Run 077 is evidence-only.
+    ///
+    /// **This is NOT peer-driven live apply, NOT gossip
+    /// propagation, NOT a peer/network listener, NOT a P2P wire
+    /// integration, NOT an admin-API endpoint, NOT a filesystem
+    /// watcher, NOT KMS/HSM, NOT `activation_epoch` runtime
+    /// sourcing, NOT signing-key ratification, NOT fast-sync
+    /// restore parity.** It is the smallest safe production-
+    /// binary surface that exercises the Run 076 validator from
+    /// the release `qbind-node` binary. See
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md` and
+    /// `docs/whitepaper/contradiction.md` C4.
+    #[arg(long = "p2p-trust-bundle-peer-candidate-validation-enabled", hide = true)]
+    pub p2p_trust_bundle_peer_candidate_validation_enabled: bool,
+
+    /// Run 077 — operator-supplied local file path of a
+    /// `PeerCandidateEnvelope` JSON fixture to validate. Requires
+    /// `--p2p-trust-bundle-peer-candidate-validation-enabled`.
+    /// Disabled by default. Local file only — no peer / gossip
+    /// input, no network listener, no remote unauthenticated
+    /// endpoint. The fixture is parsed once, the validator runs
+    /// once, and the binary exits. The on-disk anti-rollback
+    /// sequence record at `--data-dir`/`pqc_trust_sequence` is
+    /// **never** modified (sequence persistence is consulted only
+    /// via the read-only Run 055 peek inherited from Run 069).
+    /// The validator holds no live `LivePqcTrustState` handle, no
+    /// `P2pSessionEvictor`, no `LiveReloadController`, and no
+    /// `ProductionLiveTrustApplyContext`; it cannot apply the
+    /// candidate, propagate it, persist its sequence, or evict
+    /// sessions by construction. See module docs in
+    /// `crates/qbind-node/src/pqc_peer_candidate_binary.rs` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md`.
+    #[arg(long = "p2p-trust-bundle-peer-candidate-check", hide = true)]
+    pub p2p_trust_bundle_peer_candidate_check: Option<PathBuf>,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

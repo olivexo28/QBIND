@@ -188,6 +188,17 @@ pub mod pqc_live_trust_reload;
 // `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_trust_peer_candidate;
 
+// Run 077 (C4 piece: production-binary-facing, disabled-by-default
+// peer-candidate validation **local check** surface). Wires the
+// Run 076 `PeerCandidateValidator` into a hidden, opt-in, two-flag
+// required-together qbind-node CLI surface so an operator can run
+// the same Run 069/076 fail-closed pipeline against a peer-supplied
+// envelope fixture from the release binary, without starting the
+// node and without any live trust-state apply / sequence persistence
+// / session eviction / propagation. See module docs and
+// `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_peer_candidate_binary;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;

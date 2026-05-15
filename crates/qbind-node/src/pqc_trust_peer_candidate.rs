@@ -122,7 +122,20 @@ pub const MAX_PEER_CANDIDATE_BUNDLE_BYTES: usize = 256 * 1024;
 /// it against `bundle_bytes.len()` and reject mismatches before doing
 /// any work. This blocks the trivial "claim small length, send huge
 /// payload" envelope-vs-payload attack.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// # Wire/test fixture serialisation (Run 077)
+///
+/// `PeerCandidateEnvelope` derives `serde::Serialize` /
+/// `serde::Deserialize` so the Run 077 disabled-by-default binary
+/// check mode can parse an operator-supplied JSON fixture. The
+/// `bundle_bytes` field is serialised as a **lowercase hex string**
+/// (not a JSON byte array) so fixtures are diff-friendly and the
+/// declared envelope length/fingerprint cross-checks remain
+/// unambiguous. The same hex-string encoding is what the Run 077
+/// binary surface emits if it ever needs to round-trip an envelope.
+/// This is a fixture format, NOT a normative wire format: Run 077
+/// introduces no peer/gossip wire surface.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PeerCandidateEnvelope {
     /// Run 076 envelope version. Currently fixed at 1; future
     /// envelopes that change layout MUST bump this and the validator
@@ -158,7 +171,10 @@ pub struct PeerCandidateEnvelope {
     /// against `bundle_bytes.len()`.
     pub declared_length: usize,
     /// The peer-supplied bundle bytes. Strict cap
-    /// [`MAX_PEER_CANDIDATE_BUNDLE_BYTES`].
+    /// [`MAX_PEER_CANDIDATE_BUNDLE_BYTES`]. Serialised as a lowercase
+    /// hex string for operator-friendly Run 077 JSON fixtures (see
+    /// the type-level docs).
+    #[serde(with = "peer_candidate_bundle_bytes_hex")]
     pub bundle_bytes: Vec<u8>,
 }
 
@@ -878,6 +894,59 @@ fn rand_suffix() -> u64 {
     std::time::SystemTime::now().hash(&mut h);
     std::thread::current().id().hash(&mut h);
     h.finish()
+}
+
+/// Lowercase-hex serde codec for [`PeerCandidateEnvelope::bundle_bytes`].
+/// Run 077 binary fixtures use this so an operator-supplied JSON
+/// envelope is diff-friendly and the declared-length / declared-
+/// fingerprint cross-checks remain unambiguous. Strictly fixture-
+/// format only: Run 077 introduces no peer/gossip wire surface.
+mod peer_candidate_bundle_bytes_hex {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            use std::fmt::Write;
+            let _ = write!(out, "{:02x}", b);
+        }
+        s.serialize_str(&out)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(d)?;
+        if s.len() % 2 != 0 {
+            return Err(serde::de::Error::custom(
+                "peer-candidate bundle_bytes hex must have even length",
+            ));
+        }
+        let mut out = Vec::with_capacity(s.len() / 2);
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            let hi = decode_hex_nibble(bytes[i]).ok_or_else(|| {
+                serde::de::Error::custom(
+                    "peer-candidate bundle_bytes hex must be lowercase 0-9 a-f",
+                )
+            })?;
+            let lo = decode_hex_nibble(bytes[i + 1]).ok_or_else(|| {
+                serde::de::Error::custom(
+                    "peer-candidate bundle_bytes hex must be lowercase 0-9 a-f",
+                )
+            })?;
+            out.push((hi << 4) | lo);
+            i += 2;
+        }
+        Ok(out)
+    }
+
+    fn decode_hex_nibble(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(b - b'a' + 10),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------

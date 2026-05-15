@@ -56,6 +56,7 @@
 //!   binary spawns the existing `metrics_http` server. When unset the server
 //!   stays disabled (default-off) and startup logs say so.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::watch;
@@ -337,6 +338,279 @@ async fn main() {
             }
         }
     }
+
+    // Run 077 — disabled-by-default production-binary-facing local
+    // peer-candidate validation check mode (positioned AFTER the
+    // Run 069 reload-check hook and BEFORE the Run 073 process-start
+    // reload-apply hook so it fires for any startup invocation,
+    // mirroring the same staging-before-apply layering).
+    //
+    // When BOTH `--p2p-trust-bundle-peer-candidate-validation-enabled`
+    // AND `--p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>`
+    // are supplied, the binary parses the local JSON envelope
+    // fixture and runs the same Run 076
+    // `PeerCandidateValidator::try_accept` against it. The validator
+    // reuses the same Run 069 `validate_candidate_bundle_full`
+    // pipeline used at startup, the local reload-check, the Run 073
+    // process-start apply, and the Run 074 SIGHUP live reload-apply.
+    // The hook bumps the seven existing Run 076
+    // `qbind_p2p_pqc_trust_bundle_peer_candidate_*` Prometheus
+    // counters (no new metric family; no `_applied_total` family),
+    // prints the canonical `VERDICT=...` operator-log line, and
+    // exits (`0` only on `Validated`; `1` on every fail-closed
+    // outcome including partial-config / I/O / parse refusal). The
+    // node does NOT start in this mode.
+    //
+    // **What this hook is NOT.** It is not peer-driven live apply;
+    // it is not gossip propagation; it is not a peer/network
+    // listener; it is not a P2P wire integration; it is not an
+    // admin-API endpoint; it is not a filesystem watcher; it is not
+    // KMS/HSM custody; it is not `activation_epoch` runtime sourcing;
+    // it is not signing-key ratification; it is not fast-sync
+    // restore parity. The validator holds no `LivePqcTrustState`
+    // handle, no `P2pSessionEvictor`, no `LiveReloadController`, and
+    // no `ProductionLiveTrustApplyContext`; by construction it
+    // cannot apply the candidate, propagate it, persist its sequence
+    // number, or evict P2P / KEMTLS sessions.
+    //
+    // **Preconditions** (same as Run 069, fail-closed):
+    // - both flags required-together (top-level partial-config
+    //   refusal — typing one alone never arms the check);
+    // - TestNet / MainNet require at least one
+    //   `--p2p-trust-bundle-signing-key`;
+    // - TestNet / MainNet require `--data-dir`;
+    // - `--p2p-leaf-cert` and `--p2p-leaf-cert-key` must be set
+    //   together when supplied;
+    // - no implicit fallback to `--p2p-trusted-root`;
+    // - no `DummySig` / `DummyKem` / `DummyAead` reactivation.
+    //
+    // See `crates/qbind-node/src/pqc_peer_candidate_binary.rs`,
+    // `crates/qbind-node/src/pqc_trust_peer_candidate.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md`, and
+    // `docs/whitepaper/contradiction.md` C4.
+    if qbind_node::pqc_peer_candidate_binary::run077_hook_active(
+        args.p2p_trust_bundle_peer_candidate_check.as_deref(),
+        args.p2p_trust_bundle_peer_candidate_validation_enabled,
+    ) {
+        use qbind_node::pqc_peer_candidate_binary::{
+            run_local_check, Run077Inputs, Run077RefusalReason, Run077Result,
+        };
+        use qbind_node::pqc_root_config::PqcLeafCredentialPaths;
+        use qbind_types::NetworkEnvironment;
+
+        // Top-level partial-config refusal BEFORE we touch any
+        // signing-key / leaf-cert / data-dir / fixture file. Mirrors
+        // the Run 074 partial-config discipline.
+        match (
+            args.p2p_trust_bundle_peer_candidate_check.as_ref(),
+            args.p2p_trust_bundle_peer_candidate_validation_enabled,
+        ) {
+            (Some(_), true) => {
+                // Valid pair — proceed below.
+            }
+            (Some(_), false) => {
+                eprintln!(
+                    "[binary] FATAL: {}",
+                    Run077RefusalReason::EnabledFlagMissing
+                );
+                std::process::exit(1);
+            }
+            (None, true) => {
+                eprintln!(
+                    "[binary] FATAL: {}",
+                    Run077RefusalReason::EnvelopePathMissing
+                );
+                std::process::exit(1);
+            }
+            (None, false) => unreachable!("run077_hook_active guards this branch"),
+        }
+
+        // Parse signing keys (same parser as Run 069).
+        let bundle_signing_keys =
+            match qbind_node::pqc_trust_bundle::BundleSigningKeySet::parse_specs(
+                &args.p2p_trust_bundle_signing_keys,
+            ) {
+                Ok(set) => set,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: {}",
+                        Run077RefusalReason::SigningKeyParseError {
+                            message: e.to_string(),
+                        }
+                    );
+                    std::process::exit(1);
+                }
+            };
+        // TestNet/MainNet require an explicit signing-key set
+        // (matches Run 069). No fallback.
+        if !matches!(config.environment, NetworkEnvironment::Devnet)
+            && bundle_signing_keys.is_empty()
+        {
+            eprintln!(
+                "[binary] FATAL: {}",
+                Run077RefusalReason::UnsignedRequiredOnEnvironment {
+                    environment: config.environment,
+                }
+            );
+            std::process::exit(1);
+        }
+
+        // Optional local-leaf bytes drive the Run 061 / Run 063 self-
+        // checks. Same loader as the live path so the verdict matches.
+        let leaf_credentials_opt = match (
+            args.p2p_leaf_cert.as_ref(),
+            args.p2p_leaf_cert_key.as_ref(),
+        ) {
+            (Some(cert), Some(sk)) => {
+                let paths = PqcLeafCredentialPaths {
+                    cert_path: cert.clone(),
+                    kem_sk_path: sk.clone(),
+                };
+                match paths.load() {
+                    Ok(creds) => Some(creds),
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] FATAL: {}",
+                            Run077RefusalReason::LeafCredentialLoadError {
+                                message: e.to_string(),
+                            }
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
+            (None, None) => None,
+            _ => {
+                eprintln!(
+                    "[binary] FATAL: {}",
+                    Run077RefusalReason::LeafCredentialFlagsUnpaired
+                );
+                std::process::exit(1);
+            }
+        };
+
+        // Anti-rollback persistence parity with Run 069: TestNet /
+        // MainNet require `--data-dir`. The on-disk sequence record
+        // is only peeked (read-only) by the reused loader.
+        let seq_path_buf = config
+            .data_dir
+            .as_ref()
+            .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
+        let seq_path_ref = seq_path_buf.as_deref();
+        if seq_path_ref.is_none()
+            && !matches!(config.environment, NetworkEnvironment::Devnet)
+        {
+            eprintln!(
+                "[binary] FATAL: {}",
+                Run077RefusalReason::DataDirRequiredOnEnvironment {
+                    environment: config.environment,
+                }
+            );
+            std::process::exit(1);
+        }
+
+        // Scratch directory for the validator's temp file. Prefer
+        // the operator-controlled `--data-dir` when available so the
+        // scratch never lives in a world-writable location. Fall
+        // back to the OS temp dir only when `--data-dir` is unset
+        // (DevNet only — TestNet/MainNet refused above).
+        let scratch_dir_buf: PathBuf = config
+            .data_dir
+            .clone()
+            .map(|d| d.join("run077-peer-candidate-scratch"))
+            .unwrap_or_else(std::env::temp_dir);
+        if let Err(e) = std::fs::create_dir_all(&scratch_dir_buf) {
+            eprintln!(
+                "[binary] FATAL: --p2p-trust-bundle-peer-candidate-check could not create \
+                 scratch dir {}: {}. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md.",
+                scratch_dir_buf.display(),
+                e
+            );
+            std::process::exit(1);
+        }
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let activation_current_height: u64 = restore_baseline
+            .as_ref()
+            .map(|b| b.snapshot_height)
+            .unwrap_or(0);
+        let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+            current_height: Some(activation_current_height),
+            current_epoch: None,
+        };
+        let local_leaf_bytes_opt =
+            leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
+
+        // No real `/metrics` HTTP server is bound at this point —
+        // the process exits before `metrics::serve_metrics_http` is
+        // called — but we still need a `P2pMetrics` so the existing
+        // Run 076 recorders can run. Using a process-local instance
+        // is honest: the Run 077 binary surface never publishes
+        // these counters over HTTP (it exits before binding the
+        // metrics listener), matching the same discipline as the
+        // Run 069 / Run 073 process-start hooks.
+        let metrics = qbind_node::metrics::P2pMetrics::default();
+
+        let envelope_path = args
+            .p2p_trust_bundle_peer_candidate_check
+            .as_deref()
+            .expect("partial-config refusal above guarantees Some(...)");
+        let inputs = Run077Inputs {
+            validation_enabled_flag: args.p2p_trust_bundle_peer_candidate_validation_enabled,
+            envelope_path: Some(envelope_path),
+            environment: config.environment,
+            chain_id: config.chain_id(),
+            validation_time_secs: now_secs,
+            signing_keys: &bundle_signing_keys,
+            activation_ctx,
+            sequence_persistence_path: seq_path_ref,
+            local_leaf_cert_bytes: local_leaf_bytes_opt,
+            scratch_dir: &scratch_dir_buf,
+            now_ms,
+        };
+
+        match run_local_check(inputs, &metrics) {
+            Run077Result::Refused { reason } => {
+                eprintln!("[binary] FATAL: {}", reason);
+                std::process::exit(1);
+            }
+            Run077Result::Ran {
+                outcome,
+                verdict_line,
+                observed_log_line,
+            } => {
+                if let Some(line) = observed_log_line {
+                    eprintln!("{}", line);
+                }
+                if !matches!(
+                    outcome,
+                    qbind_node::pqc_trust_peer_candidate::PeerCandidateOutcome::Validated(_)
+                ) {
+                    // Surface the rejection reason for operator audit
+                    // (safe: no private keys, no raw bundle bytes —
+                    // the existing `Display` impls are log-safe by
+                    // construction; see Run 076 module docs).
+                    eprintln!("[binary] Run 077: outcome detail: {:?}", outcome);
+                }
+                eprintln!("{}", verdict_line);
+                let code = Run077Result::Ran {
+                    outcome,
+                    verdict_line,
+                    observed_log_line: None,
+                }
+                .exit_code();
+                std::process::exit(code);
+            }
+        }
+    }
+
 
     // Run 073 — production adapter wiring (composes Run 069
     // validation + Run 070 apply contract + Run 071

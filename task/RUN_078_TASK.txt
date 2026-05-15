@@ -1,0 +1,411 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened PQC transport.
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Runs 050–068 completed the signed trust-bundle lifecycle path:
+  - structured PQC trust bundles
+  - signed ML-DSA-44 bundle verification
+  - chain_id crosscheck
+  - sequence anti-rollback persistence
+  - activation-height gating
+  - minimum activation-height policy
+  - root/leaf revocation
+  - per-entry revocation activation_height
+  - local revoked-leaf startup self-check
+  - local revoked issuer-root startup self-check
+  - DevNet/TestNet/MainNet evidence
+  - N=4 MainNet signed-bundle peer-connection evidence
+- Run 069 landed validation-only local reload-check.
+- Run 070 landed reload-apply contract and rollback semantics.
+- Run 071 introduced LivePqcTrustState and live snapshot reads.
+- Run 072 added production P2P session eviction.
+- Run 073 landed ProductionLiveTrustApplyContext for process-start local reload-apply.
+- Run 074 landed long-running SIGHUP local live reload-apply.
+- Run 075 updated the operator runbook for Runs 069–074.
+- Run 076 added library-level disabled-by-default peer-candidate validation:
+  - PeerCandidateValidator
+  - PeerCandidateEnvelope
+  - 256 KiB cap
+  - duplicate LRU
+  - fixed-window rate limiter
+  - valid candidates validate but are not applied
+  - invalid candidates fail closed
+  - no LivePqcTrustState handle
+  - no session evictor
+  - no sequence mutation
+  - no _applied_total metric
+- Run 077 positive-narrow:
+  - added production-binary-facing local peer-candidate check mode
+  - hidden required-together flags:
+    - --p2p-trust-bundle-peer-candidate-validation-enabled
+    - --p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>
+  - local JSON PeerCandidateEnvelope fixture validation through release qbind-node
+  - valid fixture validates but is not applied
+  - invalid fixtures fail closed
+  - sequence/live trust/session state remains unchanged
+  - no node start in this mode
+  - no P2P wire/gossip integration yet
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust/lifecycle blockers include:
+- true P2P wire/gossip peer-candidate receive path
+- peer-driven live apply / propagation
+- activation_epoch runtime source
+- in-binary / on-chain bundle-signing-key ratification
+- external KMS/HSM custody integration
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+- selective per-peer session retention if ever wanted
+- admin-API or filesystem-watcher triggers if ever desired
+
+Task:
+Run 078. Add a disabled-by-default P2P wire receive path for peer-candidate validation only.
+
+Primary objective:
+Allow a running qbind-node to receive a bounded trust-bundle peer-candidate envelope over the P2P layer and validate it through the Run 076 PeerCandidateValidator, without applying it, propagating it, persisting sequence, mutating LivePqcTrustState, or evicting sessions.
+
+Important framing:
+This is validation-only P2P receive.
+This is NOT peer-driven live apply.
+This is NOT automatic gossip propagation.
+This is NOT trust-bundle synchronization.
+This is NOT consensus ratification.
+This is NOT activation_epoch.
+This is NOT KMS/HSM.
+This is NOT signing-key ratification.
+This is NOT fast-sync restore.
+Do not redesign KEMTLS.
+Do not redesign consensus.
+Do not weaken local operator reload-check.
+Do not weaken local SIGHUP live reload.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Add a disabled-by-default P2P receive surface for peer-candidate validation.
+- Use a typed, versioned, bounded envelope.
+- Reuse Run 076 PeerCandidateValidator.
+- Reuse Run 077 local fixture encoding only if it is safe for wire use; otherwise define a separate wire envelope.
+- Do not call ProductionLiveTrustApplyContext.
+- Do not call LiveReloadController.
+- Do not call LivePqcTrustState::swap_snapshot.
+- Do not call P2pSessionEvictor.
+- Do not call check_and_update_sequence.
+- Do not rebroadcast or forward peer candidates.
+- Do not accept unsigned TestNet/MainNet bundles.
+- Do not enable by default.
+- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Required investigation:
+
+1. Inspect existing P2P wire/message surfaces
+   Inspect:
+   - crates/qbind-node/src/p2p_node_builder.rs
+   - crates/qbind-node/src/p2p_tcp.rs
+   - qbind-net message/framing types
+   - any peer message dispatch loop
+   - any existing broadcast/gossip/injection envelope
+   - crates/qbind-node/src/pqc_trust_peer_candidate.rs
+   - crates/qbind-node/src/pqc_peer_candidate_binary.rs
+   - crates/qbind-node/src/metrics.rs
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_076.md
+   - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md
+   - docs/whitepaper/contradiction.md
+
+   Determine:
+   - whether there is an existing safe typed P2P message channel.
+   - whether candidate validation can be added without changing consensus messages.
+   - how to bound payload size before allocation/crypto.
+   - how to rate-limit per peer or globally.
+   - whether validation runs synchronously or through a bounded queue.
+   - whether test harness can inject a P2P frame through the same receive path.
+
+2. Define wire/envelope semantics
+   Required:
+   - version/domain tag, e.g. QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE:v1.
+   - explicit payload length.
+   - max payload length <= Run 076 cap.
+   - environment.
+   - chain_id.
+   - sequence.
+   - bundle_fingerprint.
+   - bundle bytes or a strict envelope containing bundle bytes.
+   - peer identity if available for rate-limit attribution.
+   - strict decode errors.
+   - reject unknown version.
+   - reject oversize before expensive verification.
+   - reject malformed before signature verification.
+   - do not dump bundle bytes to logs.
+
+3. Define enablement
+   Add hidden or clearly experimental flag:
+   - --p2p-trust-bundle-peer-candidate-wire-validation-enabled
+   or equivalent.
+
+   Requirements:
+   - disabled by default.
+   - no behavior change unless enabled.
+   - no partial config that silently enables receive path.
+   - if enabled without signed trust-bundle context/signing keys/data-dir, fail closed or disable safely with an explicit log.
+   - MainNet still requires signed bundle verification.
+
+4. Define validation-only behavior
+   Required:
+   - Valid candidate:
+     - increments received/validated metrics.
+     - logs safe metadata and validation-only/not-applied.
+     - does not mutate LivePqcTrustState.
+     - does not mutate sequence file.
+     - does not evict sessions.
+     - does not propagate.
+   - Invalid candidate:
+     - increments received/rejected or drop metric.
+     - logs safe rejection reason.
+     - does not mutate state.
+   - Oversize candidate:
+     - dropped before signature verification.
+   - Duplicate candidate:
+     - suppressed through Run 076 duplicate logic.
+   - Rate-limited candidate:
+     - dropped or rejected before expensive validation.
+   - Disabled path:
+     - candidate frames are ignored or rejected cheaply.
+     - no expensive validation.
+
+5. Define DoS controls
+   Required:
+   - max payload size.
+   - bounded queue if async.
+   - per-peer or global fixed-window rate limit.
+   - duplicate suppression.
+   - no unbounded task spawn.
+   - no unbounded memory allocation.
+   - no repeated expensive verification for duplicate candidate where possible.
+   - metrics for oversize/rate-limited/duplicate.
+
+6. Define metrics/logs
+   Reuse Run 076 counters:
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_received_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_dropped_oversize_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_rate_limited_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total
+
+   Requirements:
+   - no _applied_total family.
+   - local reload-check metrics must not move.
+   - live-reload apply metrics must not move.
+   - session eviction metrics must not move.
+   - logs must include validation-only/not-applied.
+   - no private material.
+
+Required implementation:
+
+1. Add P2P wire receive hook
+   If a safe typed channel exists:
+   - add message type/envelope.
+   - gate handler behind hidden flag.
+   - decode and bound payload.
+   - call PeerCandidateValidator::try_accept.
+   - record metrics.
+   - do not propagate.
+
+   If no safe typed channel exists:
+   - implement the smallest honest receive-path harness that uses the same P2P framing layer and document exact boundary.
+   - do not fake production gossip.
+
+2. Add CLI/config flag
+   Add hidden flag:
+   - --p2p-trust-bundle-peer-candidate-wire-validation-enabled
+   or equivalent.
+
+3. Preserve Run 077 local check
+   Existing local check mode must remain:
+   - non-mutating.
+   - no node start.
+   - deterministic exit code.
+   - no P2P wire behavior.
+
+4. Preserve local reload paths
+   Ensure:
+   - Run 069 reload-check unchanged.
+   - Run 073 process-start apply unchanged.
+   - Run 074 SIGHUP live reload unchanged.
+   - peer candidate validation cannot trigger any of them.
+
+Required tests:
+
+1. Unit tests
+   - wire envelope encode/decode roundtrip.
+   - unknown version rejected.
+   - oversize rejected before validation.
+   - malformed rejected before validation.
+   - disabled handler does not validate.
+   - enabled valid candidate validates and is not applied.
+   - invalid candidate rejected and not applied.
+   - duplicate suppressed.
+   - rate limit triggers.
+   - no sequence mutation.
+   - no LivePqcTrustState mutation.
+   - no session eviction.
+
+2. Integration tests
+   - N=2 P2P nodes connect normally with wire validation disabled.
+   - with wire validation enabled, injecting/sending valid candidate frame validates.
+   - injecting/sending invalid candidate frame rejects.
+   - oversize frame dropped.
+   - duplicate frame suppressed.
+   - session remains alive after candidate validation.
+   - sequence file unchanged.
+   - live trust snapshot unchanged.
+   - session eviction counters unchanged.
+   - live reload apply counters unchanged.
+   - local check mode from Run 077 still works.
+   - SIGHUP live reload from Run 074 still works.
+
+Required regression commands:
+- cargo test -p qbind-node --lib pqc_trust_peer_candidate
+- cargo test -p qbind-node --lib pqc_peer_candidate_binary
+- new Run 078 wire peer-candidate tests
+- cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
+- cargo test -p qbind-node --test run_077_pqc_peer_candidate_binary_tests
+- cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
+- cargo test -p qbind-node --test run_073_pqc_trust_bundle_reload_apply_runtime_tests
+- cargo test -p qbind-node --test run_074_pqc_trust_bundle_live_reload_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If source touches P2P wire/message handling, also run:
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Disabled-by-default N=2 baseline
+   - start N=2 signed-bundle nodes without wire-validation flag.
+   - prove normal peer connection works.
+   - prove peer-candidate wire path inactive.
+   - no fallback.
+   - no Dummy crypto.
+
+2. Enabled valid peer-candidate frame
+   - start N=2 with wire-validation enabled.
+   - send/inject valid candidate frame over the intended P2P path.
+   - prove candidate validates.
+   - prove logs/metrics say validation-only/not-applied.
+   - prove sequence file unchanged.
+   - prove LivePqcTrustState unchanged.
+   - prove sessions remain alive.
+   - prove no session eviction metrics.
+   - prove no live reload apply metrics.
+
+3. Invalid peer-candidate frame
+   - tampered or wrong-chain candidate.
+   - prove rejected.
+   - prove no sequence/live-trust/session mutation.
+
+4. Oversize frame
+   - prove dropped before expensive validation.
+   - prove oversize metric increments.
+
+5. Duplicate/rate-limit frame
+   - prove duplicate or rate-limit handling if implemented.
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence run and pass/fail status
+- investigation findings with file/function references
+- chosen P2P receive surface
+- wire/envelope design
+- enablement flag
+- disabled-by-default behavior
+- validation-only semantics
+- DoS controls
+- metrics/logging
+- proof local check mode unchanged
+- proof local reload paths unchanged
+- release-binary evidence
+- proof valid peer candidate is not applied
+- proof invalid peer candidate does not mutate state
+- proof no sequence burn
+- proof no session eviction
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- exact boundaries:
+  - no peer-driven live apply
+  - no propagation/rebroadcast
+  - no consensus ratification
+  - activation_epoch still absent
+  - KMS/HSM still absent
+  - signing-key ratification still absent
+- exact immediate next action
+
+contradiction.md update rules:
+- If disabled-by-default P2P wire receive validation lands, update C4 to record peer/gossiped trust-bundle acceptance narrowed to validation-only wire receive.
+- If only harness-level receive is possible, state exact boundary.
+- Keep C4 open for:
+  - peer-driven live apply / propagation
+  - activation_epoch runtime source
+  - in-binary/on-chain bundle-signing-key ratification
+  - KMS/HSM custody
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- Do not close full C4.
+- Do not claim C5 closure.
+- If peer candidate mutates live trust state or burns sequence, record contradiction/regression.
+- If invalid peer candidate evicts sessions, record contradiction/regression.
+- If peer candidate bypasses signed-bundle validation, record contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  disabled-by-default P2P wire receive validation lands; valid peer candidate validates but is not applied; invalid/oversize/duplicate/rate-limited candidates fail closed; sequence, live trust, sessions, and apply metrics remain unchanged; no propagation; no fallback; no Dummy crypto; release-binary evidence passes.
+- Partial positive:
+  only harness-level receive lands, or release-binary wire evidence is incomplete. State exact boundary.
+- Negative:
+  peer candidate mutates state, burns sequence, bypasses validation, evicts sessions, triggers apply, causes fallback/Dummy crypto, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
