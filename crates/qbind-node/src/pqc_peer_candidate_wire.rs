@@ -112,8 +112,10 @@
 //! future run under a separate review once peer-driven live apply
 //! / propagation / activation_epoch / KMS-HSM custody all land".
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
@@ -744,9 +746,329 @@ pub fn wire_observed_log_line(
 }
 
 // ---------------------------------------------------------------------
-// Unit tests (frame codec / disabled-by-default / metrics).
+// Run 079: live P2P receive-loop dispatch wiring.
+//
+// Run 078 landed the codec, the typed envelope, and the disabled-by-
+// default `PeerCandidateWireReceiver`. Run 079 lands the smallest
+// honest live-receive-loop bridge: a `Send + Sync` trait the
+// transport's read loop can call into when it observes a frame whose
+// first byte is `DISCRIMINATOR_PEER_CANDIDATE_WIRE`, and a
+// `LivePeerCandidateWireDispatcher` that wraps the Run 078 receiver
+// + the operator-supplied runtime context (signing keys, environment,
+// chain id, scratch dir, activation context, optional sequence
+// persistence path, optional local leaf bytes, shared P2pMetrics)
+// behind that trait.
+//
+// Strict scope inherited from Run 078:
+//   - validation-only (NEVER applied);
+//   - no propagation / rebroadcast (the trait method returns `()`);
+//   - no LivePqcTrustState mutation (no handle held);
+//   - no sequence persistence (the inner Run 069 path uses
+//     `peek_sequence` only);
+//   - no P2P session eviction (no evictor handle held);
+//   - no _applied_total metric (none exists by design).
+//
+// The transport's read loop is responsible for:
+//   - peeking the first byte of every received frame BEFORE calling
+//     the existing `decode_frame` (which only knows about the
+//     consensus/DAG/control discriminators and would break the
+//     connection on an unknown discriminator);
+//   - routing `0x05` frames through the installed sink (if any);
+//   - dropping `0x05` frames cheaply when no sink is installed (so
+//     a peer cannot poison the read loop just by sending a 0x05
+//     frame to a node that has not opted in).
+// ---------------------------------------------------------------------
+
+/// Trait implemented by anything the live P2P receive loop can hand
+/// a `DISCRIMINATOR_PEER_CANDIDATE_WIRE` frame to. The trait is
+/// **dyn-compatible** and `Send + Sync` so the read loop can hold an
+/// `Arc<dyn PeerCandidateWireFrameSink>` and the sink itself can
+/// internally serialize state (e.g. behind a `Mutex`).
+///
+/// # Contract on every call
+///
+/// - the implementation MUST NOT block the caller for longer than
+///   the validation cost (the read loop is per-peer; long blocks
+///   stall honest traffic);
+/// - the implementation MUST NOT propagate / rebroadcast / forward
+///   the frame;
+/// - the implementation MUST NOT mutate any live PQC trust state,
+///   sequence file, or P2P session;
+/// - the implementation MUST NOT panic on malformed input — any
+///   decode / validation failure is surfaced via the inner
+///   `P2pMetrics` counters reused from Run 076.
+pub trait PeerCandidateWireFrameSink: Send + Sync + 'static {
+    /// Hand the receive loop's raw frame bytes (including the
+    /// 5-byte length-prefixed header) to the sink.
+    ///
+    /// The default Run 079 implementation
+    /// (`LivePeerCandidateWireDispatcher`) routes the frame through
+    /// the Run 078 `PeerCandidateWireReceiver` and bumps the same
+    /// seven Run 076 `qbind_p2p_pqc_trust_bundle_peer_candidate_*`
+    /// counters as the Run 078 library tests do.
+    fn handle_frame(&self, frame: &[u8]);
+}
+
+/// Run 079 live receive-loop dispatcher: the production-honest
+/// implementation of [`PeerCandidateWireFrameSink`]. Holds exactly
+/// one Run 078 [`PeerCandidateWireReceiver`] (which itself holds
+/// exactly one Run 076 [`PeerCandidateValidator`]) plus the
+/// operator-supplied runtime context. None of these owned fields
+/// give the dispatcher any way to apply / propagate / evict.
+///
+/// The struct's `handle_frame` impl:
+///   1. records "wall-clock" `now_ms` via the injectable clock fn
+///      (`SystemTime` by default; tests can inject a deterministic
+///      clock);
+///   2. constructs a [`PeerCandidateWireRuntimeContext`] from the
+///      owned fields;
+///   3. delegates to [`PeerCandidateWireReceiver::try_handle_frame`];
+///   4. emits a single safe operator-log line via
+///      [`wire_observed_log_line`].
+pub struct LivePeerCandidateWireDispatcher {
+    receiver: Mutex<PeerCandidateWireReceiver>,
+    expected_environment: NetworkEnvironment,
+    expected_chain_id: ChainId,
+    scratch_dir: PathBuf,
+    signing_keys: BundleSigningKeySet,
+    activation_ctx: ActivationContext,
+    sequence_persistence_path: Option<PathBuf>,
+    local_leaf_cert_bytes: Option<Vec<u8>>,
+    validation_time_secs: u64,
+    metrics: Arc<P2pMetrics>,
+    clock_ms_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static>,
+}
+
+impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LivePeerCandidateWireDispatcher")
+            .field("expected_environment", &self.expected_environment)
+            .field("expected_chain_id", &self.expected_chain_id)
+            .field("scratch_dir", &self.scratch_dir)
+            .field(
+                "sequence_persistence_path",
+                &self.sequence_persistence_path,
+            )
+            .field(
+                "local_leaf_cert_bytes_present",
+                &self.local_leaf_cert_bytes.is_some(),
+            )
+            .field("validation_time_secs", &self.validation_time_secs)
+            .field("is_enabled", &self.is_enabled())
+            .finish()
+    }
+}
+
+/// Run 079 owned-fields builder for [`LivePeerCandidateWireDispatcher`].
+/// Each field has the same semantic as the corresponding field in
+/// [`PeerCandidateWireRuntimeContext`] (which is the *borrowed*
+/// per-call view).
+#[derive(Debug, Clone)]
+pub struct LivePeerCandidateWireDispatcherConfig {
+    /// Run 078 receiver config. When `inner.enabled` is `true`, the
+    /// receive path runs full Run 076 validation against every
+    /// frame; when `false`, frames short-circuit at the disabled
+    /// check (the cheap path the task requires).
+    pub inner: PeerCandidateWireReceiverConfig,
+    /// Operator's runtime environment (Devnet / Testnet / Mainnet).
+    pub expected_environment: NetworkEnvironment,
+    /// Operator's runtime chain id.
+    pub expected_chain_id: ChainId,
+    /// Operator-controlled scratch directory for the temp candidate
+    /// file used internally by the Run 076 validator. MUST NOT be a
+    /// directory the peer can influence.
+    pub scratch_dir: PathBuf,
+    /// Bundle-signing key set (same fail-closed semantics as the
+    /// Run 069 reload-check path).
+    pub signing_keys: BundleSigningKeySet,
+    /// Activation context (same shape as Run 069).
+    pub activation_ctx: ActivationContext,
+    /// Optional on-disk sequence file path (read-only `peek_sequence`
+    /// is used; the file is NEVER written by the Run 079 receive
+    /// path).
+    pub sequence_persistence_path: Option<PathBuf>,
+    /// Optional local leaf cert bytes for Run 061 / Run 063
+    /// startup self-checks.
+    pub local_leaf_cert_bytes: Option<Vec<u8>>,
+    /// Wall-clock seconds used as `validation_time_secs`. Held as
+    /// an owned `u64` because the validator already passes it
+    /// per-call; receivers that want a moving clock should
+    /// reconstruct the dispatcher (Run 079 is library-grade — no
+    /// continuous clock daemon).
+    pub validation_time_secs: u64,
+}
+
+impl LivePeerCandidateWireDispatcher {
+    /// Construct the dispatcher. The clock function returns "now"
+    /// in monotonic milliseconds and is used as the Run 076
+    /// rate-limiter clock input. The default
+    /// `LivePeerCandidateWireDispatcher::new` uses
+    /// `std::time::SystemTime::now()`; tests inject a deterministic
+    /// clock via [`LivePeerCandidateWireDispatcher::with_clock`].
+    pub fn new(
+        config: LivePeerCandidateWireDispatcherConfig,
+        metrics: Arc<P2pMetrics>,
+    ) -> Self {
+        let clock_ms_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static> = Arc::new(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0)
+        });
+        Self::with_clock(config, metrics, clock_ms_fn)
+    }
+
+    /// Like [`new`](Self::new) but with an injectable clock for
+    /// deterministic tests.
+    pub fn with_clock(
+        config: LivePeerCandidateWireDispatcherConfig,
+        metrics: Arc<P2pMetrics>,
+        clock_ms_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static>,
+    ) -> Self {
+        let receiver = PeerCandidateWireReceiver::new(config.inner);
+        Self {
+            receiver: Mutex::new(receiver),
+            expected_environment: config.expected_environment,
+            expected_chain_id: config.expected_chain_id,
+            scratch_dir: config.scratch_dir,
+            signing_keys: config.signing_keys,
+            activation_ctx: config.activation_ctx,
+            sequence_persistence_path: config.sequence_persistence_path,
+            local_leaf_cert_bytes: config.local_leaf_cert_bytes,
+            validation_time_secs: config.validation_time_secs,
+            metrics,
+            clock_ms_fn,
+        }
+    }
+
+    /// `true` iff the wrapped receiver is armed.
+    pub fn is_enabled(&self) -> bool {
+        self.receiver.lock().is_enabled()
+    }
+
+    /// Test-grade synchronous dispatch entry point. Returns the
+    /// inner outcome so unit tests can assert it without scraping
+    /// metrics.
+    ///
+    /// The production read loop calls
+    /// [`PeerCandidateWireFrameSink::handle_frame`] instead, which
+    /// discards the outcome (no propagation by construction).
+    pub fn dispatch_frame_for_test(&self, frame: &[u8]) -> PeerCandidateWireOutcome {
+        let now_ms = (self.clock_ms_fn)();
+        let ctx = PeerCandidateWireRuntimeContext {
+            expected_environment: self.expected_environment,
+            expected_chain_id: self.expected_chain_id,
+            scratch_dir: self.scratch_dir.as_path(),
+            validation_time_secs: self.validation_time_secs,
+            signing_keys: &self.signing_keys,
+            activation_ctx: self.activation_ctx.clone(),
+            sequence_persistence_path: self
+                .sequence_persistence_path
+                .as_deref(),
+            local_leaf_cert_bytes: self.local_leaf_cert_bytes.as_deref(),
+            now_ms,
+        };
+        let mut receiver = self.receiver.lock();
+        receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref())
+    }
+}
+
+impl PeerCandidateWireFrameSink for LivePeerCandidateWireDispatcher {
+    fn handle_frame(&self, frame: &[u8]) {
+        let outcome = self.dispatch_frame_for_test(frame);
+        // Single safe operator-log line. No bundle bytes, no
+        // private material — the Run 078 helper enforces the
+        // stable substrings used by operator log scrapers.
+        let peer_id_for_log = None;
+        eprintln!("{}", wire_observed_log_line(&outcome, peer_id_for_log));
+    }
+}
+
+/// Run 079 "cheap-discard" sink: installed when the wire-validation
+/// flag is enabled but the runtime context required to construct a
+/// real [`LivePeerCandidateWireDispatcher`] is unavailable (e.g.
+/// no `--p2p-trust-bundle` baseline supplied). Bumps the truthful
+/// `received_total` + `disabled_total` counters reused from
+/// Run 076 and returns. NEVER decodes the payload.
+pub struct DiscardPeerCandidateWireSink {
+    metrics: Arc<P2pMetrics>,
+}
+
+impl DiscardPeerCandidateWireSink {
+    pub fn new(metrics: Arc<P2pMetrics>) -> Self {
+        Self { metrics }
+    }
+}
+
+impl PeerCandidateWireFrameSink for DiscardPeerCandidateWireSink {
+    fn handle_frame(&self, _frame: &[u8]) {
+        self.metrics.record_peer_candidate_received();
+        self.metrics.record_peer_candidate_disabled();
+    }
+}
+
+/// Run 079 read-loop helper: given the raw frame bytes received
+/// from the secure channel and the optional installed sink,
+/// returns the decision the transport's read loop should take.
+///
+/// This is intentionally a small pure function so the read-loop
+/// branching logic is unit-testable without spinning up KEMTLS.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReadLoopFrameDecision {
+    /// Frame is a peer-candidate wire frame (`0x05`). The caller
+    /// has already invoked the sink (if any) and MUST `continue`
+    /// the read loop — DO NOT call the existing consensus/DAG/
+    /// control `decode_frame` on this frame.
+    ConsumedPeerCandidateWire,
+    /// Frame is NOT a peer-candidate wire frame. The caller MUST
+    /// fall through to the existing length-prefixed
+    /// consensus/DAG/control decode path bit-for-bit.
+    PassThrough,
+}
+
+/// Run 079 read-loop branch entry point. Inspects only the first
+/// byte of `frame_bytes`:
+///
+/// - if it equals [`DISCRIMINATOR_PEER_CANDIDATE_WIRE`], invokes
+///   the installed sink (or silently drops the frame when no sink
+///   is installed) and returns
+///   [`ReadLoopFrameDecision::ConsumedPeerCandidateWire`];
+/// - otherwise, returns [`ReadLoopFrameDecision::PassThrough`]
+///   without touching the frame so the caller's pre-existing
+///   decode path runs bit-for-bit.
+///
+/// This function NEVER returns an error and NEVER panics — a
+/// malformed `0x05` frame is the sink's problem (it has the
+/// Run 078 fail-closed decoder), and a non-`0x05` frame is the
+/// existing transport's problem (its policy on unknown
+/// discriminators is preserved).
+pub fn read_loop_dispatch_peer_candidate_wire_frame(
+    frame_bytes: &[u8],
+    sink: Option<&Arc<dyn PeerCandidateWireFrameSink>>,
+) -> ReadLoopFrameDecision {
+    if frame_bytes.first().copied() == Some(DISCRIMINATOR_PEER_CANDIDATE_WIRE) {
+        if let Some(sink) = sink {
+            sink.handle_frame(frame_bytes);
+        }
+        // No sink installed → cheap drop. The truthful zero-cost
+        // observation is "we saw a 0x05 frame on the wire and did
+        // not validate it because the operator did not opt in".
+        // We intentionally do NOT poison the read loop here so the
+        // existing consensus / DAG / control traffic continues
+        // unaffected.
+        ReadLoopFrameDecision::ConsumedPeerCandidateWire
+    } else {
+        ReadLoopFrameDecision::PassThrough
+    }
+}
+
+
+// ---------------------------------------------------------------------
+// Unit tests (frame codec / disabled-by-default / metrics +
+// Run 079 read-loop dispatch helper + cheap-discard sink).
 // Full-pipeline validator tests live in
 // crates/qbind-node/tests/run_078_pqc_peer_candidate_wire_tests.rs
+// and crates/qbind-node/tests/run_079_pqc_peer_candidate_wire_live_dispatch_tests.rs
 // because they need the test signing harness.
 // ---------------------------------------------------------------------
 #[cfg(test)]
@@ -1069,6 +1391,225 @@ mod tests {
         assert!(
             MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES > MAX_PEER_CANDIDATE_BUNDLE_BYTES,
             "wire frame cap must exceed inner bundle cap"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // Run 079 unit tests: live read-loop dispatch helper +
+    // cheap-discard sink. The full Run 078 → Run 069 validation
+    // pipeline is covered by the integration suite
+    // crates/qbind-node/tests/run_079_pqc_peer_candidate_wire_live_dispatch_tests.rs.
+    // -----------------------------------------------------------------
+
+    /// Test-grade [`PeerCandidateWireFrameSink`] that records the
+    /// raw frame bytes it was handed. Used to assert the
+    /// read-loop helper invokes the sink exactly once per 0x05
+    /// frame.
+    struct RecordingSink {
+        seen: Mutex<Vec<Vec<u8>>>,
+    }
+    impl RecordingSink {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+    }
+    impl PeerCandidateWireFrameSink for RecordingSink {
+        fn handle_frame(&self, frame: &[u8]) {
+            self.seen.lock().push(frame.to_vec());
+        }
+    }
+
+    #[test]
+    fn run079_read_loop_helper_passes_through_non_0x05_frames() {
+        // Existing consensus / DAG / control discriminators MUST
+        // fall through to the existing decode path unchanged.
+        let sink = RecordingSink::new();
+        let sink_arc: Arc<dyn PeerCandidateWireFrameSink> = sink.clone();
+        for d in [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x06, 0xff] {
+            let frame = vec![d, 0, 0, 0, 0];
+            let decision = read_loop_dispatch_peer_candidate_wire_frame(
+                &frame,
+                Some(&sink_arc),
+            );
+            assert_eq!(decision, ReadLoopFrameDecision::PassThrough);
+        }
+        assert!(sink.seen.lock().is_empty());
+    }
+
+    #[test]
+    fn run079_read_loop_helper_routes_0x05_to_sink() {
+        let sink = RecordingSink::new();
+        let sink_arc: Arc<dyn PeerCandidateWireFrameSink> = sink.clone();
+        let frame = vec![DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0];
+        let decision = read_loop_dispatch_peer_candidate_wire_frame(
+            &frame,
+            Some(&sink_arc),
+        );
+        assert_eq!(decision, ReadLoopFrameDecision::ConsumedPeerCandidateWire);
+        let seen = sink.seen.lock();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0], frame);
+    }
+
+    #[test]
+    fn run079_read_loop_helper_drops_0x05_when_no_sink_installed() {
+        // Cheap drop: NEVER poisons the read loop, NEVER calls
+        // the existing decode_frame, NEVER bumps any metric (the
+        // metric handle lives inside the sink which is absent here).
+        let frame = vec![DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0];
+        let decision = read_loop_dispatch_peer_candidate_wire_frame(&frame, None);
+        assert_eq!(decision, ReadLoopFrameDecision::ConsumedPeerCandidateWire);
+    }
+
+    #[test]
+    fn run079_read_loop_helper_empty_frame_passes_through() {
+        // Empty frame is not 0x05 — must fall through to the
+        // existing transport's "frame too short" handling so we
+        // do not silently change the policy for malformed frames.
+        let frame: Vec<u8> = Vec::new();
+        let decision = read_loop_dispatch_peer_candidate_wire_frame(&frame, None);
+        assert_eq!(decision, ReadLoopFrameDecision::PassThrough);
+    }
+
+    #[test]
+    fn run079_discard_sink_records_received_and_disabled() {
+        let metrics = Arc::new(P2pMetrics::default());
+        let sink = DiscardPeerCandidateWireSink::new(Arc::clone(&metrics));
+        let frame = vec![DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0];
+        // Drive five frames to prove the sink is non-mutating and
+        // the counters move monotonically.
+        for _ in 0..5 {
+            sink.handle_frame(&frame);
+        }
+        assert_eq!(metrics.peer_candidate_received_total(), 5);
+        assert_eq!(metrics.peer_candidate_disabled_total(), 5);
+        // Nothing else should move on the discard path.
+        assert_eq!(metrics.peer_candidate_validated_total(), 0);
+        assert_eq!(metrics.peer_candidate_rejected_total(), 0);
+        assert_eq!(metrics.peer_candidate_dropped_oversize_total(), 0);
+        assert_eq!(metrics.peer_candidate_rate_limited_total(), 0);
+        assert_eq!(metrics.peer_candidate_duplicate_total(), 0);
+    }
+
+    #[test]
+    fn run079_live_dispatcher_disabled_short_circuits_without_decode() {
+        // A disabled live dispatcher MUST behave exactly like the
+        // Run 078 disabled receiver: bump received_total +
+        // disabled_total, never decode the payload, never call
+        // the validator.
+        let metrics = Arc::new(P2pMetrics::default());
+        let cfg = LivePeerCandidateWireDispatcherConfig {
+            inner: PeerCandidateWireReceiverConfig::default(), // disabled
+            expected_environment: NetworkEnvironment::Devnet,
+            expected_chain_id: NetworkEnvironment::Devnet.chain_id(),
+            scratch_dir: std::env::temp_dir(),
+            signing_keys: fake_signing_keys(),
+            activation_ctx: ActivationContext::height_only(0),
+            sequence_persistence_path: None,
+            local_leaf_cert_bytes: None,
+            validation_time_secs: 100,
+        };
+        let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
+        assert!(!disp.is_enabled());
+        // Even an obviously malformed frame must not panic, must
+        // not poison anything — the disabled short-circuit fires
+        // FIRST inside the wrapped receiver.
+        let frame = vec![DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0xff, 0xff, 0xff, 0xff];
+        let outcome = disp.dispatch_frame_for_test(&frame);
+        assert!(matches!(outcome, PeerCandidateWireOutcome::Disabled));
+        assert_eq!(metrics.peer_candidate_received_total(), 1);
+        assert_eq!(metrics.peer_candidate_disabled_total(), 1);
+        assert_eq!(metrics.peer_candidate_validated_total(), 0);
+        assert_eq!(metrics.peer_candidate_rejected_total(), 0);
+        assert_eq!(metrics.peer_candidate_dropped_oversize_total(), 0);
+    }
+
+    #[test]
+    fn run079_live_dispatcher_enabled_rejects_oversize_frame_before_decode() {
+        // The Run 078 DoS cap is enforced on the DECLARED
+        // payload_len in the 5-byte header BEFORE allocation /
+        // decode. Drive an enabled dispatcher with such a frame
+        // and assert dropped_oversize_total fires, NOT
+        // rejected_total.
+        let metrics = Arc::new(P2pMetrics::default());
+        let cfg = LivePeerCandidateWireDispatcherConfig {
+            inner: PeerCandidateWireReceiverConfig {
+                enabled: true,
+                inner: PeerCandidateConfig::default(),
+            },
+            expected_environment: NetworkEnvironment::Devnet,
+            expected_chain_id: NetworkEnvironment::Devnet.chain_id(),
+            scratch_dir: std::env::temp_dir(),
+            signing_keys: fake_signing_keys(),
+            activation_ctx: ActivationContext::height_only(0),
+            sequence_persistence_path: None,
+            local_leaf_cert_bytes: None,
+            validation_time_secs: 100,
+        };
+        let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
+        assert!(disp.is_enabled());
+        let declared: u32 = (MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES + 1) as u32;
+        let mut frame = vec![DISCRIMINATOR_PEER_CANDIDATE_WIRE];
+        frame.extend_from_slice(&declared.to_be_bytes());
+        // No payload bytes — the cap check fires on the declared
+        // header value alone.
+        let outcome = disp.dispatch_frame_for_test(&frame);
+        assert!(matches!(
+            outcome,
+            PeerCandidateWireOutcome::FrameRejected(
+                PeerCandidateWireFrameError::DeclaredPayloadOversize { .. },
+            )
+        ));
+        assert_eq!(metrics.peer_candidate_received_total(), 1);
+        assert_eq!(metrics.peer_candidate_dropped_oversize_total(), 1);
+        assert_eq!(metrics.peer_candidate_rejected_total(), 0);
+        assert_eq!(metrics.peer_candidate_validated_total(), 0);
+    }
+
+    #[test]
+    fn run079_live_dispatcher_clock_fn_is_invoked_per_frame() {
+        // Drive a deterministic clock and assert it fires once per
+        // dispatch_frame_for_test call (proving the dispatcher
+        // does not cache a wall-clock value across frames in a way
+        // the inner rate limiter could not see).
+        let clock_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let clock_counter_for_fn = Arc::clone(&clock_counter);
+        let clock_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static> =
+            Arc::new(move || {
+                clock_counter_for_fn
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                42
+            });
+        let metrics = Arc::new(P2pMetrics::default());
+        let cfg = LivePeerCandidateWireDispatcherConfig {
+            inner: PeerCandidateWireReceiverConfig::default(),
+            expected_environment: NetworkEnvironment::Devnet,
+            expected_chain_id: NetworkEnvironment::Devnet.chain_id(),
+            scratch_dir: std::env::temp_dir(),
+            signing_keys: fake_signing_keys(),
+            activation_ctx: ActivationContext::height_only(0),
+            sequence_persistence_path: None,
+            local_leaf_cert_bytes: None,
+            validation_time_secs: 100,
+        };
+        let disp = LivePeerCandidateWireDispatcher::with_clock(
+            cfg,
+            Arc::clone(&metrics),
+            clock_fn,
+        );
+        // Disabled path still calls the clock once before the
+        // short-circuit (cheap; the inner receiver receives the
+        // ctx even on the disabled path so the contract is the
+        // same as Run 078).
+        for _ in 0..3 {
+            let _ = disp
+                .dispatch_frame_for_test(&[DISCRIMINATOR_PEER_CANDIDATE_WIRE, 0, 0, 0, 0]);
+        }
+        assert_eq!(
+            clock_counter.load(std::sync::atomic::Ordering::Relaxed),
+            3
         );
     }
 }

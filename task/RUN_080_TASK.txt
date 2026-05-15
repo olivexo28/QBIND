@@ -1,0 +1,412 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no hype / no overclaiming
+
+Current state:
+- Runs 037–045 hardened PQC transport.
+- Runs 046–049 completed live timeout-backoff evidence through the 800-tick cap.
+- Runs 050–068 completed the signed trust-bundle lifecycle path:
+  - structured PQC trust bundles
+  - signed ML-DSA-44 bundle verification
+  - chain_id crosscheck
+  - sequence anti-rollback persistence
+  - activation-height gating
+  - minimum activation-height policy
+  - root/leaf revocation
+  - per-entry revocation activation_height
+  - local revoked-leaf startup self-check
+  - local revoked issuer-root startup self-check
+  - DevNet/TestNet/MainNet evidence
+  - N=4 MainNet signed-bundle peer-connection evidence
+- Run 069 landed validation-only local reload-check.
+- Run 070 landed reload-apply contract and rollback semantics.
+- Run 071 introduced LivePqcTrustState and live snapshot reads.
+- Run 072 added production P2P session eviction.
+- Run 073 landed ProductionLiveTrustApplyContext for process-start local reload-apply.
+- Run 074 landed long-running SIGHUP local live reload-apply.
+- Run 075 updated the operator runbook for Runs 069–074.
+- Run 076 added library-level disabled-by-default peer-candidate validation.
+- Run 077 added production-binary-facing local peer-candidate check mode.
+- Run 078 added typed/versioned/bounded peer-candidate wire envelope and disabled receiver.
+- Run 079 partial-positive:
+  - wired disabled-by-default live P2P receive-loop dispatch for peer-candidate frame discriminator 0x05
+  - valid wire candidates validate through Run 078 → Run 076 → Run 069
+  - tampered / oversize / rate-limited / disabled paths fail closed at correct boundary
+  - no apply
+  - no propagation
+  - no sequence write
+  - no LivePqcTrustState mutation
+  - no session eviction
+  - no _applied_total or peer_candidate_wire_* metric family
+  - honest 0x00/0x01/0x02/0x03 traffic unchanged
+  - boundary: no production send-side publisher yet, so no N=2 release-binary real 0x05 frame exchange
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Current remaining C4 trust/lifecycle blockers include:
+- production peer-candidate wire publisher / send-side counterpart
+- peer-driven live apply / propagation
+- activation_epoch runtime source
+- in-binary / on-chain bundle-signing-key ratification
+- external KMS/HSM custody integration
+- production fast-sync / consensus-storage restore
+- per-environment production trust-anchor operation
+- selective per-peer session retention if ever wanted
+- admin-API or filesystem-watcher triggers if ever desired
+
+Task:
+Run 080. Implement a disabled-by-default production peer-candidate wire publisher / send-side counterpart, then prove an N=2 release-binary real 0x05 frame exchange end-to-end.
+
+Primary objective:
+A running qbind-node should be able to send a bounded trust-bundle peer-candidate wire frame over an existing authenticated P2P session to a peer whose Run 079 receive path validates it, while preserving validation-only semantics.
+
+Important framing:
+This is send-side / frame-exchange only.
+This is NOT peer-driven live apply.
+This is NOT automatic gossip propagation.
+This is NOT rebroadcast.
+This is NOT trust-bundle synchronization.
+This is NOT consensus ratification.
+This is NOT activation_epoch.
+This is NOT KMS/HSM.
+This is NOT signing-key ratification.
+This is NOT fast-sync restore.
+Do not redesign KEMTLS.
+Do not redesign consensus.
+Do not weaken local operator reload-check.
+Do not weaken local SIGHUP live reload.
+Do not weaken Run 079 receive-only validation.
+Do not silently fall back to --p2p-trusted-root.
+Do not silently fall back to DummySig, DummyKem, or DummyAead.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Add disabled-by-default send-side support for frame discriminator 0x05.
+- Send only a local operator-supplied candidate envelope/file.
+- Send only to explicitly selected connected peer(s), or to all currently connected peers only if bounded and explicitly triggered.
+- Do not auto-forward received frames.
+- Do not rebroadcast.
+- Do not apply the candidate locally or remotely.
+- Do not commit sequence.
+- Do not mutate LivePqcTrustState.
+- Do not evict sessions.
+- Do not expose remote unauthenticated mutation.
+- Preserve Run 077 local check mode.
+- Preserve Run 079 receive path.
+- Crosscheck all code against existing design/spec. If contradictions or inconsistencies are found, update docs/whitepaper/contradiction.md.
+
+Recommended safest design:
+Use an explicit local operator-triggered send path, hidden and disabled by default, such as:
+- --p2p-trust-bundle-peer-candidate-wire-publish-enabled
+- --p2p-trust-bundle-peer-candidate-wire-publish-path <ENVELOPE_PATH>
+- optional --p2p-trust-bundle-peer-candidate-wire-publish-once
+
+If the node starts with publish-once:
+- wait until at least one authenticated peer is connected, within a bounded timeout.
+- send exactly one 0x05 frame to the selected peer(s).
+- log result.
+- continue running or exit according to existing project style, but document exact behavior.
+
+If existing runtime cannot safely expose send handles:
+- implement the smallest honest send harness using the same production frame encoder and TcpKemTlsP2pService send path.
+- document exact boundary.
+- do not fake a successful P2P exchange.
+
+Required investigation:
+
+1. Inspect Run 079 receive path and send handles
+   Inspect:
+   - crates/qbind-node/src/pqc_peer_candidate_wire.rs
+   - crates/qbind-node/src/p2p_tcp.rs
+   - crates/qbind-node/src/p2p_node_builder.rs
+   - crates/qbind-node/src/main.rs
+   - crates/qbind-node/src/cli.rs
+   - qbind-net frame/message types
+   - peer registry / outbound tx channel ownership
+   - existing send path for 0x00/0x01/0x02/0x03 frames
+   - Run 078 and Run 079 tests/evidence docs
+   - docs/whitepaper/contradiction.md
+
+   Determine:
+   - where frame 0x05 should be encoded for sending.
+   - how to select peer(s) safely.
+   - whether outbound channels are accessible from qbind-node.
+   - whether sending one frame can be proven without changing consensus traffic.
+   - whether existing bounded outbound queues enforce backpressure.
+   - how to avoid sending oversized frames.
+
+2. Define send-side semantics
+   Required:
+   - disabled by default.
+   - explicit opt-in required.
+   - local candidate file/envelope required.
+   - encode using Run 078 wire envelope.
+   - enforce max size before queueing.
+   - if no peers connected within timeout, fail closed or report no-peer without pretending success.
+   - send failure must not mutate state.
+   - send success must not imply validation or apply unless receiver logs/metrics prove validation.
+   - no rebroadcast.
+   - no automatic resend loop.
+   - no sequence write.
+   - no local trust mutation.
+   - no session eviction.
+
+3. Define receive-side expectations
+   Receiver must be launched with Run 079 wire-validation flag enabled.
+   Sender may or may not need receive flag enabled, depending on design.
+   Receiver must log/metric:
+   - received_total increments
+   - validated_total increments for valid candidate
+   - rejected/oversize/duplicate/rate-limited counters according to test case
+   - validation-only / not-applied statement
+   - no live reload apply counters
+   - no session eviction counters
+   - sequence unchanged
+   - LivePqcTrustState unchanged
+
+4. Define metrics/logs
+   Add send-side metrics if meaningful:
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total
+   - qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total
+
+   Requirements:
+   - no _applied_total family.
+   - no fabricated metrics.
+   - no duplicate metric families.
+   - receive metrics remain Run 076 counters.
+   - local reload-check metrics must not move.
+   - live-reload apply metrics must not move.
+   - session eviction metrics must not move.
+   - logs must include:
+     - peer target count
+     - candidate fingerprint prefix
+     - candidate sequence
+     - sent/not-sent outcome
+     - validation-only / not-applied boundary
+   - no private material.
+   - no bundle bytes dumped.
+
+5. Define DoS/backpressure
+   Required:
+   - max size check before send queue.
+   - bounded send attempt.
+   - no unbounded task spawn.
+   - no infinite publish loop.
+   - no automatic propagation.
+   - publish-once semantics for release evidence.
+   - if queue full, report send failure, do not block indefinitely.
+
+Required implementation:
+
+1. Add peer-candidate sender
+   Add a small module or extend pqc_peer_candidate_wire.rs:
+   - encode candidate as 0x05 frame.
+   - validate local envelope shape/size before send.
+   - send over existing peer outbound channel.
+   - return SendReport.
+
+2. Add disabled local trigger
+   Add hidden flags:
+   - --p2p-trust-bundle-peer-candidate-wire-publish-enabled
+   - --p2p-trust-bundle-peer-candidate-wire-publish-path <PATH>
+   - optional bounded timeout flag if project style permits, otherwise use fixed small timeout.
+
+   Required:
+   - partial config fails closed.
+   - default behavior unchanged.
+   - no send without explicit enable.
+
+3. Preserve receive path
+   Run 079 receiver remains validation-only and disabled by default.
+
+4. Preserve local reload paths
+   Ensure:
+   - Run 069 reload-check unchanged.
+   - Run 073 process-start apply unchanged.
+   - Run 074 SIGHUP live reload unchanged.
+   - peer candidate publish cannot trigger apply.
+
+Required tests:
+
+1. Unit tests
+   - valid envelope encodes into 0x05 frame.
+   - oversize envelope refuses before send.
+   - missing/invalid publish config refuses.
+   - send report counts sent/failed/no-peer accurately.
+   - publish-once does not loop.
+   - no sequence mutation.
+   - no LivePqcTrustState mutation.
+   - no session eviction.
+
+2. Integration tests
+   - N=2 nodes connect normally without publish flags.
+   - receiver enabled, sender disabled: no candidate sent.
+   - sender enabled, receiver disabled: frame is ignored/disabled cheaply; connection remains healthy.
+   - sender enabled, receiver enabled: valid candidate frame is sent and validated.
+   - invalid candidate frame is sent and rejected.
+   - oversize candidate not sent or dropped before validation.
+   - duplicate candidate sent twice triggers duplicate behavior on receiver.
+   - sequence file unchanged on both nodes.
+   - live trust snapshot unchanged on both nodes.
+   - session eviction counters unchanged.
+   - live reload apply counters unchanged.
+   - 0x00/0x01/0x02/0x03 honest traffic unchanged.
+   - Run 077 local check mode still works.
+   - Run 079 receive tests still pass.
+
+Required regression commands:
+- cargo test -p qbind-node --lib pqc_peer_candidate_wire
+- cargo test -p qbind-node --lib pqc_trust_peer_candidate
+- cargo test -p qbind-node --lib pqc_peer_candidate_binary
+- new Run 080 send-side tests
+- cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
+- cargo test -p qbind-node --test run_077_pqc_peer_candidate_binary_tests
+- cargo test -p qbind-node --test run_078_pqc_peer_candidate_wire_tests
+- cargo test -p qbind-node --test run_079_pqc_peer_candidate_wire_live_dispatch_tests
+- cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
+- cargo test -p qbind-node --test run_073_pqc_trust_bundle_reload_apply_runtime_tests
+- cargo test -p qbind-node --test run_074_pqc_trust_bundle_live_reload_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+Because this touches P2P wire/message handling, also run:
+- cargo test -p qbind-node --test run_037_pqc_static_root_mutual_auth_tests
+- cargo test -p qbind-node --test run_040_pqc_static_root_real_aead_tests
+- cargo test -p qbind-net --test run_052_leaf_revocation_handshake_tests
+
+If source touches timeout verification or binary consensus loop, also run:
+- cargo test -p qbind-node --lib binary_consensus
+- cargo test -p qbind-node --lib forged_injection
+- cargo test -p qbind-node --lib run030
+- cargo test -p qbind-consensus --lib timeout
+
+Release-binary evidence:
+
+1. Disabled-by-default N=2 baseline
+   - start N=2 signed-bundle nodes without publish/receive flags.
+   - prove normal peer connection works.
+   - prove no peer-candidate send/receive metrics move.
+   - no fallback.
+   - no Dummy crypto.
+
+2. Sender enabled, receiver disabled
+   - sender publishes one valid 0x05 frame.
+   - receiver has validation disabled.
+   - prove receiver disabled counter or cheap-ignore behavior.
+   - prove connection remains healthy.
+   - prove no apply/sequence/session mutation.
+
+3. Sender enabled, receiver enabled
+   - start N=2 signed-bundle nodes.
+   - receiver wire-validation enabled.
+   - sender publish-once enabled with valid candidate envelope.
+   - prove sender reports sent.
+   - prove receiver receives and validates.
+   - prove logs/metrics say validation-only/not-applied.
+   - prove sequence file unchanged on both nodes.
+   - prove LivePqcTrustState unchanged if observable.
+   - prove sessions remain alive.
+   - prove no session eviction metrics.
+   - prove no live reload apply metrics.
+   - no fallback.
+   - no Dummy crypto.
+
+4. Invalid candidate frame
+   - send tampered/wrong-chain candidate.
+   - prove receiver rejected.
+   - prove no sequence/live-trust/session mutation.
+
+5. Duplicate candidate
+   - send same candidate twice.
+   - prove duplicate metric moves or validation not repeated according to design.
+
+6. Oversize candidate
+   - prove not sent or dropped before expensive validation.
+   - prove correct metric/log outcome.
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_080.md
+
+Evidence document must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence run and pass/fail status
+- investigation findings with file/function references
+- send-side design
+- peer selection / timeout behavior
+- enablement flags
+- validation-only receiver boundary
+- no-propagation boundary
+- DoS/backpressure controls
+- metrics/logging
+- proof local check mode unchanged
+- proof local reload paths unchanged
+- release-binary evidence
+- proof valid sent peer candidate is not applied
+- proof invalid sent peer candidate does not mutate state
+- proof no sequence burn
+- proof no session eviction
+- proof no fallback to --p2p-trusted-root
+- proof no DummySig/DummyKem/DummyAead fallback
+- exact boundaries:
+  - no peer-driven live apply
+  - no rebroadcast/propagation
+  - no consensus ratification
+  - activation_epoch still absent
+  - KMS/HSM still absent
+  - signing-key ratification still absent
+- exact immediate next action
+
+contradiction.md update rules:
+- If disabled-by-default send-side publisher lands and N=2 release-binary frame exchange is proven, update C4 to record peer/gossiped trust-bundle acceptance narrowed to validation-only wire exchange.
+- If send-side lands but release-binary evidence cannot prove receiver validation, state exact boundary.
+- Keep C4 open for:
+  - peer-driven live apply / propagation
+  - activation_epoch runtime source
+  - in-binary/on-chain bundle-signing-key ratification
+  - KMS/HSM custody
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- Do not close full C4.
+- Do not claim C5 closure.
+- If peer candidate mutates live trust state or burns sequence, record contradiction/regression.
+- If sent invalid peer candidate evicts sessions, record contradiction/regression.
+- If peer candidate bypasses signed-bundle validation, record contradiction/regression.
+- If failure falls back to static roots or Dummy crypto, record contradiction/regression.
+
+Expected verdict options:
+- Strongest positive:
+  disabled-by-default send-side publisher lands; release binary exchanges real 0x05 frame over live P2P transport; receiver validates valid candidate but does not apply; invalid/oversize/duplicate candidates fail closed; sequence, live trust, sessions, and apply metrics remain unchanged; no rebroadcast; no fallback; no Dummy crypto.
+- Partial positive:
+  send-side lands but release-binary frame exchange is harness-only or cannot prove receiver validation. State exact boundary.
+- Negative:
+  sent peer candidate mutates state, burns sequence, bypasses validation, evicts sessions, triggers apply, causes fallback/Dummy crypto, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was fixed
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended

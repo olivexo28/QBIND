@@ -441,6 +441,27 @@ pub struct TcpKemTlsP2pService {
     /// spawned by `start()`. Tracked so `shutdown()` can abort them
     /// cleanly and so tests can observe completion.
     dial_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
+    /// Run 079: optional sink for peer-candidate wire frames
+    /// (discriminator [`crate::pqc_peer_candidate_wire::DISCRIMINATOR_PEER_CANDIDATE_WIRE`]).
+    ///
+    /// When set, the per-peer `read_loop` routes any received frame
+    /// whose first byte equals the peer-candidate wire discriminator
+    /// through the sink and continues — it does NOT call the
+    /// existing `decode_frame` consensus/DAG/control demuxer on
+    /// those frames (so the read loop is not poisoned by an
+    /// "unknown discriminator" close).
+    ///
+    /// When `None` (the default and the bit-for-bit pre-Run-079
+    /// behaviour for callers that don't opt in), peer-candidate
+    /// wire frames are dropped cheaply at the read loop — the
+    /// transport never decodes their payload and never bumps any
+    /// metric (the metric handle lives inside the sink).
+    ///
+    /// Wired through `set_peer_candidate_wire_frame_sink` on the
+    /// production-binary path by `p2p_node_builder` when the
+    /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+    /// flag is set.
+    peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -487,6 +508,7 @@ impl TcpKemTlsP2pService {
             inbound_identity_resolver: Arc::new(RwLock::new(None)),
             dial_retry_policy: Arc::new(RwLock::new(DialRetryPolicy::default())),
             dial_handles: Arc::new(RwLock::new(Vec::new())),
+            peer_candidate_wire_sink: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -553,6 +575,39 @@ impl TcpKemTlsP2pService {
         *self.dial_retry_policy.write() = policy;
     }
 
+    /// Run 079: install (or replace) the peer-candidate wire frame
+    /// sink consulted by every per-peer `read_loop` whenever a
+    /// frame's first byte equals
+    /// [`crate::pqc_peer_candidate_wire::DISCRIMINATOR_PEER_CANDIDATE_WIRE`].
+    ///
+    /// When set, the read loop routes `0x05` frames through the
+    /// sink and CONTINUES (so the connection is NOT closed on a
+    /// peer-supplied `0x05` frame). The sink is responsible for
+    /// the Run 078 fail-closed decode + Run 076 validator pipeline.
+    ///
+    /// When the sink is `None` (the default), `0x05` frames are
+    /// dropped cheaply by the read loop. Existing
+    /// consensus/DAG/control discriminators (`0x00`/`0x01`/`0x02`)
+    /// remain bit-for-bit unaffected.
+    ///
+    /// This is the production-binary entry point used by
+    /// `p2p_node_builder` when the operator opts in via
+    /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`.
+    pub fn set_peer_candidate_wire_frame_sink(
+        &self,
+        sink: Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>,
+    ) {
+        *self.peer_candidate_wire_sink.write() = Some(sink);
+    }
+
+    /// Run 079: read accessor used by tests / observability code to
+    /// confirm a sink has (or has not) been installed. The sink
+    /// itself is hidden behind an `Arc<dyn>` so the return type is
+    /// just a boolean to avoid leaking the trait object.
+    pub fn has_peer_candidate_wire_frame_sink(&self) -> bool {
+        self.peer_candidate_wire_sink.read().is_some()
+    }
+
     /// Start the P2P service: listen on configured address and dial static peers.
     ///
     /// **B8 — initial-dial retry**: each configured static-peer dial is
@@ -606,6 +661,7 @@ impl TcpKemTlsP2pService {
         let bytes_received = Arc::clone(&self.bytes_received);
         let inbound_session_counter = Arc::clone(&self.inbound_session_counter);
         let inbound_identity_resolver = Arc::clone(&self.inbound_identity_resolver);
+        let peer_candidate_wire_sink = Arc::clone(&self.peer_candidate_wire_sink);
 
         tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
@@ -627,6 +683,7 @@ impl TcpKemTlsP2pService {
                                 let bytes_received_clone = Arc::clone(&bytes_received);
                                 let inbound_session_counter_clone = Arc::clone(&inbound_session_counter);
                                 let resolver_clone = Arc::clone(&inbound_identity_resolver);
+                                let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
 
                                 tokio::spawn(async move {
                                     if let Err(e) = Self::handle_inbound_connection(
@@ -639,6 +696,7 @@ impl TcpKemTlsP2pService {
                                         bytes_received_clone,
                                         inbound_session_counter_clone,
                                         resolver_clone,
+                                        wire_sink_clone,
                                     )
                                     .await
                                     {
@@ -696,6 +754,9 @@ impl TcpKemTlsP2pService {
         bytes_received: Arc<AtomicU64>,
         inbound_session_counter: Arc<AtomicU64>,
         inbound_identity_resolver: Arc<RwLock<Option<InboundIdentityResolver>>>,
+        peer_candidate_wire_sink: Arc<
+            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
     ) -> Result<(), P2pTransportError> {
         // Convert Tokio stream to std::net::TcpStream for KEMTLS handshake.
         //
@@ -776,6 +837,7 @@ impl TcpKemTlsP2pService {
             inbound_tx,
             connections_current,
             bytes_received,
+            peer_candidate_wire_sink,
         )
         .await;
 
@@ -868,6 +930,7 @@ impl TcpKemTlsP2pService {
             self.inbound_tx.clone(),
             Arc::clone(&self.connections_current),
             Arc::clone(&self.bytes_received),
+            Arc::clone(&self.peer_candidate_wire_sink),
         )
         .await;
 
@@ -882,6 +945,7 @@ impl TcpKemTlsP2pService {
         inbound_tx: mpsc::Sender<P2pMessage>,
         _connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
+        peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
     ) {
         // Create outbound channel for this peer
         let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
@@ -896,8 +960,15 @@ impl TcpKemTlsP2pService {
         let channel_read = channel;
         let inbound_tx_clone = inbound_tx.clone();
         let bytes_received_clone = Arc::clone(&bytes_received);
+        let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
         let read_handle = tokio::spawn(async move {
-            Self::read_loop(channel_read, inbound_tx_clone, bytes_received_clone).await;
+            Self::read_loop(
+                channel_read,
+                inbound_tx_clone,
+                bytes_received_clone,
+                wire_sink_clone,
+            )
+            .await;
         });
 
         // Register peer connection
@@ -914,15 +985,50 @@ impl TcpKemTlsP2pService {
     }
 
     /// Read loop: continuously read frames and push to inbound channel.
+    ///
+    /// # Run 079 peer-candidate wire dispatch
+    ///
+    /// Before each frame is handed to the existing length-prefixed
+    /// `decode_frame` consensus/DAG/control demuxer, the first byte
+    /// is peeked and compared against
+    /// [`crate::pqc_peer_candidate_wire::DISCRIMINATOR_PEER_CANDIDATE_WIRE`]
+    /// (`0x05`). Frames whose first byte matches are routed through
+    /// the installed
+    /// [`crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink`]
+    /// (if any) or dropped cheaply (if none), and the read loop
+    /// CONTINUES — they do NOT poison the connection. Frames whose
+    /// first byte does NOT match fall through to the existing
+    /// `decode_frame` path bit-for-bit, including the existing
+    /// "break on decode error" close-connection policy for
+    /// honest-traffic discriminators (`0x00`/`0x01`/`0x02`).
     async fn read_loop(
         channel: SecureChannelAsync,
         inbound_tx: mpsc::Sender<P2pMessage>,
         bytes_received: Arc<AtomicU64>,
+        peer_candidate_wire_sink: Arc<
+            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
     ) {
         loop {
             match channel.recv().await {
                 Ok(frame_bytes) => {
                     bytes_received.fetch_add(frame_bytes.len() as u64, Ordering::Relaxed);
+
+                    // Run 079: peek the first byte and route
+                    // peer-candidate wire frames (`0x05`) to the
+                    // installed sink (or cheap-drop) WITHOUT calling
+                    // the existing decode_frame demuxer.
+                    let sink_snapshot = peer_candidate_wire_sink.read().clone();
+                    let decision = crate::pqc_peer_candidate_wire::read_loop_dispatch_peer_candidate_wire_frame(
+                        &frame_bytes,
+                        sink_snapshot.as_ref(),
+                    );
+                    if matches!(
+                        decision,
+                        crate::pqc_peer_candidate_wire::ReadLoopFrameDecision::ConsumedPeerCandidateWire,
+                    ) {
+                        continue;
+                    }
 
                     match decode_frame(&frame_bytes) {
                         Ok(msg) => {
@@ -1033,6 +1139,7 @@ impl TcpKemTlsP2pService {
             inbound_tx: self.inbound_tx.clone(),
             connections_current: Arc::clone(&self.connections_current),
             bytes_received: Arc::clone(&self.bytes_received),
+            peer_candidate_wire_sink: Arc::clone(&self.peer_candidate_wire_sink),
         }
     }
 
@@ -1188,6 +1295,14 @@ struct DialerHandle {
     inbound_tx: mpsc::Sender<P2pMessage>,
     connections_current: Arc<AtomicU64>,
     bytes_received: Arc<AtomicU64>,
+    /// Run 079: shared optional wire sink (cloned from
+    /// `TcpKemTlsP2pService::peer_candidate_wire_sink`). Threaded
+    /// into `spawn_peer_handlers` so retry-dialed peers' read loops
+    /// see the same sink the accept-loop sees. Default `None` →
+    /// cheap-drop behaviour preserved bit-for-bit.
+    peer_candidate_wire_sink: Arc<
+        RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+    >,
 }
 
 impl DialerHandle {
@@ -1262,6 +1377,7 @@ impl DialerHandle {
             self.inbound_tx.clone(),
             Arc::clone(&self.connections_current),
             Arc::clone(&self.bytes_received),
+            Arc::clone(&self.peer_candidate_wire_sink),
         )
         .await;
 

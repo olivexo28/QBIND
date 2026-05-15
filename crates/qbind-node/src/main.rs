@@ -2447,6 +2447,140 @@ async fn run_p2p_node(
         builder
     };
 
+    // Run 079 — install the live P2P peer-candidate wire frame
+    // sink on the production-binary builder.
+    //
+    // When the hidden flag
+    // `--p2p-trust-bundle-peer-candidate-wire-validation-enabled` is
+    // set:
+    //
+    //   * if a `--p2p-trust-bundle` baseline + `trust_bundle_loaded`
+    //     is available, construct a full
+    //     `LivePeerCandidateWireDispatcher` and install it on the
+    //     builder via `with_peer_candidate_wire_sink`. The dispatcher
+    //     wraps the Run 078 receiver one-to-one, reuses the same
+    //     seven Run 076 `qbind_p2p_pqc_trust_bundle_peer_candidate_*`
+    //     metric counters surfaced on `/metrics`, and the per-peer
+    //     `read_loop` routes every received `0x05` frame through
+    //     it (validation-only — NEVER applied / propagated / evicts);
+    //   * if no baseline is loaded, install a cheap-discard sink
+    //     so the read loop still recognizes the `0x05`
+    //     discriminator and does not close the connection on a
+    //     peer-supplied wire frame (the operator opt-in is honored
+    //     truthfully even when the validation pipeline is
+    //     unavailable).
+    //
+    // The hook MUST NOT mutate any pre-existing builder field; it
+    // either calls `with_peer_candidate_wire_sink` exactly once or
+    // not at all. The default path (`enabled == false`) is
+    // bit-for-bit identical to pre-Run-079.
+    let builder = if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled {
+        use qbind_node::pqc_peer_candidate_wire::{
+            DiscardPeerCandidateWireSink, LivePeerCandidateWireDispatcher,
+            LivePeerCandidateWireDispatcherConfig, PeerCandidateWireFrameSink,
+            PeerCandidateWireReceiverConfig,
+        };
+        use qbind_node::pqc_trust_peer_candidate::PeerCandidateConfig;
+        let metrics_arc = node_metrics.p2p_arc();
+        let sink: Arc<dyn PeerCandidateWireFrameSink> = match trust_bundle_loaded
+            .as_ref()
+        {
+            Some(loaded) => {
+                // Use the same scratch directory shape Run 077 /
+                // Run 070 helpers use: a process-scoped temp dir.
+                // The dispatcher's inner validator only writes
+                // temp candidate files here; never the persistent
+                // sequence file (that path is read-only on the
+                // wire-receive path).
+                let scratch_dir = std::env::temp_dir().join(format!(
+                    "qbind-run079-wire-scratch-{}",
+                    std::process::id()
+                ));
+                if let Err(e) = std::fs::create_dir_all(&scratch_dir) {
+                    eprintln!(
+                        "[binary] Run 079: FATAL: scratch dir create failed at {}: {}. \
+                         Disabling wire sink (frames will be cheap-dropped at the read loop).",
+                        scratch_dir.display(),
+                        e
+                    );
+                    Arc::new(DiscardPeerCandidateWireSink::new(Arc::clone(&metrics_arc)))
+                        as Arc<dyn PeerCandidateWireFrameSink>
+                } else {
+                    let validation_time_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    // Reuse the bundle's environment (already
+                    // validated against `config.environment` by
+                    // the loader) and the operator-supplied
+                    // chain id from the live `config` so the
+                    // wire envelope's pre-decode checks match
+                    // the operator's runtime view bit-for-bit.
+                    let dispatcher_cfg = LivePeerCandidateWireDispatcherConfig {
+                        inner: PeerCandidateWireReceiverConfig {
+                            enabled: true,
+                            inner: PeerCandidateConfig::default(),
+                        },
+                        expected_environment: config.environment,
+                        expected_chain_id: config.environment.chain_id(),
+                        scratch_dir,
+                        signing_keys: bundle_signing_keys.clone(),
+                        activation_ctx:
+                            qbind_node::pqc_trust_activation::ActivationContext::height_only(0),
+                        sequence_persistence_path: config
+                            .data_dir
+                            .as_ref()
+                            .map(|d| {
+                                qbind_node::pqc_trust_sequence::sequence_file_path(d)
+                            }),
+                        // Local leaf bytes are optional on the Run
+                        // 076/077/078 receive path (the local-leaf
+                        // self-check only fires when the operator
+                        // has them configured). At this point in
+                        // run_p2p_node, `leaf_credentials` has
+                        // already been moved into the trust-bundle
+                        // pipeline above, so we pass `None` here
+                        // — the Run 079 receive path still
+                        // executes Run 069 loader checks plus the
+                        // Run 076 envelope / rate-limit / LRU
+                        // pipeline against the peer-supplied
+                        // candidate, just without the optional
+                        // Run 063 local-leaf gate (the local leaf
+                        // is exercised on the production *send*
+                        // path via the live `LivePqcTrustState`
+                        // wiring above).
+                        local_leaf_cert_bytes: None,
+                        validation_time_secs,
+                    };
+                    eprintln!(
+                        "[binary] Run 079: installing live peer-candidate wire \
+                         dispatcher (env={} sequence_baseline={} signing_keys={}).",
+                        loaded.environment(),
+                        loaded.bundle.sequence,
+                        bundle_signing_keys.len(),
+                    );
+                    Arc::new(LivePeerCandidateWireDispatcher::new(
+                        dispatcher_cfg,
+                        Arc::clone(&metrics_arc),
+                    )) as Arc<dyn PeerCandidateWireFrameSink>
+                }
+            }
+            None => {
+                eprintln!(
+                    "[binary] Run 079: --p2p-trust-bundle-peer-candidate-wire-validation-enabled \
+                     was supplied without a --p2p-trust-bundle baseline; installing \
+                     cheap-discard sink (wire frames will be observed via the seven \
+                     Run 076 peer_candidate_* counters and otherwise dropped without decode)."
+                );
+                Arc::new(DiscardPeerCandidateWireSink::new(Arc::clone(&metrics_arc)))
+                    as Arc<dyn PeerCandidateWireFrameSink>
+            }
+        };
+        builder.with_peer_candidate_wire_sink(sink)
+    } else {
+        builder
+    };
+
     let node_context = match builder.build(config, validator_id).await {
         Ok(ctx) => ctx,
         Err(e) => {

@@ -694,6 +694,15 @@ pub struct P2pNodeBuilder {
     /// Default `None` preserves pre-Run-071 builder behaviour
     /// bit-for-bit for tests / non-binary callers.
     pqc_live_trust: Option<LivePqcTrustState>,
+    /// Run 079: optional peer-candidate wire frame sink. When set,
+    /// `build()` installs it on the constructed
+    /// `TcpKemTlsP2pService` via
+    /// `set_peer_candidate_wire_frame_sink` so per-peer read loops
+    /// route `0x05` frames through the sink instead of dropping
+    /// them at the read loop. Default `None` preserves pre-Run-079
+    /// behaviour bit-for-bit.
+    peer_candidate_wire_sink:
+        Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>,
 }
 
 impl Default for P2pNodeBuilder {
@@ -735,6 +744,11 @@ impl P2pNodeBuilder {
             // live binary wires this via `with_live_pqc_trust(...)`
             // after the startup trust-bundle pipeline has finished.
             pqc_live_trust: None,
+            // Run 079: peer-candidate wire frame sink defaults to
+            // None — preserves pre-Run-079 builder/test behaviour
+            // bit-for-bit (frames with discriminator 0x05 are
+            // dropped cheaply by the read loop).
+            peer_candidate_wire_sink: None,
         }
     }
 
@@ -881,6 +895,25 @@ impl P2pNodeBuilder {
     /// Run 072+ swap will land under a separate review.
     pub fn with_live_pqc_trust(mut self, live: LivePqcTrustState) -> Self {
         self.pqc_live_trust = Some(live);
+        self
+    }
+
+    /// Run 079: install a peer-candidate wire frame sink that the
+    /// constructed `TcpKemTlsP2pService`'s per-peer read loops
+    /// consult on every received frame whose first byte equals
+    /// [`qbind_node::pqc_peer_candidate_wire::DISCRIMINATOR_PEER_CANDIDATE_WIRE`].
+    ///
+    /// Default `None` preserves pre-Run-079 builder/test behaviour
+    /// bit-for-bit (no wire sink → frames with discriminator
+    /// `0x05` are dropped cheaply by the read loop). The
+    /// production binary wires this from `main.rs` when the
+    /// hidden `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+    /// flag is supplied AND a trust-bundle baseline is loaded.
+    pub fn with_peer_candidate_wire_sink(
+        mut self,
+        sink: Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>,
+    ) -> Self {
+        self.peer_candidate_wire_sink = Some(sink);
         self
     }
 
@@ -1122,6 +1155,15 @@ impl P2pNodeBuilder {
         if !peer_kem_pk_overrides.is_empty() {
             p2p_service.set_peer_kem_pk_overrides(peer_kem_pk_overrides);
             p2p_service.set_peer_validator_id_overrides(peer_vid_overrides);
+        }
+
+        // Run 079: install the peer-candidate wire frame sink (if
+        // configured) on the freshly constructed service BEFORE
+        // `start()` so the very first accepted / dialed peer's
+        // read loop already sees the sink. Default `None` preserves
+        // pre-Run-079 builder/test behaviour bit-for-bit.
+        if let Some(sink) = self.peer_candidate_wire_sink.as_ref() {
+            p2p_service.set_peer_candidate_wire_frame_sink(Arc::clone(sink));
         }
 
         // B8/B12: install the listener-side identity resolver.
