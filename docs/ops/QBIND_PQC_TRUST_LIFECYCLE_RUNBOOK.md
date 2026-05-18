@@ -1,7 +1,7 @@
 # QBIND PQC Trust Lifecycle Operator Runbook
 
-**Run:** 086 (prose update of the Run 075 playbook for Runs 076–085)
-**Status:** Operator playbook landed and updated for Runs 050–085; full C4 remains OPEN; C5 remains OPEN / narrowed
+**Run:** 087 (safety-spec pointer update after Run 086)
+**Status:** Operator playbook landed and updated for Runs 050–087; full C4 remains OPEN; C5 remains OPEN / narrowed
 **Scope owner:** transport trust-anchor + bundle-signing lifecycle + peer-candidate validation-only lifecycle
 **Date:** 2026-05-18
 
@@ -10,7 +10,9 @@ Runs 050–074 into a concrete operator playbook for production
 custody, rotation, revocation, bundle-signing-key rotation, **and
 the operator-triggered hot-reload lifecycle** (§6.F), and — as of
 Run 086 — also documents the **peer-candidate validation-only
-lifecycle** (§6.G) added by Runs 076–085.
+lifecycle** (§6.G) added by Runs 076–085. Run 087 adds a
+formal design-gate safety specification for any future peer-driven
+trust-bundle propagation or apply work.
 
 Run 086 is a documentation-only update of the Run 075 playbook
 that incorporates Runs 076–085:
@@ -55,8 +57,14 @@ candidates, but never applies them, never propagates them,
 never mutates `LivePqcTrustState`, never writes the sequence
 file, and never evicts sessions. The §6.F SIGHUP path remains
 the only operator surface that ever applies a candidate to a
-running node. Run 086 is documentation only — no
-`crates/**/src/**` source is changed by Run 086.
+running node. Run 087 adds only a design/specification pointer:
+`docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md`
+defines future gates before any propagation or peer-driven apply may
+be implemented. Peer-candidate `0x05` remains validation-only today;
+local SIGHUP reload remains the only running-node apply path; and
+peer-driven apply / propagation requires a future separately scoped
+implementation. Runs 086 and 087 are documentation only — no
+`crates/**/src/**` source is changed by either run.
 
 Run 075 was the previous documentation-only update of the
 Run 066 playbook for Runs 069–074:
@@ -100,7 +108,7 @@ The Run 065 per-environment minimum activation-margin policy
 `activation_height = None` immediate revocations remain exempt)
 continues to apply at every bundle-load site, including all four
 hot-reload entry points above. No runtime code, no test source,
-and no helper source is changed by Run 075 or by Run 086.
+and no helper source is changed by Run 075, Run 086, or Run 087.
 
 It is **operator documentation**. It is **not** a redesign of any
 runtime layer. It does **not** introduce new bypass flags, does
@@ -1906,6 +1914,22 @@ of the following — they remain explicitly open under C4 / C5
   prior production-honest transport-KEM evidence, not by the
   peer-candidate path.
 
+### 6.G.8 Future propagation/apply design gate (Run 087)
+
+Run 087 adds the formal safety gate in
+`docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md`. Operators and
+implementers MUST treat that document as a future-work prerequisite, not as a
+statement that peer-driven propagation or peer-driven live apply exists today.
+
+The preserved operating boundary is:
+
+- Peer-candidate `0x05` is validation-only today.
+- Local SIGHUP reload (§6.F.4) remains the only running-node apply path today.
+- Peer-driven apply and propagation require a future separately scoped
+  implementation with its own evidence.
+- No automatic trust-bundle synchronization is allowed without satisfying the
+  Run 087 gates.
+
 ---
 
 ## 7. Promotion checklist (every production trust-bundle change)
@@ -2312,7 +2336,10 @@ under C4:
    exchange** (see §6.G) that validates inbound candidates
    without applying, propagating, mutating live trust, writing
    the sequence file, or evicting sessions — but this is a
-   signal source, not an apply trigger, and peer-driven live
+   signal source, not an apply trigger. Run 087 adds the formal
+   design-gate specification for any future propagation/apply work
+   (`docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md`),
+   and peer-driven live
    apply / propagation remain OPEN. When peer-driven apply or
    propagation lands, the same Run 065
    `pqc_trust_activation::check_min_activation_height_policy`
@@ -2432,7 +2459,7 @@ in §10):**
 
 ---
 
-## 11. Mapping to Runs 050–075
+## 11. Mapping to Runs 050–087
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -2470,6 +2497,7 @@ in §10):**
 | 084 | Committed repeatable **N=2 DevNet** harness `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh`; closed the N=2 evidence gap: baseline / valid / receiver-disabled / invalid-wrong-chain / duplicate scenarios all pass; sequence hashes unchanged; live-reload-apply + session-eviction metrics stayed zero; no propagation; no Dummy crypto; no `--p2p-trusted-root` fallback. | §6.G.5, §6.G.6, §10 (peer-driven apply / propagation still open). |
 | 085 | Committed repeatable **N=4 MainNet** harness `scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh`; strongest current evidence: all five MainNet scenarios pass on four release `qbind-node` processes with signed MainNet trust material; sequence hashes unchanged; live-reload-apply + session-eviction metrics stayed zero; no propagation; no active `DummySig` / `DummyKem` / `DummyAead`; no `--p2p-trusted-root` fallback. | §6.G.1, §6.G.5, §6.G.6, §10 (peer-driven apply / propagation still open). |
 | 086 | Operator-playbook prose update for Runs 076–085 (docs-only). Adds §6.G peer-candidate validation-only lifecycle, extends §10 / §11 / §12, no source changes. | All §sections (esp. §1, §6.G, §10, §11, §12). |
+| 087 | Formal peer trust-bundle propagation/apply safety specification (docs-only). Defines future gates; no runtime behavior change; peer-candidate `0x05` remains validation-only. | §1, §6.G.8, §10, §11. |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---
