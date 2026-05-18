@@ -1,0 +1,218 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no overclaiming
+
+Current state:
+- Runs 050–090 completed major PQC trust-bundle lifecycle, local reload, peer-candidate validation, and propagation-only evidence.
+- Run 091 partial-positive:
+  - investigated activation_epoch runtime-source boundary.
+  - found no canonical pre-consensus epoch source currently wired into the trust-bundle activation gate.
+  - did not fake an epoch source.
+  - pinned activation_epoch as fail-closed via TrustBundleActivationError::CurrentEpochUnavailable.
+  - added 15 integration tests.
+  - proved activation_epoch omitted preserves existing behavior.
+  - proved activation_epoch future / unsupported rejects before sequence mutation.
+  - proved reload-check with activation_epoch does not mutate sequence.
+  - proved revocation schema has no activation_epoch field today.
+  - identified MetaStore::get_current_epoch() as conceptually suitable but not currently wired early enough.
+  - identified snapshot/rejoin epoch parity as a required future consideration if epoch activation becomes production-real.
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 092. Implement the narrow canonical pre-consensus epoch-source wiring for PQC trust-bundle activation using the existing persisted MetaStore epoch, if it can be done without broad storage redesign.
+
+Primary objective:
+Replace the Run 091 fail-closed unsupported boundary with a real current_epoch source for the trust-bundle activation gate, using existing persisted epoch state, while preserving all activation_height, minimum-margin, sequence, reload, and peer-candidate invariants.
+
+Important framing:
+This is not an epoch-transition redesign.
+This is not consensus redesign.
+This is not fast-sync restore completion.
+This is not peer-driven live apply.
+This is not KMS/HSM.
+This is not signing-key ratification.
+Do not invent a synthetic epoch.
+Do not read epoch from wall-clock time.
+Do not use block height as epoch unless the repo already defines that canonical mapping.
+Do not silently ignore activation_epoch.
+Do not weaken Run 091 fail-closed behavior if the epoch source is unavailable/corrupt.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Investigate where MetaStore is opened and how current_epoch is initialized/persisted.
+- If safe, expose a pre-consensus read-only current_epoch lookup before trust-bundle activation validation.
+- Use that epoch in ActivationContext.
+- If storage is unavailable/corrupt/missing and activation_epoch is present, fail closed.
+- Preserve activation_epoch omitted behavior.
+- Preserve activation_height and Run 065 minimum activation-height behavior exactly.
+- Preserve Run 055 sequence anti-rollback ordering.
+- Preserve Run 069 reload-check non-mutation.
+- Preserve Run 073/074 local reload apply ordering.
+- Preserve Run 076–090 peer-candidate validation/propagation non-mutation behavior.
+- Do not change trust-bundle wire format unless absolutely required.
+- Crosscheck all code/docs against existing design/spec. If contradictions are found, update contradiction.md.
+
+Required investigation:
+Inspect:
+- MetaStore::get_current_epoch implementation and callers
+- storage initialization order in qbind-node main
+- snapshot restore path and StateSnapshotMeta
+- trust-bundle activation gate in main / reload / peer-candidate code
+- crates/qbind-node/src/pqc_trust_activation.rs
+- crates/qbind-node/src/pqc_trust_reload.rs
+- crates/qbind-node/src/pqc_live_trust_apply.rs
+- crates/qbind-node/src/pqc_live_trust_reload.rs
+- peer-candidate validator path
+- Run 091 tests and evidence
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md
+- docs/whitepaper/contradiction.md
+
+Required design:
+1. Define current_epoch source
+   Must be:
+   - persisted
+   - deterministic
+   - chain-local
+   - available before trust-bundle activation validation
+   - fail-closed on corruption
+   - not derived from wall-clock
+   - not guessed from height unless already canonical
+
+2. ActivationContext update
+   Use:
+   - current_height
+   - current_epoch
+   - environment
+   - chain_id
+   - existing minimum activation-height policy
+
+3. Startup ordering
+   Ensure activation_epoch is checked before:
+   - sequence persistence
+   - active root merge
+   - P2P start
+   - live trust creation
+
+4. Reload ordering
+   Ensure activation_epoch is checked before:
+   - reload-check success
+   - live trust swap
+   - session eviction
+   - sequence commit
+
+5. Peer-candidate ordering
+   Ensure activation_epoch is checked before:
+   - candidate accepted/validated
+   - propagation
+   - any metrics that imply validation success
+
+6. Snapshot/restore boundary
+   If snapshot metadata lacks epoch:
+   - do not fake epoch from snapshot.
+   - document exact remaining boundary.
+   - ensure restore path either obtains epoch from MetaStore or fails closed for activation_epoch bundles.
+   - update docs accordingly.
+
+Required tests:
+- activation_epoch omitted: existing behavior unchanged.
+- activation_epoch satisfied using MetaStore current_epoch: accepted.
+- activation_epoch future using MetaStore current_epoch: rejected.
+- corrupted epoch store: fail closed.
+- missing epoch store + activation_epoch present: fail closed or explicit default only if existing code canonically initializes epoch.
+- activation_height satisfied + activation_epoch future: rejected.
+- activation_epoch satisfied + activation_height future: rejected.
+- reload-check with satisfied activation_epoch: validates without sequence mutation.
+- reload-check with future activation_epoch: rejects without sequence mutation.
+- SIGHUP live reload with future activation_epoch: no live trust mutation, no eviction, no sequence commit.
+- peer-candidate with future activation_epoch: rejected / not propagated / no sequence/session/trust mutation.
+- existing Run 091 unsupported tests updated or preserved as relevant.
+
+Required regression commands:
+- cargo test -p qbind-node --test run_091_pqc_trust_bundle_activation_epoch_tests
+- cargo test -p qbind-node --lib pqc_trust_activation
+- cargo test -p qbind-node --test run_057_pqc_trust_bundle_activation_tests
+- cargo test -p qbind-node --test run_065_pqc_min_activation_margin_tests
+- cargo test -p qbind-node --test run_069_pqc_trust_bundle_reload_check_tests
+- cargo test -p qbind-node --test run_073_pqc_trust_bundle_reload_apply_runtime_tests
+- cargo test -p qbind-node --test run_074_pqc_trust_bundle_live_reload_tests
+- cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
+- cargo test -p qbind-node --test run_088_pqc_peer_candidate_propagation_tests
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+If startup/storage ordering changes touch snapshot or persistence behavior, also run relevant snapshot/restore tests and document exact command names.
+
+If P2P or wire paths are touched, also rerun:
+- scripts/devnet/run_084_peer_candidate_0x05_matrix.sh
+- scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh
+- scripts/devnet/run_089_peer_candidate_propagation_n3.sh
+
+Evidence:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_092.md
+
+Update:
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md if needed
+- docs/whitepaper/contradiction.md
+
+Evidence doc must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence pass-fail status
+- current_epoch source investigation
+- startup ordering
+- reload ordering
+- peer-candidate ordering
+- snapshot/restore boundary
+- proof activation_epoch satisfied now accepts where epoch source exists
+- proof future/corrupt/missing epoch fails closed
+- proof no sequence burn on rejected activation_epoch
+- proof no live trust mutation on rejected activation_epoch
+- proof no session eviction on rejected activation_epoch
+- proof existing activation_height behavior preserved
+- exact remaining C4/C5 boundaries
+- exact immediate next action
+
+contradiction.md update rules:
+- If MetaStore current_epoch is wired and proven, record C4 activation_epoch runtime-source narrowed/closed for the scoped startup/reload/peer-candidate trust-bundle paths.
+- If snapshot/restore epoch parity remains open, state exact boundary.
+- If no safe epoch source wiring is possible, keep Run 091 fail-closed boundary and record why.
+- Keep C4 open for peer-driven live apply, KMS/HSM, signing-key ratification, fast-sync/restore, and production trust-anchor operations.
+- Do not close full C4.
+- Do not claim C5 closure.
+
+Expected verdict:
+- Strongest positive:
+  MetaStore current_epoch is wired into activation context; activation_epoch satisfied accepts; future/corrupt/missing fails closed; no sequence/live-trust/session mutation on rejection; regressions pass.
+- Partial positive:
+  source wiring is blocked by startup/storage architecture and fail-closed boundary remains.
+- Negative:
+  activation_epoch ignored, guessed, burns sequence on rejection, mutates state on rejection, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence pass-fail status
+5. What was fixed or bounded
+6. What was proven
+7. What remains not solved
+8. Whether contradiction.md was updated and why
+9. Exact immediate next action recommended
