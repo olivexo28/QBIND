@@ -1,17 +1,65 @@
 # QBIND PQC Trust Lifecycle Operator Runbook
 
-**Run:** 075 (prose update of the Run 066 playbook for Runs 069–074)
-**Status:** Operator playbook landed and updated for Runs 050–074; full C4 remains OPEN
-**Scope owner:** transport trust-anchor + bundle-signing lifecycle
-**Date:** 2026-05-14
+**Run:** 086 (prose update of the Run 075 playbook for Runs 076–085)
+**Status:** Operator playbook landed and updated for Runs 050–085; full C4 remains OPEN; C5 remains OPEN / narrowed
+**Scope owner:** transport trust-anchor + bundle-signing lifecycle + peer-candidate validation-only lifecycle
+**Date:** 2026-05-18
 
 This runbook converts the PQC trust-bundle machinery proven by
 Runs 050–074 into a concrete operator playbook for production
 custody, rotation, revocation, bundle-signing-key rotation, **and
-the operator-triggered hot-reload lifecycle** (§6.F).
+the operator-triggered hot-reload lifecycle** (§6.F), and — as of
+Run 086 — also documents the **peer-candidate validation-only
+lifecycle** (§6.G) added by Runs 076–085.
 
-Run 075 is a documentation-only update of the Run 066 playbook
-that incorporates Runs 069–074:
+Run 086 is a documentation-only update of the Run 075 playbook
+that incorporates Runs 076–085:
+
+- **Run 076** — library-level disabled-by-default
+  `PeerCandidateValidator` over a structured
+  `PeerCandidateEnvelope`.
+- **Run 077** — production-binary-facing local peer-candidate
+  check mode (hidden `--p2p-trust-bundle-peer-candidate-validation-enabled`
+  + `--p2p-trust-bundle-peer-candidate-check <PATH>`); node
+  does not start; exits 0/1; non-mutating by construction.
+- **Run 078** — bounded typed/versioned peer-candidate **wire
+  envelope** with deterministic canonical bytes and size cap.
+- **Run 079** — disabled-by-default **live P2P receive-loop
+  dispatch** for inbound `0x05` frames (hidden
+  `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`).
+- **Run 080** — disabled-by-default **send-side publisher**
+  plumbing (hidden
+  `--p2p-trust-bundle-peer-candidate-wire-publish-{enabled,path,once}`);
+  one-shot publish over the live authenticated P2P session.
+- **Run 081** — first release-binary N=2 real `0x05` exchange
+  evidence; partial due to `DummySig` ambiguity on the
+  consensus signer probe path.
+- **Run 082 / 083** — isolated the `DummySig` boundary as
+  non-active / probe-log-only with respect to the
+  peer-candidate matrix.
+- **Run 084** — committed repeatable **N=2 DevNet** harness
+  `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh`;
+  closed the N=2 evidence gap.
+- **Run 085** — committed repeatable **N=4 MainNet** harness
+  `scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh`;
+  strongest current evidence (signed MainNet trust material;
+  baseline / valid / receiver-disabled / invalid-wrong-chain /
+  duplicate scenarios all pass; sequence hashes unchanged;
+  live-reload-apply + session-eviction metrics stayed zero;
+  no propagation; no active `DummySig` / `DummyKem` /
+  `DummyAead`; no `--p2p-trusted-root` fallback).
+
+The peer-candidate `0x05` exchange added by Runs 076–085 is
+**strictly validation-only**: a receiver observes and validates
+candidates, but never applies them, never propagates them,
+never mutates `LivePqcTrustState`, never writes the sequence
+file, and never evicts sessions. The §6.F SIGHUP path remains
+the only operator surface that ever applies a candidate to a
+running node. Run 086 is documentation only — no
+`crates/**/src/**` source is changed by Run 086.
+
+Run 075 was the previous documentation-only update of the
+Run 066 playbook for Runs 069–074:
 
 - **Run 069** — disabled-by-default validation-only reload-check
   hook (`--p2p-trust-bundle-reload-check <PATH>`), non-mutating
@@ -52,7 +100,7 @@ The Run 065 per-environment minimum activation-margin policy
 `activation_height = None` immediate revocations remain exempt)
 continues to apply at every bundle-load site, including all four
 hot-reload entry points above. No runtime code, no test source,
-and no helper source is changed by Run 075.
+and no helper source is changed by Run 075 or by Run 086.
 
 It is **operator documentation**. It is **not** a redesign of any
 runtime layer. It does **not** introduce new bypass flags, does
@@ -1592,6 +1640,274 @@ When a SIGHUP trigger returns `Invalid` or `Fatal`:
 
 ---
 
+## 6.G Peer-candidate validation-only lifecycle (Runs 076–085)
+
+Runs 076–085 add a **disabled-by-default, validation-only**
+peer-candidate `0x05` exchange on top of the §6.F local-operator
+hot-reload lifecycle. The peer-candidate path is strictly
+**observation + validation**: it lets one node receive a
+candidate trust-bundle envelope from a peer, run it through the
+same Run 050/051/053/057/065 startup security pipeline, and emit
+structured evidence about the verdict. It does **not** apply
+candidates, does **not** mutate the live trust state, does
+**not** persist the sequence file, does **not** evict sessions,
+and does **not** propagate / rebroadcast candidates to other
+peers. The only operator surface that ever applies a candidate
+to a running node remains the local-file SIGHUP live reload-
+apply path from Run 074 (§6.F.4).
+
+### 6.G.1 Strict behaviour (what the path does and does not do)
+
+The peer-candidate `0x05` exchange:
+
+- **Is validation-only.** A candidate is run through the same
+  startup pipeline (`pqc_trust_bundle` envelope + ML-DSA-44
+  signature + `chain_id` crosscheck + `environment` crosscheck
+  + Run 065 per-environment activation-margin policy + Run 062
+  active/pending revocation split + Run 057 future-height gate
+  + Run 055 sequence read-only `peek_sequence`). The verdict is
+  recorded; no state changes.
+- **Observes valid candidates.** A candidate that passes every
+  check is logged as
+  `outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction`
+  (see Run 085) and increments only the receiver-side
+  `qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total`
+  counter. Nothing else moves.
+- **Rejects invalid candidates.** A candidate that fails any
+  check (`chain_id` mismatch, environment mismatch, signature
+  failure, sequence ≤ persisted, activation-margin too soon,
+  malformed wire envelope, etc.) is logged as
+  `outcome=rejected; NOT applied; not propagated; sequence not
+  persisted; live trust state unchanged; sessions untouched`
+  and increments only the receiver-side
+  `qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total`
+  counter.
+- **Suppresses duplicates.** A candidate that re-arrives with
+  the same canonical fingerprint within a bounded receiver-side
+  cache is logged as
+  `outcome=duplicate-suppressed; NOT applied; not propagated;
+  sequence not persisted; live trust state unchanged; sessions
+  untouched` and increments only the receiver-side
+  `qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total`
+  counter.
+- **Cheap-ignores on the receiver-disabled path.** When a
+  receiver has not opted in to the Run 079 dispatch (i.e. the
+  receiver-side validation enabled flag is off), inbound `0x05`
+  frames are dropped early with no counter motion and no log
+  spam beyond the existing transport-layer accounting. Sender-
+  side counters still advance on a node that has opted in to
+  publishing; receiver-side counters all stay zero.
+- **Never applies a candidate automatically.** No path inside
+  the peer-candidate code ever calls
+  `pqc_trust_reload::apply_validated_candidate{,_with_previous}`,
+  `LivePqcTrustState::swap_snapshot`, `P2pSessionEvictor::*`, or
+  `pqc_trust_sequence::commit_sequence` — even on a validated
+  candidate. The validator pipeline and the apply pipeline are
+  joined only through operator action (the §6.F.4 SIGHUP path
+  reading a local file the operator has independently approved).
+- **Never writes the sequence file.** Receiver-side validation
+  uses `peek_sequence` (Run 055, read-only). The persisted
+  sequence files on every node MUST have byte-identical sha256
+  before and after every peer-candidate scenario. This is a
+  Run 084 / Run 085 acceptance invariant.
+- **Never mutates `LivePqcTrustState`.** The Run 071 shared
+  live-trust handle is never swapped by the peer-candidate
+  path. The `qbind_p2p_trust_bundle_live_reload_*` family stays
+  at zero on every node in every peer-candidate scenario.
+- **Never evicts sessions.** The Run 072 eviction hook is never
+  invoked by the peer-candidate path. The
+  `qbind_p2p_session_eviction_*` family stays at zero on every
+  node in every peer-candidate scenario.
+- **Never propagates / rebroadcasts.** A receiver that
+  validates an inbound `0x05` candidate MUST NOT re-emit it.
+  Run 084 / Run 085 assert `sent_total = 0` on every non-sender
+  in every scenario. There is no `BundleAnnounce` /
+  `BundleRequest` retransmission path, and there is no
+  forwarding step inside the receive-loop dispatcher.
+
+### 6.G.2 Feature evolution (Runs 076–085)
+
+| Run | What landed | Path it exercised |
+|---|---|---|
+| 076 | Library-level `PeerCandidateValidator` + `try_accept` over a structured `PeerCandidateEnvelope`; disabled-by-default. | `crates/qbind-node/src/pqc_trust_peer_candidate.rs` (library tests only). |
+| 077 | Production-binary-facing **local** peer-candidate check mode (`--p2p-trust-bundle-peer-candidate-validation-enabled` + `--p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>`). Reuses the same `PeerCandidateValidator::try_accept`; node does not start; exits 0/1. Non-mutating by construction. | `crates/qbind-node/src/pqc_peer_candidate_binary.rs` + binary main wiring. |
+| 078 | Bounded typed/versioned wire envelope for `0x05` (size cap, encoded version, deterministic canonical bytes). Library-level encode/decode; not yet on the live socket. | `crates/qbind-node/src/pqc_peer_candidate_wire.rs`. |
+| 079 | Disabled-by-default **live P2P receive-loop dispatch** for inbound `0x05` frames. Receiver-side flag `--p2p-trust-bundle-peer-candidate-wire-validation-enabled` opts in to running each inbound frame through the same Run 076 validator. Counters move only when the flag is on. | `crates/qbind-node/src/p2p_tcp.rs` + `p2p_node_builder.rs`. |
+| 080 | Disabled-by-default **send-side publisher** plumbing (`--p2p-trust-bundle-peer-candidate-wire-publish-enabled` + `--p2p-trust-bundle-peer-candidate-wire-publish-path <PATH>` + `--p2p-trust-bundle-peer-candidate-wire-publish-once`). Operator-supplied envelope is published once over the same authenticated P2P session as a real `0x05` frame. No auto-resend loop. | `crates/qbind-node/src/p2p_node_builder.rs` + send-side metrics. |
+| 081 | First release-binary N=2 real `0x05` exchange evidence, but partial: the `DummySig` boundary on the consensus signer path left the Run 033 timeout-verification proof ambiguous. | DevNet evidence Run 081 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_081.md`). |
+| 082 / 083 | Isolated the `DummySig` boundary as **non-active / probe-log-only** with respect to the peer-candidate `0x05` matrix; the matrix is independent of the consensus signer probe path. | DevNet evidence Runs 082 / 083. |
+| 084 | Committed repeatable **N=2 DevNet** harness `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh`. Closed the N=2 evidence gap with full baseline / valid / receiver-disabled / invalid-wrong-chain / duplicate scenarios; all sequence hashes unchanged; live reload apply + session eviction metrics stayed zero; no propagation; no Dummy crypto; no `--p2p-trusted-root` fallback. | DevNet evidence Run 084. |
+| 085 | Committed repeatable **N=4 MainNet** harness `scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh`. Strongest current evidence: signed MainNet trust material, four real release `qbind-node` processes, all five scenarios pass; sequence hashes unchanged; live reload apply + session eviction metrics stayed zero; no propagation; no active `DummySig` / `DummyKem` / `DummyAead`; no `--p2p-trusted-root` fallback. | DevNet evidence Run 085. |
+
+### 6.G.3 What operators may use this path for
+
+Operators MAY use the peer-candidate validation-only path to:
+
+- **Observe** candidate bundles proposed by another node on the
+  live P2P mesh (when the receiver has opted in to Run 079
+  dispatch).
+- **Validate** the candidate's structure, signature,
+  `environment`, `chain_id`, `sequence` ordering, `activation_height`
+  / activation-margin policy (Run 065), and revocation
+  active/pending split (Run 062) using the exact same code path
+  that gates the startup `--p2p-trust-bundle` load.
+- **Produce evidence** that a particular candidate is valid or
+  invalid against this node's current view (counters, logs,
+  read-only `peek_sequence` baselines) — without burning the
+  persisted sequence and without mutating the live trust set.
+- **Decide manually**, on the basis of that evidence, whether
+  to feed the same candidate file into the operator-controlled
+  Run 069 reload-check (§6.F.2) or the Run 074 SIGHUP live
+  reload-apply (§6.F.4). The decision and the file path are
+  always operator-supplied; the peer-candidate exchange is the
+  signal source, not the apply trigger.
+
+### 6.G.4 What operators MUST NOT treat this path as
+
+The peer-candidate validation-only path is explicitly **NOT**:
+
+- **Not trust-bundle propagation.** A validated candidate is
+  not retransmitted to other peers. The receiver-side
+  `sent_total` counter MUST stay zero. Bundle propagation
+  between peers remains C4-OPEN (§10).
+- **Not peer-driven live apply.** No validated candidate is
+  ever applied to the live trust state by the receive-loop
+  dispatcher. Live apply still requires the §6.F.4 operator
+  SIGHUP trigger reading a local file.
+- **Not consensus ratification.** There is no on-chain
+  ratification step. A candidate's validity inside this node's
+  view does not bind any other node, and does not commit any
+  sequence number on this node either.
+- **Not automatic root rotation.** A peer announcing a new
+  bundle does not cause this node to rotate its transport root.
+  Root rotation still follows §6.A (with §6.F.4 as the
+  zero-downtime apply trigger).
+- **Not automatic revocation distribution.** A peer announcing
+  a bundle with new revocation entries does not cause this
+  node to enforce those revocations. The local active
+  `revoked_leaf_fingerprints` / `revoked_root_ids` set only
+  changes when an operator applies the bundle via §6.F.4.
+- **Not a substitute for `--p2p-trust-bundle` at startup.**
+  The peer-candidate path runs alongside a startup-loaded
+  bundle; it does not seed an unloaded node.
+
+### 6.G.5 Safety invariants (checklist per peer-candidate scenario)
+
+Every peer-candidate scenario — valid, receiver-disabled,
+invalid / wrong-chain, duplicate — MUST satisfy ALL of the
+following. Any red item indicates the path has regressed and
+MUST block promotion / merge:
+
+- [ ] **Persisted sequence file unchanged.** sha256 of every
+      node's sequence file BEFORE the scenario equals sha256
+      AFTER the scenario (Run 084 / Run 085 sha256 columns).
+- [ ] **`LivePqcTrustState` unchanged.** Live reload apply
+      metrics remain at zero on every node:
+      `qbind_p2p_trust_bundle_live_reload_trigger_total = 0`,
+      `..._apply_success_total = 0`,
+      `..._apply_failure_total = 0`,
+      `..._already_in_progress_total = 0`,
+      `..._sessions_evicted_total = 0`.
+- [ ] **No session eviction.** Session eviction metrics remain
+      at zero on every node:
+      `qbind_p2p_session_eviction_attempt_total = 0`,
+      `..._success_total = 0`,
+      `..._failure_total = 0`,
+      `..._sessions_evicted_total = 0`.
+- [ ] **Receiver logs say NOT applied / not propagated.** Every
+      validated, rejected, and duplicate verdict log line MUST
+      include `NOT applied` and `not propagated`; every valid
+      verdict MUST include
+      `outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction`.
+- [ ] **No `--p2p-trusted-root` fallback.** Neither the
+      operator command line nor any log line mentions
+      `--p2p-trusted-root` on TestNet/MainNet. Static-CLI roots
+      MUST NOT be re-introduced as a peer-candidate fallback.
+- [ ] **No active `DummySig` / `DummyKem` / `DummyAead`.**
+      `[Run040]` lines show `dummy_kem_registered=false`,
+      `dummy_aead_registered=false`,
+      `transport_kem_suite_name=ml-kem-768`, and
+      `transport_aead_suite_name=chacha20-poly1305`. Log
+      archives contain no `DummySig` / `DummyKem` / `DummyAead`
+      matches.
+- [ ] **`qbind_p2p_pqc_cert_verify_rejected_total = 0` for
+      honest traffic.** A live peer-candidate scenario must not
+      cause the underlying cert-verify path to start rejecting
+      honest connections. Cert-verify rejected counters MUST
+      stay at zero on every node throughout the scenario.
+- [ ] **Peer-candidate rejected counters move only for invalid
+      candidates.** In the invalid / wrong-chain scenario, the
+      receiver's
+      `qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total`
+      MUST increment exactly by the number of invalid frames
+      delivered. In every other scenario, this counter MUST
+      NOT move.
+
+### 6.G.6 MainNet evidence (Run 085 — strongest current)
+
+Run 085 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_085.md`,
+harness `scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh`)
+is the strongest current evidence for this lifecycle and is the
+canonical regression harness operators / reviewers should rerun
+when evaluating peer-candidate behaviour:
+
+- **N=4 MainNet signed-bundle cluster.** Four release
+  `qbind-node` processes under `--env mainnet`, signed
+  MainNet trust bundle (`chain_id = 0x51424E444D41494E`),
+  explicit `--p2p-trust-bundle-signing-key`, per-node data
+  dirs, explicit peer-leaf-cert mappings, no
+  `--p2p-trusted-root` fallback.
+- **All five scenarios pass.** baseline; valid `0x05`
+  send/validate; receiver-disabled cheap-ignore;
+  invalid/wrong-chain reject; duplicate suppression.
+- **Sequence hashes unchanged.** Every
+  `sequence/*.before.sha256` equals the matching
+  `sequence/*.after.sha256` for every candidate scenario.
+- **No apply / no eviction / no propagation.** All live-reload-
+  apply, session-eviction, and receiver `sent_total` counters
+  stay at zero across every scenario.
+- **No Dummy crypto.** `[Run040]` lines confirm real
+  ML-KEM-768 + ChaCha20-Poly1305; `[binary] Run 033` lines
+  confirm active timeout verification with four loaded
+  consensus signer keys.
+- **No fallback.** `--p2p-trusted-root` is absent from every
+  command line and every log line.
+
+Run 084 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_084.md`,
+harness `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh`)
+remains the canonical N=2 DevNet regression and is the cheapest
+harness for local re-verification.
+
+### 6.G.7 What the peer-candidate path does NOT close
+
+The peer-candidate validation-only path does **NOT** close any
+of the following — they remain explicitly open under C4 / C5
+(see §10):
+
+- **Peer-driven live apply / propagation.** No path inside the
+  binary applies a peer-supplied candidate to live trust, and
+  no path retransmits a candidate to other peers.
+- **`activation_epoch` runtime sourcing.** Bundle-level and
+  per-entry `activation_epoch` continue to fail closed; the
+  epoch axis remains height-only (Run 057 / Run 065 boundary).
+- **KMS / HSM custody.** Signing keys are still operator-
+  supplied via `--p2p-trust-bundle-signing-key`. The peer-
+  candidate path does not change custody.
+- **Signing-key ratification (in-binary / on-chain).** §6.D
+  remains an out-of-band CLI overlap procedure.
+- **Fast-sync / consensus-storage restore parity.** Trust-
+  bundle restore from a snapshot is independent and remains
+  partially open under C4.
+- **Per-environment production trust-anchor operation.**
+  Depends on operator custody (§4.4) and is not solved by
+  documentation alone.
+- **Full C4 / C5 closure.** Run 086 narrows neither. C4 and C5
+  remain OPEN; C5 remains NARROWED (Runs 038 / 039) by the
+  prior production-honest transport-KEM evidence, not by the
+  peer-candidate path.
+
+---
+
 ## 7. Promotion checklist (every production trust-bundle change)
 
 Run this before promoting a bundle to TestNet, and again before
@@ -1991,7 +2307,13 @@ under C4:
 2. **Peer-supplied / gossiped trust-bundle acceptance.** Runs
    069/073/074 accept **local files only**. There is no
    `BundleAnnounce` / `BundleRequest` over the wire, no admin-API
-   trigger, and no filesystem-watcher trigger. When peer
+   trigger, and no filesystem-watcher trigger. **Runs 076–085
+   added a strictly observation-only peer-candidate `0x05`
+   exchange** (see §6.G) that validates inbound candidates
+   without applying, propagating, mutating live trust, writing
+   the sequence file, or evicting sessions — but this is a
+   signal source, not an apply trigger, and peer-driven live
+   apply / propagation remain OPEN. When peer-driven apply or
    propagation lands, the same Run 065
    `pqc_trust_activation::check_min_activation_height_policy`
    helper, the same Run 050/051/053 validator pipeline, and the
@@ -2138,6 +2460,16 @@ in §10):**
 | 073 | `ProductionLiveTrustApplyContext` adapter composes Runs 069/070/071/072/055 end-to-end. Binary's `--p2p-trust-bundle-reload-apply-enabled` + `--p2p-trust-bundle-reload-apply-path <PATH>` hook (hidden, required-together) drives a live apply at process-start time over `NoActiveSessionsEvictor` (truthful zero-session report); `ReloadApplyError::UnsupportedRuntimeContext` removed from the local-operator path. Library boundary preserved for callers omitting apply context. | §1.2, §1.3, §6.F.3, §6.F.5, §6.F.6, §7, §9, §10 (closed item). |
 | 074 | Long-running local operator-triggered live trust-bundle reload-apply via SIGHUP: hidden `--p2p-trust-bundle-live-reload-enabled` + `--p2p-trust-bundle-live-reload-path <PATH>` (required-together; refused without `--p2p-trust-bundle <BASELINE-PATH>`). `LiveReloadController` constructs a fresh `ProductionLiveTrustApplyContext` per trigger; `Arc<AtomicBool>` CAS guard serializes concurrent triggers as `AlreadyInProgress`. Six new `qbind_p2p_trust_bundle_live_reload_*` counters/gauge. Only the `Fatal` (`SequenceCommitFailedRollbackAlsoFailed`) arm signals shutdown; valid candidates apply while the node remains running; invalid candidates do not mutate trust, sequence, or sessions. | §1.2, §1.3, §6.F.4, §6.F.5, §6.F.6, §6.F.7, §6.F.8, §6.F.9, §6.F.10, §9, §10 (closed item). |
 | 075 | Operator-playbook prose update for Runs 069–074 (docs-only). | All §sections (esp. §1, §6.F, §7, §9, §10, §11, §12). |
+| 076 | Library-level **disabled-by-default** peer-candidate validation boundary: `PeerCandidateValidator::try_accept` runs a candidate `PeerCandidateEnvelope` through the same Run 050/051/053/057/065 startup pipeline; no live mutation, no sequence write. | §6.G.1, §6.G.2. |
+| 077 | Production-binary-facing **local** peer-candidate check mode: hidden `--p2p-trust-bundle-peer-candidate-validation-enabled` + `--p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>`. Reuses Run 076 `PeerCandidateValidator::try_accept`. Node does not start; exits 0/1. Non-mutating by construction. | §6.G.1, §6.G.2, §12. |
+| 078 | Bounded, typed, versioned peer-candidate **wire envelope** (`pqc_peer_candidate_wire`) with deterministic canonical bytes and size cap. Library-level; not yet on the live socket. | §6.G.2. |
+| 079 | **Disabled-by-default live P2P receive-loop dispatch** for inbound `0x05` frames: hidden `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`. Each inbound frame is routed through the same Run 076 validator; receiver-side `qbind_p2p_pqc_trust_bundle_peer_candidate_*` counters move only when the flag is on. | §6.G.1, §6.G.2, §6.G.5, §12. |
+| 080 | **Disabled-by-default send-side publisher** plumbing: hidden `--p2p-trust-bundle-peer-candidate-wire-publish-enabled` + `--p2p-trust-bundle-peer-candidate-wire-publish-path <PATH>` + `--p2p-trust-bundle-peer-candidate-wire-publish-once`. Publishes one operator-supplied envelope over a live authenticated P2P session as a real `0x05` frame; no auto-resend. | §6.G.2, §12. |
+| 081 | First release-binary N=2 real `0x05` exchange evidence; partial only due to `DummySig` ambiguity on the consensus signer probe path. | §6.G.2 (history). |
+| 082 / 083 | Isolated the `DummySig` boundary as non-active / probe-log-only with respect to the peer-candidate `0x05` matrix. | §6.G.2 (history). |
+| 084 | Committed repeatable **N=2 DevNet** harness `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh`; closed the N=2 evidence gap: baseline / valid / receiver-disabled / invalid-wrong-chain / duplicate scenarios all pass; sequence hashes unchanged; live-reload-apply + session-eviction metrics stayed zero; no propagation; no Dummy crypto; no `--p2p-trusted-root` fallback. | §6.G.5, §6.G.6, §10 (peer-driven apply / propagation still open). |
+| 085 | Committed repeatable **N=4 MainNet** harness `scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh`; strongest current evidence: all five MainNet scenarios pass on four release `qbind-node` processes with signed MainNet trust material; sequence hashes unchanged; live-reload-apply + session-eviction metrics stayed zero; no propagation; no active `DummySig` / `DummyKem` / `DummyAead`; no `--p2p-trusted-root` fallback. | §6.G.1, §6.G.5, §6.G.6, §10 (peer-driven apply / propagation still open). |
+| 086 | Operator-playbook prose update for Runs 076–085 (docs-only). Adds §6.G peer-candidate validation-only lifecycle, extends §10 / §11 / §12, no source changes. | All §sections (esp. §1, §6.G, §10, §11, §12). |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---
@@ -2181,6 +2513,39 @@ in §10):**
   local file the SIGHUP handler re-reads on every trigger.
   Required together with `--p2p-trust-bundle-live-reload-enabled`.
   See §6.F.4.
+- `--p2p-trust-bundle-peer-candidate-validation-enabled` *(hidden; Run 077)* —
+  arms the local peer-candidate check mode. Required together
+  with `--p2p-trust-bundle-peer-candidate-check`. Disabled by
+  default. **Validation-only**: node does not start in this
+  mode; exits 0/1. No live trust mutation, no sequence write,
+  no session eviction. See §6.G.1, §6.G.2.
+- `--p2p-trust-bundle-peer-candidate-check <ENVELOPE_PATH>` *(hidden; Run 077)* —
+  local `PeerCandidateEnvelope` JSON fixture to validate against
+  this node's startup security pipeline. Required together with
+  `--p2p-trust-bundle-peer-candidate-validation-enabled`. See
+  §6.G.2.
+- `--p2p-trust-bundle-peer-candidate-wire-validation-enabled` *(hidden; Run 079)* —
+  arms the **receiver-side** live P2P receive-loop dispatch for
+  inbound `0x05` peer-candidate frames. Disabled by default.
+  When off, inbound `0x05` frames are cheap-ignored and no
+  receiver-side `qbind_p2p_pqc_trust_bundle_peer_candidate_*`
+  counter moves. **Validation-only**: even when on, no
+  candidate is applied, propagated, or persisted. See §6.G.1,
+  §6.G.5.
+- `--p2p-trust-bundle-peer-candidate-wire-publish-enabled` *(hidden; Run 080)* —
+  arms the **sender-side** publisher. Required together with
+  `--p2p-trust-bundle-peer-candidate-wire-publish-path`.
+  Disabled by default. Publishes exactly the operator-supplied
+  envelope as a real `0x05` frame over live authenticated P2P
+  sessions; no auto-resend loop. See §6.G.2.
+- `--p2p-trust-bundle-peer-candidate-wire-publish-path <PATH>` *(hidden; Run 080)* —
+  local `PeerCandidateEnvelope` JSON fixture to publish as a
+  Run 078 wire envelope. Required together with
+  `--p2p-trust-bundle-peer-candidate-wire-publish-enabled`. See
+  §6.G.2.
+- `--p2p-trust-bundle-peer-candidate-wire-publish-once` *(hidden; Run 080)* —
+  publish exactly one candidate frame and continue normal node
+  runtime; no automatic resend loop. See §6.G.2.
 
 ---
 
