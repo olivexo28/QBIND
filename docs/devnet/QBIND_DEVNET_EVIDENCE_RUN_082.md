@@ -460,3 +460,37 @@ remains green. This is **not** required for closure — Run 082 already
 isolates the boundary at the evidence layer — but it removes the
 cryptographic-honesty ambiguity at the source layer for future operators
 reading the log.
+## Run 083 follow-up note (2026-05-18) — bit-for-bit-identical-source argument re-affirmed by full regression re-execution; matrix rerun deferred a second time
+
+DevNet Evidence Run 083 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_083.md`)
+is the deferred immediate-next-action of this Run 082 evidence run.
+Run 083 (a) re-executes every regression `cargo test` command listed
+in the Run 081/083 task list with all-green pass counts bit-for-bit
+identical to Run 081 (run_076 16/16, run_077 12/12, run_078 19/19,
+run_079 11/11, run_080 3/3, lib pqc_peer_candidate_wire 28/28, lib
+metrics::tests::peer_candidate_send_metrics 2/2, qbind-node lib
+1063/1063, qbind-net lib 17/17, qbind-crypto lib 68/68); (b)
+re-executes the full Run 082 `DummySig` / `DummyKem` / `DummyAead`
+/ `TrustedClientRoots` / `Run 033` / `dummy_*_registered` /
+`ProductionPiecesUnavailable` reference inventory across `crates/`
+and `docs/whitepaper/` and reconciles every `.rs` hit against the
+Run 082 classification with no change; and (c) re-walks the
+production-path decision tree on the Run 083 tip and re-confirms
+that under the Run 081 command shape the `[binary] Run 033: …` line
+takes the `run_032_probe_with_signer` branch and emits
+`reason=SignerPresentKeyProviderUnavailable { … }` (not
+`TrustedClientRoots/DummySig`).
+
+The release-binary N=2 networked `0x05` matrix end-to-end rerun that
+Run 082 listed as the immediate next action is **deferred a second
+time** because the operator orchestration harness that produced the
+original Run 081 record is not committed to this repository — Run 083's
+immediate next action is to commit such a harness under `scripts/devnet/`
+(or as an `#[ignore]`-by-default integration test). The Run 082
+bit-for-bit-identical-source preservation argument is therefore
+preserved and further strengthened by Run 083's all-green regression
+re-execution: Run 083 verdict remains **partial positive** for the same
+reason Run 082 verdict remained partial positive, but now with an
+additional layer of evidence proving the source paths exercised by the
+deferred matrix are behaviourally identical to those captured live in
+Run 081.

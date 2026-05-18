@@ -324,3 +324,63 @@ Run 082 because Run 082 makes no source changes; it is purely an evidence
 isolation and classification artifact. Run 082's verdict is **partial
 positive (boundary isolated; no production-active `DummySig` found; live
 N=2 matrix rerun deferred)**.
+---
+
+## Run 083 follow-up note (2026-05-18) — regression matrix re-executed; release-binary N=2 rerun deferred a second time
+
+DevNet Evidence Run 083 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_083.md`)
+re-executes every regression `cargo test` command listed in the Run 081
+task list on the Run 083 tip (no source change since Run 081) and
+records bit-for-bit-identical pass counts: `run_076 16/16`,
+`run_077 12/12`, `run_078 19/19`, `run_079 11/11`, `run_080 3/3`,
+`qbind-node --lib pqc_peer_candidate_wire 28/28`,
+`qbind-node --lib metrics::tests::peer_candidate_send_metrics 2/2`,
+`qbind-node --lib 1063/1063`, `qbind-net --lib 17/17`,
+`qbind-crypto --lib 68/68`. `cargo check -p qbind-node` passes with
+only the two pre-existing `bincode::config()` deprecation warnings.
+Run 083 also re-executes the full Run 082 reference inventory across
+`crates/` and `docs/whitepaper/` (per-pattern counts: `DummySig` 421
+crates / 56 whitepaper; `DummyKem` 359 / 48; `DummyAead` 393 / 49;
+`TrustedClientRoots` 57 / 15; `Run 033` 28 / 15; `dummy_kem_registered`
+1 / 20; `dummy_aead_registered` 1 / 21; `ProductionPiecesUnavailable`
+13 / 2; `Run033` and `dummy_sig_registered` zero everywhere) and
+reconciles each `.rs` reference against the Run 082 classification —
+no new reference, no reclassification, no newly reachable production
+registration site.
+
+The release-binary N=2 networked `0x05` matrix end-to-end re-execution
+(spawn two `qbind-node` release processes on the loopback interface
+with the documented seven-scenario CLI combinations, scrape `/metrics`,
+capture `stderr`, sha256 the per-node sequence file before/after each
+scenario) is **deferred a second time** because the operator
+orchestration harness that produced the original Run 081 record is not
+committed to the repository and is not present in this sandboxed
+evidence run. The bit-for-bit-identical-source preservation argument
+established in Run 082 carries the Run 081 release-binary outcome
+forward verbatim and is now further strengthened by Run 083's
+all-green regression re-execution.
+
+Per Run 083's source-code re-walk (`crates/qbind-node/src/main.rs:3055-3085`
++ `crates/qbind-node/src/timeout_verification_bridge.rs:540-647`), the
+`[binary] Run 033: …` line under the Run 081 command shape takes the
+`run_032_probe_with_signer` branch and its `reason=` substring is
+`SignerPresentKeyProviderUnavailable { … detail: "NodeConfig.network.static_peers
+carries no per-peer (suite_id, pk_bytes); …" }`, which does **not**
+contain the `TrustedClientRoots/DummySig` substring. The Run 081
+text above describing the line as still containing
+`TrustedClientRoots/DummySig` is best read as referring to the
+*source-level* static `&'static str` at
+`timeout_verification_bridge.rs:551-555` (reachable only when both
+signer and peer key-provider are absent — not the Run 081 command
+shape), not the actually-emitted runtime line. Run 082 and Run 083
+preserve that source-level reference deliberately (it is pinned by the
+existing `run_031_probe_today_is_disabled_with_precise_detail`
+regression-guard unit test, which is the production-safety guarantee
+that prevents the probe from silently flipping to an `Active` outcome).
+
+Run 083's verdict is **partial positive (regression matrix passes; live
+release-binary N=2 networked rerun deferred a second time; immediate
+next action is to commit a repeatable orchestration harness under
+`scripts/devnet/` so a sandboxed evidence run can re-capture the
+release-binary matrix and upgrade Run 081/082/083 to strongest
+positive on the no-`Dummy*` boundary)**.

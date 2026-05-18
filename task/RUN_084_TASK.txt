@@ -1,0 +1,99 @@
+Continue QBIND from the current state.
+
+Task:
+Run 084. Commit a repeatable release-binary N=2 orchestration harness for the peer-candidate 0x05 matrix, then use it to rerun the Run 081/083 matrix end-to-end.
+
+Objective:
+Close the remaining Run 081/082/083 evidence gap by making the N=2 release-binary 0x05 matrix reproducible inside the repo.
+
+Current state:
+- Run 081 captured live release-binary N=2 0x05 evidence but stayed partial-positive due DummySig boundary.
+- Run 082 isolated DummySig as probe/log-only and non-active on the production-honest path.
+- Run 083 reconfirmed the Run 082 classification and reran all regression tests, but deferred the live N=2 0x05 matrix again because the orchestration harness is not committed.
+- Full C4 remains open.
+- C5 remains open.
+
+Primary deliverable:
+Add a repeatable harness under scripts/devnet/ or as an ignored integration test that:
+1. builds release qbind-node and helper binaries;
+2. records sha256 and ELF BuildID;
+3. generates signed N=2 trust-bundle material;
+4. generates valid, invalid/wrong-chain, and duplicate peer-candidate envelopes;
+5. starts two release qbind-node processes over loopback;
+6. runs the documented scenarios:
+   - baseline N=2 startup;
+   - valid 0x05 send/validate;
+   - receiver-disabled cheap-ignore;
+   - invalid candidate reject;
+   - duplicate suppression;
+7. scrapes /metrics;
+8. captures stderr logs;
+9. captures [Run040] and [binary] Run 033 lines;
+10. hashes sequence files before/after;
+11. asserts:
+   - valid candidate validates;
+   - invalid candidate rejects;
+   - duplicate suppresses;
+   - sequence file unchanged by candidate validation;
+   - live reload apply metrics remain zero;
+   - session eviction metrics remain zero;
+   - sessions remain healthy;
+   - no --p2p-trusted-root fallback;
+   - no DummySig / DummyKem / DummyAead active;
+   - no peer-driven apply or propagation.
+
+Strict scope:
+- Evidence harness only unless a real bug appears.
+- Do not add new peer-candidate protocol features.
+- Do not implement propagation.
+- Do not implement peer-driven live apply.
+- Do not implement activation_epoch.
+- Do not implement KMS/HSM.
+- Do not implement signing-key ratification.
+- Do not implement fast-sync restore.
+- Do not redesign KEMTLS or consensus.
+- Do not hide any DummySig evidence.
+
+Required files:
+- Add harness:
+  - scripts/devnet/run_084_peer_candidate_0x05_matrix.sh
+  - optionally scripts/devnet/run_084_peer_candidate_0x05_matrix.py
+- Add evidence:
+  - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_084.md
+- Update:
+  - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_081.md with Run 084 follow-up note
+  - docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_083.md with Run 084 follow-up note
+  - docs/whitepaper/contradiction.md
+
+Required tests:
+- cargo test -p qbind-node --test run_080_pqc_peer_candidate_wire_send_tests
+- cargo test -p qbind-node --test run_079_pqc_peer_candidate_wire_live_dispatch_tests
+- cargo test -p qbind-node --test run_078_pqc_peer_candidate_wire_tests
+- cargo test -p qbind-node --test run_077_binary_peer_candidate_check_tests
+- cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
+- cargo test -p qbind-node --lib pqc_peer_candidate_wire
+- cargo test -p qbind-node --lib metrics::tests::peer_candidate_send_metrics
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+
+Expected verdict:
+- Strongest positive:
+  harness lands, release-binary N=2 matrix runs end-to-end, Run033/Run040 prove no active DummySig/DummyKem/DummyAead, 0x05 validation-only invariants hold, no fallback, no sequence burn, no eviction, no apply.
+- Partial positive:
+  harness lands but matrix cannot complete or no-Dummy proof remains incomplete.
+- Negative:
+  active DummySig remains reachable, validation-only invariants regress, or tests fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was proven
+6. What remains not solved
+7. Whether contradiction.md was updated and why
+8. Exact immediate next action recommended
