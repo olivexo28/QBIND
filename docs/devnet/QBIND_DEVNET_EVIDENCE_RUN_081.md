@@ -295,3 +295,32 @@ Run 081 only narrows the Run 080 sub-piece to live release-binary validation-onl
 ## Immediate next action
 
 Run a focused follow-up that removes/lands the remaining `DummySig`-related timeout-verification boundary on the same N=2 release-binary path (while preserving Run 081 validation-only invariants), then re-capture the same sender/receiver `0x05` evidence matrix to upgrade from partial to strongest positive.
+
+---
+
+## Run 082 follow-up note (2026-05-18) — boundary isolated as probe/log-only
+
+DevNet Evidence Run 082 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_082.md`)
+investigated the residual `TrustedClientRoots/DummySig` reference noted
+above and classified it as **probe/log-only — stale narrative text inside
+a fail-closed `Disabled` outcome**. Specifically, the reference is the
+`detail: &'static str` carried by
+`TimeoutVerificationDisabledReason::ProductionPiecesUnavailable` at
+`crates/qbind-node/src/timeout_verification_bridge.rs:551-555`, reachable
+only via `run_031_probe_production_pieces_for_run_p2p_node`. Under the
+Run 081 command shape the signer keystore is loaded honestly, so the
+binary's `run_032_probe_with_signer` branch is taken and the rendered
+`[binary] Run 033: …` `reason=` substring is
+`SignerPresentKeyProviderUnavailable { … }` — which does **not** contain
+the `DummySig` substring. The Run 031 static text remains in source on
+purpose (pinned by the existing
+`run_031_probe_today_is_disabled_with_precise_detail` regression-guard
+unit test) and is **not** a registration / selection path for any
+`Dummy*` primitive. The Run 081 baseline cryptographic-honesty banners
+(`[Run040] dummy_kem_registered=false dummy_aead_registered=false`,
+`qbind_p2p_pqc_trust_bundle_signature_verified_total=1`,
+`qbind_p2p_pqc_cert_verify_accepted_total=2` per node) are unchanged by
+Run 082 because Run 082 makes no source changes; it is purely an evidence
+isolation and classification artifact. Run 082's verdict is **partial
+positive (boundary isolated; no production-active `DummySig` found; live
+N=2 matrix rerun deferred)**.
