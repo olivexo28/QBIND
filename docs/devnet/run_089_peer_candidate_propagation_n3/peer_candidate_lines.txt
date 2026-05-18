@@ -1,0 +1,79 @@
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=2 attempted=2 sent=2 failed=0 seq=1 fp_prefix=d28da147 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=2 attempted=2 sent=2 failed=0 seq=1 fp_prefix=d28da147 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=true; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=true).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: peer-candidate validated before propagation; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=1; source_peer_excluded=true; candidate_fp=d28da147.. sequence=1
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 078: peer-candidate wire frame observed; outcome=duplicate-suppressed; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 078: peer-candidate wire frame observed; outcome=duplicate-suppressed; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 078: peer-candidate wire frame observed; outcome=duplicate-suppressed; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=2 attempted=2 sent=2 failed=0 seq=1 fp_prefix=d28da147 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=true; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=true).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=rejected; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=rejected; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=2 attempted=2 sent=2 failed=0 seq=1 fp_prefix=d28da147 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=true; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=true).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: peer-candidate validated before propagation; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=1; source_peer_excluded=true; candidate_fp=d28da147.. sequence=1
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 078: peer-candidate wire frame observed; outcome=duplicate-suppressed; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=2 attempted=2 sent=2 failed=0 seq=1 fp_prefix=d28da147 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=true; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=true).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 088: peer-candidate validated before propagation; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=1; source_peer_excluded=true; candidate_fp=d28da147.. sequence=1
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 078: peer-candidate wire frame observed; outcome=duplicate-suppressed; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)

@@ -1,0 +1,15 @@
+qbind-node[validator=V0]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:19900 peers=2 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:19900 (node_id=NodeId(b687af5dab120f07))
+[T175] P2P node builder: validator=ValidatorId(0) node_id=NodeId(b687af5dab120f07) num_validators=3 peer_kem_overrides=2 mutual_auth=Required
+[P2P] Dial 127.0.0.1:19902: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Dial 127.0.0.1:19901: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Peer NodeId(36e46b9d08112e24) connected
+[P2P] Peer NodeId(04db57b30db4e932) connected
+[P2P] Accepted connection from 127.0.0.1:59022
+[P2P] Accepted connection from 127.0.0.1:59038
+[P2P] Inbound connection from 127.0.0.1:59038 bound to deterministic NodeId NodeId(04db57b30db4e932) via inbound identity resolver (B8, test-grade)
+[P2P] Peer NodeId(04db57b30db4e932) connected
+[P2P] Accepted connection from 127.0.0.1:59054
+[P2P] Accepted connection from 127.0.0.1:59068
+[P2P] Inbound connection from 127.0.0.1:59068 bound to deterministic NodeId NodeId(36e46b9d08112e24) via inbound identity resolver (B8, test-grade)
+[P2P] Peer NodeId(36e46b9d08112e24) connected

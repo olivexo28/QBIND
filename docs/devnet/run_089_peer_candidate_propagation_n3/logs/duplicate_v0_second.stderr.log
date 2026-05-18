@@ -1,0 +1,32 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[restore] no --restore-from-snapshot requested; normal startup.
+[binary] Run 088: P2P peer-candidate wire receiver armed for validation-before-propagation acceptance (propagation_enabled=false; NOT applied; sequence not persisted; live trust state unchanged; sessions untouched). Frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[metrics_http] Enabling metrics HTTP server on 127.0.0.1:9429 (from QBIND_METRICS_HTTP_ADDR)
+[metrics] Spawning metrics HTTP server on 127.0.0.1:9429 (set via QBIND_METRICS_HTTP_ADDR)
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[metrics_http] Listening on 127.0.0.1:9429
+[binary] Run 057: trust-bundle activation gate satisfied (required_height=None current_height=Some(0) required_epoch=None current_epoch=None)
+[binary] Run 055: trust-bundle sequence persistence env=devnet chain_id=51424e4444455600 path=/tmp/qbind-run089-peer-candidate-propagation-n3/data/v0/pqc_trust_bundle_sequence.json equal-sequence same-fingerprint (no write) sequence=1 fp=d28da147
+[binary] Run 050/051: trust bundle loaded path=/tmp/qbind-run089-peer-candidate-propagation-n3/material/trust-bundle.json env=devnet fp=d28da147038adbbe5487ae3b3d3b62f8e39d55b28ad869ce8f29a304c5e63dae active_roots=1 revoked_roots=0 sequence=1 valid_from=0 valid_until=18446744073709551615 signature=verified(signing_key_id=397a6d8f..) signing_keys_configured=1. Bundle root IDs: [5b629675..]
+[binary] Run 062: trust-bundle revocation activation (configured=0 active=0 pending=0 root_active=0 root_pending=0 leaf_active=0 leaf_pending=0)
+[binary] Run 063: local-leaf issuer-root startup self-check passed (local_issuer_root_id=5b629675.. bundle_fp=d28da147.. active_revoked_root_ids=0)
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=2 (root fingerprints: [id=5b629675.. suite=100 fp=270b36b9])
+[binary] Run 052: revoked_leaf_fingerprints=0 (from trust bundle env=devnet sequence=1)
+[binary] Run 071: live PQC trust-state initialized (env=devnet sequence=1 fingerprint=d28da147038adbbe5487ae3b3d3b62f8e39d55b28ad869ce8f29a304c5e63dae active_roots=1 revoked_roots_active=0 revoked_leaves_active=0)
+[binary] Run 088: installing live peer-candidate wire dispatcher (env=devnet sequence_baseline=1 signing_keys=1 propagation_enabled=false).
+[Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
+[binary] P2P transport up. Listen address: 127.0.0.1:19924, static peers: 2
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=2 attempted=2 sent=2 failed=0 seq=1 fp_prefix=d28da147 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[binary] Consensus loop config: local_validator_id=ValidatorId(0) num_validators=3 restore_baseline=false interconnect=p2p
+[binary] Multi-validator P2P (3 validators): inbound P2P consensus messages are routed into BasicHotStuffEngine via on_proposal_event / on_vote_event; engine actions flow back out through P2pConsensusNetwork.
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[binary] Run 032: validator signer loaded — backend=local-keystore-plain validator_id=ValidatorId(0) suite_id=suite_100 pk_fingerprint=49d6c602... keystore_path=/tmp/qbind-run089-peer-candidate-propagation-n3/signers/v0
+[binary] Run 033: SuiteAwareValidatorKeyProvider built honestly — loaded(validators=3,peer_ids=[1, 2],suite_ids=[100],fingerprints=["v0:s100:49d6c602...", "v1:s100:08f24127...", "v2:s100:a8503832..."])
+[binary] Run 033: timeout-verification probe: active=true reason=n/a policy=OptionalActivate validators=3 chain_id=chain_51424e4444455600 supported_suite_ids=[100] local_signer=loaded(backend=local-keystore-plain,validator=ValidatorId(0),suite=suite_100) peer_key_provider=loaded(validators=3,peer_ids=[1, 2],suite_ids=[100],fingerprints=["v0:s100:49d6c602...", "v1:s100:08f24127...", "v2:s100:a8503832..."])
+[binary] Run 033: timeout verification ACTIVE — Arc<TimeoutVerificationContext> threaded into BinaryConsensusLoopIo::verification_ctx. Inbound TimeoutMsg / NewView / TC traffic will be verified before engine ingestion; locally-emitted timeouts will be signed before broadcast. signer_loaded=1 key_provider_loaded=1 validator_count=3
+[binary] P2P node started. Press Ctrl+C to exit.
+[binary-consensus] Starting consensus loop: local_id=ValidatorId(0) num_validators=3 tick=100ms restore_baseline=false interconnect=p2p late_peer_reemit=on timeout_verification=verify+sign
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary-consensus] B9+B10: re-emitted view 0 BroadcastProposal + BroadcastVote after late peer connect (newly_connected_peers=2, proposal_reemits_total=1, vote_reemits_total=1)
