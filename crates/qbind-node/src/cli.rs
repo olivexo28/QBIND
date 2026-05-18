@@ -642,6 +642,18 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_wire_publish_once: bool,
 
+    /// Run 088 — disabled-by-default validation-before-rebroadcast
+    /// propagation prototype for peer-candidate `0x05` frames. This
+    /// is propagation-only: candidates are rebroadcast only after the
+    /// existing Run 076/078 validation path succeeds, and the path
+    /// never applies, persists sequence, mutates live trust, evicts
+    /// sessions, or invokes SIGHUP reload.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-propagation-enabled",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_propagation_enabled: bool,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

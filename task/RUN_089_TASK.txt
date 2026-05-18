@@ -1,0 +1,243 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no overclaiming
+
+Current state:
+- Runs 076–086 completed validation-only peer-candidate 0x05 lifecycle:
+  - library validator
+  - binary local check
+  - bounded wire envelope
+  - live receive path
+  - send-side publisher
+  - repeatable N=2 DevNet evidence
+  - N=4 MainNet evidence
+  - operator runbook coverage
+- Run 087 added formal peer-driven propagation/apply safety spec:
+  - docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md
+  - no runtime behavior changed
+  - 0x05 remained validation-only
+- Run 088 partial-positive:
+  - added hidden disabled-by-default --p2p-trust-bundle-peer-candidate-propagation-enabled
+  - implemented validation-before-rebroadcast
+  - source peer exclusion
+  - bounded target/rate/queueing behavior
+  - local seen-cache loop prevention
+  - propagation metrics/logging
+  - valid candidates rebroadcast only after validation
+  - invalid, oversize, duplicate, and rate-limited candidates do not rebroadcast
+  - no apply
+  - no sequence write
+  - no LivePqcTrustState mutation
+  - no session eviction
+  - required Rust tests/builds pass
+  - boundary: N=3 release-binary propagation evidence remains incomplete
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 089. Produce release-binary N=3 DevNet propagation evidence for the Run 088 validation-before-rebroadcast path.
+
+Primary objective:
+Prove on release qbind-node binaries that:
+V0 sends a valid 0x05 peer-candidate frame to V1,
+V1 validates it,
+V1 rebroadcasts it to V2 only,
+V1 does not rebroadcast to V0/source,
+V2 validates it,
+and no apply/sequence/session/trust mutation occurs.
+
+Important framing:
+This is evidence-first.
+Do not add new peer-candidate features unless a real bug blocks evidence.
+Do not implement peer-driven live apply.
+Do not implement automatic trust-bundle synchronization.
+Do not implement activation_epoch.
+Do not implement KMS/HSM.
+Do not implement signing-key ratification.
+Do not implement fast-sync restore.
+Do not redesign KEMTLS or consensus.
+Do not weaken Run 087 safety gates.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Prefer a committed repeatable harness.
+- Source changes are allowed only if a real bug prevents evidence.
+- Preserve Run 088 validation-before-rebroadcast semantics.
+- Propagation must remain disabled by default.
+- Propagation must require explicit hidden flag.
+- Valid candidates may propagate only after validation.
+- Invalid candidates must not propagate.
+- Duplicate candidates must not propagate repeatedly.
+- Source peer must be excluded.
+- No peer candidate may trigger local reload apply.
+- No peer candidate may mutate LivePqcTrustState.
+- No peer candidate may commit sequence.
+- No peer candidate may evict sessions.
+- No fallback to --p2p-trusted-root.
+- No DummySig / DummyKem / DummyAead.
+
+Required harness:
+Add a committed harness, for example:
+- scripts/devnet/run_089_peer_candidate_propagation_n3.sh
+
+The harness should:
+1. build release qbind-node and helpers or accept prebuilt paths;
+2. record sha256 and ELF BuildID;
+3. generate signed N=3 DevNet trust-bundle material;
+4. generate consensus signer keystores if required for Run033 active=true;
+5. generate valid, invalid/wrong-chain, and duplicate candidate envelopes;
+6. launch V0, V1, V2 release qbind-node processes;
+7. enable:
+   - publish-once on V0;
+   - wire validation + propagation on V1;
+   - wire validation on V2;
+8. scrape /metrics from all nodes;
+9. capture stdout/stderr logs;
+10. capture Run033 and Run040 lines;
+11. hash sequence files before/after;
+12. assert no apply/eviction/sequence mutation.
+
+Required release-binary scenarios:
+
+1. Baseline N=3 startup
+   Prove:
+   - all three nodes start.
+   - signed trust bundle loads.
+   - cert accepted counters move.
+   - cert rejected counters remain zero.
+   - consensus or node health progresses.
+   - Run033 active=true reason=n/a if consensus signer keys are used.
+   - Run040 proves real crypto and no DummyKem/DummyAead.
+   - no active DummySig.
+   - no --p2p-trusted-root fallback.
+
+2. Valid propagation V0 → V1 → V2
+   Prove:
+   - V0 sent_total increments.
+   - V1 received_total increments.
+   - V1 validated_total increments.
+   - V1 propagation_attempt/sent_total increments.
+   - V1 does not send back to V0/source.
+   - V2 received_total increments.
+   - V2 validated_total increments.
+   - logs state validation-before-propagation and not-applied.
+   - no propagation loop.
+   - sequence hashes unchanged on all nodes.
+   - live reload apply metrics remain zero on all nodes.
+   - session eviction metrics remain zero on all nodes.
+   - sessions remain healthy.
+
+3. Invalid candidate
+   Prove:
+   - V1 rejects invalid/wrong-chain candidate.
+   - V1 does not rebroadcast invalid candidate to V2.
+   - rejected/suppressed-invalid metric moves as designed.
+   - sequence/apply/eviction invariants hold.
+
+4. Duplicate suppression
+   Prove:
+   - duplicate candidate is suppressed.
+   - duplicate does not rebroadcast repeatedly.
+   - duplicate metric moves.
+   - no loop.
+   - sequence/apply/eviction invariants hold.
+
+5. Source exclusion
+   Prove:
+   - V1 excludes V0/source from propagation target set.
+   - V0 does not receive its own candidate back from V1.
+   - no rebroadcast loop.
+
+Required tests / commands:
+- cargo test -p qbind-node --test run_088_pqc_peer_candidate_propagation_tests
+- cargo test -p qbind-node --test run_080_pqc_peer_candidate_wire_send_tests
+- cargo test -p qbind-node --test run_079_pqc_peer_candidate_wire_live_dispatch_tests
+- cargo test -p qbind-node --test run_078_pqc_peer_candidate_wire_tests
+- cargo test -p qbind-node --test run_077_binary_peer_candidate_check_tests
+- cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
+- cargo test -p qbind-node --lib pqc_peer_candidate_wire
+- cargo test -p qbind-node --lib pqc_trust_peer_candidate
+- cargo test -p qbind-node --lib metrics
+- cargo test -p qbind-node --lib p2p
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+- run scripts/devnet/run_089_peer_candidate_propagation_n3.sh
+
+If source changes are made:
+- explain exactly why evidence could not be produced without source changes.
+- rerun all affected tests.
+- do not hide any boundary.
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_089.md
+
+Update:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_088.md with a Run 089 follow-up note if project convention permits.
+- docs/whitepaper/contradiction.md
+
+Evidence doc must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence pass-fail status
+- binary/helper identities
+- harness design
+- Run087 safety-spec compliance mapping
+- baseline N=3 startup evidence
+- valid V0→V1→V2 propagation evidence
+- invalid candidate non-propagation evidence
+- duplicate suppression evidence
+- source exclusion evidence
+- sequence before/after hashes
+- proof live reload apply metrics remain zero
+- proof session eviction metrics remain zero
+- proof LivePqcTrustState is not mutated if observable
+- proof no propagation loop
+- proof no active DummySig / DummyKem / DummyAead
+- proof no --p2p-trusted-root fallback
+- exact remaining C4/C5 boundaries
+- immediate next action
+
+contradiction.md update rules:
+- If N=3 release-binary propagation evidence passes, record C4 narrowed from tested propagation prototype to live release-binary propagation-only evidence.
+- Keep C4 open for:
+  - peer-driven live apply
+  - activation_epoch runtime source
+  - KMS/HSM custody
+  - in-binary/on-chain signing-key ratification
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- Do not close full C4.
+- Do not claim C5 closure.
+- If propagation causes apply, sequence burn, session eviction, LivePqcTrustState mutation, fallback, or Dummy crypto, record contradiction/regression.
+
+Expected verdict:
+- Strongest positive:
+  N=3 release-binary propagation harness passes; valid candidate propagates only after validation; source peer excluded; invalid/duplicate candidates do not propagate; no loop; no apply/sequence/session/trust mutation; no fallback; no Dummy crypto.
+- Partial positive:
+  harness lands but propagation evidence incomplete.
+- Negative:
+  propagation happens before validation, invalid candidate propagates, source peer receives echo, loop occurs, apply is triggered, sequence burns, session eviction occurs, or tests fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence pass-fail status
+5. What was proven
+6. What remains not solved
+7. Whether contradiction.md was updated and why
+8. Exact immediate next action recommended

@@ -731,6 +731,47 @@ impl TcpKemTlsP2pService {
         crate::pqc_peer_candidate_wire::RawFrameSendReport::from_per_peer(per_peer)
     }
 
+    /// Run 088 — enqueue `frame_bytes` for a selected set of peers.
+    /// Used by validation-before-rebroadcast propagation to exclude
+    /// the source peer and bound fanout.
+    pub fn send_raw_frame_to_selected_peers(
+        &self,
+        frame_bytes: Vec<u8>,
+        selected_peers: &[NodeId],
+    ) -> crate::pqc_peer_candidate_wire::RawFrameSendReport {
+        let peer_snapshot: Vec<(NodeId, mpsc::Sender<Vec<u8>>)> = {
+            let guard = self.peers.read();
+            selected_peers
+                .iter()
+                .filter_map(|id| guard.get(id).map(|conn| (*id, conn.raw_tx.clone())))
+                .collect()
+        };
+
+        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
+            Vec::with_capacity(selected_peers.len());
+        for selected in selected_peers {
+            if !peer_snapshot.iter().any(|(peer, _)| peer == selected) {
+                per_peer.push((
+                    *selected,
+                    crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::ChannelClosed,
+                ));
+            }
+        }
+        for (peer, tx) in peer_snapshot {
+            let outcome = match tx.try_send(frame_bytes.clone()) {
+                Ok(()) => crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::Enqueued,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::QueueFull
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::ChannelClosed
+                }
+            };
+            per_peer.push((peer, outcome));
+        }
+        crate::pqc_peer_candidate_wire::RawFrameSendReport::from_per_peer(per_peer)
+    }
+
     /// Start the P2P service: listen on configured address and dial static peers.
     ///
     /// **B8 — initial-dial retry**: each configured static-peer dial is
@@ -1094,6 +1135,7 @@ impl TcpKemTlsP2pService {
         let wire_sink_clone = Arc::clone(&peer_candidate_wire_sink);
         let read_handle = tokio::spawn(async move {
             Self::read_loop(
+                node_id,
                 channel_read,
                 inbound_tx_clone,
                 bytes_received_clone,
@@ -1134,6 +1176,7 @@ impl TcpKemTlsP2pService {
     /// "break on decode error" close-connection policy for
     /// honest-traffic discriminators (`0x00`/`0x01`/`0x02`).
     async fn read_loop(
+        source_peer: NodeId,
         channel: SecureChannelAsync,
         inbound_tx: mpsc::Sender<P2pMessage>,
         bytes_received: Arc<AtomicU64>,
@@ -1151,9 +1194,10 @@ impl TcpKemTlsP2pService {
                     // installed sink (or cheap-drop) WITHOUT calling
                     // the existing decode_frame demuxer.
                     let sink_snapshot = peer_candidate_wire_sink.read().clone();
-                    let decision = crate::pqc_peer_candidate_wire::read_loop_dispatch_peer_candidate_wire_frame(
+                    let decision = crate::pqc_peer_candidate_wire::read_loop_dispatch_peer_candidate_wire_frame_from_peer(
                         &frame_bytes,
                         sink_snapshot.as_ref(),
+                        Some(source_peer),
                     );
                     if matches!(
                         decision,
@@ -1512,6 +1556,14 @@ impl crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSender for TcpKemTlsP
         frame_bytes: Vec<u8>,
     ) -> crate::pqc_peer_candidate_wire::RawFrameSendReport {
         self.send_raw_frame_to_all_peers(frame_bytes)
+    }
+
+    fn send_raw_frame_to_selected_peers(
+        &self,
+        frame_bytes: Vec<u8>,
+        selected_peers: &[NodeId],
+    ) -> crate::pqc_peer_candidate_wire::RawFrameSendReport {
+        self.send_raw_frame_to_selected_peers(frame_bytes, selected_peers)
     }
 }
 

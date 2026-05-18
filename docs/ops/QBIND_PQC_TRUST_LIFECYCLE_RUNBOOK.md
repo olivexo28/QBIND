@@ -1,7 +1,7 @@
 # QBIND PQC Trust Lifecycle Operator Runbook
 
-**Run:** 087 (safety-spec pointer update after Run 086)
-**Status:** Operator playbook landed and updated for Runs 050–087; full C4 remains OPEN; C5 remains OPEN / narrowed
+**Run:** 088 (disabled propagation-only peer-candidate prototype)
+**Status:** Operator playbook landed and updated for Runs 050–088; full C4 remains OPEN; C5 remains OPEN / narrowed
 **Scope owner:** transport trust-anchor + bundle-signing lifecycle + peer-candidate validation-only lifecycle
 **Date:** 2026-05-18
 
@@ -12,7 +12,10 @@ the operator-triggered hot-reload lifecycle** (§6.F), and — as of
 Run 086 — also documents the **peer-candidate validation-only
 lifecycle** (§6.G) added by Runs 076–085. Run 087 adds a
 formal design-gate safety specification for any future peer-driven
-trust-bundle propagation or apply work.
+trust-bundle propagation or apply work. Run 088 narrows that boundary
+with a hidden, disabled-by-default, propagation-only prototype that
+rebroadcasts only after local validation succeeds and still never
+applies.
 
 Run 086 is a documentation-only update of the Run 075 playbook
 that incorporates Runs 076–085:
@@ -50,21 +53,33 @@ that incorporates Runs 076–085:
   live-reload-apply + session-eviction metrics stayed zero;
   no propagation; no active `DummySig` / `DummyKem` /
   `DummyAead`; no `--p2p-trusted-root` fallback).
+- **Run 087** — added
+  `docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md`;
+  design-gate only, no runtime behaviour change.
+- **Run 088** — adds hidden
+  `--p2p-trust-bundle-peer-candidate-propagation-enabled`.
+  When explicitly enabled with a validated `--p2p-trust-bundle`
+  baseline, a received `0x05` peer-candidate frame is decoded and
+  validated through the existing Run 078 / Run 076 path first; only a
+  validated candidate may be rebroadcast to connected non-source peers.
+  Loop prevention is local: candidate sequence + fingerprint seen-cache,
+  source-peer exclusion, bounded target count, bounded raw-frame queues,
+  and a propagation fixed-window rate limit. The wire format is
+  unchanged; no TTL byte was added.
 
-The peer-candidate `0x05` exchange added by Runs 076–085 is
-**strictly validation-only**: a receiver observes and validates
-candidates, but never applies them, never propagates them,
-never mutates `LivePqcTrustState`, never writes the sequence
-file, and never evicts sessions. The §6.F SIGHUP path remains
-the only operator surface that ever applies a candidate to a
-running node. Run 087 adds only a design/specification pointer:
+The peer-candidate `0x05` exchange added by Runs 076–085 remains
+**non-applying**: a receiver observes and validates candidates.
+Run 088 may optionally rebroadcast only validated frames when the
+hidden propagation flag is set. It still never applies candidates,
+never mutates `LivePqcTrustState`, never writes the sequence file, and
+never evicts sessions. The §6.F SIGHUP path remains the only operator
+surface that ever applies a candidate to a running node.
 `docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md`
-defines future gates before any propagation or peer-driven apply may
-be implemented. Peer-candidate `0x05` remains validation-only today;
-local SIGHUP reload remains the only running-node apply path; and
-peer-driven apply / propagation requires a future separately scoped
-implementation. Runs 086 and 087 are documentation only — no
-`crates/**/src/**` source is changed by either run.
+defines the safety gates: Run 088 satisfies the validation-before-
+rebroadcast subset but does **not** implement peer-driven live apply,
+trust-bundle synchronization, consensus ratification, activation_epoch
+runtime sourcing, KMS/HSM custody, signing-key ratification, or
+fast-sync restore.
 
 Run 075 was the previous documentation-only update of the
 Run 066 playbook for Runs 069–074:

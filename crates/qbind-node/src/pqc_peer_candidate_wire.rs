@@ -112,6 +112,7 @@
 //! future run under a separate review once peer-driven live apply
 //! / propagation / activation_epoch / KMS-HSM custody all land".
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -477,6 +478,75 @@ impl Default for PeerCandidateWireReceiverConfig {
     }
 }
 
+/// Run 088 disabled-by-default propagation prototype configuration.
+/// Propagation is advisory rebroadcast only: it never applies a
+/// candidate, never persists a sequence, never mutates live trust, and
+/// never evicts sessions.
+#[derive(Debug, Clone)]
+pub struct PeerCandidatePropagationConfig {
+    /// Master switch. Default `false`.
+    pub enabled: bool,
+    /// Bounded seen-cache capacity for loop / duplicate suppression.
+    pub seen_lru_capacity: usize,
+    /// Maximum rebroadcast targets selected from currently connected
+    /// peers after excluding the source peer.
+    pub max_rebroadcast_targets: usize,
+    /// Fixed-window propagation attempt rate-limit window.
+    pub rate_limit_window_ms: u64,
+    /// Maximum validated propagation attempts in one window.
+    pub max_in_window: u32,
+}
+
+impl Default for PeerCandidatePropagationConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            seen_lru_capacity: 256,
+            max_rebroadcast_targets: 16,
+            rate_limit_window_ms: 1_000,
+            max_in_window: 8,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PeerCandidatePropagationState {
+    seen: VecDeque<String>,
+    rate_limiter: crate::pqc_trust_peer_candidate::PeerCandidateRateLimiter,
+}
+
+impl PeerCandidatePropagationState {
+    fn new(cfg: &PeerCandidatePropagationConfig) -> Self {
+        Self {
+            seen: VecDeque::with_capacity(cfg.seen_lru_capacity.max(1)),
+            rate_limiter: crate::pqc_trust_peer_candidate::PeerCandidateRateLimiter::new(
+                cfg.rate_limit_window_ms,
+                cfg.max_in_window,
+            ),
+        }
+    }
+
+    fn contains(&self, id: &str) -> bool {
+        // Run 088 keeps the propagation seen cache deliberately small
+        // (`seen_lru_capacity` defaults to 256) and allocation-light.
+        // A linear scan under that hard bound is acceptable for the
+        // prototype and avoids adding a second membership structure that
+        // could drift from the eviction order.
+        self.seen.iter().any(|s| s == id)
+    }
+
+    fn insert(&mut self, id: String, capacity: usize) {
+        if self.contains(&id) {
+            return;
+        }
+        let cap = capacity.max(1);
+        if self.seen.len() == cap {
+            self.seen.pop_front();
+        }
+        self.seen.push_back(id);
+    }
+}
+
 /// Run 078 outcome of [`PeerCandidateWireReceiver::try_handle_frame`].
 /// Every variant is non-mutating for live trust state, sequence
 /// persistence, and P2P sessions.
@@ -809,6 +879,16 @@ pub trait PeerCandidateWireFrameSink: Send + Sync + 'static {
     /// seven Run 076 `qbind_p2p_pqc_trust_bundle_peer_candidate_*`
     /// counters as the Run 078 library tests do.
     fn handle_frame(&self, frame: &[u8]);
+
+    /// Source-aware entry point used by the live transport. The
+    /// default preserves the Run 079 validation-only behaviour for
+    /// existing sinks; Run 088 propagation-aware sinks override this
+    /// so they can exclude the source peer from any validated
+    /// rebroadcast.
+    fn handle_frame_from_peer(&self, frame: &[u8], source_peer: Option<NodeId>) {
+        let _ = source_peer;
+        self.handle_frame(frame);
+    }
 }
 
 /// Run 079 live receive-loop dispatcher: the production-honest
@@ -829,6 +909,9 @@ pub trait PeerCandidateWireFrameSink: Send + Sync + 'static {
 ///      [`wire_observed_log_line`].
 pub struct LivePeerCandidateWireDispatcher {
     receiver: Mutex<PeerCandidateWireReceiver>,
+    propagation: PeerCandidatePropagationConfig,
+    propagation_state: Mutex<PeerCandidatePropagationState>,
+    propagation_sender: Mutex<Option<Arc<dyn PeerCandidateWireFrameSender>>>,
     expected_environment: NetworkEnvironment,
     expected_chain_id: ChainId,
     scratch_dir: PathBuf,
@@ -857,6 +940,7 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
             )
             .field("validation_time_secs", &self.validation_time_secs)
             .field("is_enabled", &self.is_enabled())
+            .field("propagation_enabled", &self.propagation.enabled)
             .finish()
     }
 }
@@ -865,7 +949,7 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
 /// Each field has the same semantic as the corresponding field in
 /// [`PeerCandidateWireRuntimeContext`] (which is the *borrowed*
 /// per-call view).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LivePeerCandidateWireDispatcherConfig {
     /// Run 078 receiver config. When `inner.enabled` is `true`, the
     /// receive path runs full Run 076 validation against every
@@ -898,6 +982,13 @@ pub struct LivePeerCandidateWireDispatcherConfig {
     /// reconstruct the dispatcher (Run 079 is library-grade — no
     /// continuous clock daemon).
     pub validation_time_secs: u64,
+    /// Run 088 disabled-by-default propagation config. When enabled,
+    /// the dispatcher may rebroadcast only after validation succeeds.
+    pub propagation: PeerCandidatePropagationConfig,
+    /// Run 088 raw-frame sender used for rebroadcast. If omitted,
+    /// propagation remains inert even if `propagation.enabled` is
+    /// true; tests and production wiring install this explicitly.
+    pub propagation_sender: Option<Arc<dyn PeerCandidateWireFrameSender>>,
 }
 
 impl LivePeerCandidateWireDispatcher {
@@ -928,8 +1019,12 @@ impl LivePeerCandidateWireDispatcher {
         clock_ms_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static>,
     ) -> Self {
         let receiver = PeerCandidateWireReceiver::new(config.inner);
+        let propagation_state = PeerCandidatePropagationState::new(&config.propagation);
         Self {
             receiver: Mutex::new(receiver),
+            propagation: config.propagation,
+            propagation_state: Mutex::new(propagation_state),
+            propagation_sender: Mutex::new(config.propagation_sender),
             expected_environment: config.expected_environment,
             expected_chain_id: config.expected_chain_id,
             scratch_dir: config.scratch_dir,
@@ -948,6 +1043,14 @@ impl LivePeerCandidateWireDispatcher {
         self.receiver.lock().is_enabled()
     }
 
+    /// Install or replace the Run 088 propagation sender after the
+    /// P2P transport is built. This does not enable propagation by
+    /// itself; [`PeerCandidatePropagationConfig::enabled`] remains the
+    /// master switch.
+    pub fn set_propagation_sender(&self, sender: Arc<dyn PeerCandidateWireFrameSender>) {
+        *self.propagation_sender.lock() = Some(sender);
+    }
+
     /// Test-grade synchronous dispatch entry point. Returns the
     /// inner outcome so unit tests can assert it without scraping
     /// metrics.
@@ -956,6 +1059,17 @@ impl LivePeerCandidateWireDispatcher {
     /// [`PeerCandidateWireFrameSink::handle_frame`] instead, which
     /// discards the outcome (no propagation by construction).
     pub fn dispatch_frame_for_test(&self, frame: &[u8]) -> PeerCandidateWireOutcome {
+        self.dispatch_frame_from_peer_for_test(frame, None)
+    }
+
+    /// Source-aware test entry point used by Run 088 propagation
+    /// tests. The source peer, when supplied, is excluded from any
+    /// validated rebroadcast.
+    pub fn dispatch_frame_from_peer_for_test(
+        &self,
+        frame: &[u8],
+        source_peer: Option<NodeId>,
+    ) -> PeerCandidateWireOutcome {
         let now_ms = (self.clock_ms_fn)();
         let ctx = PeerCandidateWireRuntimeContext {
             expected_environment: self.expected_environment,
@@ -971,13 +1085,118 @@ impl LivePeerCandidateWireDispatcher {
             now_ms,
         };
         let mut receiver = self.receiver.lock();
-        receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref())
+        let outcome = receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref());
+        drop(receiver);
+        self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
+        outcome
+    }
+
+    fn maybe_propagate_after_validation(
+        &self,
+        frame: &[u8],
+        source_peer: Option<NodeId>,
+        now_ms: u64,
+        outcome: &PeerCandidateWireOutcome,
+    ) {
+        if !self.propagation.enabled {
+            return;
+        }
+
+        let validated = match outcome {
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Validated(v)) => v,
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::DuplicateSuppressed { .. }) => {
+                self.metrics
+                    .record_peer_candidate_propagation_suppressed_duplicate();
+                return;
+            }
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::RateLimited { .. }) => {
+                self.metrics.record_peer_candidate_propagation_rate_limited();
+                return;
+            }
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(_))
+            | PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Oversize { .. })
+            | PeerCandidateWireOutcome::FrameRejected(_) => {
+                self.metrics
+                    .record_peer_candidate_propagation_suppressed_invalid();
+                return;
+            }
+            PeerCandidateWireOutcome::Disabled
+            | PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Disabled) => {
+                return;
+            }
+        };
+
+        self.metrics.record_peer_candidate_propagation_attempt();
+
+        let candidate_id = format!(
+            "{}:{}",
+            validated.validated.sequence, validated.validated.fingerprint_prefix
+        );
+        {
+            let mut state = self.propagation_state.lock();
+            if let Err((_attempts, _cap)) = state.rate_limiter.try_admit(now_ms) {
+                self.metrics.record_peer_candidate_propagation_rate_limited();
+                eprintln!(
+                    "[binary] Run 088: peer-candidate validated before propagation but propagation rate-limited; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=0; source_peer_excluded=true; candidate_fp={}.. sequence={}",
+                    validated.validated.fingerprint_prefix,
+                    validated.validated.sequence
+                );
+                return;
+            }
+            if state.contains(&candidate_id) {
+                self.metrics
+                    .record_peer_candidate_propagation_suppressed_duplicate();
+                eprintln!(
+                    "[binary] Run 088: peer-candidate validated before propagation but suppressed as duplicate; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=0; source_peer_excluded=true; candidate_fp={}.. sequence={}",
+                    validated.validated.fingerprint_prefix,
+                    validated.validated.sequence
+                );
+                return;
+            }
+            state.insert(candidate_id, self.propagation.seen_lru_capacity);
+        }
+
+        let sender = self.propagation_sender.lock().clone();
+        let Some(sender) = sender.as_ref() else {
+            eprintln!(
+                "[binary] Run 088: peer-candidate validated before propagation but no propagation sender is installed; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count=0; source_peer_excluded=true; candidate_fp={}.. sequence={}",
+                validated.validated.fingerprint_prefix,
+                validated.validated.sequence
+            );
+            return;
+        };
+
+        let targets: Vec<NodeId> = sender
+            .connected_peer_node_ids()
+            .into_iter()
+            .filter(|peer| Some(*peer) != source_peer)
+            // Deterministic first-N fanout is intentional for Run 088
+            // evidence reproducibility. A future production topology
+            // run can add randomized or policy-ranked peer selection.
+            .take(self.propagation.max_rebroadcast_targets)
+            .collect();
+        let report = sender.send_raw_frame_to_selected_peers(frame.to_vec(), &targets);
+        for (_, peer_outcome) in report.per_peer() {
+            if peer_outcome.is_enqueued() {
+                self.metrics.record_peer_candidate_propagation_sent();
+            }
+        }
+        eprintln!(
+            "[binary] Run 088: peer-candidate validated before propagation; NOT applied; sequence not persisted; live trust unchanged; sessions untouched; rebroadcast_count={}; source_peer_excluded=true; candidate_fp={}.. sequence={}",
+            report.sent(),
+            validated.validated.fingerprint_prefix,
+            validated.validated.sequence
+        );
     }
 }
 
 impl PeerCandidateWireFrameSink for LivePeerCandidateWireDispatcher {
     fn handle_frame(&self, frame: &[u8]) {
-        let outcome = self.dispatch_frame_for_test(frame);
+        self.handle_frame_from_peer(frame, None);
+    }
+
+    fn handle_frame_from_peer(&self, frame: &[u8], source_peer: Option<NodeId>) {
+        let outcome = self.dispatch_frame_from_peer_for_test(frame, source_peer);
         // Single safe operator-log line. No bundle bytes, no
         // private material — the Run 078 helper enforces the
         // stable substrings used by operator log scrapers.
@@ -1048,9 +1267,19 @@ pub fn read_loop_dispatch_peer_candidate_wire_frame(
     frame_bytes: &[u8],
     sink: Option<&Arc<dyn PeerCandidateWireFrameSink>>,
 ) -> ReadLoopFrameDecision {
+    read_loop_dispatch_peer_candidate_wire_frame_from_peer(frame_bytes, sink, None)
+}
+
+/// Source-aware Run 088 variant of
+/// [`read_loop_dispatch_peer_candidate_wire_frame`].
+pub fn read_loop_dispatch_peer_candidate_wire_frame_from_peer(
+    frame_bytes: &[u8],
+    sink: Option<&Arc<dyn PeerCandidateWireFrameSink>>,
+    source_peer: Option<NodeId>,
+) -> ReadLoopFrameDecision {
     if frame_bytes.first().copied() == Some(DISCRIMINATOR_PEER_CANDIDATE_WIRE) {
         if let Some(sink) = sink {
-            sink.handle_frame(frame_bytes);
+            sink.handle_frame_from_peer(frame_bytes, source_peer);
         }
         // No sink installed → cheap drop. The truthful zero-cost
         // observation is "we saw a 0x05 frame on the wire and did
@@ -1079,6 +1308,31 @@ pub trait PeerCandidateWireFrameSender: Send + Sync + 'static {
     /// Enqueue one already-framed raw P2P frame to all currently
     /// authenticated peers.
     fn send_raw_frame_to_all_peers(&self, frame_bytes: Vec<u8>) -> RawFrameSendReport;
+    /// Enqueue one already-framed raw P2P frame to the supplied
+    /// selected peers. The default preserves Run 080 implementers
+    /// that only know all-peer fanout; production Run 088 transport
+    /// handles override this so propagation can exclude the source
+    /// peer.
+    fn send_raw_frame_to_selected_peers(
+        &self,
+        frame_bytes: Vec<u8>,
+        selected_peers: &[NodeId],
+    ) -> RawFrameSendReport {
+        let all = self.connected_peer_node_ids();
+        if selected_peers.len() == all.len()
+            && selected_peers.iter().all(|p| all.iter().any(|a| a == p))
+        {
+            self.send_raw_frame_to_all_peers(frame_bytes)
+        } else {
+            RawFrameSendReport::from_per_peer(
+                selected_peers
+                    .iter()
+                    .copied()
+                    .map(|p| (p, RawFramePeerSendOutcome::ChannelClosed))
+                    .collect(),
+            )
+        }
+    }
 }
 
 /// Run 080 per-peer raw-frame send outcome.
@@ -1797,6 +2051,8 @@ mod tests {
             sequence_persistence_path: None,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,
+            propagation: PeerCandidatePropagationConfig::default(),
+            propagation_sender: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(!disp.is_enabled());
@@ -1834,6 +2090,8 @@ mod tests {
             sequence_persistence_path: None,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,
+            propagation: PeerCandidatePropagationConfig::default(),
+            propagation_sender: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(disp.is_enabled());
@@ -1880,6 +2138,8 @@ mod tests {
             sequence_persistence_path: None,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,
+            propagation: PeerCandidatePropagationConfig::default(),
+            propagation_sender: None,
         };
         let disp = LivePeerCandidateWireDispatcher::with_clock(
             cfg,

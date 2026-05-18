@@ -643,15 +643,16 @@ async fn main() {
     // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md`, and
     // `docs/whitepaper/contradiction.md` C4 for the exact boundary
     // that remains open.
-    if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled {
+    if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled
+        || args.p2p_trust_bundle_peer_candidate_propagation_enabled
+    {
         eprintln!(
-            "[binary] Run 078: P2P peer-candidate wire receiver armed for \
-             validation-only acceptance (NOT applied; not propagated; sequence \
+            "[binary] Run 088: P2P peer-candidate wire receiver armed for \
+             validation-before-propagation acceptance (propagation_enabled={}; NOT applied; sequence \
              not persisted; live trust state unchanged; sessions untouched). \
-             No production gossip dispatcher publishes peer-candidate frames \
-             on the wire in this run — the armed receiver is library-level \
-             only (frame discriminator 0x{:02x}, envelope version {}, domain \
+             Frame discriminator 0x{:02x}, envelope version {}, domain \
              tag {:?}). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.",
+            args.p2p_trust_bundle_peer_candidate_propagation_enabled,
             qbind_node::pqc_peer_candidate_wire::DISCRIMINATOR_PEER_CANDIDATE_WIRE,
             qbind_node::pqc_peer_candidate_wire::PEER_CANDIDATE_WIRE_VERSION,
             qbind_node::pqc_peer_candidate_wire::PEER_CANDIDATE_WIRE_DOMAIN_TAG,
@@ -2507,11 +2508,16 @@ async fn run_p2p_node(
     // either calls `with_peer_candidate_wire_sink` exactly once or
     // not at all. The default path (`enabled == false`) is
     // bit-for-bit identical to pre-Run-079.
-    let builder = if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled {
+    let mut propagation_dispatcher_for_sender: Option<
+        Arc<qbind_node::pqc_peer_candidate_wire::LivePeerCandidateWireDispatcher>,
+    > = None;
+    let builder = if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled
+        || args.p2p_trust_bundle_peer_candidate_propagation_enabled
+    {
         use qbind_node::pqc_peer_candidate_wire::{
             DiscardPeerCandidateWireSink, LivePeerCandidateWireDispatcher,
-            LivePeerCandidateWireDispatcherConfig, PeerCandidateWireFrameSink,
-            PeerCandidateWireReceiverConfig,
+            LivePeerCandidateWireDispatcherConfig, PeerCandidatePropagationConfig,
+            PeerCandidateWireFrameSink, PeerCandidateWireReceiverConfig,
         };
         use qbind_node::pqc_trust_peer_candidate::PeerCandidateConfig;
         let metrics_arc = node_metrics.p2p_arc();
@@ -2584,21 +2590,40 @@ async fn run_p2p_node(
                         // wiring above).
                         local_leaf_cert_bytes: None,
                         validation_time_secs,
+                        propagation: PeerCandidatePropagationConfig {
+                            enabled: args.p2p_trust_bundle_peer_candidate_propagation_enabled,
+                            ..PeerCandidatePropagationConfig::default()
+                        },
+                        propagation_sender: None,
                     };
                     eprintln!(
-                        "[binary] Run 079: installing live peer-candidate wire \
-                         dispatcher (env={} sequence_baseline={} signing_keys={}).",
+                        "[binary] Run 088: installing live peer-candidate wire \
+                         dispatcher (env={} sequence_baseline={} signing_keys={} propagation_enabled={}).",
                         loaded.environment(),
                         loaded.bundle.sequence,
                         bundle_signing_keys.len(),
+                        args.p2p_trust_bundle_peer_candidate_propagation_enabled,
                     );
-                    Arc::new(LivePeerCandidateWireDispatcher::new(
+                    let dispatcher = Arc::new(LivePeerCandidateWireDispatcher::new(
                         dispatcher_cfg,
                         Arc::clone(&metrics_arc),
-                    )) as Arc<dyn PeerCandidateWireFrameSink>
+                    ));
+                    if args.p2p_trust_bundle_peer_candidate_propagation_enabled {
+                        propagation_dispatcher_for_sender = Some(Arc::clone(&dispatcher));
+                    }
+                    dispatcher as Arc<dyn PeerCandidateWireFrameSink>
                 }
             }
             None => {
+                if args.p2p_trust_bundle_peer_candidate_propagation_enabled {
+                    eprintln!(
+                        "[binary] FATAL: --p2p-trust-bundle-peer-candidate-propagation-enabled \
+                         requires a validated --p2p-trust-bundle baseline so received 0x05 \
+                         candidates can be validated before any propagation. No fallback; no \
+                         apply; no sequence write; no session eviction."
+                    );
+                    std::process::exit(1);
+                }
                 eprintln!(
                     "[binary] Run 079: --p2p-trust-bundle-peer-candidate-wire-validation-enabled \
                      was supplied without a --p2p-trust-bundle baseline; installing \
@@ -2621,6 +2646,12 @@ async fn run_p2p_node(
             std::process::exit(1);
         }
     };
+
+    if let Some(dispatcher) = propagation_dispatcher_for_sender {
+        use qbind_node::pqc_peer_candidate_wire::PeerCandidateWireFrameSender;
+        let sender: Arc<dyn PeerCandidateWireFrameSender> = node_context.p2p_service.clone();
+        dispatcher.set_propagation_sender(sender);
+    }
 
     eprintln!(
         "[binary] P2P transport up. Listen address: {}, static peers: {}",

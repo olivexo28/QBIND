@@ -71,7 +71,7 @@ use qbind_node::pqc_peer_candidate_wire::{
     DiscardPeerCandidateWireSink, LivePeerCandidateWireDispatcher,
     LivePeerCandidateWireDispatcherConfig, PeerCandidateWireEnvelopeV1,
     PeerCandidateWireFrameSink, PeerCandidateWireOutcome, PeerCandidateWireReceiverConfig,
-    ReadLoopFrameDecision, DISCRIMINATOR_PEER_CANDIDATE_WIRE,
+    PeerCandidatePropagationConfig, ReadLoopFrameDecision, DISCRIMINATOR_PEER_CANDIDATE_WIRE,
     MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES, PEER_CANDIDATE_WIRE_DOMAIN_TAG,
     PEER_CANDIDATE_WIRE_VERSION,
 };
@@ -229,6 +229,8 @@ fn live_dispatcher_for_devnet(
         sequence_persistence_path: None,
         local_leaf_cert_bytes: None,
         validation_time_secs: 100,
+        propagation: PeerCandidatePropagationConfig::default(),
+        propagation_sender: None,
     };
     LivePeerCandidateWireDispatcher::new(cfg, metrics)
 }
@@ -488,6 +490,8 @@ fn run079_live_dispatcher_rate_limit_kicks_in() {
         sequence_persistence_path: None,
         local_leaf_cert_bytes: None,
         validation_time_secs: 100,
+        propagation: PeerCandidatePropagationConfig::default(),
+        propagation_sender: None,
     };
     let dispatcher = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
     // First admit: passes rate-limit; subsequent identical frames

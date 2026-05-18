@@ -6005,6 +6005,18 @@ pub struct P2pMetrics {
     peer_candidate_send_failure_total: AtomicU64,
     peer_candidate_send_no_peer_total: AtomicU64,
     peer_candidate_send_oversize_total: AtomicU64,
+
+    // ------------------------------------------------------------------
+    // Run 088 — disabled-by-default validation-before-rebroadcast
+    // propagation prototype counters. These are distinct from Run 080
+    // operator publish counters and still intentionally omit any
+    // `_applied_total` family.
+    // ------------------------------------------------------------------
+    peer_candidate_propagation_attempt_total: AtomicU64,
+    peer_candidate_propagation_sent_total: AtomicU64,
+    peer_candidate_propagation_suppressed_duplicate_total: AtomicU64,
+    peer_candidate_propagation_suppressed_invalid_total: AtomicU64,
+    peer_candidate_propagation_rate_limited_total: AtomicU64,
 }
 
 impl P2pMetrics {
@@ -6959,6 +6971,27 @@ impl P2pMetrics {
             self.peer_candidate_send_oversize_total()
         ));
 
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_attempt_total {}\n",
+            self.peer_candidate_propagation_attempt_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_sent_total {}\n",
+            self.peer_candidate_propagation_sent_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_suppressed_duplicate_total {}\n",
+            self.peer_candidate_propagation_suppressed_duplicate_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_suppressed_invalid_total {}\n",
+            self.peer_candidate_propagation_suppressed_invalid_total()
+        ));
+        output.push_str(&format!(
+            "qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_rate_limited_total {}\n",
+            self.peer_candidate_propagation_rate_limited_total()
+        ));
+
         output
     }
 
@@ -7602,6 +7635,56 @@ impl P2pMetrics {
     /// `MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES`.
     pub fn record_peer_candidate_send_oversize(&self) {
         self.peer_candidate_send_oversize_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn peer_candidate_propagation_attempt_total(&self) -> u64 {
+        self.peer_candidate_propagation_attempt_total
+            .load(Ordering::Relaxed)
+    }
+
+    pub fn peer_candidate_propagation_sent_total(&self) -> u64 {
+        self.peer_candidate_propagation_sent_total
+            .load(Ordering::Relaxed)
+    }
+
+    pub fn peer_candidate_propagation_suppressed_duplicate_total(&self) -> u64 {
+        self.peer_candidate_propagation_suppressed_duplicate_total
+            .load(Ordering::Relaxed)
+    }
+
+    pub fn peer_candidate_propagation_suppressed_invalid_total(&self) -> u64 {
+        self.peer_candidate_propagation_suppressed_invalid_total
+            .load(Ordering::Relaxed)
+    }
+
+    pub fn peer_candidate_propagation_rate_limited_total(&self) -> u64 {
+        self.peer_candidate_propagation_rate_limited_total
+            .load(Ordering::Relaxed)
+    }
+
+    pub fn record_peer_candidate_propagation_attempt(&self) {
+        self.peer_candidate_propagation_attempt_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_peer_candidate_propagation_sent(&self) {
+        self.peer_candidate_propagation_sent_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_peer_candidate_propagation_suppressed_duplicate(&self) {
+        self.peer_candidate_propagation_suppressed_duplicate_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_peer_candidate_propagation_suppressed_invalid(&self) {
+        self.peer_candidate_propagation_suppressed_invalid_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_peer_candidate_propagation_rate_limited(&self) {
+        self.peer_candidate_propagation_rate_limited_total
             .fetch_add(1, Ordering::Relaxed);
     }
 }
