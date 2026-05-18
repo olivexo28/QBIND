@@ -674,7 +674,12 @@ handling, backup/recovery notes, logging rules.
   including MainNet, regardless of `current_height` (§6.B / §6.C
   variant 2).
 - **Boundary:** `activation_epoch` is rejected today with
-  `CurrentEpochUnavailable` (Run 057 boundary — recorded in §10).
+  `CurrentEpochUnavailable` (Run 057 boundary — recorded in §10;
+  pinned by Run 091 across DevNet / TestNet / MainNet at the
+  bundle-level, per-active-root, startup load, reload-check,
+  SIGHUP live reload, and peer-candidate paths — see
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_091.md` and
+  `crates/qbind-node/tests/run_091_pqc_trust_bundle_activation_epoch_tests.rs`).
   Operators MUST NOT set `activation_epoch` on a production bundle.
   Run 065 does NOT introduce a minimum-margin policy on the epoch
   axis (the epoch runtime source itself remains open).
@@ -2615,9 +2620,15 @@ under C4:
 
 1. **Epoch-gating runtime source.** Bundle-level `activation_epoch`
    continues to fail closed with
-   `TrustBundleActivationError::CurrentEpochUnavailable` (Run 057).
+   `TrustBundleActivationError::CurrentEpochUnavailable` (Run 057,
+   pinned by Run 091 — see
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_091.md` and the
+   `crates/qbind-node/tests/run_091_pqc_trust_bundle_activation_epoch_tests.rs`
+   coverage matrix).
    Per-entry `activation_epoch` on revocations is intentionally
-   NOT supported either (Run 062 boundary). Operators MUST NOT
+   NOT supported either (Run 062 boundary; pinned by Run 091's
+   `run091_revocation_schema_has_no_activation_epoch_field`
+   exhaustive-destructure compile-time gate). Operators MUST NOT
    set `activation_epoch` on production bundles or on revocation
    entries. Run 065 does NOT introduce a minimum-margin policy on
    the epoch axis (the epoch runtime source itself remains open).
@@ -2626,6 +2637,13 @@ under C4:
    stance the startup `--p2p-trust-bundle` path uses today; a
    future run that lands a live height source can extend
    `LiveReloadConfig` without changing the SIGHUP surface.
+   Run 091's investigation found that `MetaStore::get_current_epoch()`
+   (persisted `meta:current_epoch`) is the closest candidate for a
+   canonical pre-consensus epoch source but is NOT wired today
+   because (a) `main.rs` does not open RocksDB before the trust-
+   bundle gate, (b) fresh-genesis returns `Ok(None)` ambiguously,
+   and (c) snapshot-rejoin parity would also require an `epoch`
+   field on `StateSnapshotMeta` which is out of Run 091 scope.
 2. **Peer-supplied / gossiped trust-bundle acceptance.** Runs
    069/073/074 accept **local files only**. There is no
    `BundleAnnounce` / `BundleRequest` over the wire, no admin-API
@@ -2766,7 +2784,7 @@ in §10):**
 
 ---
 
-## 11. Mapping to Runs 050–090
+## 11. Mapping to Runs 050–091
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -2808,6 +2826,7 @@ in §10):**
 | 088 | Hidden, disabled-by-default propagation-only peer-candidate prototype: `--p2p-trust-bundle-peer-candidate-propagation-enabled`; validation-before-rebroadcast; source-peer exclusion; local seen-cache; bounded rate/fanout/queue. Five new `qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_*` counters. No apply, no sequence write, no `LivePqcTrustState` mutation, no session eviction; the `peer_candidate_applied_total` family is intentionally absent. | §1, §6.G.9, §6.G.10, §6.G.11, §6.G.12, §6.G.13, §10, §12. |
 | 089 | Release-binary **N=3 DevNet** propagation evidence: `scripts/devnet/run_089_peer_candidate_propagation_n3.sh`. V0 → V1 → V2 propagation succeeds only after V1 validation; V1 excludes V0 (`V0.received_total == 0` after 5 s settle); invalid wrong-chain not rebroadcast; duplicate not rebroadcast a second time; sequence files byte-identical before/after on every node; `live_reload_apply_*` / `session_eviction_*` zero; `peer_candidate_applied_total` family absent; no `--p2p-trusted-root` fallback; no active `DummySig` / `DummyKem` / `DummyAead`; consensus progresses in the propagation-enabled topology. | §1, §6.G.9, §6.G.11, §6.G.12, §6.G.13, §10. |
 | 090 | Operator-playbook prose update for the propagation-only lifecycle from Runs 087–089 (docs-only). Adds §6.G.9 / §6.G.10 / §6.G.11 / §6.G.12 / §6.G.13; renames §6.G to "validation-only and propagation-only"; extends §10 / §11 / §12. No source changes. | All §sections (esp. §1, §6.G, §10, §11, §12). |
+| 091 | **Partial-positive** boundary pin for the C4 sub-piece "`activation_epoch` runtime source": investigates and documents the available epoch sources (`MetaStore::get_current_epoch()`, `StateSnapshotMeta`, consensus engine), explains why none are wired into the trust-bundle activation gate today, and lands `crates/qbind-node/tests/run_091_pqc_trust_bundle_activation_epoch_tests.rs` (15 integration tests) pinning fail-closed `CurrentEpochUnavailable` behaviour on DevNet/TestNet/MainNet at the bundle-level, per-active-root, startup-load, reload-check, SIGHUP, and peer-candidate surfaces, plus an exhaustive-destructure compile-time gate against per-entry revocation `activation_epoch` schema drift. No source changes; no new metric families (the existing `pqc_trust_bundle_activation_epoch_*` gauges plus the combined `_activation_rejected_total` counter remain the canonical surface); preserves every Run 050–090 invariant. | §1, §3.10, §10.1, §11. |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---

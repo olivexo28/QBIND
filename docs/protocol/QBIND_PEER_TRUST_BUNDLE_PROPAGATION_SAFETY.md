@@ -217,7 +217,11 @@ apply failure rolls back or fails closed.
 
 The following remain open and require separately scoped future runs:
 
-- `activation_epoch` runtime source.
+- `activation_epoch` runtime source (narrowed by Run 091 to a
+  documented fail-closed `CurrentEpochUnavailable` boundary at the
+  bundle-level + per-active-root activation gate on every
+  environment and every production call site; see
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_091.md`).
 - KMS/HSM custody.
 - In-binary or on-chain signing-key ratification.
 - Peer-driven apply policy.
