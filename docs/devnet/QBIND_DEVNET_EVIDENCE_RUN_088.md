@@ -111,7 +111,19 @@ Note: repository-wide `cargo fmt --check` was also tried and failed on pre-exist
 
 ## Release-binary evidence
 
-N=3 release-binary propagation evidence was not completed. No wire-format change was made, so Run 084/085 matrix reruns were not required by the task's conditional wire-format rule.
+N=3 release-binary propagation evidence was not completed in Run 088
+itself. It was completed in **Run 089** — see
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_089.md` and
+`scripts/devnet/run_089_peer_candidate_propagation_n3.sh`. Run 089 runs
+three release `qbind-node` processes (V0/V1/V2) over loopback on
+DevNet, has V0 publish a valid Run 080 0x05 envelope, asserts V1
+validates and rebroadcasts to V2 only (source-peer exclusion),
+asserts V2 validates the propagated frame, asserts the invalid /
+duplicate / settle-window scenarios match the Run 088 contract, and
+hashes every node's `pqc_trust_bundle_sequence.json` before/after each
+scenario to prove byte-identical equality. No wire-format change was
+made, so Run 084/085 matrix reruns were not required by the task's
+conditional wire-format rule.
 
 ## Remaining C4/C5 items
 
