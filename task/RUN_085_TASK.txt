@@ -1,0 +1,237 @@
+Continue QBIND from the current state.
+
+Project:
+- QBIND post-quantum L1
+- security-first, production-grade, execution-first
+- C4 is the main live operability tracker
+- C5 tracks timeout-verification activation, forged-traffic rejection, and transport-root dependency
+- no broad redesign
+- no silent regressions
+- no overclaiming
+
+Current state:
+- Run 078 added typed/versioned/bounded peer-candidate wire envelope for frame discriminator 0x05.
+- Run 079 wired disabled-by-default live receive-loop dispatch for 0x05, validation-only.
+- Run 080 added disabled-by-default send-side publisher plumbing for 0x05.
+- Run 081 produced release-binary N=2 real 0x05 exchange evidence but remained partial-positive due the DummySig probe/log ambiguity.
+- Run 082 classified TrustedClientRoots/DummySig as probe/log-only stale narrative text, not active production crypto.
+- Run 083 reconfirmed that classification but deferred the live N=2 matrix rerun because the orchestration harness was not committed.
+- Run 084 landed scripts/devnet/run_084_peer_candidate_0x05_matrix.sh and reran the release-binary N=2 0x05 matrix end-to-end:
+  - baseline N=2 startup: PASS
+  - valid 0x05 send/validate: PASS
+  - receiver-disabled cheap-ignore: PASS
+  - invalid/wrong-chain candidate reject: PASS
+  - duplicate suppression: PASS
+  - Run033 active=true reason=n/a with real consensus signer keys
+  - Run040 no DummyKem/DummyAead
+  - no DummySig/DummyKem/DummyAead active
+  - no --p2p-trusted-root fallback
+  - sequence non-mutation proven
+  - live reload apply metrics remained zero
+  - session eviction metrics remained zero
+  - sessions remained healthy
+- Run 084 closed the Run 081/082/083 evidence gap.
+- C4 remains OPEN.
+- C5 remains OPEN / narrowed.
+
+Task:
+Run 085. Produce N=4 MainNet validation-only peer-candidate 0x05 evidence using the committed Run 084 harness pattern.
+
+Primary objective:
+Extend the proven N=2 DevNet 0x05 validation-only matrix to an N=4 MainNet-mode signed-bundle cluster, while preserving the same non-mutation invariants:
+- no peer-driven live apply
+- no propagation/rebroadcast
+- no sequence mutation
+- no LivePqcTrustState mutation
+- no session eviction
+- no Dummy crypto
+- no --p2p-trusted-root fallback
+
+Important framing:
+This is evidence-first.
+Do not add new peer-candidate features unless a real bug blocks evidence.
+Do not implement peer-driven live apply.
+Do not implement propagation/rebroadcast.
+Do not implement activation_epoch.
+Do not implement KMS/HSM.
+Do not implement signing-key ratification.
+Do not implement fast-sync restore.
+Do not redesign KEMTLS.
+Do not redesign consensus.
+Do not weaken Run 084 evidence guarantees.
+Do not claim full C4 or C5 closure.
+
+Strict scope:
+- Prefer an evidence-only harness extension.
+- Reuse the Run 084 harness structure.
+- Use release qbind-node binaries.
+- Use --env mainnet.
+- Use signed MainNet trust bundle.
+- Use real ML-DSA-44 transport certs.
+- Use real ML-KEM-768 leaf material.
+- Use real ChaCha20-Poly1305.
+- Use explicit trust-bundle signing key.
+- Use per-node data dirs.
+- Use peer leaf mappings.
+- Use no --p2p-trusted-root fallback.
+- Use disabled-by-default peer-candidate 0x05 validation/publish flags only where needed.
+- Keep peer-candidate handling validation-only.
+
+Required N=4 MainNet scenarios:
+
+1. Baseline N=4 MainNet startup
+   Prove:
+   - all four nodes start with signed MainNet trust bundle.
+   - chain_id check passes.
+   - trust-bundle signature verifies.
+   - sequence=1 persists on all four data dirs.
+   - full or expected peer connectivity occurs.
+   - cert accepted counters move.
+   - cert rejected counters remain zero under honest traffic.
+   - consensus anchors progress.
+   - no --p2p-trusted-root fallback.
+   - no DummySig / DummyKem / DummyAead active.
+
+2. Valid 0x05 send/validate
+   - Choose one sender and at least one receiver.
+   - Sender publishes a valid peer-candidate 0x05 frame.
+   - Receiver has wire validation enabled.
+   - Prove:
+     - sender sent_total increments.
+     - receiver received_total increments.
+     - receiver validated_total increments.
+     - logs say validation-only / not-applied.
+     - sequence file hash unchanged on sender and receiver.
+     - live reload apply metrics remain zero.
+     - session eviction metrics remain zero.
+     - sessions remain healthy.
+     - consensus continues or at least node remains healthy.
+     - no propagation/rebroadcast.
+
+3. Receiver-disabled cheap-ignore
+   - Sender publishes valid 0x05 frame.
+   - Receiver does not enable wire validation.
+   - Prove:
+     - receiver does not validate.
+     - disabled/cheap-ignore behavior captured.
+     - connection remains healthy.
+     - no sequence/live-trust/session mutation.
+
+4. Invalid/wrong-chain candidate reject
+   - Send tampered or wrong-chain candidate.
+   - Prove:
+     - receiver rejected_total increments.
+     - sequence unchanged.
+     - live reload apply metrics remain zero.
+     - session eviction metrics remain zero.
+     - sessions remain healthy.
+
+5. Duplicate suppression
+   - Send the same valid candidate twice.
+   - Prove:
+     - duplicate_total increments.
+     - duplicate does not mutate sequence.
+     - live reload apply metrics remain zero.
+     - session eviction metrics remain zero.
+
+Required harness work:
+- Add a committed harness:
+  - scripts/devnet/run_085_mainnet_peer_candidate_0x05_matrix.sh
+- It should:
+  - build release binaries or accept prebuilt path.
+  - record sha256 and ELF BuildID.
+  - generate N=4 MainNet trust material.
+  - generate consensus signer keystores if needed.
+  - generate valid / wrong-chain / duplicate candidate envelopes.
+  - launch four release qbind-node processes.
+  - scrape metrics from all four nodes.
+  - capture stderr/stdout logs.
+  - capture Run033 and Run040 probe lines.
+  - hash sequence files before/after candidate validation.
+  - assert validation-only invariants.
+  - archive artifacts under docs/devnet/run_085_*.
+
+Required tests / commands:
+- cargo test -p qbind-node --test run_080_pqc_peer_candidate_wire_send_tests
+- cargo test -p qbind-node --test run_079_pqc_peer_candidate_wire_live_dispatch_tests
+- cargo test -p qbind-node --test run_078_pqc_peer_candidate_wire_tests
+- cargo test -p qbind-node --test run_077_binary_peer_candidate_check_tests
+- cargo test -p qbind-node --test run_076_pqc_peer_candidate_validation_tests
+- cargo test -p qbind-node --lib pqc_peer_candidate_wire
+- cargo test -p qbind-node --lib metrics::tests::peer_candidate_send_metrics
+- cargo test -p qbind-node --lib
+- cargo test -p qbind-net --lib
+- cargo test -p qbind-crypto --lib
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example devnet_pqc_trust_bundle_helper
+- cargo build --release -p qbind-node --example devnet_pqc_root_helper
+- Run the new Run 085 harness.
+
+If source changes are made:
+- explain exactly why evidence could not be produced without the source change.
+- rerun all affected unit/integration tests.
+- do not hide any new boundary.
+
+Evidence document:
+Create:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_085.md
+
+Also update:
+- docs/whitepaper/contradiction.md
+
+Evidence doc must include:
+- exact objective
+- exact verdict
+- exact files changed
+- exact commands run
+- tests/evidence pass/fail status
+- binary/helper identities
+- N=4 MainNet material procedure
+- chain_id used
+- trust-bundle signature proof
+- Run033 / Run040 lines
+- baseline N=4 startup evidence
+- valid 0x05 send/validate evidence
+- receiver-disabled evidence
+- invalid/wrong-chain evidence
+- duplicate evidence
+- sequence file before/after hashes
+- live reload apply metrics proof
+- session eviction metrics proof
+- session/peer health evidence
+- consensus progress evidence if available
+- proof no active DummySig / DummyKem / DummyAead
+- proof no --p2p-trusted-root fallback
+- exact remaining C4 boundaries
+- immediate next action
+
+contradiction.md update rules:
+- If N=4 MainNet release-binary 0x05 validation-only matrix passes, record C4 narrowed to N=4 MainNet peer-candidate validation evidence.
+- Keep C4 open for:
+  - peer-driven live apply / propagation
+  - activation_epoch runtime source
+  - KMS/HSM custody
+  - in-binary/on-chain signing-key ratification
+  - production fast-sync / consensus-storage restore
+  - per-environment production trust-anchor operation
+- Do not close full C4.
+- Do not claim C5 closure.
+- If peer candidate mutates live trust state, burns sequence, evicts sessions, triggers apply, or causes Dummy/static fallback, record contradiction/regression.
+
+Expected verdict:
+- Strongest positive:
+  N=4 MainNet release-binary 0x05 matrix passes; valid/disabled/invalid/duplicate cases pass; validation-only invariants hold; no Dummy crypto; no fallback; sequence/apply/eviction invariants preserved.
+- Partial positive:
+  N=4 MainNet startup works but one or more 0x05 scenarios are incomplete, or evidence relies on harness-only injection rather than live frame exchange.
+- Negative:
+  candidate mutates state, burns sequence, evicts sessions, triggers apply, bypasses validation, introduces Dummy/static fallback, or regressions fail.
+
+Required final response:
+1. Exact verdict
+2. Exact files changed
+3. Exact commands run
+4. Tests/evidence run and pass/fail status
+5. What was proven
+6. What remains not solved
+7. Whether contradiction.md was updated and why
+8. Exact immediate next action recommended

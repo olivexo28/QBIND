@@ -384,3 +384,10 @@ next action is to commit a repeatable orchestration harness under
 `scripts/devnet/` so a sandboxed evidence run can re-capture the
 release-binary matrix and upgrade Run 081/082/083 to strongest
 positive on the no-`Dummy*` boundary)**.
+---
+
+## Run 084 follow-up note (2026-05-18) — committed release-binary N=2 `0x05` harness closes the Run 081 evidence gap
+
+DevNet Evidence Run 084 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_084.md`) adds the previously missing committed harness at `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh` and reruns the Run 081 release-binary N=2 `0x05` matrix end-to-end. The harness builds release `qbind-node` plus helper binaries, records sha256 and ELF BuildID, mints signed N=2 DevNet trust-bundle material, mints DevNet consensus signer keystores, generates valid / invalid-wrong-chain / duplicate candidate envelopes, starts two release `qbind-node` processes over loopback, scrapes `/metrics`, captures stderr, captures `[Run040]` and `[binary] Run 033` lines, hashes sequence files before/after, and asserts the Run 081 validation-only invariants.
+
+Run 084's final harness execution passes all scenarios: baseline startup, valid send/validate, receiver-disabled cheap-ignore, invalid wrong-chain reject, and duplicate suppression. The receiver sequence-file hash remains unchanged across candidate scenarios; live-reload apply and session-eviction metrics remain zero; sessions stay healthy; no `--p2p-trusted-root` fallback is observed. Unlike the original Run 081 capture, Run 084 supplies real DevNet consensus signer keystores plus `--validator-consensus-key` entries, so the captured Run 033 line is `active=true reason=n/a` with signer and key-provider loaded, and the final logs contain no `DummySig` / `DummyKem` / `DummyAead` evidence. This upgrades the Run 081 peer-candidate matrix evidence gap to **strongest positive for that scoped validation-only matrix**, while full C4 and C5 remain open for peer-driven live apply/propagation, activation_epoch runtime sourcing, KMS/HSM, signing-key ratification, fast-sync restore, and production per-environment trust-anchor operations.

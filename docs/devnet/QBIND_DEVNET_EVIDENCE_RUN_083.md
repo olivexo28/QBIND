@@ -707,3 +707,10 @@ peer-candidate features, no propagation, no peer-driven live apply, no
 `activation_epoch`, no KMS/HSM, no signing-key ratification, no
 fast-sync restore, no KEMTLS redesign, and no consensus redesign are
 required for this harness — it is operator-orchestration only.
+---
+
+## Run 084 follow-up note (2026-05-18) — deferred matrix rerun completed by committed harness
+
+DevNet Evidence Run 084 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_084.md`) completes the immediate next action left open by Run 083. The missing orchestration is now committed as `scripts/devnet/run_084_peer_candidate_0x05_matrix.sh`, and the harness reruns the release-binary N=2 `0x05` matrix end-to-end from committed revision `8170189975d21673eb0986c8d7f209f3befb0d92`.
+
+The rerun passes baseline startup, valid send/validate, receiver-disabled cheap-ignore, invalid wrong-chain reject, and duplicate suppression; captures sha256 + ELF BuildID; scrapes `/metrics`; captures stderr and `[Run040]`/`[binary] Run 033`; proves sequence-file non-mutation; and keeps live-reload apply/session-eviction counters at zero. Run 084 also removes the no-Dummy ambiguity for this matrix by supplying DevNet consensus signer keystores and explicit `--validator-consensus-key` entries, producing Run 033 `active=true reason=n/a` rather than the prior disabled-probe boundary. Run 083's deferred-matrix status is therefore superseded by Run 084's **strongest positive for the scoped N=2 validation-only peer-candidate matrix**; full C4/C5 remain open for the broader production items documented in Run 084.
