@@ -1,0 +1,499 @@
+# Network metrics
+consensus_net_inbound_total{kind="vote"} 8
+consensus_net_inbound_total{kind="proposal"} 2
+consensus_net_inbound_total{kind="other"} 0
+consensus_net_outbound_total{kind="vote_send_to"} 0
+consensus_net_outbound_total{kind="vote_broadcast"} 4
+consensus_net_outbound_total{kind="proposal_broadcast"} 2
+consensus_net_outbound_dropped_total 0
+consensus_net_inbound_channel_closed_total 0
+consensus_net_outbound_queue_depth 0
+
+# Runtime metrics
+consensus_events_total{kind="tick"} 4
+consensus_events_total{kind="incoming_message"} 0
+consensus_events_total{kind="shutdown"} 0
+consensus_runtime_ticks_per_second 0
+
+# spawn_blocking metrics
+consensus_net_spawn_blocking_total 0
+consensus_net_spawn_blocking_duration_bucket{le="0.001"} 0
+consensus_net_spawn_blocking_duration_bucket{le="0.01"} 0
+consensus_net_spawn_blocking_duration_bucket{le="0.1"} 0
+consensus_net_spawn_blocking_duration_bucket{le="+Inf"} 0
+
+# Channel capacity configuration
+consensus_channel_config{kind="event"} 1024
+consensus_channel_config{kind="outbound_command"} 1024
+consensus_channel_config{kind="async_peer_inbound"} 1024
+consensus_channel_config{kind="async_peer_outbound"} 256
+
+# Priority-based outbound metrics (T90.3)
+consensus_net_outbound_total{kind="vote_send_to", priority="critical"} 0
+consensus_net_outbound_total{kind="vote_send_to", priority="normal"} 0
+consensus_net_outbound_total{kind="vote_broadcast", priority="critical"} 0
+consensus_net_outbound_total{kind="vote_broadcast", priority="normal"} 0
+consensus_net_outbound_total{kind="proposal_broadcast", priority="critical"} 0
+consensus_net_outbound_total{kind="proposal_broadcast", priority="normal"} 0
+consensus_net_outbound_dropped_total{priority="critical"} 0
+consensus_net_outbound_dropped_total{priority="normal"} 0
+consensus_net_outbound_dropped_total{priority="low"} 0
+
+# Critical worker metrics (T90.3)
+consensus_net_outbound_critical_total 0
+consensus_net_outbound_critical_worker_total 0
+consensus_net_critical_backpressure_wait_bucket{le="0.001"} 0
+consensus_net_critical_backpressure_wait_bucket{le="0.01"} 0
+consensus_net_critical_backpressure_wait_bucket{le="0.1"} 0
+consensus_net_critical_backpressure_wait_bucket{le="+Inf"} 0
+
+# Consensus round duration metrics (T90.5)
+consensus_view_duration_count 0
+consensus_view_duration_total_ms 0
+consensus_view_duration_bucket{le="0.1"} 0
+consensus_view_duration_bucket{le="0.5"} 0
+consensus_view_duration_bucket{le="2.0"} 0
+consensus_view_duration_bucket{le="+Inf"} 0
+
+# Per-peer network metrics (T90.4)
+
+# P2P transport metrics (T172)
+qbind_p2p_connections_current 0
+qbind_p2p_bytes_sent_total 0
+qbind_p2p_bytes_received_total 0
+qbind_p2p_messages_sent_total{kind="consensus"} 0
+qbind_p2p_messages_sent_total{kind="dag"} 0
+qbind_p2p_messages_sent_total{kind="control"} 0
+qbind_p2p_messages_received_total{kind="consensus"} 10
+qbind_p2p_messages_received_total{kind="dag"} 0
+qbind_p2p_messages_received_total{kind="control"} 0
+
+# P2P discovery metrics (T205)
+qbind_p2p_outbound_peers 0
+qbind_p2p_inbound_peers 0
+qbind_p2p_known_peers 0
+qbind_p2p_discovery_enabled 0
+qbind_p2p_peer_discovered_total 0
+qbind_p2p_peer_evicted_total{reason="liveness"} 0
+qbind_p2p_heartbeat_sent_total 0
+qbind_p2p_heartbeat_failed_total 0
+
+# P2P diversity metrics (T206)
+qbind_p2p_diversity_mode 0
+qbind_p2p_diversity_distinct_buckets 0
+qbind_p2p_diversity_max_bucket_fraction_bps 0
+qbind_p2p_peer_rejected_diversity_total{reason="prefix24"} 0
+qbind_p2p_peer_rejected_diversity_total{reason="prefix16"} 0
+qbind_p2p_peer_rejected_diversity_total{reason="max_fraction"} 0
+qbind_p2p_diversity_violation_total{mode="warn"} 0
+qbind_p2p_diversity_violation_total{mode="enforce"} 0
+
+# P2P discovery and liveness metrics (T226)
+qbind_p2p_discovery_exchange_total 0
+qbind_p2p_discovery_exchange_success_total 0
+qbind_p2p_discovery_exchange_failure_total 0
+qbind_p2p_discovery_dial_attempt_total 0
+qbind_p2p_discovery_dial_success_total 0
+qbind_p2p_discovery_dial_failure_total 0
+qbind_p2p_heartbeat_success_total 0
+qbind_p2p_heartbeat_timeout_total 0
+qbind_p2p_liveness_score_bucket{range="excellent"} 0
+qbind_p2p_liveness_score_bucket{range="good"} 0
+qbind_p2p_liveness_score_bucket{range="fair"} 0
+qbind_p2p_liveness_score_bucket{range="poor"} 0
+qbind_p2p_liveness_score_bucket{range="critical"} 0
+qbind_p2p_config_discovery_interval_secs 0
+qbind_p2p_config_heartbeat_interval_secs 0
+qbind_p2p_config_heartbeat_timeout_secs 0
+qbind_p2p_config_max_heartbeat_failures 0
+qbind_p2p_config_target_outbound_peers 0
+qbind_p2p_config_max_known_peers 0
+qbind_p2p_pqc_root_mode 1
+qbind_p2p_pqc_roots_configured 1
+qbind_p2p_pqc_cert_verify_accepted_total 5
+qbind_p2p_pqc_cert_verify_rejected_total 0
+qbind_p2p_pqc_cert_rejected_unknown_root_total 0
+qbind_p2p_pqc_cert_rejected_wrong_suite_total 0
+qbind_p2p_pqc_cert_rejected_bad_signature_total 0
+qbind_p2p_pqc_cert_rejected_validator_mismatch_total 0
+qbind_p2p_pqc_cert_rejected_malformed_total 0
+qbind_p2p_pqc_cert_rejected_expired_total 0
+qbind_p2p_pqc_cert_verify_rejected_revoked_total 0
+qbind_p2p_pqc_trust_bundle_loaded 1
+qbind_p2p_pqc_trust_bundle_environment 2
+qbind_p2p_pqc_trust_bundle_active_roots 1
+qbind_p2p_pqc_trust_bundle_revoked_roots 0
+qbind_p2p_pqc_trust_bundle_revocations_configured_total 0
+qbind_p2p_pqc_trust_bundle_revocations_active_total 0
+qbind_p2p_pqc_trust_bundle_revocations_pending_total 0
+qbind_p2p_pqc_trust_bundle_revocations_root_active 0
+qbind_p2p_pqc_trust_bundle_revocations_root_pending 0
+qbind_p2p_pqc_trust_bundle_revocations_leaf_active 0
+qbind_p2p_pqc_trust_bundle_revocations_leaf_pending 0
+qbind_p2p_pqc_trust_bundle_sequence 1
+qbind_p2p_pqc_trust_bundle_signature_verified_total 1
+qbind_p2p_pqc_trust_bundle_signature_rejected_total 0
+qbind_p2p_pqc_trust_bundle_signing_keys_configured 1
+qbind_p2p_pqc_trust_bundle_sequence_highest 1
+qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total 0
+qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total 0
+qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total 0
+qbind_p2p_pqc_trust_bundle_activation_height_required 0
+qbind_p2p_pqc_trust_bundle_activation_height_current 0
+qbind_p2p_pqc_trust_bundle_activation_epoch_required 0
+qbind_p2p_pqc_trust_bundle_activation_epoch_current 0
+qbind_p2p_pqc_trust_bundle_activation_rejected_total 0
+qbind_p2p_session_eviction_attempt_total 0
+qbind_p2p_session_eviction_success_total 0
+qbind_p2p_session_eviction_failure_total 0
+qbind_p2p_session_eviction_sessions_evicted_total 0
+qbind_p2p_trust_bundle_live_reload_trigger_total 0
+qbind_p2p_trust_bundle_live_reload_apply_success_total 0
+qbind_p2p_trust_bundle_live_reload_apply_failure_total 0
+qbind_p2p_trust_bundle_live_reload_already_in_progress_total 0
+qbind_p2p_trust_bundle_live_reload_sessions_evicted_total 0
+qbind_p2p_trust_bundle_live_reload_last_applied_sequence 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_received_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_validated_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_rejected_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_dropped_oversize_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_rate_limited_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_duplicate_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_disabled_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total 3
+qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total 0
+qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total 0
+
+# Connection limit metrics (T105)
+async_peer_inbound_rejected_limit_total 0
+async_peer_outbound_rejected_limit_total 0
+
+# Storage operation latency metrics (T107)
+eezo_storage_op_duration_ms_count{op="put_block"} 0
+eezo_storage_op_duration_ms_sum{op="put_block"} 0
+eezo_storage_op_duration_ms_bucket{op="put_block",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="put_block",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="put_block",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="put_block",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="put_qc"} 0
+eezo_storage_op_duration_ms_sum{op="put_qc"} 0
+eezo_storage_op_duration_ms_bucket{op="put_qc",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="put_qc",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="put_qc",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="put_qc",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="put_last_committed"} 0
+eezo_storage_op_duration_ms_sum{op="put_last_committed"} 0
+eezo_storage_op_duration_ms_bucket{op="put_last_committed",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="put_last_committed",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="put_last_committed",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="put_last_committed",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="put_current_epoch"} 0
+eezo_storage_op_duration_ms_sum{op="put_current_epoch"} 0
+eezo_storage_op_duration_ms_bucket{op="put_current_epoch",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="put_current_epoch",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="put_current_epoch",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="put_current_epoch",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="get_block"} 0
+eezo_storage_op_duration_ms_sum{op="get_block"} 0
+eezo_storage_op_duration_ms_bucket{op="get_block",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="get_block",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="get_block",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="get_block",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="get_qc"} 0
+eezo_storage_op_duration_ms_sum{op="get_qc"} 0
+eezo_storage_op_duration_ms_bucket{op="get_qc",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="get_qc",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="get_qc",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="get_qc",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="get_last_committed"} 0
+eezo_storage_op_duration_ms_sum{op="get_last_committed"} 0
+eezo_storage_op_duration_ms_bucket{op="get_last_committed",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="get_last_committed",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="get_last_committed",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="get_last_committed",le="+Inf"} 0
+eezo_storage_op_duration_ms_count{op="get_current_epoch"} 0
+eezo_storage_op_duration_ms_sum{op="get_current_epoch"} 0
+eezo_storage_op_duration_ms_bucket{op="get_current_epoch",le="1"} 0
+eezo_storage_op_duration_ms_bucket{op="get_current_epoch",le="10"} 0
+eezo_storage_op_duration_ms_bucket{op="get_current_epoch",le="100"} 0
+eezo_storage_op_duration_ms_bucket{op="get_current_epoch",le="+Inf"} 0
+
+# Commit latency metrics (T107)
+eezo_commit_latency_ms_count 1
+eezo_commit_latency_ms_sum 0
+eezo_commit_latency_ms_bucket{le="1"} 1
+eezo_commit_latency_ms_bucket{le="10"} 1
+eezo_commit_latency_ms_bucket{le="100"} 1
+eezo_commit_latency_ms_bucket{le="+Inf"} 1
+
+# Suite transition metrics (T124)
+suite_epoch_transitions_total{result="ok"} 0
+suite_epoch_transitions_total{result="rejected"} 0
+suite_epoch_transitions_total{result="total"} 0
+
+# Runtime suite transition metrics (T125)
+suite_epoch_runtime_transitions_total{result="ok"} 0
+suite_epoch_runtime_transitions_total{result="rejected"} 0
+suite_epoch_runtime_transitions_total{result="total"} 0
+
+# Consensus progress metrics (T127)
+qbind_consensus_qcs_formed_total 5
+qbind_consensus_votes_observed_total 9
+qbind_consensus_votes_observed_current_view 0
+qbind_consensus_view_changes_total 5
+qbind_consensus_leader_changes_total 2
+qbind_consensus_qc_formation_latency_ms_count 5
+qbind_consensus_qc_formation_latency_ms_sum 544
+qbind_consensus_qc_formation_latency_ms_bucket{le="100"} 1
+qbind_consensus_qc_formation_latency_ms_bucket{le="500"} 5
+qbind_consensus_qc_formation_latency_ms_bucket{le="2000"} 5
+qbind_consensus_qc_formation_latency_ms_bucket{le="+Inf"} 5
+
+# Restore catchup metrics
+qbind_restore_catchup_requests_sent_total 0
+qbind_restore_catchup_requests_received_total 0
+qbind_restore_catchup_responses_sent_total 0
+qbind_restore_catchup_responses_received_total 0
+qbind_restore_catchup_blocks_applied_total 0
+qbind_restore_catchup_responses_rejected_total 0
+qbind_restore_catchup_proposals_deferred_total 0
+qbind_restore_catchup_mode_active 0
+qbind_restore_catchup_mode_exited_at_height 0
+
+# Binary view-timeout metrics (B14)
+qbind_consensus_view_timeouts_emitted_total 0
+qbind_consensus_inbound_timeouts_delivered_total 0
+qbind_consensus_inbound_timeouts_engine_accepted_total 0
+qbind_consensus_timeout_certificates_formed_total 0
+qbind_consensus_outbound_new_views_sent_total 0
+qbind_consensus_inbound_new_views_delivered_total 0
+qbind_consensus_inbound_new_views_engine_accepted_total 0
+qbind_consensus_view_timeout_advances_total 0
+qbind_consensus_view_timeout_decode_failures_total 0
+qbind_consensus_view_timeout_engine_rejects_total 0
+
+# Binary timeout/new-view crypto verification (Run 030)
+qbind_consensus_inbound_timeout_verify_accepted_total 0
+qbind_consensus_inbound_timeout_verify_rejected_total 0
+qbind_consensus_inbound_timeout_rejected_unknown_validator_total 0
+qbind_consensus_inbound_timeout_rejected_missing_key_total 0
+qbind_consensus_inbound_timeout_rejected_wrong_suite_total 0
+qbind_consensus_inbound_timeout_rejected_unsupported_suite_total 0
+qbind_consensus_inbound_timeout_rejected_bad_signature_total 0
+qbind_consensus_inbound_timeout_rejected_duplicate_total 0
+qbind_consensus_inbound_timeout_engine_accepted_total 0
+qbind_consensus_inbound_timeout_engine_rejected_total 0
+qbind_consensus_inbound_newview_verify_accepted_total 0
+qbind_consensus_inbound_newview_verify_rejected_total 0
+qbind_consensus_inbound_newview_rejected_missing_evidence_total 0
+qbind_consensus_inbound_newview_rejected_evidence_mismatch_total 0
+qbind_consensus_inbound_newview_rejected_duplicate_signer_total 0
+qbind_consensus_inbound_newview_rejected_mixed_view_total 0
+qbind_consensus_inbound_newview_rejected_insufficient_quorum_total 0
+qbind_consensus_inbound_newview_rejected_unknown_validator_total 0
+qbind_consensus_inbound_newview_rejected_missing_key_total 0
+qbind_consensus_inbound_newview_rejected_wrong_suite_total 0
+qbind_consensus_inbound_newview_rejected_unsupported_suite_total 0
+qbind_consensus_inbound_newview_rejected_bad_signature_total 0
+qbind_consensus_inbound_newview_rejected_high_qc_mismatch_total 0
+qbind_consensus_inbound_newview_engine_accepted_total 0
+qbind_consensus_inbound_newview_engine_rejected_total 0
+qbind_consensus_outbound_timeout_signing_success_total 0
+qbind_consensus_outbound_timeout_signing_failure_total 0
+qbind_consensus_view_advances_due_to_verified_tc_total 0
+qbind_consensus_timeout_crypto_verify_latency_ns_total 0
+qbind_consensus_timeout_crypto_verify_latency_observations_total 0
+
+# Binary view-timeout exponential-backoff pacing (Run 046)
+qbind_consensus_view_timeout_current_threshold_ticks 50
+qbind_consensus_view_timeout_backoff_level 0
+qbind_consensus_view_timeout_backoff_resets_total 0
+qbind_consensus_view_timeout_backoff_increases_total 0
+qbind_consensus_view_timeout_max_cap_hits_total 0
+
+# Consensus committed anchor metrics
+qbind_consensus_committed_height 0
+qbind_consensus_committed_block_info{block_id="00000000000000000000000000000000ffffffffffffffffffffffffffffffff"} 1
+
+# Per-validator vote metrics (T128, T129)
+
+# View lag metrics (T128)
+qbind_consensus_current_view 3
+qbind_consensus_highest_seen_view 3
+qbind_consensus_view_lag 0
+
+# Per-validator equivocation metrics (T129)
+
+# KEM operation metrics (T137)
+qbind_net_kem_encaps_total 0
+qbind_net_kem_decaps_total 0
+qbind_net_kem_encaps_latency_ms_bucket{le="0.1"} 0
+qbind_net_kem_encaps_latency_ms_bucket{le="1"} 0
+qbind_net_kem_encaps_latency_ms_bucket{le="10"} 0
+qbind_net_kem_encaps_latency_ms_bucket{le="+Inf"} 0
+qbind_net_kem_encaps_latency_ms_count 0
+qbind_net_kem_decaps_latency_ms_bucket{le="0.1"} 0
+qbind_net_kem_decaps_latency_ms_bucket{le="1"} 0
+qbind_net_kem_decaps_latency_ms_bucket{le="10"} 0
+qbind_net_kem_decaps_latency_ms_bucket{le="+Inf"} 0
+qbind_net_kem_decaps_latency_ms_count 0
+
+# MainNet profile invariants (T237)
+qbind_mainnet_profile_invariants_ok 0
+
+# Timeout verification activation (Run 031, C5)
+qbind_timeout_verification_active 1
+# Timeout verification signer loaded (Run 032, C5)
+qbind_timeout_verification_signer_loaded 1
+# Timeout verification key provider (Run 033, C5)
+qbind_timeout_verification_key_provider_loaded 1
+qbind_timeout_verification_validator_count 4
+
+# DAG coupling validation metrics (T191)
+qbind_dag_coupling_validation_total{result="ok"} 0
+qbind_dag_coupling_validation_total{result="not_required"} 0
+qbind_dag_coupling_validation_total{result="uncoupled_missing"} 0
+qbind_dag_coupling_validation_total{result="uncoupled_mismatch"} 0
+qbind_dag_coupling_validation_total{result="unknown_batches"} 0
+qbind_dag_coupling_validation_total{result="internal_error"} 0
+qbind_dag_coupling_rejected_total{reason="uncoupled_missing"} 0
+qbind_dag_coupling_rejected_total{reason="uncoupled_mismatch"} 0
+qbind_dag_coupling_rejected_total{reason="unknown_batches"} 0
+qbind_dag_coupling_rejected_total{reason="internal_error"} 0
+
+# T192: Block-level DAG coupling invariant check metrics
+qbind_dag_coupling_block_check_total{result="not_checked"} 0
+qbind_dag_coupling_block_check_total{result="ok"} 0
+qbind_dag_coupling_block_check_total{result="missing"} 0
+qbind_dag_coupling_block_check_total{result="mismatch"} 0
+qbind_dag_coupling_block_check_total{result="internal_error"} 0
+qbind_dag_coupling_block_mismatch_total 0
+qbind_dag_coupling_block_missing_total 0
+
+# T196: Monetary engine telemetry metrics (shadow mode)
+qbind_monetary_phase 0
+qbind_monetary_r_target_annual_bps 0
+qbind_monetary_r_inf_annual_bps 0
+qbind_monetary_fee_coverage_ratio_scaled 0
+qbind_monetary_phase_recommendation 0
+qbind_monetary_smoothed_annual_fee_revenue_scaled 0
+qbind_monetary_decisions_total 0
+
+# T197: Monetary mode and seigniorage metrics
+qbind_monetary_mode 0
+qbind_monetary_issuance_total{bucket="validators"} 0
+qbind_monetary_issuance_total{bucket="treasury"} 0
+qbind_monetary_issuance_total{bucket="insurance"} 0
+qbind_monetary_issuance_total{bucket="community"} 0
+qbind_monetary_decisions_applied_total{mode="shadow"} 0
+qbind_monetary_decisions_applied_total{mode="active"} 0
+
+# T199: Epoch-level monetary state metrics
+qbind_monetary_epoch_last_index 0
+qbind_monetary_epoch_decisions_total 0
+
+# T204: Phase transition metrics
+qbind_monetary_stake_ratio_bps 0
+qbind_monetary_fee_coverage_ratio_bps 0
+qbind_monetary_phase_transitions_total{from="Bootstrap",to="Transition"} 0
+qbind_monetary_phase_transitions_total{from="Transition",to="Mature"} 0
+
+# Consensus metrics (T154)
+qbind_consensus_proposals_total{result="accepted"} 3
+qbind_consensus_proposals_total{result="rejected"} 0
+qbind_consensus_votes_total{result="accepted"} 8
+qbind_consensus_votes_total{result="invalid"} 0
+qbind_consensus_timeouts_total 0
+qbind_consensus_view_number 3
+
+# Mempool metrics (T154)
+qbind_mempool_txs_total 0
+qbind_mempool_inserted_total 0
+qbind_mempool_rejected_total{reason="full"} 0
+qbind_mempool_rejected_total{reason="invalid_signature"} 0
+qbind_mempool_rejected_total{reason="invalid_nonce"} 0
+qbind_mempool_rejected_total{reason="other"} 0
+qbind_mempool_committed_total 0
+
+# Execution metrics (T154/T155)
+qbind_execution_txs_applied_total 0
+qbind_execution_block_apply_seconds_count 0
+qbind_execution_block_apply_seconds_sum 0
+qbind_execution_block_apply_seconds_bucket{le="0.001"} 0
+qbind_execution_block_apply_seconds_bucket{le="0.01"} 0
+qbind_execution_block_apply_seconds_bucket{le="0.1"} 0
+qbind_execution_block_apply_seconds_bucket{le="+Inf"} 0
+qbind_execution_errors_total{reason="nonce_mismatch"} 0
+qbind_execution_errors_total{reason="other"} 0
+qbind_execution_queue_len 0
+qbind_execution_queue_full_total 0
+qbind_execution_worker_restarts_total 0
+
+# T157: Stage A parallel execution metrics
+qbind_execution_parallel_workers_active 0
+qbind_execution_parallel_sender_partitions_bucket{le="4"} 0
+qbind_execution_parallel_sender_partitions_bucket{le="16"} 0
+qbind_execution_parallel_sender_partitions_bucket{le="64"} 0
+qbind_execution_parallel_sender_partitions_bucket{le="+Inf"} 0
+qbind_execution_parallel_sender_partitions_sum 0
+qbind_execution_parallel_sender_partitions_count 0
+qbind_execution_block_parallel_seconds_bucket{le="0.001"} 0
+qbind_execution_block_parallel_seconds_bucket{le="0.01"} 0
+qbind_execution_block_parallel_seconds_bucket{le="0.1"} 0
+qbind_execution_block_parallel_seconds_bucket{le="+Inf"} 0
+qbind_execution_block_parallel_seconds_sum 0
+qbind_execution_block_parallel_seconds_count 0
+qbind_execution_parallel_fallback_total 0
+
+# T187: Stage B parallel execution metrics
+qbind_execution_stage_b_enabled 0
+qbind_execution_stage_b_blocks_total{mode="parallel"} 0
+qbind_execution_stage_b_blocks_total{mode="fallback"} 0
+qbind_execution_stage_b_mismatch_total 0
+qbind_execution_stage_b_levels_histogram_bucket{le="4"} 0
+qbind_execution_stage_b_levels_histogram_bucket{le="16"} 0
+qbind_execution_stage_b_levels_histogram_bucket{le="64"} 0
+qbind_execution_stage_b_levels_histogram_bucket{le="+Inf"} 0
+qbind_execution_stage_b_parallel_seconds_bucket{le="0.001"} 0
+qbind_execution_stage_b_parallel_seconds_bucket{le="0.01"} 0
+qbind_execution_stage_b_parallel_seconds_bucket{le="0.1"} 0
+qbind_execution_stage_b_parallel_seconds_bucket{le="+Inf"} 0
+qbind_execution_stage_b_parallel_seconds_sum 0
+qbind_execution_stage_b_parallel_seconds_count 0
+
+# Signer/Keystore metrics (T154)
+qbind_signer_sign_requests_total{kind="proposal"} 0
+qbind_signer_sign_requests_total{kind="vote"} 0
+qbind_signer_sign_requests_total{kind="timeout"} 0
+qbind_signer_sign_failures_total 0
+qbind_keystore_load_success_total{backend="PlainFs"} 0
+qbind_keystore_load_success_total{backend="EncryptedFsV1"} 0
+qbind_keystore_load_failure_total{backend="PlainFs"} 0
+qbind_keystore_load_failure_total{backend="EncryptedFsV1"} 0
+
+# HSM/PKCS#11 signer metrics (T211, T214)
+qbind_hsm_sign_success_total 0
+qbind_hsm_sign_error_total{kind="config"} 0
+qbind_hsm_sign_error_total{kind="runtime"} 0
+qbind_hsm_sign_last_latency_ms 0
+qbind_hsm_startup_ok 0
+
+# Remote signer client metrics (T212)
+qbind_remote_sign_requests_total{kind="proposal"} 0
+qbind_remote_sign_requests_total{kind="vote"} 0
+qbind_remote_sign_requests_total{kind="timeout"} 0
+qbind_remote_sign_failures_total{reason="transport"} 0
+qbind_remote_sign_failures_total{reason="timeout"} 0
+qbind_remote_sign_failures_total{reason="server_reject"} 0
+qbind_remote_sign_failures_total{reason="protocol"} 0
+qbind_remote_sign_last_latency_ms 0
+
+# T215: State snapshot metrics
+qbind_snapshot_last_height 0
+qbind_snapshot_last_duration_ms 0
+qbind_snapshot_last_size_bytes 0
+qbind_snapshot_last_created_at_ms 0
+qbind_snapshot_success_total 0
+qbind_snapshot_failure_total 0
+qbind_snapshot_in_progress 0

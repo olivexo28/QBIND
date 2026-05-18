@@ -1,0 +1,57 @@
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=3 attempted=3 sent=3 failed=0 seq=1 fp_prefix=4f9e1e44 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=3 attempted=3 sent=3 failed=0 seq=1 fp_prefix=4f9e1e44 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: P2P peer-candidate wire receiver armed for validation-only acceptance (NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched). No production gossip dispatcher publishes peer-candidate frames on the wire in this run — the armed receiver is library-level only (frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 079: installing live peer-candidate wire dispatcher (env=mainnet sequence_baseline=1 signing_keys=1).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[binary] Run 078: peer-candidate wire frame observed; outcome=duplicate-suppressed; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=3 attempted=3 sent=3 failed=0 seq=1 fp_prefix=4f9e1e44 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: P2P peer-candidate wire receiver armed for validation-only acceptance (NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched). No production gossip dispatcher publishes peer-candidate frames on the wire in this run — the armed receiver is library-level only (frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 079: installing live peer-candidate wire dispatcher (env=mainnet sequence_baseline=1 signing_keys=1).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=rejected; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=3 attempted=3 sent=3 failed=0 seq=1 fp_prefix=4f9e1e44 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 080: peer-candidate wire publish attempt complete; targets=3 attempted=3 sent=3 failed=0 seq=1 fp_prefix=4f9e1e44 outcome=validation-only/not-applied/not-propagated/no-sequence-write/no-session-eviction
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: P2P peer-candidate wire receiver armed for validation-only acceptance (NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched). No production gossip dispatcher publishes peer-candidate frames on the wire in this run — the armed receiver is library-level only (frame discriminator 0x05, envelope version 1, domain tag "QBIND:PQC_TRUST_BUNDLE_PEER_CANDIDATE_WIRE:v1"). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_078.md.
+[binary] Run 079: installing live peer-candidate wire dispatcher (env=mainnet sequence_baseline=1 signing_keys=1).
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary] Run 078: peer-candidate wire frame observed; outcome=validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=<unknown>)
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled

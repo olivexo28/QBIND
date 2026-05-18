@@ -1,0 +1,9 @@
+qbind-node[validator=V0]: starting in environment=MainNet chain_id=0x51424e444d41494e scope=MAIN profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:19894 peers=3 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:19894 (node_id=NodeId(6370a7bc416f23ae))
+[T175] P2P node builder: validator=ValidatorId(0) node_id=NodeId(6370a7bc416f23ae) num_validators=4 peer_kem_overrides=3 mutual_auth=Required
+[P2P] Dial 127.0.0.1:19893: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Dial 127.0.0.1:19891: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Dial 127.0.0.1:19892: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Peer NodeId(51b0946e9af3d925) connected
+[P2P] Peer NodeId(9ff0738e3a6c89c7) connected
+[P2P] Peer NodeId(f30b500bde188fff) connected

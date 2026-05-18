@@ -1,0 +1,36 @@
+qbind-node[validator=V3]: starting in environment=MainNet chain_id=0x51424e444d41494e scope=MAIN profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:19853 peers=3 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:19853 (node_id=NodeId(51b0946e9af3d925))
+[T175] P2P node builder: validator=ValidatorId(3) node_id=NodeId(51b0946e9af3d925) num_validators=4 peer_kem_overrides=3 mutual_auth=Required
+[P2P] dial 127.0.0.1:19852 attempt 1/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 100ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19851 attempt 1/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 100ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19850 attempt 1/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 100ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19852 attempt 2/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 200ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19851 attempt 2/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 200ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19850 attempt 2/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 200ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19850 attempt 3/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 400ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19852 attempt 3/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 400ms (B8 initial-dial retry)
+[P2P] dial 127.0.0.1:19851 attempt 3/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 400ms (B8 initial-dial retry)
+[P2P] Accepted connection from 127.0.0.1:42610
+[P2P] Accepted connection from 127.0.0.1:42612
+[P2P] Inbound connection from 127.0.0.1:42612 bound to deterministic NodeId NodeId(9ff0738e3a6c89c7) via inbound identity resolver (B8, test-grade)
+[P2P] Peer NodeId(9ff0738e3a6c89c7) connected
+[P2P] dial 127.0.0.1:19851 attempt 4/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 800ms (B8 initial-dial retry)
+[P2P] Dial 127.0.0.1:19852: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] dial 127.0.0.1:19850 attempt 4/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 800ms (B8 initial-dial retry)
+[P2P] Peer NodeId(9ff0738e3a6c89c7) connected
+[P2P] dial 127.0.0.1:19852 succeeded on attempt 4/8 (B8 initial-dial retry)
+[P2P] Accepted connection from 127.0.0.1:42622
+[P2P] Accepted connection from 127.0.0.1:42634
+[P2P] Inbound connection from 127.0.0.1:42634 bound to deterministic NodeId NodeId(f30b500bde188fff) via inbound identity resolver (B8, test-grade)
+[P2P] Peer NodeId(f30b500bde188fff) connected
+[P2P] Dial 127.0.0.1:19851: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] dial 127.0.0.1:19850 attempt 5/8 failed (transient: I/O error: Connection refused (os error 111)); retrying in 1000ms (B8 initial-dial retry)
+[P2P] Accepted connection from 127.0.0.1:42638
+[P2P] Accepted connection from 127.0.0.1:42642
+[P2P] Peer NodeId(f30b500bde188fff) connected
+[P2P] dial 127.0.0.1:19851 succeeded on attempt 5/8 (B8 initial-dial retry)
+[P2P] Inbound connection from 127.0.0.1:42642 bound to deterministic NodeId NodeId(6370a7bc416f23ae) via inbound identity resolver (B8, test-grade)
+[P2P] Peer NodeId(6370a7bc416f23ae) connected
+[P2P] Dial 127.0.0.1:19850: using per-peer KEM pk + validator-id override (pk_len=1184, has_vid=true)
+[P2P] Peer NodeId(6370a7bc416f23ae) connected
+[P2P] dial 127.0.0.1:19850 succeeded on attempt 6/8 (B8 initial-dial retry)

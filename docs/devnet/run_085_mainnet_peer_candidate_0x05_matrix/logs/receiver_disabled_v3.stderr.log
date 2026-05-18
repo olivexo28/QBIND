@@ -1,0 +1,33 @@
+[restore] no --restore-from-snapshot requested; normal startup.
+[metrics_http] Enabling metrics HTTP server on 127.0.0.1:9413 (from QBIND_METRICS_HTTP_ADDR)
+[metrics] Spawning metrics HTTP server on 127.0.0.1:9413 (set via QBIND_METRICS_HTTP_ADDR)
+[binary] P2P mode: starting transport + consensus loop. environment=MainNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 037: --p2p-mutual-auth=required on environment=mainnet is using the production-honest PQC static-root cert-verification path. NOTE: KEM/AEAD primitives on the binary path are still test-grade and remain a separate C4 piece (not C4(c)); MainNet readiness is therefore not yet implied. See docs/whitepaper/contradiction.md C4.
+[metrics_http] Listening on 127.0.0.1:9413
+[binary] Run 057: trust-bundle activation gate satisfied (required_height=None current_height=Some(0) required_epoch=None current_epoch=None)
+[binary] Run 055: trust-bundle sequence persistence env=mainnet chain_id=51424e444d41494e path=/tmp/qbind-run085-mainnet-peer-candidate-0x05-matrix/data/v3/pqc_trust_bundle_sequence.json equal-sequence same-fingerprint (no write) sequence=1 fp=4f9e1e44
+[binary] Run 050/051: trust bundle loaded path=/tmp/qbind-run085-mainnet-peer-candidate-0x05-matrix/material/trust-bundle.json env=mainnet fp=4f9e1e44bd7aadd6a751bd479675a56a60614a0399252f76765e8bb128e05e6f active_roots=1 revoked_roots=0 sequence=1 valid_from=0 valid_until=18446744073709551615 signature=verified(signing_key_id=14480f43..) signing_keys_configured=1. Bundle root IDs: [3c4592db..]
+[binary] Run 062: trust-bundle revocation activation (configured=0 active=0 pending=0 root_active=0 root_pending=0 leaf_active=0 leaf_pending=0)
+[binary] Run 063: local-leaf issuer-root startup self-check passed (local_issuer_root_id=3c4592db.. bundle_fp=4f9e1e44.. active_revoked_root_ids=0)
+[binary] Run 039: pqc_root_mode=pqc-static-root transport_kem_suite=ml-kem-768 configured_roots=1 leaf_credentials_present=true peer_leaf_certs=3 (root fingerprints: [id=3c4592db.. suite=100 fp=2a5fd4c3])
+[binary] Run 052: revoked_leaf_fingerprints=0 (from trust bundle env=mainnet sequence=1)
+[binary] Run 071: live PQC trust-state initialized (env=mainnet sequence=1 fingerprint=4f9e1e44bd7aadd6a751bd479675a56a60614a0399252f76765e8bb128e05e6f active_roots=1 revoked_roots_active=0 revoked_leaves_active=0)
+[Run040] P2pNodeBuilder: pqc_root_mode=pqc-static-root sig_suite_id=100 transport_kem_suite_id=100 transport_kem_suite_name=ml-kem-768 dummy_kem_registered=false transport_aead_suite_id=101 transport_aead_suite_name=chacha20-poly1305 dummy_aead_registered=false configured_roots=1 leaf_credentials_present=true
+[binary] P2P transport up. Listen address: 127.0.0.1:19873, static peers: 3
+[binary] Consensus loop config: local_validator_id=ValidatorId(3) num_validators=4 restore_baseline=false interconnect=p2p
+[binary] Multi-validator P2P (4 validators): inbound P2P consensus messages are routed into BasicHotStuffEngine via on_proposal_event / on_vote_event; engine actions flow back out through P2pConsensusNetwork.
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[binary] Run 032: validator signer loaded — backend=local-keystore-plain validator_id=ValidatorId(3) suite_id=suite_100 pk_fingerprint=ef52ea6f... keystore_path=/tmp/qbind-run085-mainnet-peer-candidate-0x05-matrix/signers/v3
+[binary] Run 033: SuiteAwareValidatorKeyProvider built honestly — loaded(validators=4,peer_ids=[0, 1, 2],suite_ids=[100],fingerprints=["v0:s100:492b5f73...", "v1:s100:fb4166bc...", "v2:s100:5bb25450...", "v3:s100:ef52ea6f..."])
+[binary] Run 033: timeout-verification probe: active=true reason=n/a policy=OptionalActivate validators=4 chain_id=chain_51424e444d41494e supported_suite_ids=[100] local_signer=loaded(backend=local-keystore-plain,validator=ValidatorId(3),suite=suite_100) peer_key_provider=loaded(validators=4,peer_ids=[0, 1, 2],suite_ids=[100],fingerprints=["v0:s100:492b5f73...", "v1:s100:fb4166bc...", "v2:s100:5bb25450...", "v3:s100:ef52ea6f..."])
+[binary] Run 033: timeout verification ACTIVE — Arc<TimeoutVerificationContext> threaded into BinaryConsensusLoopIo::verification_ctx. Inbound TimeoutMsg / NewView / TC traffic will be verified before engine ingestion; locally-emitted timeouts will be signed before broadcast. signer_loaded=1 key_provider_loaded=1 validator_count=4
+[binary] P2P node started. Press Ctrl+C to exit.
+[binary-consensus] Starting consensus loop: local_id=ValidatorId(3) num_validators=4 tick=100ms restore_baseline=false interconnect=p2p late_peer_reemit=on timeout_verification=verify+sign
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[P2P] Inbound connection error: Handshake error: channel error: Io(Error { kind: UnexpectedEof, message: "failed to fill whole buffer" })
+[binary-consensus] committed_anchor height=0 block_id=00000000000000000000000000000000ffffffffffffffffffffffffffffffff
+[snapshot] periodic snapshot skipped: committed height is zero
+[binary-consensus] committed_anchor height=1 block_id=0100000000000000010000000000000000000000000000000000000000000000

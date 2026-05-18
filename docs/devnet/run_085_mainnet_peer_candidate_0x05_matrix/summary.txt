@@ -1,0 +1,27 @@
+Run 085 MainNet peer-candidate 0x05 matrix
+outdir: /tmp/qbind-run085-mainnet-peer-candidate-0x05-matrix
+archive_dir: /home/runner/work/QBIND/QBIND/docs/devnet/run_085_mainnet_peer_candidate_0x05_matrix
+repo: /home/runner/work/QBIND/QBIND
+git_commit: c28b70b0aa72cb34bd343dfa58fcdb2e476e3ea6
+chain_id: 51424e444d41494e
+
+release artifacts:
+  /home/runner/work/QBIND/QBIND/target/release/qbind-node
+    sha256: d28c5493d3782dea5a20b03449eb01ab582f69c32e36d0a657c5f356fdb2ca49
+    build_id: c7ae28418d107f7e467fd4346f85644e6fcd943a
+  /home/runner/work/QBIND/QBIND/target/release/examples/devnet_pqc_trust_bundle_helper
+    sha256: 39b4a9a5d61aa3c3c0117ceefe5849d087f13e0ee5024b90d95ebaeb08076efb
+    build_id: 5050ded02408a3a27d1eccc382a5f48fa47b2501
+  /home/runner/work/QBIND/QBIND/target/release/examples/devnet_pqc_root_helper
+    sha256: 58298104e52b687d28d6ca5a0606f54191cad28a84f2b8cda896a43dbbe005e4
+    build_id: 7e514ca79e45bea41d743266f3224f631769902f
+  /home/runner/work/QBIND/QBIND/target/release/examples/devnet_consensus_signer_keystore_helper
+    sha256: 18f455bd0e8891381ee00dd31472beade2409d843ddae25fcf327843620d8b4c
+    build_id: ebb61100054d043ad0e0d2dc4272968641233f38
+
+scenario status: pass
+  baseline N=4 MainNet startup: pass
+  valid 0x05 send/validate: pass
+  receiver-disabled cheap-ignore: pass
+  invalid wrong-chain reject: pass
+  duplicate suppression: pass
