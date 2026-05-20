@@ -108,8 +108,7 @@ pub mod p2p_node_builder;
 /// Run 072 — production-honest internal P2P session-eviction hook.
 pub mod p2p_session_eviction;
 pub mod p2p_tcp;
-pub mod peer_key_provider;
-// Run 037 — production-honest PQC KEMTLS root-key distribution config.
+pub mod peer_key_provider;// Run 037 — production-honest PQC KEMTLS root-key distribution config.
 pub mod pqc_root_config;
 // Run 037 — DevNet-only helper to mint real ML-DSA-44-signed delegation certs.
 pub mod pqc_devnet_helper;
@@ -244,6 +243,7 @@ pub mod signer_loader;
 pub mod snapshot_restore;
 pub mod startup_validation;
 pub mod storage;
+pub mod production_consensus_storage;
 pub mod timeout_verification_bridge;
 pub mod validator_config;
 pub mod validator_signer;

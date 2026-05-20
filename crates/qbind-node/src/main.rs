@@ -75,6 +75,9 @@ use qbind_node::metrics_http::{
 use qbind_node::node_config::{ConfigProfile, NetworkMode};
 use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
+use qbind_node::production_consensus_storage::{
+    open_production_consensus_storage, OpenedProductionConsensusStorage,
+};
 use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_node::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeState};
 
@@ -1221,6 +1224,45 @@ async fn main() {
         }
     };
 
+    // ------------------------------------------------------------------
+    // Run 093: open the canonical production-binary `ConsensusStorage`
+    // at `<data_dir>/consensus`, run T104 schema-compat and M16
+    // incomplete-epoch-transition checks, and probe the explicit
+    // startup state (`NoConsensusStorage` / `PresentNoCommittedEpoch` /
+    // `CommittedEpoch(u64)`).
+    //
+    // This is storage-lifecycle groundwork only. Run 093 does NOT
+    // consume the observed epoch for PQC trust-bundle activation;
+    // every activation site continues to build
+    // `ActivationContext { current_epoch: None }`, preserving the
+    // Run 091 fail-closed `CurrentEpochUnavailable` boundary on every
+    // environment. See
+    // `crates/qbind-node/src/production_consensus_storage.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md`, and
+    // `docs/whitepaper/contradiction.md` C4.
+    //
+    // Fail-closed on any open / schema / recovery / probe failure —
+    // we never silently degrade to "no storage" when `data_dir` is
+    // set.
+    // ------------------------------------------------------------------
+    let consensus_storage_lifecycle: OpenedProductionConsensusStorage =
+        match open_production_consensus_storage(&config) {
+            Ok(opened) => {
+                eprintln!("{}", opened.log_summary());
+                opened
+            }
+            Err(e) => {
+                eprintln!("[binary] FATAL: Run 093 production consensus storage open failed: {}", e);
+                eprintln!(
+                    "[binary] qbind-node refuses to start because the canonical \
+                     <data_dir>/consensus directory could not be honestly opened, \
+                     schema-checked, or recovery-verified. No fallback path. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md and \
+                     docs/whitepaper/contradiction.md C4."
+                );
+                std::process::exit(1);
+            }
+        };
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
@@ -1262,6 +1304,16 @@ async fn main() {
     eprintln!("[binary] Stopping metrics HTTP server...");
     drop(metrics_shutdown_tx);
     let _ = metrics_handle.await;
+    // Run 093: explicitly drop the production consensus-storage handle
+    // here so the RocksDB lock is released on clean shutdown rather
+    // than at unwind. The handle was held continuously from open
+    // (above) through consensus loop teardown (handled inside
+    // `run_local_mesh_node` / `run_p2p_node`).
+    eprintln!(
+        "[binary] Run 093 consensus storage shutdown: state={} (releasing RocksDB lock)",
+        consensus_storage_lifecycle.state.tag(),
+    );
+    drop(consensus_storage_lifecycle);
     eprintln!("[binary] Shutdown complete.");
 }
 

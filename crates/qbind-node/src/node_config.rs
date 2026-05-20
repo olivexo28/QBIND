@@ -5276,6 +5276,20 @@ impl NodeConfig {
         self.data_dir.as_ref().map(|d| d.join("state_vm_v0"))
     }
 
+    /// Get the canonical path to the production consensus-storage
+    /// directory (Run 093).
+    ///
+    /// Returns `Some(<data_dir>/consensus)` if `data_dir` is set,
+    /// otherwise returns `None`. This is the deterministic, single
+    /// canonical location at which the production `qbind-node` binary
+    /// opens `RocksDbConsensusStorage` (no temp fallback, no
+    /// environment-dependent hidden path). See
+    /// `crates/qbind-node/src/production_consensus_storage.rs` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md`.
+    pub fn consensus_storage_dir(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().map(|d| d.join("consensus"))
+    }
+
     /// Get the chain ID for this node's environment.
     ///
     /// This chain ID should be used in all signing preimages:

@@ -2665,6 +2665,42 @@ under C4:
    from snapshot-rejoin without silently treating fresh-genesis
    as `current_epoch = 0`. Run 092 ships no source change and
    preserves the Run 091 fail-closed boundary exactly.
+   **Run 093 lands the first half of that coordinated work**: the
+   production `qbind-node` binary now opens
+   `RocksDbConsensusStorage` at the canonical
+   `<data_dir>/consensus` path (resolved by the new
+   `NodeConfig::consensus_storage_dir()` helper) on every
+   production startup (LocalMesh and P2P), once per process,
+   immediately after `VmV0RuntimeState::open_from_config` and
+   before the network-mode dispatch — preserving every early-exit
+   validation mode unchanged. It runs the T104
+   `ensure_compatible_schema` and M16
+   `verify_epoch_consistency_on_startup` checks before consensus
+   starts, probes `meta:current_epoch` through the existing
+   `ConsensusStorage::get_current_epoch` API, and surfaces an
+   explicit
+   `ConsensusStorageState::{NoConsensusStorage,PresentNoCommittedEpoch,CommittedEpoch(u64)}`
+   distinction whose `committed_epoch()` returns plain
+   `Option<u64>` and never collapses `NoConsensusStorage` or
+   `PresentNoCommittedEpoch` to `Some(0)`. Open / schema /
+   recovery / probe failures all fail-closed with non-zero exit;
+   the `Arc<RocksDbConsensusStorage>` handle is held in `main`'s
+   scope for the binary lifetime and dropped on clean shutdown.
+   **Trust-bundle activation behaviour is preserved unchanged**:
+   no call from `production_consensus_storage` into
+   `pqc_trust_activation` exists (pinned at the type level by
+   `run_093_does_not_expose_consensus_storage_state_to_activation_context`),
+   every `ActivationContext` construction in `main.rs` continues
+   to set `current_epoch: None`, and Run 091's
+   `CurrentEpochUnavailable` fail-closed boundary stays in effect
+   on every environment and every production call site. The
+   second half of the closure — wiring the binary-path consensus
+   loop's epoch transitions onto `apply_epoch_transition_atomic`
+   using the Run 093 handle, plus `StateSnapshotMeta.epoch`
+   parity, plus the trust-bundle epoch-consumption hand-off —
+   remains the documented next coordinated run(s) (preliminarily
+   Run 094 + a separate snapshot-format run + a separate
+   trust-bundle-hand-off run).
 2. **Peer-supplied / gossiped trust-bundle acceptance.** Runs
    069/073/074 accept **local files only**. There is no
    `BundleAnnounce` / `BundleRequest` over the wire, no admin-API
@@ -2805,7 +2841,7 @@ in §10):**
 
 ---
 
-## 11. Mapping to Runs 050–092
+## 11. Mapping to Runs 050–093
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -2849,6 +2885,7 @@ in §10):**
 | 090 | Operator-playbook prose update for the propagation-only lifecycle from Runs 087–089 (docs-only). Adds §6.G.9 / §6.G.10 / §6.G.11 / §6.G.12 / §6.G.13; renames §6.G to "validation-only and propagation-only"; extends §10 / §11 / §12. No source changes. | All §sections (esp. §1, §6.G, §10, §11, §12). |
 | 091 | **Partial-positive** boundary pin for the C4 sub-piece "`activation_epoch` runtime source": investigates and documents the available epoch sources (`MetaStore::get_current_epoch()`, `StateSnapshotMeta`, consensus engine), explains why none are wired into the trust-bundle activation gate today, and lands `crates/qbind-node/tests/run_091_pqc_trust_bundle_activation_epoch_tests.rs` (15 integration tests) pinning fail-closed `CurrentEpochUnavailable` behaviour on DevNet/TestNet/MainNet at the bundle-level, per-active-root, startup-load, reload-check, SIGHUP, and peer-candidate surfaces, plus an exhaustive-destructure compile-time gate against per-entry revocation `activation_epoch` schema drift. No source changes; no new metric families (the existing `pqc_trust_bundle_activation_epoch_*` gauges plus the combined `_activation_rejected_total` counter remain the canonical surface); preserves every Run 050–090 invariant. | §1, §3.10, §10.1, §11. |
 | 092 | **Partial-positive** follow-up to Run 091 attempting the narrow canonical pre-consensus epoch-source wiring for trust-bundle activation using the existing persisted `MetaStore` (`meta:current_epoch`) value. Source-level finding: the production `qbind-node` binary does NOT open `RocksDbConsensusStorage` (or any `ConsensusStorage`) anywhere under `crates/qbind-node/src/**` — every real call site lives under `crates/qbind-node/tests/**` or in `hotstuff_node_sim::EpochAwareNodeHotstuffHarness`. The binary therefore never writes `meta:current_epoch` on production runs, so the "existing persisted MetaStore epoch" the task asks about does not exist on a binary-run node. Wiring it requires a broad storage redesign (add canonical `<data_dir>/consensus` location to `NodeConfig`; open `RocksDbConsensusStorage` in `main.rs` before the trust-bundle gate; thread the binary-path consensus loop into `apply_epoch_transition_atomic`; extend `StateSnapshotMeta` with an additive `epoch` field for snapshot-rejoin parity; disambiguate fresh-genesis from snapshot-rejoin without silently treating fresh-genesis as `current_epoch = 0`) which is explicitly out of Run 092 scope. Run 092 preserves the Run 091 fail-closed `CurrentEpochUnavailable` boundary unchanged on every environment and production call site, preserves the Run 050–091 strict ordering exactly, and confirms by code inspection that every `ActivationContext` construction in `main.rs:296-303 / :540-547 / :898-905 / :939-942 / :1760-1767 / :2568 / :3418` continues to set `current_epoch: None`. No source-code change under `crates/**/src/**`; no test change under `crates/**/tests/**`; no new metric families; no new dependencies. Doc-only update: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_092.md` (new), `docs/whitepaper/contradiction.md` (Run 092 update), this runbook (§10.1 cross-reference + §11 row), `docs/protocol/QBIND_PEER_TRUST_BUNDLE_PROPAGATION_SAFETY.md` (§9 cross-reference). Recommended next: cross-cutting "Run 093 — binary `MetaStore` open + consensus-path epoch persistence + `StateSnapshotMeta` epoch parity" run scoped to the nine steps enumerated in the Run 092 evidence §"Immediate next action recommended". | §1, §3.10, §10.1, §11. |
+| 093 | **Partial-positive** for the bounded scope. Lands the **minimum production binary-path `ConsensusStorage` lifecycle and durable epoch persistence groundwork**: adds `NodeConfig::consensus_storage_dir()` resolving the canonical `<data_dir>/consensus` location; adds new module `crates/qbind-node/src/production_consensus_storage.rs` with `ConsensusStorageState::{NoConsensusStorage,PresentNoCommittedEpoch,CommittedEpoch(u64)}`, `OpenedProductionConsensusStorage`, `ProductionConsensusStorageError`, and `open_production_consensus_storage(&NodeConfig)`; wires this into `crates/qbind-node/src/main.rs` immediately after `VmV0RuntimeState::open_from_config` and before the network-mode dispatch (preserving all early-exit validation modes — `--p2p-trust-bundle-reload-check`, `--p2p-trust-bundle-reload-apply`, peer-candidate check — unchanged); runs T104 `ensure_compatible_schema` and M16 `verify_epoch_consistency_on_startup` before consensus starts; probes `meta:current_epoch` through the existing `ConsensusStorage::get_current_epoch` API (no synthetic epoch, no wall-clock, no block-height-as-epoch); fail-closed with non-zero exit on any open / schema / recovery / probe error; holds the `Arc<RocksDbConsensusStorage>` handle for the binary lifetime and drops cleanly on shutdown. `ConsensusStorageState::committed_epoch()` returns plain `Option<u64>` and **never** collapses `NoConsensusStorage` or `PresentNoCommittedEpoch` to `Some(0)`. Trust-bundle activation behaviour preserved unchanged: every `ActivationContext` in `main.rs` continues to set `current_epoch: None`, and Run 091's `CurrentEpochUnavailable` fail-closed boundary stays in effect on every environment and every production call site (no call from `production_consensus_storage` into `pqc_trust_activation` exists; pinned at the type level by `run_093_does_not_expose_consensus_storage_state_to_activation_context`). 7 new unit tests + 12 new integration tests (`crates/qbind-node/tests/run_093_production_consensus_storage_lifecycle_tests.rs`) cover the canonical path, the three startup-state variants, committed-epoch persistence across simulated restart through the existing MetaStore `put_current_epoch` / `get_current_epoch` APIs, RocksDB-lock-held second-open fail-closed, unwritable-data-dir fail-closed, no parallel epoch-write path, and the type-level no-conversion-to-`ActivationContext` invariant. Run 091 (15 / 15), Run 057 (12 / 12), Run 065 (12 / 12), Run 069 (12 / 12), Run 073 (10 / 10), Run 074 (10 / 10), Run 076 (16 / 16), Run 088 (5 / 5), full `qbind-node --lib` (1070 / 1070), `qbind-net --lib` (17 / 17), `qbind-crypto --lib` (68 / 68), and the release builds (`qbind-node` binary + `devnet_pqc_trust_bundle_helper` + `devnet_pqc_root_helper` examples) all pass with no regressions. N=1 release-binary smoke evidence under `docs/devnet/run_093_smoke_n1_{first_start,restart}.{stderr,stdout}.log` shows the canonical `<data_dir>/consensus` path created on disk and re-opened cleanly across restart. End-to-end committed-epoch persistence on the release binary is NOT yet proven — the production binary-path consensus loop does not yet emit epoch transitions onto `apply_epoch_transition_atomic`, so the observed state stays `present-no-committed-epoch` end-to-end. This is the documented partial-positive boundary that closes with Run 094. No change to `pqc_trust_activation::ActivationContext`, no change to `StateSnapshotMeta` (snapshot epoch parity remains a separate run), no new metric family, no new CLI flag, no new dependency, no DummySig / DummyKem / DummyAead. Recommended next: **Run 094 — wire the binary-path consensus loop's epoch transitions onto `apply_epoch_transition_atomic` using the Run 093 storage handle**, scoped to the five steps enumerated in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_093.md` §"Exact immediate next action recommended". | §1, §3.10, §10.1, §11. |
 | 037 / 039 / 040 / 041 | Real `MlDsa44SignatureSuite`, `MlKem768Backend`, `ChaCha20Poly1305Backend` registration; no `Dummy*` under `pqc-static-root`. | §1.3, §5.3, §6.B, §9. |
 
 ---
