@@ -1,0 +1,612 @@
+# RUN 099 — Release-Binary Evidence Closure for Canonical Activation-Epoch Runtime Source
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Run 091 established fail-closed `CurrentEpochUnavailable` behavior for `activation_epoch` whenever no canonical runtime epoch source exists.
+- Run 092 proved production `qbind-node` did not open `RocksDbConsensusStorage`, so `meta:current_epoch` was phantom on real binary runs.
+- Run 093 introduced canonical production binary-path `ConsensusStorage` ownership at `<data_dir>/consensus`.
+- Run 094 threaded the Run 093 `ConsensusStorage` handle into the binary consensus loop and added fail-closed epoch persistence through existing atomic epoch persistence machinery.
+- Run 095 added binary-path committed reconfig-block detection and engine epoch transition trigger.
+- Run 096 added the smallest explicit local operator-gated DevNet/TestNet reconfig proposal source.
+- Run 097 added snapshot epoch parity:
+  - `StateSnapshotMeta.epoch: Option<u64>`
+  - old snapshots remain valid
+  - missing epoch remains `None`, not epoch `0`
+  - snapshot creation uses canonical `ConsensusStorage::get_current_epoch()`
+  - restore can persist snapshot epoch back into `<data_dir>/consensus`
+  - restore fails closed on epoch inconsistency/write failure
+- Run 098 wired canonical `<data_dir>/consensus :: meta:current_epoch` into all six trust-bundle activation surfaces:
+  - startup `--p2p-trust-bundle`
+  - `--p2p-trust-bundle-reload-check`
+  - `--p2p-trust-bundle-reload-apply-path`
+  - SIGHUP live reload
+  - peer-candidate check CLI
+  - live peer-candidate wire dispatcher
+
+Run 098 was partial-positive because the implementation and tests landed, but release-binary process-log evidence was incomplete.
+
+Run 099 must be evidence-first.
+
+The goal is not new design. The goal is to produce release-binary evidence that Run 098’s canonical activation-epoch runtime source behaves correctly under real binary scenarios.
+
+Current remaining C4 items include:
+
+- release-binary evidence closure for activation_epoch runtime source
+- peer-driven live apply
+- KMS/HSM custody
+- in-binary/on-chain signing-key ratification
+- production fast-sync / broader consensus-storage restore
+- per-environment production trust-anchor operation
+- full C4/C5 closure
+
+Run 099 must address only the first item.
+
+---
+
+# Exact objective
+
+Produce release-binary evidence proving that canonical `meta:current_epoch` is consumed correctly by trust-bundle activation surfaces, and that all fail-closed boundaries remain intact.
+
+Run 099 should prefer no runtime code change.
+
+Allowed code changes are limited to:
+
+- test harnesses
+- DevNet scripts
+- log/evidence helpers
+- documentation corrections
+- narrowly scoped bug fixes if evidence reveals a real blocker
+
+The objective is to prove:
+
+1. Fresh genesis with no committed epoch still rejects `activation_epoch` with `CurrentEpochUnavailable`.
+2. Committed canonical epoch satisfies `activation_epoch <= current_epoch`.
+3. Future epoch rejects when `activation_epoch > current_epoch`.
+4. Restored epoch-bearing snapshot satisfies `activation_epoch <= restored_epoch`.
+5. Old snapshot without epoch remains `CurrentEpochUnavailable`.
+6. Peer-candidate validation/propagation rejects unavailable/future epoch candidates and remains non-mutating.
+7. No sequence write, root merge, live trust mutation, session eviction, or propagation occurs after rejection.
+8. No missing epoch is treated as epoch `0`.
+9. No height/time/view/snapshot-height-derived epoch is used.
+10. Full C4 and C5 remain open.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Release-binary evidence scripts
+
+Create or update DevNet evidence scripts under `scripts/devnet/` if needed.
+
+The scripts may:
+
+- build release binary
+- create DevNet trust materials
+- create candidate bundles with `activation_epoch`
+- run `qbind-node` with fresh and persisted `--data-dir`
+- drive Run 096 local reconfig proposal path if needed
+- create/restore snapshots using existing Run 097 path
+- send peer-candidate `0x05` frames if existing helpers support it
+- scrape logs and metrics
+- assert negative invariants
+
+Scripts must not introduce production behavior changes.
+
+---
+
+## B. Evidence-only helper updates
+
+Allowed only if needed:
+
+- helper examples for creating trust bundles with activation_epoch
+- helper examples for snapshot/reload smoke scenarios
+- log grep/assertion helpers
+- shell harness fixes
+
+Do not add protocol behavior.
+
+---
+
+## C. Narrow bug fixes
+
+If release-binary evidence reveals a real implementation bug in Run 098 wiring, fix it narrowly.
+
+Any bug fix must:
+
+- preserve canonical epoch source only
+- preserve fail-closed behavior
+- add tests
+- be documented honestly
+
+---
+
+## D. Documentation/evidence updates
+
+Update:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_099.md`
+- `docs/whitepaper/contradiction.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Also fix any missing Run 098 doc-sync issue if still present.
+
+---
+
+# Strict non-goals
+
+Run 099 MUST NOT:
+
+- introduce new activation semantics
+- change `pqc_trust_activation` rules except for a narrow bug fix if evidence proves one
+- derive epoch from block height
+- derive epoch from snapshot height
+- derive epoch from wall-clock time
+- derive epoch from view number
+- derive epoch from timer ticks
+- treat missing epoch as epoch `0`
+- silently satisfy `activation_epoch = 0` without committed epoch
+- weaken Run 065 minimum activation-margin policy
+- weaken activation-height checks
+- weaken revocation checks
+- weaken Run 055 sequence anti-rollback
+- weaken Run 069 reload-check non-mutation
+- weaken Run 070/073/074 apply ordering
+- change trust-bundle wire format
+- change peer-candidate wire format
+- implement peer-driven live apply
+- implement governance
+- implement validator-set rotation
+- implement KMS/HSM custody
+- implement signing-key ratification
+- redesign snapshots
+- redesign fast-sync
+- redesign consensus
+- add dummy crypto
+- add fallback to `--p2p-trusted-root`
+- claim full C4 closure
+- claim C5 closure
+
+---
+
+# Required investigation
+
+Before running evidence, investigate and document:
+
+## 1. Run 098 doc-sync state
+
+Verify that committed docs contain:
+
+- `docs/whitepaper/contradiction.md` Run 098 update
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md` Run 098 row/note
+
+If missing, fix before or during Run 099 and document the correction.
+
+---
+
+## 2. Existing release-binary helper availability
+
+Identify existing helpers/scripts for:
+
+- trust-bundle creation
+- activation_epoch bundle creation
+- root-level activation_epoch bundle creation
+- wrong/future epoch bundle creation
+- Run 096 reconfig proposal path
+- Run 097 snapshot creation/restoration
+- peer-candidate publish/check
+- metrics/log scraping
+
+Reuse existing helpers.
+
+Do not create duplicate helper architecture.
+
+---
+
+## 3. Canonical epoch setup
+
+Document how the release-binary scenario obtains `meta:current_epoch = n`.
+
+Preferred sources:
+
+- Run 096 reconfig proposal path
+- restored Run 097 epoch-bearing snapshot
+- existing canonical storage helper only if it uses the same `ConsensusStorage` schema and is clearly evidence-only
+
+Do not write fake epoch into storage unless the evidence explicitly labels it as a setup helper and separately proves the normal Run 096/097 path elsewhere.
+
+---
+
+## 4. Activation surfaces to evidence
+
+Map which surfaces are covered by release-binary process logs.
+
+Minimum required:
+
+- startup `--p2p-trust-bundle`
+- reload-check
+- reload-apply or SIGHUP live reload
+- peer-candidate validation/propagation
+
+If a surface cannot be covered on release binary, document why and return partial-positive.
+
+---
+
+## 5. Storage read failure ambiguity
+
+Audit the Run 098 behavior where storage read I/O errors in live paths may be logged and treated as unavailable.
+
+Determine whether this is fail-closed for:
+- bundles that declare `activation_epoch`
+- bundles that do not declare `activation_epoch`
+
+If storage corruption/unreadable state could be hidden for non-epoch bundles, document it as a residual risk or fix narrowly.
+
+---
+
+# Required evidence scenarios
+
+## Scenario 1 — Fresh genesis rejects activation_epoch
+
+Use fresh `--data-dir`.
+
+Use startup `--p2p-trust-bundle` requiring `activation_epoch`.
+
+Prove:
+
+- canonical consensus storage opens
+- no committed epoch exists
+- `ActivationContext.current_epoch = None`
+- activation rejects with `CurrentEpochUnavailable`
+- no epoch `0` fallback
+- no sequence write
+- no root merge
+- no P2P trust start
+- no fallback to `--p2p-trusted-root`
+
+Expected verdict for scenario: must pass.
+
+---
+
+## Scenario 2 — Committed epoch satisfies activation_epoch
+
+Create canonical committed epoch `n`.
+
+Use startup or reload surface with bundle requiring `activation_epoch <= n`.
+
+Prove:
+
+- canonical epoch is read from `<data_dir>/consensus`
+- `ActivationContext.current_epoch = Some(n)`
+- activation epoch axis passes
+- all other checks still apply
+- sequence/merge/apply ordering remains correct
+- no bypass of height/minimum-margin/revocation checks
+
+Expected verdict for scenario: must pass for strongest-positive.
+
+---
+
+## Scenario 3 — Future epoch rejects
+
+With canonical committed epoch `n`, use bundle requiring:
+
+```text
+activation_epoch = n + 1
+
+Prove:
+
+canonical epoch n is read
+activation rejects as future epoch
+no sequence write
+no root merge
+no live trust mutation
+no session eviction
+no propagation
+
+Expected verdict for scenario: must pass.
+
+Scenario 4 — Restored epoch-bearing snapshot satisfies activation_epoch
+
+Create or use Run 097 epoch-bearing snapshot with epoch n.
+
+Restore into fresh data dir.
+
+Use bundle requiring:
+
+activation_epoch <= n
+
+Prove:
+
+snapshot restore writes/preserves epoch into canonical consensus storage
+activation reads restored epoch
+activation epoch axis passes
+no synthetic epoch is used
+
+Expected verdict for scenario: must pass if restore harness is available; otherwise document blocker.
+
+Scenario 5 — Old snapshot without epoch remains unavailable
+
+Restore old snapshot without epoch metadata.
+
+Use bundle requiring activation_epoch.
+
+Prove:
+
+old snapshot restore succeeds
+no epoch is written
+activation fails with CurrentEpochUnavailable
+missing epoch is not treated as 0
+
+Expected verdict for scenario: must pass if old snapshot fixture/harness exists; otherwise document blocker.
+
+Scenario 6 — Reload-check non-mutation
+
+Run --p2p-trust-bundle-reload-check with:
+
+no committed epoch + activation_epoch bundle
+committed epoch n + future activation_epoch bundle
+committed epoch n + satisfied activation_epoch bundle
+
+Prove:
+
+rejection does not write sequence
+satisfied check does not write sequence either
+reload-check remains validation-only
+no live trust mutation
+no session eviction
+
+Expected verdict for scenario: must pass.
+
+Scenario 7 — Reload-apply / SIGHUP ordering
+
+On a running node with canonical committed epoch:
+
+apply otherwise-valid bundle with satisfied activation_epoch
+attempt future-epoch bundle
+
+Prove:
+
+Satisfied case:
+
+validation passes epoch axis
+existing validate → snapshot → swap → evict_sessions → commit_sequence ordering remains
+
+Future case:
+
+rejects before swap
+no live trust mutation
+no session eviction
+no sequence commit
+
+Expected verdict for scenario: pass if harness exists; otherwise partial-positive with exact blocker.
+
+Scenario 8 — Peer-candidate validation / propagation rejection
+
+On running nodes:
+
+send candidate requiring unavailable epoch, or future epoch
+propagation flag may be enabled if testing propagation behavior
+
+Prove:
+
+candidate validation rejects
+invalid epoch candidate is not rebroadcast
+no apply
+no sequence write
+no live trust mutation
+no session eviction
+validation-only / propagation-only distinction remains clear
+
+Expected verdict for scenario: must pass if peer-candidate harness supports activation_epoch bundles; otherwise document blocker.
+
+Required tests
+
+Run and report existing relevant tests.
+
+Add tests only if a gap is found.
+
+Minimum regression list:
+
+Run 057 activation-height tests
+Run 065 minimum-margin tests
+Run 069 reload-check tests
+Run 073 process-start apply tests
+Run 074 SIGHUP live reload tests
+Run 076 peer-candidate validation tests
+Run 079 live peer-candidate dispatch tests
+Run 088 propagation tests
+Run 091 activation_epoch fail-closed tests
+Run 093 production consensus storage lifecycle tests
+Run 094 binary-path epoch transition persistence tests
+Run 095 binary-path reconfig detection tests
+Run 096 reconfig proposal source tests
+Run 097 snapshot epoch parity tests
+Run 098 canonical activation epoch wiring tests
+full qbind-node --lib
+relevant qbind-ledger
+relevant qbind-net
+relevant qbind-crypto
+
+If any pre-existing test target has known compile issues, identify it clearly and prove it predates Run 099.
+
+Docs and evidence deliverables
+
+Required:
+
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_099.md
+release-binary smoke logs under docs/devnet/
+scripts/harnesses under scripts/devnet/ if added or changed
+update docs/whitepaper/contradiction.md
+update docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+
+Do not perform broad documentation rewrite.
+
+contradiction.md update rules
+
+Update docs/whitepaper/contradiction.md honestly.
+
+Run 099 may strengthen evidence for:
+
+“activation_epoch runtime source”
+
+Run 099 may mark this sub-piece resolved only if:
+
+all production activation surfaces are covered by release-binary evidence or equivalent process-log evidence
+fresh/no-epoch, committed/satisfied, future/rejected, restored/satisfied, old-snapshot/unavailable, reload-check, reload-apply/SIGHUP, and peer-candidate validation/propagation cases are proven
+sequence, root merge, live trust mutation, session eviction, and propagation negative invariants are proven
+storage failure ambiguity is audited or fixed
+
+If any scenario is missing, keep the sub-piece “open / narrowed” and state the missing evidence.
+
+Run 099 MUST NOT mark resolved:
+
+peer-driven live apply
+KMS/HSM custody
+signing-key ratification
+production fast-sync / broader consensus-storage restore
+per-environment production trust-anchor operation
+full C4
+C5
+
+The update must explicitly state:
+
+missing epoch is not epoch 0
+fresh genesis remains CurrentEpochUnavailable
+old snapshots without epoch remain CurrentEpochUnavailable
+committed/restored epoch can satisfy the epoch axis only
+all other trust-bundle checks still apply
+full C4 and C5 remain open
+Expected verdicts
+
+Acceptable verdicts:
+
+strongest-positive
+positive
+partial-positive
+negative
+
+Use strongest-positive only if:
+
+all eight evidence scenarios pass on release binaries or equivalent process-log evidence
+docs are synchronized
+storage failure ambiguity is audited/fixed
+no runtime behavior regression occurs
+all negative invariants are proven
+
+Use positive if:
+
+most release-binary scenarios pass
+any missing scenario has a narrow documented blocker
+no safety issue is found
+
+Use partial-positive if:
+
+evidence improves but key surfaces remain unproven
+harness support is incomplete
+docs were fixed but process-log evidence remains incomplete
+
+Use negative if:
+
+missing epoch is treated as 0
+epoch is derived from height/time/view
+activation silently ignores activation_epoch
+sequence writes occur on rejection
+live trust mutates on rejection
+peer-candidate propagation rebroadcasts invalid epoch candidates
+storage failure becomes fail-open
+scope broadens into peer-driven apply/governance/redesign
+Required final response format
+
+Your final response MUST contain:
+
+1. Exact verdict
+
+One of:
+
+strongest-positive
+positive
+partial-positive
+negative
+2. What was changed
+
+Include:
+
+scripts changed
+helpers changed
+docs changed
+any runtime bug fixes, if any
+explicit statement if no runtime code changed
+3. What was proven
+
+Separate:
+
+release-binary/process-log evidence
+source-level evidence
+test evidence
+
+For each scenario, state pass/fail/blocked.
+
+4. What was not changed
+
+Explicitly confirm:
+
+no synthetic epoch
+no height/time/view-derived epoch
+no missing-epoch-to-0 fallback
+no trust-bundle wire change
+no peer-driven apply
+no KMS/HSM
+no signing-key ratification
+no fast-sync redesign
+no full C4 closure
+no C5 closure
+5. Contradictions or inconsistencies
+
+You MUST cross-check new evidence against:
+
+implementation
+whitepaper
+protocol docs
+runbook
+contradiction.md
+
+If contradictions or inconsistencies are found:
+
+document them in docs/whitepaper/contradiction.md
+explain them in the final response
+
+Do not silently ignore contradictions.
+
+6. Evidence references
+
+List:
+
+evidence document
+smoke logs
+scripts/harnesses
+tests run
+exact release-binary command/scenario summaries
+metrics/logs inspected
+7. Residual risk and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 099 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.

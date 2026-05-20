@@ -323,9 +323,28 @@ async fn main() {
             .as_ref()
             .map(|b| b.snapshot_height)
             .unwrap_or(0);
+        // Run 098: open canonical production ConsensusStorage and read
+        // meta:current_epoch for activation. CLI subcommand path that
+        // exits via std::process::exit(0/1) — keep _opened alive until
+        // exit. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+        let (activation_epoch_source, _opened_b) =
+            match qbind_node::pqc_trust_activation_epoch::load_activation_current_epoch_for_cli(
+                &config,
+            ) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: Run 098: --p2p-trust-bundle-reload-check could not open \
+                         canonical production ConsensusStorage for activation epoch: {}. \
+                         Fail-closed. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
         let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
             current_height: Some(activation_current_height),
-            current_epoch: None,
+            current_epoch: activation_epoch_source.as_option(),
         };
         let local_leaf_bytes_opt =
             leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
@@ -567,9 +586,28 @@ async fn main() {
             .as_ref()
             .map(|b| b.snapshot_height)
             .unwrap_or(0);
+        // Run 098: open canonical production ConsensusStorage and read
+        // meta:current_epoch for activation. CLI subcommand path that
+        // exits via std::process::exit(0/1) — keep _opened alive until
+        // exit. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+        let (activation_epoch_source, _opened_c) =
+            match qbind_node::pqc_trust_activation_epoch::load_activation_current_epoch_for_cli(
+                &config,
+            ) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: Run 098: --p2p-trust-bundle-peer-candidate-check could \
+                         not open canonical production ConsensusStorage for activation epoch: {}. \
+                         Fail-closed. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
         let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
             current_height: Some(activation_current_height),
-            current_epoch: None,
+            current_epoch: activation_epoch_source.as_option(),
         };
         let local_leaf_bytes_opt =
             leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
@@ -925,9 +963,28 @@ async fn main() {
             .as_ref()
             .map(|b| b.snapshot_height)
             .unwrap_or(0);
+        // Run 098: open canonical production ConsensusStorage and read
+        // meta:current_epoch for activation. CLI subcommand path that
+        // exits via std::process::exit(0/1) — keep _opened alive until
+        // exit. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+        let (activation_epoch_source, _opened_d) =
+            match qbind_node::pqc_trust_activation_epoch::load_activation_current_epoch_for_cli(
+                &config,
+            ) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    eprintln!(
+                        "[binary] FATAL: Run 098: --p2p-trust-bundle-reload-apply-path could not \
+                         open canonical production ConsensusStorage for activation epoch: {}. \
+                         Fail-closed. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.",
+                        e
+                    );
+                    std::process::exit(1);
+                }
+            };
         let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
             current_height: Some(activation_current_height),
-            current_epoch: None,
+            current_epoch: activation_epoch_source.as_option(),
         };
         let local_leaf_bytes_opt =
             leaf_credentials_opt.as_ref().map(|c| c.cert_bytes.as_slice());
@@ -962,9 +1019,14 @@ async fn main() {
                 std::process::exit(1);
             }
         };
+        // Run 098: reuse the same epoch source loaded above for the
+        // baseline activation context (same canonical committed
+        // epoch applies to both candidate and baseline validation
+        // within this CLI subcommand). See
+        // docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
         let baseline_activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
             current_height: Some(activation_current_height),
-            current_epoch: None,
+            current_epoch: activation_epoch_source.as_option(),
         };
         let baseline_loaded = match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
             baseline_path,
@@ -1934,19 +1996,38 @@ async fn run_p2p_node(
             //     consensus — see
             //     crates/qbind-node/src/pqc_trust_activation.rs
             //     module docs.
-            //   current_epoch  = None. There is no safe pre-consensus
-            //     epoch source today (epoch transitions only happen
-            //     after consensus begins committing blocks). A bundle
-            //     that declares `activation_epoch` therefore fails
-            //     closed here; epoch gating recorded as remaining-open
-            //     in docs/whitepaper/contradiction.md C4.
+            //   current_epoch  = canonical production ConsensusStorage
+            //     `meta:current_epoch` via Run 098 helper. Wired from the
+            //     Run 093 lifecycle's committed-epoch state. When no committed
+            //     epoch exists (fresh DB, no epochs, or no storage at all),
+            //     the helper returns `UnavailableNoCommittedEpoch`, which
+            //     maps to `None` — preserving fail-closed semantics (a bundle
+            //     that declares `activation_epoch` will fail with
+            //     `CurrentEpochUnavailable`). See
+            //     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
             let activation_current_height: u64 = restore_baseline
                 .as_ref()
                 .map(|b| b.snapshot_height)
                 .unwrap_or(0);
+            let activation_epoch_source = match
+                qbind_node::pqc_trust_activation_epoch::activation_epoch_source_from_storage(
+                    consensus_storage.as_ref(),
+                ) {
+                    Ok(src) => src,
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] Run 098: WARNING: failed to read canonical \
+                             meta:current_epoch for startup bundle activation: {}. \
+                             Proceeding with current_epoch=None (fail-closed if bundle \
+                             declares activation_epoch).",
+                            e
+                        );
+                        qbind_node::pqc_trust_activation_epoch::ActivationEpochSource::UnavailableNoCommittedEpoch
+                    }
+                };
             let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
                 current_height: Some(activation_current_height),
-                current_epoch: None,
+                current_epoch: activation_epoch_source.as_option(),
             };
             match qbind_node::pqc_trust_bundle::TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
                 path,
@@ -2749,6 +2830,14 @@ async fn run_p2p_node(
                         signing_keys: bundle_signing_keys.clone(),
                         activation_ctx:
                             qbind_node::pqc_trust_activation::ActivationContext::height_only(0),
+                        // Run 098: pass the canonical production
+                        // `ConsensusStorage` handle so the dispatcher
+                        // reads `meta:current_epoch` per-frame. This
+                        // ensures epoch-gated bundles activate correctly
+                        // even when epoch transitions happen after the
+                        // dispatcher is constructed. See
+                        // docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+                        consensus_storage_for_epoch: consensus_storage.clone(),
                         sequence_persistence_path: config
                             .data_dir
                             .as_ref()
@@ -2781,11 +2870,13 @@ async fn run_p2p_node(
                     };
                     eprintln!(
                         "[binary] Run 088: installing live peer-candidate wire \
-                         dispatcher (env={} sequence_baseline={} signing_keys={} propagation_enabled={}).",
+                         dispatcher (env={} sequence_baseline={} signing_keys={} propagation_enabled={} \
+                         consensus_storage_for_epoch={}).",
                         loaded.environment(),
                         loaded.bundle.sequence,
                         bundle_signing_keys.len(),
                         args.p2p_trust_bundle_peer_candidate_propagation_enabled,
+                        consensus_storage.is_some(),
                     );
                     let dispatcher = Arc::new(LivePeerCandidateWireDispatcher::new(
                         dispatcher_cfg,
@@ -3026,6 +3117,11 @@ async fn run_p2p_node(
             live_for_reload_apply.clone(),
             evictor,
             node_metrics.p2p_arc(),
+            // Run 098: pass the canonical production ConsensusStorage
+            // handle so the SIGHUP trigger can read meta:current_epoch
+            // per-trigger. See
+            // docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+            consensus_storage.clone(),
             shutdown_rx.clone(),
             shutdown_tx.clone(),
         )
@@ -3589,6 +3685,12 @@ fn spawn_run074_live_reload_task(
     live_state: Option<qbind_node::pqc_live_trust::LivePqcTrustState>,
     p2p_service: Arc<dyn qbind_node::p2p_session_eviction::P2pSessionEvictor>,
     p2p_metrics: Arc<qbind_node::metrics::P2pMetrics>,
+    // Run 098: optional canonical production `ConsensusStorage`
+    // handle used for per-trigger epoch read. When present, the
+    // trigger reads `meta:current_epoch` BEFORE each trigger and
+    // builds a fresh `ActivationContext` with the canonical epoch.
+    // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+    consensus_storage: Option<Arc<qbind_node::storage::RocksDbConsensusStorage>>,
     mut shutdown_rx: watch::Receiver<()>,
     shutdown_tx: watch::Sender<()>,
 ) -> Option<tokio::task::JoinHandle<()>> {
@@ -3704,8 +3806,39 @@ fn spawn_run074_live_reload_task(
                          reload-apply trigger."
                     );
                     let controller_for_trigger = controller.clone();
+                    // Run 098: clone the optional storage handle so it
+                    // can be moved into the blocking task. The per-trigger
+                    // canonical epoch read happens inside the blocking
+                    // closure. See
+                    // docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md.
+                    let storage_for_trigger = consensus_storage.clone();
                     let outcome = tokio::task::spawn_blocking(move || {
-                        controller_for_trigger.try_trigger()
+                        // Run 098: read canonical epoch before trigger.
+                        let now_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let activation_epoch_source = match
+                            qbind_node::pqc_trust_activation_epoch::activation_epoch_source_from_storage(
+                                storage_for_trigger.as_ref(),
+                            ) {
+                                Ok(src) => src,
+                                Err(e) => {
+                                    eprintln!(
+                                        "[binary] Run 098: WARNING: failed to read canonical \
+                                         meta:current_epoch for SIGHUP trigger: {}. Proceeding \
+                                         with current_epoch=None (fail-closed if candidate \
+                                         declares activation_epoch).",
+                                        e
+                                    );
+                                    qbind_node::pqc_trust_activation_epoch::ActivationEpochSource::UnavailableNoCommittedEpoch
+                                }
+                            };
+                        let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+                            current_height: Some(0),
+                            current_epoch: activation_epoch_source.as_option(),
+                        };
+                        controller_for_trigger.try_trigger_with_activation(now_secs, activation_ctx)
                     })
                     .await;
                     match outcome {

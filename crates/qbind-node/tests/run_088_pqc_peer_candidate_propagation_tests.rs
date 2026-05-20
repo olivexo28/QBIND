@@ -215,6 +215,7 @@ fn dispatcher(
             scratch_dir: scratch,
             signing_keys: h.signing_keys.clone(),
             activation_ctx: ActivationContext::height_only(0),
+            consensus_storage_for_epoch: None,
             sequence_persistence_path: sequence_path,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,

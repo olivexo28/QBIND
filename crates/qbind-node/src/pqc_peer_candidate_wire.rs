@@ -917,6 +917,12 @@ pub struct LivePeerCandidateWireDispatcher {
     scratch_dir: PathBuf,
     signing_keys: BundleSigningKeySet,
     activation_ctx: ActivationContext,
+    /// Run 098: optional canonical production `ConsensusStorage`
+    /// handle. When present, `dispatch_frame_from_peer_for_test`
+    /// reads `meta:current_epoch` and overrides
+    /// `activation_ctx.current_epoch` per-dispatch.
+    consensus_storage_for_epoch:
+        Option<std::sync::Arc<crate::storage::RocksDbConsensusStorage>>,
     sequence_persistence_path: Option<PathBuf>,
     local_leaf_cert_bytes: Option<Vec<u8>>,
     validation_time_secs: u64,
@@ -937,6 +943,10 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
             .field(
                 "local_leaf_cert_bytes_present",
                 &self.local_leaf_cert_bytes.is_some(),
+            )
+            .field(
+                "consensus_storage_for_epoch_present",
+                &self.consensus_storage_for_epoch.is_some(),
             )
             .field("validation_time_secs", &self.validation_time_secs)
             .field("is_enabled", &self.is_enabled())
@@ -969,6 +979,15 @@ pub struct LivePeerCandidateWireDispatcherConfig {
     pub signing_keys: BundleSigningKeySet,
     /// Activation context (same shape as Run 069).
     pub activation_ctx: ActivationContext,
+    /// Run 098: optional canonical production `ConsensusStorage`
+    /// handle used for per-frame epoch read. When present, the
+    /// dispatcher reads `meta:current_epoch` BEFORE every dispatch
+    /// and overrides `activation_ctx.current_epoch` with the result.
+    /// When absent, `activation_ctx.current_epoch` is used as-is
+    /// (test-grade / legacy behavior). See
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md`.
+    pub consensus_storage_for_epoch:
+        Option<std::sync::Arc<crate::storage::RocksDbConsensusStorage>>,
     /// Optional on-disk sequence file path (read-only `peek_sequence`
     /// is used; the file is NEVER written by the Run 079 receive
     /// path).
@@ -1030,6 +1049,7 @@ impl LivePeerCandidateWireDispatcher {
             scratch_dir: config.scratch_dir,
             signing_keys: config.signing_keys,
             activation_ctx: config.activation_ctx,
+            consensus_storage_for_epoch: config.consensus_storage_for_epoch,
             sequence_persistence_path: config.sequence_persistence_path,
             local_leaf_cert_bytes: config.local_leaf_cert_bytes,
             validation_time_secs: config.validation_time_secs,
@@ -1065,19 +1085,59 @@ impl LivePeerCandidateWireDispatcher {
     /// Source-aware test entry point used by Run 088 propagation
     /// tests. The source peer, when supplied, is excluded from any
     /// validated rebroadcast.
+    ///
+    /// Run 098: when `consensus_storage_for_epoch` is present, the
+    /// dispatcher reads `meta:current_epoch` from the canonical
+    /// production storage BEFORE constructing the runtime context.
+    /// This per-frame read ensures `activation_ctx.current_epoch`
+    /// reflects the latest committed epoch (epoch transitions
+    /// happen asynchronously). When the storage handle is absent
+    /// or the read fails, `self.activation_ctx.current_epoch` is
+    /// used as-is (test-grade / legacy behavior).
     pub fn dispatch_frame_from_peer_for_test(
         &self,
         frame: &[u8],
         source_peer: Option<NodeId>,
     ) -> PeerCandidateWireOutcome {
         let now_ms = (self.clock_ms_fn)();
+        // Run 098: derive canonical epoch per-frame when handle is present.
+        let activation_ctx = {
+            let mut ctx = self.activation_ctx.clone();
+            if let Some(ref storage) = self.consensus_storage_for_epoch {
+                // Run 098: surface storage failures distinctly from valid
+                // no-epoch state. On Err we treat as unavailable
+                // (`current_epoch = None`) — any epoch-declaring candidate
+                // is then rejected with `CurrentEpochUnavailable` at the
+                // activation gate (fail-closed direction). The error is
+                // logged so operators can see the storage degradation
+                // rather than it being silently absorbed.
+                match crate::pqc_trust_activation_epoch::activation_epoch_source_from_storage(Some(storage)) {
+                    Ok(epoch_source) => {
+                        ctx.current_epoch = epoch_source.as_option();
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[binary] Run 098: peer-candidate wire dispatcher: \
+                             canonical meta:current_epoch read failed: {}. \
+                             Treating as CurrentEpochUnavailable for this frame \
+                             (epoch-declaring candidates will be rejected; \
+                             no live trust mutation; no sequence write; \
+                             no session eviction).",
+                            e
+                        );
+                        ctx.current_epoch = None;
+                    }
+                }
+            }
+            ctx
+        };
         let ctx = PeerCandidateWireRuntimeContext {
             expected_environment: self.expected_environment,
             expected_chain_id: self.expected_chain_id,
             scratch_dir: self.scratch_dir.as_path(),
             validation_time_secs: self.validation_time_secs,
             signing_keys: &self.signing_keys,
-            activation_ctx: self.activation_ctx.clone(),
+            activation_ctx,
             sequence_persistence_path: self
                 .sequence_persistence_path
                 .as_deref(),
@@ -2048,6 +2108,7 @@ mod tests {
             scratch_dir: std::env::temp_dir(),
             signing_keys: fake_signing_keys(),
             activation_ctx: ActivationContext::height_only(0),
+            consensus_storage_for_epoch: None,
             sequence_persistence_path: None,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,
@@ -2087,6 +2148,7 @@ mod tests {
             scratch_dir: std::env::temp_dir(),
             signing_keys: fake_signing_keys(),
             activation_ctx: ActivationContext::height_only(0),
+            consensus_storage_for_epoch: None,
             sequence_persistence_path: None,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,
@@ -2135,6 +2197,7 @@ mod tests {
             scratch_dir: std::env::temp_dir(),
             signing_keys: fake_signing_keys(),
             activation_ctx: ActivationContext::height_only(0),
+            consensus_storage_for_epoch: None,
             sequence_persistence_path: None,
             local_leaf_cert_bytes: None,
             validation_time_secs: 100,

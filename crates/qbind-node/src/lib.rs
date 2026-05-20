@@ -244,6 +244,13 @@ pub mod snapshot_restore;
 pub mod startup_validation;
 pub mod storage;
 pub mod production_consensus_storage;
+// Run 098 — canonical activation epoch source helper. Wires the
+// Run 093 production `ConsensusStorage` `meta:current_epoch` value
+// into `ActivationContext.current_epoch` at all production trust-
+// bundle activation call sites. Preserves fail-closed
+// `CurrentEpochUnavailable` when no committed epoch is available.
+// See module docs and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md`.
+pub mod pqc_trust_activation_epoch;
 pub mod timeout_verification_bridge;
 pub mod validator_config;
 pub mod validator_signer;

@@ -673,16 +673,39 @@ handling, backup/recovery notes, logging rules.
   minimum-margin policy and remain available on every environment,
   including MainNet, regardless of `current_height` (§6.B / §6.C
   variant 2).
-- **Boundary:** `activation_epoch` is rejected today with
-  `CurrentEpochUnavailable` (Run 057 boundary — recorded in §10;
-  pinned by Run 091 across DevNet / TestNet / MainNet at the
-  bundle-level, per-active-root, startup load, reload-check,
-  SIGHUP live reload, and peer-candidate paths — see
-  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_091.md` and
-  `crates/qbind-node/tests/run_091_pqc_trust_bundle_activation_epoch_tests.rs`).
-  Operators MUST NOT set `activation_epoch` on a production bundle.
-  Run 065 does NOT introduce a minimum-margin policy on the epoch
-  axis (the epoch runtime source itself remains open).
+- **Boundary:** `activation_epoch` was historically rejected with
+  `CurrentEpochUnavailable` because no canonical runtime epoch source
+  was wired into `ActivationContext.current_epoch` (Run 057 / Run 091
+  boundary). **As of Run 098 this is partially resolved**: every
+  production trust-bundle activation surface in `qbind-node` (startup
+  `--p2p-trust-bundle` load, `--p2p-trust-bundle-reload-check`,
+  `--p2p-trust-bundle-reload-apply-path`,
+  `--p2p-trust-bundle-peer-candidate-check`, the SIGHUP live-reload
+  trigger, and the live peer-candidate wire dispatcher) now reads
+  `meta:current_epoch` from the canonical Run 093
+  `<data_dir>/consensus` `ConsensusStorage` surface (via the narrow
+  helper `qbind_node::pqc_trust_activation_epoch`). When that surface
+  carries `CommittedEpoch(n)` — written by a real Run 094 / 095 / 096
+  reconfig transition or by a Run 097 restored snapshot — a bundle
+  declaring `activation_epoch ≤ n` activates honestly; a bundle
+  declaring `activation_epoch > n` is rejected with
+  `ActivationEpochNotYetReached`. When the surface carries no
+  committed epoch (fresh genesis, old snapshot without epoch, no
+  `--data-dir`, or a storage read error), bundles declaring any
+  `activation_epoch` continue to be rejected fail-closed with
+  `CurrentEpochUnavailable` — **missing epoch is never coerced into
+  `Some(0)`**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md` and
+  `crates/qbind-node/tests/run_098_activation_epoch_canonical_wiring_tests.rs`.
+  Operator implications:
+  - On a node that has committed at least one canonical reconfig epoch
+    (or restored from a Run-097 snapshot carrying canonical epoch),
+    `activation_epoch`-bearing bundles are now safe to ship.
+  - On fresh genesis / pre-reconfig / restored-from-old-snapshot
+    nodes, bundles MUST omit `activation_epoch` or they will be
+    rejected.
+  - Run 065 per-environment minimum-margin policy still applies only
+    to `activation_height`. There is no minimum-margin policy on the
+    epoch axis as of Run 098.
 
 ### 3.11 Chain_id field
 
