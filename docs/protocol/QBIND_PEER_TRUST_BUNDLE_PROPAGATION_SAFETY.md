@@ -220,8 +220,13 @@ The following remain open and require separately scoped future runs:
 - `activation_epoch` runtime source (narrowed by Run 091 to a
   documented fail-closed `CurrentEpochUnavailable` boundary at the
   bundle-level + per-active-root activation gate on every
-  environment and every production call site; see
-  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_091.md`).
+  environment and every production call site; further narrowed by
+  Run 092 with a source-level confirmation that the production
+  `qbind-node` binary does NOT open `RocksDbConsensusStorage` and
+  therefore never persists `meta:current_epoch`, so narrow
+  wiring requires a broad storage redesign — see
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_091.md` and
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_092.md`).
 - KMS/HSM custody.
 - In-binary or on-chain signing-key ratification.
 - Peer-driven apply policy.
