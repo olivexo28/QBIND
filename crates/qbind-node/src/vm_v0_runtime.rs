@@ -96,6 +96,7 @@ impl VmV0RuntimeState {
         &self,
         anchor: SnapshotAnchor,
         chain_id: u64,
+        epoch: Option<u64>,
         metrics: &NodeMetrics,
     ) -> Result<SnapshotStats, VmV0RuntimeError> {
         let snapshot_dir = self
@@ -133,6 +134,7 @@ impl VmV0RuntimeState {
             block_hash: anchor.block_hash,
             created_at_unix_ms: StateSnapshotMeta::now_unix_ms(),
             chain_id,
+            epoch,
         };
 
         eprintln!(
@@ -140,6 +142,15 @@ impl VmV0RuntimeState {
             anchor.height,
             target.display()
         );
+        match epoch {
+            Some(e) => eprintln!(
+                "[snapshot] Run 097 canonical committed epoch attached to meta.json: epoch={} (source=ConsensusStorage::get_current_epoch)",
+                e
+            ),
+            None => eprintln!(
+                "[snapshot] Run 097 no canonical committed epoch available; meta.json epoch field will be omitted (explicit absence, NOT epoch=0)"
+            ),
+        }
         eprintln!(
             "[snapshot] invoking StateSnapshotter::create_snapshot height={} path={}",
             anchor.height,
@@ -312,6 +323,7 @@ mod tests {
                     block_hash: [0xAB; 32],
                 },
                 config.chain_id().as_u64(),
+                None,
                 &metrics,
             )
             .unwrap();
@@ -356,6 +368,7 @@ mod tests {
                         block_hash: [height as u8; 32],
                     },
                     config.chain_id().as_u64(),
+                    None,
                     &metrics,
                 )
                 .unwrap();
@@ -385,6 +398,7 @@ mod tests {
                     block_hash: [0xAB; 32],
                 },
                 config.chain_id().as_u64(),
+                None,
                 &metrics,
             )
             .unwrap_err();
@@ -414,6 +428,7 @@ mod tests {
                     block_hash: [0xAB; 32],
                 },
                 config.chain_id().as_u64(),
+                None,
                 &metrics,
             )
             .unwrap_err();
@@ -450,6 +465,7 @@ mod tests {
                     block_hash: [0x11; 32],
                     created_at_unix_ms: StateSnapshotMeta::now_unix_ms(),
                     chain_id: 1337,
+                    epoch: None,
                 },
                 &source.path().join("snapshot"),
             )

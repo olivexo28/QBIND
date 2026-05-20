@@ -188,6 +188,29 @@ pub enum ProductionConsensusStorageError {
         path: PathBuf,
         source: StorageError,
     },
+    /// Run 097: failure to persist a snapshot-supplied canonical
+    /// committed epoch (`StateSnapshotMeta::epoch`) into the open
+    /// production `ConsensusStorage`. Treated as fatal — the binary
+    /// must not continue with a restored on-disk state whose canonical
+    /// epoch parity cannot be honestly written to the
+    /// `<data_dir>/consensus` surface.
+    RestoreEpochWriteFailed {
+        path: PathBuf,
+        epoch: u64,
+        source: StorageError,
+    },
+    /// Run 097: a restore was requested that would overwrite an
+    /// existing CommittedEpoch with a *different* value sourced from
+    /// the snapshot's `meta.json`. This is a hard inconsistency —
+    /// either the operator is restoring a snapshot from the wrong
+    /// node/epoch, or the on-disk consensus storage was advanced
+    /// after the snapshot was taken. The binary must fail closed
+    /// rather than silently overwrite.
+    RestoreEpochInconsistent {
+        path: PathBuf,
+        existing: u64,
+        snapshot: u64,
+    },
 }
 
 impl std::fmt::Display for ProductionConsensusStorageError {
@@ -225,6 +248,35 @@ impl std::fmt::Display for ProductionConsensusStorageError {
                 "production consensus storage: meta:current_epoch probe failed at '{}': {}",
                 path.display(),
                 source
+            ),
+            ProductionConsensusStorageError::RestoreEpochWriteFailed {
+                path,
+                epoch,
+                source,
+            } => write!(
+                f,
+                "production consensus storage: Run 097 restore failed to persist \
+                 snapshot canonical epoch={} into '{}': {}. \
+                 The node must not continue without a recorded canonical epoch \
+                 matching the restored on-disk state.",
+                epoch,
+                path.display(),
+                source
+            ),
+            ProductionConsensusStorageError::RestoreEpochInconsistent {
+                path,
+                existing,
+                snapshot,
+            } => write!(
+                f,
+                "production consensus storage: Run 097 restore inconsistency at \
+                 '{}': existing meta:current_epoch={} but snapshot meta.json \
+                 declares epoch={}. Refusing to silently overwrite. Either \
+                 the snapshot is from a different node/epoch, or the on-disk \
+                 consensus storage was advanced after the snapshot was taken.",
+                path.display(),
+                existing,
+                snapshot
             ),
         }
     }
@@ -404,6 +456,123 @@ pub fn open_production_consensus_storage(
 }
 
 // ============================================================================
+// Run 097 — restore-time epoch parity
+// ============================================================================
+
+/// Run 097: persist a snapshot-supplied canonical committed epoch into the
+/// production `<data_dir>/consensus` storage opened by
+/// [`open_production_consensus_storage`].
+///
+/// Called from the binary's startup path **after** the on-disk VM-v0 state
+/// has been materialized from the snapshot (B3) and **after** the canonical
+/// `ConsensusStorage` has been opened (Run 093). This re-establishes
+/// canonical epoch parity between the restored state and the
+/// `<data_dir>/consensus` `meta:current_epoch` surface so that Run 094's
+/// engine-epoch persistence and PQC trust-bundle activation observe the
+/// same canonical epoch the snapshot was taken at.
+///
+/// # Semantics
+///
+/// - `snapshot_epoch == None`: legacy or no-epoch snapshot. No write is
+///   attempted. The function returns `Ok(false)`. Run 097 MUST NOT coerce
+///   absence into `Some(0)`.
+/// - `snapshot_epoch == Some(n)`, storage state is
+///   [`ConsensusStorageState::NoConsensusStorage`]: no storage handle is
+///   open (DevNet ad-hoc smoke without `--data-dir`). Restore itself
+///   already required `--data-dir`, so this branch is unreachable when
+///   reached through the normal `apply_snapshot_restore_if_requested`
+///   path; defensively returns `Ok(false)` if hit.
+/// - `snapshot_epoch == Some(n)`, storage state is
+///   [`ConsensusStorageState::PresentNoCommittedEpoch`]: writes
+///   `meta:current_epoch = n` via `put_current_epoch`. Returns `Ok(true)`.
+/// - `snapshot_epoch == Some(n)`, storage state is
+///   [`ConsensusStorageState::CommittedEpoch(m)`] with `m == n`:
+///   no-op (idempotent restore re-run). Returns `Ok(false)`.
+/// - `snapshot_epoch == Some(n)`, storage state is
+///   [`ConsensusStorageState::CommittedEpoch(m)`] with `m != n`:
+///   returns [`ProductionConsensusStorageError::RestoreEpochInconsistent`]
+///   (fail-closed — never silently overwrites).
+///
+/// # Errors
+///
+/// - [`ProductionConsensusStorageError::RestoreEpochWriteFailed`] on
+///   `put_current_epoch` IO/checksum failure.
+/// - [`ProductionConsensusStorageError::RestoreEpochInconsistent`] when
+///   the pre-existing CommittedEpoch differs from the snapshot's epoch.
+///
+/// The production binary MUST fail-closed (non-zero exit) on either error.
+pub fn persist_restored_snapshot_epoch(
+    opened: &OpenedProductionConsensusStorage,
+    snapshot_epoch: Option<u64>,
+) -> Result<bool, ProductionConsensusStorageError> {
+    let Some(target_epoch) = snapshot_epoch else {
+        eprintln!(
+            "[restore] Run 097 snapshot meta carries no canonical epoch (epoch=None); \
+             leaving <data_dir>/consensus meta:current_epoch unchanged (explicit absence, NOT 0)"
+        );
+        return Ok(false);
+    };
+
+    let (path, storage) = match (&opened.path, &opened.handle) {
+        (Some(p), Some(s)) => (p.clone(), s.clone()),
+        _ => {
+            eprintln!(
+                "[restore] Run 097 snapshot canonical epoch={} not persisted: \
+                 no production ConsensusStorage handle open (no --data-dir). \
+                 This is unreachable on the supported restore path because \
+                 restore itself requires --data-dir.",
+                target_epoch
+            );
+            return Ok(false);
+        }
+    };
+
+    match opened.state {
+        ConsensusStorageState::CommittedEpoch(existing) if existing == target_epoch => {
+            eprintln!(
+                "[restore] Run 097 snapshot canonical epoch={} already matches \
+                 pre-existing meta:current_epoch at {}; no-op (idempotent restore)",
+                target_epoch,
+                path.display()
+            );
+            Ok(false)
+        }
+        ConsensusStorageState::CommittedEpoch(existing) => {
+            Err(ProductionConsensusStorageError::RestoreEpochInconsistent {
+                path,
+                existing,
+                snapshot: target_epoch,
+            })
+        }
+        ConsensusStorageState::PresentNoCommittedEpoch => {
+            eprintln!(
+                "[restore] Run 097 persisting snapshot canonical epoch={} into \
+                 {} (state was present-no-committed-epoch)",
+                target_epoch,
+                path.display()
+            );
+            storage.put_current_epoch(target_epoch).map_err(|e| {
+                ProductionConsensusStorageError::RestoreEpochWriteFailed {
+                    path: path.clone(),
+                    epoch: target_epoch,
+                    source: e,
+                }
+            })?;
+            eprintln!(
+                "[restore] Run 097 persisted snapshot canonical epoch={} into {}",
+                target_epoch,
+                path.display()
+            );
+            Ok(true)
+        }
+        ConsensusStorageState::NoConsensusStorage => {
+            // Defensive: matched the (None, None) branch above; never reached.
+            Ok(false)
+        }
+    }
+}
+
+// ============================================================================
 // Unit tests
 // ============================================================================
 
@@ -524,5 +693,144 @@ mod tests {
         // Both clones must be usable for reads.
         assert!(h1.get_current_epoch().unwrap().is_none());
         assert!(h2.get_current_epoch().unwrap().is_none());
+    }
+
+    // ========================================================================
+    // Run 097 — persist_restored_snapshot_epoch tests
+    // ========================================================================
+
+    #[test]
+    fn run097_persist_none_snapshot_epoch_is_noop() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        // Snapshot meta carrying epoch=None must NOT trigger any write
+        // and MUST NOT silently coerce to epoch=0.
+        let wrote = persist_restored_snapshot_epoch(&opened, None).expect("ok");
+        assert!(!wrote);
+        // Confirm storage still has no committed epoch (NOT 0).
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn run097_persist_some_into_present_no_committed_epoch_writes_canonical_epoch() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        assert_eq!(opened.state, ConsensusStorageState::PresentNoCommittedEpoch);
+
+        let wrote = persist_restored_snapshot_epoch(&opened, Some(13)).expect("write ok");
+        assert!(wrote);
+
+        // The same handle now reads back epoch=13.
+        let got = opened
+            .handle
+            .as_ref()
+            .unwrap()
+            .get_current_epoch()
+            .expect("get");
+        assert_eq!(got, Some(13));
+
+        // Re-opening the storage observes the restored CommittedEpoch.
+        drop(opened);
+        let opened2 = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened2.state, ConsensusStorageState::CommittedEpoch(13));
+    }
+
+    #[test]
+    fn run097_persist_idempotent_when_existing_matches_snapshot() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        // Pre-write epoch=5 then re-open so state observes CommittedEpoch(5).
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened
+                .handle
+                .as_ref()
+                .unwrap()
+                .put_current_epoch(5)
+                .unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened.state, ConsensusStorageState::CommittedEpoch(5));
+
+        // Restoring a snapshot whose epoch matches the existing value
+        // is an idempotent no-op (returns Ok(false)).
+        let wrote = persist_restored_snapshot_epoch(&opened, Some(5)).expect("ok");
+        assert!(!wrote);
+    }
+
+    #[test]
+    fn run097_persist_inconsistent_existing_epoch_fails_closed() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        {
+            let opened = open_production_consensus_storage(&cfg).expect("open");
+            opened
+                .handle
+                .as_ref()
+                .unwrap()
+                .put_current_epoch(9)
+                .unwrap();
+        }
+        let opened = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened.state, ConsensusStorageState::CommittedEpoch(9));
+
+        // Snapshot meta says epoch=7 but on-disk says epoch=9 — must
+        // fail closed rather than silently overwriting either side.
+        let err = persist_restored_snapshot_epoch(&opened, Some(7)).expect_err("must fail");
+        match err {
+            ProductionConsensusStorageError::RestoreEpochInconsistent {
+                existing,
+                snapshot,
+                ..
+            } => {
+                assert_eq!(existing, 9);
+                assert_eq!(snapshot, 7);
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        // Confirm storage was NOT overwritten.
+        let got = opened
+            .handle
+            .as_ref()
+            .unwrap()
+            .get_current_epoch()
+            .unwrap();
+        assert_eq!(got, Some(9));
+    }
+
+    #[test]
+    fn run097_persist_into_no_storage_is_defensive_noop() {
+        let opened = OpenedProductionConsensusStorage::no_storage();
+        // No data_dir, no handle. The function returns Ok(false) and
+        // does not attempt any write — this branch is unreachable in
+        // production because restore itself requires --data-dir.
+        let wrote = persist_restored_snapshot_epoch(&opened, Some(3)).expect("ok");
+        assert!(!wrote);
+    }
+
+    #[test]
+    fn run097_persist_epoch_zero_is_canonical_committed_epoch_zero() {
+        // Snapshot carrying epoch=Some(0) is the canonical genesis
+        // CommittedEpoch — NOT the same as absence. It must be
+        // persisted as `meta:current_epoch=0`.
+        let tmp = TempDir::new().unwrap();
+        let cfg = devnet_config_with_data_dir(tmp.path());
+        let opened = open_production_consensus_storage(&cfg).expect("open");
+        let wrote = persist_restored_snapshot_epoch(&opened, Some(0)).expect("ok");
+        assert!(wrote);
+        assert_eq!(
+            opened.handle.as_ref().unwrap().get_current_epoch().unwrap(),
+            Some(0)
+        );
+
+        drop(opened);
+        let opened2 = open_production_consensus_storage(&cfg).expect("reopen");
+        assert_eq!(opened2.state, ConsensusStorageState::CommittedEpoch(0));
     }
 }

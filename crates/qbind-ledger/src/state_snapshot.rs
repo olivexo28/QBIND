@@ -106,17 +106,53 @@ pub struct StateSnapshotMeta {
     /// Prevents accidentally restoring a snapshot from a different network.
     /// Should match the node's configured chain ID.
     pub chain_id: u64,
+
+    /// Run 097: optional canonical committed epoch at the moment of snapshot
+    /// creation, sourced **only** from a canonical surface (e.g. the
+    /// production `ConsensusStorage::get_current_epoch()` per Run 093/094).
+    ///
+    /// Semantics — see `task/RUN_097_TASK.txt`:
+    ///
+    /// - `Some(n)`: the snapshot was created on a node that observed
+    ///   `CommittedEpoch(n)` in canonical consensus storage. Restore
+    ///   uses this value to persist `meta:current_epoch = n` into the
+    ///   restored node's canonical `<data_dir>/consensus` surface.
+    /// - `None`: no canonical committed epoch was observable at snapshot
+    ///   creation (e.g. pre-Run-094 node, no `data_dir`, or
+    ///   `PresentNoCommittedEpoch` storage state). This is an
+    ///   **explicit absence** and MUST NOT be coerced to `0`.
+    ///
+    /// Old snapshots predating Run 097 do not carry this field and parse
+    /// as `epoch: None` (additive backward compatibility).
+    ///
+    /// Run 097 MUST NOT derive this value from block height, view number,
+    /// wall-clock time, timer ticks, snapshot height, or directory name.
+    pub epoch: Option<u64>,
 }
 
 impl StateSnapshotMeta {
     /// Create a new snapshot metadata instance.
+    ///
+    /// `epoch` defaults to `None`; use [`StateSnapshotMeta::with_epoch`]
+    /// to populate it from a canonical committed-epoch source.
     pub fn new(height: u64, block_hash: [u8; 32], created_at_unix_ms: u64, chain_id: u64) -> Self {
         Self {
             height,
             block_hash,
             created_at_unix_ms,
             chain_id,
+            epoch: None,
         }
+    }
+
+    /// Run 097: builder-style setter for the optional canonical
+    /// committed-epoch field. Pass `Some(n)` only when `n` was sourced
+    /// from a canonical surface (e.g. the production `ConsensusStorage`
+    /// `get_current_epoch()` probe). Pass `None` to keep absence
+    /// explicit — missing epoch MUST NOT be silently coerced to `0`.
+    pub fn with_epoch(mut self, epoch: Option<u64>) -> Self {
+        self.epoch = epoch;
+        self
     }
 
     /// Get the current Unix timestamp in milliseconds.
@@ -129,24 +165,37 @@ impl StateSnapshotMeta {
 
     /// Encode metadata to JSON bytes.
     ///
-    /// Format:
+    /// Format (Run 097 additive `epoch` field):
     /// ```json
     /// {
     ///   "height": 100000,
     ///   "block_hash": "aaaa...aaaa",
     ///   "created_at_unix_ms": 1700000000000,
-    ///   "chain_id": 5854693887968574798
+    ///   "chain_id": 5854693887968574798,
+    ///   "epoch": 7
     /// }
     /// ```
+    ///
+    /// When `epoch` is `None` (e.g. pre-Run-097 snapshots, or snapshots
+    /// taken without an observable canonical committed epoch) the
+    /// `"epoch"` key is **omitted entirely** from the JSON output. This
+    /// preserves additive backward compatibility: parsers older than
+    /// Run 097 simply ignore the new key when present, and the new
+    /// parser distinguishes "absent" (`None`) from "present and zero"
+    /// (`Some(0)`).
     pub fn to_json(&self) -> Vec<u8> {
         let block_hash_hex: String = self
             .block_hash
             .iter()
             .map(|b| format!("{:02x}", b))
             .collect();
+        let epoch_field = match self.epoch {
+            Some(e) => format!(",\n  \"epoch\": {}", e),
+            None => String::new(),
+        };
         format!(
-            "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}\n}}",
-            self.height, block_hash_hex, self.created_at_unix_ms, self.chain_id
+            "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}{}\n}}",
+            self.height, block_hash_hex, self.created_at_unix_ms, self.chain_id, epoch_field
         )
         .into_bytes()
     }
@@ -154,6 +203,16 @@ impl StateSnapshotMeta {
     /// Parse metadata from JSON bytes.
     ///
     /// Returns `None` if parsing fails or required fields are missing.
+    ///
+    /// Run 097: the `"epoch"` field is **optional and additive**.
+    ///
+    /// - Absent key → `epoch: None` (pre-Run-097 snapshot, parses cleanly).
+    /// - Present and numeric → `epoch: Some(n)` (Run 097+ snapshot).
+    /// - Present but malformed (non-numeric, quoted, etc.) → returns
+    ///   `None` from this function (fail-closed on the parse path so
+    ///   `validate_snapshot_dir` surfaces `MissingMetadata`).
+    ///
+    /// Missing epoch MUST NOT be silently coerced to `0`.
     pub fn from_json(data: &[u8]) -> Option<Self> {
         let s = std::str::from_utf8(data).ok()?;
 
@@ -162,6 +221,13 @@ impl StateSnapshotMeta {
         let block_hash_hex = Self::extract_string(s, "block_hash")?;
         let created_at_unix_ms = Self::extract_u64(s, "created_at_unix_ms")?;
         let chain_id = Self::extract_u64(s, "chain_id")?;
+        let epoch = match Self::extract_optional_u64(s, "epoch") {
+            Ok(opt) => opt,
+            // Malformed epoch field (key present, value not a clean u64
+            // literal). Fail closed — Run 097 must not silently treat
+            // an unreadable epoch as absent.
+            Err(_) => return None,
+        };
 
         // Parse block hash from hex
         if block_hash_hex.len() != 64 {
@@ -178,6 +244,7 @@ impl StateSnapshotMeta {
             block_hash,
             created_at_unix_ms,
             chain_id,
+            epoch,
         })
     }
 
@@ -193,6 +260,37 @@ impl StateSnapshotMeta {
         let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
         let num_str = rest[..end].trim();
         num_str.parse().ok()
+    }
+
+    /// Run 097: extract an *optional* u64 value from JSON-like text.
+    ///
+    /// Returns:
+    /// - `Ok(None)` when the key is absent (additive compatibility
+    ///   with pre-Run-097 snapshots).
+    /// - `Ok(Some(n))` when the key is present and parses as a bare
+    ///   u64 decimal literal.
+    /// - `Err(())` when the key is present but the value is not a
+    ///   valid u64 literal (malformed, quoted, negative, etc.). The
+    ///   caller MUST fail closed — Run 097 does not silently downgrade
+    ///   a malformed epoch field to `None`.
+    fn extract_optional_u64(s: &str, key: &str) -> Result<Option<u64>, ()> {
+        let key_pattern = format!("\"{}\":", key);
+        let Some(start) = s.find(&key_pattern) else {
+            return Ok(None);
+        };
+        let value_start = start + key_pattern.len();
+        let rest = &s[value_start..];
+        let rest = rest.trim_start();
+        let end = rest.find([',', '\n', '}']).unwrap_or(rest.len());
+        let num_str = rest[..end].trim();
+        // Explicit `null` is treated as absent for forward compatibility.
+        if num_str.eq_ignore_ascii_case("null") {
+            return Ok(None);
+        }
+        match num_str.parse::<u64>() {
+            Ok(n) => Ok(Some(n)),
+            Err(_) => Err(()),
+        }
     }
 
     /// Extract a string value from JSON-like text.
@@ -601,6 +699,9 @@ mod tests {
         assert_eq!(meta.block_hash, [0xAA; 32]);
         assert_eq!(meta.created_at_unix_ms, 1700000000000);
         assert_eq!(meta.chain_id, 0x1234);
+        // Run 097: new() must default epoch to None (explicit absence,
+        // not silently coerced to 0).
+        assert_eq!(meta.epoch, None);
     }
 
     #[test]
@@ -610,6 +711,7 @@ mod tests {
             block_hash: [0xAB; 32],
             created_at_unix_ms: 1700000000000,
             chain_id: 0x51424E444D41494E,
+            epoch: None,
         };
 
         let json = meta.to_json();
@@ -619,6 +721,7 @@ mod tests {
         assert_eq!(parsed.block_hash, meta.block_hash);
         assert_eq!(parsed.created_at_unix_ms, meta.created_at_unix_ms);
         assert_eq!(parsed.chain_id, meta.chain_id);
+        assert_eq!(parsed.epoch, None);
     }
 
     #[test]
@@ -700,5 +803,149 @@ mod tests {
         let ts = StateSnapshotMeta::now_unix_ms();
         // Should be a reasonable recent timestamp (after year 2020)
         assert!(ts > 1577836800000); // 2020-01-01 00:00:00 UTC
+    }
+
+    // ========================================================================
+    // Run 097 — additive snapshot epoch parity unit tests
+    // ========================================================================
+
+    /// Run 097: a snapshot meta with `epoch: Some(n)` serializes the epoch
+    /// field into JSON and round-trips losslessly.
+    #[test]
+    fn run097_epoch_some_serializes_and_round_trips() {
+        let meta = StateSnapshotMeta::new(100, [0x33; 32], 1700000000000, 0xC1)
+            .with_epoch(Some(7));
+        let json = meta.to_json();
+        let json_str = std::str::from_utf8(&json).unwrap();
+        assert!(
+            json_str.contains("\"epoch\": 7"),
+            "epoch field must be emitted when Some: {json_str}"
+        );
+        let parsed = StateSnapshotMeta::from_json(&json).expect("parses");
+        assert_eq!(parsed.epoch, Some(7));
+        assert_eq!(parsed.height, 100);
+        assert_eq!(parsed.chain_id, 0xC1);
+    }
+
+    /// Run 097: `epoch: None` MUST omit the field entirely so pre-Run-097
+    /// parsers still accept the snapshot unchanged.
+    #[test]
+    fn run097_epoch_none_omits_field_for_backward_compatibility() {
+        let meta = StateSnapshotMeta::new(100, [0x33; 32], 1700000000000, 0xC1);
+        let json = meta.to_json();
+        let json_str = std::str::from_utf8(&json).unwrap();
+        assert!(
+            !json_str.contains("epoch"),
+            "epoch field must be omitted when None: {json_str}"
+        );
+        let parsed = StateSnapshotMeta::from_json(&json).expect("parses");
+        assert_eq!(parsed.epoch, None);
+    }
+
+    /// Run 097: an old (pre-Run-097) snapshot JSON without `epoch`
+    /// continues to parse cleanly and yields `epoch: None`. This is
+    /// the explicit additive backward-compatibility contract.
+    #[test]
+    fn run097_old_snapshot_without_epoch_parses_as_none() {
+        let legacy = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99\n}";
+        let parsed = StateSnapshotMeta::from_json(legacy).expect("legacy parses");
+        assert_eq!(parsed.epoch, None, "missing epoch must NOT be Some(0)");
+        assert_eq!(parsed.height, 5);
+        assert_eq!(parsed.chain_id, 99);
+    }
+
+    /// Run 097: an explicit `"epoch": 0` is a *committed-epoch-0* signal,
+    /// not "no epoch". It must round-trip as `Some(0)`. This is the
+    /// invariant Run 091/092 require so that absence cannot be silently
+    /// conflated with a real CommittedEpoch(0).
+    #[test]
+    fn run097_epoch_zero_is_some_zero_not_none() {
+        let meta = StateSnapshotMeta::new(1, [0; 32], 1700000000000, 1).with_epoch(Some(0));
+        let json = meta.to_json();
+        let json_str = std::str::from_utf8(&json).unwrap();
+        assert!(json_str.contains("\"epoch\": 0"));
+        let parsed = StateSnapshotMeta::from_json(&json).unwrap();
+        assert_eq!(parsed.epoch, Some(0));
+        assert_ne!(parsed.epoch, None);
+    }
+
+    /// Run 097: a malformed `epoch` value (non-numeric) fails closed —
+    /// `from_json` returns `None` and downstream validation reports
+    /// `MissingMetadata`. Run 097 does NOT silently downgrade a
+    /// malformed epoch field to `None`.
+    #[test]
+    fn run097_malformed_epoch_fails_closed() {
+        let bad_quoted = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"epoch\": \"7\"\n}";
+        assert!(
+            StateSnapshotMeta::from_json(bad_quoted).is_none(),
+            "quoted epoch must fail closed"
+        );
+
+        let bad_negative = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"epoch\": -1\n}";
+        assert!(
+            StateSnapshotMeta::from_json(bad_negative).is_none(),
+            "negative epoch must fail closed"
+        );
+
+        let bad_garbage = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"epoch\": notanumber\n}";
+        assert!(
+            StateSnapshotMeta::from_json(bad_garbage).is_none(),
+            "garbage epoch must fail closed"
+        );
+    }
+
+    /// Run 097: explicit `"epoch": null` is treated as absence (forward
+    /// compatibility with future serializers that may choose to keep
+    /// the key but emit `null`). It is **not** an error.
+    #[test]
+    fn run097_epoch_explicit_null_is_treated_as_absent() {
+        let payload = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"epoch\": null\n}";
+        let parsed = StateSnapshotMeta::from_json(payload).expect("null epoch parses");
+        assert_eq!(parsed.epoch, None);
+    }
+
+    /// Run 097: serialization of a Run-097 snapshot with `epoch=Some(n)`
+    /// is deterministic — repeated `to_json` calls produce byte-identical
+    /// output.
+    #[test]
+    fn run097_serialization_is_deterministic() {
+        let meta = StateSnapshotMeta::new(7, [0x42; 32], 1700000000000, 0xA)
+            .with_epoch(Some(11));
+        let j1 = meta.to_json();
+        let j2 = meta.to_json();
+        assert_eq!(j1, j2);
+
+        let meta2 = StateSnapshotMeta::new(7, [0x42; 32], 1700000000000, 0xA);
+        let j3 = meta2.to_json();
+        let j4 = meta2.to_json();
+        assert_eq!(j3, j4);
+    }
+
+    /// Run 097: the epoch field MUST NOT be inferred from height by the
+    /// metadata layer. Constructing meta with `height=100, epoch=None`
+    /// must produce JSON that does not embed `100` as the epoch and
+    /// must round-trip back to `epoch=None`.
+    #[test]
+    fn run097_epoch_is_not_derived_from_height() {
+        let meta = StateSnapshotMeta::new(100, [0; 32], 1700000000000, 1);
+        assert_eq!(meta.epoch, None);
+        let json = meta.to_json();
+        let parsed = StateSnapshotMeta::from_json(&json).unwrap();
+        assert_eq!(parsed.epoch, None);
+        assert_eq!(parsed.height, 100);
     }
 }

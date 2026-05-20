@@ -1936,6 +1936,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 committed_anchor,
                                 &mut last_periodic_snapshot_height,
                                 Arc::clone(&metrics),
+                                cfg.consensus_storage.as_ref(),
                             );
                             update_restore_catchup_metrics(&metrics, &inbound_stats);
                             update_binary_view_timeout_metrics(&metrics, &inbound_stats);
@@ -2060,6 +2061,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         committed_anchor,
                         &mut last_periodic_snapshot_height,
                         Arc::clone(&metrics),
+                        cfg.consensus_storage.as_ref(),
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
                     update_binary_view_timeout_metrics(&metrics, &inbound_stats);
@@ -2189,6 +2191,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         committed_anchor,
                         &mut last_periodic_snapshot_height,
                         Arc::clone(&metrics),
+                        cfg.consensus_storage.as_ref(),
                     );
                     update_restore_catchup_metrics(&metrics, &inbound_stats);
                     update_binary_view_timeout_metrics(&metrics, &inbound_stats);
@@ -4407,6 +4410,7 @@ fn maybe_trigger_periodic_snapshot(
     committed_anchor: Option<SnapshotAnchor>,
     last_periodic_snapshot_height: &mut Option<u64>,
     metrics: Arc<NodeMetrics>,
+    consensus_storage: Option<&Arc<dyn ConsensusStorage>>,
 ) {
     let Some(anchor) = committed_anchor else {
         return;
@@ -4443,6 +4447,42 @@ fn maybe_trigger_periodic_snapshot(
         return;
     };
     let chain_id = periodic.chain_id;
+    // Run 097: probe canonical committed epoch from the production
+    // `ConsensusStorage` handle (the same handle Run 094 persists
+    // engine epoch transitions into). On any probe error we treat the
+    // snapshot as "no canonical epoch available" — the snapshot is
+    // still produced, with the `epoch` field omitted (explicit
+    // absence). We do NOT fabricate an epoch from height/view/wall-clock.
+    let snapshot_epoch: Option<u64> = match consensus_storage {
+        Some(storage) => match storage.get_current_epoch() {
+            Ok(Some(e)) => {
+                eprintln!(
+                    "[snapshot] Run 097 periodic epoch source: ConsensusStorage::get_current_epoch -> Some({})",
+                    e
+                );
+                Some(e)
+            }
+            Ok(None) => {
+                eprintln!(
+                    "[snapshot] Run 097 periodic epoch source: ConsensusStorage::get_current_epoch -> None (no committed epoch)"
+                );
+                None
+            }
+            Err(e) => {
+                eprintln!(
+                    "[snapshot] Run 097 periodic epoch source: ConsensusStorage probe error: {} — emitting snapshot with epoch=None (explicit absence)",
+                    e
+                );
+                None
+            }
+        },
+        None => {
+            eprintln!(
+                "[snapshot] Run 097 periodic epoch source: no ConsensusStorage handle wired — epoch=None"
+            );
+            None
+        }
+    };
     *last_periodic_snapshot_height = Some(anchor.height);
     // Fire-and-forget is deliberate here: periodic snapshots must not block the
     // consensus tick path. The inner spawn_blocking result is logged and metrics
@@ -4452,7 +4492,7 @@ fn maybe_trigger_periodic_snapshot(
         let snapshot_height = anchor.height;
         let metrics_for_task = Arc::clone(&metrics);
         let result = tokio::task::spawn_blocking(move || {
-            runtime.create_snapshot(anchor, chain_id, &metrics_for_task)
+            runtime.create_snapshot(anchor, chain_id, snapshot_epoch, &metrics_for_task)
         })
         .await;
         match result {
@@ -4700,6 +4740,7 @@ mod tests {
             }),
             &mut last_height,
             Arc::clone(&metrics),
+            None,
         );
         short_settle().await;
 
@@ -4726,6 +4767,7 @@ mod tests {
             }),
             &mut last_height,
             Arc::clone(&metrics),
+            None,
         );
         short_settle().await;
 
@@ -4753,6 +4795,7 @@ mod tests {
             }),
             &mut last_height,
             Arc::clone(&metrics),
+            None,
         );
         short_settle().await;
 
@@ -4781,6 +4824,7 @@ mod tests {
             Some(anchor),
             &mut last_height,
             Arc::clone(&metrics),
+            None,
         );
         wait_for_snapshot_success(&metrics, 1).await;
         maybe_trigger_periodic_snapshot(
@@ -4788,6 +4832,7 @@ mod tests {
             Some(anchor),
             &mut last_height,
             Arc::clone(&metrics),
+            None,
         );
         short_settle().await;
 
@@ -4817,6 +4862,7 @@ mod tests {
                 }),
                 &mut last_height,
                 Arc::clone(&metrics),
+                None,
             );
             wait_for_snapshot_success(&metrics, height / 4).await;
         }

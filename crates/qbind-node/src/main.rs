@@ -76,7 +76,8 @@ use qbind_node::node_config::{ConfigProfile, NetworkMode};
 use qbind_node::p2p_inbound::ChannelConsensusHandler;
 use qbind_node::p2p_node_builder::P2pNodeBuilder;
 use qbind_node::production_consensus_storage::{
-    open_production_consensus_storage, OpenedProductionConsensusStorage,
+    open_production_consensus_storage, persist_restored_snapshot_epoch,
+    OpenedProductionConsensusStorage,
 };
 use qbind_node::snapshot_restore::RestoreOutcome;
 use qbind_node::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeState};
@@ -1285,6 +1286,60 @@ async fn main() {
                 std::process::exit(1);
             }
         };
+    // ------------------------------------------------------------------
+    // Run 097: snapshot epoch parity for the restore path.
+    //
+    // If we restored from a snapshot (B3) AND the snapshot's `meta.json`
+    // carries a canonical committed epoch (`StateSnapshotMeta.epoch =
+    // Some(n)`), persist that epoch into the canonical
+    // `<data_dir>/consensus` `meta:current_epoch` surface we just opened.
+    // This re-establishes canonical epoch parity between the restored
+    // on-disk VM-v0 state and the production consensus storage so that
+    // Run 094's engine-epoch persistence and (later) PQC trust-bundle
+    // activation observe the same canonical epoch the snapshot was
+    // taken at. Fail-closed on write failure or inconsistency with any
+    // pre-existing CommittedEpoch — never silently overwrite.
+    //
+    // Run 097 does NOT change `ActivationContext.current_epoch`
+    // construction; the Run 091/092 fail-closed
+    // `CurrentEpochUnavailable` boundary remains in place for PQC
+    // trust-bundle activation in this run.
+    //
+    // See `crates/qbind-node/src/production_consensus_storage.rs`
+    // (`persist_restored_snapshot_epoch`) and
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_097.md`.
+    // ------------------------------------------------------------------
+    if let Some(outcome) = restore_outcome.as_ref() {
+        let snapshot_epoch = outcome.meta.epoch;
+        match persist_restored_snapshot_epoch(&consensus_storage_lifecycle, snapshot_epoch) {
+            Ok(true) => {
+                eprintln!(
+                    "[binary] Run 097: snapshot canonical epoch={} persisted into \
+                     <data_dir>/consensus meta:current_epoch.",
+                    snapshot_epoch.expect("Ok(true) implies Some")
+                );
+            }
+            Ok(false) => {
+                eprintln!(
+                    "[binary] Run 097: no snapshot epoch persistence performed \
+                     (snapshot_epoch={:?}, storage_state={}).",
+                    snapshot_epoch,
+                    consensus_storage_lifecycle.state.tag()
+                );
+            }
+            Err(e) => {
+                eprintln!("[binary] FATAL: Run 097 snapshot epoch parity failed: {}", e);
+                eprintln!(
+                    "[binary] qbind-node refuses to start because the restored \
+                     on-disk state cannot be honestly reconciled with the \
+                     canonical <data_dir>/consensus meta:current_epoch surface. \
+                     No fallback path. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_097.md."
+                );
+                std::process::exit(1);
+            }
+        }
+    }
     // Branch based on network mode for transport / wiring.
     match config.network_mode {
         NetworkMode::LocalMesh => {
@@ -1438,10 +1493,20 @@ async fn run_local_mesh_node(
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+    // Run 097: pass the canonical production `ConsensusStorage` handle
+    // into the SIGUSR1 snapshot task so the operator-triggered snapshot
+    // can attach the canonical committed epoch to `meta.json`. None
+    // here (no --data-dir) → snapshot meta will carry `epoch: None`
+    // (explicit absence; NOT 0).
+    let snapshot_consensus_storage: Option<Arc<dyn qbind_node::storage::ConsensusStorage>> =
+        consensus_storage
+            .clone()
+            .map(|s| s as Arc<dyn qbind_node::storage::ConsensusStorage>);
     let snapshot_handle = spawn_vm_v0_snapshot_signal_task(
         vm_v0_runtime,
         Arc::clone(&node_metrics),
         config.chain_id().as_u64(),
+        snapshot_consensus_storage,
         shutdown_rx.clone(),
     );
     let (consensus_handle, _progress) = spawn_binary_consensus_loop(cfg, shutdown_rx, node_metrics);
@@ -2901,10 +2966,18 @@ async fn run_p2p_node(
     }
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
+    // Run 097: pass the canonical production `ConsensusStorage` handle
+    // into the SIGUSR1 snapshot task so the operator-triggered snapshot
+    // can attach the canonical committed epoch to `meta.json`.
+    let snapshot_consensus_storage: Option<Arc<dyn qbind_node::storage::ConsensusStorage>> =
+        consensus_storage
+            .clone()
+            .map(|s| s as Arc<dyn qbind_node::storage::ConsensusStorage>);
     let snapshot_handle = spawn_vm_v0_snapshot_signal_task(
         vm_v0_runtime,
         Arc::clone(&node_metrics),
         config.chain_id().as_u64(),
+        snapshot_consensus_storage,
         shutdown_rx.clone(),
     );
 
@@ -3667,6 +3740,7 @@ fn spawn_vm_v0_snapshot_signal_task(
     runtime: Option<Arc<VmV0RuntimeState>>,
     metrics: Arc<NodeMetrics>,
     chain_id: u64,
+    consensus_storage: Option<Arc<dyn qbind_node::storage::ConsensusStorage>>,
     mut shutdown_rx: watch::Receiver<()>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let mut sigusr1 =
@@ -3723,10 +3797,46 @@ fn spawn_vm_v0_snapshot_signal_task(
                         continue;
                     };
                     let metrics_for_task = Arc::clone(&metrics);
+                    // Run 097: probe canonical committed epoch from the
+                    // production `ConsensusStorage` handle (Run 093/094)
+                    // and attach it to the snapshot meta. Absent /
+                    // probe-error → epoch=None (explicit absence; NOT
+                    // coerced to 0).
+                    let snapshot_epoch: Option<u64> = match consensus_storage.as_ref() {
+                        Some(storage) => match storage.get_current_epoch() {
+                            Ok(Some(e)) => {
+                                eprintln!(
+                                    "[snapshot] Run 097 SIGUSR1 epoch source: ConsensusStorage::get_current_epoch -> Some({})",
+                                    e
+                                );
+                                Some(e)
+                            }
+                            Ok(None) => {
+                                eprintln!(
+                                    "[snapshot] Run 097 SIGUSR1 epoch source: ConsensusStorage::get_current_epoch -> None"
+                                );
+                                None
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[snapshot] Run 097 SIGUSR1 epoch source: probe error: {} — epoch=None",
+                                    e
+                                );
+                                None
+                            }
+                        },
+                        None => {
+                            eprintln!(
+                                "[snapshot] Run 097 SIGUSR1 epoch source: no ConsensusStorage handle wired — epoch=None"
+                            );
+                            None
+                        }
+                    };
                     let result = tokio::task::spawn_blocking(move || {
                         runtime.create_snapshot(
                             SnapshotAnchor { height, block_hash },
                             chain_id,
+                            snapshot_epoch,
                             &metrics_for_task,
                         )
                     })
@@ -3764,6 +3874,7 @@ fn spawn_vm_v0_snapshot_signal_task(
     runtime: Option<Arc<VmV0RuntimeState>>,
     metrics: Arc<NodeMetrics>,
     _unsupported_chain_id: u64,
+    _unsupported_consensus_storage: Option<Arc<dyn qbind_node::storage::ConsensusStorage>>,
     _unsupported_shutdown_rx: watch::Receiver<()>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     if runtime.and_then(|r| r.snapshot_dir().map(|_| ())).is_some() {

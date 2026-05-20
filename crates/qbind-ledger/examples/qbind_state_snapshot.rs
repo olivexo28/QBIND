@@ -55,6 +55,17 @@ struct Args {
     height: u64,
     block_hash: [u8; 32],
     chain_id: u64,
+    /// Run 097: optional canonical committed epoch to embed in
+    /// `meta.json`. The operator MUST source this value from a
+    /// canonical surface (e.g. probing `<data_dir>/consensus`
+    /// via `qbind-node`'s startup log or an external
+    /// `ConsensusStorage::get_current_epoch` probe). Pass
+    /// `--epoch` only when the operator has observed
+    /// `CommittedEpoch(n)` for this node. When omitted, the
+    /// `epoch` field is left absent in `meta.json` (explicit
+    /// "not available", not `0`). Run 097 MUST NOT derive this
+    /// from height, view, wall-clock, or directory name.
+    epoch: Option<u64>,
 }
 
 fn parse_u64(s: &str) -> Result<u64, String> {
@@ -86,6 +97,7 @@ fn parse_args() -> Result<Args, String> {
     let mut height: Option<u64> = None;
     let mut block_hash: Option<[u8; 32]> = None;
     let mut chain_id: Option<u64> = None;
+    let mut epoch: Option<u64> = None;
 
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -104,11 +116,15 @@ fn parse_args() -> Result<Args, String> {
             "--chain-id" => {
                 chain_id = Some(parse_u64(&it.next().ok_or("--chain-id needs a value")?)?)
             }
+            "--epoch" => {
+                epoch = Some(parse_u64(&it.next().ok_or("--epoch needs a value")?)?)
+            }
             "-h" | "--help" => {
                 eprintln!(
                     "{}",
                     "qbind_state_snapshot --state-dir DIR --snapshot-dir DIR \
-                     --height N --block-hash-hex HEX --chain-id N"
+                     --height N --block-hash-hex HEX --chain-id N \
+                     [--epoch N]"
                 );
                 return Err("help".to_string());
             }
@@ -122,6 +138,7 @@ fn parse_args() -> Result<Args, String> {
         height: height.ok_or("--height required")?,
         block_hash: block_hash.ok_or("--block-hash-hex required")?,
         chain_id: chain_id.ok_or("--chain-id required")?,
+        epoch,
     })
 }
 
@@ -147,7 +164,8 @@ fn run() -> Result<(), String> {
         .unwrap_or(0);
 
     let meta =
-        StateSnapshotMeta::new(args.height, args.block_hash, now_ms, args.chain_id);
+        StateSnapshotMeta::new(args.height, args.block_hash, now_ms, args.chain_id)
+            .with_epoch(args.epoch);
 
     eprintln!(
         "[qbind_state_snapshot] opening RocksDbAccountState at {}",
@@ -156,11 +174,22 @@ fn run() -> Result<(), String> {
     let storage = RocksDbAccountState::open(&args.state_dir)
         .map_err(|e| format!("open state dir failed: {e:?}"))?;
 
+    match args.epoch {
+        Some(e) => eprintln!(
+            "[qbind_state_snapshot] Run 097 canonical committed epoch attached: epoch={} (operator-supplied via --epoch)",
+            e
+        ),
+        None => eprintln!(
+            "[qbind_state_snapshot] Run 097 no --epoch supplied; meta.json epoch field will be omitted (explicit absence, NOT 0)"
+        ),
+    }
+
     eprintln!(
-        "[qbind_state_snapshot] invoking StateSnapshotter::create_snapshot meta={{height={},chain_id={:#x},block_hash={}}} target={}",
+        "[qbind_state_snapshot] invoking StateSnapshotter::create_snapshot meta={{height={},chain_id={:#x},block_hash={},epoch={:?}}} target={}",
         meta.height,
         meta.chain_id,
         hex_encode(&meta.block_hash),
+        meta.epoch,
         args.snapshot_dir.display()
     );
 

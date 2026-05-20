@@ -1,0 +1,752 @@
+# RUN 098 — Wire Canonical `meta:current_epoch` into Production `ActivationContext.current_epoch`
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+* Runs 050–068 completed signed PQC trust-bundle lifecycle.
+* Runs 069–075 completed local operator reload lifecycle.
+* Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+* Run 087 added peer-driven propagation/apply safety specification.
+* Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+* Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+* Run 090 updated the operator runbook for propagation-only behavior.
+* Run 091 established fail-closed `CurrentEpochUnavailable` behavior for `activation_epoch` whenever no canonical runtime epoch source exists.
+* Run 092 proved production `qbind-node` did not open `RocksDbConsensusStorage`, so `meta:current_epoch` was phantom on real binary runs.
+* Run 093 introduced canonical production binary-path `ConsensusStorage` ownership at `<data_dir>/consensus`.
+* Run 094 threaded the Run 093 `ConsensusStorage` handle into the binary consensus loop and added fail-closed epoch persistence through existing atomic epoch persistence machinery.
+* Run 095 added binary-path committed reconfig-block detection and engine epoch transition trigger.
+* Run 096 added the smallest explicit local operator-gated DevNet/TestNet reconfig proposal source and proved the reconfig → transition → persistence path in tests.
+* Run 097 added snapshot epoch parity:
+
+  * `StateSnapshotMeta.epoch: Option<u64>`
+  * old snapshots remain valid
+  * missing epoch remains `None`, not epoch `0`
+  * snapshot creation uses canonical `ConsensusStorage::get_current_epoch()`
+  * restore can persist snapshot epoch back into `<data_dir>/consensus`
+  * restore fails closed on epoch inconsistency/write failure
+  * trust-bundle activation still remained isolated with `ActivationContext.current_epoch: None`
+
+Run 098 is the first run allowed to consume the canonical epoch source for trust-bundle activation.
+
+Current remaining C4 items include:
+
+* activation_epoch runtime-source consumption
+* peer-driven live apply
+* KMS/HSM custody
+* in-binary/on-chain signing-key ratification
+* production fast-sync / broader consensus-storage restore
+* per-environment production trust-anchor operation
+* full C4/C5 closure
+
+Run 098 must address only the first item:
+
+> Wire canonical production `meta:current_epoch` into `ActivationContext.current_epoch` at all production trust-bundle activation call sites, while preserving fail-closed behavior whenever no committed epoch is available.
+
+---
+
+# Exact objective
+
+Implement the smallest safe production wiring that supplies canonical committed epoch into trust-bundle activation checks.
+
+The objective is:
+
+1. Read `meta:current_epoch` only from the canonical Run 093 production `ConsensusStorage` surface.
+2. Provide `Some(epoch)` to `ActivationContext.current_epoch` only when a committed epoch is actually present.
+3. Preserve `CurrentEpochUnavailable` when:
+
+   * fresh genesis has no committed epoch
+   * old restored snapshot lacks epoch metadata
+   * storage is unavailable
+   * storage is corrupt
+   * canonical epoch lookup fails
+4. Apply the same behavior consistently across all production trust-bundle activation surfaces:
+
+   * startup `--p2p-trust-bundle`
+   * reload-check
+   * reload-apply
+   * SIGHUP live reload
+   * peer-candidate validation
+   * peer-candidate propagation
+5. Preserve all existing activation-height, minimum-margin, revocation, sequence, and trust-bundle safety checks.
+6. Do not invent or infer epoch from any non-canonical source.
+
+Run 098 may finally narrow the C4 `activation_epoch runtime source` item, but only for canonical committed-epoch cases.
+
+Run 098 must not claim full C4 or C5 closure.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Canonical epoch lookup helper
+
+Add a narrow helper if needed, for example:
+
+```rust
+load_activation_current_epoch(...)
+```
+
+or equivalent.
+
+It must:
+
+* use only canonical production `ConsensusStorage`
+* return `Some(epoch)` only when `meta:current_epoch` exists
+* return `None` for explicit no-epoch state
+* fail closed on storage corruption/read failure where appropriate
+* never derive epoch from height/time/view/snapshot height
+
+---
+
+## B. ActivationContext wiring
+
+Change production `ActivationContext` construction from:
+
+```rust
+current_epoch: None
+```
+
+to:
+
+```rust
+current_epoch: canonical_epoch_option
+```
+
+only where canonical epoch lookup is available and safe.
+
+All production trust-bundle activation surfaces must be audited and updated consistently.
+
+---
+
+## C. Fail-closed no-epoch behavior
+
+If a trust bundle or active root declares `activation_epoch` and canonical epoch is unavailable:
+
+* behavior must remain `CurrentEpochUnavailable`
+* no silent ignore
+* no epoch `0` fallback
+* no environment-specific bypass
+
+If the bundle does not declare `activation_epoch`, existing behavior should remain unchanged.
+
+---
+
+## D. Fresh genesis and old snapshot behavior
+
+Fresh genesis:
+
+* no committed epoch
+* `current_epoch = None`
+* bundles requiring `activation_epoch` fail closed
+
+Old snapshot without epoch:
+
+* restored state may be valid
+* no committed epoch restored
+* `current_epoch = None`
+* bundles requiring `activation_epoch` fail closed
+
+---
+
+## E. Committed/restored epoch behavior
+
+If `meta:current_epoch = n` exists canonically:
+
+* activation bundle/root with `activation_epoch <= n` may pass the epoch axis, subject to all other checks
+* activation bundle/root with `activation_epoch > n` must fail closed as future epoch
+* all existing height/minimum-margin/revocation/sequence checks still apply
+
+---
+
+# Strict non-goals
+
+Run 098 MUST NOT:
+
+* derive epoch from block height
+* derive epoch from snapshot height
+* derive epoch from wall-clock time
+* derive epoch from view number
+* derive epoch from timer ticks
+* treat missing epoch as epoch `0`
+* silently satisfy `activation_epoch = 0` when no epoch exists
+* weaken Run 065 minimum activation-margin policy
+* weaken activation-height checks
+* weaken revocation checks
+* weaken Run 055 sequence anti-rollback
+* weaken Run 069 reload-check non-mutation
+* weaken Run 070/073/074 apply ordering
+* change trust-bundle wire format
+* change peer-candidate wire format
+* implement peer-driven apply
+* implement governance
+* implement validator-set rotation
+* implement KMS/HSM custody
+* implement signing-key ratification
+* redesign snapshots
+* redesign fast-sync
+* redesign consensus
+* add dummy crypto
+* add fallback to `--p2p-trusted-root`
+* claim full C4 closure
+* claim C5 closure
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. All ActivationContext construction sites
+
+Find every production construction of:
+
+```rust
+ActivationContext { ... }
+```
+
+or equivalent.
+
+Expected surfaces include:
+
+* startup trust-bundle load
+* reload-check
+* process-start reload-apply
+* SIGHUP live reload
+* peer-candidate validation
+* peer-candidate propagation
+
+Document all call sites and whether they can safely access canonical epoch.
+
+No call site may be silently missed.
+
+---
+
+## 2. Canonical epoch availability per surface
+
+For each activation surface, document whether canonical `ConsensusStorage` is available.
+
+Examples:
+
+* startup with `--data-dir`
+* startup without `--data-dir`, if still allowed for any check mode
+* reload-check command paths
+* live reload on running node
+* peer-candidate validation on running node
+* restore path after Run 097
+
+If a surface cannot safely access canonical epoch, it must remain `None` and preserve `CurrentEpochUnavailable`.
+
+---
+
+## 3. Existing activation semantics
+
+Review and preserve:
+
+* bundle-level `activation_epoch`
+* root-level `activation_epoch`
+* future epoch rejection
+* unavailable epoch rejection
+* display/log messages
+* metrics behavior
+* interaction with activation-height
+* interaction with Run 065 minimum-margin
+* interaction with revocation activation
+
+---
+
+## 4. Storage failure behavior
+
+Define behavior for:
+
+* storage missing
+* storage unreadable
+* schema incompatible
+* corruption detected
+* read error
+* no committed epoch
+
+No corrupt or unreadable storage may become `current_epoch = None` if that would hide a real storage failure. Distinguish:
+
+* valid no-epoch state
+* storage failure
+
+---
+
+## 5. Restore behavior
+
+Confirm Run 097 behavior:
+
+* new snapshot with epoch restores `meta:current_epoch`
+* old snapshot without epoch leaves no committed epoch
+* activation after restore behaves accordingly
+
+---
+
+# Required implementation
+
+Implement the smallest safe code changes to:
+
+## 1. Add canonical activation epoch provider
+
+Create a narrow provider/helper if needed.
+
+Expected behavior:
+
+```rust
+enum ActivationEpochSource {
+    Committed(u64),
+    UnavailableNoCommittedEpoch,
+}
+```
+
+or use existing types if available.
+
+Storage failures should return typed errors and fail closed where startup/apply semantics require.
+
+Do not conflate no-epoch with storage failure.
+
+---
+
+## 2. Wire provider into startup trust-bundle load
+
+At startup:
+
+* use canonical storage opened by Run 093
+* read committed epoch if available
+* build `ActivationContext.current_epoch`
+* preserve `None` on valid no-epoch
+* fail closed on storage errors
+
+---
+
+## 3. Wire provider into reload-check
+
+For reload-check:
+
+* use canonical epoch if a canonical storage source is available
+* if reload-check intentionally runs without `data_dir`, preserve unavailable epoch behavior
+* do not force unrelated CLI contract changes unless necessary
+* no sequence write on rejection
+
+---
+
+## 4. Wire provider into reload-apply and SIGHUP live reload
+
+For running-node apply surfaces:
+
+* use the live node’s canonical storage handle
+* read committed epoch at validation time
+* preserve validation-before-swap ordering
+* preserve `validate → snapshot → swap → evict_sessions → commit_sequence`
+* no sequence commit if activation fails
+
+---
+
+## 5. Wire provider into peer-candidate validation / propagation
+
+For peer-candidate validation and propagation:
+
+* use canonical epoch when available on running node
+* if unavailable, keep `CurrentEpochUnavailable`
+* validation-only and propagation-only remain non-mutating
+* no apply
+* no sequence commit
+* no session eviction
+
+---
+
+## 6. Preserve metrics unless needed
+
+Do not add new metric families unless there is a clear operator-actionable gap.
+
+Existing activation epoch required/current/rejected metrics should remain canonical unless implementation proves they are insufficient.
+
+---
+
+# Required tests
+
+Add focused tests.
+
+## A. ActivationContext wiring tests
+
+Test that all production call sites either:
+
+* pass `Some(epoch)` from canonical storage when committed epoch exists
+* or explicitly pass `None` when no committed epoch exists
+
+No silent missed call site.
+
+---
+
+## B. Startup activation tests
+
+Test:
+
+* fresh genesis + bundle activation_epoch ⇒ `CurrentEpochUnavailable`
+* committed epoch `n` + activation_epoch `<= n` passes epoch axis
+* committed epoch `n` + activation_epoch `> n` rejects future epoch
+* root-level activation_epoch follows same rules
+* no activation_epoch remains unchanged
+
+---
+
+## C. Reload-check tests
+
+Test:
+
+* committed epoch satisfies activation_epoch
+* future epoch rejects
+* no committed epoch remains `CurrentEpochUnavailable`
+* sequence file unchanged on rejection
+* reload-check without canonical storage preserves unavailable behavior
+
+---
+
+## D. Reload-apply / SIGHUP tests
+
+Test:
+
+* committed epoch permits otherwise-valid apply
+* future epoch rejects before swap
+* no epoch rejects with `CurrentEpochUnavailable`
+* no live trust mutation on rejection
+* no session eviction on rejection
+* no sequence commit on rejection
+
+---
+
+## E. Peer-candidate validation / propagation tests
+
+Test:
+
+* committed epoch permits validation when otherwise valid
+* future epoch rejects
+* no epoch rejects with `CurrentEpochUnavailable`
+* validation-only remains non-mutating
+* propagation remains validation-before-rebroadcast only
+* invalid epoch candidate is not rebroadcast
+
+---
+
+## F. Restore tests
+
+Test:
+
+* restore from Run 097 epoch-bearing snapshot allows activation_epoch satisfied by restored epoch
+* restore from old snapshot without epoch still rejects activation_epoch with `CurrentEpochUnavailable`
+* malformed/corrupt storage fails closed
+
+---
+
+## G. Regression tests
+
+Run and report:
+
+* Run 091 activation_epoch fail-closed tests, updated only where legitimately superseded by canonical epoch availability
+* Run 093 production consensus storage lifecycle tests
+* Run 094 binary-path epoch transition persistence tests
+* Run 095 binary-path reconfig detection tests
+* Run 096 reconfig proposal source tests
+* Run 097 snapshot epoch parity tests
+* Run 057 activation-height tests
+* Run 065 minimum-margin tests
+* Run 069 reload-check tests
+* Run 073 process-start apply tests
+* Run 074 SIGHUP live reload tests
+* Run 076 peer-candidate validation tests
+* Run 088 propagation tests
+* full `qbind-node --lib`
+* relevant `qbind-ledger`
+* relevant `qbind-net`
+* relevant `qbind-crypto`
+
+If any pre-existing test target has known compile issues, identify it clearly and prove it predates Run 098.
+
+---
+
+# Release-binary evidence
+
+Produce release-binary evidence.
+
+Minimum scenarios:
+
+## Scenario 1 — Fresh genesis remains fail-closed
+
+Start release binary with fresh `--data-dir`.
+
+Use a trust bundle requiring `activation_epoch`.
+
+Prove:
+
+* canonical storage opens
+* no committed epoch exists
+* activation fails with `CurrentEpochUnavailable`
+* no epoch `0` fallback
+* no sequence write
+* no root merge
+* no P2P trust start
+
+---
+
+## Scenario 2 — Committed epoch satisfies activation_epoch
+
+Use Run 096 path or existing committed-epoch setup to produce `meta:current_epoch = n`.
+
+Start/reload with trust bundle requiring `activation_epoch <= n`.
+
+Prove:
+
+* canonical epoch is read
+* activation epoch axis passes
+* all other checks still apply
+* sequence/merge/apply ordering remains correct
+
+---
+
+## Scenario 3 — Future epoch rejects
+
+With `meta:current_epoch = n`, use trust bundle requiring `activation_epoch = n + 1`.
+
+Prove:
+
+* activation rejects as future epoch
+* no sequence write
+* no root merge
+* no live trust mutation
+* no session eviction
+
+---
+
+## Scenario 4 — Restore epoch-bearing snapshot
+
+Restore from Run 097 epoch-bearing snapshot.
+
+Use trust bundle requiring `activation_epoch <= restored_epoch`.
+
+Prove:
+
+* restored epoch is read from consensus storage
+* activation epoch axis passes
+* no synthetic epoch
+
+---
+
+## Scenario 5 — Old snapshot without epoch remains unavailable
+
+Restore from old snapshot without epoch.
+
+Use trust bundle requiring `activation_epoch`.
+
+Prove:
+
+* activation fails with `CurrentEpochUnavailable`
+* missing epoch not treated as `0`
+
+---
+
+## Scenario 6 — Peer-candidate propagation rejection
+
+On a running node without committed epoch or with insufficient epoch, send peer candidate requiring future/unavailable epoch.
+
+Prove:
+
+* validation rejects
+* propagation does not rebroadcast
+* no apply
+* no sequence write
+* no session eviction
+
+If any release-binary scenario cannot be honestly produced, return partial-positive and document the exact blocker. Do not fake it.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_098.md`
+* release-binary smoke logs under `docs/devnet/`
+* update `docs/whitepaper/contradiction.md`
+* update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Update other docs only if required by actual code changes.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 098 may narrow:
+
+* “activation_epoch runtime source”
+
+Run 098 may mark this sub-piece resolved only if:
+
+* all production activation surfaces use canonical committed epoch when available
+* valid no-epoch states still fail with `CurrentEpochUnavailable`
+* storage failures fail closed
+* release-binary evidence proves satisfied and future epoch cases
+* peer-candidate validation/propagation preserves non-mutation
+
+Run 098 MUST NOT mark resolved:
+
+* peer-driven live apply
+* KMS/HSM custody
+* signing-key ratification
+* production fast-sync / broader consensus-storage restore
+* per-environment production trust-anchor operation
+* full C4
+* C5
+
+The update must explicitly state:
+
+* missing epoch is not epoch `0`
+* fresh genesis remains `CurrentEpochUnavailable`
+* old snapshots without epoch remain `CurrentEpochUnavailable`
+* committed/restored epoch can satisfy the epoch axis only
+* all other trust-bundle checks still apply
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+* strongest-positive
+* positive
+* partial-positive
+* negative
+
+Use **strongest-positive** only if:
+
+* all activation surfaces are wired
+* release-binary evidence covers fresh/no-epoch, satisfied epoch, future epoch, restored epoch, old snapshot, and peer-candidate rejection
+* storage failures are fail-closed
+* non-mutation invariants are proven
+* no scope expansion occurs
+
+Use **positive** if:
+
+* implementation and tests are complete
+* release-binary proof is strong but has a narrow documented limitation
+
+Use **partial-positive** if:
+
+* startup activation is wired but reload/peer surfaces remain incomplete
+* release-binary evidence is incomplete
+* some surfaces intentionally remain `None` due to missing canonical storage access
+
+Use **negative** if:
+
+* missing epoch is treated as `0`
+* epoch is derived from height/time/view
+* activation silently ignores `activation_epoch`
+* peer-candidate propagation rebroadcasts invalid epoch candidates
+* sequence writes occur on rejection
+* live trust mutates on rejection
+* scope broadens into peer-driven apply/governance/redesign
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+* strongest-positive
+* positive
+* partial-positive
+* negative
+
+---
+
+## 2. What was implemented
+
+Include:
+
+* files changed
+* canonical epoch provider/helper
+* ActivationContext call sites changed
+* storage failure handling
+* startup behavior
+* reload-check behavior
+* reload-apply/SIGHUP behavior
+* peer-candidate behavior
+* restore behavior
+* any API/CLI additions
+
+---
+
+## 3. What was proven
+
+Separate:
+
+* source-level proof
+* unit/integration test proof
+* release-binary evidence proof
+
+---
+
+## 4. What was not changed
+
+Explicitly confirm:
+
+* no synthetic epoch
+* no height/time/view-derived epoch
+* no missing-epoch-to-0 fallback
+* no trust-bundle wire change
+* no peer-driven apply
+* no KMS/HSM
+* no signing-key ratification
+* no fast-sync redesign
+* no full C4 closure
+* no C5 closure
+
+---
+
+## 5. Contradictions or inconsistencies
+
+You MUST cross-check new code against existing design/spec/docs.
+
+If contradictions or inconsistencies are found:
+
+* document them in `docs/whitepaper/contradiction.md`
+* explain them in the final response
+
+Do not silently ignore contradictions.
+
+---
+
+## 6. Evidence references
+
+List:
+
+* evidence document
+* tests added
+* tests run
+* release-binary command/scenario summaries
+* logs/metrics inspected
+
+---
+
+## 7. Residual risk and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 098 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
