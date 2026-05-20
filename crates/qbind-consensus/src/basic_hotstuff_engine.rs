@@ -349,6 +349,32 @@ where
 
     /// Whether we have already emitted a timeout message for the current view (T146).
     timeout_emitted_in_view: bool,
+
+    /// Run 096 — pending local-operator-gated reconfig proposal intent.
+    ///
+    /// When `Some(target_epoch)` and this engine is the leader for the
+    /// current view, the next [`on_leader_step`] / [`try_propose`] call
+    /// will construct the leader proposal as a canonical reconfig block
+    /// (`payload_kind = PAYLOAD_KIND_RECONFIG`, `next_epoch = target_epoch`)
+    /// instead of a normal block, and clear the intent. The intent is
+    /// **single-shot**: after one emission the field is cleared and the
+    /// engine returns to emitting normal proposals.
+    ///
+    /// This is the only canonical place a release-binary leader can be
+    /// directed to propose a reconfig block under the existing HotStuff
+    /// proposal path. The intent is supplied by the binary via the
+    /// operator-gated `--devnet-reconfig-proposal-next-epoch <N>` CLI
+    /// flag (DevNet/TestNet-only; refused on MainNet). The engine never
+    /// derives the target epoch from wall-clock, height, view, or timer
+    /// ticks — the value is exactly what the operator supplied.
+    ///
+    /// Validation at intent-set time enforces `target_epoch >
+    /// current_epoch`. At consumption time the same monotonicity check
+    /// is repeated and a stale intent (target ≤ current — i.e. the
+    /// engine already advanced past the target by other means) is
+    /// silently dropped (no synthetic reconfig is emitted). See
+    /// `on_leader_step` for the consumption site.
+    pending_reconfig_next_epoch: Option<u64>,
 }
 
 /// Peer-learned certified block material used by restore catchup.
@@ -367,6 +393,51 @@ pub struct RestoreCatchupBlock<BlockIdT> {
     /// Logical QC signers learned from the peer.
     pub qc_signers: Vec<ValidatorId>,
 }
+
+/// Run 096 — fail-closed errors from
+/// [`BasicHotStuffEngine::set_pending_reconfig_next_epoch`].
+///
+/// The setter refuses to arm an invalid local-operator-gated reconfig
+/// proposal intent so an operator can never silently configure the
+/// binary leader to propose a regressive, equal, or zero `next_epoch`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PendingReconfigIntentError {
+    /// `target_epoch` was zero. The engine treats `0` as "no epoch
+    /// requested" (matching the `BlockHeader.next_epoch` semantics
+    /// for `PAYLOAD_KIND_NORMAL`) and refuses to arm such an intent.
+    TargetEpochZero,
+    /// `target_epoch` was not strictly greater than the engine's
+    /// current epoch (equal or regressive). Reconfig must always
+    /// advance the epoch monotonically — the engine's own
+    /// `transition_to_epoch` enforces the same invariant.
+    NonMonotonicTarget {
+        current_epoch: u64,
+        target_epoch: u64,
+    },
+}
+
+impl std::fmt::Display for PendingReconfigIntentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PendingReconfigIntentError::TargetEpochZero => write!(
+                f,
+                "pending_reconfig_intent_invalid: target_epoch=0 (zero target is not a \
+                 valid reconfig request; fail closed)"
+            ),
+            PendingReconfigIntentError::NonMonotonicTarget {
+                current_epoch,
+                target_epoch,
+            } => write!(
+                f,
+                "pending_reconfig_intent_invalid: target_epoch={} must be strictly greater \
+                 than current_epoch={} (no equal, no regress; fail closed)",
+                target_epoch, current_epoch
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PendingReconfigIntentError {}
 
 /// Fail-closed restore-catchup validation errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,6 +492,7 @@ where
             .field("equivocation_recorder", &self.equivocation_recorder)
             .field("timeout_accumulator", &self.timeout_accumulator)
             .field("timeout_emitted_in_view", &self.timeout_emitted_in_view)
+            .field("pending_reconfig_next_epoch", &self.pending_reconfig_next_epoch)
             .finish()
     }
 }
@@ -452,6 +524,7 @@ where
             equivocation_recorder: None,
             timeout_accumulator: TimeoutAccumulator::new(),
             timeout_emitted_in_view: false,
+            pending_reconfig_next_epoch: None,
         }
     }
 
@@ -582,6 +655,66 @@ where
     /// * `epoch` - The epoch number to use for all consensus messages.
     pub fn set_current_epoch(&mut self, epoch: u64) {
         self.current_epoch = epoch;
+    }
+
+    /// Run 096 — set the pending local-operator-gated reconfig proposal
+    /// intent.
+    ///
+    /// When set, the next leader-step proposal this engine emits will
+    /// carry `payload_kind = PAYLOAD_KIND_RECONFIG` and
+    /// `next_epoch = target_epoch` instead of a normal block. The
+    /// intent is **single-shot**: it is cleared as soon as the engine
+    /// emits one proposal carrying it (regardless of whether that
+    /// proposal subsequently commits). This matches `task/RUN_096_TASK.txt`
+    /// §"3. Inject intent into leader proposal construction" — "once
+    /// proposal is emitted or committed, avoid repeated uncontrolled
+    /// proposals".
+    ///
+    /// # Validation
+    ///
+    /// Enforces:
+    /// - `target_epoch` must be strictly greater than the engine's
+    ///   current epoch (no equal, no regress). Matches the same
+    ///   monotonicity invariant `transition_to_epoch` enforces.
+    ///
+    /// On invalid input, returns `Err(PendingReconfigIntentError::*)`
+    /// and leaves the field unchanged (fail-closed). The binary
+    /// surfaces this as a refused-startup error so an operator can
+    /// never silently arm an invalid reconfig proposal.
+    ///
+    /// Run 096 does NOT derive the target epoch from wall-clock time,
+    /// block height, view number, or timer ticks — the value is
+    /// exactly what the caller (the binary CLI handler) passed in.
+    pub fn set_pending_reconfig_next_epoch(
+        &mut self,
+        target_epoch: u64,
+    ) -> Result<(), PendingReconfigIntentError> {
+        if target_epoch == 0 {
+            return Err(PendingReconfigIntentError::TargetEpochZero);
+        }
+        if target_epoch <= self.current_epoch {
+            return Err(PendingReconfigIntentError::NonMonotonicTarget {
+                current_epoch: self.current_epoch,
+                target_epoch,
+            });
+        }
+        self.pending_reconfig_next_epoch = Some(target_epoch);
+        Ok(())
+    }
+
+    /// Run 096 — current pending reconfig intent (test/inspection
+    /// surface). Returns `None` when no intent is armed.
+    pub fn pending_reconfig_next_epoch(&self) -> Option<u64> {
+        self.pending_reconfig_next_epoch
+    }
+
+    /// Run 096 — explicitly clear any pending reconfig intent without
+    /// emitting a proposal. Used only when the engine state has
+    /// diverged from the intent's preconditions (e.g. concurrent
+    /// epoch advance from a peer-driven path that does not exist in
+    /// Run 096 but is reserved for future governance integration).
+    pub fn clear_pending_reconfig_next_epoch(&mut self) {
+        self.pending_reconfig_next_epoch = None;
     }
 
     /// Transition to a new epoch (T102).
@@ -1186,6 +1319,32 @@ impl BasicHotStuffEngine<[u8; 32]> {
 
         let epoch = self.current_epoch;
 
+        // Run 096 — consume any pending local-operator-gated reconfig
+        // proposal intent. The intent is single-shot: it is taken
+        // (cleared) exactly when we build a proposal carrying it. We
+        // re-validate the monotonicity invariant at consume time so a
+        // stale intent (engine somehow already at or past the target
+        // by other means) never produces a synthetic / regressive
+        // reconfig block — we just emit a normal block and drop the
+        // intent. This preserves the canonical reconfig representation
+        // (no parallel format) and the existing block-id derivation
+        // (the canonical reconfig fields are simply set on the same
+        // `BlockHeader`). No epoch is derived from wall-clock /
+        // height / view / timer ticks — the value is exactly the
+        // operator-supplied `target_epoch`.
+        let (payload_kind, next_epoch_for_header) =
+            match self.pending_reconfig_next_epoch.take() {
+                Some(target) if target > self.current_epoch => {
+                    (qbind_wire::PAYLOAD_KIND_RECONFIG, target)
+                }
+                Some(_) => {
+                    // Stale intent (engine already at/past target).
+                    // Drop it silently and emit a normal block.
+                    (qbind_wire::PAYLOAD_KIND_NORMAL, 0)
+                }
+                None => (qbind_wire::PAYLOAD_KIND_NORMAL, 0),
+            };
+
         let proposal = BlockProposal {
             header: BlockHeader {
                 version: 1,
@@ -1199,8 +1358,8 @@ impl BasicHotStuffEngine<[u8; 32]> {
                 suite_id: qbind_wire::DEFAULT_CONSENSUS_SUITE_ID,
                 tx_count: 0,
                 timestamp: 0,
-                payload_kind: qbind_wire::PAYLOAD_KIND_NORMAL,
-                next_epoch: 0,
+                payload_kind,
+                next_epoch: next_epoch_for_header,
                 batch_commitment: [0u8; 32],
             },
             qc: justify_qc.map(|qc| {
@@ -2193,5 +2352,242 @@ mod tests {
             Vec::new(),
             "freshly restored engine has no certified peer-learned suffix to export"
         );
+    }
+
+    // ========================================================================
+    // Run 096 — pending reconfig proposal intent tests.
+    // ========================================================================
+
+    /// Fresh engine has no pending reconfig intent.
+    #[test]
+    fn run_096_fresh_engine_has_no_pending_reconfig() {
+        let validators = make_validator_set(1);
+        let engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// `set_pending_reconfig_next_epoch(0)` fails closed.
+    #[test]
+    fn run_096_set_pending_reconfig_rejects_zero() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        let err = engine
+            .set_pending_reconfig_next_epoch(0)
+            .expect_err("zero target_epoch must fail closed");
+        assert!(matches!(err, PendingReconfigIntentError::TargetEpochZero));
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// `set_pending_reconfig_next_epoch(current_epoch)` fails closed
+    /// — equal target is regressive.
+    #[test]
+    fn run_096_set_pending_reconfig_rejects_equal_to_current() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        engine.set_current_epoch(3);
+        let err = engine
+            .set_pending_reconfig_next_epoch(3)
+            .expect_err("equal target_epoch must fail closed");
+        match err {
+            PendingReconfigIntentError::NonMonotonicTarget {
+                current_epoch,
+                target_epoch,
+            } => {
+                assert_eq!(current_epoch, 3);
+                assert_eq!(target_epoch, 3);
+            }
+            other => panic!("expected NonMonotonicTarget, got {:?}", other),
+        }
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// `set_pending_reconfig_next_epoch(target < current_epoch)` fails
+    /// closed (regression).
+    #[test]
+    fn run_096_set_pending_reconfig_rejects_regression() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        engine.set_current_epoch(5);
+        let err = engine
+            .set_pending_reconfig_next_epoch(2)
+            .expect_err("regressive target_epoch must fail closed");
+        assert!(matches!(
+            err,
+            PendingReconfigIntentError::NonMonotonicTarget { .. }
+        ));
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// `set_pending_reconfig_next_epoch(current+1)` succeeds and arms
+    /// the intent.
+    #[test]
+    fn run_096_set_pending_reconfig_accepts_sequential_target() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        engine
+            .set_pending_reconfig_next_epoch(1)
+            .expect("target=1 > current=0 is valid");
+        assert_eq!(engine.pending_reconfig_next_epoch(), Some(1));
+    }
+
+    /// `clear_pending_reconfig_next_epoch` clears the intent without
+    /// emitting a proposal.
+    #[test]
+    fn run_096_clear_pending_reconfig() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        engine.set_pending_reconfig_next_epoch(7).unwrap();
+        assert_eq!(engine.pending_reconfig_next_epoch(), Some(7));
+        engine.clear_pending_reconfig_next_epoch();
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// No reconfig intent → leader proposal is exactly the same
+    /// canonical normal block as before Run 096.
+    #[test]
+    fn run_096_no_intent_emits_normal_proposal_unchanged() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        let actions = engine.on_leader_step();
+        assert!(!actions.is_empty());
+        if let ConsensusEngineAction::BroadcastProposal(proposal) = &actions[0] {
+            assert_eq!(
+                proposal.header.payload_kind,
+                qbind_wire::PAYLOAD_KIND_NORMAL
+            );
+            assert_eq!(proposal.header.next_epoch, 0);
+        } else {
+            panic!("expected BroadcastProposal");
+        }
+    }
+
+    /// Armed reconfig intent → leader emits a canonical
+    /// `PAYLOAD_KIND_RECONFIG` block carrying the exact requested
+    /// `next_epoch`. The proposal otherwise uses the same block-id
+    /// derivation, signing path, and HotStuff structures — no parallel
+    /// wire format.
+    #[test]
+    fn run_096_armed_intent_emits_canonical_reconfig_proposal() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        engine.set_pending_reconfig_next_epoch(1).unwrap();
+
+        let actions = engine.on_leader_step();
+        assert!(!actions.is_empty());
+        if let ConsensusEngineAction::BroadcastProposal(proposal) = &actions[0] {
+            assert_eq!(
+                proposal.header.payload_kind,
+                qbind_wire::PAYLOAD_KIND_RECONFIG
+            );
+            assert_eq!(proposal.header.next_epoch, 1);
+            // Canonical block-id derivation must be unchanged — the
+            // header still carries the same proposer / view / parent.
+            assert_eq!(proposal.header.proposer_index, 1);
+            assert_eq!(proposal.header.height, 0);
+        } else {
+            panic!("expected BroadcastProposal");
+        }
+        // Single-shot: intent must be cleared after one emission.
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// One-shot behaviour: after consuming the intent once, subsequent
+    /// leader-step calls emit normal proposals again (no spam).
+    #[test]
+    fn run_096_intent_is_one_shot() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        engine.set_pending_reconfig_next_epoch(1).unwrap();
+
+        // First call consumes the intent and emits reconfig.
+        let actions1 = engine.on_leader_step();
+        match &actions1[0] {
+            ConsensusEngineAction::BroadcastProposal(p) => {
+                assert_eq!(p.header.payload_kind, qbind_wire::PAYLOAD_KIND_RECONFIG);
+                assert_eq!(p.header.next_epoch, 1);
+            }
+            _ => panic!("expected BroadcastProposal"),
+        }
+
+        // After the single-validator self-QC commits view 0 and advances
+        // to view 1, the next leader step emits a normal block again.
+        let actions2 = engine.on_leader_step();
+        match &actions2[0] {
+            ConsensusEngineAction::BroadcastProposal(p) => {
+                assert_eq!(p.header.payload_kind, qbind_wire::PAYLOAD_KIND_NORMAL);
+                assert_eq!(p.header.next_epoch, 0);
+            }
+            _ => panic!("expected BroadcastProposal"),
+        }
+    }
+
+    /// A stale intent (engine advanced past target by some other path
+    /// between arm and consume) is dropped silently and a normal
+    /// proposal is emitted — never a synthetic / regressive reconfig.
+    #[test]
+    fn run_096_stale_intent_emits_normal_proposal() {
+        let validators = make_validator_set(1);
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(1), validators);
+        // Arm intent target=2 while current=0 (valid at set time).
+        engine.set_pending_reconfig_next_epoch(2).unwrap();
+        // Then simulate engine advancing past the target via another
+        // path (e.g. snapshot-driven epoch state seed). This is not a
+        // path Run 096 itself activates; the check is purely defensive.
+        engine.set_current_epoch(5);
+
+        let actions = engine.on_leader_step();
+        match &actions[0] {
+            ConsensusEngineAction::BroadcastProposal(p) => {
+                assert_eq!(p.header.payload_kind, qbind_wire::PAYLOAD_KIND_NORMAL);
+                assert_eq!(p.header.next_epoch, 0);
+            }
+            _ => panic!("expected BroadcastProposal"),
+        }
+        // Intent must be cleared regardless (single-shot).
+        assert_eq!(engine.pending_reconfig_next_epoch(), None);
+    }
+
+    /// A non-leader with an armed intent does NOT produce any proposal
+    /// and the intent remains armed for when leadership rotates back.
+    #[test]
+    fn run_096_non_leader_does_not_consume_intent() {
+        let validators = make_validator_set(3);
+        // Node 2 is not leader at view 0 (leaders = [1, 2, 3], view 0
+        // -> leader 1).
+        let mut engine: BasicHotStuffEngine<[u8; 32]> =
+            BasicHotStuffEngine::new(ValidatorId(2), validators);
+        engine.set_pending_reconfig_next_epoch(1).unwrap();
+
+        let actions = engine.on_leader_step();
+        assert!(actions.is_empty());
+        // Intent must remain armed.
+        assert_eq!(engine.pending_reconfig_next_epoch(), Some(1));
+    }
+
+    /// `Display` for `PendingReconfigIntentError` mentions fail-closed
+    /// semantics so the operator log line is searchable.
+    #[test]
+    fn run_096_intent_error_display_mentions_fail_closed() {
+        let err = PendingReconfigIntentError::TargetEpochZero;
+        let s = format!("{}", err);
+        assert!(s.contains("fail closed"));
+        let err2 = PendingReconfigIntentError::NonMonotonicTarget {
+            current_epoch: 3,
+            target_epoch: 2,
+        };
+        let s2 = format!("{}", err2);
+        assert!(s2.contains("fail closed"));
+        assert!(s2.contains("target_epoch=2"));
+        assert!(s2.contains("current_epoch=3"));
     }
 }

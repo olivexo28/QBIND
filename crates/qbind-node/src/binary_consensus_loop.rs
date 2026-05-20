@@ -356,6 +356,140 @@ pub struct BinaryConsensusLoopConfig {
     /// synthetic epoch, derive one from wall-clock / block-height /
     /// view, or fabricate a transition just to satisfy tests.
     pub consensus_storage: Option<Arc<dyn ConsensusStorage>>,
+
+    /// Run 096 — optional local-operator-gated canonical reconfig
+    /// proposal intent.
+    ///
+    /// When `Some`, the binary consensus loop installs the intent on
+    /// the underlying `BasicHotStuffEngine` at startup via
+    /// [`BasicHotStuffEngine::set_pending_reconfig_next_epoch`]. The
+    /// engine then emits exactly one canonical `PAYLOAD_KIND_RECONFIG`
+    /// block carrying `next_epoch = target_epoch` on its next
+    /// leader-step tick, instead of a normal block. After that single
+    /// emission the engine clears the intent and returns to normal
+    /// proposals — Run 096 is intentionally one-shot. If the
+    /// canonical reconfig block then commits through the existing
+    /// HotStuff path, the Run 095 detector fires
+    /// `engine.transition_to_epoch(...)` and the Run 094 persistence
+    /// hook writes `meta:current_epoch = CommittedEpoch(n)`.
+    ///
+    /// This field is supplied **only** by the operator-gated CLI flag
+    /// `--devnet-reconfig-proposal-next-epoch <N>`, which is
+    /// disabled-by-default, environment-gated (refused on MainNet
+    /// unless an existing MainNet governance path authorizes it —
+    /// today no such path exists, so MainNet refuses), and hidden in
+    /// `--help`. The value is the exact operator-supplied target
+    /// epoch — Run 096 does **not** derive epoch from wall-clock,
+    /// block height, view number, or timer ticks.
+    ///
+    /// When `None` (the default), the binary loop runs identically to
+    /// pre-Run-096 behaviour: only normal blocks are proposed.
+    pub reconfig_proposal: Option<BinaryReconfigProposalConfig>,
+}
+
+/// Run 096 — narrow type carrying the local-operator-gated reconfig
+/// proposal intent through into the binary consensus loop.
+///
+/// The struct deliberately carries only the canonical reconfig fields
+/// the engine needs (`target_epoch`). It does NOT carry private keys,
+/// trust-bundle material, signing-key bytes, validator-set rotation
+/// material, or any peer-supplied data. The actual reconfig block is
+/// constructed by the existing `BasicHotStuffEngine::on_leader_step`
+/// proposal path (single canonical reconfig representation; no
+/// parallel wire format).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryReconfigProposalConfig {
+    /// Canonical `BlockHeader.next_epoch` value the leader will emit
+    /// in its next reconfig proposal. Must be strictly greater than
+    /// `engine.current_epoch()` at the moment the intent is armed —
+    /// the engine's `set_pending_reconfig_next_epoch` re-validates
+    /// the monotonicity invariant and fail-closes on regression.
+    ///
+    /// The binary CLI layer is responsible for refusing values of
+    /// zero (refused at CLI parse time as well as in the engine
+    /// validation). No height / wall-clock / view derivation.
+    pub target_epoch: u64,
+}
+
+/// Run 096 — fail-closed errors from
+/// [`derive_reconfig_proposal_from_cli_flag`].
+///
+/// Each variant corresponds to a distinct binary-side environment /
+/// validity gate. The CLI layer in `qbind-node` surfaces these as
+/// startup refusals with a clear operator log line — an operator
+/// can never silently arm an invalid or environment-disallowed
+/// reconfig proposal intent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconfigProposalCliError {
+    /// `--devnet-reconfig-proposal-next-epoch=0` was supplied. The
+    /// engine treats `0` as "no epoch requested" (matching the
+    /// `BlockHeader.next_epoch` semantics for `PAYLOAD_KIND_NORMAL`)
+    /// and the CLI gate refuses such a request up front.
+    TargetEpochZero,
+    /// The flag was supplied on a MainNet binary. No governance path
+    /// authorizes operator-gated reconfig proposals on MainNet today
+    /// — Run 096 is explicitly DevNet/TestNet evidence-only.
+    MainnetRefused { target_epoch: u64 },
+}
+
+impl std::fmt::Display for ReconfigProposalCliError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReconfigProposalCliError::TargetEpochZero => write!(
+                f,
+                "Run 096: --devnet-reconfig-proposal-next-epoch=0 is refused (the engine \
+                 treats 0 as \"no epoch requested\"; supply N >= 1). Fail-closed."
+            ),
+            ReconfigProposalCliError::MainnetRefused { target_epoch } => write!(
+                f,
+                "Run 096: --devnet-reconfig-proposal-next-epoch={} is refused on MainNet — \
+                 no governance path authorizes operator-gated reconfig proposals on MainNet \
+                 today. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_096.md and \
+                 docs/whitepaper/contradiction.md C4. Fail-closed.",
+                target_epoch
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReconfigProposalCliError {}
+
+/// Run 096 — derive a [`BinaryReconfigProposalConfig`] from the
+/// operator-supplied CLI flag, applying the binary's environment /
+/// validity gates **before** the loop receives it.
+///
+/// This is the canonical CLI-side validation gate for Run 096. It:
+///   - returns `Ok(None)` when the flag is absent (default — no
+///     reconfig proposal will be armed; the binary runs exactly as
+///     pre-Run-096);
+///   - refuses `N == 0` (fail-closed; the engine treats 0 as "no
+///     epoch requested");
+///   - refuses MainNet — no governance path authorizes
+///     operator-gated reconfig proposals on MainNet today;
+///   - otherwise returns `Ok(Some(BinaryReconfigProposalConfig {
+///     target_epoch: N }))` for the loop to install on the engine.
+///
+/// The engine layer (`set_pending_reconfig_next_epoch`) re-validates
+/// `N > current_epoch` so even if the CLI gate is bypassed by tests
+/// the monotonicity invariant still holds.
+pub fn derive_reconfig_proposal_from_cli_flag(
+    raw_flag: Option<u64>,
+    is_mainnet: bool,
+) -> Result<Option<BinaryReconfigProposalConfig>, ReconfigProposalCliError> {
+    let Some(target) = raw_flag else {
+        return Ok(None);
+    };
+    if target == 0 {
+        return Err(ReconfigProposalCliError::TargetEpochZero);
+    }
+    if is_mainnet {
+        return Err(ReconfigProposalCliError::MainnetRefused {
+            target_epoch: target,
+        });
+    }
+    Ok(Some(BinaryReconfigProposalConfig {
+        target_epoch: target,
+    }))
 }
 
 /// Restore-aware consensus baseline derived from a successful snapshot
@@ -413,6 +547,7 @@ impl BinaryConsensusLoopConfig {
             view_timeout_max_ticks: DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS,
             periodic_snapshot: None,
             consensus_storage: None,
+            reconfig_proposal: None,
         }
     }
 
@@ -482,6 +617,22 @@ impl BinaryConsensusLoopConfig {
         self.consensus_storage = Some(storage);
         self
     }
+
+    /// Run 096 — install the local-operator-gated canonical reconfig
+    /// proposal intent the binary loop must arm on the underlying
+    /// engine at startup.
+    ///
+    /// See [`BinaryConsensusLoopConfig::reconfig_proposal`] for the
+    /// full semantics. Passing `None` (or never calling this builder)
+    /// preserves pre-Run-096 behaviour exactly: only normal blocks are
+    /// proposed.
+    pub fn with_reconfig_proposal(
+        mut self,
+        reconfig_proposal: BinaryReconfigProposalConfig,
+    ) -> Self {
+        self.reconfig_proposal = Some(reconfig_proposal);
+        self
+    }
 }
 
 impl std::fmt::Debug for BinaryConsensusLoopConfig {
@@ -506,6 +657,7 @@ impl std::fmt::Debug for BinaryConsensusLoopConfig {
                     .as_ref()
                     .map(|_| "<ConsensusStorage handle>"),
             )
+            .field("reconfig_proposal", &self.reconfig_proposal)
             .finish()
     }
 }
@@ -1492,6 +1644,60 @@ pub async fn run_binary_consensus_loop_with_io(
             engine.current_view(),
             engine.committed_height(),
         );
+    }
+
+    // ----------------------------------------------------------------------
+    // Run 096 — arm the local-operator-gated canonical reconfig
+    // proposal intent on the engine, if supplied by the binary CLI
+    // layer. This is the only place the binary consensus loop can
+    // direct the underlying `BasicHotStuffEngine` to construct a
+    // canonical `PAYLOAD_KIND_RECONFIG` block instead of a normal
+    // block on its next leader-step tick — see
+    // `BasicHotStuffEngine::set_pending_reconfig_next_epoch`.
+    //
+    // The intent is single-shot: the engine consumes it on the next
+    // leader-step that produces a proposal and emits exactly one
+    // canonical reconfig block; subsequent ticks emit normal blocks
+    // again. No re-arming, no timer-driven retry, no view-driven
+    // retry. If a non-leader node receives the intent the intent
+    // stays armed until that node is leader (no message is emitted
+    // until then).
+    //
+    // Validation: the engine re-validates `target_epoch >
+    // current_epoch` here. The CLI layer (`main.rs`) already enforced
+    // `target_epoch != 0` and MainNet refusal before construction;
+    // this engine-side validation is the second fail-closed gate. A
+    // baseline-restored engine that has already advanced past the
+    // requested target will refuse the intent here and the loop exits
+    // fail-closed so an operator never silently arms a regressive
+    // reconfig request against a restored node.
+    // ----------------------------------------------------------------------
+    if let Some(reconfig_proposal) = cfg.reconfig_proposal {
+        match engine.set_pending_reconfig_next_epoch(reconfig_proposal.target_epoch) {
+            Ok(()) => {
+                eprintln!(
+                    "[binary-consensus] Run 096: armed canonical reconfig proposal intent — \
+                     target_epoch={} current_epoch={} local_id={:?} (single-shot; the next \
+                     leader-step tick that produces a proposal will emit \
+                     PAYLOAD_KIND_RECONFIG with this next_epoch).",
+                    reconfig_proposal.target_epoch,
+                    engine.current_epoch(),
+                    cfg.local_validator_id,
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "[binary-consensus] FATAL: Run 096 refused to arm canonical reconfig \
+                     proposal intent: {}. See task/RUN_096_TASK.txt §\"C. Validation before \
+                     proposal\". The binary will exit fail-closed rather than silently \
+                     downgrading to a normal-only proposal stream.",
+                    e
+                );
+                // Return current progress (empty) so the spawn helper
+                // can surface the failure as a clean loop exit.
+                return BinaryConsensusLoopProgress::default();
+            }
+        }
     }
 
     let (mut inbound_rx, outbound_facade, peer_connectivity, verification_ctx): (

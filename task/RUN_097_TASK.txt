@@ -1,0 +1,672 @@
+# RUN 097 — Snapshot Epoch Parity for `StateSnapshotMeta` and Restore Path
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+* Runs 050–068 completed signed PQC trust-bundle lifecycle.
+* Runs 069–075 completed local operator reload lifecycle.
+* Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+* Run 087 added peer-driven propagation/apply safety specification.
+* Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+* Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+* Run 090 updated the operator runbook for propagation-only behavior.
+* Run 091 established fail-closed `CurrentEpochUnavailable` behavior for `activation_epoch` whenever no canonical runtime epoch source exists.
+* Run 092 proved that production `qbind-node` did not open `RocksDbConsensusStorage`, so `meta:current_epoch` was phantom on real binary runs.
+* Run 093 introduced canonical production binary-path `ConsensusStorage` ownership at `<data_dir>/consensus`.
+* Run 094 threaded the Run 093 `ConsensusStorage` handle into the binary consensus loop and added fail-closed epoch persistence through existing atomic epoch persistence machinery.
+* Run 095 added binary-path committed reconfig-block detection and engine epoch transition trigger.
+* Run 096 added the smallest explicit local operator-gated DevNet/TestNet reconfig proposal source:
+
+  * hidden disabled-by-default `--devnet-reconfig-proposal-next-epoch <N>`
+  * refuses `N = 0`
+  * refuses MainNet
+  * emits canonical `PAYLOAD_KIND_RECONFIG`
+  * uses existing proposal construction path
+  * commits through existing HotStuff path
+  * triggers Run 095 epoch transition
+  * triggers Run 094 persistence
+  * proves `CommittedEpoch(1)` through the Run 093 storage surface in tests
+
+Run 096 was positive at the code/test level but must keep the following boundaries:
+
+* It is **not** governance.
+* It is **not** MainNet authorization.
+* It is **not** validator-set rotation.
+* It is **not** peer-driven apply.
+* It does **not** consume `current_epoch` for trust-bundle activation.
+* Run 091/092 `CurrentEpochUnavailable` remains fail-closed.
+
+Current remaining C4 items include:
+
+* snapshot epoch parity
+* activation_epoch runtime-source consumption
+* peer-driven live apply
+* KMS/HSM custody
+* in-binary/on-chain signing-key ratification
+* production fast-sync / consensus-storage restore
+* per-environment production trust-anchor operation
+* full C4/C5 closure
+
+Run 097 must address only the first item:
+
+> preserve canonical committed epoch across snapshot create/validate/restore by extending `StateSnapshotMeta` and restore wiring with additive epoch parity.
+
+---
+
+# Exact objective
+
+Implement the smallest backward-compatible snapshot epoch parity support so that snapshots created after a committed epoch transition carry the canonical committed epoch, and restore can preserve that epoch into the production consensus-storage surface.
+
+The objective is:
+
+1. Add an additive optional epoch field to `StateSnapshotMeta`.
+2. Populate that field during snapshot creation using the canonical committed epoch source.
+3. Validate the epoch field during snapshot validation without breaking old snapshots.
+4. Restore the epoch into canonical production `ConsensusStorage` when restoring from a snapshot that contains epoch metadata.
+5. Preserve explicit ambiguity for old snapshots that lack epoch metadata.
+6. Preserve Run 091/092 fail-closed `CurrentEpochUnavailable` behavior for trust-bundle activation.
+7. Do not consume `current_epoch` for trust-bundle activation in Run 097.
+
+Run 097 should make snapshot/rejoin epoch state honest and durable.
+
+Run 097 must not yet use the restored epoch to satisfy trust-bundle activation.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Additive snapshot metadata field
+
+Extend `StateSnapshotMeta` with an optional epoch field.
+
+Expected shape:
+
+```rust
+epoch: Option<u64>
+```
+
+or the repo’s existing epoch type if one already exists and is appropriate.
+
+Requirements:
+
+* backward-compatible with existing snapshot metadata
+* old snapshots without epoch remain valid
+* new snapshots may include epoch
+* absence of epoch must remain explicit, not coerced to `0`
+
+---
+
+## B. Snapshot creation epoch population
+
+When creating a snapshot from a node with a canonical committed epoch available, write the epoch into snapshot metadata.
+
+The epoch must come from a canonical source only, such as:
+
+* Run 093/094/096 production `ConsensusStorage` committed epoch
+* existing engine committed/current epoch if already canonical at snapshot time
+
+Do not derive epoch from:
+
+* block height
+* wall-clock time
+* view number
+* timer ticks
+* snapshot height
+* filename
+* directory name
+
+---
+
+## C. Snapshot validation
+
+Update snapshot validation so that:
+
+* old metadata without epoch remains accepted
+* new metadata with epoch is parsed and validated
+* malformed epoch fails closed
+* epoch `0` is accepted only if it is semantically valid in existing repo epoch rules; otherwise reject or preserve explicit no-epoch state
+* no missing epoch is silently treated as `0`
+
+---
+
+## D. Restore path epoch parity
+
+When restoring from a snapshot that includes epoch metadata:
+
+* materialize VM-v0 state exactly as before
+* open/use canonical production `ConsensusStorage`
+* persist or restore `meta:current_epoch` consistently with the snapshot epoch
+* preserve atomicity/fail-closed behavior
+* avoid partial restore where VM state is restored but epoch metadata fails silently
+
+When restoring from an old snapshot without epoch metadata:
+
+* restore must remain backward-compatible
+* epoch state must remain explicit unknown/no-epoch
+* no synthetic epoch must be written
+
+---
+
+## E. Trust activation isolation
+
+Every production `ActivationContext` must continue to use:
+
+```rust
+current_epoch: None
+```
+
+Run 097 must not feed snapshot epoch or restored consensus-storage epoch into trust-bundle activation.
+
+---
+
+# Strict non-goals
+
+Run 097 MUST NOT:
+
+* consume `current_epoch` for trust-bundle activation
+* modify `pqc_trust_activation` semantics
+* weaken Run 091/092 `CurrentEpochUnavailable`
+* treat missing snapshot epoch as epoch `0`
+* derive epoch from snapshot height
+* derive epoch from block height
+* derive epoch from wall-clock time
+* derive epoch from view number
+* derive epoch from timer ticks
+* redesign snapshot format beyond additive metadata
+* redesign fast-sync
+* redesign consensus
+* redesign HotStuff commit rules
+* redesign epoch semantics
+* implement governance
+* implement validator-set rotation
+* implement peer-driven live apply
+* change peer-candidate propagation behavior
+* implement KMS/HSM custody
+* implement signing-key ratification
+* change trust-bundle wire format
+* add dummy crypto
+* add fallback to `--p2p-trusted-root`
+* weaken sequence anti-rollback
+* weaken activation-height checks
+* weaken Run 065 minimum-margin policy
+* weaken revocation checks
+* claim full C4 closure
+* claim C5 closure
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing snapshot metadata format
+
+Map:
+
+* `StateSnapshotMeta`
+* snapshot `meta.json` serialization/deserialization
+* snapshot create path
+* snapshot validation path
+* restore path
+* compatibility behavior for old metadata
+
+Document the smallest additive change.
+
+---
+
+## 2. Existing epoch source availability at snapshot creation
+
+Find where snapshot creation currently runs.
+
+Determine whether it has access to:
+
+* production `ConsensusStorage`
+* engine current/committed epoch
+* node config / data dir
+* restore baseline
+
+Document the safest canonical source for the snapshot epoch.
+
+If no canonical source is available at a particular snapshot creation path, leave `epoch: None` and document why.
+
+Do not invent one.
+
+---
+
+## 3. Restore path storage ordering
+
+Map restore startup ordering:
+
+```text
+--restore-from-snapshot
+→ snapshot validation
+→ VM-v0 materialization
+→ production ConsensusStorage open
+→ consensus loop startup
+```
+
+Determine the safest point to restore `meta:current_epoch` from snapshot metadata.
+
+Preserve fail-closed behavior.
+
+---
+
+## 4. Old snapshot compatibility
+
+Identify any existing snapshot fixtures/tests.
+
+Ensure old snapshots without epoch still pass.
+
+Document that absence of epoch means “not available,” not `0`.
+
+---
+
+## 5. Activation isolation
+
+Reconfirm all production `ActivationContext` construction sites.
+
+Document that Run 097 does not feed snapshot epoch into trust-bundle activation.
+
+---
+
+# Required implementation
+
+Implement the smallest safe code changes to:
+
+## 1. Extend `StateSnapshotMeta`
+
+Add optional epoch metadata.
+
+Requirements:
+
+* additive
+* backward-compatible
+* deterministic serialization
+* explicit absence
+* no coercion to `0`
+
+---
+
+## 2. Populate epoch on snapshot creation
+
+When a canonical committed epoch is available:
+
+* include it in `meta.json`
+* record source in logs/evidence where useful
+
+When unavailable:
+
+* write `epoch: null` or omit field according to compatibility style
+* do not fake it
+
+---
+
+## 3. Validate epoch metadata
+
+Validation must:
+
+* accept old snapshots without epoch
+* accept valid new snapshots with epoch
+* reject malformed/incompatible epoch metadata
+* preserve existing chain-id/height/block-hash validation
+
+---
+
+## 4. Restore epoch into consensus storage
+
+When snapshot metadata includes epoch:
+
+* write/persist it through existing canonical storage machinery
+* prefer existing atomic transition/MetaStore APIs
+* preserve storage consistency checks
+* fail closed on write/recovery failure
+
+When metadata lacks epoch:
+
+* do not write epoch
+* preserve explicit no-epoch state
+
+---
+
+## 5. Preserve restore atomicity
+
+Avoid a partial restore where:
+
+* VM state is restored
+* epoch restore fails
+* node continues anyway
+
+If epoch metadata exists but cannot be restored, startup must fail closed.
+
+---
+
+## 6. Preserve activation isolation
+
+Do not change trust-bundle activation input.
+
+No `ActivationContext.current_epoch = Some(...)` in Run 097.
+
+---
+
+# Required tests
+
+Add focused tests.
+
+## A. Snapshot metadata tests
+
+Test:
+
+* old metadata without epoch parses
+* new metadata with epoch parses
+* serialization is deterministic
+* missing epoch remains `None`
+* malformed epoch fails closed
+* epoch is not inferred from height
+
+---
+
+## B. Snapshot creation tests
+
+Test:
+
+* snapshot created with canonical committed epoch includes epoch
+* snapshot created without canonical epoch leaves epoch absent/None
+* no fake epoch is written
+
+---
+
+## C. Restore tests
+
+Test:
+
+* restore from snapshot with epoch writes `CommittedEpoch(n)` into production consensus storage
+* restart after restore observes `CommittedEpoch(n)`
+* restore from old snapshot without epoch preserves no-epoch state
+* restore with malformed epoch fails closed
+* restore with epoch write failure fails closed
+* VM-v0 restore behavior remains unchanged
+
+---
+
+## D. Regression tests
+
+Run and report:
+
+* Run 091 activation_epoch fail-closed tests
+* Run 093 production consensus storage lifecycle tests
+* Run 094 binary-path epoch transition persistence tests
+* Run 095 binary-path reconfig detection tests
+* Run 096 reconfig proposal source tests
+* B3 snapshot restore tests
+* B5 restore-aware consensus start tests
+* B13 restore-catchup tests if available
+* epoch persistence tests
+* epoch startup validation tests
+* full `qbind-node --lib`
+* relevant `qbind-ledger`
+* relevant `qbind-net`
+* relevant `qbind-crypto`
+
+If any pre-existing test target has known compile issues, identify it clearly and prove it predates Run 097.
+
+---
+
+# Release-binary evidence
+
+Produce release-binary evidence.
+
+Minimum scenarios:
+
+## Scenario 1 — Snapshot created after committed epoch
+
+Run release binary through the Run 096 reconfig path.
+
+Prove:
+
+* canonical reconfig proposal commits
+* epoch transition occurs
+* `meta:current_epoch = CommittedEpoch(n)`
+* snapshot is created after that transition
+* snapshot `meta.json` contains epoch `n`
+
+---
+
+## Scenario 2 — Restore from epoch-bearing snapshot
+
+Start fresh release binary with `--restore-from-snapshot <PATH>`.
+
+Prove:
+
+* VM-v0 state restores as before
+* consensus storage opens at canonical `<data_dir>/consensus`
+* restored storage observes `CommittedEpoch(n)`
+* restart still observes `CommittedEpoch(n)`
+
+---
+
+## Scenario 3 — Old snapshot compatibility
+
+Restore an old snapshot without epoch metadata.
+
+Prove:
+
+* restore still works
+* no synthetic epoch is written
+* state remains no-epoch / unavailable explicitly
+
+---
+
+## Scenario 4 — Malformed epoch metadata fail-closed
+
+Use a controlled malformed snapshot metadata case.
+
+Prove:
+
+* startup rejects it
+* VM/consensus state is not silently partially accepted
+* no epoch fallback occurs
+
+---
+
+## Scenario 5 — Activation unchanged
+
+Prove:
+
+* trust-bundle activation with `activation_epoch` still fails closed with `CurrentEpochUnavailable`
+* restored/current epoch is not consumed by activation in Run 097
+* every production `ActivationContext` remains isolated
+
+If release-binary snapshot creation after reconfig cannot be produced honestly, return **partial-positive** and document the blocker. Do not fake it.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_097.md`
+* release-binary smoke logs under `docs/devnet/`
+* update `docs/whitepaper/contradiction.md`
+* update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Update other docs only if required by actual code changes.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 097 may narrow:
+
+* “snapshot epoch parity”
+* “restore/rejoin epoch preservation”
+
+Run 097 may mark this sub-piece resolved only if:
+
+* snapshot metadata carries canonical committed epoch
+* restore writes/preserves that epoch into canonical production consensus storage
+* restart observes `CommittedEpoch(n)`
+* old snapshots without epoch remain explicitly no-epoch
+* malformed metadata fails closed
+
+Run 097 MUST NOT mark resolved:
+
+* activation_epoch runtime consumption
+* peer-driven live apply
+* KMS/HSM custody
+* signing-key ratification
+* production fast-sync / broader consensus-storage restore
+* full C4
+* C5
+
+The update must explicitly state:
+
+* missing snapshot epoch is not epoch `0`
+* trust-bundle activation still does not consume current_epoch
+* Run 091/092 fail-closed behavior remains
+* any release-binary limitation, if present
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+* strongest-positive
+* positive
+* partial-positive
+* negative
+
+Use **strongest-positive** only if:
+
+* release binary creates epoch-bearing snapshot after a real committed epoch
+* restore from that snapshot preserves `CommittedEpoch(n)`
+* restart observes `CommittedEpoch(n)`
+* old snapshots remain compatible
+* malformed metadata fails closed
+* activation behavior remains unchanged
+* evidence is complete
+
+Use **positive** if:
+
+* implementation and tests are complete
+* release-binary proof is strong but has narrow documented limitations
+
+Use **partial-positive** if:
+
+* metadata support lands
+* tests prove correctness
+* but release-binary snapshot/restore proof is incomplete
+
+Use **negative** if:
+
+* implementation derives epoch from height/time/view
+* missing epoch is treated as `0`
+* activation behavior changes
+* restore silently ignores epoch write failure
+* scope broadens into fast-sync/snapshot redesign
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+* strongest-positive
+* positive
+* partial-positive
+* negative
+
+---
+
+## 2. What was implemented
+
+Include:
+
+* files changed
+* snapshot metadata changes
+* snapshot creation epoch source
+* validation behavior
+* restore behavior
+* consensus-storage write behavior
+* startup/restart behavior
+* failure behavior
+* any API/CLI additions
+
+---
+
+## 3. What was proven
+
+Separate:
+
+* source-level proof
+* unit/integration test proof
+* release-binary evidence proof
+
+---
+
+## 4. What was not changed
+
+Explicitly confirm:
+
+* no trust-bundle activation consumption
+* no synthetic epoch
+* no wall-clock epoch
+* no height-derived epoch
+* no view-derived epoch
+* no snapshot/fast-sync redesign beyond additive epoch metadata
+* no peer-driven apply
+* no KMS/HSM
+* no signing-key ratification
+* no full C4 closure
+* no C5 closure
+
+---
+
+## 5. Contradictions or inconsistencies
+
+You MUST cross-check new code against existing design/spec/docs.
+
+If contradictions or inconsistencies are found:
+
+* document them in `docs/whitepaper/contradiction.md`
+* explain them in the final response
+
+Do not silently ignore contradictions.
+
+---
+
+## 6. Evidence references
+
+List:
+
+* evidence document
+* tests added
+* tests run
+* release-binary command/scenario summaries
+* logs/metrics inspected
+
+---
+
+## 7. Residual risk and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 097 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.

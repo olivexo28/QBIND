@@ -936,6 +936,51 @@ pub struct CliArgs {
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_035.md`.
     #[arg(long = "devnet-forged-inject", action = clap::ArgAction::Append, hide = true)]
     pub devnet_forged_inject: Vec<String>,
+
+    /// Run 096 — disabled-by-default local-operator-gated canonical
+    /// reconfig proposal trigger (DevNet/TestNet only; refused on
+    /// MainNet).
+    ///
+    /// When set to a non-zero value N strictly greater than the
+    /// engine's current epoch, the binary's underlying
+    /// `BasicHotStuffEngine` arms a single-shot reconfig proposal
+    /// intent: the next leader-step tick that produces a proposal
+    /// will emit a canonical `BlockHeader { payload_kind:
+    /// PAYLOAD_KIND_RECONFIG, next_epoch: N, .. }` block instead of a
+    /// normal block, using the same proposal construction path,
+    /// block-id derivation, signing path, and HotStuff structures.
+    /// After that single emission the intent is cleared and the node
+    /// returns to normal proposals — Run 096 is intentionally
+    /// one-shot. If the reconfig block then commits through the
+    /// existing HotStuff commit rule, the Run 095 detector fires
+    /// `engine.transition_to_epoch(...)` and the Run 094 persistence
+    /// hook writes `meta:current_epoch = CommittedEpoch(N)`.
+    ///
+    /// **What this flag is NOT.** It is not a parallel reconfig wire
+    /// format (it uses the existing canonical
+    /// `(payload_kind, next_epoch)` header fields); not a redesign
+    /// of HotStuff commit rules; not a redesign of epoch semantics;
+    /// not a validator-set rotation primitive (the existing
+    /// `transition_to_epoch` machinery does that); not peer-driven
+    /// live apply; not a height/view/wall-clock-derived epoch (the
+    /// value is exactly the operator-supplied N); not a
+    /// `pqc_trust_activation::ActivationContext` change; not a
+    /// trust-bundle wire-format or peer-propagation surface; not
+    /// KMS/HSM custody; not a filesystem watcher.
+    ///
+    /// **Preconditions** (fail-closed):
+    /// - `N` must be `>= 1`. `N == 0` is refused at startup.
+    /// - `N` must be strictly greater than the engine's current
+    ///   epoch at intent-arm time (the engine re-validates).
+    /// - The environment must NOT be MainNet — MainNet refuses
+    ///   this flag at startup with a clear error.
+    /// - The flag is hidden because it is evidence-only.
+    ///
+    /// Operators who use it MUST read
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_096.md` for the
+    /// staging-vs-commit boundary.
+    #[arg(long = "devnet-reconfig-proposal-next-epoch", hide = true)]
+    pub devnet_reconfig_proposal_next_epoch: Option<u64>,
 }
 
 // ============================================================================

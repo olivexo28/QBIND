@@ -93,6 +93,28 @@ fn binary_periodic_snapshot_config(
     BinaryPeriodicSnapshotConfig::new(snapshot_config, runtime, config.chain_id().as_u64())
 }
 
+/// Run 096 — thin wrapper around
+/// [`derive_reconfig_proposal_from_cli_flag`] that pulls the raw CLI
+/// flag value and environment off of the CLI args + `NodeConfig` and
+/// surfaces the typed CLI error as a `String` for the operator log
+/// line in `main`. See the helper's docs for full semantics.
+fn derive_run_096_reconfig_proposal(
+    config: &qbind_node::node_config::NodeConfig,
+    args: &CliArgs,
+) -> Result<
+    Option<qbind_node::binary_consensus_loop::BinaryReconfigProposalConfig>,
+    String,
+> {
+    use qbind_node::binary_consensus_loop::derive_reconfig_proposal_from_cli_flag;
+    use qbind_types::NetworkEnvironment;
+
+    derive_reconfig_proposal_from_cli_flag(
+        args.devnet_reconfig_proposal_next_epoch,
+        matches!(config.environment, NetworkEnvironment::Mainnet),
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Main entry point for qbind-node binary.
 #[tokio::main]
 async fn main() {
@@ -1375,6 +1397,26 @@ async fn run_local_mesh_node(
              handle available (data_dir unset) — no epoch persistence on \
              this LocalMesh invocation."
         );
+    }
+    // Run 096: install the local-operator-gated canonical reconfig
+    // proposal intent (DevNet/TestNet only; MainNet refused at the
+    // CLI gate). Disabled by default (the default `None` path is
+    // bit-equivalent to pre-Run-096 behaviour).
+    match derive_run_096_reconfig_proposal(config, args) {
+        Ok(Some(rc)) => {
+            cfg = cfg.with_reconfig_proposal(rc);
+            eprintln!(
+                "[binary] Run 096: armed canonical reconfig proposal intent \
+                 (LocalMesh) — target_epoch={} (single-shot; the next \
+                 leader-step proposal will be PAYLOAD_KIND_RECONFIG).",
+                rc.target_epoch
+            );
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("[binary] FATAL: {}", e);
+            std::process::exit(1);
+        }
     }
     eprintln!(
         "[binary] Consensus loop config: local_validator_id={:?} num_validators={} restore_baseline={}",
@@ -2816,6 +2858,26 @@ async fn run_p2p_node(
              handle available (data_dir unset) — no epoch persistence on \
              this P2P invocation."
         );
+    }
+    // Run 096: install the local-operator-gated canonical reconfig
+    // proposal intent (DevNet/TestNet only; MainNet refused at the
+    // CLI gate). Disabled by default (the default `None` path is
+    // bit-equivalent to pre-Run-096 behaviour).
+    match derive_run_096_reconfig_proposal(config, args) {
+        Ok(Some(rc)) => {
+            consensus_cfg = consensus_cfg.with_reconfig_proposal(rc);
+            eprintln!(
+                "[binary] Run 096: armed canonical reconfig proposal intent \
+                 (P2P) — target_epoch={} (single-shot; the next leader-step \
+                 proposal will be PAYLOAD_KIND_RECONFIG).",
+                rc.target_epoch
+            );
+        }
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!("[binary] FATAL: {}", e);
+            std::process::exit(1);
+        }
     }
     eprintln!(
         "[binary] Consensus loop config: local_validator_id={:?} num_validators={} \

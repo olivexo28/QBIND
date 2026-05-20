@@ -60,7 +60,8 @@ pub use adversarial_multi_sim::{AdversarialMultiNodeSim, InFlightMessage, Partit
 pub use basic_hotstuff_engine::{
     BasicHotStuffEngine, ConsensusProgressRecorder, NoopConsensusProgressRecorder,
     NoopValidatorEquivocationRecorder, NoopValidatorVoteRecorder, NoopViewDurationRecorder,
-    ValidatorEquivocationRecorder, ValidatorVoteRecorder, ViewDurationRecorder,
+    PendingReconfigIntentError, ValidatorEquivocationRecorder, ValidatorVoteRecorder,
+    ViewDurationRecorder,
 };
 pub use block_state::BlockNode;
 pub use crypto_verifier::{
