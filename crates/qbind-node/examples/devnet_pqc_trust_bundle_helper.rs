@@ -211,6 +211,22 @@
 //!   `pqc_trust_bundle::canonical_signing_bytes` /
 //!   `canonical_fingerprint` already include it).
 //!
+//! Optional 8th positional argument: `[bundle_activation_epoch]`
+//!   Decimal `u64` or the literal string `none`. If supplied as a
+//!   decimal `u64`, the bundle's bundle-level `activation_epoch`
+//!   field is set to `Some(n)` BEFORE signing and BEFORE the canonical
+//!   fingerprint is computed. `none` forces `activation_epoch = null`
+//!   explicitly (i.e. no bundle-level epoch gate). Defaults to
+//!   whatever `build_helper_bundle` emits (currently `None`). Added
+//!   by Run 099 so the release-binary harness can mint bundles that
+//!   exercise the canonical `<data_dir>/consensus :: meta:current_epoch`
+//!   activation gate (Run 091 fail-closed boundary, Run 098 wiring).
+//!   This is an evidence-tooling knob ONLY; it does NOT change signing
+//!   semantics, wire format, or activation evaluation in any way (the
+//!   field is part of the signed preimage and canonical fingerprint,
+//!   as `pqc_trust_bundle::canonical_signing_bytes` /
+//!   `canonical_fingerprint` already include it).
+//!
 //! Writes to `outdir`:
 //!   root.id.hex                — 64 lowercase hex chars (root_key_id)
 //!   root.pk.hex                — full ML-DSA-44 root public key
@@ -557,6 +573,29 @@ fn main() {
             }
         });
 
+    // Run 099: optional bundle-level `activation_epoch` override
+    // written into `bundle.activation_epoch` BEFORE signing and BEFORE
+    // the canonical fingerprint is computed. Accepts a decimal `u64`
+    // (sets `Some(n)`) or the literal `none` (sets `None` explicitly).
+    // Mirrors the existing Run 057/067 `activation_height_override`
+    // shape, applied to the parallel `activation_epoch` field already
+    // serialized and signed by `pqc_trust_bundle::canonical_signing_bytes`
+    // / `canonical_fingerprint`. This is an evidence-tooling knob ONLY:
+    // it does NOT change signing semantics or wire format and does
+    // NOT alter activation evaluation in any way (the loader still
+    // consults `ActivationContext.current_epoch` exactly as before).
+    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_099.md`.
+    let activation_epoch_override: Option<Option<u64>> = args.next().map(|s| {
+        if s.eq_ignore_ascii_case("none") {
+            None
+        } else {
+            Some(
+                s.parse::<u64>()
+                    .expect("optional [activation_epoch_override] must be a u64 decimal or 'none'"),
+            )
+        }
+    });
+
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
     let root = mint_devnet_root().expect("root keygen");
@@ -616,6 +655,13 @@ fn main() {
                 // explicitly clears the field.
                 b.activation_height = maybe_h;
             }
+            if let Some(maybe_e) = activation_epoch_override {
+                // Run 099: bundle-level activation_epoch set before
+                // fingerprint computation; unsigned paths still cover
+                // the field via the canonical fingerprint. `None`
+                // explicitly clears the field. Evidence-only knob.
+                b.activation_epoch = maybe_e;
+            }
             // Run 059: bundle.chain_id override before fingerprint
             // computation.
             if let Some(maybe_cid) = chain_id_override.clone() {
@@ -643,6 +689,15 @@ fn main() {
                 // MainNet smoke needs this combined with
                 // `chain_id_override` on a fresh data dir).
                 b.activation_height = maybe_h;
+            }
+            if let Some(maybe_e) = activation_epoch_override {
+                // Run 099: override bundle-level activation_epoch
+                // BEFORE signing so the signed preimage covers it.
+                // `None` explicitly clears the field. Evidence-only
+                // knob used by the Run 099 release-binary harness to
+                // mint bundles whose activation gate exercises the
+                // canonical `meta:current_epoch` axis end-to-end.
+                b.activation_epoch = maybe_e;
             }
             // Run 059: override bundle.chain_id BEFORE signing so
             // the signed preimage covers the declared chain_id.

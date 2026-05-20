@@ -1,0 +1,658 @@
+# RUN 100 — Production Trust-Anchor Authority and Bundle-Signing-Key Ratification Model
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Run 091 established fail-closed `CurrentEpochUnavailable` behavior for `activation_epoch` whenever no canonical runtime epoch source exists.
+- Run 092 proved production `qbind-node` did not open `RocksDbConsensusStorage`, so `meta:current_epoch` was phantom on real binary runs.
+- Run 093 introduced canonical production binary-path `ConsensusStorage` ownership at `<data_dir>/consensus`.
+- Run 094 threaded canonical `ConsensusStorage` into the binary consensus loop and added fail-closed epoch persistence through existing atomic epoch persistence machinery.
+- Run 095 added binary-path committed reconfig-block detection and engine epoch transition trigger.
+- Run 096 added the smallest explicit local operator-gated DevNet/TestNet reconfig proposal source.
+- Run 097 added snapshot epoch parity.
+- Run 098 wired canonical `<data_dir>/consensus :: meta:current_epoch` into all six trust-bundle activation surfaces.
+- Run 099 produced partial-positive release-binary evidence for fresh-genesis / no-committed-epoch fail-closed behavior on three production CLI surfaces:
+  - startup `--p2p-trust-bundle`
+  - `--p2p-trust-bundle-reload-check`
+  - `--p2p-trust-bundle-peer-candidate-check`
+
+Run 099 further narrowed the `activation_epoch` runtime-source axis but did not close full C4 or C5.
+
+Current remaining C4/C5 items include:
+
+- production trust-anchor authority model
+- bundle-signing-key ratification
+- KMS/HSM custody
+- peer-driven live apply
+- in-binary/on-chain signing-key ratification
+- production fast-sync / broader consensus-storage restore
+- per-environment production trust-anchor operation
+- MainNet governance authorization path
+- full C4/C5 closure
+
+Run 100 begins the next grand architectural layer:
+
+> define how QBIND determines which bundle-signing keys and trust-anchor authorities are valid in DevNet, TestNet, and MainNet.
+
+This must be spec-first.
+
+Do not implement peer-driven live apply.
+
+Do not implement KMS/HSM.
+
+Do not redesign consensus.
+
+Do not bake production root anchors as source-code static constants.
+
+---
+
+# Exact objective
+
+Write a production-grade authority and ratification specification for PQC trust anchors and bundle-signing keys.
+
+The objective is to define:
+
+1. How initial trust anchors are established at genesis.
+2. How genesis trust-anchor authority is cryptographically bound at boot.
+3. How bundle-signing keys are ratified.
+4. How bundle-signing keys rotate.
+5. How bundle-signing keys are revoked.
+6. How DevNet, TestNet, and MainNet differ.
+7. What nodes must refuse in each environment.
+8. What anti-rollback rules apply to authority state.
+9. What persistence and recovery semantics are required before implementation.
+10. What future implementation runs must satisfy.
+
+Run 100 must produce a clear design/specification that future implementation runs can follow.
+
+Run 100 should not introduce runtime behavior unless a tiny compile-time/doc-test helper is absolutely necessary. Prefer docs only.
+
+---
+
+# Architectural decision
+
+Run 100 must use this design direction:
+
+## Initial production authority must come from a genesis configuration file bound by a boot-time cryptographic hash.
+
+Do NOT bake initial production root anchors directly into source code as static constants.
+
+Allowed:
+
+- test-only/dev-only static constants behind explicit non-production gates
+- examples/fixtures for tests
+- documented DevNet local shortcuts
+
+Not allowed:
+
+- MainNet production root anchors hard-coded in Rust source as authoritative constants
+- hidden fallback anchors
+- implicit trust roots outside genesis/config
+- environment-ambiguous root anchors
+
+The genesis configuration should be the canonical authority root.
+
+Expected model:
+
+```text
+genesis config
+  ├─ chain_id
+  ├─ environment
+  ├─ initial validator set
+  ├─ initial PQC transport trust anchors
+  ├─ initial bundle-signing authority / ratification root
+  ├─ initial activation policy parameters
+  ├─ initial authority sequence / epoch
+  └─ canonical genesis hash
+
+At boot:
+
+load genesis config
+→ canonicalize bytes
+→ compute genesis hash
+→ compare against expected genesis hash
+→ verify chain/environment binding
+→ derive initial authority state
+→ reject any trust-anchor/bundle-signing authority not bound to that genesis
+Strict scope
+
+Allowed:
+
+A. Spec document
+
+Create a new protocol/ops document, for example:
+
+docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+or use the project’s existing naming style.
+
+The document must be concrete enough to guide implementation.
+
+B. Run 100 evidence document
+
+Create:
+
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_100.md
+
+This should record:
+
+investigation performed
+design decisions
+non-goals
+implementation plan for later runs
+contradictions found
+current unresolved items
+C. contradiction.md update
+
+Update:
+
+docs/whitepaper/contradiction.md
+
+The update must explain that production trust-anchor authority and bundle-signing-key ratification are still open but now have a formal design model.
+
+Do not mark full C4 or C5 closed.
+
+D. runbook update
+
+Update:
+
+docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+
+Add a Run 100 row/note explaining:
+
+genesis-bound authority model
+no production static source-code anchors
+bundle-signing-key ratification remains future implementation
+peer-driven live apply remains forbidden until ratification exists
+E. Existing docs cross-check
+
+Cross-check existing docs for contradictions, including:
+
+whitepaper
+operator runbook
+peer trust-bundle propagation/apply safety spec
+contradiction.md
+any genesis/DevNet/TestNet/MainNet docs
+any trust-bundle lifecycle docs
+
+Update docs only narrowly.
+
+Strict non-goals
+
+Run 100 MUST NOT:
+
+implement peer-driven live apply
+implement bundle-signing-key ratification verifier
+implement KMS/HSM custody
+implement governance
+implement validator-set rotation
+implement on-chain ratification
+change trust-bundle wire format
+change peer-candidate wire format
+change consensus
+change KEMTLS
+change activation_epoch semantics
+add production static root anchors as source-code constants
+add fallback roots
+add fallback signing keys
+weaken existing signed-bundle verification
+weaken chain_id enforcement
+weaken environment enforcement
+weaken sequence anti-rollback
+weaken activation-height checks
+weaken activation_epoch checks
+weaken Run 065 minimum-margin policy
+weaken revocation checks
+weaken reload-check non-mutation
+weaken reload-apply ordering
+claim full C4 closure
+claim C5 closure
+Required investigation
+
+Before writing the final spec, investigate and document:
+
+1. Current trust-anchor inputs
+
+Identify every current source of trust-anchor authority:
+
+--p2p-trust-bundle
+--p2p-trusted-root
+signed trust-bundle roots
+local static-root test/dev config
+DevNet helper-generated roots
+peer-candidate bundle roots
+reload-check / reload-apply / SIGHUP live reload paths
+any genesis references to root anchors
+any hard-coded/test fixture roots
+
+Document which are production-intended and which are dev/test only.
+
+2. Current bundle-signing-key authority
+
+Identify how trust bundles are currently authenticated:
+
+configured signing key(s)
+helper-generated signing keys
+environment/chain binding
+signature verification preimage
+sequence anti-rollback
+activation-height / activation_epoch checks
+revocation checks
+
+Document the current gap:
+
+a bundle may be signature-valid under a locally configured signing key, but the production system still lacks a formal ratification source proving that signing key is authorized by genesis/governance authority.
+
+3. Genesis configuration surface
+
+Investigate existing genesis config structures.
+
+Document:
+
+where genesis is loaded
+how chain_id is represented
+whether genesis hash already exists
+whether validators are already bound to genesis
+whether PQC trust anchors are currently represented in genesis
+whether bundle-signing authority is represented in genesis
+what additive fields would be needed later
+
+Do not implement additive fields in Run 100 unless already trivial and explicitly requested. This run is spec-first.
+
+4. Environment model
+
+Define authority behavior separately for:
+
+DevNet
+may allow local operator/generated authority
+may allow hidden evidence flags
+must still be explicit
+no silent fallback
+TestNet
+should require genesis-bound authority
+may allow staged governance/ratification
+should reject DevNet-only shortcuts
+MainNet
+must require genesis-bound authority and ratification
+must reject local/dev shortcuts
+must reject unratified bundle-signing keys
+must reject fallback static roots
+must define emergency paths explicitly
+5. Authority state machine
+
+Define a state machine for bundle-signing authority:
+
+Example states:
+
+Uninitialized
+GenesisRatified
+PendingRotation
+Active
+Retired
+Revoked
+EmergencyRevoked
+Expired
+Rejected
+
+Use project-appropriate names.
+
+The state machine must define:
+
+allowed transitions
+who/what authorizes transitions
+what is persisted
+what is signed
+what is rejected
+what happens on rollback
+what happens on corruption
+what happens during restore
+6. Ratification object model
+
+Define a future ratification object, without implementing it yet.
+
+The model should specify at least:
+
+version
+chain_id
+environment
+authority_epoch or authority_sequence
+bundle_signing_public_key fingerprint
+activation_epoch / activation_height if needed
+expiration / validity window if needed
+revocation status
+issuer authority
+signature suite
+signature
+canonical signing preimage
+domain separation tag
+
+Do not pick a classical algorithm.
+
+Stay PQC-only and suite-agile.
+
+7. Anti-rollback model
+
+Define anti-rollback rules for signing-key authority.
+
+Must include:
+
+monotonic authority sequence or epoch
+persistence location
+corruption behavior
+restore behavior
+rollback rejection
+interaction with trust-bundle sequence
+interaction with activation_epoch
+interaction with snapshot restore
+8. Emergency authority model
+
+Define emergency revocation and recovery behavior.
+
+Must answer:
+
+who can revoke a compromised bundle-signing key?
+what if the active signing key is compromised?
+what if genesis authority is compromised?
+what if nodes are partitioned?
+what if a revoked key signs a future-dated bundle?
+what if an old snapshot restores an old signing authority?
+what must MainNet refuse?
+
+Do not hand-wave this.
+
+9. Peer-driven apply dependency
+
+Document explicitly:
+
+Peer-driven live apply remains forbidden until:
+
+bundle-signing key ratification exists
+authority anti-rollback exists
+KMS/HSM custody assumptions are defined
+operator override/emergency controls exist
+release-binary evidence proves non-mutation/fail-closed boundaries
+Required design output
+
+The new authority model document must include at least:
+
+1. Scope and non-goals
+
+State clearly that Run 100 is a design/spec run.
+
+2. Threat model
+
+Include:
+
+malicious bundle signer
+compromised bundle-signing key
+compromised or stale genesis config
+wrong-chain authority reuse
+wrong-environment authority reuse
+rollback to old authority
+snapshot restore rollback
+peer-gossiped unratified authority
+operator misconfiguration
+partitioned authority updates
+emergency revocation abuse
+static source-code anchor drift
+dev/test shortcuts leaking into MainNet
+3. Trust assumptions
+
+State:
+
+genesis file integrity must be bound by an expected hash
+authority roots must be bound to chain_id and environment
+local config alone is not sufficient for MainNet signing-key authority
+peers are advisory only
+operator approval does not replace cryptographic ratification on MainNet
+KMS/HSM custody is future work, not assumed complete
+4. Genesis-bound initial authority
+
+Specify:
+
+genesis fields required in future implementation
+canonical serialization requirement
+hash binding requirement
+boot-time verification
+failure behavior
+environment separation
+5. Bundle-signing-key ratification model
+
+Specify:
+
+ratification object
+signing preimage
+domain separation
+authority sequence/epoch
+activation semantics
+revocation semantics
+expiration semantics, if used
+suite agility
+6. Persistence and anti-rollback
+
+Specify:
+
+authority-state persistence
+monotonic sequence/epoch
+crash consistency
+restore interaction
+snapshot interaction
+failure behavior
+7. Environment policy
+
+Separate DevNet/TestNet/MainNet.
+
+MainNet rules must be strict.
+
+8. Operational lifecycle
+
+Define:
+
+bootstrap
+normal rotation
+emergency revocation
+recovery
+restore
+audit evidence
+9. Unsafe designs to reject
+
+Must reject:
+
+source-code static MainNet anchors
+peer-provided authority without ratification
+local config as sole MainNet authority
+fallback signing keys
+treating majority gossip as authority
+restoring old authority silently
+accepting wrong-chain/wrong-environment authority
+accepting unratified bundle-signing keys
+accepting expired/revoked signing keys
+10. Future implementation plan
+
+Break future work into scoped runs, likely:
+
+Run 101 — genesis authority fields and hash binding
+Run 102 — in-binary bundle-signing-key ratification verifier
+Run 103 — authority-state persistence and anti-rollback
+Run 104 — release-binary signing-key rotation/revocation evidence
+Run 105 — KMS/HSM custody model
+Run 106+ — peer-driven apply gates
+
+Adjust numbering if needed, but keep the staged architecture.
+
+Required tests
+
+Run 100 is spec-first. Tests are not required unless small docs/check tests already exist.
+
+If any code changes are made, add tests.
+
+If no code changes are made, state explicitly:
+
+No runtime code changed. No new tests required.
+
+Still run a lightweight validation if available, such as:
+
+markdown lint/build if project supports it
+docs link check if project supports it
+existing targeted tests only if docs tooling requires it
+
+Do not run huge unrelated suites unless needed.
+
+Docs and evidence deliverables
+
+Required:
+
+docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_100.md
+update docs/whitepaper/contradiction.md
+update docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+
+Optional narrow updates:
+
+whitepaper cross-reference if there is an existing authority section
+peer propagation/apply safety spec cross-reference
+genesis docs cross-reference
+
+Do not perform broad documentation rewrite.
+
+contradiction.md update rules
+
+Update docs/whitepaper/contradiction.md honestly.
+
+Run 100 may narrow:
+
+“production trust-anchor authority”
+“bundle-signing-key ratification”
+“per-environment production trust-anchor operation”
+
+Run 100 may NOT mark these resolved unless actual runtime implementation exists, which is not expected in this run.
+
+Run 100 MUST NOT mark resolved:
+
+peer-driven live apply
+KMS/HSM custody
+signing-key ratification implementation
+production fast-sync / broader consensus-storage restore
+full C4
+C5
+
+The update must explicitly state:
+
+Run 100 is a design/specification run
+genesis-bound authority is the chosen production direction
+production static source-code anchors are rejected
+bundle-signing-key ratification remains future implementation
+peer-driven live apply remains forbidden until ratification exists
+Expected verdicts
+
+Acceptable verdicts:
+
+positive
+partial-positive
+negative
+
+Use positive if:
+
+the authority model spec is complete
+docs are synchronized
+contradictions are recorded
+no runtime behavior changes were made
+future implementation runs are clearly staged
+
+Use partial-positive if:
+
+spec lands but major design questions remain unresolved
+docs are incomplete
+future implementation boundaries are unclear
+
+Use negative if:
+
+spec recommends static production source-code anchors
+spec allows unratified MainNet signing keys
+spec permits peer-driven authority without ratification
+spec weakens existing trust-bundle checks
+spec claims implementation closure without implementation
+
+Do not use strongest-positive for Run 100 unless the project convention allows strongest-positive for design-only runs. Prefer positive for a complete spec-only run.
+
+Required final response format
+
+Your final response MUST contain:
+
+1. Exact verdict
+
+One of:
+
+positive
+partial-positive
+negative
+2. What changed
+
+List:
+
+docs created
+docs updated
+any code changed, if any
+explicit statement if no runtime code changed
+3. Key architecture decisions
+
+Include:
+
+genesis-bound authority
+no production static source-code anchors
+bundle-signing-key ratification requirement
+per-environment authority policy
+anti-rollback model
+peer-driven apply dependency
+4. Contradictions or inconsistencies
+
+You MUST cross-check new spec against existing docs.
+
+If contradictions or inconsistencies are found:
+
+document them in docs/whitepaper/contradiction.md
+explain them in the final response
+
+Do not silently ignore contradictions.
+
+5. Validation performed
+
+List:
+
+docs checks
+tests, if any
+grep/source checks
+files inspected
+6. Explicit non-claims
+
+State that Run 100 does NOT implement:
+
+bundle-signing-key ratification verifier
+KMS/HSM custody
+peer-driven live apply
+governance
+validator-set rotation
+full C4 closure
+C5 closure
+7. Residual risks
+
+List unresolved risks and open questions.
+
+8. Recommended next run
+
+Recommend the next run only after stating what Run 100 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.

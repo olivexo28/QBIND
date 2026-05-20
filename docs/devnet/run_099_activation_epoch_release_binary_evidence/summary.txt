@@ -1,0 +1,27 @@
+Run 099 release-binary evidence summary
+qbind_node_path=/home/runner/work/QBIND/QBIND/target/release/qbind-node
+qbind_node_sha256=232162f49445960f15ec58bcff94b7db62a4c906ac3c8ba7b5030b4ded995a94
+qbind_node_build_id=365c8898799ad4db398d11864e906b209acde3e0
+trust_helper_path=/home/runner/work/QBIND/QBIND/target/release/examples/devnet_pqc_trust_bundle_helper
+trust_helper_sha256=b4697c548be3168ceeb6adda383423f8ed3b6fa2b25e1d79b3913ae5e3d25842
+
+Scenarios (release binary, this harness):
+  s1_startup_fresh_genesis_rejects_activation_epoch                 = PASS (exit 1, CurrentEpochUnavailable)
+  s6a_reload_check_fresh_genesis_rejects_activation_epoch           = PASS (exit 1, VERDICT=invalid, non-mutating)
+  s6b_reload_check_fresh_genesis_no_epoch_control                   = PASS (exit 0, VERDICT=valid, non-mutating)
+  s6c_reload_check_fresh_genesis_future_epoch_unavailable_first     = PASS (exit 1, VERDICT=invalid, CurrentEpochUnavailable wins)
+  s8_peer_candidate_check_fresh_genesis_rejects_activation_epoch    = PASS (exit != 0, rejection logged, no sequence write)
+
+Negative invariants asserted on every scenario:
+  - no <data_dir>/pqc_trust_bundle_sequence.json written
+  - no current_epoch=Some(0) anywhere on the failure path (no missing-to-0)
+  - no fallback to --p2p-trusted-root
+  - no DummySig / DummyKem / DummyAead
+
+Harness-limited (NOT covered by this script, covered by integration
+tests cited in the evidence doc):
+  - Scenario 2 (committed epoch satisfies)
+  - Scenario 3 (real future-epoch rejection on a committed epoch)
+  - Scenario 4 (restored Run 097 epoch-bearing snapshot satisfies)
+  - Scenario 5 (old snapshot without epoch remains unavailable)
+  - Scenario 7 (reload-apply / SIGHUP on a running node)

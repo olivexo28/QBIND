@@ -1,0 +1,5 @@
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[binary] Run 077: outcome detail: Rejected(ValidationFailed(Bundle(Activation(CurrentEpochUnavailable { required_epoch: 1, scope: Bundle }))))
+[binary] Run 077: VERDICT=rejected (peer-candidate validation-only; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched). Envelope path=/tmp/qbind-run099-activation-epoch-release-binary-evidence/envelopes/s8_peer_candidate_check_fresh_genesis_rejects_activation_epoch.json. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md.

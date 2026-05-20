@@ -706,6 +706,32 @@ handling, backup/recovery notes, logging rules.
   - Run 065 per-environment minimum-margin policy still applies only
     to `activation_height`. There is no minimum-margin policy on the
     epoch axis as of Run 098.
+  - **Run 099 release-binary evidence.** As of Run 099, the
+    fail-closed `CurrentEpochUnavailable` boundary is additionally
+    proven end-to-end on the production release `qbind-node`
+    binary's process logs for three of the six activation surfaces
+    (startup `--p2p-trust-bundle`, `--p2p-trust-bundle-reload-check`,
+    and `--p2p-trust-bundle-peer-candidate-check`) on a fresh-genesis
+    DevNet `--data-dir`. See
+    `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_099.md` and the harness
+    `scripts/devnet/run_099_activation_epoch_release_binary_evidence.sh`.
+    The other three surfaces (`--p2p-trust-bundle-reload-apply-path`,
+    SIGHUP live reload on a running node, live peer-candidate wire
+    dispatcher) remain harness-bound to integration tests; Run 099
+    does NOT claim release-binary process-log coverage for them.
+  - **Operator alert: storage read failure on `<data_dir>/consensus`.**
+    A canonical storage I/O error at activation time is logged as
+    `[binary] Run 098: WARNING: failed to read canonical
+    meta:current_epoch for startup bundle activation: …` and mapped
+    to `current_epoch = None`. For bundles declaring `activation_epoch`
+    this is fail-closed (CurrentEpochUnavailable). For bundles that
+    do NOT declare `activation_epoch` the warning is informational
+    only — activation proceeds because the epoch axis is not
+    consulted (intentional; pinned by
+    `run098_bundle_without_activation_epoch_unchanged_by_canonical_wiring`).
+    Operators MUST treat this warning line as an alertable event in
+    production and investigate canonical storage health before the
+    next bundle ratification.
 
 ### 3.11 Chain_id field
 

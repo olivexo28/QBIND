@@ -1,0 +1,12 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=/tmp/qbind-run099-activation-epoch-release-binary-evidence/data/s1_startup_fresh_genesis_rejects_activation_epoch/consensus
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] FATAL: --p2p-trust-bundle load/validate failed for path=/tmp/qbind-run099-activation-epoch-release-binary-evidence/material/with-epoch/trust-bundle.json: trust bundle activation gating: pqc trust-bundle activation epoch gating requires current_epoch but no runtime epoch source is available in this build (scope=bundle, required_epoch=1); fail closed — epoch gating is deferred (see docs/whitepaper/contradiction.md C4). No fallback to --p2p-trusted-root on bundle failure (production-honest lifecycle must not silently downgrade). See docs/whitepaper/contradiction.md C4 (signed root distribution).

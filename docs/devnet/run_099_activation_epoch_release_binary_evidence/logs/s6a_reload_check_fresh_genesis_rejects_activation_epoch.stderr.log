@@ -1,0 +1,4 @@
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[binary] Run 069: VERDICT=invalid (candidate rejected; no live trust apply; no sequence persistence write; no peer/session mutation; no /metrics mutation). Candidate path=/tmp/qbind-run099-activation-epoch-release-binary-evidence/material/with-epoch/trust-bundle.json. Reason: candidate bundle invalid: trust bundle activation gating: pqc trust-bundle activation epoch gating requires current_epoch but no runtime epoch source is available in this build (scope=bundle, required_epoch=1); fail closed — epoch gating is deferred (see docs/whitepaper/contradiction.md C4). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_069.md.
