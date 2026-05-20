@@ -76,9 +76,11 @@ use std::time::Duration;
 ///     block_hash: [0xAA; 32],
 ///     created_at_unix_ms: 1700000000000,
 ///     chain_id: 0x51424E444D41494E, // MainNet chain ID
+///     epoch: None, // Run 097: no canonical committed epoch observed
 /// };
 ///
 /// assert_eq!(meta.height, 100_000);
+/// assert_eq!(meta.epoch, None);
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StateSnapshotMeta {
