@@ -2753,6 +2753,37 @@ under C4:
    source"* and is out of scope for Run 094); the call site is
    in place and will fire automatically once the runtime
    trigger lands in a separate run (preliminarily Run 095).
+   **Run 095** lands that runtime trigger: a small per-loop
+   `BinaryReconfigDetector` observes every proposal the binary
+   loop already sees, caches the canonical wire-level
+   `(BlockHeader::payload_kind, BlockHeader::next_epoch)` tuple
+   keyed by canonical block ID, and — for any committed entry in
+   `engine.commit_log()` whose cached header is
+   `PAYLOAD_KIND_RECONFIG` — calls the existing
+   `BasicHotStuffEngine::transition_to_epoch(...)` machinery before
+   the Run 094 persistence helper runs. The actual committed
+   reconfig block ID is threaded into the Run 094 helper as a new
+   `Option<[u8; 32]>` argument; a typed
+   `EpochPersistenceFailureSource::MissingReconfigBlockId` makes
+   zero fallback unreachable on real transitions. Malformed
+   (`next_epoch == 0`), non-monotonic (`next_epoch <=
+   current_epoch`), and engine-rejected reconfig commits fail
+   closed with typed `ReconfigTransitionError` variants and
+   surface in the loop-exit summary as
+   `reconfig_transition_failed=true`. Trust-bundle activation
+   still does not consume `current_epoch` — every production
+   `ActivationContext` continues to be constructed with
+   `current_epoch: None`, and Run 091/092 fail-closed
+   `CurrentEpochUnavailable` activation behaviour is preserved
+   verbatim. Release-binary Scenario 2 (real committed reconfig
+   transition end-to-end) remains gated on a separately-tracked
+   peer-driven live apply / on-chain governance path that would
+   introduce a canonical `PAYLOAD_KIND_RECONFIG` proposal onto the
+   binary path; the existing binary-path leader code
+   (`BasicHotStuffEngine::try_propose`) still hard-codes
+   `PAYLOAD_KIND_NORMAL` / `next_epoch=0` into every emitted
+   proposal. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_095.md`
+   for full details.
 2. **Peer-supplied / gossiped trust-bundle acceptance.** Runs
    069/073/074 accept **local files only**. There is no
    `BundleAnnounce` / `BundleRequest` over the wire, no admin-API

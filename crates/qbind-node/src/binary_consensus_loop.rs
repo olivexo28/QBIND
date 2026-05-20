@@ -76,7 +76,7 @@
 //! `consensus_t154.inc_vote_accepted()` etc.) and it does **not** speak to
 //! restore-from-snapshot (B3). Both remain out of scope.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -1556,6 +1556,44 @@ pub async fn run_binary_consensus_loop_with_io(
     // ----------------------------------------------------------------------
     let mut last_persisted_epoch: u64 = engine.current_epoch();
     let mut epoch_persistence_failed: Option<EpochPersistenceFailed> = None;
+    // Run 095: separate state for canonical reconfig transition
+    // failures (malformed/non-monotonic next_epoch, or engine-rejected
+    // transition). Reported alongside `epoch_persistence_failed` in
+    // the loop-exit summary so operators can correlate against
+    // engine logs.
+    let mut reconfig_transition_failed: Option<ReconfigTransitionError> = None;
+
+    // ----------------------------------------------------------------------
+    // Run 095 — binary-path canonical reconfig commit detector.
+    //
+    // `reconfig_detector` observes every proposal the loop has visibility
+    // into (leader-emitted via `do_leader_tick`'s `BroadcastProposal`
+    // action, and inbound via `handle_inbound_consensus_msg`'s decoded
+    // `BlockProposal`), caches the existing canonical
+    // `BlockHeader::payload_kind` / `BlockHeader::next_epoch` fields
+    // keyed by the canonical binary-path block ID
+    // (`BlockStore::compute_block_id`), and on every tick path that may
+    // have advanced `engine.commit_log()` calls
+    // `maybe_transition_epoch_from_committed_block(engine, detector)`.
+    // That helper invokes the existing
+    // `BasicHotStuffEngine::transition_to_epoch(...)` machinery (no
+    // redesign of HotStuff commit rules, epoch semantics, or validator-
+    // set rotation) on every newly committed canonical reconfig block,
+    // surfacing typed errors (`ReconfigTransitionError`) that the loop
+    // fails closed on. The committed reconfig block ID is then passed
+    // to `maybe_persist_engine_epoch_transition` so the Run 094
+    // persistence write uses the *actual* committed reconfig block ID
+    // (per `task/RUN_095_TASK.txt` §"D. Correct reconfig_block_id" —
+    // no zero fallback for real transitions).
+    //
+    // `BinaryReconfigDetector::new(initial_commit_log_len)` is seeded
+    // with `engine.commit_log().len()` at loop start so the detector
+    // does not retroactively transition for snapshot-restored or
+    // pre-existing committed blocks (those are handled by Run 091/093
+    // startup-validation, not Run 095).
+    // ----------------------------------------------------------------------
+    let mut reconfig_detector =
+        BinaryReconfigDetector::new(engine.commit_log().len());
 
     // ----------------------------------------------------------------------
     // B9 + B10: late-peer-connect proposal/vote re-emission state.
@@ -1675,6 +1713,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                 cfg.local_validator_id,
                                 &mut restore_mode,
                                 verification_ctx.as_deref(),
+                                &mut reconfig_detector,
                             );
                             // Reflect engine state changes (view / commits)
                             // immediately so /metrics never stalls behind
@@ -1704,6 +1743,20 @@ pub async fn run_binary_consensus_loop_with_io(
                                 p.current_view = engine.current_view();
                                 p.inbound = inbound_stats;
                             }
+                            // Run 095: detect any canonical committed
+                            // reconfig block and invoke the existing
+                            // engine epoch-transition machinery before
+                            // attempting Run 094 persistence. Fail-closed
+                            // on malformed / non-monotonic / engine-
+                            // rejected transitions.
+                            if let Err(e) = maybe_transition_epoch_from_committed_block(
+                                &mut engine,
+                                &mut reconfig_detector,
+                            ) {
+                                eprintln!("[binary-consensus] FATAL: {}", e);
+                                reconfig_transition_failed = Some(e);
+                                break;
+                            }
                             // Run 094: persist any canonical engine
                             // epoch advance through the threaded
                             // Run 093 storage handle. Fail-closed on
@@ -1713,6 +1766,7 @@ pub async fn run_binary_consensus_loop_with_io(
                                     &engine,
                                     storage,
                                     &mut last_persisted_epoch,
+                                    reconfig_detector.latest_reconfig_block_id(),
                                 ) {
                                     Ok(_) => {}
                                     Err(e) => {
@@ -1744,6 +1798,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         outbound_facade.as_deref(),
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
+                        &mut reconfig_detector,
                     );
                     // B9 + B10: poll for a late-peer-connect transition
                     // and, if armed, re-emit the cached current-view
@@ -1817,6 +1872,18 @@ pub async fn run_binary_consensus_loop_with_io(
                         p.current_view = engine.current_view();
                         p.inbound = inbound_stats;
                     }
+                    // Run 095: detect any canonical committed reconfig
+                    // block produced by this tick and invoke the
+                    // existing engine epoch-transition machinery
+                    // before attempting Run 094 persistence.
+                    if let Err(e) = maybe_transition_epoch_from_committed_block(
+                        &mut engine,
+                        &mut reconfig_detector,
+                    ) {
+                        eprintln!("[binary-consensus] FATAL: {}", e);
+                        reconfig_transition_failed = Some(e);
+                        break;
+                    }
                     // Run 094: persist any canonical engine epoch
                     // advance produced by this tick through the
                     // threaded Run 093 storage handle. Fail-closed
@@ -1826,6 +1893,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             &engine,
                             storage,
                             &mut last_persisted_epoch,
+                            reconfig_detector.latest_reconfig_block_id(),
                         ) {
                             Ok(_) => {}
                             Err(e) => {
@@ -1866,6 +1934,7 @@ pub async fn run_binary_consensus_loop_with_io(
                         outbound_facade.as_deref(),
                         &mut last_leader_proposal,
                         &mut last_leader_vote,
+                        &mut reconfig_detector,
                     );
                     if let Some(pc) = peer_connectivity.as_deref() {
                         maybe_reemit_on_late_peer_connect(
@@ -1932,6 +2001,18 @@ pub async fn run_binary_consensus_loop_with_io(
                         p.current_view = engine.current_view();
                         p.inbound = inbound_stats;
                     }
+                    // Run 095: detect any canonical committed reconfig
+                    // block produced by this tick and invoke the
+                    // existing engine epoch-transition machinery
+                    // before attempting Run 094 persistence.
+                    if let Err(e) = maybe_transition_epoch_from_committed_block(
+                        &mut engine,
+                        &mut reconfig_detector,
+                    ) {
+                        eprintln!("[binary-consensus] FATAL: {}", e);
+                        reconfig_transition_failed = Some(e);
+                        break;
+                    }
                     // Run 094: persist any canonical engine epoch
                     // advance produced by this tick through the
                     // threaded Run 093 storage handle. Fail-closed
@@ -1941,6 +2022,7 @@ pub async fn run_binary_consensus_loop_with_io(
                             &engine,
                             storage,
                             &mut last_persisted_epoch,
+                            reconfig_detector.latest_reconfig_block_id(),
                         ) {
                             Ok(_) => {}
                             Err(e) => {
@@ -1971,11 +2053,18 @@ pub async fn run_binary_consensus_loop_with_io(
             e
         );
     }
+    if let Some(ref e) = reconfig_transition_failed {
+        eprintln!(
+            "[binary-consensus] Run 095 canonical reconfig transition FAILED — fail-closed exit: {}",
+            e
+        );
+    }
     eprintln!(
         "[binary-consensus] Loop exit: ticks={} proposals={} commits={} committed_height={:?} \
          view={} inbound_msgs={} inbound_proposals={} inbound_votes={} \
          outbound_proposals={} outbound_votes={} outbound_proposal_late_peer_reemits={} \
-         last_persisted_epoch={} epoch_persistence_failed={}",
+         last_persisted_epoch={} epoch_persistence_failed={} \
+         reconfig_transition_failed={}",
         final_progress.ticks,
         final_progress.proposals_emitted,
         final_progress.commits,
@@ -1989,6 +2078,7 @@ pub async fn run_binary_consensus_loop_with_io(
         final_progress.inbound.outbound_proposal_late_peer_reemits,
         last_persisted_epoch,
         epoch_persistence_failed.is_some(),
+        reconfig_transition_failed.is_some(),
     );
     final_progress
 }
@@ -2021,6 +2111,7 @@ fn do_leader_tick(
     outbound: Option<&dyn ConsensusNetworkFacade>,
     last_leader_proposal: &mut Option<(u64, BlockProposal)>,
     last_leader_vote: &mut Option<(u64, Vote)>,
+    reconfig_detector: &mut BinaryReconfigDetector,
 ) {
     let view_at_step = engine.current_view();
     let actions = engine.try_propose();
@@ -2031,6 +2122,17 @@ fn do_leader_tick(
             ConsensusEngineAction::BroadcastProposal(p) => {
                 *proposals_emitted = proposals_emitted.saturating_add(1);
                 tick_proposals = tick_proposals.saturating_add(1);
+                // Run 095: record the canonical reconfig header
+                // metadata (`payload_kind`, `next_epoch`) for the
+                // leader-emitted proposal so a later
+                // `engine.commit_log()` entry with the same
+                // canonical block ID can be classified as a
+                // canonical reconfig commit by
+                // `maybe_transition_epoch_from_committed_block`.
+                // This is the only place leader-self-emitted
+                // proposals are visible as values; we record from
+                // the BroadcastProposal action itself.
+                reconfig_detector.record_observed_proposal(p);
                 // B9: cache the proposal + its view so a later late-peer
                 // connect can re-emit it once. We always overwrite — the
                 // engine only ever produces one proposal per view, and view
@@ -2313,6 +2415,7 @@ pub(crate) fn handle_inbound_consensus_msg(
     local_validator_id: ValidatorId,
     restore_mode: &mut RestoreCatchupModeState,
     verification_ctx: Option<&TimeoutVerificationContext>,
+    reconfig_detector: &mut BinaryReconfigDetector,
 ) {
     use qbind_wire::consensus::{BlockProposal, Vote};
     use qbind_wire::io::WireDecode;
@@ -2369,6 +2472,19 @@ pub(crate) fn handle_inbound_consensus_msg(
                     let from = ValidatorId::new(proposal.header.proposer_index as u64);
                     stats.inbound_proposals_delivered =
                         stats.inbound_proposals_delivered.saturating_add(1);
+                    // Run 095: record the canonical reconfig header
+                    // metadata (`payload_kind`, `next_epoch`) for
+                    // this inbound proposal *before* invoking the
+                    // engine. We key by the canonical block ID
+                    // derivation (`BlockStore::compute_block_id`)
+                    // so any later `engine.commit_log()` entry with
+                    // the same ID — regardless of whether the
+                    // engine accepted the proposal on this
+                    // particular tick — can still be classified as
+                    // a canonical reconfig commit. We only record
+                    // the two existing canonical header fields; no
+                    // new schema is invented.
+                    reconfig_detector.record_observed_proposal(&proposal);
                     if let Some(action) = engine.on_proposal_event(from, &proposal) {
                         // B10: an action returned from `on_proposal_event`
                         // means the engine performed the full accept path
@@ -2785,6 +2901,7 @@ pub(crate) fn deliver_inbound_for_run035(
     verification_ctx: Option<&TimeoutVerificationContext>,
 ) {
     let mut restore_mode = RestoreCatchupModeState::from_config(None);
+    let mut detector = BinaryReconfigDetector::default();
     handle_inbound_consensus_msg(
         engine,
         msg,
@@ -2794,6 +2911,7 @@ pub(crate) fn deliver_inbound_for_run035(
         local_validator_id,
         &mut restore_mode,
         verification_ctx,
+        &mut detector,
     );
 }
 
@@ -3575,39 +3693,77 @@ fn update_state_metrics(
 // ----------------------------------------------------------------------------
 
 /// Run 094: error produced by [`maybe_persist_engine_epoch_transition`] when
-/// the canonical engine epoch advances but the storage write fails. The
-/// caller MUST treat this as fatal — the binary-path loop must fail closed
-/// rather than continue with ambiguous epoch state (per Run 091/092
-/// `CurrentEpochUnavailable` invariants and `task/RUN_094_TASK.txt`
-/// §"Failure semantics").
+/// the canonical engine epoch advances but the storage write fails OR
+/// (Run 095) when the caller could not supply the actual committed
+/// reconfig block ID for a real transition. The caller MUST treat this
+/// as fatal — the binary-path loop must fail closed rather than
+/// continue with ambiguous epoch state (per Run 091/092
+/// `CurrentEpochUnavailable` invariants, `task/RUN_094_TASK.txt`
+/// §"Failure semantics", and `task/RUN_095_TASK.txt` §"D. Correct
+/// reconfig_block_id" — zero fallback MUST NOT be used for real
+/// transitions).
 #[derive(Debug)]
 pub struct EpochPersistenceFailed {
     pub previous_epoch: u64,
     pub target_epoch: u64,
+    /// The canonical committed reconfig block ID that triggered the
+    /// transition, or `[0u8; 32]` only in the
+    /// [`EpochPersistenceFailureSource::MissingReconfigBlockId`] case
+    /// (no committed reconfig block ID was supplied — the persistence
+    /// is refused and no marker is written).
     pub reconfig_block_id: [u8; 32],
-    pub source: StorageError,
+    /// Run 095: the underlying source of the persistence failure.
+    pub source: EpochPersistenceFailureSource,
+}
+
+/// Run 095: typed source of an [`EpochPersistenceFailed`] failure.
+#[derive(Debug)]
+pub enum EpochPersistenceFailureSource {
+    /// The underlying `apply_epoch_transition_atomic` write failed
+    /// (Run 094 semantics).
+    StorageWrite(StorageError),
+    /// Run 095: the caller observed a canonical engine epoch advance
+    /// but could not supply the actual committed reconfig block ID
+    /// for the transition. Per `task/RUN_095_TASK.txt` §"D. Correct
+    /// reconfig_block_id", zero fallback MUST NOT be used for real
+    /// transitions — the helper refuses to persist and the binary
+    /// loop fails closed.
+    MissingReconfigBlockId,
 }
 
 impl std::fmt::Display for EpochPersistenceFailed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Run 094 epoch persistence failed: previous_epoch={} target_epoch={} \
-             reconfig_block_id={} source={}. \
-             The binary-path consensus loop must fail closed rather than \
-             continue with ambiguous epoch state.",
-            self.previous_epoch,
-            self.target_epoch,
-            hex::encode(self.reconfig_block_id),
-            self.source
-        )
+        match &self.source {
+            EpochPersistenceFailureSource::StorageWrite(e) => write!(
+                f,
+                "Run 094 epoch persistence failed: previous_epoch={} target_epoch={} \
+                 reconfig_block_id={} source={}. \
+                 The binary-path consensus loop must fail closed rather than \
+                 continue with ambiguous epoch state.",
+                self.previous_epoch,
+                self.target_epoch,
+                hex::encode(self.reconfig_block_id),
+                e
+            ),
+            EpochPersistenceFailureSource::MissingReconfigBlockId => write!(
+                f,
+                "Run 095 epoch persistence refused: previous_epoch={} target_epoch={} \
+                 source=missing_reconfig_block_id. \
+                 The canonical engine epoch advanced but no committed reconfig \
+                 block ID was supplied — the binary-path consensus loop must fail \
+                 closed rather than persist a zero reconfig_block_id marker for a \
+                 real transition.",
+                self.previous_epoch,
+                self.target_epoch,
+            ),
+        }
     }
 }
 
 impl std::error::Error for EpochPersistenceFailed {}
 
-/// Run 094: persist a canonical engine epoch transition through the
-/// Run 093 production `ConsensusStorage` handle, if and only if the
+/// Run 094 + Run 095: persist a canonical engine epoch transition through
+/// the Run 093 production `ConsensusStorage` handle, if and only if the
 /// engine's own `current_epoch()` has advanced above
 /// `last_persisted_epoch`.
 ///
@@ -3621,29 +3777,46 @@ impl std::error::Error for EpochPersistenceFailed {}
 /// On `Ok(true)` the loop's `last_persisted_epoch` cursor has been
 /// updated to the engine's current epoch. On `Ok(false)` no
 /// transition was observed. On `Err(_)` the storage write failed at
-/// the epoch transition boundary; the caller MUST treat this as
-/// fatal (fail closed).
+/// the epoch transition boundary OR (Run 095) the caller could not
+/// supply the actual committed reconfig block ID; the caller MUST
+/// treat this as fatal (fail closed).
 ///
-/// `reconfig_block_id` is the canonical anchor used by the existing
-/// M16 `EpochTransitionBatch` machinery — we pass the engine's
-/// `committed_block()` if available, otherwise zero (genesis-like
-/// fresh-start case; in practice the engine cannot transition epoch
-/// without a committed reconfig block, so this branch should not be
-/// reached on the real binary path).
+/// `reconfig_block_id` is the canonical committed reconfig block ID
+/// that triggered this transition. Per `task/RUN_095_TASK.txt`
+/// §"D. Correct reconfig_block_id", zero fallback MUST NOT be used
+/// for real transitions:
+///
+/// * `Some(id)` — persist using the supplied committed reconfig
+///   block ID. This is the only honest path for a real transition.
+/// * `None` — if the engine epoch has advanced, the helper refuses
+///   to persist and returns
+///   [`EpochPersistenceFailureSource::MissingReconfigBlockId`].
+///   `last_persisted_epoch` is left unchanged.
+///
+/// This pinning makes it impossible to silently persist a zero
+/// `reconfig_block_id` for a real epoch transition.
 pub fn maybe_persist_engine_epoch_transition(
     engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
     storage: &Arc<dyn ConsensusStorage>,
     last_persisted_epoch: &mut u64,
+    reconfig_block_id: Option<[u8; 32]>,
 ) -> Result<bool, EpochPersistenceFailed> {
     let current = engine.current_epoch();
     if current <= *last_persisted_epoch {
         return Ok(false);
     }
     let previous = *last_persisted_epoch;
-    let reconfig_block_id: [u8; 32] = engine
-        .committed_block()
-        .copied()
-        .unwrap_or([0u8; 32]);
+    // Run 095: no zero fallback for real transitions. If the engine
+    // epoch has advanced but the caller could not produce the actual
+    // committed reconfig block ID, fail closed.
+    let Some(reconfig_block_id) = reconfig_block_id else {
+        return Err(EpochPersistenceFailed {
+            previous_epoch: previous,
+            target_epoch: current,
+            reconfig_block_id: [0u8; 32],
+            source: EpochPersistenceFailureSource::MissingReconfigBlockId,
+        });
+    };
 
     let batch = EpochTransitionBatch::new(current, previous, reconfig_block_id);
 
@@ -3661,7 +3834,7 @@ pub fn maybe_persist_engine_epoch_transition(
             previous_epoch: previous,
             target_epoch: current,
             reconfig_block_id,
-            source: e,
+            source: EpochPersistenceFailureSource::StorageWrite(e),
         })?;
 
     *last_persisted_epoch = current;
@@ -3670,6 +3843,328 @@ pub fn maybe_persist_engine_epoch_transition(
         current
     );
     Ok(true)
+}
+
+// ----------------------------------------------------------------------------
+// Run 095 — binary-path reconfig block detection and engine epoch
+// transition trigger
+// ----------------------------------------------------------------------------
+
+/// Run 095: typed error produced by
+/// [`maybe_transition_epoch_from_committed_block`] when a committed
+/// block carries malformed or non-monotonic epoch transition data,
+/// or when the existing engine epoch-transition machinery
+/// (`BasicHotStuffEngine::transition_to_epoch`) rejects the
+/// transition. The caller MUST treat this as fatal — the binary-path
+/// loop must fail closed rather than continue with ambiguous epoch
+/// state.
+#[derive(Debug)]
+pub enum ReconfigTransitionError {
+    /// A committed reconfig block carries `next_epoch == 0` or some
+    /// other value that is not strictly greater than the engine's
+    /// current epoch. The transition is refused.
+    NonMonotonicTargetEpoch {
+        committed_block_id: [u8; 32],
+        current_epoch: u64,
+        next_epoch: u64,
+    },
+    /// The existing engine epoch-transition machinery rejected the
+    /// transition. This surfaces the underlying
+    /// `EpochTransitionError` verbatim so the caller can correlate
+    /// against engine logs.
+    EngineRejected {
+        committed_block_id: [u8; 32],
+        next_epoch: u64,
+        source: qbind_consensus::validator_set::EpochTransitionError,
+    },
+}
+
+impl std::fmt::Display for ReconfigTransitionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReconfigTransitionError::NonMonotonicTargetEpoch {
+                committed_block_id,
+                current_epoch,
+                next_epoch,
+            } => write!(
+                f,
+                "Run 095 reconfig transition refused: committed_block_id={} \
+                 current_epoch={} next_epoch={} — next_epoch must be strictly \
+                 greater than current_epoch. The binary-path consensus loop \
+                 must fail closed rather than advance to a non-monotonic epoch.",
+                hex::encode(committed_block_id),
+                current_epoch,
+                next_epoch,
+            ),
+            ReconfigTransitionError::EngineRejected {
+                committed_block_id,
+                next_epoch,
+                source,
+            } => write!(
+                f,
+                "Run 095 reconfig transition rejected by engine: \
+                 committed_block_id={} next_epoch={} engine_error={:?}. \
+                 The binary-path consensus loop must fail closed rather \
+                 than continue with ambiguous epoch state.",
+                hex::encode(committed_block_id),
+                next_epoch,
+                source,
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ReconfigTransitionError {}
+
+/// Run 095: minimal cached metadata we need for a committed proposal
+/// to decide whether it is a reconfig block and, if so, which epoch
+/// it transitions the engine to. We do NOT cache the full
+/// `BlockProposal`, only the two header fields the existing canonical
+/// reconfig representation already carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReconfigHeaderInfo {
+    /// `qbind_wire::PAYLOAD_KIND_NORMAL` (0) or
+    /// `qbind_wire::PAYLOAD_KIND_RECONFIG` (1). See
+    /// `crates/qbind-wire/src/consensus.rs`.
+    payload_kind: u8,
+    /// Only meaningful when `payload_kind == PAYLOAD_KIND_RECONFIG`.
+    next_epoch: u64,
+}
+
+/// Run 095: state for detecting committed canonical reconfig blocks on
+/// the production binary path and triggering
+/// `BasicHotStuffEngine::transition_to_epoch(...)`.
+///
+/// The detector is populated by the same proposal flows the binary
+/// loop already observes:
+///
+/// * Leader-emitted proposals (via `do_leader_tick`'s
+///   `BroadcastProposal` action).
+/// * Inbound proposals delivered to `engine.on_proposal_event` (via
+///   `handle_inbound_consensus_msg`).
+///
+/// On every tick path that may have advanced `engine.commit_log()`,
+/// [`maybe_transition_epoch_from_committed_block`] walks the new
+/// committed entries since the last call. For each newly committed
+/// block whose header (looked up in `header_cache`) is canonical
+/// reconfig (`payload_kind == PAYLOAD_KIND_RECONFIG`), the helper
+/// validates monotonicity and calls
+/// `BasicHotStuffEngine::transition_to_epoch(EpochId::new(next_epoch),
+/// engine.validators().clone())`. The actual committed block ID is
+/// then recorded as `latest_reconfig_block_id` so the Run 094
+/// persistence hook can persist it (no zero fallback for real
+/// transitions).
+///
+/// We do **not** invent a parallel block schema: the detector reads
+/// only the existing canonical `BlockHeader::payload_kind` /
+/// `BlockHeader::next_epoch` fields and only the existing
+/// `engine.commit_log()` surface (which records blocks committed
+/// under existing HotStuff commit rules).
+#[derive(Debug, Default)]
+pub struct BinaryReconfigDetector {
+    /// `block_id → (payload_kind, next_epoch)` for every proposal the
+    /// loop has observed (either self-emitted or inbound). Sized
+    /// implicitly by the engine's block tree because we only observe
+    /// blocks the engine itself observed; this is the same lifetime
+    /// the engine's `state.blocks` (`HotStuffStateEngine.blocks`)
+    /// uses.
+    header_cache: HashMap<[u8; 32], ReconfigHeaderInfo>,
+    /// Cursor into `engine.commit_log()` — index of the next
+    /// committed entry to scan for canonical reconfig detection.
+    /// Initialised to `commit_log().len()` on loop start so the
+    /// detector does not retroactively transition for snapshot-
+    /// restored or already-committed blocks (those are handled by
+    /// the Run 091/093 startup-validation path, not Run 095).
+    next_commit_index: usize,
+    /// The committed block ID of the most recently observed
+    /// canonical reconfig transition, ready to be consumed by the
+    /// Run 094 persistence hook. `None` if no real reconfig
+    /// transition has been observed yet on this loop — in that
+    /// case the engine epoch cannot have advanced and the Run 094
+    /// hook short-circuits via `current <= *last_persisted_epoch`.
+    latest_reconfig_block_id: Option<[u8; 32]>,
+}
+
+impl BinaryReconfigDetector {
+    /// Construct a detector for a fresh loop start.
+    ///
+    /// `initial_commit_log_len` is the engine's `commit_log().len()`
+    /// at loop start (typically `0` on fresh genesis; non-zero only
+    /// when the loop is started with a restored consensus baseline).
+    /// The detector skips those pre-existing entries — Run 095 only
+    /// detects NEW commits that happen under the live binary-path
+    /// consensus loop.
+    pub fn new(initial_commit_log_len: usize) -> Self {
+        Self {
+            header_cache: HashMap::new(),
+            next_commit_index: initial_commit_log_len,
+            latest_reconfig_block_id: None,
+        }
+    }
+
+    /// The canonical committed reconfig block ID of the most recent
+    /// transition observed by this detector, ready to be consumed by
+    /// [`maybe_persist_engine_epoch_transition`]. `None` if no
+    /// transition has fired yet — in that case the Run 094 hook
+    /// short-circuits (`current_epoch() <= last_persisted_epoch`).
+    pub fn latest_reconfig_block_id(&self) -> Option<[u8; 32]> {
+        self.latest_reconfig_block_id
+    }
+
+    /// Number of cached headers (test/observability only).
+    pub fn cached_headers(&self) -> usize {
+        self.header_cache.len()
+    }
+
+    /// Record the (payload_kind, next_epoch) tuple for a proposal the
+    /// loop has observed, keyed by the canonical binary-path block ID
+    /// derivation (`BlockStore::compute_block_id`). This is the same
+    /// derivation `BasicHotStuffEngine` uses internally, so a later
+    /// `engine.commit_log()` entry with the same block ID will look
+    /// up the right header.
+    ///
+    /// We only record the two existing canonical header fields:
+    /// `payload_kind` and `next_epoch`. No new schema is invented.
+    pub fn record_observed_proposal(&mut self, proposal: &BlockProposal) {
+        let block_id = crate::block_store::BlockStore::compute_block_id(proposal);
+        self.header_cache.insert(
+            block_id,
+            ReconfigHeaderInfo {
+                payload_kind: proposal.header.payload_kind,
+                next_epoch: proposal.header.next_epoch,
+            },
+        );
+    }
+}
+
+/// Run 095: detect canonical committed reconfig blocks on the binary
+/// path and call the existing engine epoch-transition machinery so
+/// the Run 094 persistence hook can fire on real epoch transitions.
+///
+/// Behaviour:
+///
+/// * Walks `engine.commit_log()[detector.next_commit_index..]`.
+/// * For each newly committed entry, looks up its block ID in
+///   `detector.header_cache`. If absent, the block was not observed
+///   as a proposal on this loop (e.g. snapshot-restored anchor) — we
+///   treat it as a normal block (no-op) rather than fabricating a
+///   transition.
+/// * For each newly committed entry whose cached header is
+///   `payload_kind == PAYLOAD_KIND_RECONFIG`, validates that
+///   `next_epoch > engine.current_epoch()`, then calls
+///   `engine.transition_to_epoch(EpochId::new(next_epoch),
+///   engine.validators().clone())`. The same validator set is
+///   carried across the transition because Run 095 does NOT redesign
+///   validator-set rotation — that is out of scope per
+///   `task/RUN_095_TASK.txt` §"Strict non-goals" and remains the
+///   separately-tracked C4 work item "peer-driven live apply".
+/// * Records the committed block ID into
+///   `detector.latest_reconfig_block_id` so the Run 094 persistence
+///   hook can use the actual committed reconfig block ID (no zero
+///   fallback for real transitions).
+/// * Always advances `detector.next_commit_index` to the current
+///   `commit_log().len()` so the same entries are not re-processed.
+///
+/// Returns:
+///
+/// * `Ok(None)` — no canonical reconfig transition occurred in this
+///   call window. The engine's `current_epoch()` is unchanged.
+/// * `Ok(Some(new_epoch))` — at least one canonical reconfig
+///   transition fired; the engine's `current_epoch()` advanced to
+///   `new_epoch` and `detector.latest_reconfig_block_id` is now
+///   `Some(committed_block_id)`.
+/// * `Err(ReconfigTransitionError)` — the committed reconfig block
+///   is malformed or non-monotonic, or the engine rejected the
+///   transition. The detector does NOT advance
+///   `next_commit_index` past the offending entry so the caller
+///   sees the same failure on retry; the caller MUST treat this as
+///   fatal (fail closed).
+pub fn maybe_transition_epoch_from_committed_block(
+    engine: &mut qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+    detector: &mut BinaryReconfigDetector,
+) -> Result<Option<u64>, ReconfigTransitionError> {
+    let commit_log_len = engine.commit_log().len();
+    let mut new_epoch_observed: Option<u64> = None;
+
+    while detector.next_commit_index < commit_log_len {
+        // Take a snapshot of the entry by value (block_id is Copy
+        // `[u8; 32]`) so we drop the borrow on `engine` before
+        // possibly mutating it via `transition_to_epoch`.
+        let entry = engine.commit_log()[detector.next_commit_index].clone();
+
+        let Some(header) = detector.header_cache.get(&entry.block_id).copied() else {
+            // We never observed a proposal for this committed block
+            // on this loop — treat it as a normal block (no-op).
+            // This is the safe default: we only act on observed
+            // canonical reconfig metadata.
+            detector.next_commit_index = detector
+                .next_commit_index
+                .saturating_add(1);
+            continue;
+        };
+
+        if header.payload_kind != qbind_wire::PAYLOAD_KIND_RECONFIG {
+            // Ordinary committed block — no epoch change.
+            detector.next_commit_index = detector
+                .next_commit_index
+                .saturating_add(1);
+            continue;
+        }
+
+        // Canonical committed reconfig block detected. Validate
+        // monotonicity *before* calling into the engine so a
+        // malformed `next_epoch == 0` (or any non-monotonic value)
+        // is rejected with a precise Run 095 error rather than
+        // surfacing as an engine `NonSequentialEpoch` error.
+        let current = engine.current_epoch();
+        if header.next_epoch <= current {
+            // Fail closed — leave `next_commit_index` pinned at the
+            // offending entry so the failure is reproducible.
+            return Err(ReconfigTransitionError::NonMonotonicTargetEpoch {
+                committed_block_id: entry.block_id,
+                current_epoch: current,
+                next_epoch: header.next_epoch,
+            });
+        }
+
+        // Call existing engine epoch-transition machinery. Per
+        // `task/RUN_095_TASK.txt` §"C. Engine transition trigger",
+        // we reuse `BasicHotStuffEngine::transition_to_epoch` — we
+        // do NOT redesign HotStuff commit rules, epoch semantics,
+        // or validator-set rotation.
+        let new_epoch_id =
+            qbind_consensus::validator_set::EpochId::new(header.next_epoch);
+        let same_validator_set = engine.validators().clone();
+        if let Err(e) = engine.transition_to_epoch(new_epoch_id, same_validator_set) {
+            return Err(ReconfigTransitionError::EngineRejected {
+                committed_block_id: entry.block_id,
+                next_epoch: header.next_epoch,
+                source: e,
+            });
+        }
+
+        // Engine epoch advanced. Record the canonical committed
+        // reconfig block ID so the Run 094 persistence hook can
+        // persist the actual ID (no zero fallback).
+        detector.latest_reconfig_block_id = Some(entry.block_id);
+        new_epoch_observed = Some(header.next_epoch);
+
+        eprintln!(
+            "[binary-consensus] Run 095: canonical reconfig commit detected — \
+             committed_block_id={} height={} previous_epoch={} target_epoch={} \
+             engine.transition_to_epoch invoked successfully",
+            hex::encode(entry.block_id),
+            entry.height,
+            current,
+            header.next_epoch,
+        );
+
+        detector.next_commit_index = detector
+            .next_commit_index
+            .saturating_add(1);
+    }
+
+    Ok(new_epoch_observed)
 }
 
 fn log_periodic_snapshot_config(periodic: Option<&BinaryPeriodicSnapshotConfig>) {
@@ -5126,6 +5621,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -5148,6 +5644,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -5191,6 +5688,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 1);
@@ -5232,6 +5730,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(stats.inbound_new_views_delivered, 1);
         assert_eq!(stats.inbound_new_views_engine_accepted, 0);
@@ -5305,6 +5804,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         // 2/4 timeouts ⇒ still no TC, view still 15.
         assert_eq!(stats.inbound_timeouts_delivered, 1);
@@ -5327,6 +5827,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(stats.inbound_timeouts_delivered, 2);
         assert_eq!(stats.inbound_timeouts_engine_accepted, 2);
@@ -5367,6 +5868,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_timeouts_delivered, 0);
@@ -5384,6 +5886,7 @@ mod tests {
             ValidatorId::new(0),
             &mut restore_mode,
             None,
+            &mut BinaryReconfigDetector::default(),
         );
         assert_eq!(engine.current_view(), view_before);
         assert_eq!(stats.inbound_new_views_delivered, 0);
@@ -6103,6 +6606,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 ctx,
+                &mut BinaryReconfigDetector::default(),
             );
         }
 
@@ -6230,6 +6734,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 Some(&ctx),
+                &mut BinaryReconfigDetector::default(),
             );
             assert!(stats.view_timeout_decode_failures >= 1);
             assert_eq!(stats.inbound_timeout_verify_accepted, 0);
@@ -6259,6 +6764,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 ctx,
+                &mut BinaryReconfigDetector::default(),
             );
         }
 
@@ -6507,6 +7013,7 @@ mod tests {
                 ValidatorId(0),
                 &mut restore_mode,
                 Some(&ctx),
+                &mut BinaryReconfigDetector::default(),
             );
 
             assert!(stats.view_timeout_decode_failures >= 1);
