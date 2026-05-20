@@ -1272,6 +1272,7 @@ async fn main() {
                 Arc::clone(&node_metrics),
                 restore_baseline,
                 vm_v0_runtime.clone(),
+                consensus_storage_lifecycle.handle.clone(),
             )
             .await;
         }
@@ -1283,6 +1284,7 @@ async fn main() {
                     Arc::clone(&node_metrics),
                     restore_baseline,
                     vm_v0_runtime.clone(),
+                    consensus_storage_lifecycle.handle.clone(),
                 )
                 .await;
             } else {
@@ -1331,6 +1333,7 @@ async fn run_local_mesh_node(
     node_metrics: Arc<NodeMetrics>,
     restore_baseline: Option<RestoreBaseline>,
     vm_v0_runtime: Option<Arc<VmV0RuntimeState>>,
+    consensus_storage: Option<Arc<qbind_node::storage::RocksDbConsensusStorage>>,
 ) {
     eprintln!(
         "[binary] LocalMesh mode: starting consensus loop. environment={} profile={}",
@@ -1353,6 +1356,26 @@ async fn run_local_mesh_node(
         args,
         vm_v0_runtime.clone(),
     ));
+    // Run 094: thread the canonical production `ConsensusStorage`
+    // handle (opened by Run 093's `open_production_consensus_storage`)
+    // into the binary-path consensus loop so real engine epoch
+    // transitions are persisted via `apply_epoch_transition_atomic`.
+    // No handle (DevNet ad-hoc smoke without --data-dir) → no
+    // persistence is attempted (the loop is identical to pre-Run-094).
+    if let Some(storage) = consensus_storage.clone() {
+        let storage_dyn: Arc<dyn qbind_node::storage::ConsensusStorage> = storage;
+        cfg = cfg.with_consensus_storage(storage_dyn);
+        eprintln!(
+            "[binary] Run 094: binary consensus loop wired to canonical \
+             production ConsensusStorage handle (LocalMesh)."
+        );
+    } else {
+        eprintln!(
+            "[binary] Run 094: no canonical production ConsensusStorage \
+             handle available (data_dir unset) — no epoch persistence on \
+             this LocalMesh invocation."
+        );
+    }
     eprintln!(
         "[binary] Consensus loop config: local_validator_id={:?} num_validators={} restore_baseline={}",
         local_validator_id,
@@ -1415,6 +1438,7 @@ async fn run_p2p_node(
     node_metrics: Arc<NodeMetrics>,
     restore_baseline: Option<RestoreBaseline>,
     vm_v0_runtime: Option<Arc<VmV0RuntimeState>>,
+    consensus_storage: Option<Arc<qbind_node::storage::RocksDbConsensusStorage>>,
 ) {
     eprintln!(
         "[binary] P2P mode: starting transport + consensus loop. environment={} profile={}",
@@ -2775,6 +2799,24 @@ async fn run_p2p_node(
         args,
         vm_v0_runtime.clone(),
     ));
+    // Run 094: thread the canonical production `ConsensusStorage`
+    // handle (opened by Run 093's `open_production_consensus_storage`)
+    // into the binary-path consensus loop so real engine epoch
+    // transitions are persisted via `apply_epoch_transition_atomic`.
+    if let Some(storage) = consensus_storage.clone() {
+        let storage_dyn: Arc<dyn qbind_node::storage::ConsensusStorage> = storage;
+        consensus_cfg = consensus_cfg.with_consensus_storage(storage_dyn);
+        eprintln!(
+            "[binary] Run 094: binary consensus loop wired to canonical \
+             production ConsensusStorage handle (P2P)."
+        );
+    } else {
+        eprintln!(
+            "[binary] Run 094: no canonical production ConsensusStorage \
+             handle available (data_dir unset) — no epoch persistence on \
+             this P2P invocation."
+        );
+    }
     eprintln!(
         "[binary] Consensus loop config: local_validator_id={:?} num_validators={} \
          restore_baseline={} interconnect=p2p",

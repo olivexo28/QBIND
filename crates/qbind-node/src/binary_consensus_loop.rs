@@ -105,6 +105,7 @@ use crate::p2p::{
     ConsensusNetMsg, NodeId, P2pService, RestoreCatchupBlock, RestoreCatchupRequest,
     RestoreCatchupResponse,
 };
+use crate::storage::{ConsensusStorage, EpochTransitionBatch, StorageError};
 use crate::validator_signer::ValidatorSigner;
 use crate::vm_v0_runtime::{SnapshotAnchor, VmV0RuntimeError, VmV0RuntimeState};
 
@@ -281,7 +282,7 @@ pub const DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS: u64 = 800;
 const MAX_INBOUND_TIMEOUT_FRAME_BYTES: usize = 64 * 1024;
 
 /// Configuration for the binary consensus loop.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BinaryConsensusLoopConfig {
     /// Local validator id.
     pub local_validator_id: ValidatorId,
@@ -333,6 +334,28 @@ pub struct BinaryConsensusLoopConfig {
     pub view_timeout_max_ticks: u64,
     /// Optional committed-height periodic VM-v0 snapshot trigger.
     pub periodic_snapshot: Option<BinaryPeriodicSnapshotConfig>,
+    /// Run 094: optional canonical production `ConsensusStorage` handle
+    /// (opened by Run 093's `open_production_consensus_storage`) into
+    /// which the binary-path consensus loop persists *real* canonical
+    /// engine epoch transitions via `apply_epoch_transition_atomic`.
+    ///
+    /// When `Some`, the loop observes `engine.current_epoch()` on every
+    /// tick path that may have mutated engine state and, whenever it
+    /// advances above `last_persisted_epoch`, persists the transition
+    /// atomically through this handle. Failure to persist is fatal
+    /// (the loop emits a fail-closed error and exits) — Run 094 must
+    /// never silently downgrade to memory-only epoch.
+    ///
+    /// When `None`, no epoch persistence occurs (legacy pre-Run-094
+    /// behaviour). This is the path tests that do not exercise epoch
+    /// transitions continue to use, and the path the production binary
+    /// will use only when `data_dir` is unset (DevNet ad-hoc smoke).
+    ///
+    /// The trigger is `engine.current_epoch()` advancing — the engine's
+    /// own canonical epoch counter. Run 094 does **not** invent a
+    /// synthetic epoch, derive one from wall-clock / block-height /
+    /// view, or fabricate a transition just to satisfy tests.
+    pub consensus_storage: Option<Arc<dyn ConsensusStorage>>,
 }
 
 /// Restore-aware consensus baseline derived from a successful snapshot
@@ -389,6 +412,7 @@ impl BinaryConsensusLoopConfig {
                 DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER,
             view_timeout_max_ticks: DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS,
             periodic_snapshot: None,
+            consensus_storage: None,
         }
     }
 
@@ -442,6 +466,47 @@ impl BinaryConsensusLoopConfig {
     pub fn with_periodic_snapshot(mut self, periodic: BinaryPeriodicSnapshotConfig) -> Self {
         self.periodic_snapshot = Some(periodic);
         self
+    }
+
+    /// Run 094: thread the canonical production `ConsensusStorage`
+    /// handle (opened by Run 093's `open_production_consensus_storage`)
+    /// into the binary-path consensus loop so real engine epoch
+    /// transitions are durably persisted via
+    /// `apply_epoch_transition_atomic`.
+    ///
+    /// See [`BinaryConsensusLoopConfig::consensus_storage`] for the
+    /// detection-and-persistence semantics. Passing `None` (or never
+    /// calling this builder) preserves pre-Run-094 behaviour exactly:
+    /// no epoch persistence is attempted.
+    pub fn with_consensus_storage(mut self, storage: Arc<dyn ConsensusStorage>) -> Self {
+        self.consensus_storage = Some(storage);
+        self
+    }
+}
+
+impl std::fmt::Debug for BinaryConsensusLoopConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinaryConsensusLoopConfig")
+            .field("local_validator_id", &self.local_validator_id)
+            .field("num_validators", &self.num_validators)
+            .field("tick_interval", &self.tick_interval)
+            .field("max_ticks", &self.max_ticks)
+            .field("restore_baseline", &self.restore_baseline)
+            .field("view_timeout_ticks", &self.view_timeout_ticks)
+            .field(
+                "view_timeout_backoff_multiplier",
+                &self.view_timeout_backoff_multiplier,
+            )
+            .field("view_timeout_max_ticks", &self.view_timeout_max_ticks)
+            .field("periodic_snapshot", &self.periodic_snapshot)
+            .field(
+                "consensus_storage",
+                &self
+                    .consensus_storage
+                    .as_ref()
+                    .map(|_| "<ConsensusStorage handle>"),
+            )
+            .finish()
     }
 }
 
@@ -1470,6 +1535,29 @@ pub async fn run_binary_consensus_loop_with_io(
     let mut inbound_stats = BinaryConsensusLoopInboundStats::default();
 
     // ----------------------------------------------------------------------
+    // Run 094 — binary-path epoch transition persistence cursor.
+    //
+    // `last_persisted_epoch` is initialized to `engine.current_epoch()` at
+    // loop start (typically 0 on fresh genesis). On every subsequent tick
+    // path that may have mutated engine state we call
+    // `maybe_persist_engine_epoch_transition`; if and only if
+    // `engine.current_epoch()` has advanced above `last_persisted_epoch`,
+    // we persist the transition through the Run 093 canonical
+    // `ConsensusStorage` handle (`cfg.consensus_storage`) via
+    // `apply_epoch_transition_atomic`. Persistence failure is fatal —
+    // the loop exits fail-closed rather than continuing with ambiguous
+    // epoch state (preserves Run 091/092 `CurrentEpochUnavailable`
+    // invariants).
+    //
+    // No storage handle wired → no persistence is attempted (preserves
+    // pre-Run-094 behaviour). No synthetic epoch, no wall-clock epoch,
+    // no view-derived epoch — the trigger is `engine.current_epoch()`
+    // advancing under existing consensus/epoch rules.
+    // ----------------------------------------------------------------------
+    let mut last_persisted_epoch: u64 = engine.current_epoch();
+    let mut epoch_persistence_failed: Option<EpochPersistenceFailed> = None;
+
+    // ----------------------------------------------------------------------
     // B9 + B10: late-peer-connect proposal/vote re-emission state.
     //
     // - `last_leader_proposal`: the most recent `BroadcastProposal` the
@@ -1616,6 +1704,24 @@ pub async fn run_binary_consensus_loop_with_io(
                                 p.current_view = engine.current_view();
                                 p.inbound = inbound_stats;
                             }
+                            // Run 094: persist any canonical engine
+                            // epoch advance through the threaded
+                            // Run 093 storage handle. Fail-closed on
+                            // write error.
+                            if let Some(storage) = cfg.consensus_storage.as_ref() {
+                                match maybe_persist_engine_epoch_transition(
+                                    &engine,
+                                    storage,
+                                    &mut last_persisted_epoch,
+                                ) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        eprintln!("[binary-consensus] FATAL: {}", e);
+                                        epoch_persistence_failed = Some(e);
+                                        break;
+                                    }
+                                }
+                            }
                         }
                         None => {
                             // Inbound channel closed: stop reacting to
@@ -1710,6 +1816,24 @@ pub async fn run_binary_consensus_loop_with_io(
                         p.committed_height = engine.committed_height();
                         p.current_view = engine.current_view();
                         p.inbound = inbound_stats;
+                    }
+                    // Run 094: persist any canonical engine epoch
+                    // advance produced by this tick through the
+                    // threaded Run 093 storage handle. Fail-closed
+                    // on write error.
+                    if let Some(storage) = cfg.consensus_storage.as_ref() {
+                        match maybe_persist_engine_epoch_transition(
+                            &engine,
+                            storage,
+                            &mut last_persisted_epoch,
+                        ) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("[binary-consensus] FATAL: {}", e);
+                                epoch_persistence_failed = Some(e);
+                                break;
+                            }
+                        }
                     }
                     if let Some(cap) = cfg.max_ticks {
                         if ticks >= cap {
@@ -1808,6 +1932,24 @@ pub async fn run_binary_consensus_loop_with_io(
                         p.current_view = engine.current_view();
                         p.inbound = inbound_stats;
                     }
+                    // Run 094: persist any canonical engine epoch
+                    // advance produced by this tick through the
+                    // threaded Run 093 storage handle. Fail-closed
+                    // on write error.
+                    if let Some(storage) = cfg.consensus_storage.as_ref() {
+                        match maybe_persist_engine_epoch_transition(
+                            &engine,
+                            storage,
+                            &mut last_persisted_epoch,
+                        ) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                eprintln!("[binary-consensus] FATAL: {}", e);
+                                epoch_persistence_failed = Some(e);
+                                break;
+                            }
+                        }
+                    }
                     if let Some(cap) = cfg.max_ticks {
                         if ticks >= cap {
                             eprintln!(
@@ -1823,10 +1965,17 @@ pub async fn run_binary_consensus_loop_with_io(
     }
 
     let final_progress = progress.lock().clone();
+    if let Some(ref e) = epoch_persistence_failed {
+        eprintln!(
+            "[binary-consensus] Run 094 epoch persistence FAILED — fail-closed exit: {}",
+            e
+        );
+    }
     eprintln!(
         "[binary-consensus] Loop exit: ticks={} proposals={} commits={} committed_height={:?} \
          view={} inbound_msgs={} inbound_proposals={} inbound_votes={} \
-         outbound_proposals={} outbound_votes={} outbound_proposal_late_peer_reemits={}",
+         outbound_proposals={} outbound_votes={} outbound_proposal_late_peer_reemits={} \
+         last_persisted_epoch={} epoch_persistence_failed={}",
         final_progress.ticks,
         final_progress.proposals_emitted,
         final_progress.commits,
@@ -1838,6 +1987,8 @@ pub async fn run_binary_consensus_loop_with_io(
         final_progress.inbound.outbound_proposals_sent,
         final_progress.inbound.outbound_votes_sent,
         final_progress.inbound.outbound_proposal_late_peer_reemits,
+        last_persisted_epoch,
+        epoch_persistence_failed.is_some(),
     );
     final_progress
 }
@@ -3417,6 +3568,108 @@ fn update_state_metrics(
     *last_commits = new_commits_total;
     *last_view = new_view;
     new_committed_anchor
+}
+
+// ----------------------------------------------------------------------------
+// Run 094 — binary-path epoch transition persistence
+// ----------------------------------------------------------------------------
+
+/// Run 094: error produced by [`maybe_persist_engine_epoch_transition`] when
+/// the canonical engine epoch advances but the storage write fails. The
+/// caller MUST treat this as fatal — the binary-path loop must fail closed
+/// rather than continue with ambiguous epoch state (per Run 091/092
+/// `CurrentEpochUnavailable` invariants and `task/RUN_094_TASK.txt`
+/// §"Failure semantics").
+#[derive(Debug)]
+pub struct EpochPersistenceFailed {
+    pub previous_epoch: u64,
+    pub target_epoch: u64,
+    pub reconfig_block_id: [u8; 32],
+    pub source: StorageError,
+}
+
+impl std::fmt::Display for EpochPersistenceFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Run 094 epoch persistence failed: previous_epoch={} target_epoch={} \
+             reconfig_block_id={} source={}. \
+             The binary-path consensus loop must fail closed rather than \
+             continue with ambiguous epoch state.",
+            self.previous_epoch,
+            self.target_epoch,
+            hex::encode(self.reconfig_block_id),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for EpochPersistenceFailed {}
+
+/// Run 094: persist a canonical engine epoch transition through the
+/// Run 093 production `ConsensusStorage` handle, if and only if the
+/// engine's own `current_epoch()` has advanced above
+/// `last_persisted_epoch`.
+///
+/// This is the *only* binary-path persistence trigger. The value
+/// persisted is exactly `engine.current_epoch()` — Run 094 does NOT
+/// invent a synthetic epoch, does NOT derive epoch from wall-clock
+/// time, view number, or block height, and does NOT fabricate a
+/// transition just to satisfy tests. If the engine never advances
+/// its epoch, this function never writes.
+///
+/// On `Ok(true)` the loop's `last_persisted_epoch` cursor has been
+/// updated to the engine's current epoch. On `Ok(false)` no
+/// transition was observed. On `Err(_)` the storage write failed at
+/// the epoch transition boundary; the caller MUST treat this as
+/// fatal (fail closed).
+///
+/// `reconfig_block_id` is the canonical anchor used by the existing
+/// M16 `EpochTransitionBatch` machinery — we pass the engine's
+/// `committed_block()` if available, otherwise zero (genesis-like
+/// fresh-start case; in practice the engine cannot transition epoch
+/// without a committed reconfig block, so this branch should not be
+/// reached on the real binary path).
+pub fn maybe_persist_engine_epoch_transition(
+    engine: &qbind_consensus::BasicHotStuffEngine<[u8; 32]>,
+    storage: &Arc<dyn ConsensusStorage>,
+    last_persisted_epoch: &mut u64,
+) -> Result<bool, EpochPersistenceFailed> {
+    let current = engine.current_epoch();
+    if current <= *last_persisted_epoch {
+        return Ok(false);
+    }
+    let previous = *last_persisted_epoch;
+    let reconfig_block_id: [u8; 32] = engine
+        .committed_block()
+        .copied()
+        .unwrap_or([0u8; 32]);
+
+    let batch = EpochTransitionBatch::new(current, previous, reconfig_block_id);
+
+    eprintln!(
+        "[binary-consensus] Run 094: persisting canonical engine epoch transition \
+         previous_epoch={} target_epoch={} reconfig_block_id={}",
+        previous,
+        current,
+        hex::encode(reconfig_block_id)
+    );
+
+    storage
+        .apply_epoch_transition_atomic(batch)
+        .map_err(|e| EpochPersistenceFailed {
+            previous_epoch: previous,
+            target_epoch: current,
+            reconfig_block_id,
+            source: e,
+        })?;
+
+    *last_persisted_epoch = current;
+    eprintln!(
+        "[binary-consensus] Run 094: meta:current_epoch={} durably persisted",
+        current
+    );
+    Ok(true)
 }
 
 fn log_periodic_snapshot_config(periodic: Option<&BinaryPeriodicSnapshotConfig>) {
