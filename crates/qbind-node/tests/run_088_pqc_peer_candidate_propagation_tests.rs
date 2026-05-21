@@ -221,6 +221,7 @@ fn dispatcher(
             validation_time_secs: 100,
             propagation,
             propagation_sender: Some(sender_trait),
+            live_ratification: None,
         },
         metrics,
     )

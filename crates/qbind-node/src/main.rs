@@ -3499,6 +3499,69 @@ async fn run_p2p_node(
                             ..PeerCandidatePropagationConfig::default()
                         },
                         propagation_sender: None,
+                        // Run 109 — install owned ratification context
+                        // for live `0x05` inbound peer-candidate frames.
+                        // MainNet/TestNet are default-strict (Run 106);
+                        // DevNet honours the operator opt-in. When the
+                        // gate decision says invoke and the context
+                        // cannot be built (no --genesis-path, no
+                        // authority block, malformed sidecar), the
+                        // process refuses to install the dispatcher on
+                        // MainNet/TestNet — there is no fallback path.
+                        // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_109.md.
+                        live_ratification: {
+                            let gate_decision =
+                                qbind_node::pqc_ratification_policy::ratification_gate_decision(
+                                    config.environment,
+                                    args.p2p_trust_bundle_ratification_enforcement_enabled,
+                                );
+                            if gate_decision.should_invoke() {
+                                match build_run_105_reload_check_context(&args, &config) {
+                                    Ok(ctx_data) => {
+                                        eprintln!(
+                                            "[run-109] live peer-candidate wire ratification \
+                                             gate INVOKED (policy={}, env={:?}). Unratified, \
+                                             missing, or bad ratification candidates will be \
+                                             rejected BEFORE validation success and BEFORE any \
+                                             Run 088 rebroadcast.",
+                                            gate_decision.label(),
+                                            config.environment
+                                        );
+                                        Some(qbind_node::pqc_peer_candidate_wire::LiveRatificationConfig {
+                                            authority: ctx_data.authority,
+                                            expected_genesis_hash: ctx_data.canonical_hash,
+                                            expected_environment_policy: ctx_data.env_policy,
+                                            expected_chain_id_str: ctx_data.chain_id_str,
+                                            ratification: ctx_data.ratification,
+                                            policy: ctx_data.policy,
+                                            gate_decision,
+                                        })
+                                    }
+                                    Err(reason) => {
+                                        eprintln!(
+                                            "[binary] FATAL: Run 109 live peer-candidate wire \
+                                             ratification context could not be built: {}. \
+                                             Refusing to install the live `0x05` dispatcher; \
+                                             no fallback; no apply; no sequence write; no \
+                                             session eviction. See \
+                                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_109.md.",
+                                            reason
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            } else {
+                                eprintln!(
+                                    "[run-109] live peer-candidate wire ratification gate \
+                                     SKIPPED (policy={}, env={:?}). This preserves pre-Run-109 \
+                                     DevNet legacy behaviour only; MainNet/TestNet always invoke \
+                                     the gate by default and never reach this branch.",
+                                    gate_decision.label(),
+                                    config.environment
+                                );
+                                None
+                            }
+                        },
                     };
                     eprintln!(
                         "[binary] Run 088: installing live peer-candidate wire \

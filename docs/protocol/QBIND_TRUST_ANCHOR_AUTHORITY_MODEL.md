@@ -1419,3 +1419,20 @@ Security boundaries remain unchanged:
 - live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven apply, rotation/revocation, authority anti-rollback persistence, KMS/HSM, governance, validator-set rotation, full C4, and C5 remain future work.
 
 Evidence is recorded in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_108.md` and `docs/devnet/run_108_peer_candidate_check_ratification_release_binary_evidence/`. Run 108 closes only the Run 107 release-binary evidence gap for the local peer-candidate check; it does not claim live-path or applying-surface closure.
+
+## Run 109 update — live inbound `0x05` peer-candidate wire validation ratification gate
+
+Run 109 wires the existing Run 105 / 106 / 107 bundle-signing-key ratification verifier stack into the live inbound `0x05` peer-candidate wire validation path. The live `LivePeerCandidateWireDispatcher` (the Run 079 owned-fields dispatcher used by the production read loop) now carries an optional owned `LiveRatificationConfig` (the owned-fields version of the borrowed `RatificationEnforcementContext` Runs 105 and 107 use). When the Run 106 `ratification_gate_decision` says invoke, every inbound `0x05` frame is routed through `PeerCandidateWireReceiver::try_handle_frame_with_ratification(...)`, which delegates to the same `PeerCandidateValidator::try_accept_with_ratification(...)` Run 107 uses on the local CLI path. The Run 088 propagation step downstream is gated on a `Validated` outcome, so every ratification refusal (`ReloadCheckError::RatificationRefused(..)`) is counted into the existing `peer_candidate_propagation_suppressed_invalid_total` family and the frame is NEVER rebroadcast.
+
+Run 109 reuses the operator-supplied Run 105 sidecar (`--p2p-trust-bundle-ratification <PATH>`) as the ratification-object source for live frames. No new wire-format field, no peer-supplied ratification object, no parallel validation stack. The binary refuses to install the live dispatcher (FATAL exit, no fallback) when the gate says invoke and the context cannot be built (missing `--genesis-path`, missing authority block, malformed sidecar). MainNet/TestNet always invoke (Run 106 default-strict); DevNet invokes only under `--p2p-trust-bundle-ratification-enforcement-enabled`; DevNet without opt-in preserves the pre-Run-109 unguarded path bit-for-bit.
+
+Security boundaries remain unchanged:
+
+- local config alone is still not enough for MainNet bundle-signing authority — the ratification verifier is rooted in the genesis authority block via the canonical genesis hash;
+- static production source-code anchors remain rejected;
+- transport roots cannot ratify bundle-signing keys (the `TransportRootNotAllowed` rejection is pinned by the Run 109 test suite on the live wire path identically to the Run 107 local CLI path);
+- rejection remains validation-only and non-mutating: no sequence file is written, no root merge occurs, no live trust state is mutated, no sessions are evicted, no `_applied_total` metric family was introduced, and no `0x05` rebroadcast happens on rejection;
+- no trust-bundle or peer-candidate wire format changes were made;
+- peer-driven live apply, reload-apply ratification, SIGHUP ratification, signing-key rotation/revocation lifecycle, authority anti-rollback persistence, peer-distributed ratification objects on the wire, fast-sync / consensus-storage-restore ratification parity, KMS/HSM custody, governance, validator-set rotation, full C4, and C5 all remain future work.
+
+Evidence is recorded in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_109.md`. Run 109 is **partial-positive**: focused integration tests (`crates/qbind-node/tests/run_109_pqc_peer_candidate_wire_live_ratification_tests.rs`, 23 passing) plus the unchanged Run 089 N=3 DevNet release-binary propagation harness mechanically cover the live `0x05` plumbing; a fresh ratification-aware multi-node release-binary capture was descoped in this run and is recommended for a future run.

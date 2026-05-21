@@ -118,16 +118,22 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
+use qbind_ledger::{
+    BundleSigningRatification, GenesisAuthorityConfig, GenesisHash, NetworkEnvironmentPolicy,
+    RatificationEnforcementPolicy,
+};
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p::NodeId;
+use crate::pqc_ratification_policy::RatificationGateDecision;
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
 use crate::pqc_trust_peer_candidate::{
     PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome,
     PeerCandidateRuntimeContext, PeerCandidateValidator, MAX_PEER_CANDIDATE_BUNDLE_BYTES,
 };
+use crate::pqc_trust_reload::RatificationEnforcementContext;
 
 /// Reserved P2P frame discriminator for Run 078 peer-candidate wire
 /// frames. Distinct from the existing `p2p_tcp.rs` consensus
@@ -717,6 +723,53 @@ impl PeerCandidateWireReceiver {
         ctx: &PeerCandidateWireRuntimeContext<'_>,
         metrics: &P2pMetrics,
     ) -> PeerCandidateWireOutcome {
+        self.try_handle_frame_inner(frame, ctx, metrics, None)
+    }
+
+    /// Run 109 — receive entry point that additionally enforces the
+    /// Run 103/105 bundle-signing-key ratification gate on the same
+    /// Run 069/076 inner validation pipeline that
+    /// [`try_handle_frame`](Self::try_handle_frame) drives.
+    ///
+    /// The frame-layer decode, disabled-by-default short-circuit, DoS
+    /// cap, duplicate suppression, and rate limiter all run FIRST and
+    /// unchanged. Only after the inner Run 069 validation succeeds is
+    /// the ratification gate consulted. If the gate refuses, the call
+    /// returns
+    /// `ValidatorRan(PeerCandidateOutcome::Rejected(
+    /// PeerCandidateRejection::ValidationFailed(
+    /// ReloadCheckError::RatificationRefused(..))))`
+    /// — the SAME rejection shape Runs 105/107 emit elsewhere — and
+    /// the propagation gate downstream observes a non-validated
+    /// outcome and refuses to rebroadcast (see Run 088 path).
+    ///
+    /// # Strict non-mutation contract (every return path)
+    ///
+    /// - the live PQC trust state is not touched;
+    /// - the on-disk sequence persistence file is not modified
+    ///   (peek-only via the Run 069 inner pipeline);
+    /// - no P2P / KEMTLS session is evicted;
+    /// - no `_applied_total` metric family is bumped (none exists);
+    /// - no candidate frame is re-broadcast or forwarded by this
+    ///   function (the dispatcher's Run 088 propagation step runs
+    ///   AFTER this method and is gated on a validated outcome).
+    pub fn try_handle_frame_with_ratification(
+        &mut self,
+        frame: &[u8],
+        ctx: &PeerCandidateWireRuntimeContext<'_>,
+        ratification_ctx: &RatificationEnforcementContext<'_>,
+        metrics: &P2pMetrics,
+    ) -> PeerCandidateWireOutcome {
+        self.try_handle_frame_inner(frame, ctx, metrics, Some(ratification_ctx))
+    }
+
+    fn try_handle_frame_inner(
+        &mut self,
+        frame: &[u8],
+        ctx: &PeerCandidateWireRuntimeContext<'_>,
+        metrics: &P2pMetrics,
+        ratification_ctx: Option<&RatificationEnforcementContext<'_>>,
+    ) -> PeerCandidateWireOutcome {
         // Always-truthful "we observed a frame" counter — matches
         // the Run 076 / Run 077 `received_total` discipline.
         metrics.record_peer_candidate_received();
@@ -766,7 +819,12 @@ impl PeerCandidateWireReceiver {
             local_leaf_cert_bytes: ctx.local_leaf_cert_bytes,
             now_ms: ctx.now_ms,
         };
-        let outcome = self.validator.try_accept(run076_envelope, &inner_ctx);
+        let outcome = match ratification_ctx {
+            Some(rctx) => self
+                .validator
+                .try_accept_with_ratification(run076_envelope, &inner_ctx, rctx),
+            None => self.validator.try_accept(run076_envelope, &inner_ctx),
+        };
 
         // 4. Record the outcome-specific metric exactly once.
         //    Reuses the SAME seven Run 076 counters (no new metric
@@ -928,6 +986,11 @@ pub struct LivePeerCandidateWireDispatcher {
     validation_time_secs: u64,
     metrics: Arc<P2pMetrics>,
     clock_ms_fn: Arc<dyn Fn() -> u64 + Send + Sync + 'static>,
+    /// Run 109 — owned ratification context applied to every live
+    /// inbound `0x05` frame BEFORE validation success / propagation.
+    /// `None` preserves the pre-Run-109 unguarded path used by older
+    /// tests and DevNet operators who have not yet wired ratification.
+    live_ratification: Option<LiveRatificationConfig>,
 }
 
 impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
@@ -951,6 +1014,10 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
             .field("validation_time_secs", &self.validation_time_secs)
             .field("is_enabled", &self.is_enabled())
             .field("propagation_enabled", &self.propagation.enabled)
+            .field(
+                "ratification_gate_invoked",
+                &self.ratification_gate_is_invoked(),
+            )
             .finish()
     }
 }
@@ -1008,6 +1075,90 @@ pub struct LivePeerCandidateWireDispatcherConfig {
     /// propagation remains inert even if `propagation.enabled` is
     /// true; tests and production wiring install this explicitly.
     pub propagation_sender: Option<Arc<dyn PeerCandidateWireFrameSender>>,
+    /// Run 109 — optional owned ratification context applied to live
+    /// inbound `0x05` peer-candidate frames BEFORE the inner Run 069
+    /// validation accepts the candidate. When `None`, frames are
+    /// validated through the unchanged pre-Run-109 path (Run 088
+    /// propagation gating is unaffected). When `Some`, the
+    /// dispatcher consults
+    /// [`LiveRatificationConfig::gate_decision`] on every frame and
+    /// routes through
+    /// [`PeerCandidateWireReceiver::try_handle_frame_with_ratification`]
+    /// iff the gate is invoked under Run 106 policy.
+    ///
+    /// MainNet/TestNet callers MUST install this in production; the
+    /// dispatcher cannot infer per-environment defaults from
+    /// `expected_environment` alone because the owned authority
+    /// material lives in the operator-supplied genesis file, not in
+    /// the dispatcher itself.
+    pub live_ratification: Option<LiveRatificationConfig>,
+}
+
+/// Run 109 — owned ratification context for live inbound
+/// peer-candidate `0x05` frame validation.
+///
+/// Holds the same six fields the borrowed
+/// [`RatificationEnforcementContext`] borrows for the local Run 107
+/// peer-candidate-check path, plus the Run 106
+/// [`RatificationGateDecision`] computed once at dispatcher build
+/// time (the per-environment policy decision is stable for the
+/// lifetime of the process and does not depend on per-frame state).
+///
+/// This struct is constructed once at startup by the operator-facing
+/// builder (mirroring the
+/// [`crate::pqc_peer_candidate_binary::run_local_check_with_ratification`]
+/// path that already builds the borrowed context for Run 107) and
+/// owned by the dispatcher for the lifetime of the process. The
+/// dispatcher reborrows it per-frame to produce the borrowed
+/// [`RatificationEnforcementContext`] the verifier consumes.
+///
+/// # Strict scope
+///
+/// - No private-key material is held here. `ratification` is an
+///   already-signed object; `authority` carries only public-key
+///   material; `expected_genesis_hash` is the canonical Run 102
+///   hash; `expected_chain_id_str` is the public chain id; `policy`
+///   is the Run 106 per-environment enum.
+/// - No I/O is performed here. Loading the genesis authority and
+///   the optional ratification sidecar happens out-of-band by the
+///   binary entry point.
+/// - No live trust state, sequence handle, or session evictor is
+///   carried here. This struct is the "ratification context only"
+///   side of the Run 109 boundary.
+#[derive(Debug, Clone)]
+pub struct LiveRatificationConfig {
+    /// Genesis-bound authority block (Run 101/104). Cloned from the
+    /// canonical genesis configuration loaded at startup. The
+    /// verifier consults `bundle_signing_authority_roots` only.
+    pub authority: GenesisAuthorityConfig,
+    /// Canonical genesis hash computed at startup (Run 102).
+    pub expected_genesis_hash: GenesisHash,
+    /// Per-environment policy enum for the verifier. Derived from
+    /// `config.environment` at dispatcher build time.
+    pub expected_environment_policy: NetworkEnvironmentPolicy,
+    /// Pre-formatted lowercase-hex string form of the runtime chain
+    /// id (matches the Run 107 binary path; the verifier expects a
+    /// `&str` so the canonical encoding lives at the call site).
+    pub expected_chain_id_str: String,
+    /// Optional owned ratification sidecar object. `None` triggers
+    /// the verifier's `Missing` / `LegacyUnratifiedAccepted` branch
+    /// per `policy`. On MainNet/TestNet under
+    /// `RatificationEnforcementPolicy::Strict` (Run 106 default),
+    /// `Missing` is fail-closed.
+    pub ratification: Option<BundleSigningRatification>,
+    /// Per-surface enforcement policy. MainNet is always
+    /// [`RatificationEnforcementPolicy::Strict`]; TestNet/DevNet
+    /// may be `AllowLegacyUnratified` only when the operator
+    /// supplied the explicit legacy-allow flag.
+    pub policy: RatificationEnforcementPolicy,
+    /// Run 106 per-environment gate decision computed once at
+    /// startup. When this is `Skip(DevnetNoOperatorOptIn)` the
+    /// dispatcher routes frames through the pre-Run-109 unguarded
+    /// path; otherwise it routes through the ratification-aware
+    /// path. MainNet/TestNet always produce
+    /// `Invoke(MainnetDefaultStrict)` / `Invoke(TestnetDefaultStrict)`
+    /// and the gate is always invoked.
+    pub gate_decision: RatificationGateDecision,
 }
 
 impl LivePeerCandidateWireDispatcher {
@@ -1055,12 +1206,32 @@ impl LivePeerCandidateWireDispatcher {
             validation_time_secs: config.validation_time_secs,
             metrics,
             clock_ms_fn,
+            live_ratification: config.live_ratification,
         }
     }
 
     /// `true` iff the wrapped receiver is armed.
     pub fn is_enabled(&self) -> bool {
         self.receiver.lock().is_enabled()
+    }
+
+    /// Run 109 — `true` iff an owned ratification context has been
+    /// installed AND the Run 106 gate decision says the gate should
+    /// be invoked. False both when no ratification context is wired
+    /// (pre-Run-109 unguarded path) and when the gate decision is a
+    /// `Skip` (DevNet without operator opt-in).
+    pub fn ratification_gate_is_invoked(&self) -> bool {
+        self.live_ratification
+            .as_ref()
+            .map(|c| c.gate_decision.should_invoke())
+            .unwrap_or(false)
+    }
+
+    /// Run 109 — borrow the installed owned ratification context, if
+    /// any. Tests and operator-introspection paths read this to
+    /// confirm the policy/gate decision applied to live frames.
+    pub fn live_ratification(&self) -> Option<&LiveRatificationConfig> {
+        self.live_ratification.as_ref()
     }
 
     /// Install or replace the Run 088 propagation sender after the
@@ -1145,7 +1316,34 @@ impl LivePeerCandidateWireDispatcher {
             now_ms,
         };
         let mut receiver = self.receiver.lock();
-        let outcome = receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref());
+        // Run 109: route through the ratification-aware receiver path
+        // when the owned ratification context is installed AND the
+        // Run 106 gate decision says invoke. Otherwise preserve the
+        // pre-Run-109 unguarded path (used by DevNet without operator
+        // opt-in and by all pre-Run-109 tests). The Run 088
+        // propagation step downstream is gated on a validated outcome
+        // either way, so an unratified candidate (which produces a
+        // `Rejected(RatificationRefused)` outcome under the
+        // ratification-aware path) is NEVER rebroadcast.
+        let outcome = match self.live_ratification.as_ref() {
+            Some(rc) if rc.gate_decision.should_invoke() => {
+                let rctx = RatificationEnforcementContext {
+                    authority: &rc.authority,
+                    expected_genesis_hash: &rc.expected_genesis_hash,
+                    expected_environment_policy: rc.expected_environment_policy,
+                    expected_chain_id_str: rc.expected_chain_id_str.as_str(),
+                    ratification: rc.ratification.as_ref(),
+                    policy: rc.policy,
+                };
+                receiver.try_handle_frame_with_ratification(
+                    frame,
+                    &ctx,
+                    &rctx,
+                    self.metrics.as_ref(),
+                )
+            }
+            _ => receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref()),
+        };
         drop(receiver);
         self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
         outcome
@@ -2114,6 +2312,7 @@ mod tests {
             validation_time_secs: 100,
             propagation: PeerCandidatePropagationConfig::default(),
             propagation_sender: None,
+            live_ratification: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(!disp.is_enabled());
@@ -2154,6 +2353,7 @@ mod tests {
             validation_time_secs: 100,
             propagation: PeerCandidatePropagationConfig::default(),
             propagation_sender: None,
+            live_ratification: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(disp.is_enabled());
@@ -2203,6 +2403,7 @@ mod tests {
             validation_time_secs: 100,
             propagation: PeerCandidatePropagationConfig::default(),
             propagation_sender: None,
+            live_ratification: None,
         };
         let disp = LivePeerCandidateWireDispatcher::with_clock(
             cfg,
