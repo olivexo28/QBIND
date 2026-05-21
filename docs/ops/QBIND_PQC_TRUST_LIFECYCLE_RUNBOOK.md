@@ -3536,3 +3536,53 @@ Operator obligations and the resulting log/exit behavior:
 - DevNet startup with `--p2p-trust-bundle-ratification-enforcement-enabled`: the dispatcher logs `policy=devnet-operator-opt-in` and enforces ratification on every live `0x05` frame.
 
 When the gate is INVOKED and an inbound frame is rejected (missing, bad-signature, wrong-chain, wrong-environment, unknown-authority-root, transport-root, unsupported-suite, missing or malformed key material), the existing Run 088 invalid-outcome path increments `qbind_p2p_pqc_trust_bundle_peer_candidate_propagation_suppressed_invalid_total` and the frame is NOT rebroadcast. The non-mutation invariants the Run 077 local-check operator already relies on (no sequence write, no root merge, no live trust mutation, no session eviction, no `_applied_total` family) hold identically on the live wire path. Run 109 does NOT introduce peer-driven live apply, reload-apply ratification, SIGHUP ratification, signing-key rotation/revocation, authority anti-rollback persistence, peer-distributed ratification objects on the wire, KMS/HSM custody, governance, validator-set rotation, or full C4 / C5 closure — all of these remain future work. Source and integration-test evidence is in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_109.md`.
+## Run 110 operator update — release-binary N=3 DevNet live ratification harness
+
+Run 110 records release-binary multi-node evidence for the Run 109 live inbound `0x05` peer-candidate wire ratification gate. The reusable harness is `scripts/devnet/run_110_live_peer_candidate_ratification_n3.sh` and the supporting fixture helper is `cargo run --release -p qbind-node --example run_110_live_ratification_fixture_helper -- <material-dir> <outdir>` (model layered on top of `devnet_pqc_trust_bundle_helper` material). A single-command replay produces:
+
+- the cluster baseline signed DevNet trust bundle (`<OUTDIR>/material/trust-bundle.json`, signed by the **R1 ratified key**);
+- the Run 100 / 101 genesis with a populated `genesis_authority` block, the Run 102 canonical expected genesis hash, the Run 103 signed ratification sidecar covering R1, a tampered copy of that sidecar (`ratification.bad-signature.json`), a freshly-minted **U1 unratified key**, a U1-signed alternate bundle, and matching peer-candidate envelopes (`<OUTDIR>/fixtures/*.json`);
+- the six scenario archives — `baseline_ratification`, `valid_ratified`, `missing_ratification`, `bad_ratification_startup_refuse`, `duplicate_unratified_no_promotion`, `devnet_no_opt_in_legacy` — each with metric snapshots before/after, sequence-file SHA-256 hashes, stderr logs, and a `summary.txt` line stating `pass`.
+
+The exercised command shape per node, in the enforced-policy scenarios, is:
+
+```text
+qbind-node \
+  --env devnet --network-mode p2p --enable-p2p \
+  --p2p-listen-addr 127.0.0.1:<P2P_PORT> \
+  --validator-id <0|1|2> \
+  --p2p-mutual-auth required \
+  --p2p-pqc-root-mode pqc-static-root \
+  --p2p-trust-bundle <material>/trust-bundle.json \
+  --p2p-trust-bundle-signing-key <R1 spec> \
+  --p2p-trust-bundle-signing-key <U1 spec>           # required on V1+V2 so U1-signed alt bundles reach the Run 109 gate
+  --p2p-leaf-cert <material>/v<id>.cert.bin \
+  --p2p-leaf-cert-key <material>/v<id>.kem.sk.bin \
+  --signer-keystore-path <signers>/v<id> \
+  --data-dir <data>/v<id> \
+  --p2p-peer <peer_id>@127.0.0.1:<port> \
+  --p2p-peer-leaf-cert <peer_id>:<material>/v<peer_id>.cert.bin \
+  --validator-consensus-key <id>:100:<pk_hex> \
+  --genesis-path <fixtures>/genesis.json \           # V1+V2 only in enforced scenarios
+  --expect-genesis-hash <fixtures>/expected-genesis-hash.txt
+  --p2p-trust-bundle-ratification-enforcement-enabled # V1+V2 only in enforced scenarios
+  --p2p-trust-bundle-ratification <fixtures>/ratification.valid.json  # V1+V2 only in enforced scenarios
+  [--p2p-trust-bundle-peer-candidate-wire-validation-enabled]         # all nodes
+  [--p2p-trust-bundle-peer-candidate-wire-publish-enabled \           # V0 only
+   --p2p-trust-bundle-peer-candidate-wire-publish-path <envelope> \
+   --p2p-trust-bundle-peer-candidate-wire-publish-once]
+  [--p2p-trust-bundle-peer-candidate-propagation-enabled]             # V1 only
+```
+
+Expected release-binary behavior (one row per Run 110 scenario):
+
+- `baseline_ratification` — V1+V2 stderr contain a Run 109 `ratification gate INVOKED` / `policy=devnet-operator-opt-in` marker; every node reaches `P2P transport up`; no peer-candidate traffic flows; `qbind_p2p_pqc_cert_verify_accepted_total >= 1` and `qbind_p2p_pqc_cert_verify_rejected_total = 0` on every node; `pqc_trust_bundle_sequence.json` is identical before and after.
+- `valid_ratified` — V1: `peer_candidate_received_total=1`, `validated_total=1`, `rejected_total=0`, `propagation_attempt_total=1`, `propagation_sent_total=1`, `propagation_suppressed_invalid_total=0`. V2: `validated_total=1`, `rejected_total=0`, `propagation_sent_total=0`. V0: `received_total=0` (source-peer exclusion). Sequence-file SHA-256 identical before / after.
+- `missing_ratification` — V1: `validated_total=0`, `rejected_total=1`, `propagation_attempt_total=0`, `propagation_sent_total=0`, `propagation_suppressed_invalid_total>=1`, stderr contains a `RatificationRefused` / `Missing` marker. V2: `validated_total=0`, `propagation_sent_total=0`. V0: `received_total=0`. Sequence-file SHA-256 identical before / after.
+- `bad_ratification_startup_refuse` — V1 exits non-zero; stderr contains a `RatificationRefused` / `BadSignature` / `run-105.*refused` / `run-109.*FATAL` marker; the binary NEVER reaches `P2P transport up`; no `pqc_trust_bundle_sequence.json` is created under V1's data dir.
+- `duplicate_unratified_no_promotion` — V1: `received_total>=2`, `validated_total=0`, `propagation_sent_total=0`, `rejected_total + duplicate_total >= 2`. V2: `validated_total=0`, `propagation_sent_total=0`. The seen-cache does NOT convert a prior rejection into acceptance on the second arrival.
+- `devnet_no_opt_in_legacy` — V1 stderr contains a Run 109 `ratification gate SKIPPED` / `policy=devnet-no-operator-opt-in` marker; V1: `validated_total=1`, `propagation_sent_total=1`; V2: `validated_total=1`. This is the regression-protection that the no-opt-in DevNet path is byte-for-byte the Run 089 unguarded path.
+
+The cross-cutting non-mutation invariants pinned by every scenario: `pqc_trust_bundle_sequence.json` byte-identical on every node before and after; no `qbind_p2p_pqc_trust_bundle_peer_candidate_applied_total` metric family on any `/metrics`; all `qbind_p2p_trust_bundle_live_reload_*` and `qbind_p2p_session_eviction_*` counters at zero; no `--p2p-trusted-root` fallback log line; no `DummySig` / `DummyKem` / `DummyAead` / `dummy_*_registered=true` line.
+
+Operator obligations remain identical to Run 109: under default-strict MainNet/TestNet (and DevNet with `--p2p-trust-bundle-ratification-enforcement-enabled`) the operator MUST supply a populated `--genesis-path` with a `genesis_authority` block and a `--p2p-trust-bundle-ratification` sidecar whose `bundle_signing_public_key` matches the configured `--p2p-trust-bundle-signing-key`. Without these the binary refuses to install the live dispatcher and exits non-zero (no fallback, no apply, no sequence write, no session eviction). Run 110 does NOT introduce peer-driven live apply, reload-apply ratification, SIGHUP ratification, signing-key rotation/revocation, authority anti-rollback persistence, peer-distributed ratification objects on the wire, KMS/HSM custody, governance, validator-set rotation, or full C4 / C5 closure. Source and integration-test evidence is in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_110.md`; the harness is `scripts/devnet/run_110_live_peer_candidate_ratification_n3.sh`. Run 110 is **partial-positive**: the harness, fixture helper, and docs land in-tree and are repeatable end-to-end; a fresh full release-binary capture under this PR was not produced.
