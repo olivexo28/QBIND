@@ -26,7 +26,7 @@ use qbind_ledger::{
     compute_canonical_genesis_hash, format_genesis_hash, parse_genesis_hash, GenesisAllocation,
     GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig,
     GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::node_config::{GenesisSourceConfig, NodeConfig};
 use qbind_node::pqc_boot_genesis::{
@@ -36,6 +36,12 @@ use qbind_types::NetworkEnvironment;
 
 fn fingerprint(seed: u8) -> String {
     format!("{:02x}", seed).repeat(32)
+}
+
+/// Run 104: synthetic 1312-byte ML-DSA-44 public key for MainNet
+/// bundle-signing-authority root fixtures.
+fn synthetic_ml_dsa_44_pk(seed: u8) -> Vec<u8> {
+    vec![seed; GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES]
 }
 
 fn mainnet_genesis_with_chain(chain_id: &str) -> GenesisConfig {
@@ -61,11 +67,15 @@ fn mainnet_genesis_with_chain(chain_id: &str) -> GenesisConfig {
         ),
         GenesisMonetaryConfig::mainnet_default(),
     );
-    let mut auth = GenesisAuthorityConfig::new(vec![GenesisAuthorityRoot::new(
-        GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-        fingerprint(0xab),
-        "foundation-bundle-signer-1",
-    )]);
+    // Run 104: full ML-DSA-44 public-key material is required on MainNet
+    // for the bundle-signing-authority root.
+    let mut auth = GenesisAuthorityConfig::new(vec![
+        GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &synthetic_ml_dsa_44_pk(0xab),
+            "foundation-bundle-signer-1",
+        ),
+    ]);
     auth.pqc_transport_roots = vec![GenesisAuthorityRoot::new(
         GENESIS_AUTHORITY_SUITE_ML_DSA_44,
         fingerprint(0xcd),

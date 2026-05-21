@@ -3325,3 +3325,85 @@ Run 102.
 *If anything in this Run 103 note appears to permit a fallback that
 the binary refuses, the binary wins and this runbook is the defect.
 Open an issue against `docs/whitepaper/contradiction.md` immediately.*
+---
+
+# Run 104 update — Genesis-bound authority key material registry
+
+Run 104 (`task/RUN_104_TASK.txt`) adds a structurally separate
+`public_key_hex` field to `GenesisAuthorityRoot` and a verified
+binding between that field and the existing `key_fingerprint` so the
+Run 103 bundle-signing-key ratification verifier can verify real
+ML-DSA-44 signatures using genesis-bound material — without the
+Run 101 / Run 103 overloading of `key_fingerprint` as full
+public-key bytes.
+
+## MainNet operator obligation
+
+MainNet genesis files MUST now carry `public_key_hex` for every
+bundle-signing-authority root. Genesis files written before Run 104
+that relied on either:
+
+- only a 64-hex SHA3 fingerprint, or
+- the Run 103 legacy 2624-hex `key_fingerprint` overload,
+
+will be refused by boot-time genesis verification with one of these
+typed errors:
+
+- `MissingPublicKeyMaterial` — no `public_key_hex` field at all;
+- `MalformedPublicKey` — `public_key_hex` is wrong length, not
+  lowercase hex, or odd length;
+- `PublicKeyFingerprintMismatch` — `sha3_256_hex(public_key_hex)`
+  does not equal `key_fingerprint`;
+- `PublicKeySuiteUnknown` — `suite_id` is not `100` (ML-DSA-44);
+- `DuplicateAuthorityPublicKey` — two roots share the same
+  `(suite_id, public_key_hex)`.
+
+All MainNet failures surface through the existing
+`BootGenesisVerificationError::AuthorityValidationFailed` shell with
+a clear `Display` line; the operator workflow (`--print-genesis-hash`
+→ pin via `--expect-genesis-hash` → start the node) is unchanged in
+shape — only the content of the genesis JSON file changes.
+
+## Regenerating a MainNet genesis file
+
+The recommended path is to construct each bundle-signing-authority
+root via the Rust API:
+
+    GenesisAuthorityRoot::with_public_key_bytes(
+        GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+        &pk_bytes,
+        "foundation-bundle-signer-1",
+    )
+
+which derives the canonical SHA3-256 `key_fingerprint` from
+`pk_bytes` automatically, guaranteeing consistency by construction.
+Operators that hand-edit JSON files MUST ensure
+`sha3_256_hex(decoded(public_key_hex)) == key_fingerprint` — Run 104
+will refuse any mismatch on MainNet.
+
+## TestNet / DevNet behavior (unchanged shape)
+
+TestNet and DevNet continue to tolerate legacy short-fingerprint-only
+bundle-signing-authority roots so existing local fixtures and
+DevNet/TestNet workflows continue to work without modification. The
+Run 103 verifier still fails closed on those roots with
+`AuthorityKeyMaterialUnavailable`; this is the documented and
+intended behavior.
+
+## What Run 104 does NOT add to the operator surface
+
+- No new CLI flag, no new config key, no new admin endpoint.
+- No new metric family, no new logger target.
+- No filesystem watcher, no network listener, no gossip subscription.
+- No new dependency.
+
+**Run 104 explicitly does NOT enable peer-driven live apply,
+trust-bundle apply-path ratification enforcement, KMS/HSM custody,
+signing-key rotation, signing-key revocation, anti-rollback
+persistence, production source-code root anchors, or any fallback
+authority.** The operator surface is otherwise unchanged from
+Run 102/Run 103.
+
+*If anything in this Run 104 note appears to permit a fallback that
+the binary refuses, the binary wins and this runbook is the defect.
+Open an issue against `docs/whitepaper/contradiction.md` immediately.*

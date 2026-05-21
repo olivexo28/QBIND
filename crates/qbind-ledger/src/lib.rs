@@ -155,6 +155,13 @@ pub use genesis::{
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 
+// Run 104: Genesis-Bound Authority Key Material Registry exports
+pub use genesis::{
+    authority_public_key_fingerprint, GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN,
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES,
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN,
+};
+
 // Run 103: Minimal Bundle-Signing-Key Ratification Verifier exports
 pub use bundle_signing_ratification::{
     canonical_ratification_digest, canonical_ratification_preimage,

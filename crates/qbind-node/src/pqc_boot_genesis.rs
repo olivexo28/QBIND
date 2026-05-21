@@ -291,12 +291,20 @@ mod tests {
     use super::*;
     use qbind_ledger::{
         GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisCouncilConfig,
-        GenesisMonetaryConfig, GenesisValidator, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+        GenesisMonetaryConfig, GenesisValidator, GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES,
+        GENESIS_AUTHORITY_SUITE_ML_DSA_44,
     };
     use std::io::Write;
 
     fn fingerprint(seed: u8) -> String {
         format!("{:02x}", seed).repeat(32)
+    }
+
+    /// Run 104: synthetic 1312-byte ML-DSA-44 public key filled with
+    /// `seed`. Sufficient for boot-time genesis-hash / authority
+    /// schema validation tests (no PQC signing exercised here).
+    fn synthetic_ml_dsa_44_pk(seed: u8) -> Vec<u8> {
+        vec![seed; GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES]
     }
 
     fn mainnet_genesis() -> GenesisConfig {
@@ -322,11 +330,17 @@ mod tests {
             ),
             GenesisMonetaryConfig::mainnet_default(),
         );
-        let mut auth = GenesisAuthorityConfig::new(vec![GenesisAuthorityRoot::new(
-            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-            fingerprint(0xab),
-            "foundation-bundle-signer-1",
-        )]);
+        // Run 104: MainNet bundle-signing-authority roots must carry full
+        // ML-DSA-44 public-key material. Transport roots remain
+        // fingerprint-only (transport consumption is a separate
+        // post-Run-104 topic).
+        let mut auth = GenesisAuthorityConfig::new(vec![
+            GenesisAuthorityRoot::with_public_key_bytes(
+                GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+                &synthetic_ml_dsa_44_pk(0xab),
+                "foundation-bundle-signer-1",
+            ),
+        ]);
         auth.pqc_transport_roots = vec![GenesisAuthorityRoot::new(
             GENESIS_AUTHORITY_SUITE_ML_DSA_44,
             fingerprint(0xcd),

@@ -1162,3 +1162,78 @@ this within `GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX = 16 KiB`.
 If anything in this update drifts from the binary's behaviour once
 Run 104 lands, this update is the defect: update it before merging
 the Run 104 change.
+
+---
+
+## 20. Run 104 Update — Genesis-Bound Authority Key Material Registry
+
+**Status:** landed. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_104.md`.
+
+### 20.1 What Run 104 closes
+
+Run 104 closes the §19.5 boundary: the genesis-bound bundle-signing
+authority root now carries a structurally separate, validated
+ML-DSA-44 public key, and the Run 103 verifier consumes it directly.
+
+Schema additions on `GenesisAuthorityRoot`:
+
+| Field             | Type             | MainNet bundle-signing | TestNet / DevNet |
+|-------------------|------------------|------------------------|------------------|
+| `public_key_hex`  | `Option<String>` | **required**           | optional (legacy short fingerprint tolerated) |
+
+When `public_key_hex` is `Some`, validation enforces:
+
+1. Lowercase hex, even length, ≤ `GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX`.
+2. Suite-specific byte length: ML-DSA-44 = 1312 bytes (= 2624 hex).
+3. `key_fingerprint.len() == 64` AND
+   `sha3_256_hex(decoded_public_key) == key_fingerprint`
+   (binding enforced via `authority_public_key_fingerprint`).
+
+When `public_key_hex` is `None` on a MainNet bundle-signing root,
+`validate_for_environment` fails closed with
+`GenesisAuthorityValidationError::MissingPublicKeyMaterial`.
+
+Config-level validation additionally rejects duplicate
+`(suite_id, public_key_hex)` pairs with
+`DuplicateAuthorityPublicKey`.
+
+### 20.2 Canonical hash binding
+
+`encode_authority_root` was extended with
+`encode_optional_str(buf, root.public_key_hex.as_deref())`. Any
+mutation of the new field — including its presence/absence — changes
+the canonical genesis hash, so Run 102 boot-time hash pinning
+transitively protects the new material.
+
+### 20.3 Verifier integration
+
+`verify_bundle_signing_key_ratification` resolution order:
+
+1. Use `bundle_root.public_key_hex` if present (Run 104 clean path).
+   Malformed bytes → `AuthorityKeyMaterialMalformed` (new variant).
+2. Fall back to the Run 103 legacy 2624-hex `key_fingerprint`
+   overload (preserved for DevNet/TestNet backward compatibility
+   only).
+3. Otherwise → `AuthorityKeyMaterialUnavailable` (unchanged).
+
+No fake verification path is introduced; no fallback authority is
+consulted.
+
+### 20.4 What Run 104 explicitly does NOT do
+
+- Does not wire the verifier into any trust-bundle apply call site
+  (Run 105+).
+- Does not implement signing-key rotation, revocation, custody, or
+  authority anti-rollback persistence.
+- Does not enable peer-driven live apply.
+- Does not change `--print-genesis-hash` byte layout or CLI surface.
+
+### 20.5 Operator obligation (MainNet)
+
+MainNet genesis files MUST now carry `public_key_hex` for every
+bundle-signing-authority root. Genesis files written before Run 104
+that relied on either (a) only a 64-hex SHA3 fingerprint, or
+(b) the Run 103 legacy 2624-hex `key_fingerprint` overload, will be
+refused by `validate_for_environment(Mainnet)` and must be
+regenerated using `GenesisAuthorityRoot::with_public_key_bytes(...)`
+or by populating `public_key_hex` directly.

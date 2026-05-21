@@ -25,17 +25,26 @@ use qbind_ledger::{
     GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot,
     GenesisAuthorityValidationError, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig,
     GenesisValidationError, GenesisValidator, NetworkEnvironmentPolicy,
-    GENESIS_AUTHORITY_POLICY_VERSION_RUN_101, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES, GENESIS_AUTHORITY_POLICY_VERSION_RUN_101,
+    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 
 fn fingerprint_64(seed: u8) -> String {
     format!("{:02x}", seed).repeat(32)
 }
 
+/// Run 104: synthetic 1312-byte ML-DSA-44 public key filled with `seed`.
+fn synthetic_ml_dsa_44_pk(seed: u8) -> Vec<u8> {
+    vec![seed; GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES]
+}
+
 fn root(seed: u8, label: &str) -> GenesisAuthorityRoot {
-    GenesisAuthorityRoot::new(
+    // Run 104: produce a fully-populated authority root with full
+    // public-key material so MainNet test fixtures satisfy the new
+    // key-material policy.
+    GenesisAuthorityRoot::with_public_key_bytes(
         GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-        fingerprint_64(seed),
+        &synthetic_ml_dsa_44_pk(seed),
         label,
     )
 }

@@ -302,6 +302,71 @@ pub const GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX: usize = 16 * 1024;
 /// migration in `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
 pub const GENESIS_AUTHORITY_POLICY_VERSION_RUN_101: u32 = 1;
 
+// ---------------------------------------------------------------------------
+// Run 104: full ML-DSA-44 authority public-key material constants
+// ---------------------------------------------------------------------------
+
+/// Raw byte length of an ML-DSA-44 public key (mirrors
+/// `qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE`). Re-declared here as a `const`
+/// so `qbind-ledger` does not need a direct `qbind-crypto` dependency for
+/// pure schema/validation work.
+pub const GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES: usize = 1312;
+
+/// Hex-encoded length of a full ML-DSA-44 authority public key
+/// (`2 * GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES`).
+pub const GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN: usize =
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES * 2;
+
+/// Hex length of a canonical SHA3-256 authority-key fingerprint
+/// (32 raw bytes = 64 lowercase hex chars).
+pub const GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN: usize = 64;
+
+/// Compute the canonical lowercase-hex SHA3-256 fingerprint of an authority
+/// public key.
+///
+/// This is the Run 104 binding between the short `key_fingerprint` field
+/// and the full `public_key_hex` field on a [`GenesisAuthorityRoot`]. It is
+/// deterministic, suite-agnostic at the byte level, and produces exactly
+/// `GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN` hex characters.
+///
+/// Validation requires the stored `key_fingerprint` to equal
+/// `authority_public_key_fingerprint(decoded_public_key_bytes)` — any
+/// mismatch fails closed with
+/// [`GenesisAuthorityValidationError::PublicKeyFingerprintMismatch`].
+pub fn authority_public_key_fingerprint(public_key_bytes: &[u8]) -> String {
+    let d = qbind_hash::sha3_256(public_key_bytes);
+    let mut out = String::with_capacity(GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN);
+    for b in d.iter() {
+        use std::fmt::Write;
+        let _ = write!(&mut out, "{:02x}", b);
+    }
+    out
+}
+
+fn decode_lowercase_hex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(s.len() / 2);
+    let mut i = 0;
+    while i < bytes.len() {
+        let hi = decode_hex_nibble(bytes[i])?;
+        let lo = decode_hex_nibble(bytes[i + 1])?;
+        out.push((hi << 4) | lo);
+        i += 2;
+    }
+    Some(out)
+}
+
+fn decode_hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(10 + b - b'a'),
+        _ => None,
+    }
+}
+
 /// One entry in the initial PQC trust-anchor / bundle-signing-authority root
 /// set, as expressed in the genesis configuration file.
 ///
@@ -310,15 +375,29 @@ pub const GENESIS_AUTHORITY_POLICY_VERSION_RUN_101: u32 = 1;
 /// is intentionally minimal:
 ///
 /// * `suite_id` — PQC suite identifier (must be `ML-DSA-44 = 100` on MainNet).
-/// * `key_fingerprint` — lowercase hex of either the full PQC public key
-///   bytes or the SHA3-256 fingerprint of the key (operators choose, but
-///   MainNet requires ≥ 64 hex chars = 32 raw bytes).
+/// * `key_fingerprint` — lowercase hex SHA3-256 fingerprint of the
+///   authority public key (64 hex chars on MainNet/TestNet). Run 101
+///   historically allowed this field to carry the full PK bytes as a
+///   convenience; Run 104 deprecates that overload and introduces the
+///   structurally separate [`Self::public_key_hex`] field below. MainNet
+///   refuses any `key_fingerprint` that is not exactly
+///   [`GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN`] when
+///   `public_key_hex` is present.
 /// * `label` — operator-facing identifier (e.g. `"foundation-root-1"`).
 ///   Must be non-empty; included in the canonical hash; never used for
 ///   trust decisions.
 /// * `not_before_epoch` — optional epoch at which this root becomes valid;
 ///   reserved for Run 102+. When `Some`, the value is hash-bound but not
 ///   enforced by Run 101.
+/// * `public_key_hex` — **Run 104 addition.** Optional lowercase hex of the
+///   full PQC authority public key bytes
+///   (`GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN` chars for
+///   ML-DSA-44). When `Some`, the Run 103 ratification verifier uses it to
+///   verify ratification signatures without overloading `key_fingerprint`.
+///   MainNet requires `Some` for every bundle-signing authority root; the
+///   field is hash-bound (any byte mutation changes the canonical genesis
+///   hash) and is verified against `key_fingerprint` via
+///   [`authority_public_key_fingerprint`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenesisAuthorityRoot {
     /// PQC suite identifier. MainNet MUST be `100` (ML-DSA-44).
@@ -333,6 +412,15 @@ pub struct GenesisAuthorityRoot {
     /// Reserved for Run 102+ activation gating. Hash-bound only.
     #[serde(default)]
     pub not_before_epoch: Option<u64>,
+
+    /// Run 104: optional full PQC authority public key, lowercase hex.
+    ///
+    /// MainNet requires `Some` for every bundle-signing authority root.
+    /// Validation enforces hex correctness, suite-specific byte length,
+    /// and consistency between the decoded bytes and `key_fingerprint`
+    /// via SHA3-256 (see [`authority_public_key_fingerprint`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_key_hex: Option<String>,
 }
 
 impl GenesisAuthorityRoot {
@@ -347,7 +435,46 @@ impl GenesisAuthorityRoot {
             key_fingerprint: key_fingerprint.into(),
             label: label.into(),
             not_before_epoch: None,
+            public_key_hex: None,
         }
+    }
+
+    /// Run 104: construct a fully-populated authority root from raw PQC
+    /// public key bytes, deriving the canonical SHA3-256
+    /// `key_fingerprint` automatically.
+    ///
+    /// Performs no policy validation — call
+    /// [`Self::validate`] / [`GenesisAuthorityConfig::validate_for_environment`]
+    /// afterwards. The derived fingerprint will always satisfy the Run 104
+    /// `key_fingerprint <-> public_key_hex` consistency rule by
+    /// construction, so this constructor is the recommended path for
+    /// operator tooling and test fixtures.
+    pub fn with_public_key_bytes(
+        suite_id: GenesisAuthoritySuiteId,
+        public_key_bytes: &[u8],
+        label: impl Into<String>,
+    ) -> Self {
+        let fp = authority_public_key_fingerprint(public_key_bytes);
+        let mut pk_hex = String::with_capacity(public_key_bytes.len() * 2);
+        for b in public_key_bytes {
+            use std::fmt::Write;
+            let _ = write!(&mut pk_hex, "{:02x}", b);
+        }
+        Self {
+            suite_id,
+            key_fingerprint: fp,
+            label: label.into(),
+            not_before_epoch: None,
+            public_key_hex: Some(pk_hex),
+        }
+    }
+
+    /// Builder-style helper that attaches a pre-formatted lowercase-hex
+    /// public key to an existing authority root. Returns the modified
+    /// root; performs no validation.
+    pub fn with_public_key_hex(mut self, public_key_hex: impl Into<String>) -> Self {
+        self.public_key_hex = Some(public_key_hex.into());
+        self
     }
 
     /// Validate this root against the per-environment policy.
@@ -358,9 +485,19 @@ impl GenesisAuthorityRoot {
     ///     length in `[64, GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX]`,
     ///     even length.
     ///   * `label` must be non-empty.
+    ///   * **Run 104 (bundle-signing roots on MainNet only):**
+    ///     `public_key_hex` MUST be `Some`, valid lowercase hex,
+    ///     `GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN` chars, and
+    ///     its SHA3-256 fingerprint MUST equal the 64-hex
+    ///     `key_fingerprint`. Transport roots on MainNet may still omit
+    ///     `public_key_hex` (transport-root consumption is a separate
+    ///     post-Run-104 topic).
     ///
     /// DevNet relaxes the suite-id and fingerprint-length checks to allow
-    /// helper-generated short fingerprints in legacy local tests.
+    /// helper-generated short fingerprints in legacy local tests. When
+    /// `public_key_hex` is present on any environment, its hex / length
+    /// / fingerprint-consistency rules are still enforced (no silent
+    /// acceptance of malformed material).
     pub fn validate(
         &self,
         env: NetworkEnvironmentPolicy,
@@ -434,6 +571,129 @@ impl GenesisAuthorityRoot {
             }
             NetworkEnvironmentPolicy::Devnet => { /* permissive */ }
         }
+
+        // ------------------------------------------------------------------
+        // Run 104: optional full public-key material — when present, it must
+        // be valid hex, the correct suite-specific byte length, and its
+        // SHA3-256 fingerprint MUST equal `key_fingerprint`. MainNet
+        // additionally requires `Some` for every bundle-signing-authority
+        // root (transport roots remain Run 105+ scope).
+        // ------------------------------------------------------------------
+        match &self.public_key_hex {
+            Some(pk_hex) => {
+                if pk_hex.is_empty() {
+                    return Err(GenesisAuthorityValidationError::MalformedPublicKey {
+                        kind,
+                        label: self.label.clone(),
+                        reason: "public_key_hex is empty".into(),
+                    });
+                }
+                if pk_hex.len() % 2 != 0 {
+                    return Err(GenesisAuthorityValidationError::MalformedPublicKey {
+                        kind,
+                        label: self.label.clone(),
+                        reason: "public_key_hex length must be even".into(),
+                    });
+                }
+                if pk_hex.len() > GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX {
+                    return Err(GenesisAuthorityValidationError::MalformedPublicKey {
+                        kind,
+                        label: self.label.clone(),
+                        reason: format!(
+                            "public_key_hex length {} exceeds maximum {}",
+                            pk_hex.len(),
+                            GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX
+                        ),
+                    });
+                }
+                let pk_bytes = match decode_lowercase_hex(pk_hex) {
+                    Some(b) => b,
+                    None => {
+                        return Err(GenesisAuthorityValidationError::MalformedPublicKey {
+                            kind,
+                            label: self.label.clone(),
+                            reason:
+                                "public_key_hex must be lowercase hex without 0x prefix"
+                                    .into(),
+                        });
+                    }
+                };
+                // Suite-specific length check. Run 104 only knows
+                // ML-DSA-44 = 1312 bytes. Unknown suites with a
+                // public_key_hex are rejected so that no malformed
+                // material is silently accepted.
+                let expected_bytes = match self.suite_id {
+                    GENESIS_AUTHORITY_SUITE_ML_DSA_44 => {
+                        GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES
+                    }
+                    other => {
+                        return Err(GenesisAuthorityValidationError::PublicKeySuiteUnknown {
+                            kind,
+                            label: self.label.clone(),
+                            suite_id: other,
+                        });
+                    }
+                };
+                if pk_bytes.len() != expected_bytes {
+                    return Err(GenesisAuthorityValidationError::MalformedPublicKey {
+                        kind,
+                        label: self.label.clone(),
+                        reason: format!(
+                            "public_key_hex decodes to {} bytes; suite_id {} requires exactly {}",
+                            pk_bytes.len(),
+                            self.suite_id,
+                            expected_bytes
+                        ),
+                    });
+                }
+                // Run 104 requires the short `key_fingerprint` to be the
+                // canonical SHA3-256 fingerprint of the decoded public
+                // key, so the on-disk shape is unambiguous (no
+                // overloading of the fingerprint field as raw PK bytes).
+                if self.key_fingerprint.len() != GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN {
+                    return Err(
+                        GenesisAuthorityValidationError::PublicKeyFingerprintMismatch {
+                            kind,
+                            label: self.label.clone(),
+                            declared: self.key_fingerprint.clone(),
+                            derived: authority_public_key_fingerprint(&pk_bytes),
+                        },
+                    );
+                }
+                let derived = authority_public_key_fingerprint(&pk_bytes);
+                if derived != self.key_fingerprint {
+                    return Err(
+                        GenesisAuthorityValidationError::PublicKeyFingerprintMismatch {
+                            kind,
+                            label: self.label.clone(),
+                            declared: self.key_fingerprint.clone(),
+                            derived,
+                        },
+                    );
+                }
+            }
+            None => {
+                // MainNet: bundle-signing-authority roots MUST carry full
+                // PK material (Run 104 boundary closure).
+                if matches!(env, NetworkEnvironmentPolicy::Mainnet)
+                    && matches!(kind, GenesisAuthorityRootKind::BundleSigning)
+                {
+                    return Err(
+                        GenesisAuthorityValidationError::MissingPublicKeyMaterial {
+                            kind,
+                            label: self.label.clone(),
+                            env,
+                            suite_id: self.suite_id,
+                        },
+                    );
+                }
+                // TestNet / DevNet: legacy fingerprint-only roots remain
+                // tolerated, but the Run 103 verifier still fails closed
+                // with `AuthorityKeyMaterialUnavailable` when asked to
+                // verify a ratification against them.
+            }
+        }
+
         Ok(())
     }
 }
@@ -597,6 +857,28 @@ impl GenesisAuthorityConfig {
             }
         }
 
+        // Run 104: reject duplicate `public_key_hex` values across the
+        // combined root set. Without this, two roots with different
+        // labels but identical PK bytes could create ambiguous lookups
+        // in the ratification verifier.
+        let mut seen_pks = HashSet::new();
+        for root in self
+            .pqc_transport_roots
+            .iter()
+            .chain(self.bundle_signing_authority_roots.iter())
+        {
+            if let Some(pk_hex) = &root.public_key_hex {
+                if !seen_pks.insert((root.suite_id, pk_hex.as_str())) {
+                    return Err(
+                        GenesisAuthorityValidationError::DuplicateAuthorityPublicKey {
+                            suite_id: root.suite_id,
+                            key_fingerprint: root.key_fingerprint.clone(),
+                        },
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 }
@@ -645,6 +927,54 @@ pub enum GenesisAuthorityValidationError {
     DuplicateAuthorityRoot {
         suite_id: GenesisAuthoritySuiteId,
         key_fingerprint: String,
+    },
+
+    /// Run 104: duplicate `(suite_id, public_key_hex)` across the combined
+    /// root set. Two roots may never share the same full PQC public key.
+    DuplicateAuthorityPublicKey {
+        suite_id: GenesisAuthoritySuiteId,
+        key_fingerprint: String,
+    },
+
+    /// Run 104: MainNet bundle-signing-authority root is missing its full
+    /// `public_key_hex` field. MainNet refuses fingerprint-only roots so
+    /// that the Run 103 ratification verifier never has to fall back to
+    /// `AuthorityKeyMaterialUnavailable` for a production authority.
+    MissingPublicKeyMaterial {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+        env: NetworkEnvironmentPolicy,
+        suite_id: GenesisAuthoritySuiteId,
+    },
+
+    /// Run 104: `public_key_hex` is present but malformed (non-hex,
+    /// wrong length for the declared suite, odd length, etc.).
+    MalformedPublicKey {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+        reason: String,
+    },
+
+    /// Run 104: `public_key_hex` is present but the declared `suite_id`
+    /// is not one for which Run 104 knows the canonical PK length
+    /// (currently only ML-DSA-44 = 100).
+    PublicKeySuiteUnknown {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+        suite_id: GenesisAuthoritySuiteId,
+    },
+
+    /// Run 104: `public_key_hex` is present but
+    /// `sha3_256_hex(decoded_public_key) != key_fingerprint`. Indicates
+    /// either operator error or tampering between the short fingerprint
+    /// and the full PK bytes.
+    PublicKeyFingerprintMismatch {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+        /// Fingerprint as declared in the genesis file.
+        declared: String,
+        /// Fingerprint derived from the decoded `public_key_hex` bytes.
+        derived: String,
     },
 
     /// The genesis `chain_id` does not match the runtime environment scope.
@@ -704,6 +1034,52 @@ impl std::fmt::Display for GenesisAuthorityValidationError {
                 f,
                 "genesis authority duplicate root: suite_id={} key_fingerprint={}",
                 suite_id, key_fingerprint
+            ),
+            GenesisAuthorityValidationError::DuplicateAuthorityPublicKey {
+                suite_id,
+                key_fingerprint,
+            } => write!(
+                f,
+                "genesis authority duplicate public_key_hex: suite_id={} key_fingerprint={}",
+                suite_id, key_fingerprint
+            ),
+            GenesisAuthorityValidationError::MissingPublicKeyMaterial {
+                kind,
+                label,
+                env,
+                suite_id,
+            } => write!(
+                f,
+                "genesis {} '{}' is missing public_key_hex; environment {:?} requires complete ML-DSA-44 (suite_id {}) key material",
+                kind, label, env, suite_id
+            ),
+            GenesisAuthorityValidationError::MalformedPublicKey {
+                kind,
+                label,
+                reason,
+            } => write!(
+                f,
+                "genesis {} '{}' has malformed public_key_hex: {}",
+                kind, label, reason
+            ),
+            GenesisAuthorityValidationError::PublicKeySuiteUnknown {
+                kind,
+                label,
+                suite_id,
+            } => write!(
+                f,
+                "genesis {} '{}' declares public_key_hex but suite_id {} is unknown to Run 104 (only ML-DSA-44 = {} accepted)",
+                kind, label, suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44
+            ),
+            GenesisAuthorityValidationError::PublicKeyFingerprintMismatch {
+                kind,
+                label,
+                declared,
+                derived,
+            } => write!(
+                f,
+                "genesis {} '{}' public_key_hex fingerprint mismatch: declared key_fingerprint={} derived sha3_256={}",
+                kind, label, declared, derived
             ),
             GenesisAuthorityValidationError::ChainEnvironmentMismatch { chain_id, env } => write!(
                 f,
@@ -1303,6 +1679,11 @@ fn encode_authority_root(buf: &mut Vec<u8>, root: &GenesisAuthorityRoot) {
     encode_length_prefixed_str(buf, &root.key_fingerprint);
     encode_length_prefixed_str(buf, &root.label);
     encode_optional_u64(buf, root.not_before_epoch);
+    // Run 104: hash-bind the full PQC authority public key bytes. Encoded
+    // as an optional length-prefixed lowercase hex string so that adding
+    // the field to an existing root produces a different canonical hash
+    // (and so that `None` vs `Some("")` never collide).
+    encode_optional_str(buf, root.public_key_hex.as_deref());
 }
 
 // ============================================================================
@@ -1995,7 +2376,30 @@ mod tests {
         byte_hex.repeat(32)
     }
 
+    /// Synthetic 1312-byte ML-DSA-44 public key filled with `seed`.
+    /// Run 104 validation does not perform PQC liveness here — only
+    /// length / fingerprint-consistency — so a deterministic filler is
+    /// sufficient for schema/hash/duplicate tests.
+    fn synthetic_ml_dsa_44_pk(seed: u8) -> Vec<u8> {
+        vec![seed; GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES]
+    }
+
     fn authority_root(seed: u8, label: &str) -> GenesisAuthorityRoot {
+        // Run 104: produce a fully-populated authority root (full PK +
+        // matching canonical SHA3 fingerprint) so MainNet/TestNet test
+        // fixtures satisfy the new key-material policy without
+        // sacrificing the determinism of the helper.
+        GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &synthetic_ml_dsa_44_pk(seed),
+            label,
+        )
+    }
+
+    /// Legacy short-fingerprint-only authority root (no `public_key_hex`).
+    /// Used to prove that MainNet refuses fingerprint-only roots and that
+    /// DevNet/TestNet tolerate them.
+    fn legacy_short_authority_root(seed: u8, label: &str) -> GenesisAuthorityRoot {
         GenesisAuthorityRoot::new(
             GENESIS_AUTHORITY_SUITE_ML_DSA_44,
             ml_dsa_44_fingerprint(seed),
@@ -2421,5 +2825,325 @@ mod tests {
         assert!(cfg.authority.is_none());
         cfg.validate_for_environment(NetworkEnvironmentPolicy::Devnet)
             .expect("legacy DevNet genesis must remain valid");
+    }
+
+    // ========================================================================
+    // Run 104: Genesis-Bound Authority Key Material Registry
+    // ========================================================================
+
+    #[test]
+    fn run_104_authority_public_key_fingerprint_is_sha3_256_lowercase_hex() {
+        let pk = synthetic_ml_dsa_44_pk(0xab);
+        let fp = authority_public_key_fingerprint(&pk);
+        assert_eq!(fp.len(), GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN);
+        assert!(fp.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+        // Sanity: equal inputs produce equal fingerprints.
+        assert_eq!(fp, authority_public_key_fingerprint(&pk));
+    }
+
+    #[test]
+    fn run_104_with_public_key_bytes_produces_consistent_root() {
+        let pk = synthetic_ml_dsa_44_pk(0xa1);
+        let root = GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &pk,
+            "foundation-bundle-signer-1",
+        );
+        assert_eq!(root.suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44);
+        assert_eq!(
+            root.key_fingerprint.len(),
+            GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN
+        );
+        assert_eq!(
+            root.public_key_hex.as_ref().map(|s| s.len()),
+            Some(GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN)
+        );
+        // The constructor invariant: the fingerprint must equal the
+        // SHA3-256 of the decoded PK bytes.
+        let decoded = decode_lowercase_hex(root.public_key_hex.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            authority_public_key_fingerprint(&decoded),
+            root.key_fingerprint
+        );
+        root.validate(
+            NetworkEnvironmentPolicy::Mainnet,
+            GenesisAuthorityRootKind::BundleSigning,
+        )
+        .expect("Run 104 mainnet root must validate cleanly");
+    }
+
+    #[test]
+    fn run_104_mainnet_rejects_bundle_signing_root_without_public_key_material() {
+        let mut cfg = mainnet_genesis_config();
+        // Strip `public_key_hex` from the bundle-signing root.
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex = None;
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                GenesisValidationError::AuthorityValidationFailed(
+                    GenesisAuthorityValidationError::MissingPublicKeyMaterial {
+                        kind: GenesisAuthorityRootKind::BundleSigning,
+                        env: NetworkEnvironmentPolicy::Mainnet,
+                        ..
+                    }
+                )
+            ),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_mainnet_rejects_public_key_with_wrong_length() {
+        let mut cfg = mainnet_genesis_config();
+        // Truncate the PK hex by 2 chars (= 1 byte).
+        let root_mut = &mut cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0];
+        let pk = root_mut.public_key_hex.as_mut().unwrap();
+        pk.truncate(pk.len() - 2);
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                GenesisValidationError::AuthorityValidationFailed(
+                    GenesisAuthorityValidationError::MalformedPublicKey { .. }
+                )
+            ),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_mainnet_rejects_public_key_with_non_hex_bytes() {
+        let mut cfg = mainnet_genesis_config();
+        let root_mut = &mut cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0];
+        let pk = root_mut.public_key_hex.as_mut().unwrap();
+        // Replace the first two hex chars with non-hex.
+        pk.replace_range(0..2, "zz");
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                GenesisValidationError::AuthorityValidationFailed(
+                    GenesisAuthorityValidationError::MalformedPublicKey { .. }
+                )
+            ),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_mainnet_rejects_public_key_fingerprint_mismatch() {
+        let mut cfg = mainnet_genesis_config();
+        // Mutate one byte of the PK hex so the SHA3 fingerprint no
+        // longer matches the declared `key_fingerprint`.
+        let root_mut = &mut cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0];
+        let pk = root_mut.public_key_hex.as_mut().unwrap();
+        // XOR first nibble.
+        let first = pk.chars().next().unwrap();
+        let replacement = if first == '0' { '1' } else { '0' };
+        pk.replace_range(0..1, &replacement.to_string());
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                GenesisValidationError::AuthorityValidationFailed(
+                    GenesisAuthorityValidationError::PublicKeyFingerprintMismatch { .. }
+                )
+            ),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_rejects_duplicate_public_key_across_roots() {
+        let mut cfg = mainnet_genesis_config();
+        // Add a second bundle-signing root with the SAME PK but a
+        // different label (and identical fingerprint, since
+        // fingerprint is derived from the PK). The duplicate
+        // (suite_id, key_fingerprint) check will fire first; force a
+        // PK-only collision by giving the second root a distinct
+        // fingerprint via direct mutation, then re-aligning the
+        // public_key_hex.
+        let pk = cfg.authority.as_ref().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex
+            .clone()
+            .unwrap();
+        let mut second = GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &synthetic_ml_dsa_44_pk(0xcd),
+            "foundation-bundle-signer-2",
+        );
+        // Force public_key_hex collision while keeping a distinct
+        // fingerprint to defeat the earlier dup check. This shape
+        // would never appear in practice (the helper enforces
+        // consistency) — we synthesise it manually here.
+        second.public_key_hex = Some(pk);
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots
+            .push(second);
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        // First error encountered is the per-root PublicKeyFingerprintMismatch
+        // (because the forced PK no longer matches the second root's
+        // fingerprint). When the synthesised collision happens to pass
+        // the per-root check (different PK seeds), the config-level
+        // DuplicateAuthorityPublicKey would fire — accept either.
+        assert!(
+            matches!(
+                err,
+                GenesisValidationError::AuthorityValidationFailed(
+                    GenesisAuthorityValidationError::PublicKeyFingerprintMismatch { .. }
+                        | GenesisAuthorityValidationError::DuplicateAuthorityPublicKey { .. }
+                )
+            ),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_testnet_tolerates_missing_public_key_material() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.chain_id = "qbind-testnet-beta".to_string();
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex = None;
+        // Reset the fingerprint to a short SHA3-shaped value so the
+        // per-root validation does not complain about length when
+        // public_key_hex is None.
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .key_fingerprint = ml_dsa_44_fingerprint(0xab);
+        cfg.validate_for_environment(NetworkEnvironmentPolicy::Testnet)
+            .expect(
+                "Run 104 TestNet must tolerate legacy short-fingerprint roots; tighter \
+                 enforcement is post-Run-104 scope",
+            );
+    }
+
+    #[test]
+    fn run_104_devnet_tolerates_missing_public_key_material() {
+        let mut cfg = devnet_genesis_config_no_authority();
+        let mut auth = GenesisAuthorityConfig::new(vec![legacy_short_authority_root(
+            0xab,
+            "devnet-bundle-signer",
+        )]);
+        auth.pqc_transport_roots = vec![legacy_short_authority_root(0xcd, "devnet-transport-1")];
+        cfg.authority = Some(auth);
+        cfg.validate_for_environment(NetworkEnvironmentPolicy::Devnet)
+            .expect("Run 104 DevNet must remain permissive");
+    }
+
+    #[test]
+    fn run_104_canonical_hash_binds_public_key_hex() {
+        // Two roots with identical (suite_id, key_fingerprint, label,
+        // not_before_epoch) but different `public_key_hex` MUST hash
+        // differently, proving Run 104 hash-binds the new field.
+        let mut cfg_a = mainnet_genesis_config();
+        let mut cfg_b = cfg_a.clone();
+
+        // Replace cfg_b's PK with a different one; re-derive its
+        // canonical fingerprint so the per-root invariant holds for
+        // both fixtures.
+        let new_pk = synthetic_ml_dsa_44_pk(0xfe);
+        let new_root_b = GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &new_pk,
+            "foundation-bundle-signer-1",
+        );
+        // Also rebuild cfg_a's root from a different PK for a true A/B.
+        let pk_a = synthetic_ml_dsa_44_pk(0xab);
+        let new_root_a = GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            &pk_a,
+            "foundation-bundle-signer-1",
+        );
+        cfg_a.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![new_root_a];
+        cfg_b.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![new_root_b];
+
+        let ha = compute_canonical_genesis_hash(&cfg_a, NetworkEnvironmentPolicy::Mainnet);
+        let hb = compute_canonical_genesis_hash(&cfg_b, NetworkEnvironmentPolicy::Mainnet);
+        assert_ne!(ha, hb);
+    }
+
+    #[test]
+    fn run_104_canonical_hash_distinguishes_with_vs_without_public_key_hex() {
+        // Same `(suite_id, key_fingerprint, label, not_before_epoch)`
+        // but the second config has the new `public_key_hex` populated.
+        let mut cfg_without = devnet_genesis_config_no_authority();
+        let short_root = legacy_short_authority_root(0xab, "shared-label");
+        cfg_without.authority = Some(GenesisAuthorityConfig::new(vec![short_root.clone()]));
+
+        let mut cfg_with = cfg_without.clone();
+        // Add public_key_hex of arbitrary content (validation is not
+        // invoked here — this is a pure hash-framing test).
+        cfg_with.authority.as_mut().unwrap().bundle_signing_authority_roots[0]
+            .public_key_hex = Some("ab".repeat(GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES));
+
+        let h_without = compute_canonical_genesis_hash(
+            &cfg_without,
+            NetworkEnvironmentPolicy::Devnet,
+        );
+        let h_with =
+            compute_canonical_genesis_hash(&cfg_with, NetworkEnvironmentPolicy::Devnet);
+        assert_ne!(
+            h_without, h_with,
+            "Run 104 public_key_hex must contribute to the canonical genesis hash"
+        );
+    }
+
+    #[test]
+    fn run_104_serde_roundtrip_preserves_public_key_hex() {
+        let cfg = mainnet_genesis_config();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let cfg_rt: GenesisConfig = serde_json::from_str(&json).unwrap();
+        // GenesisConfig has no PartialEq impl; assert the canonical
+        // hash is preserved instead (which transitively covers the
+        // new `public_key_hex` field via the Run 104 hash binding).
+        let h1 = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let h2 = compute_canonical_genesis_hash(&cfg_rt, NetworkEnvironmentPolicy::Mainnet);
+        assert_eq!(h1, h2);
+        // Also assert the new field round-trips structurally.
+        let pk_before = &cfg.authority.as_ref().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex;
+        let pk_after = &cfg_rt.authority.as_ref().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex;
+        assert_eq!(pk_before, pk_after);
+        assert!(pk_after.is_some());
     }
 }

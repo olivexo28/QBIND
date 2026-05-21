@@ -72,9 +72,10 @@ use qbind_crypto::{
 };
 
 use crate::genesis::{
-    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisAuthorityRootKind,
-    GenesisAuthoritySuiteId, GenesisHash, NetworkEnvironmentPolicy,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    authority_public_key_fingerprint, GenesisAuthorityConfig, GenesisAuthorityRoot,
+    GenesisAuthorityRootKind, GenesisAuthoritySuiteId, GenesisHash, NetworkEnvironmentPolicy,
+    GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN, GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES,
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 
 // ===========================================================================
@@ -424,13 +425,27 @@ pub enum RatificationFailure {
     /// so signature verification cannot be performed without an additional
     /// authority-key-material registry.
     ///
-    /// This is the documented Run 103 boundary; Run 104+ will add the
-    /// resolution path.
+    /// Run 104 narrowed this boundary: MainNet roots are required to
+    /// carry full `public_key_hex`, so this failure only fires for
+    /// legacy DevNet/TestNet fingerprint-only roots or for explicitly
+    /// incomplete genesis. The verifier still fails closed — no fake
+    /// verification, no fallback authority.
     AuthorityKeyMaterialUnavailable {
         fingerprint: String,
         suite_id: GenesisAuthoritySuiteId,
         got_hex_len: usize,
         required_hex_len: usize,
+    },
+
+    /// Run 104: the matched authority root declares a full
+    /// `public_key_hex` but the bytes are malformed (non-hex, wrong
+    /// length for the declared suite, or fingerprint mismatch). The
+    /// verifier fails closed with a typed reason rather than silently
+    /// falling back to any other key material.
+    AuthorityKeyMaterialMalformed {
+        fingerprint: String,
+        suite_id: GenesisAuthoritySuiteId,
+        reason: String,
     },
 
     /// The PQC signature verification under the authority root's public key
@@ -519,8 +534,17 @@ impl std::fmt::Display for RatificationFailure {
                 required_hex_len,
             } => write!(
                 f,
-                "bundle-signing ratification cannot be verified: authority root '{}' (suite_id {}) carries only a {}-hex fingerprint; full {}-hex PQC public key required (Run 103 boundary)",
+                "bundle-signing ratification cannot be verified: authority root '{}' (suite_id {}) carries only a {}-hex fingerprint; full {}-hex PQC public key required (genesis-bound key material registry)",
                 fingerprint, suite_id, got_hex_len, required_hex_len
+            ),
+            RatificationFailure::AuthorityKeyMaterialMalformed {
+                fingerprint,
+                suite_id,
+                reason,
+            } => write!(
+                f,
+                "bundle-signing ratification cannot be verified: authority root '{}' (suite_id {}) public_key_hex is malformed: {}",
+                fingerprint, suite_id, reason
             ),
             RatificationFailure::BadSignature => write!(
                 f,
@@ -685,24 +709,77 @@ pub fn verify_bundle_signing_key_ratification(
 
     // 5. Resolve authority-root public-key bytes.
     //
-    // Run 103 boundary: the genesis-bound root may carry either a full
-    // ML-DSA-44 public key (2624 hex chars = 1312 bytes) OR a 64-hex SHA3
-    // fingerprint. Only the former lets us verify a signature. The latter
-    // fails closed with the documented Run 103 partial boundary — no fake
-    // verification, no fallback authority.
+    // Run 104 resolution order:
+    //   1. If the matched root carries `public_key_hex`, decode and use
+    //      that. Any malformed bytes (non-hex, wrong length for the
+    //      declared suite, fingerprint mismatch with the root's
+    //      `key_fingerprint`) fail closed with
+    //      `AuthorityKeyMaterialMalformed`.
+    //   2. Otherwise, fall back to the Run 103 legacy overload where
+    //      `key_fingerprint` itself carries the full PK hex (2624 chars
+    //      for ML-DSA-44). This path is preserved for backward
+    //      compatibility with DevNet/TestNet genesis written before Run
+    //      104 introduced the explicit `public_key_hex` field.
+    //   3. Otherwise (only a short SHA3-256 fingerprint exists), fail
+    //      closed with `AuthorityKeyMaterialUnavailable` — never fake
+    //      verification, never fall back to local/static keys.
     let required_hex_len = ML_DSA_44_PUBLIC_KEY_SIZE * 2;
-    let fp_hex = &bundle_root.key_fingerprint;
-    if fp_hex.len() != required_hex_len {
-        return Err(RatificationFailure::AuthorityKeyMaterialUnavailable {
-            fingerprint: bundle_root.key_fingerprint.clone(),
-            suite_id: bundle_root.suite_id,
-            got_hex_len: fp_hex.len(),
-            required_hex_len,
-        });
-    }
-    let authority_pk = match decode_hex(fp_hex) {
-        Some(pk) => pk,
-        None => {
+    let authority_pk: Vec<u8> = if let Some(pk_hex) = bundle_root.public_key_hex.as_deref() {
+        // Run 104 clean path.
+        if pk_hex.len() != GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN {
+            return Err(RatificationFailure::AuthorityKeyMaterialMalformed {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                reason: format!(
+                    "public_key_hex length {} != expected {}",
+                    pk_hex.len(),
+                    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN
+                ),
+            });
+        }
+        let pk_bytes = match decode_hex(pk_hex) {
+            Some(b) => b,
+            None => {
+                return Err(RatificationFailure::AuthorityKeyMaterialMalformed {
+                    fingerprint: bundle_root.key_fingerprint.clone(),
+                    suite_id: bundle_root.suite_id,
+                    reason: "public_key_hex is not lowercase hex".into(),
+                });
+            }
+        };
+        if pk_bytes.len() != GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES {
+            return Err(RatificationFailure::AuthorityKeyMaterialMalformed {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                reason: format!(
+                    "decoded public_key_hex is {} bytes; ML-DSA-44 requires {}",
+                    pk_bytes.len(),
+                    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES
+                ),
+            });
+        }
+        // Enforce the Run 104 key_fingerprint ↔ public_key_hex binding
+        // *at verification time* too, so a malformed genesis that
+        // somehow slipped past `validate_for_environment` still fails
+        // closed rather than silently authenticating the wrong key.
+        if bundle_root.key_fingerprint.len() == GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN {
+            let derived = authority_public_key_fingerprint(&pk_bytes);
+            if derived != bundle_root.key_fingerprint {
+                return Err(RatificationFailure::AuthorityKeyMaterialMalformed {
+                    fingerprint: bundle_root.key_fingerprint.clone(),
+                    suite_id: bundle_root.suite_id,
+                    reason: format!(
+                        "public_key_hex sha3_256={} does not match declared key_fingerprint={}",
+                        derived, bundle_root.key_fingerprint
+                    ),
+                });
+            }
+        }
+        pk_bytes
+    } else {
+        // Legacy fallback: `key_fingerprint` may carry the full PK hex.
+        let fp_hex = &bundle_root.key_fingerprint;
+        if fp_hex.len() != required_hex_len {
             return Err(RatificationFailure::AuthorityKeyMaterialUnavailable {
                 fingerprint: bundle_root.key_fingerprint.clone(),
                 suite_id: bundle_root.suite_id,
@@ -710,15 +787,27 @@ pub fn verify_bundle_signing_key_ratification(
                 required_hex_len,
             });
         }
+        let authority_pk = match decode_hex(fp_hex) {
+            Some(pk) => pk,
+            None => {
+                return Err(RatificationFailure::AuthorityKeyMaterialUnavailable {
+                    fingerprint: bundle_root.key_fingerprint.clone(),
+                    suite_id: bundle_root.suite_id,
+                    got_hex_len: fp_hex.len(),
+                    required_hex_len,
+                });
+            }
+        };
+        if authority_pk.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
+            return Err(RatificationFailure::AuthorityKeyMaterialUnavailable {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                got_hex_len: fp_hex.len(),
+                required_hex_len,
+            });
+        }
+        authority_pk
     };
-    if authority_pk.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
-        return Err(RatificationFailure::AuthorityKeyMaterialUnavailable {
-            fingerprint: bundle_root.key_fingerprint.clone(),
-            suite_id: bundle_root.suite_id,
-            got_hex_len: fp_hex.len(),
-            required_hex_len,
-        });
-    }
 
     // 6. PQC signature verification via the existing production ML-DSA-44
     // adapter — no parallel crypto stack.
@@ -753,8 +842,9 @@ fn find_root<'a>(
         // representation.
         .or_else(|| {
             // Permit the inverse pairing where genesis stores the full PK
-            // and the ratification carries the SHA3-256 fingerprint. This
-            // keeps operator tooling flexible without weakening any check.
+            // in `key_fingerprint` (Run 103 legacy overload) and the
+            // ratification carries the SHA3-256 fingerprint. This keeps
+            // operator tooling flexible without weakening any check.
             roots.iter().find(|r| {
                 r.suite_id == suite_id
                     && r.key_fingerprint.len() == ML_DSA_44_PUBLIC_KEY_SIZE * 2
@@ -765,6 +855,19 @@ fn find_root<'a>(
                             None => false,
                         }
                     }
+            })
+        })
+        .or_else(|| {
+            // Run 104: when genesis carries the clean Run 104 shape
+            // (short `key_fingerprint` + separate `public_key_hex`),
+            // also allow operators to point a ratification at the full
+            // PK hex. The verifier checks consistency via the SHA3-256
+            // fingerprint binding, so this never accepts an
+            // inconsistent root.
+            roots.iter().find(|r| {
+                r.suite_id == suite_id
+                    && fingerprint.len() == GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN
+                    && r.public_key_hex.as_deref() == Some(fingerprint)
             })
         })
 }
@@ -1558,5 +1661,218 @@ mod tests {
             &gh,
         ))
         .expect("must still verify after json round-trip");
+    }
+
+    // ===================================================================
+    // Run 104 — clean-shape genesis with separate `public_key_hex`
+    // ===================================================================
+
+    /// Build a Run 104 mainnet genesis whose bundle-signing root carries
+    /// a separate `public_key_hex` (clean shape) and whose
+    /// `key_fingerprint` is the SHA3-256 of that PK.
+    fn mk_genesis_run_104_clean(chain_id: &str, auth_pk: &[u8]) -> GenesisConfig {
+        let mut cfg = GenesisConfig::new(
+            chain_id,
+            1_738_000_000_000,
+            vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+            vec![GenesisValidator::new(
+                format!("0x{}", "22".repeat(32)),
+                "ab".repeat(32),
+                100,
+            )],
+            GenesisCouncilConfig::new(
+                vec![
+                    format!("0x{}", "33".repeat(32)),
+                    format!("0x{}", "44".repeat(32)),
+                    format!("0x{}", "55".repeat(32)),
+                ],
+                2,
+            ),
+            GenesisMonetaryConfig::mainnet_default(),
+        );
+        let root = GenesisAuthorityRoot::with_public_key_bytes(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            auth_pk,
+            "foundation-bundle-signing-104",
+        );
+        cfg.authority = Some(GenesisAuthorityConfig::new(vec![root]));
+        cfg
+    }
+
+    #[test]
+    fn run_104_verifier_uses_public_key_hex_when_present() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis_run_104_clean("qbind-mainnet-v0", &auth_pk);
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        // Operator chooses to bind the ratification by the canonical
+        // 64-hex SHA3 fingerprint of the authority key — Run 104's
+        // clean shape supports this without overloading anything.
+        let fp = qbind_hash::sha3_256(&auth_pk);
+        let fp_hex: String = fp.iter().map(|b| format!("{:02x}", b)).collect();
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &fp_hex,
+            &auth_sk,
+            &bsk_pk,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        verify_bundle_signing_key_ratification(mk_inputs(
+            &r,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect(
+            "Run 104 clean-shape ratification (short-fingerprint binding) must verify against \
+             the genesis-bound public_key_hex",
+        );
+    }
+
+    #[test]
+    fn run_104_verifier_accepts_full_pk_binding_against_clean_root() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis_run_104_clean("qbind-mainnet-v0", &auth_pk);
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        // Operator chooses to bind the ratification by the full PK hex.
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        verify_bundle_signing_key_ratification(mk_inputs(
+            &r,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect("full-PK ratification binding must verify against a Run 104 clean-shape root");
+    }
+
+    #[test]
+    fn run_104_verifier_rejects_malformed_public_key_hex() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let mut cfg = mk_genesis_run_104_clean("qbind-mainnet-v0", &auth_pk);
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let fp = qbind_hash::sha3_256(&auth_pk);
+        let fp_hex: String = fp.iter().map(|b| format!("{:02x}", b)).collect();
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &fp_hex,
+            &auth_sk,
+            &bsk_pk,
+        );
+        // Corrupt the genesis-bound public_key_hex by truncation.
+        let pk_mut = cfg.authority.as_mut().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex
+            .as_mut()
+            .unwrap();
+        pk_mut.truncate(pk_mut.len() - 2);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification(mk_inputs(
+            &r,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationFailure::AuthorityKeyMaterialMalformed { .. }),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_verifier_rejects_pk_hex_fingerprint_mismatch() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (other_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let mut cfg = mk_genesis_run_104_clean("qbind-mainnet-v0", &auth_pk);
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let fp = qbind_hash::sha3_256(&auth_pk);
+        let fp_hex: String = fp.iter().map(|b| format!("{:02x}", b)).collect();
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &fp_hex,
+            &auth_sk,
+            &bsk_pk,
+        );
+        // Swap in a different PK while leaving the SHA3 fingerprint
+        // declaring the original — this is the tampering case.
+        cfg.authority.as_mut().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex = Some(full_pk_hex(&other_pk));
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification(mk_inputs(
+            &r,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationFailure::AuthorityKeyMaterialMalformed { .. }),
+            "got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run_104_verifier_still_fails_closed_when_only_short_fingerprint_present() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let fp = qbind_hash::sha3_256(&auth_pk);
+        let fp_hex: String = fp.iter().map(|b| format!("{:02x}", b)).collect();
+        // Genesis carries only the 64-hex fingerprint — no public_key_hex,
+        // no legacy full-PK overload. The verifier must fail closed.
+        let mut cfg = mk_genesis("qbind-mainnet-v0", &fp_hex);
+        // Clear any accidental public_key_hex helper effect.
+        cfg.authority.as_mut().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex = None;
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &fp_hex,
+            &auth_sk,
+            &bsk_pk,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification(mk_inputs(
+            &r,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RatificationFailure::AuthorityKeyMaterialUnavailable { .. }
+            ),
+            "got {:?}",
+            err
+        );
     }
 }
