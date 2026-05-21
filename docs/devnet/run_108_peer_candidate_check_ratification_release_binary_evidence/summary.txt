@@ -1,0 +1,22 @@
+Run 108 peer-candidate-check ratification release-binary evidence
+outdir: docs/devnet/run_108_peer_candidate_check_ratification_release_binary_evidence
+repo: /tmp/workspace/olivexo28/QBIND
+git_commit: 564779b29a7b9a759a622f2af69cb40945aef6de
+qbind-node_sha256: ef55ebea525b434537384950273a927e83805116741f06af25440087d38b7b88
+qbind-node_build_id: 665be0acb324902e25730d54a8ac917073bf0ec7
+fixture-helper_sha256: fb7480d19b23b312414383aeead02f23b63f6be83d7b34b4c5f992ffadf21258
+fixture-helper_build_id: f9cda9476d6aef03e4179baec279b8d2ecd8d57c
+
+scenario status:
+  scenario_1_mainnet_valid: rc=0
+  scenario_2_mainnet_missing: rc=1
+  scenario_3_mainnet_bad_signature: rc=1
+  scenario_4_devnet_no_opt_in_legacy: rc=0
+  scenario_5a_devnet_opt_in_valid: rc=0
+  scenario_5b_devnet_opt_in_missing: rc=1
+  scenario_5c_devnet_opt_in_bad_signature: rc=1
+
+non-mutation checks: pass
+  no pqc_trust_bundle_sequence.json files were created under scenario data dirs
+  no node startup/P2P/propagation/session-eviction/reload-apply markers were observed
+wire format checks: source-only, no trust-bundle or peer-candidate structs changed by this script

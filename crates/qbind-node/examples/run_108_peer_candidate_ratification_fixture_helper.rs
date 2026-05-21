@@ -62,6 +62,14 @@ fn bundle_env(env: NetworkEnvironment) -> TrustBundleEnvironment {
     }
 }
 
+fn genesis_chain_id(env: NetworkEnvironment) -> &'static str {
+    match env {
+        NetworkEnvironment::Mainnet => "qbind-mainnet-v0",
+        NetworkEnvironment::Testnet => "qbind-testnet-v0",
+        NetworkEnvironment::Devnet => "qbind-devnet-v0",
+    }
+}
+
 fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
     fs::write(path, serde_json::to_vec_pretty(value).expect("serialize json")).expect("write json");
 }
@@ -108,7 +116,7 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let root = mint_devnet_root().expect("mint transport root");
     let chain_id_str = chain_id_hex(env.chain_id());
     let mut genesis = GenesisConfig::new(
-        &chain_id_str,
+        genesis_chain_id(env),
         1_738_000_000_000,
         vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
         vec![GenesisValidator::new(

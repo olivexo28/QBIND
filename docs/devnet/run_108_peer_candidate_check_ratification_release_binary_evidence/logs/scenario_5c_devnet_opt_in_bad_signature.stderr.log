@@ -1,0 +1,7 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=docs/devnet/run_108_peer_candidate_check_ratification_release_binary_evidence/fixtures/devnet/genesis.json, canonical_hash=0xa70fb84b12d2300efd8811279882a691f63b116c7d212b5a27e36b83a9dc227e).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-107] peer-candidate-check ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[binary] Run 077: outcome detail: Rejected(ValidationFailed(RatificationRefused(Verifier(BadSignature))))
+[binary] Run 077: VERDICT=rejected (peer-candidate validation-only; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched). Envelope path=docs/devnet/run_108_peer_candidate_check_ratification_release_binary_evidence/fixtures/devnet/peer-candidate.ratified.json. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md.
