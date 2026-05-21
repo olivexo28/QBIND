@@ -142,3 +142,14 @@ pub use genesis::{
     compute_genesis_hash_bytes, format_genesis_hash, parse_genesis_hash, ChainMeta, ChainMetaError,
     GenesisHash,
 };
+
+// Run 101: Genesis Authority + Canonical Hash + Boot-Time Verification exports
+pub use genesis::{
+    compute_canonical_genesis_hash, verify_boot_time_genesis, BootGenesisVerification,
+    BootGenesisVerificationError, GenesisAuthorityConfig, GenesisAuthorityRoot,
+    GenesisAuthorityRootKind, GenesisAuthoritySuiteId, GenesisAuthorityValidationError,
+    NetworkEnvironmentPolicy, CANONICAL_GENESIS_HASH_DOMAIN_V1,
+    GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX, GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_DEVNET,
+    GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_PROD, GENESIS_AUTHORITY_POLICY_VERSION_RUN_101,
+    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+};

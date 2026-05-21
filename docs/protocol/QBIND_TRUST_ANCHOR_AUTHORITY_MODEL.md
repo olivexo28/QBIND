@@ -848,3 +848,111 @@ narrowing.
 If anything in this document drifts from the binary's behavior once
 Runs 101–106 land, this document is the defect: update this document
 before merging the implementation change.
+---
+
+## 17. Run 101 update — additive genesis authority fields and canonical
+## genesis hash landed (partial implementation of §6)
+
+**Date:** 2026-05-21
+**Status:** partial implementation of §6 ("Genesis-bound initial authority")
+of this specification; specification text in §1–§16 above is unchanged.
+
+Run 101 implements the **fields and hash** layer of the genesis-bound
+authority described in §6, without yet implementing the ratification
+verifier (§5), the on-disk `pqc_authority_state.json` persistence (§8
+beyond hash binding), the operator override / emergency authority surface
+(§9), or any peer-driven apply (§10). Those remain Run 102–106+ scope per
+§13 staging.
+
+### 17.1 What Run 101 lands
+
+- `qbind_ledger::genesis::GenesisAuthorityRoot` —
+  `{ suite_id, key_fingerprint, label, not_before_epoch }`.
+- `qbind_ledger::genesis::GenesisAuthorityConfig` —
+  `{ authority_policy_version, authority_sequence, authority_epoch,
+     pqc_transport_roots, bundle_signing_authority_roots }`.
+- `qbind_ledger::genesis::GenesisConfig.authority:
+  Option<GenesisAuthorityConfig>` — additive, backward-compatible via
+  `#[serde(default)]`.
+- `qbind_ledger::genesis::compute_canonical_genesis_hash(&GenesisConfig,
+  env) -> [u8; 32]` with the domain-separation tag
+  `b"QBIND:GENESIS:v1"`. Length-prefixed framing of every field;
+  optional fields carry an explicit discriminator byte so `None` ≠
+  `Some(empty)`. Includes the environment scope (`DEV`/`TST`/`MAIN`),
+  the `chain_id`, every allocation/validator/council/monetary field, and
+  the full authority block. **Distinct from** the existing T233
+  `compute_genesis_hash_bytes` (file-bytes hash), which is kept
+  unchanged and continues to back `--expect-genesis-hash`.
+- `qbind_ledger::genesis::verify_boot_time_genesis(env, &GenesisConfig,
+  Option<&GenesisHash>) -> Result<BootGenesisVerification,
+  BootGenesisVerificationError>` — performs structural per-environment
+  validation, chain_id ↔ environment binding check, canonical hash
+  computation, and (on MainNet) refusal when the expected canonical
+  hash is missing or mismatched.
+- `qbind_ledger::genesis::GenesisConfig::validate_for_environment(env)`
+  — env-aware structural + authority validation.
+- Constants: `GENESIS_AUTHORITY_SUITE_ML_DSA_44 = 100`,
+  `GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_PROD = 64`,
+  `GENESIS_AUTHORITY_POLICY_VERSION_RUN_101 = 1`,
+  `CANONICAL_GENESIS_HASH_DOMAIN_V1 = b"QBIND:GENESIS:v1"`.
+- 24 unit tests in `crates/qbind-ledger/src/genesis.rs::tests` and 11
+  release-binary-facing integration tests in
+  `crates/qbind-node/tests/run_101_genesis_authority_tests.rs`.
+
+### 17.2 Per-environment policy as implemented by Run 101
+
+| Environment | `authority` block | Canonical hash flag           | Chain-id check  |
+|-------------|-------------------|-------------------------------|-----------------|
+| DevNet      | optional (legacy) | optional                      | best-effort     |
+| TestNet     | **required**      | strongly recommended          | strict          |
+| MainNet     | **required**      | **required (fail-closed)**    | strict          |
+
+MainNet refusals (distinct error variants, no vague messages):
+`Missing { env: Mainnet }`, `EmptyBundleSigningRoots`,
+`UnsupportedSuite`, `MalformedFingerprint`, `EmptyLabel`,
+`EmptyFingerprint`, `DuplicateAuthorityRoot`, `InvalidPolicyVersion`,
+`ExpectedCanonicalHashMissing { env: Mainnet }`,
+`CanonicalHashMismatch`, `ChainEnvironmentMismatch`.
+
+### 17.3 What Run 101 explicitly does NOT land
+
+(Quoted verbatim from `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_101.md` §7
+non-claims):
+
+> Bundle-signing-key ratification verifier (Run 102), signing-key
+> rotation, signing-key revocation, authority anti-rollback persistence
+> beyond genesis hash binding (no `<data_dir>/pqc_authority_state.json`
+> is added — Run 103 scope), KMS/HSM custody (Run 105), peer-driven live
+> apply (Run 106+, gated by §10), governance, validator-set rotation,
+> production static source-code anchors of any kind, fallback roots or
+> fallback signing keys, changes to the trust-bundle or peer-candidate
+> wire format, weakening of any Run 050–099 invariant, full C4 closure,
+> C5 closure.
+
+### 17.4 Cross-document binding
+
+- Evidence record: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_101.md`.
+- contradiction tracker: Run 101 update in
+  `docs/whitepaper/contradiction.md` — C4 sub-piece
+  "genesis-bound authority root surface and boot-time hash binding"
+  moves from OPEN to partial-positive; full C4 remains OPEN.
+- Runbook: Run 101 row added to
+  `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md` §11 mapping with a
+  prose note linking to the evidence record.
+
+### 17.5 Why partial-positive and not positive
+
+The `verify_boot_time_genesis` helper is exposed and exercised by tests
+through the public API the release binary links against, but the
+*single call site* from the release-binary `async_runner` startup
+sequence is deferred to Run 102 alongside the ratification verifier
+(§13 staging). The existing T233 file-bytes
+`MainnetConfigError::ExpectedGenesisHashMissing` CLI-layer refusal
+continues to fail closed for MainNet without `--expect-genesis-hash`,
+so MainNet operators cannot accidentally start without a hash binding.
+Run 102 will move the canonical-hash + authority refusal into the same
+pre-network startup point and supersede the file-bytes shield.
+
+If anything in this update drifts from the binary's behaviour once
+Run 102 lands, this update is the defect: update it before merging the
+Run 102 change.

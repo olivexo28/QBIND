@@ -1,0 +1,14 @@
+[NOTE — Run 101]
+The release binary's `--print-genesis-hash` flag (defined since T233 in
+crates/qbind-node/src/cli.rs:850) is currently not wired to exit after
+printing; the binary falls through to the regular consensus loop. This is
+PRE-Run-101 behaviour and is not within Run 101's scope to change (Run 101
+adds *only* the additive genesis authority fields, the canonical hash
+helper, and the boot-time verification function). The canonical-hash
+behaviour itself is proven instead via the public-API path the release
+binary links against (see scenario_5 in
+crates/qbind-node/tests/run_101_genesis_authority_tests.rs and the
+"test_canonical_hash_is_deterministic" / "_differs_on_*" unit tests in
+crates/qbind-ledger/src/genesis.rs). Wiring `--print-genesis-hash` to
+print the canonical hash and exit is a candidate for the small CLI work
+in Run 102 alongside the ratification verifier.

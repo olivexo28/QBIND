@@ -1,0 +1,15 @@
+          When specified, the node will validate the snapshot directory at `<PATH>` (expected to contain `meta.json` + `state/` per the `StateSnapshotter` format) and materialize its `state/` checkpoint into `<data-dir>/state_vm_v0` before starting consensus.
+      --genesis-path <GENESIS_PATH>
+          Path to the external genesis configuration file (T232).
+          Required for MainNet. Optional for DevNet/TestNet (uses embedded genesis if not provided). The file must be a valid JSON file conforming to the GenesisConfig schema.
+          Example: /etc/qbind/genesis.json
+      --print-genesis-hash
+          Print the SHA3-256 genesis hash of the given genesis file and exit (T233).
+          Computes the canonical genesis hash over the exact bytes of the genesis file (no JSON normalization). Prints the hash as a hex string (0x...) and exits.
+          Requires --genesis-path to be specified.
+          Example: ```bash qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json ```
+      --expect-genesis-hash <EXPECT_GENESIS_HASH>
+          Expected genesis hash (T233).
+          If specified, the node computes the genesis hash from the loaded genesis file and compares it to this expected value. If they don't match, the node fails fast at startup with a clear error.
+          **Required for MainNet**: MainNet validators MUST specify this flag to prevent accidental startup with the wrong genesis file.
+          Example: ```bash qbind-node --profile mainnet \ --genesis-path /etc/qbind/genesis.json \ --expect-genesis-hash 0xabc123... ```

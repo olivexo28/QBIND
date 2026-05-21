@@ -2992,7 +2992,7 @@ in §10):**
 
 ---
 
-## 11. Mapping to Runs 050–100
+## 11. Mapping to Runs 050–101
 
 | Run | What it proved | What §section of this runbook relies on it |
 |---|---|---|
@@ -3155,4 +3155,63 @@ only move on opt-in receivers when the propagation flag is set):
 
 *If anything here appears to permit a fallback that the binary
 refuses, the binary wins and this runbook is the defect. Open an
+issue against `docs/whitepaper/contradiction.md` immediately.*
+---
+
+## 11.1 Run 101 row (appended)
+
+| Run | What it proved | What §section of this runbook relies on it |
+|---|---|---|
+| 101 | **Partial-positive (fields + canonical hash + boot helper)**. First implementation step after the Run 100 design. Lands, in `crates/qbind-ledger/src/genesis.rs` (re-exported from `crates/qbind-ledger/src/lib.rs`): (i) the additive `GenesisConfig.authority: Option<GenesisAuthorityConfig>` field with `#[serde(default)]` so existing DevNet/legacy JSON files without an `authority` key continue to parse cleanly; (ii) `GenesisAuthorityConfig { authority_policy_version, authority_sequence, authority_epoch, pqc_transport_roots, bundle_signing_authority_roots }` and `GenesisAuthorityRoot { suite_id, key_fingerprint, label, not_before_epoch }`; (iii) `compute_canonical_genesis_hash(&GenesisConfig, env)` with the project-style domain-separation tag `b"QBIND:GENESIS:v1"`, length-prefixed framing of every field including environment scope (`DEV`/`TST`/`MAIN`), `chain_id`, and the full authority block (with discriminator bytes so `None` ≠ `Some(empty)` and so the absence vs. emptiness of the authority block produce distinct hashes); (iv) `verify_boot_time_genesis(env, &GenesisConfig, Option<&GenesisHash>)` with strict, fail-closed, per-environment refusal — MainNet refuses missing expected canonical hash, mismatched hash, missing authority before the hash compare, empty `bundle_signing_authority_roots`, non-ML-DSA-44 `suite_id`, malformed fingerprints (short / non-hex / oversized / odd-length), empty labels, empty fingerprints, duplicate `(suite_id, key_fingerprint)` across the combined transport+bundle-signing set, `authority_policy_version == 0` or `> 1`, and chain_id not bound to the runtime environment; TestNet matches MainNet except that the expected-canonical-hash flag is not yet forced when absent (documented partial-positive — Run 102 will force it alongside the ratification verifier); DevNet remains permissive for legacy local tests. The existing T232 `MainnetConfigError::GenesisMisconfigured` + T233 `MainnetConfigError::ExpectedGenesisHashMissing` MainNet CLI-layer shields are preserved bit-for-bit, so MainNet operators still cannot accidentally start without a hash binding. 24 new unit tests in `crates/qbind-ledger/src/genesis.rs::tests` and 11 release-binary-facing integration tests in `crates/qbind-node/tests/run_101_genesis_authority_tests.rs` cover Scenarios 1–5 of `task/RUN_101_TASK.txt` plus duplicate/malformed/wrong-environment refusal coverage and a canonical-hash serde-json round-trip stability check. **No new dependency, no new CLI flag, no new metric family, no `Cargo.toml` change, no protocol or wire-format change.** No `Dummy*` primitive is referenced, no transport-root reuse as a bundle-signing authority is introduced (the Run 050 trust-separation invariant is preserved and is now structurally separated into `pqc_transport_roots` vs `bundle_signing_authority_roots`), no `--p2p-trusted-root` fallback path is added, and no production static MainNet root anchor exists as a source-code constant (grep audit on `crates/**/src/**` confirms only the new Run 101 type declarations and their re-exports appear). Run 101 does **not** implement the in-binary bundle-signing-key ratification verifier (Run 102), does **not** add `<data_dir>/pqc_authority_state.json` (Run 103), does **not** wire `verify_boot_time_genesis` from the release-binary `async_runner` startup (the helper is exposed and exercised through the public API path the release binary links against; the single startup call site is deferred to Run 102 alongside the ratification verifier — see §11.2 prose), does **not** introduce KMS/HSM custody (Run 105), does **not** add peer-driven live apply (Run 106+, gated by Run 100 spec §10), and does **not** weaken any Run 050–099 invariant. Run 101 does **not** claim full C4 closure and does **not** claim C5 closure. | §1.3, §2.2, §4.2, §4.4, §5.3, §6.D, §7, §11.2. Evidence at `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_101.md`. Spec update at `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` §17. |
+
+### 11.2 Run 101 prose note
+
+Run 101 introduces **only** the genesis-bound authority *fields* and the
+*canonical-hash + boot-time-helper* surface defined by Run 100 spec §6.
+Operationally this means:
+
+- **Genesis files for MainNet/TestNet may now include an `authority`
+  block.** A minimal block looks like:
+  ```json
+  {
+    "authority": {
+      "authority_policy_version": 1,
+      "authority_sequence": 0,
+      "authority_epoch": null,
+      "pqc_transport_roots": [
+        {"suite_id": 100, "key_fingerprint": "<64-hex>",
+         "label": "<operator label>", "not_before_epoch": null}
+      ],
+      "bundle_signing_authority_roots": [
+        {"suite_id": 100, "key_fingerprint": "<64-hex>",
+         "label": "<operator label>", "not_before_epoch": null}
+      ]
+    }
+  }
+  ```
+  `suite_id = 100` is ML-DSA-44 (the only suite MainNet/TestNet accept).
+  `key_fingerprint` MUST be lowercase hex without `0x` prefix and ≥ 64
+  hex characters (32 raw bytes) on MainNet/TestNet.
+- **Operators MUST treat the `authority` block as part of the production
+  trust surface.** It is hash-bound by `compute_canonical_genesis_hash`
+  and will become the source of truth for the Run 102 bundle-signing-key
+  ratification verifier. Operators MUST NOT publish or commit
+  private-key material in the genesis file (only fingerprints / public
+  keys are stored).
+- **Until Run 102 wires the boot helper into the startup sequence,**
+  the existing T233 `--expect-genesis-hash` (file-bytes hash) remains
+  the operator-facing shield on MainNet; do not skip it.
+- **Run 101 adds no new CLI flag, no new metric, no new persistence
+  file.** Continue to follow the Run 050/055/065/069–075/076–086/087/
+  088/089/090/091–099/100 lifecycle exactly as documented in this
+  runbook. The single behavioural addition is the per-environment
+  validation of the new `authority` block when present, plus the
+  canonical-hash helper used by tests today and by Run 102 startup
+  tomorrow.
+- **Reference:** evidence record
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_101.md` and spec update
+  §17 of `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
+
+*If anything in this Run 101 note appears to permit a fallback that the
+binary refuses, the binary wins and this runbook is the defect. Open an
 issue against `docs/whitepaper/contradiction.md` immediately.*

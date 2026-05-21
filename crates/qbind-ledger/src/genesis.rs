@@ -241,6 +241,482 @@ impl GenesisCouncilConfig {
 }
 
 // ============================================================================
+// Run 101: Genesis Authority Fields
+// ============================================================================
+//
+// These types add an *additive*, backward-compatible authority surface to the
+// genesis configuration as the first implementation step after Run 100's
+// `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` design.
+//
+// Scope (Run 101): represent and **hash-bind** the initial production
+// PQC transport / bundle-signing-authority roots and authority-policy
+// metadata. **Not consumed** for live bundle-signing-key ratification — that
+// is Run 102+. See `docs/whitepaper/contradiction.md` Run 101 update for the
+// explicit non-claims.
+//
+// Design decisions (mirroring Run 100 spec §5, §6, §7):
+//   * additive: existing DevNet genesis without `authority` continues to
+//     parse and validate, but MainNet/TestNet refuse missing/empty roots.
+//   * MainNet must NOT come from source-code static constants — only from a
+//     genesis file bound by `compute_canonical_genesis_hash`.
+//   * authority fields participate in the canonical genesis hash (domain
+//     `QBIND:GENESIS:v1`) so any change to roots, policy version, or
+//     authority sequence produces a different hash.
+
+/// Suite identifier for a PQC trust-anchor key (ML-DSA-44 = 100).
+///
+/// Stored as a raw `u8` to mirror the on-wire suite-id encoding already used
+/// throughout `qbind-net` / `qbind-crypto`. The set of accepted values for
+/// MainNet is intentionally narrow and is enforced by
+/// [`GenesisAuthorityRoot::validate`].
+pub type GenesisAuthoritySuiteId = u8;
+
+/// Suite-id constant for ML-DSA-44 PQC signature keys.
+///
+/// This mirrors the `100` value used by `qbind-types::SuiteId::MlDsa44` /
+/// `qbind_types::genesis_suite_registry` and the Run 050+ trust-bundle
+/// signer suite. The genesis authority layer accepts only this suite for
+/// MainNet (Run 100 spec §5.3, §7.3).
+pub const GENESIS_AUTHORITY_SUITE_ML_DSA_44: GenesisAuthoritySuiteId = 100;
+
+/// Minimum allowed length (in raw bytes) for a hex-encoded authority-root
+/// key fingerprint.
+///
+/// Run 101 stores fingerprints as hex strings (consistent with the existing
+/// `GenesisValidator::pqc_public_key` representation). A 32-byte SHA3-256
+/// fingerprint is 64 hex characters; we accept anything from 32 hex
+/// characters (16 bytes, e.g. truncated key id) up to a full PQC public key
+/// (~5KB hex). MainNet enforces the 64-hex (32-byte) minimum.
+pub const GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_DEVNET: usize = 32;
+
+/// MainNet/TestNet minimum hex length for an authority-root fingerprint
+/// (32 raw bytes = 64 hex characters). Equal to a SHA3-256 digest length.
+pub const GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_PROD: usize = 64;
+
+/// Hex-string upper bound for a single authority root entry (safety guard
+/// against accidental multi-megabyte blobs in a genesis file).
+pub const GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX: usize = 16 * 1024;
+
+/// Current authority-policy schema version. Run 101 = `1`. Future runs that
+/// extend the authority surface MUST bump this constant and document the
+/// migration in `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
+pub const GENESIS_AUTHORITY_POLICY_VERSION_RUN_101: u32 = 1;
+
+/// One entry in the initial PQC trust-anchor / bundle-signing-authority root
+/// set, as expressed in the genesis configuration file.
+///
+/// Run 101 only hash-binds these entries — they are **not** yet consumed by
+/// the in-binary ratification verifier (that lands in Run 102). Each entry
+/// is intentionally minimal:
+///
+/// * `suite_id` — PQC suite identifier (must be `ML-DSA-44 = 100` on MainNet).
+/// * `key_fingerprint` — lowercase hex of either the full PQC public key
+///   bytes or the SHA3-256 fingerprint of the key (operators choose, but
+///   MainNet requires ≥ 64 hex chars = 32 raw bytes).
+/// * `label` — operator-facing identifier (e.g. `"foundation-root-1"`).
+///   Must be non-empty; included in the canonical hash; never used for
+///   trust decisions.
+/// * `not_before_epoch` — optional epoch at which this root becomes valid;
+///   reserved for Run 102+. When `Some`, the value is hash-bound but not
+///   enforced by Run 101.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenesisAuthorityRoot {
+    /// PQC suite identifier. MainNet MUST be `100` (ML-DSA-44).
+    pub suite_id: GenesisAuthoritySuiteId,
+
+    /// Lowercase hex fingerprint or full public key.
+    pub key_fingerprint: String,
+
+    /// Operator-facing label. Non-empty; hash-bound; not used for trust.
+    pub label: String,
+
+    /// Reserved for Run 102+ activation gating. Hash-bound only.
+    #[serde(default)]
+    pub not_before_epoch: Option<u64>,
+}
+
+impl GenesisAuthorityRoot {
+    /// Construct a new authority root entry. Performs no validation.
+    pub fn new(
+        suite_id: GenesisAuthoritySuiteId,
+        key_fingerprint: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            suite_id,
+            key_fingerprint: key_fingerprint.into(),
+            label: label.into(),
+            not_before_epoch: None,
+        }
+    }
+
+    /// Validate this root against the per-environment policy.
+    ///
+    /// MainNet/TestNet rules:
+    ///   * `suite_id` must equal `GENESIS_AUTHORITY_SUITE_ML_DSA_44`.
+    ///   * `key_fingerprint` must be valid lowercase hex (no `0x` prefix),
+    ///     length in `[64, GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX]`,
+    ///     even length.
+    ///   * `label` must be non-empty.
+    ///
+    /// DevNet relaxes the suite-id and fingerprint-length checks to allow
+    /// helper-generated short fingerprints in legacy local tests.
+    pub fn validate(
+        &self,
+        env: NetworkEnvironmentPolicy,
+        kind: GenesisAuthorityRootKind,
+    ) -> Result<(), GenesisAuthorityValidationError> {
+        if self.label.is_empty() {
+            return Err(GenesisAuthorityValidationError::EmptyLabel { kind });
+        }
+        let hex = &self.key_fingerprint;
+        if hex.is_empty() {
+            return Err(GenesisAuthorityValidationError::EmptyFingerprint {
+                kind,
+                label: self.label.clone(),
+            });
+        }
+        if hex.len() % 2 != 0 {
+            return Err(GenesisAuthorityValidationError::MalformedFingerprint {
+                kind,
+                label: self.label.clone(),
+                reason: "hex length must be even".into(),
+            });
+        }
+        if hex.len() > GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX {
+            return Err(GenesisAuthorityValidationError::MalformedFingerprint {
+                kind,
+                label: self.label.clone(),
+                reason: format!(
+                    "hex length {} exceeds maximum {}",
+                    hex.len(),
+                    GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX
+                ),
+            });
+        }
+        if !hex
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        {
+            return Err(GenesisAuthorityValidationError::MalformedFingerprint {
+                kind,
+                label: self.label.clone(),
+                reason: "fingerprint must be lowercase hex without 0x prefix".into(),
+            });
+        }
+        let min_hex = match env {
+            NetworkEnvironmentPolicy::Devnet => GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_DEVNET,
+            NetworkEnvironmentPolicy::Testnet | NetworkEnvironmentPolicy::Mainnet => {
+                GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_PROD
+            }
+        };
+        if hex.len() < min_hex {
+            return Err(GenesisAuthorityValidationError::MalformedFingerprint {
+                kind,
+                label: self.label.clone(),
+                reason: format!(
+                    "hex length {} below minimum {} for environment {:?}",
+                    hex.len(),
+                    min_hex,
+                    env
+                ),
+            });
+        }
+        match env {
+            NetworkEnvironmentPolicy::Mainnet | NetworkEnvironmentPolicy::Testnet => {
+                if self.suite_id != GENESIS_AUTHORITY_SUITE_ML_DSA_44 {
+                    return Err(GenesisAuthorityValidationError::UnsupportedSuite {
+                        kind,
+                        label: self.label.clone(),
+                        suite_id: self.suite_id,
+                    });
+                }
+            }
+            NetworkEnvironmentPolicy::Devnet => { /* permissive */ }
+        }
+        Ok(())
+    }
+}
+
+/// Discriminator for error messages: which kind of root we are validating.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenesisAuthorityRootKind {
+    /// `authority.pqc_transport_roots[..]`
+    Transport,
+    /// `authority.bundle_signing_authority_roots[..]`
+    BundleSigning,
+}
+
+impl std::fmt::Display for GenesisAuthorityRootKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GenesisAuthorityRootKind::Transport => write!(f, "pqc_transport_root"),
+            GenesisAuthorityRootKind::BundleSigning => write!(f, "bundle_signing_authority_root"),
+        }
+    }
+}
+
+/// Minimal per-environment policy enum used by Run 101 genesis validation.
+///
+/// This is a local mirror of `qbind_types::NetworkEnvironment` to avoid
+/// pulling `qbind-types` into `qbind-ledger`'s public API surface for the
+/// authority validator. Callers in `qbind-node` map their
+/// `NetworkEnvironment` to this enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NetworkEnvironmentPolicy {
+    /// Development network — permissive.
+    Devnet,
+    /// Public test network — production-shape rules except where explicitly
+    /// relaxed (see `validate_for_environment`).
+    Testnet,
+    /// Production main network — strictest fail-closed rules.
+    Mainnet,
+}
+
+impl NetworkEnvironmentPolicy {
+    /// ASCII scope tag used as part of the canonical genesis-hash
+    /// domain-separator (matches `qbind_types::NetworkEnvironment::scope`).
+    pub const fn scope(&self) -> &'static str {
+        match self {
+            NetworkEnvironmentPolicy::Devnet => "DEV",
+            NetworkEnvironmentPolicy::Testnet => "TST",
+            NetworkEnvironmentPolicy::Mainnet => "MAIN",
+        }
+    }
+}
+
+/// Genesis authority configuration block (Run 101).
+///
+/// Additive, hash-bound, and validated per environment. Not yet consumed by
+/// any live ratification verifier — that is Run 102+ scope (see Run 100
+/// spec §5 / §8 / §13 and `docs/whitepaper/contradiction.md` Run 101 update).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GenesisAuthorityConfig {
+    /// Authority-policy schema version. Run 101 = `1`. MainNet/TestNet
+    /// refuse `0` and refuse any value greater than this binary's known
+    /// maximum (currently `1`).
+    pub authority_policy_version: u32,
+
+    /// Monotonic authority-sequence anchor for Run 102+ anti-rollback. Run
+    /// 101 hash-binds this value but does NOT persist it (no
+    /// `<data_dir>/pqc_authority_state.json` yet).
+    #[serde(default)]
+    pub authority_sequence: u64,
+
+    /// Optional authority-activation epoch. Hash-bound only in Run 101.
+    #[serde(default)]
+    pub authority_epoch: Option<u64>,
+
+    /// Initial PQC transport trust anchors (e.g. KEMTLS leaf-cert issuers).
+    /// Run 101 only hash-binds these entries; consumption by the transport
+    /// layer remains a Run 102+ topic.
+    #[serde(default)]
+    pub pqc_transport_roots: Vec<GenesisAuthorityRoot>,
+
+    /// Initial bundle-signing-authority roots. Run 101 only hash-binds; the
+    /// in-binary ratification verifier lands in Run 102.
+    pub bundle_signing_authority_roots: Vec<GenesisAuthorityRoot>,
+}
+
+impl GenesisAuthorityConfig {
+    /// Construct an authority block with the current Run 101 policy version.
+    pub fn new(bundle_signing_authority_roots: Vec<GenesisAuthorityRoot>) -> Self {
+        Self {
+            authority_policy_version: GENESIS_AUTHORITY_POLICY_VERSION_RUN_101,
+            authority_sequence: 0,
+            authority_epoch: None,
+            pqc_transport_roots: Vec::new(),
+            bundle_signing_authority_roots,
+        }
+    }
+
+    /// Validate this authority block against the per-environment policy.
+    ///
+    /// MainNet rules (fail-closed):
+    ///   * `authority_policy_version` in `[1, GENESIS_AUTHORITY_POLICY_VERSION_RUN_101]`.
+    ///   * `bundle_signing_authority_roots` non-empty.
+    ///   * Every root validates per `GenesisAuthorityRoot::validate(Mainnet, _)`.
+    ///   * No duplicate `(suite_id, key_fingerprint)` pairs across the
+    ///     combined transport + bundle-signing sets.
+    ///
+    /// TestNet rules: identical to MainNet except that an empty
+    /// `pqc_transport_roots` is allowed (Run 101 does not yet wire transport
+    /// roots).
+    ///
+    /// DevNet rules: permissive — empty sets are allowed, but if entries
+    /// are present they must still pass the relaxed per-root validation.
+    pub fn validate_for_environment(
+        &self,
+        env: NetworkEnvironmentPolicy,
+    ) -> Result<(), GenesisAuthorityValidationError> {
+        if self.authority_policy_version == 0 {
+            return Err(GenesisAuthorityValidationError::InvalidPolicyVersion {
+                got: self.authority_policy_version,
+                max_supported: GENESIS_AUTHORITY_POLICY_VERSION_RUN_101,
+            });
+        }
+        if self.authority_policy_version > GENESIS_AUTHORITY_POLICY_VERSION_RUN_101 {
+            return Err(GenesisAuthorityValidationError::InvalidPolicyVersion {
+                got: self.authority_policy_version,
+                max_supported: GENESIS_AUTHORITY_POLICY_VERSION_RUN_101,
+            });
+        }
+
+        // MainNet & TestNet require a non-empty bundle-signing root set.
+        // DevNet is permissive (legacy local tests).
+        if matches!(
+            env,
+            NetworkEnvironmentPolicy::Mainnet | NetworkEnvironmentPolicy::Testnet
+        ) && self.bundle_signing_authority_roots.is_empty()
+        {
+            return Err(GenesisAuthorityValidationError::EmptyBundleSigningRoots);
+        }
+
+        for root in &self.pqc_transport_roots {
+            root.validate(env, GenesisAuthorityRootKind::Transport)?;
+        }
+        for root in &self.bundle_signing_authority_roots {
+            root.validate(env, GenesisAuthorityRootKind::BundleSigning)?;
+        }
+
+        // Reject duplicate (suite_id, key_fingerprint) pairs across the
+        // combined set. Duplicates would silently inflate the authority
+        // surface and are never intended.
+        let mut seen = HashSet::new();
+        for root in self
+            .pqc_transport_roots
+            .iter()
+            .chain(self.bundle_signing_authority_roots.iter())
+        {
+            let key = (root.suite_id, root.key_fingerprint.as_str());
+            if !seen.insert(key) {
+                return Err(GenesisAuthorityValidationError::DuplicateAuthorityRoot {
+                    suite_id: root.suite_id,
+                    key_fingerprint: root.key_fingerprint.clone(),
+                });
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Errors returned by [`GenesisAuthorityConfig::validate_for_environment`]
+/// and [`GenesisAuthorityRoot::validate`].
+///
+/// All variants produce operator-facing messages with the precise reason —
+/// no vague "invalid config" errors. Mirrors the precision required by the
+/// Run 101 task ("logging / operator error messages" section).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GenesisAuthorityValidationError {
+    /// `authority` block is absent and required by the current environment.
+    Missing { env: NetworkEnvironmentPolicy },
+
+    /// `authority_policy_version` is zero or beyond this binary's max.
+    InvalidPolicyVersion { got: u32, max_supported: u32 },
+
+    /// MainNet/TestNet requires at least one bundle-signing root.
+    EmptyBundleSigningRoots,
+
+    /// Authority root entry has an empty `label`.
+    EmptyLabel { kind: GenesisAuthorityRootKind },
+
+    /// Authority root entry has an empty hex `key_fingerprint`.
+    EmptyFingerprint {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+    },
+
+    /// Authority root entry has a malformed hex `key_fingerprint`.
+    MalformedFingerprint {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+        reason: String,
+    },
+
+    /// Authority root entry uses a suite not allowed by environment policy.
+    UnsupportedSuite {
+        kind: GenesisAuthorityRootKind,
+        label: String,
+        suite_id: GenesisAuthoritySuiteId,
+    },
+
+    /// Duplicate `(suite_id, key_fingerprint)` across the combined root set.
+    DuplicateAuthorityRoot {
+        suite_id: GenesisAuthoritySuiteId,
+        key_fingerprint: String,
+    },
+
+    /// The genesis `chain_id` does not match the runtime environment scope.
+    ChainEnvironmentMismatch {
+        chain_id: String,
+        env: NetworkEnvironmentPolicy,
+    },
+}
+
+impl std::fmt::Display for GenesisAuthorityValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GenesisAuthorityValidationError::Missing { env } => write!(
+                f,
+                "genesis authority block is required for environment {:?} but is missing",
+                env
+            ),
+            GenesisAuthorityValidationError::InvalidPolicyVersion { got, max_supported } => write!(
+                f,
+                "genesis authority_policy_version {} invalid: must be in 1..={}",
+                got, max_supported
+            ),
+            GenesisAuthorityValidationError::EmptyBundleSigningRoots => write!(
+                f,
+                "genesis bundle_signing_authority_roots must be non-empty for MainNet/TestNet"
+            ),
+            GenesisAuthorityValidationError::EmptyLabel { kind } => {
+                write!(f, "genesis {} has empty label", kind)
+            }
+            GenesisAuthorityValidationError::EmptyFingerprint { kind, label } => write!(
+                f,
+                "genesis {} '{}' has empty key_fingerprint",
+                kind, label
+            ),
+            GenesisAuthorityValidationError::MalformedFingerprint {
+                kind,
+                label,
+                reason,
+            } => write!(
+                f,
+                "genesis {} '{}' has malformed key_fingerprint: {}",
+                kind, label, reason
+            ),
+            GenesisAuthorityValidationError::UnsupportedSuite {
+                kind,
+                label,
+                suite_id,
+            } => write!(
+                f,
+                "genesis {} '{}' uses unsupported suite_id {} (MainNet/TestNet require ML-DSA-44 = {})",
+                kind, label, suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44
+            ),
+            GenesisAuthorityValidationError::DuplicateAuthorityRoot {
+                suite_id,
+                key_fingerprint,
+            } => write!(
+                f,
+                "genesis authority duplicate root: suite_id={} key_fingerprint={}",
+                suite_id, key_fingerprint
+            ),
+            GenesisAuthorityValidationError::ChainEnvironmentMismatch { chain_id, env } => write!(
+                f,
+                "genesis chain_id '{}' does not match runtime environment {:?}",
+                chain_id, env
+            ),
+        }
+    }
+}
+
+impl std::error::Error for GenesisAuthorityValidationError {}
+
+// ============================================================================
 // Genesis Monetary Configuration
 // ============================================================================
 
@@ -486,6 +962,23 @@ pub struct GenesisConfig {
     /// This allows adding new genesis features without changing the core schema.
     #[serde(default)]
     pub extra: serde_json::Value,
+
+    /// Run 101: optional genesis authority block.
+    ///
+    /// **Additive and backward-compatible:** existing DevNet/test genesis
+    /// JSON files without this field continue to parse cleanly.
+    /// MainNet/TestNet require `authority` to be present and validated by
+    /// [`GenesisConfig::validate_for_environment`].
+    ///
+    /// The authority block is included in the canonical genesis hash
+    /// (see [`compute_canonical_genesis_hash`]). Any change to the authority
+    /// roots, policy version, sequence, or epoch produces a different hash.
+    ///
+    /// Not yet consumed by any live ratification verifier — see
+    /// `docs/whitepaper/contradiction.md` Run 101 update for the explicit
+    /// non-claims.
+    #[serde(default)]
+    pub authority: Option<GenesisAuthorityConfig>,
 }
 
 impl GenesisConfig {
@@ -506,6 +999,7 @@ impl GenesisConfig {
             council,
             monetary,
             extra: serde_json::Value::Null,
+            authority: None,
         }
     }
 
@@ -608,6 +1102,376 @@ impl GenesisConfig {
     pub fn council_member_count(&self) -> usize {
         self.council.members.len()
     }
+
+    /// Run 101: per-environment genesis validation.
+    ///
+    /// In addition to all checks performed by [`Self::validate`]:
+    ///   * MainNet/TestNet require [`Self::authority`] to be present and
+    ///     valid per [`GenesisAuthorityConfig::validate_for_environment`].
+    ///   * DevNet allows a missing `authority` block (legacy local tests),
+    ///     but if present it must still pass relaxed validation.
+    ///
+    /// Note: this method does NOT check the runtime-vs-genesis chain_id
+    /// match — that is handled at the boot-time layer by
+    /// [`verify_boot_time_genesis`].
+    pub fn validate_for_environment(
+        &self,
+        env: NetworkEnvironmentPolicy,
+    ) -> Result<(), GenesisValidationError> {
+        self.validate()?;
+        match (&self.authority, env) {
+            (None, NetworkEnvironmentPolicy::Mainnet)
+            | (None, NetworkEnvironmentPolicy::Testnet) => {
+                return Err(GenesisValidationError::AuthorityValidationFailed(
+                    GenesisAuthorityValidationError::Missing { env },
+                ));
+            }
+            (None, NetworkEnvironmentPolicy::Devnet) => {
+                // DevNet legacy: tolerated, but caller should log a
+                // non-production banner. See Run 101 evidence Scenario 1.
+            }
+            (Some(authority), _) => {
+                authority
+                    .validate_for_environment(env)
+                    .map_err(GenesisValidationError::AuthorityValidationFailed)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Run 101: Canonical Genesis Hash (domain "QBIND:GENESIS:v1")
+// ============================================================================
+
+/// Canonical genesis-hash domain-separation tag.
+///
+/// Mirrors the project-wide tag style used by `qbind-hash::net` /
+/// `qbind-hash::tx` / `qbind-hash::consensus` (`b"QBIND:<SCOPE>:v<N>"`).
+pub const CANONICAL_GENESIS_HASH_DOMAIN_V1: &[u8] = b"QBIND:GENESIS:v1";
+
+/// Run 101: compute the canonical, deterministic, domain-separated genesis
+/// hash over the structured [`GenesisConfig`].
+///
+/// **Differs from [`compute_genesis_hash_bytes`]:** that function hashes the
+/// exact bytes of the genesis JSON file (T233 behaviour, kept for backward
+/// compatibility with `--expect-genesis-hash`). The canonical hash here is
+/// computed over the *structured* configuration with explicit framing and
+/// domain separation, so it is stable across whitespace / map-ordering
+/// differences in the source JSON.
+///
+/// Both hashes coexist in Run 101: the file-bytes hash continues to back
+/// `--expect-genesis-hash`, and the canonical hash is the value that
+/// Run 102+ ratification objects will bind to.
+///
+/// # Encoding
+///
+/// ```text
+/// SHA3-256(
+///     "QBIND:GENESIS:v1"
+///   || u32_be(env_scope_len)    || env_scope_bytes
+///   || u32_be(chain_id_len)     || chain_id_bytes
+///   || u64_be(genesis_time_unix_ms)
+///   || u32_be(allocation_count) || allocations_canonical_bytes
+///   || u32_be(validator_count)  || validators_canonical_bytes
+///   || u32_be(council_threshold)|| council_canonical_bytes
+///   || monetary_canonical_bytes
+///   || authority_canonical_bytes  // empty framed block if authority is None
+/// )
+/// ```
+///
+/// All variable-length strings are length-prefixed with a big-endian `u32`
+/// length followed by the raw UTF-8 bytes. Sub-blocks (each allocation /
+/// validator / council member / authority root) are similarly framed and
+/// emitted in declaration order (not sorted) — this preserves operator
+/// intent and is deterministic because the JSON-to-struct decode preserves
+/// `Vec` order.
+///
+/// Optional fields are framed with a single `0` or `1` discriminator byte
+/// so that `None` and `Some("")` never collide.
+///
+/// The `extra` field is hashed via `serde_json::to_vec` of the *value* (not
+/// the raw substring of the source JSON). Operators who set `extra` MUST
+/// supply canonical JSON values — strings, numbers, booleans, ordered
+/// arrays, and `serde_json::Map` (which is `BTreeMap` here in `qbind-ledger`'s
+/// build of `serde_json` with the `preserve_order` feature **disabled**;
+/// see `Cargo.toml`). For Run 101 / DevNet the `extra` field is `Null` in
+/// practice.
+pub fn compute_canonical_genesis_hash(
+    config: &GenesisConfig,
+    env: NetworkEnvironmentPolicy,
+) -> GenesisHash {
+    let mut buf: Vec<u8> = Vec::with_capacity(256);
+    buf.extend_from_slice(CANONICAL_GENESIS_HASH_DOMAIN_V1);
+    encode_length_prefixed_str(&mut buf, env.scope());
+    encode_length_prefixed_str(&mut buf, &config.chain_id);
+    buf.extend_from_slice(&config.genesis_time_unix_ms.to_be_bytes());
+
+    encode_u32_be(&mut buf, config.allocations.len() as u32);
+    for alloc in &config.allocations {
+        encode_length_prefixed_str(&mut buf, &alloc.address);
+        buf.extend_from_slice(&alloc.amount.to_be_bytes());
+        encode_optional_str(&mut buf, alloc.memo.as_deref());
+        encode_optional_u64(&mut buf, alloc.lockup_until_unix_ms);
+    }
+
+    encode_u32_be(&mut buf, config.validators.len() as u32);
+    for validator in &config.validators {
+        encode_length_prefixed_str(&mut buf, &validator.address);
+        encode_length_prefixed_str(&mut buf, &validator.pqc_public_key);
+        buf.extend_from_slice(&validator.stake.to_be_bytes());
+        encode_optional_str(&mut buf, validator.name.as_deref());
+        encode_optional_str(&mut buf, validator.metadata.as_deref());
+    }
+
+    encode_u32_be(&mut buf, config.council.threshold);
+    encode_u32_be(&mut buf, config.council.members.len() as u32);
+    for member in &config.council.members {
+        encode_length_prefixed_str(&mut buf, member);
+    }
+
+    // Monetary config is hashed via its serde_json canonical bytes. This is
+    // deterministic across runs because `qbind-ledger` depends on
+    // `serde_json` without the `preserve_order` feature, and
+    // `GenesisMonetaryConfig` is a fixed-shape struct with primitive fields
+    // only. We frame with a length prefix so the boundary is unambiguous.
+    let monetary_bytes = serde_json::to_vec(&config.monetary)
+        .expect("GenesisMonetaryConfig must always serialize to JSON");
+    encode_u32_be(&mut buf, monetary_bytes.len() as u32);
+    buf.extend_from_slice(&monetary_bytes);
+
+    encode_authority_block(&mut buf, config.authority.as_ref());
+
+    qbind_hash::sha3_256(&buf)
+}
+
+fn encode_u32_be(buf: &mut Vec<u8>, v: u32) {
+    buf.extend_from_slice(&v.to_be_bytes());
+}
+
+fn encode_length_prefixed_str(buf: &mut Vec<u8>, s: &str) {
+    let bytes = s.as_bytes();
+    encode_u32_be(buf, bytes.len() as u32);
+    buf.extend_from_slice(bytes);
+}
+
+fn encode_optional_str(buf: &mut Vec<u8>, s: Option<&str>) {
+    match s {
+        None => buf.push(0u8),
+        Some(s) => {
+            buf.push(1u8);
+            encode_length_prefixed_str(buf, s);
+        }
+    }
+}
+
+fn encode_optional_u64(buf: &mut Vec<u8>, v: Option<u64>) {
+    match v {
+        None => buf.push(0u8),
+        Some(v) => {
+            buf.push(1u8);
+            buf.extend_from_slice(&v.to_be_bytes());
+        }
+    }
+}
+
+fn encode_authority_block(buf: &mut Vec<u8>, authority: Option<&GenesisAuthorityConfig>) {
+    match authority {
+        None => buf.push(0u8),
+        Some(authority) => {
+            buf.push(1u8);
+            encode_u32_be(buf, authority.authority_policy_version);
+            buf.extend_from_slice(&authority.authority_sequence.to_be_bytes());
+            encode_optional_u64(buf, authority.authority_epoch);
+            encode_u32_be(buf, authority.pqc_transport_roots.len() as u32);
+            for root in &authority.pqc_transport_roots {
+                encode_authority_root(buf, root);
+            }
+            encode_u32_be(
+                buf,
+                authority.bundle_signing_authority_roots.len() as u32,
+            );
+            for root in &authority.bundle_signing_authority_roots {
+                encode_authority_root(buf, root);
+            }
+        }
+    }
+}
+
+fn encode_authority_root(buf: &mut Vec<u8>, root: &GenesisAuthorityRoot) {
+    buf.push(root.suite_id);
+    encode_length_prefixed_str(buf, &root.key_fingerprint);
+    encode_length_prefixed_str(buf, &root.label);
+    encode_optional_u64(buf, root.not_before_epoch);
+}
+
+// ============================================================================
+// Run 101: Boot-time Genesis Hash / Authority Verification
+// ============================================================================
+
+/// Errors returned by [`verify_boot_time_genesis`].
+///
+/// Distinct, precise variants so that operator log messages can pinpoint the
+/// failure cause without resorting to vague "invalid config" output (per the
+/// Run 101 task "logging / operator error messages" requirement).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootGenesisVerificationError {
+    /// `expected_canonical_hash` is required for this environment and was
+    /// not supplied (MainNet always, TestNet by policy).
+    ExpectedCanonicalHashMissing { env: NetworkEnvironmentPolicy },
+
+    /// Supplied `expected_canonical_hash` did not match the computed value.
+    CanonicalHashMismatch {
+        env: NetworkEnvironmentPolicy,
+        expected: GenesisHash,
+        actual: GenesisHash,
+    },
+
+    /// Structural genesis validation (env-aware) failed.
+    GenesisValidationFailed(GenesisValidationError),
+
+    /// Authority validation failed.
+    AuthorityValidationFailed(GenesisAuthorityValidationError),
+
+    /// The genesis `chain_id` does not match the runtime environment.
+    ChainEnvironmentMismatch {
+        chain_id: String,
+        env: NetworkEnvironmentPolicy,
+    },
+}
+
+impl std::fmt::Display for BootGenesisVerificationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BootGenesisVerificationError::ExpectedCanonicalHashMissing { env } => write!(
+                f,
+                "expected canonical genesis hash is required for environment {:?} but was not provided",
+                env
+            ),
+            BootGenesisVerificationError::CanonicalHashMismatch {
+                env,
+                expected,
+                actual,
+            } => write!(
+                f,
+                "canonical genesis hash mismatch on environment {:?}: expected {} actual {}",
+                env,
+                format_genesis_hash(expected),
+                format_genesis_hash(actual)
+            ),
+            BootGenesisVerificationError::GenesisValidationFailed(e) => {
+                write!(f, "genesis validation failed: {}", e)
+            }
+            BootGenesisVerificationError::AuthorityValidationFailed(e) => {
+                write!(f, "genesis authority validation failed: {}", e)
+            }
+            BootGenesisVerificationError::ChainEnvironmentMismatch { chain_id, env } => write!(
+                f,
+                "genesis chain_id '{}' does not match runtime environment {:?}",
+                chain_id, env
+            ),
+        }
+    }
+}
+
+impl std::error::Error for BootGenesisVerificationError {}
+
+/// Result of a boot-time genesis verification call. On success this carries
+/// the computed canonical hash so callers (e.g. `qbind-node` startup) can
+/// log it and persist it alongside the file-bytes [`ChainMeta`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootGenesisVerification {
+    /// The canonical hash that was computed and (when applicable) matched.
+    pub canonical_hash: GenesisHash,
+}
+
+/// Run 101: boot-time genesis-hash + authority verification.
+///
+/// Performs, in order:
+///   1. structural validation via [`GenesisConfig::validate_for_environment`];
+///   2. chain_id / environment binding check (substring match of the
+///      environment scope in the chain id, see below);
+///   3. canonical hash computation;
+///   4. expected-hash comparison per environment policy.
+///
+/// Environment policy:
+///
+/// | env     | authority required | expected hash required | chain_id check |
+/// |---------|--------------------|------------------------|----------------|
+/// | DevNet  | optional (legacy)  | optional               | best-effort    |
+/// | TestNet | required           | strongly required if `expected_canonical_hash.is_some()` (Run 101 does not yet force the CLI flag; documented as partial-positive) | required |
+/// | MainNet | required           | required (fail-closed) | required       |
+///
+/// The chain_id check is a substring match of the environment's lowercase
+/// scope token (`"devnet"` / `"testnet"` / `"mainnet"`) against
+/// `config.chain_id.to_lowercase()`. This mirrors the existing
+/// `qbind-mainnet-v0` / `qbind-testnet-beta` chain-id convention used by
+/// `QBIND_DEVNET_CHAIN_ID` / `QBIND_TESTNET_CHAIN_ID` /
+/// `QBIND_MAINNET_CHAIN_ID` in `qbind-types::primitives`. It is intentionally
+/// loose for DevNet (best-effort warning only via the returned error) and
+/// strict for MainNet/TestNet.
+///
+/// On any failure this function returns the most specific error variant —
+/// no silent "continue with default authority" path exists.
+pub fn verify_boot_time_genesis(
+    env: NetworkEnvironmentPolicy,
+    config: &GenesisConfig,
+    expected_canonical_hash: Option<&GenesisHash>,
+) -> Result<BootGenesisVerification, BootGenesisVerificationError> {
+    // 1. Structural + per-env validation.
+    config
+        .validate_for_environment(env)
+        .map_err(|e| match e {
+            GenesisValidationError::AuthorityValidationFailed(a) => {
+                BootGenesisVerificationError::AuthorityValidationFailed(a)
+            }
+            other => BootGenesisVerificationError::GenesisValidationFailed(other),
+        })?;
+
+    // 2. chain_id / environment binding check.
+    if matches!(
+        env,
+        NetworkEnvironmentPolicy::Mainnet | NetworkEnvironmentPolicy::Testnet
+    ) {
+        let needle = match env {
+            NetworkEnvironmentPolicy::Mainnet => "mainnet",
+            NetworkEnvironmentPolicy::Testnet => "testnet",
+            NetworkEnvironmentPolicy::Devnet => unreachable!(),
+        };
+        if !config.chain_id.to_lowercase().contains(needle) {
+            return Err(BootGenesisVerificationError::ChainEnvironmentMismatch {
+                chain_id: config.chain_id.clone(),
+                env,
+            });
+        }
+    }
+
+    // 3. Canonical hash computation.
+    let canonical_hash = compute_canonical_genesis_hash(config, env);
+
+    // 4. Expected-hash comparison per environment policy.
+    match (env, expected_canonical_hash) {
+        (NetworkEnvironmentPolicy::Mainnet, None) => {
+            return Err(BootGenesisVerificationError::ExpectedCanonicalHashMissing { env });
+        }
+        (_, Some(expected)) => {
+            if expected != &canonical_hash {
+                return Err(BootGenesisVerificationError::CanonicalHashMismatch {
+                    env,
+                    expected: *expected,
+                    actual: canonical_hash,
+                });
+            }
+        }
+        // TestNet without explicit expected hash: documented partial-positive
+        // (Run 101 does not yet force the CLI flag on TestNet — see
+        // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_101.md` and the runbook).
+        (NetworkEnvironmentPolicy::Testnet, None) => { /* allowed for now */ }
+        // DevNet without expected hash: explicitly non-production allowed.
+        (NetworkEnvironmentPolicy::Devnet, None) => { /* allowed */ }
+    }
+
+    Ok(BootGenesisVerification { canonical_hash })
 }
 
 // ============================================================================
@@ -655,6 +1519,9 @@ pub enum GenesisValidationError {
 
     /// Duplicate council member address.
     DuplicateCouncilMember { address: String },
+
+    /// Run 101: authority block validation failed (additive).
+    AuthorityValidationFailed(GenesisAuthorityValidationError),
 }
 
 impl std::fmt::Display for GenesisValidationError {
@@ -705,6 +1572,9 @@ impl std::fmt::Display for GenesisValidationError {
             }
             GenesisValidationError::DuplicateCouncilMember { address } => {
                 write!(f, "duplicate council member: {}", address)
+            }
+            GenesisValidationError::AuthorityValidationFailed(e) => {
+                write!(f, "authority validation failed: {}", e)
             }
         }
     }
@@ -1113,5 +1983,443 @@ mod tests {
 
         let v2 = GenesisValidator::with_name("0xabc", "pqc_key_1", 10000, "Validator One");
         assert_eq!(v2.name, Some("Validator One".to_string()));
+    }
+
+    // ========================================================================
+    // Run 101: Genesis Authority + Canonical Hash + Boot-Time Verification
+    // ========================================================================
+
+    fn ml_dsa_44_fingerprint(seed: u8) -> String {
+        // 64 hex chars = 32 raw bytes; matches MainNet minimum.
+        let byte_hex = format!("{:02x}", seed);
+        byte_hex.repeat(32)
+    }
+
+    fn authority_root(seed: u8, label: &str) -> GenesisAuthorityRoot {
+        GenesisAuthorityRoot::new(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            ml_dsa_44_fingerprint(seed),
+            label,
+        )
+    }
+
+    fn mainnet_authority() -> GenesisAuthorityConfig {
+        let mut auth = GenesisAuthorityConfig::new(vec![
+            authority_root(0xab, "foundation-bundle-signer-1"),
+        ]);
+        auth.pqc_transport_roots = vec![authority_root(0xcd, "foundation-transport-1")];
+        auth
+    }
+
+    fn mainnet_genesis_config() -> GenesisConfig {
+        let mut cfg = valid_genesis_config();
+        cfg.chain_id = "qbind-mainnet-v0".to_string();
+        cfg.authority = Some(mainnet_authority());
+        cfg
+    }
+
+    fn devnet_genesis_config_no_authority() -> GenesisConfig {
+        let mut cfg = valid_genesis_config();
+        cfg.chain_id = "qbind-devnet-v0".to_string();
+        cfg.authority = None;
+        cfg
+    }
+
+    // ---- Authority validation ----
+
+    #[test]
+    fn test_authority_mainnet_requires_present() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority = None;
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::Missing { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_empty_bundle_signing_roots() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![];
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::EmptyBundleSigningRoots
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_unsupported_suite() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].suite_id = 1;
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::UnsupportedSuite { suite_id: 1, .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_malformed_fingerprint_short() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].key_fingerprint =
+            "ab".repeat(8); // 16 hex chars
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::MalformedFingerprint { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_malformed_fingerprint_non_hex() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].key_fingerprint =
+            "zz".repeat(32);
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::MalformedFingerprint { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_empty_label() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].label = String::new();
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::EmptyLabel { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_duplicate_roots() {
+        let mut cfg = mainnet_genesis_config();
+        let dup = cfg.authority.as_ref().unwrap().bundle_signing_authority_roots[0].clone();
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots
+            .push(dup);
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::DuplicateAuthorityRoot { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_invalid_policy_version() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().authority_policy_version = 0;
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::InvalidPolicyVersion { got: 0, .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_rejects_policy_version_too_new() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority.as_mut().unwrap().authority_policy_version = u32::MAX;
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::InvalidPolicyVersion { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_devnet_allows_missing() {
+        let cfg = devnet_genesis_config_no_authority();
+        cfg.validate_for_environment(NetworkEnvironmentPolicy::Devnet)
+            .expect("devnet must allow missing authority for legacy local tests");
+    }
+
+    #[test]
+    fn test_authority_testnet_requires_present() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.chain_id = "qbind-testnet-beta".to_string();
+        cfg.authority = None;
+        let err = cfg
+            .validate_for_environment(NetworkEnvironmentPolicy::Testnet)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            GenesisValidationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::Missing { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_authority_mainnet_accepts_valid() {
+        let cfg = mainnet_genesis_config();
+        cfg.validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
+            .expect("valid mainnet genesis with authority must pass");
+    }
+
+    // ---- Canonical hash ----
+
+    #[test]
+    fn test_canonical_hash_is_deterministic() {
+        let cfg = mainnet_genesis_config();
+        let h1 = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let h2 = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_canonical_hash_differs_on_chain_id() {
+        let mut a = mainnet_genesis_config();
+        let b = a.clone();
+        a.chain_id = "qbind-mainnet-v1".to_string();
+        let ha = compute_canonical_genesis_hash(&a, NetworkEnvironmentPolicy::Mainnet);
+        let hb = compute_canonical_genesis_hash(&b, NetworkEnvironmentPolicy::Mainnet);
+        assert_ne!(ha, hb);
+    }
+
+    #[test]
+    fn test_canonical_hash_differs_on_environment() {
+        let cfg = mainnet_genesis_config();
+        let main_h = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let test_h = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Testnet);
+        let dev_h = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Devnet);
+        assert_ne!(main_h, test_h);
+        assert_ne!(test_h, dev_h);
+        assert_ne!(main_h, dev_h);
+    }
+
+    #[test]
+    fn test_canonical_hash_differs_on_authority_change() {
+        let cfg = mainnet_genesis_config();
+        let h_before = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut cfg2 = cfg.clone();
+        cfg2.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .key_fingerprint = ml_dsa_44_fingerprint(0xee);
+        let h_after = compute_canonical_genesis_hash(&cfg2, NetworkEnvironmentPolicy::Mainnet);
+        assert_ne!(h_before, h_after);
+    }
+
+    #[test]
+    fn test_canonical_hash_differs_on_authority_policy_version_change() {
+        let cfg = mainnet_genesis_config();
+        let h_before = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut cfg2 = cfg.clone();
+        // Bump to the maximum supported version (still valid).
+        cfg2.authority.as_mut().unwrap().authority_policy_version =
+            GENESIS_AUTHORITY_POLICY_VERSION_RUN_101;
+        // Mutate authority_sequence instead to ensure a hash difference even
+        // if the policy version is already at max.
+        cfg2.authority.as_mut().unwrap().authority_sequence += 1;
+        let h_after = compute_canonical_genesis_hash(&cfg2, NetworkEnvironmentPolicy::Mainnet);
+        assert_ne!(h_before, h_after);
+    }
+
+    #[test]
+    fn test_canonical_hash_differs_on_validator_change() {
+        let cfg = mainnet_genesis_config();
+        let h_before = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut cfg2 = cfg.clone();
+        cfg2.validators[0].stake += 1;
+        let h_after = compute_canonical_genesis_hash(&cfg2, NetworkEnvironmentPolicy::Mainnet);
+        assert_ne!(h_before, h_after);
+    }
+
+    #[test]
+    fn test_canonical_hash_differs_on_allocation_change() {
+        let cfg = mainnet_genesis_config();
+        let h_before = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut cfg2 = cfg.clone();
+        cfg2.allocations[0].amount += 1;
+        let h_after = compute_canonical_genesis_hash(&cfg2, NetworkEnvironmentPolicy::Mainnet);
+        assert_ne!(h_before, h_after);
+    }
+
+    #[test]
+    fn test_canonical_hash_distinguishes_none_vs_empty_authority() {
+        // No-authority and empty-authority must hash differently because the
+        // authority block is framed with a discriminator byte.
+        let mut cfg_none = devnet_genesis_config_no_authority();
+        let mut cfg_empty = cfg_none.clone();
+        cfg_empty.authority = Some(GenesisAuthorityConfig::new(vec![]));
+        cfg_none.authority = None;
+        let h_none = compute_canonical_genesis_hash(&cfg_none, NetworkEnvironmentPolicy::Devnet);
+        let h_empty = compute_canonical_genesis_hash(&cfg_empty, NetworkEnvironmentPolicy::Devnet);
+        assert_ne!(h_none, h_empty);
+    }
+
+    // ---- Boot-time verification ----
+
+    #[test]
+    fn test_boot_mainnet_requires_expected_hash() {
+        let cfg = mainnet_genesis_config();
+        let err =
+            verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, None).unwrap_err();
+        assert!(matches!(
+            err,
+            BootGenesisVerificationError::ExpectedCanonicalHashMissing {
+                env: NetworkEnvironmentPolicy::Mainnet
+            }
+        ));
+    }
+
+    #[test]
+    fn test_boot_mainnet_accepts_matching_hash() {
+        let cfg = mainnet_genesis_config();
+        let h = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, Some(&h))
+            .expect("matching hash must succeed");
+        assert_eq!(v.canonical_hash, h);
+    }
+
+    #[test]
+    fn test_boot_mainnet_rejects_mismatched_hash() {
+        let cfg = mainnet_genesis_config();
+        let wrong = [0u8; 32];
+        let err =
+            verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, Some(&wrong))
+                .unwrap_err();
+        assert!(matches!(
+            err,
+            BootGenesisVerificationError::CanonicalHashMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn test_boot_mainnet_rejects_missing_authority_before_hash() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.authority = None;
+        // Even when the operator supplies *some* expected hash, missing
+        // authority must surface as an authority error (fail-closed before
+        // any hash compare).
+        let h = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let err = verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, Some(&h))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BootGenesisVerificationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::Missing { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_boot_mainnet_rejects_wrong_chain_id() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.chain_id = "qbind-testnet-v0".to_string();
+        let h = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let err = verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, Some(&h))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BootGenesisVerificationError::ChainEnvironmentMismatch { .. }
+        ));
+    }
+
+    #[test]
+    fn test_boot_devnet_allows_missing_hash_and_authority() {
+        let cfg = devnet_genesis_config_no_authority();
+        let v = verify_boot_time_genesis(NetworkEnvironmentPolicy::Devnet, &cfg, None)
+            .expect("devnet legacy path must remain usable");
+        // Hash is still deterministic and exposed.
+        assert_eq!(
+            v.canonical_hash,
+            compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Devnet)
+        );
+    }
+
+    #[test]
+    fn test_boot_testnet_allows_missing_hash_with_authority_present() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.chain_id = "qbind-testnet-beta".to_string();
+        verify_boot_time_genesis(NetworkEnvironmentPolicy::Testnet, &cfg, None)
+            .expect("testnet without expected hash but valid authority should pass (Run 101 partial-positive)");
+    }
+
+    #[test]
+    fn test_boot_testnet_rejects_missing_authority() {
+        let mut cfg = mainnet_genesis_config();
+        cfg.chain_id = "qbind-testnet-beta".to_string();
+        cfg.authority = None;
+        let err = verify_boot_time_genesis(NetworkEnvironmentPolicy::Testnet, &cfg, None)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            BootGenesisVerificationError::AuthorityValidationFailed(
+                GenesisAuthorityValidationError::Missing { .. }
+            )
+        ));
+    }
+
+    #[test]
+    fn test_backward_compat_legacy_json_without_authority_parses() {
+        // A genesis JSON written before Run 101 (no `authority` key) must
+        // still deserialize cleanly.
+        let json = serde_json::json!({
+            "chain_id": "qbind-devnet-v0",
+            "genesis_time_unix_ms": 1738000000000u64,
+            "allocations": [{
+                "address": "0x1111111111111111111111111111111111111111",
+                "amount": 1_000_000u128.to_string().parse::<u128>().unwrap(),
+            }],
+            "validators": [{
+                "address": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "pqc_public_key": "pqc_key_1",
+                "stake": 100_000u128,
+            }],
+            "council": {
+                "members": ["0xcccccccccccccccccccccccccccccccccccccccc"],
+                "threshold": 1u32,
+            },
+            "monetary": serde_json::to_value(test_monetary_config()).unwrap(),
+        });
+        let cfg: GenesisConfig = serde_json::from_value(json).expect("legacy JSON must parse");
+        assert!(cfg.authority.is_none());
+        cfg.validate_for_environment(NetworkEnvironmentPolicy::Devnet)
+            .expect("legacy DevNet genesis must remain valid");
     }
 }
