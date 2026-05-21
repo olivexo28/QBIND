@@ -3495,3 +3495,31 @@ Use the existing sidecar flag:
 with the existing `BundleSigningRatification` JSON format. Do not introduce a separate peer-candidate ratification format. A missing, malformed, wrong-chain, wrong-environment, bad-signature, unknown-root, transport-root, unsupported-suite, missing-key-material, or malformed-key-material ratification fails closed before a successful peer-candidate verdict.
 
 Run 107 does not change live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven live apply, signing-key rotation/revocation, authority anti-rollback persistence, KMS/HSM custody, governance, validator-set rotation, full C4, or C5.
+
+---
+
+## Run 108 operator update — peer-candidate check ratification release-binary evidence
+
+Run 108 records release-binary evidence for the Run 107 local peer-candidate check. The exercised command shape is:
+
+```text
+qbind-node \
+  --env <mainnet|devnet> \
+  --genesis-path <genesis.json> \
+  --expect-genesis-hash <0x...> \
+  --data-dir <DIR> \
+  --p2p-trust-bundle-signing-key <KEYID:100:PK> \
+  --p2p-trust-bundle-peer-candidate-validation-enabled \
+  --p2p-trust-bundle-peer-candidate-check <peer-candidate.json> \
+  [--p2p-trust-bundle-ratification-enforcement-enabled] \
+  [--p2p-trust-bundle-ratification <ratification.json>]
+```
+
+Expected release-binary behavior:
+
+- MainNet: the peer-candidate-check ratification gate logs `policy=mainnet-default-strict`; valid ratification exits `0`, missing or bad ratification exits `1` with typed `RatificationRefused(...)` detail.
+- TestNet: same default-strict policy shape as MainNet, though Run 108 evidence focuses on MainNet plus DevNet.
+- DevNet without `--p2p-trust-bundle-ratification-enforcement-enabled`: the gate logs `policy=devnet-no-operator-opt-in` and preserves legacy unratified local-check behavior.
+- DevNet with `--p2p-trust-bundle-ratification-enforcement-enabled`: the gate logs `policy=devnet-operator-opt-in`; valid ratification exits `0`, missing or bad ratification exits `1`.
+
+In all cases this is still validation-only. Operators should expect no sequence write, no root merge, no live trust mutation, no session eviction, no propagation/rebroadcast, no reload-apply, no SIGHUP apply, and no node startup. Evidence and exact logs are under `docs/devnet/run_108_peer_candidate_check_ratification_release_binary_evidence/`; the reusable harness is `scripts/devnet/run_108_peer_candidate_check_ratification_release_binary.sh`.

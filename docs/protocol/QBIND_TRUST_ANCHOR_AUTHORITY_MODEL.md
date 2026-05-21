@@ -1401,3 +1401,21 @@ Security boundaries preserved:
 - live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven apply, rotation/revocation, authority anti-rollback persistence, KMS/HSM, governance, and validator-set rotation remain future work.
 
 Evidence is recorded in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_107.md`. Because release-binary smoke evidence was not produced, Run 107 is partial-positive and does not claim full C4 or C5 closure.
+
+---
+
+## Run 108 update — release-binary evidence closure for local peer-candidate check ratification
+
+Run 108 produces release-binary evidence for the exact Run 107 local CLI surface. The release `qbind-node` binary proves MainNet default-strict ratification on `--p2p-trust-bundle-peer-candidate-check`, including valid-ratification success, missing-ratification fail-closed behavior, and bad-signature fail-closed behavior. It also proves the intended DevNet policy: no opt-in preserves legacy unratified local-check behavior, while `--p2p-trust-bundle-ratification-enforcement-enabled` enforces valid/missing/bad ratification outcomes.
+
+Security boundaries remain unchanged:
+
+- local config alone is still not enough for MainNet bundle-signing authority;
+- authority remains genesis-bound through the canonical genesis hash and authority block;
+- static production source-code anchors remain rejected;
+- rejection remains validation-only and non-mutating;
+- no sequence file is written, no root merge occurs, no live trust state is mutated, no sessions are evicted, no propagation occurs, and the node does not start;
+- no trust-bundle or peer-candidate wire format changes were made;
+- live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven apply, rotation/revocation, authority anti-rollback persistence, KMS/HSM, governance, validator-set rotation, full C4, and C5 remain future work.
+
+Evidence is recorded in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_108.md` and `docs/devnet/run_108_peer_candidate_check_ratification_release_binary_evidence/`. Run 108 closes only the Run 107 release-binary evidence gap for the local peer-candidate check; it does not claim live-path or applying-surface closure.

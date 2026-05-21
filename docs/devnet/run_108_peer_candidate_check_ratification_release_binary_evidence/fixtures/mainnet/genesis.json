@@ -1,0 +1,66 @@
+{
+  "chain_id": "qbind-mainnet-v0",
+  "genesis_time_unix_ms": 1738000000000,
+  "allocations": [
+    {
+      "address": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "amount": 100,
+      "memo": null,
+      "lockup_until_unix_ms": null
+    }
+  ],
+  "validators": [
+    {
+      "address": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "pqc_public_key": "abababababababababababababababababababababababababababababababab",
+      "stake": 100,
+      "name": null,
+      "metadata": null
+    }
+  ],
+  "council": {
+    "members": [
+      "0x3333333333333333333333333333333333333333333333333333333333333333",
+      "0x4444444444444444444444444444444444444444444444444444444444444444",
+      "0x5555555555555555555555555555555555555555555555555555555555555555"
+    ],
+    "threshold": 2
+  },
+  "monetary": {
+    "pqc_premium_compute": 0.3,
+    "pqc_premium_bandwidth": 0.15,
+    "pqc_premium_storage": 0.1,
+    "bootstrap_r_target_annual": 0.05,
+    "bootstrap_inflation_floor_annual": 0.0,
+    "bootstrap_max_annual_inflation_cap": 0.12,
+    "bootstrap_ema_lambda_bps": 700,
+    "bootstrap_max_delta_r_per_epoch_bps": 25,
+    "transition_r_target_annual": 0.04,
+    "transition_inflation_floor_annual": 0.0,
+    "transition_max_annual_inflation_cap": 0.1,
+    "transition_ema_lambda_bps": 300,
+    "transition_max_delta_r_per_epoch_bps": 10,
+    "mature_r_target_annual": 0.03,
+    "mature_inflation_floor_annual": 0.01,
+    "mature_max_annual_inflation_cap": 0.08,
+    "mature_ema_lambda_bps": 150,
+    "mature_max_delta_r_per_epoch_bps": 5,
+    "alpha_fee_offset": 1.0
+  },
+  "extra": null,
+  "authority": {
+    "authority_policy_version": 1,
+    "authority_sequence": 0,
+    "authority_epoch": null,
+    "pqc_transport_roots": [],
+    "bundle_signing_authority_roots": [
+      {
+        "suite_id": 100,
+        "key_fingerprint": "2a52a235c3dd613f655c32fd60b926e15cdccb36e9e852b552626bca65d92549",
+        "label": "run108-bundle-signing-authority",
+        "not_before_epoch": null,
+        "public_key_hex": "ebea016c54d26326c876470c829ea1c0a3fbb9d06f58a9e3e2ebcfed99076ca2a87749db3f99ea2c7b1488b17a849eb7ebd3aa3ba341c6ef8f16fc02872c3a6d77ed62ffa168958e733bd9b683d4bb3877aeeaba6e685b8d53baac3b1df42d6228d50620ea50faca91e567f6239941e7b43c0e4ddb07fe4bda4d9e8b4ef0c1dc1b517836959f9a67b62ceb08fb900f44c98b4bbaac92720643160ac470e8bd82557d244233ad2193584e569529087f498f7920c80f311863da92902f5595692b89f6f5b1756eb69f1874c485b473de6166b715425d6de2e8f1b278407ff4cf9e6db5e3cefc1b4d3337b1be0ca673ed93424d8c5c30ade6f1edc8c69cf20c98ec3fef364b6735ba9e4ec73611534f5ebe553f7e5db723704ba3bbbc8477df6d3b7839b4a624f809e059fd60854ff648113678a8c69a17a33a727b348b9fc43999b6f1aac68e9867952ee37368a657fa234b2b6f37afa42f2d8e851ae28209c314e06a31644a0c312694ae3211c84caeb8ecfc62baee160d48b608b296d3ef0beb2f57918b1b3a8b4045b8ce0d32085f27b69eefc9d4d8a88c4457e3f5930e7f1cc619e238e6a269f34e041698b6c93831a8e2981512302ea7fae04a2a4cb13cff91495a5f8d080e5dbcab33b6594dc99821c85ae832c67e3c9a7733e518b6cfa3697981a1fd0bdc518154d94e35679e25c153a278799f4363f3b3ec56e68822a5c17ebfbd16d865e48c60d8ef6c7c33006e698b540860b6ce494531b7f36efb242b69fe1d866108e25ebb796eb5cc3fe19e442e2a7d939b058a3c4ca3232faa781c6d56b8696b416b42dd08227a211096d8db346a450f2e92a65b322d706cd1687c16492b2bcad0d14be998a6f246788f774cb16f6ee03318ef26e2339d7f0a4c944f74a83378227b3627594e0cfe4a9f6cd275314c206478724d83f5b95b6fd91aefe39c0ba2cdba05757c31a25127f896b758730792c0a3791219a4f9605c8ff0bf46f262e2bfe7a3e753e23ec0b1bab81218b197af7f5b2e610fe96c23fd226e38900bda9195ea716d9451e48edff136b2d2df08673b7534a25302e45745b85359680a02996236093b11ddad4188e4838b16833b241c4119520d9d5602b083af51ff135987787d09836961a2a80d28a2f14b5bc0a3c9da96cbb5e441aa555a5438e94a3536a09ec892267dc86271b691f11e4766c51e1fd594dc3727e49ac2e35c0ff9ac3b1991786d18cf34e3f13084e80eb3656cc9336bc35b45c95caa7fd09e9ca49bcd2ab0de604791deb104c8a0ca4c403ebcb5db878a0752e67e996d5250d7c3ead066e943c3c1ccd42e0619538f67db2e585ec225b319528eac602b3d19cc3d4013907b73e20501a602056058a038513bbb654b223a949918da9975534abbfcef07d3122175c4fa3ee7480edbf21084723b4fd8e9c6a0831f58f4bac5b124e740935c8b527320ba120ccdf52b984d47d2939b431b4d99c8a77384cc247ae203d4fd422956daf2d740a4823ffcec15e33ad706a143d03cb09562f03c2b23685ebf9dc079110b606a1a66ee4e961ed4f067f2aa08c5076a953f5adc80aaee67a76a9feaf617cb9f12b0180dd42341dbbec7f43479dcc23e7821511d424a3cb9aedddfd1c7004f541994fdd8aaa50142b30f2ece61efb7876d5039d1431729cde7bbf806b08a7215c5f0fd977d6c202d258ad045c4ec8fc2f67b15bbe44f0a933d00279e24782726276825daf4c1da563fb3e16143c0bd9970272d065f6e3d043d9b8dad5d60b6dddeaa6444d32dbdd3d54ab05a825423edf84d3cfb5222f4fdcc9c51e76aefdb3fdc46704b31554d882109d269fe17c444cdc4cfb04e"
+      }
+    ]
+  }
+}
