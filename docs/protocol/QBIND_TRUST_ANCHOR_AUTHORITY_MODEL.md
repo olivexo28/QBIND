@@ -1236,4 +1236,61 @@ that relied on either (a) only a 64-hex SHA3 fingerprint, or
 (b) the Run 103 legacy 2624-hex `key_fingerprint` overload, will be
 refused by `validate_for_environment(Mainnet)` and must be
 regenerated using `GenesisAuthorityRoot::with_public_key_bytes(...)`
+
+---
+
+## 21. Run 105 Update — Non-Mutating Ratification Enforcement
+
+Run 105 lands the **first non-mutating enforcement gate** for the
+Run 103/104 verifier on the existing local validation surfaces. It
+introduces no peer-driven path, no live-apply mutation, no
+filesystem watcher, no SIGHUP wiring, and no network listener — those
+remain Run 106+ scope.
+
+### 21.1 What Run 105 enforces
+
+When the operator opts in via
+`--p2p-trust-bundle-ratification-enforcement-enabled`, the binary
+runs `qbind_ledger::enforce_bundle_signing_key_ratification` on the
+candidate bundle's signing key at three positions:
+
+1. **Startup `--p2p-trust-bundle` preflight.** AFTER all
+   Run 050/051/053/057/062/065 validation succeeds and the activation
+   gate is satisfied, BEFORE the Run 055 sequence write and BEFORE
+   bundle roots are merged into `trusted_roots`. Fail-closed prevents
+   any new bundle-signing key from establishing live trust without a
+   genesis-bound ratification.
+2. **`--p2p-trust-bundle-reload-check` validation-only path.** AFTER
+   the Run 069 read-only pipeline succeeds. The reload-check path
+   itself remains read-only on every branch — the gate adds zero
+   file writes.
+3. **New library entry points.** `validate_candidate_bundle_full_with_ratification`
+   and `validate_candidate_bundle_with_ratification` give downstream
+   library consumers (and Run 106+ wiring) a typed,
+   non-breaking-change handle to the gate.
+
+### 21.2 Per-environment policy
+
+* MainNet — always Strict. Refuses unratified bundles in two places
+  (the binary's policy choice AND the helper's
+  `MainnetLegacyUnratifiedRefused` defense in depth).
+* TestNet/DevNet — Strict by default; the operator MAY opt in to
+  `RatificationEnforcementPolicy::AllowLegacyUnratified` via
+  `--p2p-trust-bundle-allow-unratified-testnet-devnet`. The legacy
+  verdict is always logged distinctly as
+  `RatificationEnforcementOutcome::LegacyUnratifiedAccepted`; it is
+  NEVER a "passed ratification" verdict.
+
+### 21.3 What Run 105 explicitly does NOT do
+
+- No peer-driven ratification acceptance (no `0x05` extension, no
+  gossip path, no propagation rebroadcast).
+- No live-apply trust mutation; no session eviction; no SIGHUP wiring.
+- No signing-key custody, rotation, or revocation mechanism.
+- No `--p2p-trust-bundle-peer-candidate-check` binary-side gate
+  wiring (deferred to Run 106; the Run 076 validator path is
+  bit-for-bit unchanged).
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md` for the full
+artefact set, test counts, and operator workflow.
 or by populating `public_key_hex` directly.

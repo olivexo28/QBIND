@@ -86,6 +86,11 @@
 
 use std::path::{Path, PathBuf};
 
+use qbind_ledger::{
+    BundleSigningRatification, GenesisAuthorityConfig, GenesisHash,
+    NetworkEnvironmentPolicy, RatificationEnforcementFailure,
+    RatificationEnforcementInputs, RatificationEnforcementPolicy,
+};
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::pqc_trust_activation::{ActivationCheckOutcome, ActivationContext};
@@ -218,6 +223,13 @@ pub enum ReloadCheckError {
     /// the root id that issued the locally-configured leaf cert
     /// (Run 063 self-check semantics).
     LocalIssuerRootRevoked(LocalLeafIssuerRootSelfCheckError),
+    /// Run 105 — the candidate bundle's signing key was refused by
+    /// the genesis-bound bundle-signing-key ratification enforcer.
+    /// The candidate is rejected BEFORE any mutation side effect on
+    /// every Run 069 / Run 077 / startup non-mutating validation
+    /// surface that opts into enforcement. Live trust state, the
+    /// on-disk sequence record, and all sessions are unchanged.
+    RatificationRefused(RatificationEnforcementFailure),
 }
 
 impl std::fmt::Display for ReloadCheckError {
@@ -233,6 +245,11 @@ impl std::fmt::Display for ReloadCheckError {
             Self::LocalIssuerRootRevoked(e) => write!(
                 f,
                 "candidate rejects local issuer root via active root-revocation list: {}",
+                e
+            ),
+            Self::RatificationRefused(e) => write!(
+                f,
+                "candidate refused by Run 105 bundle-signing-key ratification enforcement: {}",
                 e
             ),
         }
@@ -406,6 +423,34 @@ pub struct ReloadCheckInputs<'a> {
     pub local_leaf_cert_bytes: Option<&'a [u8]>,
 }
 
+/// Run 105 — operator-supplied genesis authority + ratification
+/// context for the non-mutating enforcement gate.
+///
+/// All fields are required so the enforcer never falls back to
+/// ambient state. Constructed once at the call site (startup
+/// preflight, reload-check, peer-candidate check) from values
+/// already in scope after Run 102 boot-time genesis verification.
+#[derive(Debug, Clone)]
+pub struct RatificationEnforcementContext<'a> {
+    /// Genesis-bound authority block (Run 101/104). The enforcer
+    /// consults `bundle_signing_authority_roots` only.
+    pub authority: &'a GenesisAuthorityConfig,
+    /// Canonical genesis hash the runtime computed (Run 102).
+    pub expected_genesis_hash: &'a GenesisHash,
+    /// Per-environment policy enum for the verifier (1:1 with
+    /// `inputs.environment` mapped to [`NetworkEnvironmentPolicy`]).
+    pub expected_environment_policy: NetworkEnvironmentPolicy,
+    /// String form of `inputs.chain_id` expected by the verifier.
+    /// Pre-formatted at the call site so the verifier doesn't pull
+    /// `qbind-types` into its API surface.
+    pub expected_chain_id_str: &'a str,
+    /// Optional ratification object. `None` triggers the
+    /// `Missing` / `LegacyUnratifiedAccepted` branch per `policy`.
+    pub ratification: Option<&'a BundleSigningRatification>,
+    /// Per-surface enforcement policy.
+    pub policy: RatificationEnforcementPolicy,
+}
+
 /// Run 069 entry point: validate a candidate trust bundle without
 /// mutating any live state. Returns [`ValidatedCandidate`] metadata
 /// on success or [`ReloadCheckError`] on any fail-closed condition.
@@ -516,6 +561,138 @@ pub fn validate_candidate_bundle_full(
         sequence_persistence_path: inputs.sequence_persistence_path.map(PathBuf::from),
     };
     Ok((loaded, activation, candidate))
+}
+
+/// Run 105 — entry point that wraps [`validate_candidate_bundle_full`]
+/// with a non-mutating bundle-signing-key ratification enforcement
+/// gate.
+///
+/// All Run 050–065/061/063 checks of the inner function are run
+/// FIRST, completely unchanged. ONLY on a successful inner verdict
+/// does this function consult
+/// [`qbind_ledger::enforce_bundle_signing_key_ratification`]. If the
+/// gate refuses the candidate, the call returns
+/// [`ReloadCheckError::RatificationRefused`] and:
+///
+/// * NO live trust state is mutated;
+/// * NO on-disk sequence record is mutated;
+/// * NO sessions are evicted;
+/// * NO metrics families are mutated by this function (callers MAY
+///   surface the verdict on their own metric surfaces).
+///
+/// Unsigned bundles (DevNet-only) carry no signing key to ratify; in
+/// that structurally-inapplicable case the gate is silently skipped
+/// (the inner loader contract already refuses unsigned bundles on
+/// MainNet/TestNet via `TrustBundleError::UnsignedBundleNotAllowed`,
+/// so this branch is only reachable on DevNet).
+///
+/// This function exists as a separate entry point so that pre-Run-105
+/// callers do not need to opt in or change call shape; the only
+/// difference between this and [`validate_candidate_bundle_full`] is
+/// the additional ratification gate at the very end.
+pub fn validate_candidate_bundle_full_with_ratification(
+    inputs: ReloadCheckInputs<'_>,
+    ratification_ctx: &RatificationEnforcementContext<'_>,
+) -> Result<(LoadedTrustBundle, ActivationCheckOutcome, ValidatedCandidate), ReloadCheckError> {
+    let signing_keys = inputs.signing_keys;
+    let (loaded, activation, candidate) = validate_candidate_bundle_full(inputs)?;
+
+    // Resolve the bundle-signing key bytes for the verified bundle.
+    // For DevNet-unsigned bundles the gate is structurally
+    // inapplicable; on MainNet/TestNet the loader already refused
+    // them, so we never reach this branch with `Unsigned` there.
+    if let Some(signing_pk) = resolve_loaded_bundle_signing_public_key(&loaded, signing_keys) {
+        let outcome = qbind_ledger::enforce_bundle_signing_key_ratification(
+            RatificationEnforcementInputs {
+                ratification: ratification_ctx.ratification,
+                authority: ratification_ctx.authority,
+                expected_chain_id: ratification_ctx.expected_chain_id_str,
+                expected_environment: ratification_ctx.expected_environment_policy,
+                expected_genesis_hash: ratification_ctx.expected_genesis_hash,
+                candidate_bundle_signing_public_key: signing_pk,
+                policy: ratification_ctx.policy,
+            },
+        )
+        .map_err(ReloadCheckError::RatificationRefused)?;
+        // Verdict diagnostics are surfaced by the call site; the
+        // validator itself is silent on a successful accept branch
+        // (matches the Run 069 contract).
+        let _ = outcome;
+    }
+
+    Ok((loaded, activation, candidate))
+}
+
+/// Run 105 — convenience entry point that mirrors
+/// [`validate_candidate_bundle`] but applies the ratification gate.
+/// See [`validate_candidate_bundle_full_with_ratification`] for the
+/// detailed contract.
+pub fn validate_candidate_bundle_with_ratification(
+    inputs: ReloadCheckInputs<'_>,
+    ratification_ctx: &RatificationEnforcementContext<'_>,
+) -> Result<ValidatedCandidate, ReloadCheckError> {
+    let (loaded, _activation, candidate) =
+        validate_candidate_bundle_full_with_ratification(inputs, ratification_ctx)?;
+    let _ = loaded;
+    Ok(candidate)
+}
+
+/// Run 105 helper — resolve the bundle-signing public key bytes for a
+/// successfully loaded trust bundle.
+///
+/// The startup loader produces a [`LoadedTrustBundle`] whose
+/// [`crate::pqc_trust_bundle::BundleSignatureStatus`] reports either
+/// `Unsigned` (DevNet-only) or `Verified { signing_key_id }`. For the
+/// verified case, the caller's configured [`BundleSigningKeySet`]
+/// contains the public-key bytes keyed by the same 64-char lowercase
+/// hex `signing_key_id`; this helper performs the lookup and returns
+/// the bytes. Returns `None` for the unsigned case (the Run 105
+/// ratification gate is structurally inapplicable).
+fn resolve_loaded_bundle_signing_public_key<'a>(
+    loaded: &LoadedTrustBundle,
+    signing_keys: &'a BundleSigningKeySet,
+) -> Option<&'a [u8]> {
+    match &loaded.signature_status {
+        crate::pqc_trust_bundle::BundleSignatureStatus::Unsigned => None,
+        crate::pqc_trust_bundle::BundleSignatureStatus::Verified { signing_key_id } => {
+            // The loader has already validated the hex form, so this
+            // decode cannot fail in practice; we still fail closed
+            // (return None) on any structural surprise rather than
+            // panic. A None here would short-circuit the gate, which
+            // is safe because the caller treats "no key resolvable"
+            // as "skip ratification" — and that path is only ever
+            // reachable for unsigned DevNet bundles, never on
+            // MainNet/TestNet under the loader's existing contract.
+            let mut bytes = [0u8; 32];
+            if !decode_hex_into_32(signing_key_id, &mut bytes) {
+                return None;
+            }
+            signing_keys.lookup(&bytes).map(|k| k.pk_bytes.as_slice())
+        }
+    }
+}
+
+fn decode_hex_into_32(s: &str, out: &mut [u8; 32]) -> bool {
+    if s.len() != 64 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < 64 {
+        let hi = match bytes[i] {
+            b'0'..=b'9' => bytes[i] - b'0',
+            b'a'..=b'f' => 10 + bytes[i] - b'a',
+            _ => return false,
+        };
+        let lo = match bytes[i + 1] {
+            b'0'..=b'9' => bytes[i + 1] - b'0',
+            b'a'..=b'f' => 10 + bytes[i + 1] - b'a',
+            _ => return false,
+        };
+        out[i / 2] = (hi << 4) | lo;
+        i += 2;
+    }
+    true
 }
 
 // ============================================================================

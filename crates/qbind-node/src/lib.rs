@@ -120,6 +120,12 @@ pub mod pqc_devnet_helper;
 // operator surface. See `pqc_boot_genesis.rs` and
 // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`.
 pub mod pqc_boot_genesis;
+// Run 105 — operator-supplied bundle-signing-key ratification sidecar
+// JSON loader. Wraps `qbind_ledger::BundleSigningRatification` parsing
+// with operator-friendly typed I/O / parse errors. Pure read-only,
+// local-file-only loader; verification happens via
+// `qbind_ledger::enforce_bundle_signing_key_ratification`.
+pub mod pqc_ratification_input;
 // Run 050 — production-honest PQC transport trust-anchor bundle
 // (environment binding, root status + window, revocation entries,
 // canonical fingerprint, DevNet-unsigned scaffolding boundary).

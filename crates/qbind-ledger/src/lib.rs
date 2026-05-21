@@ -170,3 +170,10 @@ pub use bundle_signing_ratification::{
     RatificationFailure, RatificationVerifierInputs, RatifiedBundleSigningKey,
     BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1, BUNDLE_SIGNING_RATIFICATION_VERSION_V1,
 };
+
+// Run 105: Non-mutating ratification enforcement layer exports.
+pub use bundle_signing_ratification::{
+    enforce_bundle_signing_key_ratification, RatificationEnforcementFailure,
+    RatificationEnforcementInputs, RatificationEnforcementOutcome,
+    RatificationEnforcementPolicy,
+};

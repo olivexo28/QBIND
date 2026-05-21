@@ -940,6 +940,289 @@ pub fn pqc_public_key_fingerprint(pk: &[u8]) -> String {
 }
 
 // ===========================================================================
+// Run 105 — Enforcement layer for non-mutating validation surfaces
+// ===========================================================================
+
+/// Run 105 — environment-policy escape hatch for legacy DevNet/TestNet
+/// callers that have not yet migrated to genesis-bound ratification.
+///
+/// Production policy:
+///
+///   * MainNet → MUST be [`RatificationEnforcementPolicy::Strict`].
+///     Local config alone is NEVER sufficient on MainNet.
+///   * TestNet → SHOULD be `Strict`. The
+///     [`RatificationEnforcementPolicy::AllowLegacyUnratified`] policy
+///     is permitted only when the operator has explicitly opted in via
+///     CLI/config, and MUST be logged loudly.
+///   * DevNet → MAY be `AllowLegacyUnratified` for local development
+///     workflows; the absence of a ratification object is then surfaced
+///     as a [`RatificationEnforcementOutcome::LegacyUnratifiedAccepted`]
+///     verdict (NOT silently treated as ratified).
+///
+/// The enforcer NEVER converts `AllowLegacyUnratified` into a verified
+/// outcome — operators see the precise verdict in logs and metrics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RatificationEnforcementPolicy {
+    /// Ratification is mandatory. Missing ratification fails closed
+    /// with [`RatificationEnforcementFailure::Missing`]. This is the
+    /// only policy permitted on MainNet.
+    Strict,
+    /// Ratification is optional on this surface. If supplied, it MUST
+    /// verify; if absent, the call returns
+    /// [`RatificationEnforcementOutcome::LegacyUnratifiedAccepted`]
+    /// rather than failing. The caller is responsible for logging and
+    /// for refusing this outcome on MainNet (the enforcer also refuses
+    /// `AllowLegacyUnratified` on MainNet — defense in depth).
+    AllowLegacyUnratified,
+}
+
+/// Outcome of [`enforce_bundle_signing_key_ratification`] on a successful
+/// path. Never returned for an explicit failure; failures are typed
+/// [`RatificationEnforcementFailure`] values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RatificationEnforcementOutcome {
+    /// A ratification object was supplied AND verified by the Run 103
+    /// verifier AND its `bundle_signing_public_key` matches the
+    /// candidate trust-bundle's signing key.
+    Ratified(RatifiedBundleSigningKey),
+    /// No ratification object was supplied AND the policy is
+    /// [`RatificationEnforcementPolicy::AllowLegacyUnratified`] (and
+    /// the runtime environment is NOT MainNet). Callers MUST log this
+    /// verdict — it is explicitly NOT a "passed" outcome and is never
+    /// available on MainNet.
+    LegacyUnratifiedAccepted {
+        /// SHA3-256 fingerprint of the locally-configured bundle-signing
+        /// key, lowercase hex. Carried so the operator log can name the
+        /// key that was accepted under the legacy policy.
+        bundle_signing_public_key_fingerprint: String,
+    },
+}
+
+/// Run 105 — typed failure reasons for the enforcement layer.
+///
+/// Maps cleanly to operator log lines and to error variants in
+/// downstream surfaces (`TrustBundleError`, `ReloadCheckError`,
+/// `PeerCandidateRejection`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RatificationEnforcementFailure {
+    /// MainNet was supplied with `AllowLegacyUnratified` policy.
+    /// Refused unconditionally — defense in depth against caller bugs.
+    LegacyUnratifiedRefusedOnMainnet,
+    /// MainNet/TestNet (under [`RatificationEnforcementPolicy::Strict`])
+    /// requires a ratification object, but none was supplied. The
+    /// candidate bundle is refused before any mutation side effect.
+    Missing {
+        environment: RatificationEnvironment,
+        /// SHA3-256 fingerprint of the candidate bundle's signing key
+        /// (lowercase hex), so the operator log can name what was
+        /// refused without exposing key bytes.
+        bundle_signing_public_key_fingerprint: String,
+    },
+    /// The supplied ratification object failed Run 103 verification.
+    /// Wraps the precise typed reason. The candidate bundle is refused
+    /// before any mutation side effect.
+    Verifier(RatificationFailure),
+    /// The supplied ratification verified, but its
+    /// `bundle_signing_public_key` does NOT match the candidate
+    /// trust-bundle's signing key. This catches the case where an
+    /// operator supplies a *valid* ratification for some *other* key.
+    RatifiesDifferentKey {
+        /// Fingerprint of the key authorised by the ratification.
+        ratified_fingerprint: String,
+        /// Fingerprint of the key the candidate trust bundle was
+        /// actually signed by.
+        candidate_fingerprint: String,
+    },
+    /// The genesis authority block does not contain ANY
+    /// `bundle_signing_authority_roots` entries. Without a ratifying
+    /// authority surface MainNet/TestNet cannot enforce ratification —
+    /// fail closed rather than silently accept any local key.
+    NoBundleSigningAuthorityConfigured {
+        environment: RatificationEnvironment,
+    },
+}
+
+impl std::fmt::Display for RatificationEnforcementFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RatificationEnforcementFailure::LegacyUnratifiedRefusedOnMainnet => write!(
+                f,
+                "bundle-signing ratification enforcement refused: legacy unratified policy is not \
+                 permitted on MainNet (Run 105 invariant; MainNet always requires ratification)"
+            ),
+            RatificationEnforcementFailure::Missing {
+                environment,
+                bundle_signing_public_key_fingerprint,
+            } => write!(
+                f,
+                "bundle-signing ratification missing: environment={} requires a ratification \
+                 object for bundle-signing key {} (Run 105 strict enforcement)",
+                environment.tag(),
+                bundle_signing_public_key_fingerprint
+            ),
+            RatificationEnforcementFailure::Verifier(e) => write!(f, "{}", e),
+            RatificationEnforcementFailure::RatifiesDifferentKey {
+                ratified_fingerprint,
+                candidate_fingerprint,
+            } => write!(
+                f,
+                "bundle-signing ratification authorises a different key: ratified={} candidate={}",
+                ratified_fingerprint, candidate_fingerprint
+            ),
+            RatificationEnforcementFailure::NoBundleSigningAuthorityConfigured { environment } => {
+                write!(
+                    f,
+                    "bundle-signing ratification cannot be enforced: genesis authority block \
+                     contains zero bundle_signing_authority_roots on environment={} (Run 105 \
+                     refuses to silently accept any local signing key in this configuration)",
+                    environment.tag()
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for RatificationEnforcementFailure {}
+
+impl From<RatificationFailure> for RatificationEnforcementFailure {
+    fn from(e: RatificationFailure) -> Self {
+        RatificationEnforcementFailure::Verifier(e)
+    }
+}
+
+/// Run 105 — inputs to [`enforce_bundle_signing_key_ratification`].
+///
+/// All fields are required so the enforcer never falls back to ambient
+/// state. Callers compute / supply them explicitly from their existing
+/// runtime context.
+pub struct RatificationEnforcementInputs<'a> {
+    /// Optional ratification object (parsed from a sidecar JSON file or
+    /// equivalent operator-supplied source). `None` triggers the
+    /// `Missing` / `LegacyUnratifiedAccepted` policy branch.
+    pub ratification: Option<&'a BundleSigningRatification>,
+    /// Genesis-bound authority block (Run 101/104). The enforcer
+    /// consults `bundle_signing_authority_roots` only.
+    pub authority: &'a GenesisAuthorityConfig,
+    /// Expected runtime chain id.
+    pub expected_chain_id: &'a str,
+    /// Expected runtime environment policy.
+    pub expected_environment: NetworkEnvironmentPolicy,
+    /// Canonical genesis hash the runtime computed (Run 102).
+    pub expected_genesis_hash: &'a GenesisHash,
+    /// Bundle-signing public key actually used to sign the candidate
+    /// trust bundle. Used to bind the verified ratification to the
+    /// concrete key the loader accepted: a ratification authorising
+    /// some *other* key is refused as `RatifiesDifferentKey`.
+    pub candidate_bundle_signing_public_key: &'a [u8],
+    /// Per-surface enforcement policy. MainNet MUST pass `Strict`.
+    /// `AllowLegacyUnratified` is refused on MainNet by the enforcer
+    /// itself — defense in depth.
+    pub policy: RatificationEnforcementPolicy,
+}
+
+/// Run 105 — non-mutating ratification enforcement entry point.
+///
+/// Used by trust-bundle validation surfaces (startup preflight,
+/// reload-check, peer-candidate-check). Returns
+/// [`RatificationEnforcementOutcome`] on a clean accept verdict and
+/// [`RatificationEnforcementFailure`] on any fail-closed condition.
+///
+/// The function is pure: it neither reads nor writes any global state,
+/// touches no files, and has no side effects beyond returning a typed
+/// outcome. Callers MUST run this BEFORE any sequence write, root
+/// merge, live trust swap, session eviction, sequence commit, or
+/// rebroadcast/propagation acceptance.
+///
+/// # Decision matrix
+///
+/// | Policy / Env | ratification supplied | not supplied |
+/// |--------------|-----------------------|--------------|
+/// | `Strict` / MainNet | verified+matched → `Ratified` (else fail closed) | `Missing` |
+/// | `Strict` / TestNet | verified+matched → `Ratified` (else fail closed) | `Missing` |
+/// | `Strict` / DevNet  | verified+matched → `Ratified` (else fail closed) | `Missing` |
+/// | `AllowLegacyUnratified` / MainNet | **always refused** (`LegacyUnratifiedRefusedOnMainnet`) | **always refused** (same) |
+/// | `AllowLegacyUnratified` / TestNet | verified+matched → `Ratified` (else fail closed) | `LegacyUnratifiedAccepted` |
+/// | `AllowLegacyUnratified` / DevNet  | verified+matched → `Ratified` (else fail closed) | `LegacyUnratifiedAccepted` |
+///
+/// In every row, transport-root authority and unknown roots fail
+/// closed via the underlying Run 103 verifier (`TransportRootNotAllowed`,
+/// `UnknownAuthorityRoot`).
+pub fn enforce_bundle_signing_key_ratification<'a>(
+    inputs: RatificationEnforcementInputs<'a>,
+) -> Result<RatificationEnforcementOutcome, RatificationEnforcementFailure> {
+    let env = RatificationEnvironment::from_policy(inputs.expected_environment);
+    let candidate_fp = sha3_256_hex(inputs.candidate_bundle_signing_public_key);
+
+    // 0. Defense-in-depth: refuse legacy-unratified on MainNet under any
+    //    code path, even if the caller passed it by mistake.
+    if matches!(inputs.policy, RatificationEnforcementPolicy::AllowLegacyUnratified)
+        && matches!(env, RatificationEnvironment::Mainnet)
+    {
+        return Err(RatificationEnforcementFailure::LegacyUnratifiedRefusedOnMainnet);
+    }
+
+    // 1. Strict surface that has zero bundle-signing authority roots
+    //    cannot enforce ratification — fail closed rather than silently
+    //    accept any local key. (DevNet `AllowLegacyUnratified` may
+    //    still proceed via the explicit legacy branch below, since the
+    //    operator opted in.)
+    if matches!(inputs.policy, RatificationEnforcementPolicy::Strict)
+        && inputs.authority.bundle_signing_authority_roots.is_empty()
+    {
+        return Err(RatificationEnforcementFailure::NoBundleSigningAuthorityConfigured {
+            environment: env,
+        });
+    }
+
+    match inputs.ratification {
+        None => {
+            // 2a. Missing ratification under strict policy: fail closed.
+            match inputs.policy {
+                RatificationEnforcementPolicy::Strict => {
+                    Err(RatificationEnforcementFailure::Missing {
+                        environment: env,
+                        bundle_signing_public_key_fingerprint: candidate_fp,
+                    })
+                }
+                RatificationEnforcementPolicy::AllowLegacyUnratified => {
+                    // 2b. Legacy DevNet/TestNet: explicit non-failure
+                    //     verdict that callers MUST surface in logs.
+                    Ok(RatificationEnforcementOutcome::LegacyUnratifiedAccepted {
+                        bundle_signing_public_key_fingerprint: candidate_fp,
+                    })
+                }
+            }
+        }
+        Some(ratification) => {
+            // 3. Run 103 verifier — single source of truth for the
+            //    crypto / chain / env / genesis / authority-root
+            //    binding. Any failure surfaces precisely.
+            let ratified = verify_bundle_signing_key_ratification(RatificationVerifierInputs {
+                ratification,
+                authority: inputs.authority,
+                expected_chain_id: inputs.expected_chain_id,
+                expected_environment: inputs.expected_environment,
+                expected_genesis_hash: inputs.expected_genesis_hash,
+            })?;
+
+            // 4. Bind the verified ratification to the concrete
+            //    bundle-signing key the loader accepted. Without this
+            //    check an operator could supply a valid ratification
+            //    for some *other* key and have a bundle signed by a
+            //    different key still pass.
+            if ratified.public_key.as_slice() != inputs.candidate_bundle_signing_public_key {
+                return Err(RatificationEnforcementFailure::RatifiesDifferentKey {
+                    ratified_fingerprint: ratified.fingerprint.clone(),
+                    candidate_fingerprint: candidate_fp,
+                });
+            }
+
+            Ok(RatificationEnforcementOutcome::Ratified(ratified))
+        }
+    }
+}
+
+// ===========================================================================
 // Test-only signer helper
 // ===========================================================================
 
@@ -1874,5 +2157,328 @@ mod tests {
             "got {:?}",
             err
         );
+    }
+
+    // -----------------------------------------------------------------
+    // Run 105 — enforcement-layer tests
+    // -----------------------------------------------------------------
+
+    fn mk_enforcement_inputs<'a>(
+        ratification: Option<&'a BundleSigningRatification>,
+        authority: &'a GenesisAuthorityConfig,
+        chain_id: &'a str,
+        env: NetworkEnvironmentPolicy,
+        gh: &'a GenesisHash,
+        bundle_signing_pk: &'a [u8],
+        policy: RatificationEnforcementPolicy,
+    ) -> RatificationEnforcementInputs<'a> {
+        RatificationEnforcementInputs {
+            ratification,
+            authority,
+            expected_chain_id: chain_id,
+            expected_environment: env,
+            expected_genesis_hash: gh,
+            candidate_bundle_signing_public_key: bundle_signing_pk,
+            policy,
+        }
+    }
+
+    #[test]
+    fn run_105_strict_mainnet_accepts_valid_ratification() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let outcome = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            Some(&r),
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .expect("valid ratification must succeed under strict mainnet");
+        match outcome {
+            RatificationEnforcementOutcome::Ratified(rk) => {
+                assert_eq!(rk.public_key, bsk_pk);
+                assert_eq!(rk.signature_suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44);
+            }
+            other => panic!("expected Ratified, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run_105_strict_mainnet_rejects_missing_ratification() {
+        let (auth_pk, _auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            None,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .unwrap_err();
+        match err {
+            RatificationEnforcementFailure::Missing {
+                environment,
+                bundle_signing_public_key_fingerprint,
+            } => {
+                assert_eq!(environment, RatificationEnvironment::Mainnet);
+                assert_eq!(bundle_signing_public_key_fingerprint, sha3_256_hex(&bsk_pk));
+            }
+            other => panic!("expected Missing, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run_105_strict_testnet_rejects_missing_ratification() {
+        let (auth_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-testnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Testnet);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            None,
+            auth,
+            "qbind-testnet-v0",
+            NetworkEnvironmentPolicy::Testnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            RatificationEnforcementFailure::Missing { .. }
+        ));
+    }
+
+    #[test]
+    fn run_105_mainnet_refuses_legacy_unratified_policy() {
+        let (auth_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            None,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::AllowLegacyUnratified,
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            RatificationEnforcementFailure::LegacyUnratifiedRefusedOnMainnet
+        ));
+    }
+
+    #[test]
+    fn run_105_devnet_legacy_unratified_returns_explicit_verdict() {
+        let (auth_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-devnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Devnet);
+        let auth = cfg.authority.as_ref().unwrap();
+        let outcome = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            None,
+            auth,
+            "qbind-devnet-v0",
+            NetworkEnvironmentPolicy::Devnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::AllowLegacyUnratified,
+        ))
+        .expect("DevNet legacy-unratified must produce an explicit verdict, not a failure");
+        match outcome {
+            RatificationEnforcementOutcome::LegacyUnratifiedAccepted {
+                bundle_signing_public_key_fingerprint,
+            } => {
+                assert_eq!(bundle_signing_public_key_fingerprint, sha3_256_hex(&bsk_pk));
+            }
+            other => panic!("expected LegacyUnratifiedAccepted, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run_105_rejects_ratification_for_different_key() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk_a, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk_b, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        // Ratify key A
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk_a,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        // But supply candidate key B
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            Some(&r),
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk_b,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .unwrap_err();
+        match err {
+            RatificationEnforcementFailure::RatifiesDifferentKey {
+                ratified_fingerprint,
+                candidate_fingerprint,
+            } => {
+                assert_eq!(ratified_fingerprint, sha3_256_hex(&bsk_pk_a));
+                assert_eq!(candidate_fingerprint, sha3_256_hex(&bsk_pk_b));
+            }
+            other => panic!("expected RatifiesDifferentKey, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run_105_propagates_verifier_failure_on_wrong_chain() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        // Ratification bound to a *different* chain
+        let r = test_helpers::build_signed_ratification(
+            "some-other-chain-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            Some(&r),
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            RatificationEnforcementFailure::Verifier(RatificationFailure::ChainMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn run_105_strict_refuses_when_authority_block_has_no_bundle_signing_roots() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        // Strip bundle-signing roots after construction.
+        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots.clear();
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            Some(&r),
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            RatificationEnforcementFailure::NoBundleSigningAuthorityConfigured { .. }
+        ));
+    }
+
+    #[test]
+    fn run_105_transport_root_cannot_ratify_via_enforcer() {
+        // Construct a genesis with only a transport root (no bundle-
+        // signing root). The enforcer's strict-no-bundle-signing-roots
+        // gate fires first, but if a bundle-signing root is also
+        // present and the operator points the ratification at the
+        // transport root, the verifier rejects with TransportRootNotAllowed.
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (transport_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        // Add a transport root and have the ratification point at it.
+        cfg.authority.as_mut().unwrap().pqc_transport_roots.push(
+            GenesisAuthorityRoot::new(
+                GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+                &full_pk_hex(&transport_pk),
+                "transport-1",
+            ),
+        );
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+        );
+        // Re-target the ratification at the transport root fingerprint
+        // (signature is now invalid for that key, but the verifier
+        // returns TransportRootNotAllowed before reaching signature
+        // verification because the lookup happens first).
+        r.authority_root_fingerprint = full_pk_hex(&transport_pk);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = enforce_bundle_signing_key_ratification(mk_enforcement_inputs(
+            Some(&r),
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+            &bsk_pk,
+            RatificationEnforcementPolicy::Strict,
+        ))
+        .unwrap_err();
+        match err {
+            RatificationEnforcementFailure::Verifier(
+                RatificationFailure::TransportRootNotAllowed { .. },
+            )
+            | RatificationEnforcementFailure::Verifier(
+                RatificationFailure::UnknownAuthorityRoot { .. },
+            ) => {}
+            other => panic!(
+                "expected TransportRootNotAllowed or UnknownAuthorityRoot, got {:?}",
+                other
+            ),
+        }
     }
 }

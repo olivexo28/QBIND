@@ -654,6 +654,74 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_propagation_enabled: bool,
 
+    /// Run 105 — disabled-by-default operator opt-in flag for the
+    /// **non-mutating bundle-signing-key ratification enforcement**
+    /// layer. Without this flag, supplying `--p2p-trust-bundle-ratification
+    /// <PATH>` is refused as a configuration error so the operator
+    /// can never accidentally "arm" enforcement by typing the path
+    /// flag alone.
+    ///
+    /// With this flag plus a path, the binary loads the sidecar
+    /// JSON ratification, calls
+    /// `qbind_ledger::enforce_bundle_signing_key_ratification`, and
+    /// fails closed BEFORE any mutation side effect on the three
+    /// non-mutating validation surfaces (Run 050/051/053/057/062/065
+    /// startup preflight, Run 069 reload-check, Run 077 peer-candidate
+    /// check). On MainNet/TestNet, supplying this flag without a
+    /// `--p2p-trust-bundle-ratification` path is fatal.
+    ///
+    /// **This is NOT live propagation, NOT reload-apply, NOT
+    /// SIGHUP, NOT a network listener.** It is the smallest safe
+    /// non-mutating enforcement primitive. See
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md`.
+    #[arg(
+        long = "p2p-trust-bundle-ratification-enforcement-enabled",
+        hide = true
+    )]
+    pub p2p_trust_bundle_ratification_enforcement_enabled: bool,
+
+    /// Run 105 — operator-supplied local file path of a
+    /// [`qbind_ledger::BundleSigningRatification`] sidecar JSON
+    /// document binding the candidate trust bundle's signing key to a
+    /// genesis-bound bundle-signing authority root.
+    ///
+    /// Requires `--p2p-trust-bundle-ratification-enforcement-enabled`.
+    /// Disabled by default. Local file only — no network input, no
+    /// peer / gossip input. The file is read once, parsed, passed to
+    /// the Run 103/105 verifier, and the binary either proceeds or
+    /// fails closed with a typed reason. The file is NEVER written;
+    /// no on-disk persistence is touched.
+    ///
+    /// Used by:
+    ///   * `--p2p-trust-bundle` (startup preflight),
+    ///   * `--p2p-trust-bundle-reload-check` (Run 069 validation-only),
+    ///   * `--p2p-trust-bundle-peer-candidate-check` (Run 077
+    ///     validation-only).
+    ///
+    /// On MainNet under enforcement-enabled, this flag is REQUIRED;
+    /// on TestNet it is REQUIRED unless
+    /// `--p2p-trust-bundle-allow-unratified-testnet` is also
+    /// supplied; on DevNet it is OPTIONAL.
+    #[arg(long = "p2p-trust-bundle-ratification", hide = true)]
+    pub p2p_trust_bundle_ratification: Option<PathBuf>,
+
+    /// Run 105 — DevNet/TestNet-only escape hatch that permits an
+    /// unratified bundle-signing key when no
+    /// `--p2p-trust-bundle-ratification` sidecar is supplied. Refused
+    /// on MainNet (the enforcer itself refuses the legacy policy on
+    /// MainNet, defense in depth).
+    ///
+    /// When this flag is supplied AND no ratification path is set,
+    /// the enforcement layer returns
+    /// `RatificationEnforcementOutcome::LegacyUnratifiedAccepted`
+    /// rather than failing — the verdict is logged loudly and is
+    /// explicitly NOT a "passed" outcome.
+    #[arg(
+        long = "p2p-trust-bundle-allow-unratified-testnet-devnet",
+        hide = true
+    )]
+    pub p2p_trust_bundle_allow_unratified_testnet_devnet: bool,
+
     // ========================================================================
     // Node Identity & Storage
     // ========================================================================

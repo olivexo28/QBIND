@@ -116,10 +116,330 @@ fn derive_run_096_reconfig_proposal(
     .map_err(|e| e.to_string())
 }
 
+/// Run 105 — startup-only helper that applies the non-mutating
+/// bundle-signing-key ratification enforcement gate to a successfully-
+/// loaded trust bundle. Returns `Err(reason_string)` to fail closed
+/// with an operator-log-friendly message; the caller exits non-zero
+/// without writing the Run 055 sequence record and without merging
+/// any new root into the live PQC trust set.
+///
+/// The function is intentionally pure: it neither mutates any global
+/// state nor touches any file other than the operator-supplied
+/// genesis JSON (re-read here to obtain the authority block; the
+/// boot-time `BootGenesisOutcome` only carries the canonical hash) and
+/// the operator-supplied ratification sidecar JSON. Both paths are
+/// already trusted local files (same trust assumption as
+/// `--p2p-trust-bundle` itself).
+fn apply_run_105_ratification_gate_at_startup(
+    args: &CliArgs,
+    config: &qbind_node::node_config::NodeConfig,
+    loaded: &qbind_node::pqc_trust_bundle::LoadedTrustBundle,
+    bundle_signing_keys: &qbind_node::pqc_trust_bundle::BundleSigningKeySet,
+) -> Result<(), String> {
+    use qbind_ledger::{
+        enforce_bundle_signing_key_ratification, RatificationEnforcementInputs,
+        RatificationEnforcementOutcome, RatificationEnforcementPolicy,
+    };
+    use qbind_node::pqc_boot_genesis::{load_external_genesis, map_environment};
+    use qbind_node::pqc_ratification_input::load_ratification_from_path;
+    use qbind_node::pqc_trust_bundle::BundleSignatureStatus;
+    use qbind_types::NetworkEnvironment;
+
+    // 1. Resolve genesis authority block + canonical genesis hash.
+    //    The Run 102 boot-time verifier already validated these; we
+    //    re-load the same operator-supplied file here to extract the
+    //    authority block. No fallback to defaults: a missing or
+    //    malformed file is a fatal startup error (and is unreachable
+    //    anyway because Run 102 already passed).
+    let genesis_path = match config.genesis_source.genesis_path.as_ref() {
+        Some(p) => p.clone(),
+        None => {
+            // DevNet/TestNet without external genesis: there is no
+            // operator-supplied authority block to bind against.
+            // Under the operator-opt-in flag, we still refuse on
+            // MainNet (boot would already have failed). On DevNet/
+            // TestNet, fall back to the legacy unratified verdict
+            // ONLY when the operator explicitly opted in via the
+            // companion flag.
+            if matches!(config.environment, NetworkEnvironment::Mainnet) {
+                return Err(
+                    "MainNet startup requires an external --genesis-path with a populated \
+                     authority block; Run 105 ratification cannot be enforced without it"
+                        .to_string(),
+                );
+            }
+            if !args.p2p_trust_bundle_allow_unratified_testnet_devnet {
+                return Err(format!(
+                    "environment={:?} has no external genesis file configured, so the genesis \
+                     authority block is not available for Run 105 ratification enforcement; \
+                     pass --p2p-trust-bundle-allow-unratified-testnet-devnet to opt in to the \
+                     legacy unratified verdict on this surface",
+                    config.environment
+                ));
+            }
+            eprintln!(
+                "[run-105] no external genesis file configured; surface evaluated under \
+                 explicit --p2p-trust-bundle-allow-unratified-testnet-devnet opt-in. \
+                 Bundle-signing key {} accepted under legacy DevNet/TestNet policy; this \
+                 verdict is NOT a passed ratification.",
+                fingerprint_for_log(loaded, bundle_signing_keys),
+            );
+            return Ok(());
+        }
+    };
+
+    let genesis_cfg = load_external_genesis(&genesis_path).map_err(|e| {
+        format!(
+            "failed to re-load external genesis file at {} for Run 105 ratification \
+             enforcement: {}",
+            genesis_path.display(),
+            e
+        )
+    })?;
+    let authority = genesis_cfg.authority.as_ref().ok_or_else(|| {
+        format!(
+            "external genesis file at {} has no authority block; Run 105 cannot enforce \
+             ratification without bundle_signing_authority_roots",
+            genesis_path.display()
+        )
+    })?;
+    let env_policy = map_environment(config.environment);
+    let canonical_hash =
+        qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
+    let chain_id_str =
+        qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
+
+    // 2. Resolve the candidate bundle's signing public-key bytes.
+    //    For unsigned DevNet bundles there is no key to ratify and
+    //    the gate is structurally inapplicable; we still log the
+    //    verdict explicitly.
+    let signing_pk_bytes: Vec<u8> = match &loaded.signature_status {
+        BundleSignatureStatus::Unsigned => {
+            eprintln!(
+                "[run-105] candidate bundle is DevNet-unsigned; ratification gate is \
+                 structurally inapplicable (no signing key to authorise). Verdict: \
+                 unsigned-no-key-to-ratify."
+            );
+            return Ok(());
+        }
+        BundleSignatureStatus::Verified { signing_key_id } => {
+            let mut id_bytes = [0u8; 32];
+            decode_run_105_hex_into_32(signing_key_id, &mut id_bytes).map_err(|e| {
+                format!(
+                    "internal: BundleSignatureStatus::Verified.signing_key_id is not \
+                     a 64-char lowercase hex string: {}",
+                    e
+                )
+            })?;
+            match bundle_signing_keys.lookup(&id_bytes) {
+                Some(k) => k.pk_bytes.clone(),
+                None => {
+                    return Err(format!(
+                        "internal: bundle was verified by signing_key_id {} but that key is \
+                         no longer in the configured signing-key set",
+                        signing_key_id
+                    ));
+                }
+            }
+        }
+    };
+
+    // 3. Resolve the operator-supplied ratification sidecar (if any).
+    let ratification_obj = match args.p2p_trust_bundle_ratification.as_ref() {
+        Some(path) => Some(
+            load_ratification_from_path(path)
+                .map_err(|e| format!("{}", e))?,
+        ),
+        None => None,
+    };
+
+    // 4. Pick the per-environment enforcement policy. MainNet is
+    //    always Strict. TestNet/DevNet default to Strict unless the
+    //    operator opted in to legacy.
+    let policy = match config.environment {
+        NetworkEnvironment::Mainnet => RatificationEnforcementPolicy::Strict,
+        NetworkEnvironment::Testnet | NetworkEnvironment::Devnet => {
+            if args.p2p_trust_bundle_allow_unratified_testnet_devnet {
+                RatificationEnforcementPolicy::AllowLegacyUnratified
+            } else {
+                RatificationEnforcementPolicy::Strict
+            }
+        }
+    };
+
+    // 5. Run the gate.
+    let outcome = enforce_bundle_signing_key_ratification(RatificationEnforcementInputs {
+        ratification: ratification_obj.as_ref(),
+        authority,
+        expected_chain_id: &chain_id_str,
+        expected_environment: env_policy,
+        expected_genesis_hash: &canonical_hash,
+        candidate_bundle_signing_public_key: &signing_pk_bytes,
+        policy,
+    })
+    .map_err(|e| format!("{}", e))?;
+
+    match outcome {
+        RatificationEnforcementOutcome::Ratified(rk) => {
+            eprintln!(
+                "[run-105] OK: bundle-signing key ratification verified; bundle_signing_fp={} \
+                 authority_root_fp={} suite_id={} env={} chain_id={}",
+                rk.fingerprint,
+                rk.authority_root_fingerprint,
+                rk.signature_suite_id,
+                env_policy.scope(),
+                chain_id_str
+            );
+        }
+        RatificationEnforcementOutcome::LegacyUnratifiedAccepted {
+            bundle_signing_public_key_fingerprint,
+        } => {
+            eprintln!(
+                "[run-105] LEGACY-UNRATIFIED: bundle-signing key {} accepted under explicit \
+                 --p2p-trust-bundle-allow-unratified-testnet-devnet opt-in (env={} \
+                 chain_id={}). This is NOT a passed ratification.",
+                bundle_signing_public_key_fingerprint,
+                env_policy.scope(),
+                chain_id_str
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Helper used by the Run 105 startup gate's no-genesis branch to
+/// produce a log-safe fingerprint for the candidate bundle's signing
+/// key without exposing public-key bytes.
+fn fingerprint_for_log(
+    loaded: &qbind_node::pqc_trust_bundle::LoadedTrustBundle,
+    bundle_signing_keys: &qbind_node::pqc_trust_bundle::BundleSigningKeySet,
+) -> String {
+    use qbind_node::pqc_trust_bundle::BundleSignatureStatus;
+    match &loaded.signature_status {
+        BundleSignatureStatus::Unsigned => "unsigned".to_string(),
+        BundleSignatureStatus::Verified { signing_key_id } => {
+            let mut id_bytes = [0u8; 32];
+            if decode_run_105_hex_into_32(signing_key_id, &mut id_bytes).is_ok() {
+                if let Some(k) = bundle_signing_keys.lookup(&id_bytes) {
+                    return qbind_ledger::pqc_public_key_fingerprint(&k.pk_bytes);
+                }
+            }
+            signing_key_id.clone()
+        }
+    }
+}
+
+fn decode_run_105_hex_into_32(s: &str, out: &mut [u8; 32]) -> Result<(), String> {
+    if s.len() != 64 {
+        return Err(format!("expected 64-char lowercase hex, got len={}", s.len()));
+    }
+    let bytes = s.as_bytes();
+    for (i, pair) in bytes.chunks_exact(2).enumerate() {
+        let hi = match pair[0] {
+            b'0'..=b'9' => pair[0] - b'0',
+            b'a'..=b'f' => 10 + pair[0] - b'a',
+            _ => return Err(format!("non-hex byte at position {}", i * 2)),
+        };
+        let lo = match pair[1] {
+            b'0'..=b'9' => pair[1] - b'0',
+            b'a'..=b'f' => 10 + pair[1] - b'a',
+            _ => return Err(format!("non-hex byte at position {}", i * 2 + 1)),
+        };
+        out[i] = (hi << 4) | lo;
+    }
+    Ok(())
+}
+
+/// Run 105 — owned data for a [`RatificationEnforcementContext`].
+///
+/// Used by the reload-check and peer-candidate-check binary paths to
+/// keep the ratification + authority + canonical hash + chain-id
+/// string alive for the duration of the borrowed context the
+/// validator consumes.
+struct Run105ReloadCheckContextData {
+    authority: qbind_ledger::GenesisAuthorityConfig,
+    canonical_hash: qbind_ledger::GenesisHash,
+    env_policy: qbind_ledger::NetworkEnvironmentPolicy,
+    chain_id_str: String,
+    ratification: Option<qbind_ledger::BundleSigningRatification>,
+    policy: qbind_ledger::RatificationEnforcementPolicy,
+}
+
+/// Run 105 — build the owned context the reload-check / peer-candidate-
+/// check binary paths borrow from when calling
+/// [`qbind_node::pqc_trust_reload::validate_candidate_bundle_full_with_ratification`].
+///
+/// Same fail-closed shape as
+/// [`apply_run_105_ratification_gate_at_startup`]: re-loads the
+/// operator-supplied genesis JSON (no fallback), pulls the authority
+/// block out, computes the canonical genesis hash, picks the
+/// per-environment policy, and (optionally) loads the ratification
+/// sidecar JSON. Returns `Err(reason)` for any I/O / parse / structural
+/// problem; the caller exits non-zero with the operator-facing
+/// message.
+fn build_run_105_reload_check_context(
+    args: &CliArgs,
+    config: &qbind_node::node_config::NodeConfig,
+) -> Result<Run105ReloadCheckContextData, String> {
+    use qbind_node::pqc_boot_genesis::{load_external_genesis, map_environment};
+    use qbind_node::pqc_ratification_input::load_ratification_from_path;
+    use qbind_types::NetworkEnvironment;
+
+    let genesis_path = config.genesis_source.genesis_path.as_ref().ok_or_else(|| {
+        "no external --genesis-path configured; Run 105 ratification cannot be enforced \
+         on the reload-check / peer-candidate-check binary path without a populated \
+         genesis authority block"
+            .to_string()
+    })?;
+    let genesis_cfg = load_external_genesis(genesis_path).map_err(|e| {
+        format!(
+            "failed to load external genesis file at {}: {}",
+            genesis_path.display(),
+            e
+        )
+    })?;
+    let authority = genesis_cfg.authority.clone().ok_or_else(|| {
+        format!(
+            "external genesis file at {} has no authority block; Run 105 cannot enforce \
+             ratification without bundle_signing_authority_roots",
+            genesis_path.display()
+        )
+    })?;
+    let env_policy = map_environment(config.environment);
+    let canonical_hash =
+        qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
+    let chain_id_str =
+        qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
+    let ratification = match args.p2p_trust_bundle_ratification.as_ref() {
+        Some(path) => Some(
+            load_ratification_from_path(path)
+                .map_err(|e| format!("{}", e))?,
+        ),
+        None => None,
+    };
+    let policy = match config.environment {
+        NetworkEnvironment::Mainnet => qbind_ledger::RatificationEnforcementPolicy::Strict,
+        NetworkEnvironment::Testnet | NetworkEnvironment::Devnet => {
+            if args.p2p_trust_bundle_allow_unratified_testnet_devnet {
+                qbind_ledger::RatificationEnforcementPolicy::AllowLegacyUnratified
+            } else {
+                qbind_ledger::RatificationEnforcementPolicy::Strict
+            }
+        }
+    };
+    Ok(Run105ReloadCheckContextData {
+        authority,
+        canonical_hash,
+        env_policy,
+        chain_id_str,
+        ratification,
+        policy,
+    })
+}
+
 /// Main entry point for qbind-node binary.
 #[tokio::main]
 async fn main() {
-    // Parse CLI arguments
     let args = CliArgs::parse_args();
 
     // Build NodeConfig from CLI args
@@ -493,7 +813,45 @@ async fn main() {
             sequence_persistence_path: seq_path_ref,
             local_leaf_cert_bytes: local_leaf_bytes_opt,
         };
-        match qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs) {
+        // Run 105 — operator-opt-in non-mutating ratification gate.
+        // The reload-check binary path is a single-shot CLI tool that
+        // exits via `std::process::exit`; we therefore build a
+        // short-lived context here from the same files Run 102 boot
+        // verification consulted, drive the new
+        // `validate_candidate_bundle_full_with_ratification` entry
+        // point, and surface the typed error to operator logs. When
+        // the opt-in flag is absent, the call falls through to the
+        // unchanged Run 069 entry point so legacy behaviour is
+        // preserved bit-for-bit.
+        let reload_check_result = if args.p2p_trust_bundle_ratification_enforcement_enabled {
+            match build_run_105_reload_check_context(&args, &config) {
+                Ok(ctx_data) => qbind_node::pqc_trust_reload::validate_candidate_bundle_with_ratification(
+                    inputs,
+                    &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
+                        authority: &ctx_data.authority,
+                        expected_genesis_hash: &ctx_data.canonical_hash,
+                        expected_environment_policy: ctx_data.env_policy,
+                        expected_chain_id_str: &ctx_data.chain_id_str,
+                        ratification: ctx_data.ratification.as_ref(),
+                        policy: ctx_data.policy,
+                    },
+                ),
+                Err(reason) => {
+                    eprintln!(
+                        "[run-105] Run 069 reload-check refused: ratification context could \
+                         not be built: {}. Candidate path={}. No live trust apply, no \
+                         sequence write, no session mutation, no metrics mutation. \
+                         See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md.",
+                        reason,
+                        candidate_path.display()
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs)
+        };
+        match reload_check_result {
             Ok(candidate) => {
                 eprintln!("{}", candidate.staged_metadata_log_line());
                 eprintln!(
@@ -2215,6 +2573,48 @@ async fn run_p2p_node(
                         activation_outcome.required_epoch,
                         activation_outcome.current_epoch,
                     );
+
+                    // Run 105: non-mutating bundle-signing-key
+                    // ratification enforcement gate. MUST run AFTER
+                    // all existing Run 050/051/053/057/062/065
+                    // bundle validation succeeds and the activation
+                    // gate is satisfied, but BEFORE the Run 055
+                    // sequence write and BEFORE bundle roots are
+                    // merged into `trusted_roots`. A refused
+                    // ratification fails closed without writing the
+                    // sequence record and without merging any new
+                    // root.
+                    //
+                    // Disabled by default. Active only when the
+                    // operator opts in via
+                    // `--p2p-trust-bundle-ratification-enforcement-enabled`.
+                    // On MainNet under the opt-in flag, a
+                    // ratification path is REQUIRED. On TestNet/DevNet,
+                    // legacy unratified is permitted only when the
+                    // operator additionally supplies
+                    // `--p2p-trust-bundle-allow-unratified-testnet-devnet`.
+                    //
+                    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md`.
+                    if args.p2p_trust_bundle_ratification_enforcement_enabled {
+                        if let Err(reason) =
+                            apply_run_105_ratification_gate_at_startup(&args, &config, &loaded, &bundle_signing_keys)
+                        {
+                            eprintln!(
+                                "[run-105] FATAL: bundle-signing-key ratification refused at \
+                                 startup; sequence record NOT written, bundle roots NOT merged \
+                                 into the live PQC trust set, no live trust mutation \
+                                 occurred. Reason: {}",
+                                reason
+                            );
+                            eprintln!(
+                                "[run-105] qbind-node refuses to start. See \
+                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md, \
+                                 docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md \
+                                 §\"Run 105 ratification enforcement\"."
+                            );
+                            std::process::exit(1);
+                        }
+                    }
 
                     // Run 055: anti-rollback persistence check. MUST run
                     // AFTER all existing bundle validation (schema, env,
