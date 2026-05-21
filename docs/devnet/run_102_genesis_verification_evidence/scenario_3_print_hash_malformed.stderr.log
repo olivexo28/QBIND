@@ -1,0 +1,1 @@
+[run-102] FATAL: --print-genesis-hash failed: [run-102] failed to parse genesis file /tmp/run-102-fixtures/out/genesis_malformed.json as JSON GenesisConfig: key must be a string at line 1 column 2. Release binary refuses to start. No fallback to defaults.

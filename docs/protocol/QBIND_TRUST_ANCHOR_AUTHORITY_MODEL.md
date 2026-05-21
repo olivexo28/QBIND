@@ -956,3 +956,102 @@ pre-network startup point and supersede the file-bytes shield.
 If anything in this update drifts from the binary's behaviour once
 Run 102 lands, this update is the defect: update it before merging the
 Run 102 change.
+
+## 18. Run 102 update — release-binary genesis verification wiring and canonical `--print-genesis-hash` LANDED
+
+Run 102 implements the **release-binary wiring** layer of the
+genesis-bound authority surface (§13 staging Run 102, narrowed). It does
+not implement signing-key rotation/revocation (§9), the in-binary
+bundle-signing-key ratification verifier (deferred to Run 103, see §18.3
+below), persistent `<data_dir>/pqc_authority_state.json` (Run 103), or
+any peer-driven apply (§10).
+
+### 18.1 What Run 102 lands
+
+- A new `qbind-node` module
+  `crates/qbind-node/src/pqc_boot_genesis.rs` exposing
+  `run_boot_time_genesis_verification(&NodeConfig) -> Result<…>` which:
+  loads `config.genesis_source.genesis_path` as a strict
+  `GenesisConfig`, maps `NetworkEnvironment → NetworkEnvironmentPolicy`,
+  and delegates to `qbind_ledger::verify_boot_time_genesis(env_policy,
+  &cfg, config.expected_genesis_hash.as_ref())`. No defaults are filled,
+  no embedded fallback is consulted, no source-code production root
+  anchor is referenced.
+- A new module function
+  `compute_print_genesis_hash(&Path, NetworkEnvironmentPolicy)` powering
+  the canonical `--print-genesis-hash` operator surface, which now
+  computes the **canonical Run 101 hash over the parsed `GenesisConfig`**
+  (not the raw file bytes). The printed value is `0x`-prefixed
+  64-char lowercase hex and pasteable verbatim into `--expect-genesis-hash`.
+- Two new `main.rs` startup blocks: (a) the `--print-genesis-hash` early
+  exit (positioned after `to_node_config` so the printer works for any
+  resolved env; refuses with non-zero exit on missing path, malformed
+  JSON, or I/O failure); (b) the boot-time genesis verification call
+  positioned **after** T185 MainNet invariants and **before** B3 restore,
+  Run 069 reload-check, Run 077 peer-candidate check, P2P startup, and
+  the binary-path consensus loop. Operator-precise log lines: `[run-102]
+  OK: …` on success and `[run-102] FATAL: …` (with a typed reason) on
+  refusal.
+- Updated `--print-genesis-hash` / `--expect-genesis-hash` help text in
+  `crates/qbind-node/src/cli.rs` that explicitly describes canonical
+  Run 101 parsed-genesis semantics and that there is no raw-file-byte
+  fallback.
+
+### 18.2 Per-environment policy as implemented by Run 102
+
+| env     | external genesis file | expected hash | authority | outcome on misconfiguration                                                                |
+|---------|----------------------|--------------|-----------|---------------------------------------------------------------------------------------------|
+| DevNet  | optional             | optional     | optional  | `SkippedNoExternalGenesis` with log line if no `--genesis-path`; otherwise normal verifier. |
+| TestNet | optional             | optional     | optional (Run 101 partial-positive) | as above; existing Run 101 TestNet relaxation preserved.                                    |
+| MainNet | **required** (T185 + belt-and-braces in Run 102) | **required** | **required** (Run 101) | release binary refuses to start with typed `BootGenesisError` *before* trust-bundle / network / consensus startup. |
+
+### 18.3 What Run 102 explicitly does NOT land
+
+Per the task's explicit scope rule — *"If the skeleton cannot be added
+cleanly without broad redesign, do not implement it in Run 102.
+Document it as Run 103 instead."* — the bundle-signing-key
+**ratification verifier skeleton** is deferred to Run 103. Run 102 also
+does NOT land:
+
+> persistent `<data_dir>/pqc_authority_state.json` (Run 103),
+> signing-key rotation, signing-key revocation, KMS/HSM custody
+> (Run 105), peer-driven live apply (Run 106+, gated by §10),
+> governance, validator-set rotation, production static source-code
+> anchors of any kind, fallback roots or fallback signing keys, changes
+> to the trust-bundle or peer-candidate wire format, new CLI flags
+> beyond the existing T232/T233 surface, new dependencies, new metric
+> families, new admin-API surfaces, new filesystem watchers, new
+> network listeners or gossip subscriptions, weakening of any Run 050–
+> 101 invariant, full C4 closure, C5 closure.
+
+### 18.4 Cross-document binding
+
+- Evidence record: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md` with
+  10 release-binary smoke scenarios (incl. authority-only-diff canonical
+  hash divergence proof and Run 102 OK ordering before all `[restore]` /
+  `[metrics]` / `[binary]` / `[binary-consensus]` lines), plus
+  fixtures and stdout/stderr captures in
+  `docs/devnet/run_102_genesis_verification_evidence/`.
+- Tests: 8 in-module unit tests (`pqc_boot_genesis::tests`) and 14
+  integration tests (`crates/qbind-node/tests/run_102_boot_genesis_wiring_tests.rs`).
+- Regression linkage: Run 101 (11), T232 (7), T233 (16), T237 (24)
+  remain green; T233's `MainnetConfigError::ExpectedGenesisHashMissing`
+  shield is preserved bit-for-bit and *composes* with Run 102 (Run 102
+  adds the actual canonical hash comparison the shield never did, and
+  adds a belt-and-braces refusal for callers that bypass
+  `--profile mainnet`).
+- contradiction tracker: see Run 102 update in
+  `docs/whitepaper/contradiction.md`.
+
+### 18.5 Why partial-positive and not positive
+
+Run 102 closes the *release-binary wiring* gap recorded in the Run 101
+evidence note (the helper is now actually invoked from `main` before
+any trust-bundle / network / consensus startup), and replaces the
+pre-Run-101 raw-file-byte `--print-genesis-hash` semantics with
+canonical Run 101 semantics. It does not yet land the bundle-signing-key
+ratification verifier — Run 103.
+
+If anything in this update drifts from the binary's behaviour once
+Run 103 lands, this update is the defect: update it before merging the
+Run 103 change.

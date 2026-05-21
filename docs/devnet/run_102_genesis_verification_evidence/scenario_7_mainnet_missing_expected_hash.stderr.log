@@ -1,0 +1,2 @@
+[run-102] FATAL: [run-102] expected canonical genesis hash is required for environment Mainnet but was not provided
+[run-102] qbind-node refuses to start. No fallback authority, no fallback expected-hash, no source-code production anchor. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md and docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md.

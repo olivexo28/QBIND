@@ -834,32 +834,57 @@ pub struct CliArgs {
     pub genesis_path: Option<PathBuf>,
 
     // ========================================================================
-    // T233: Genesis Hash Commitment & Verification
+    // T233 / Run 102: Genesis Hash Commitment & Verification
     // ========================================================================
-    /// Print the SHA3-256 genesis hash of the given genesis file and exit (T233).
+    /// Print the canonical Run 101 genesis hash of the parsed genesis file and exit.
     ///
-    /// Computes the canonical genesis hash over the exact bytes of the genesis file
-    /// (no JSON normalization). Prints the hash as a hex string (0x...) and exits.
+    /// Run 102 update: this flag now computes the **canonical Run 101 genesis
+    /// hash** over the *parsed* `GenesisConfig` — that is, a SHA3-256 over a
+    /// length-prefixed canonical encoding of `chain_id`, `genesis_time_unix_ms`,
+    /// the validator set, allocations, council config, monetary config, and the
+    /// `authority` block — under the environment policy resolved from `--env`
+    /// (DEV / TST / MAIN). It is **not** a hash over the exact file bytes; two
+    /// JSON files that differ only in whitespace or key ordering produce the
+    /// same canonical hash, while two files that differ in any authority,
+    /// chain_id, or validator field produce different canonical hashes.
     ///
-    /// Requires --genesis-path to be specified.
+    /// Requires `--genesis-path` to be specified. Malformed genesis files are
+    /// rejected with a clear error and a non-zero exit code; there is no
+    /// raw-file-byte fallback.
+    ///
+    /// The printed value is a `0x`-prefixed 64-char lowercase hex string and
+    /// can be pasted verbatim into `--expect-genesis-hash` to pin the
+    /// canonical hash for subsequent startups.
     ///
     /// Example:
     /// ```bash
-    /// qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json
+    /// qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json --env mainnet
     /// ```
+    ///
+    /// See `crates/qbind-node/src/pqc_boot_genesis.rs`,
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and
+    /// `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
     #[arg(long = "print-genesis-hash")]
     pub print_genesis_hash: bool,
 
-    /// Expected genesis hash (T233).
+    /// Expected canonical Run 101 genesis hash (T233 + Run 102).
     ///
-    /// If specified, the node computes the genesis hash from the loaded genesis file
-    /// and compares it to this expected value. If they don't match, the node fails
-    /// fast at startup with a clear error.
+    /// When set, qbind-node loads the configured `--genesis-path`, parses it
+    /// as a `GenesisConfig`, computes the canonical Run 101 genesis hash
+    /// under the resolved environment policy, and compares it against this
+    /// expected value. On mismatch, malformed genesis, missing authority
+    /// (on MainNet/TestNet), or any other Run 101 verification failure the
+    /// release binary refuses to start with a precise typed error — before
+    /// any trust-bundle / network / consensus startup begins.
     ///
-    /// Accepts hex string with or without 0x prefix (64 hex characters).
+    /// Accepts hex string with or without `0x` prefix (64 hex characters).
     ///
-    /// **Required for MainNet**: MainNet validators MUST specify this flag to prevent
-    /// accidental startup with the wrong genesis file.
+    /// **Required for MainNet**: MainNet validators MUST specify this flag.
+    /// The T233 `MainnetConfigError::ExpectedGenesisHashMissing` shield in
+    /// `validate_mainnet_invariants` composes with the Run 102 canonical
+    /// verification — the shield refuses MainNet startup if the flag is
+    /// absent, and the Run 102 verifier refuses startup if the flag's value
+    /// does not match the parsed canonical hash.
     ///
     /// Example:
     /// ```bash

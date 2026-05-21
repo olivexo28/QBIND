@@ -112,6 +112,14 @@ pub mod peer_key_provider;// Run 037 — production-honest PQC KEMTLS root-key d
 pub mod pqc_root_config;
 // Run 037 — DevNet-only helper to mint real ML-DSA-44-signed delegation certs.
 pub mod pqc_devnet_helper;
+// Run 102 — release-binary boot-time canonical genesis verification
+// wiring. Loads the external GenesisConfig JSON (when configured),
+// dispatches into Run 101's `verify_boot_time_genesis`, fails closed on
+// MainNet missing/mismatched/malformed expected hash and missing/
+// malformed authority. Also powers the canonical `--print-genesis-hash`
+// operator surface. See `pqc_boot_genesis.rs` and
+// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`.
+pub mod pqc_boot_genesis;
 // Run 050 — production-honest PQC transport trust-anchor bundle
 // (environment binding, root status + window, revocation entries,
 // canonical fingerprint, DevNet-unsigned scaffolding boundary).

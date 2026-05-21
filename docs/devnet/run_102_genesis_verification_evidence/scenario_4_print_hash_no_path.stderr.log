@@ -1,0 +1,1 @@
+[run-102] FATAL: --print-genesis-hash requires --genesis-path to be set so the canonical Run 101 hash can be computed over the parsed genesis config. No embedded fallback. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md §Scenario 1.

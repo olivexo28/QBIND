@@ -1,0 +1,18 @@
+          The printed value is a `0x`-prefixed 64-char lowercase hex string and can be pasted verbatim into `--expect-genesis-hash` to pin the canonical hash for subsequent startups.
+          
+          Example: ```bash qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json --env mainnet ```
+          
+          See `crates/qbind-node/src/pqc_boot_genesis.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
+
+      --expect-genesis-hash <EXPECT_GENESIS_HASH>
+          Expected canonical Run 101 genesis hash (T233 + Run 102).
+          
+          When set, qbind-node loads the configured `--genesis-path`, parses it as a `GenesisConfig`, computes the canonical Run 101 genesis hash under the resolved environment policy, and compares it against this expected value. On mismatch, malformed genesis, missing authority (on MainNet/TestNet), or any other Run 101 verification failure the release binary refuses to start with a precise typed error — before any trust-bundle / network / consensus startup begins.
+          
+          Accepts hex string with or without `0x` prefix (64 hex characters).
+          
+          **Required for MainNet**: MainNet validators MUST specify this flag. The T233 `MainnetConfigError::ExpectedGenesisHashMissing` shield in `validate_mainnet_invariants` composes with the Run 102 canonical verification — the shield refuses MainNet startup if the flag is absent, and the Run 102 verifier refuses startup if the flag's value does not match the parsed canonical hash.
+          
+          Example: ```bash qbind-node --profile mainnet \ --genesis-path /etc/qbind/genesis.json \ --expect-genesis-hash 0xabc123... ```
+
+      --mempool-eviction-mode <MEMPOOL_EVICTION_MODE>

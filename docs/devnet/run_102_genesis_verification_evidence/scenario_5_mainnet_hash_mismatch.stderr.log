@@ -1,0 +1,2 @@
+[run-102] FATAL: [run-102] canonical genesis hash mismatch on environment Mainnet: expected 0x0000000000000000000000000000000000000000000000000000000000000000 actual 0xc0bf6b82180bac5e2aa6acb51217fc63ba457862558776ab6a338f80fbc89872
+[run-102] qbind-node refuses to start. No fallback authority, no fallback expected-hash, no source-code production anchor. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md and docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md.

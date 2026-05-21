@@ -131,6 +131,76 @@ async fn main() {
         }
     };
 
+    // ------------------------------------------------------------------
+    // Run 102 — `--print-genesis-hash` operator tooling.
+    //
+    // When `--print-genesis-hash` is passed, load the configured external
+    // genesis file, compute the **canonical Run 101 genesis hash** under
+    // the resolved environment policy, print it to stdout, and exit
+    // (`0` on success, `1` on any failure). This replaces the pre-Run-101
+    // "hash the exact file bytes" semantics — see the help text on
+    // `CliArgs::print_genesis_hash` and the scenario_5 evidence note in
+    // `docs/devnet/run_101_genesis_authority_evidence/`.
+    //
+    // The hash is authority-, chain_id-, and environment-sensitive and is
+    // independent of JSON formatting; running this twice on two genesis
+    // files that differ only in authority fields prints two different
+    // values (proven by Run 102 release-binary evidence).
+    //
+    // No fallback to raw file-byte hashing exists. Malformed genesis,
+    // missing genesis path, and I/O failures all fail closed.
+    // See `crates/qbind-node/src/pqc_boot_genesis.rs` and
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md` §Scenario 1.
+    // ------------------------------------------------------------------
+    if args.print_genesis_hash {
+        let genesis_path = match config.genesis_source.genesis_path.as_ref() {
+            Some(p) => p.clone(),
+            None => {
+                eprintln!(
+                    "[run-102] FATAL: --print-genesis-hash requires --genesis-path to be set \
+                     so the canonical Run 101 hash can be computed over the parsed genesis \
+                     config. No embedded fallback. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md §Scenario 1."
+                );
+                std::process::exit(1);
+            }
+        };
+        let env_policy = qbind_node::pqc_boot_genesis::map_environment(config.environment);
+        match qbind_node::pqc_boot_genesis::compute_print_genesis_hash(&genesis_path, env_policy) {
+            Ok(hash) => {
+                // stdout is the operator-pin surface; stderr carries the
+                // human-readable provenance. Output format mirrors
+                // `qbind_ledger::format_genesis_hash` (lowercase `0x` +
+                // 64 hex chars) so the value can be pasted verbatim into
+                // `--expect-genesis-hash` without trimming.
+                eprintln!(
+                    "[run-102] --print-genesis-hash: canonical Run 101 hash over parsed \
+                     genesis (env={:?}, chain_id={}, authority={}, source={})",
+                    env_policy,
+                    config.chain_id().as_u64(),
+                    if config
+                        .genesis_source
+                        .genesis_path
+                        .as_ref()
+                        .map(|p| p.exists())
+                        .unwrap_or(false)
+                    {
+                        "<see genesis file>"
+                    } else {
+                        "<inline>"
+                    },
+                    genesis_path.display(),
+                );
+                println!("{}", qbind_node::pqc_boot_genesis::format_for_operator(&hash));
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[run-102] FATAL: --print-genesis-hash failed: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
     // T185: Validate MainNet invariants if using MainNet profile
     if let Some(ref profile_str) = args.profile {
         if let Some(ConfigProfile::MainNet) =
@@ -147,6 +217,71 @@ async fn main() {
                 std::process::exit(1);
             }
             eprintln!("[T185] MainNet invariants validated successfully.");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Run 102 — release-binary boot-time canonical genesis verification.
+    //
+    // Per `task/RUN_102_TASK.txt` "Expected ordering":
+    //   load genesis
+    //   → canonicalize/hash parsed genesis
+    //   → verify expected genesis hash according to environment policy
+    //   → validate genesis authority fields according to environment policy
+    //   → only then continue to trust-bundle processing / networking / consensus startup
+    //
+    // This call site is positioned **after** the T185 MainNet invariants
+    // validation (so MainNet still refuses on missing `--expect-genesis-hash`,
+    // composing the existing T233 `MainnetConfigError::ExpectedGenesisHashMissing`
+    // shield with the new Run 101 canonical verification) and **before**
+    // the B3 snapshot restore, Run 069 trust-bundle reload-check,
+    // Run 077 peer-candidate check, P2P startup, and the binary-path
+    // consensus loop. Any failure here exits non-zero with a precise
+    // operator-facing error message — there is no silent fallback to
+    // defaults, no fallback authority, and no source-code production
+    // anchor.
+    //
+    // DevNet / TestNet retain their existing embedded-genesis path when
+    // no `--genesis-path` is configured (verifier returns
+    // `BootGenesisOutcome::SkippedNoExternalGenesis` with a clear log
+    // line). MainNet without an external genesis path is rejected here
+    // belt-and-braces even if upstream shields are bypassed.
+    //
+    // See `crates/qbind-node/src/pqc_boot_genesis.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and
+    // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
+    // ------------------------------------------------------------------
+    match qbind_node::pqc_boot_genesis::run_boot_time_genesis_verification(&config) {
+        Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::Verified {
+            canonical_hash,
+            env,
+            genesis_path,
+        }) => {
+            eprintln!(
+                "[run-102] OK: canonical Run 101 genesis verification passed \
+                 (env={:?}, genesis={}, canonical_hash={}).",
+                env,
+                genesis_path.display(),
+                qbind_node::pqc_boot_genesis::format_for_operator(&canonical_hash),
+            );
+        }
+        Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::SkippedNoExternalGenesis { env }) => {
+            eprintln!(
+                "[run-102] no external --genesis-path configured; canonical boot \
+                 verification skipped (env={:?}, embedded-genesis path). MainNet \
+                 always requires --genesis-path so this branch is unreachable on MainNet.",
+                env,
+            );
+        }
+        Err(e) => {
+            eprintln!("[run-102] FATAL: {}", e);
+            eprintln!(
+                "[run-102] qbind-node refuses to start. No fallback authority, no fallback \
+                 expected-hash, no source-code production anchor. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md and \
+                 docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md."
+            );
+            std::process::exit(1);
         }
     }
 

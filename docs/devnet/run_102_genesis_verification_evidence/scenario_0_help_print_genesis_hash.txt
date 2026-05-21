@@ -1,0 +1,13 @@
+      --print-genesis-hash
+          Print the canonical Run 101 genesis hash of the parsed genesis file and exit.
+          
+          Run 102 update: this flag now computes the **canonical Run 101 genesis hash** over the *parsed* `GenesisConfig` — that is, a SHA3-256 over a length-prefixed canonical encoding of `chain_id`, `genesis_time_unix_ms`, the validator set, allocations, council config, monetary config, and the `authority` block — under the environment policy resolved from `--env` (DEV / TST / MAIN). It is **not** a hash over the exact file bytes; two JSON files that differ only in whitespace or key ordering produce the same canonical hash, while two files that differ in any authority, chain_id, or validator field produce different canonical hashes.
+          
+          Requires `--genesis-path` to be specified. Malformed genesis files are rejected with a clear error and a non-zero exit code; there is no raw-file-byte fallback.
+          
+          The printed value is a `0x`-prefixed 64-char lowercase hex string and can be pasted verbatim into `--expect-genesis-hash` to pin the canonical hash for subsequent startups.
+          Example: ```bash qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json --env mainnet ```
+          
+          See `crates/qbind-node/src/pqc_boot_genesis.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
+
+      --expect-genesis-hash <EXPECT_GENESIS_HASH>

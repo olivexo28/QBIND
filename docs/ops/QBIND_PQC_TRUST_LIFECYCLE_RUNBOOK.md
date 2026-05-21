@@ -3215,3 +3215,66 @@ Operationally this means:
 *If anything in this Run 101 note appears to permit a fallback that the
 binary refuses, the binary wins and this runbook is the defect. Open an
 issue against `docs/whitepaper/contradiction.md` immediately.*
+
+## 11.3 Run 102 row (appended)
+
+| Run | Verdict + Scope                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Cross-runbook anchors |
+|-----|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------|
+| 102 | **Partial-positive (release-binary wiring + canonical `--print-genesis-hash`)**. Wires Run 101's `qbind_ledger::verify_boot_time_genesis` into `qbind-node`'s `main` after T185 MainNet invariants validation and **before** B3 restore / Run 069 trust-bundle reload-check / Run 077 peer-candidate check / P2P startup / consensus loop, via a new module `crates/qbind-node/src/pqc_boot_genesis.rs`. Replaces the pre-Run-101 raw-file-byte `--print-genesis-hash` semantics with the canonical Run 101 parsed-genesis hash under the resolved environment policy; the printed value is `0x`-prefixed 64-char lowercase hex pasteable verbatim into `--expect-genesis-hash`. MainNet refuses to start on missing/mismatched/malformed expected hash, missing/empty/malformed authority, env-mismatched `chain_id`, missing genesis file, malformed genesis JSON, and (belt-and-braces) missing `--genesis-path` — every refusal exits non-zero with a typed operator-facing `BootGenesisError` *before* any trust-bundle / network / consensus startup. DevNet/TestNet embedded-genesis path is preserved: when no external genesis is configured the verifier returns `SkippedNoExternalGenesis` with a clear log line. The existing T232/T233 `MainnetConfigError::{GenesisMisconfigured, ExpectedGenesisHashMissing}` CLI shields are preserved bit-for-bit and **compose** with the Run 102 verifier (the shields refuse MainNet startup when flags are absent; Run 102 refuses when the supplied expected hash does not match the parsed canonical hash and refuses for any caller that bypasses `--profile mainnet`). 8 new in-module unit tests in `crates/qbind-node/src/pqc_boot_genesis.rs::tests` and 14 new integration tests in `crates/qbind-node/tests/run_102_boot_genesis_wiring_tests.rs` cover every MainNet refusal scenario plus the happy path, the print→expect operator round-trip, and DevNet preservation. 10 release-binary smoke scenarios in `docs/devnet/run_102_genesis_verification_evidence/` capture the canonical hash divergence between two genesis files differing only in one byte of `authority.bundle_signing_authority_roots[0].key_fingerprint`, and prove the Run 102 OK log line precedes all `[restore]` / `[metrics]` / `[binary]` / `[binary-consensus]` / `[snapshot]` lines. **No new dependency, no new CLI flag (only doc-comment help-text update on the existing T232/T233 flags), no new metric family, no `Cargo.toml` change, no protocol or wire-format change, no admin-API surface, no filesystem watcher, no network listener / gossip subscription / publisher.** No `Dummy*` primitive is referenced; no transport-root reuse as a bundle-signing authority; no `--p2p-trusted-root` fallback; no production static MainNet root anchor as a source-code constant — the release binary reads the authority block **only** from the operator-supplied genesis file. Run 102 does **NOT** implement the bundle-signing-key ratification verifier (deferred to Run 103 per the task's explicit "no broad redesign in Run 102" scope rule), does **NOT** add `<data_dir>/pqc_authority_state.json` (Run 103), does **NOT** introduce KMS/HSM custody (Run 105), does **NOT** add peer-driven live apply (Run 106+, gated by Run 100 spec §10), and does **NOT** weaken any Run 050–101 invariant. Run 102 does **NOT** claim full C4 closure and does **NOT** claim C5 closure. | §1.3, §2.2, §4.2, §11.2, §11.4. Evidence at `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`. Spec update at `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` §18. Contradiction tracker at `docs/whitepaper/contradiction.md` C4 Run 102 update. |
+
+## 11.4 Run 102 prose note
+
+Run 102 takes Run 101's `verify_boot_time_genesis` helper and **wires it
+into the production release binary** at the spec-defined ordering
+position. On MainNet, every `qbind-node` startup now:
+
+1. Loads `--genesis-path` as a strict `GenesisConfig` JSON (no defaults
+   filled, no embedded fallback consulted).
+2. Computes the canonical Run 101 genesis hash over the parsed config
+   under the `Mainnet` environment policy.
+3. Compares against `--expect-genesis-hash`. On mismatch — refuse and
+   exit non-zero.
+4. Validates the `GenesisAuthorityConfig` (suite, fingerprint shape,
+   labels, uniqueness, policy version, chain_id/env binding). On
+   refusal — exit non-zero with a typed reason.
+5. Only after the verifier returns `BootGenesisOutcome::Verified` does
+   the binary proceed to B3 restore, Run 069 trust-bundle reload-check,
+   trust-bundle load + activation, P2P startup, and the binary-path
+   consensus loop.
+
+The DevNet embedded-genesis path is unchanged: with no `--genesis-path`
+the verifier returns `SkippedNoExternalGenesis` and the node starts
+normally. TestNet matches Run 101's partial-positive policy (the
+expected-hash flag is not yet forced when absent; tightening is a
+TestNet operator-impact decision deferred to a later run).
+
+**The bundle-signing-key ratification verifier is NOT in Run 102.** Per
+`task/RUN_102_TASK.txt`'s explicit scope rule — *"If the skeleton cannot
+be added cleanly without broad redesign, do not implement it in Run 102.
+Document it as Run 103 instead."* — and because adding even a skeleton
+verifier requires a new operator-supplied input (a ratification
+certificate or signed bootstrap payload), a new canonical preimage, a
+new typed error variant, and a new acceptance/refusal call site, Run 102
+stops at the wiring step and defers the ratification verifier to
+Run 103. The "matched-but-not-ratified" residual risk is recorded in
+Evidence Run 102 §8.
+
+**Operator workflow (Run 102):**
+
+1. Run `qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json --env mainnet`.
+2. Pin the printed `0x…` hash into `--expect-genesis-hash` on every
+   MainNet validator's startup command line.
+3. Subsequent `qbind-node` startups will refuse if either the genesis
+   file or the expected hash diverges from the pinned value.
+
+**Run 102 adds no new CLI flag, no new metric, no new persistence file,
+no admin API, no filesystem watcher, no network listener, no gossip
+subscription, no gossip publisher, no peer-driven apply, no
+ratification path, no KMS/HSM custody binding, no signing-key rotation
+path, no signing-key revocation path, and no source-code production
+trust root.** The operator surface is bit-for-bit T232/T233 with
+updated doc-comment help text.
+
+*If anything in this Run 102 note appears to permit a fallback that the
+binary refuses, the binary wins and this runbook is the defect. Open an
+issue against `docs/whitepaper/contradiction.md` immediately.*
