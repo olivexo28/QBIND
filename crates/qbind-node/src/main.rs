@@ -813,17 +813,33 @@ async fn main() {
             sequence_persistence_path: seq_path_ref,
             local_leaf_cert_bytes: local_leaf_bytes_opt,
         };
-        // Run 105 — operator-opt-in non-mutating ratification gate.
-        // The reload-check binary path is a single-shot CLI tool that
-        // exits via `std::process::exit`; we therefore build a
-        // short-lived context here from the same files Run 102 boot
-        // verification consulted, drive the new
-        // `validate_candidate_bundle_full_with_ratification` entry
-        // point, and surface the typed error to operator logs. When
-        // the opt-in flag is absent, the call falls through to the
-        // unchanged Run 069 entry point so legacy behaviour is
-        // preserved bit-for-bit.
-        let reload_check_result = if args.p2p_trust_bundle_ratification_enforcement_enabled {
+        // Run 105/106 — non-mutating ratification gate.
+        //
+        // Run 105 wired the gate as operator-opt-in via
+        // `--p2p-trust-bundle-ratification-enforcement-enabled`. Run 106
+        // promotes the **invocation decision** to a per-environment
+        // policy via `qbind_node::pqc_ratification_policy`:
+        // MainNet/TestNet invoke the gate by default (the opt-in flag
+        // can neither enable nor disable it); DevNet preserves the
+        // pre-Run-106 opt-in behaviour so unsigned/legacy bundles
+        // continue to work in developer workflows. The gate body
+        // itself is unchanged from Run 105 — it still drives the full
+        // Run 103/105 `enforce_bundle_signing_key_ratification`
+        // pipeline and still uses `RatificationEnforcementPolicy::Strict`
+        // on MainNet regardless of any flag. When the policy returns
+        // `Skip`, the call falls through to the unchanged Run 069
+        // entry point so legacy DevNet behaviour is preserved
+        // bit-for-bit.
+        let gate_decision = qbind_node::pqc_ratification_policy::ratification_gate_decision(
+            config.environment,
+            args.p2p_trust_bundle_ratification_enforcement_enabled,
+        );
+        let reload_check_result = if gate_decision.should_invoke() {
+            eprintln!(
+                "[run-106] reload-check ratification gate INVOKED (policy={}, env={:?}).",
+                gate_decision.label(),
+                config.environment
+            );
             match build_run_105_reload_check_context(&args, &config) {
                 Ok(ctx_data) => qbind_node::pqc_trust_reload::validate_candidate_bundle_with_ratification(
                     inputs,
@@ -849,6 +865,14 @@ async fn main() {
                 }
             }
         } else {
+            eprintln!(
+                "[run-106] reload-check ratification gate SKIPPED (policy={}, env={:?}). \
+                 This is NOT a passed ratification; it preserves pre-Run-105 DevNet \
+                 behaviour for developer workflows. MainNet/TestNet always invoke the \
+                 gate by default and never reach this branch.",
+                gate_decision.label(),
+                config.environment
+            );
             qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs)
         };
         match reload_check_result {
@@ -2574,7 +2598,7 @@ async fn run_p2p_node(
                         activation_outcome.current_epoch,
                     );
 
-                    // Run 105: non-mutating bundle-signing-key
+                    // Run 105/106: non-mutating bundle-signing-key
                     // ratification enforcement gate. MUST run AFTER
                     // all existing Run 050/051/053/057/062/065
                     // bundle validation succeeds and the activation
@@ -2585,17 +2609,34 @@ async fn run_p2p_node(
                     // sequence record and without merging any new
                     // root.
                     //
-                    // Disabled by default. Active only when the
-                    // operator opts in via
-                    // `--p2p-trust-bundle-ratification-enforcement-enabled`.
-                    // On MainNet under the opt-in flag, a
-                    // ratification path is REQUIRED. On TestNet/DevNet,
-                    // legacy unratified is permitted only when the
-                    // operator additionally supplies
-                    // `--p2p-trust-bundle-allow-unratified-testnet-devnet`.
+                    // Run 106: invocation is now a per-environment
+                    // policy (see
+                    // `qbind_node::pqc_ratification_policy`). MainNet
+                    // and TestNet invoke the gate by default — the
+                    // `--p2p-trust-bundle-ratification-enforcement-enabled`
+                    // flag can neither enable nor disable MainNet
+                    // enforcement. DevNet preserves the Run 105
+                    // operator-opt-in behaviour so developer
+                    // workflows keep working.
                     //
-                    // See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md`.
-                    if args.p2p_trust_bundle_ratification_enforcement_enabled {
+                    // On MainNet, a ratification path is REQUIRED. On
+                    // TestNet/DevNet, legacy unratified is permitted
+                    // only when the operator additionally supplies
+                    // `--p2p-trust-bundle-allow-unratified-testnet-devnet`
+                    // and is refused by the gate body on MainNet
+                    // regardless. See
+                    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_106.md`.
+                    let startup_gate_decision =
+                        qbind_node::pqc_ratification_policy::ratification_gate_decision(
+                            config.environment,
+                            args.p2p_trust_bundle_ratification_enforcement_enabled,
+                        );
+                    if startup_gate_decision.should_invoke() {
+                        eprintln!(
+                            "[run-106] startup ratification gate INVOKED (policy={}, env={:?}).",
+                            startup_gate_decision.label(),
+                            config.environment
+                        );
                         if let Err(reason) =
                             apply_run_105_ratification_gate_at_startup(&args, &config, &loaded, &bundle_signing_keys)
                         {
@@ -2614,6 +2655,15 @@ async fn run_p2p_node(
                             );
                             std::process::exit(1);
                         }
+                    } else {
+                        eprintln!(
+                            "[run-106] startup ratification gate SKIPPED (policy={}, env={:?}). \
+                             This is NOT a passed ratification; it preserves pre-Run-105 DevNet \
+                             behaviour for developer workflows. MainNet/TestNet always invoke \
+                             the gate by default and never reach this branch.",
+                            startup_gate_decision.label(),
+                            config.environment
+                        );
                     }
 
                     // Run 055: anti-rollback persistence check. MUST run

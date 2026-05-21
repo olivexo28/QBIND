@@ -1,0 +1,654 @@
+# RUN 107 — Ratification Enforcement for Peer-Candidate Check CLI
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into the release binary startup path and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Run 105 added the first opt-in ratification enforcement surfaces:
+  - startup `--p2p-trust-bundle` preflight gate before Run 055 sequence write and root merge;
+  - `--p2p-trust-bundle-reload-check` gate preserving Run 069 non-mutation;
+  - sidecar JSON ratification input loader;
+  - hidden local-only CLI flags;
+  - typed `ReloadCheckError::RatificationRefused`;
+  - no peer-candidate-check enforcement yet.
+- Run 106 added default-strict ratification policy for the two already-wired surfaces:
+  - MainNet/TestNet invoke ratification regardless of opt-in flag;
+  - DevNet preserves explicit operator opt-in;
+  - startup and reload-check now consult `ratification_gate_decision(env, opt_in)`;
+  - peer-candidate-check, live peer-candidate wire validation, propagation, reload-apply, and SIGHUP remained deferred.
+
+Run 106 was partial-positive because only 2 of 7 target surfaces are default-strict. The next safest surface is the local peer-candidate check CLI because it is mechanically closest to reload-check and remains validation-only.
+
+Run 107 must wire ratification enforcement into:
+
+```text
+--p2p-trust-bundle-peer-candidate-check
+```
+
+This run must not touch live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven live apply, rotation/revocation, authority anti-rollback persistence, KMS/HSM, or governance.
+
+---
+
+# Exact objective
+
+Implement ratification enforcement for the peer-candidate check CLI while preserving its validation-only, non-mutating behavior.
+
+The objective is:
+
+1. Reuse the Run 105 / Run 106 ratification policy and sidecar input model.
+2. Wire `--p2p-trust-bundle-peer-candidate-check` into ratification-aware validation.
+3. Make MainNet/TestNet strict by default for peer-candidate check.
+4. Preserve DevNet opt-in behavior exactly and explicitly.
+5. Reject unratified, missing, malformed, wrong-chain, wrong-environment, bad-signature, unknown-root, transport-root, unsupported-suite, and missing-key-material ratification cases before validation success.
+6. Preserve every Run 076–090 peer-candidate non-mutation invariant:
+   - no sequence write;
+   - no live trust mutation;
+   - no root merge;
+   - no session eviction;
+   - no propagation;
+   - no apply;
+   - no consensus ratification.
+7. Do not change the peer-candidate wire format.
+8. Do not touch live peer-candidate dispatcher behavior in this run.
+
+Run 107 should make this statement true:
+
+> The local `--p2p-trust-bundle-peer-candidate-check` path rejects MainNet/TestNet peer candidates signed by unratified bundle-signing keys before any mutation or propagation side effect.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Peer-candidate check CLI wiring
+
+Modify only the local CLI peer-candidate check path and supporting helpers needed to pass ratification context into existing validation.
+
+Expected target surface:
+
+```text
+--p2p-trust-bundle-peer-candidate-check <PATH>
+```
+
+This path must remain check-only and must not start the node.
+
+## B. Reuse existing ratification policy
+
+Use Run 106 policy:
+
+```text
+MainNet: ratification required
+TestNet: ratification required
+DevNet: ratification only when operator opt-in is set
+```
+
+Do not invent a second policy.
+
+## C. Reuse existing ratification input model
+
+Use Run 105 sidecar JSON loader / ratification input if applicable.
+
+If the peer-candidate check CLI needs a path flag for ratification sidecar, use the same operator model as startup/reload-check where possible.
+
+Do not create a separate incompatible ratification format.
+
+## D. Error mapping
+
+Map ratification failure precisely into peer-candidate check errors.
+
+Operators should be able to distinguish:
+
+- missing ratification;
+- malformed sidecar;
+- bad signature;
+- wrong chain;
+- wrong environment;
+- unknown authority root;
+- transport root not allowed;
+- authority key material unavailable;
+- authority key material malformed;
+- unsupported suite.
+
+Avoid collapsing all failures into generic invalid candidate if precise mapping exists.
+
+## E. Non-mutation proof
+
+Prove the peer-candidate check remains non-mutating under both pass and reject cases.
+
+No sequence file creation/update.
+No live trust mutation.
+No root merge.
+No session eviction.
+No propagation.
+No apply.
+
+---
+
+# Strict non-goals
+
+Run 107 MUST NOT:
+
+- wire live peer-candidate wire validation;
+- wire live peer-candidate propagation/rebroadcast;
+- wire reload-apply;
+- wire SIGHUP live reload;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement authority anti-rollback persistence;
+- implement persistent ratified-authority state;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken Run 105 startup/reload-check enforcement;
+- weaken Run 106 default-strict policy;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- weaken peer-candidate validation-only behavior;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet signing authority;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing peer-candidate check path
+
+Find the exact code path for:
+
+```text
+--p2p-trust-bundle-peer-candidate-check
+```
+
+Document:
+
+- where candidate envelope is loaded;
+- where Run 076 / Run 078 validation occurs;
+- where chain_id/environment/activation/sequence/revocation checks occur;
+- where the process exits;
+- why the path is non-mutating;
+- whether a data_dir/genesis authority context is already available;
+- whether ratification sidecar flags are parsed in this mode.
+
+Do not create a parallel peer-candidate validator if an existing path exists.
+
+## 2. Ratification context builder opportunity
+
+Run 106 identified the need for a factored `RatificationContextBuilder` or equivalent.
+
+Investigate whether startup, reload-check, and peer-candidate check can share a small helper for:
+
+- environment policy decision;
+- genesis authority context;
+- canonical genesis hash / authority context hash;
+- sidecar ratification loading;
+- bundle-signing key fingerprint extraction.
+
+If a helper reduces duplication without broad redesign, add it.
+
+If it would broaden scope, wire the peer-candidate path narrowly and document future factoring.
+
+## 3. MainNet/TestNet default strictness
+
+Confirm that peer-candidate check enforces ratification by default on MainNet/TestNet.
+
+Confirm that no hidden opt-out can bypass this on MainNet.
+
+## 4. DevNet opt-in behavior
+
+Confirm DevNet behavior matches Run 106 policy.
+
+DevNet without opt-in may preserve legacy unratified local behavior if currently required.
+
+DevNet with opt-in must enforce ratification.
+
+## 5. Non-mutation audit
+
+Identify all state artifacts that must remain unchanged:
+
+- sequence file;
+- trust root config;
+- live trust state;
+- session registry;
+- any candidate persistence;
+- any propagation counters/queues;
+- any consensus state.
+
+For CLI check mode, prove none are touched.
+
+---
+
+# Required implementation
+
+## 1. Wire ratification policy into peer-candidate check
+
+Use the existing policy helper:
+
+```text
+ratification_gate_decision(environment, opt_in)
+```
+
+or repo-style equivalent.
+
+MainNet/TestNet must invoke the gate regardless of opt-in flag.
+
+DevNet must preserve explicit opt-in semantics.
+
+## 2. Load ratification input for peer-candidate check
+
+Reuse the Run 105 sidecar loader and CLI flag if possible.
+
+If a new flag is needed, it must be:
+
+- local-only;
+- hidden if consistent with existing style;
+- validation-only;
+- disabled by default;
+- unable to bypass MainNet strictness.
+
+## 3. Enforce before validation success
+
+The ratification check must occur before the peer-candidate check returns success.
+
+For rejection:
+
+- exit non-zero;
+- print precise error;
+- do not write sequence;
+- do not mutate trust;
+- do not propagate;
+- do not start node.
+
+## 4. Preserve existing validation chain
+
+Ratification enforcement must be additive.
+
+Do not remove or weaken:
+
+- signature verification;
+- chain_id check;
+- environment check;
+- activation-height check;
+- activation_epoch check;
+- sequence peek / anti-rollback check;
+- revocation checks;
+- local-leaf / issuer-root checks;
+- size/version/wire envelope checks.
+
+## 5. Tests and evidence helpers
+
+Add helper support only as needed for peer-candidate check evidence.
+
+Do not add production shortcuts.
+
+---
+
+# Required tests
+
+Add focused tests.
+
+## A. Policy tests for peer-candidate check
+
+Test:
+
+- MainNet invokes ratification even without opt-in;
+- TestNet invokes ratification even without opt-in;
+- DevNet skips without opt-in;
+- DevNet invokes with opt-in;
+- MainNet cannot use DevNet bypass.
+
+## B. Peer-candidate check ratification tests
+
+Test:
+
+- valid ratification passes otherwise-valid candidate;
+- missing ratification rejects on MainNet/TestNet;
+- bad ratification signature rejects;
+- wrong chain rejects;
+- wrong environment rejects;
+- unknown authority root rejects;
+- transport root rejected;
+- missing authority key material rejects where policy requires;
+- malformed authority material rejects;
+- unsupported suite rejects.
+
+## C. Non-mutation tests
+
+For rejection cases, prove:
+
+- sequence file unchanged / not created;
+- no root merge;
+- no live trust mutation;
+- no session eviction;
+- no propagation or rebroadcast;
+- process exits before node startup.
+
+## D. Regression tests
+
+Run and report:
+
+- Run 101 genesis authority tests;
+- Run 102 genesis verification tests;
+- Run 103 ratification verifier tests;
+- Run 104 key material tests;
+- Run 105 ratification enforcement tests;
+- Run 106 ratification policy tests;
+- Run 076 peer-candidate validation tests;
+- Run 078 peer-candidate wire envelope tests;
+- Run 088 propagation tests;
+- Run 050 signed trust-bundle tests;
+- Run 055 sequence anti-rollback tests;
+- Run 057 activation-height tests;
+- Run 065 minimum-margin tests;
+- Run 091–099 activation_epoch tests where relevant;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib;
+- relevant qbind-net tests if touched.
+
+If any pre-existing test target has known compile issues, identify it clearly and prove it predates Run 107.
+
+---
+
+# Release-binary evidence
+
+Produce release-binary evidence for peer-candidate check.
+
+Minimum scenarios:
+
+## Scenario 1 — MainNet peer-candidate check valid ratification passes
+
+Use a peer candidate signed by a ratified bundle-signing key.
+
+Prove:
+
+- genesis verification passes;
+- ratification verifies;
+- peer-candidate validation succeeds;
+- process exits successfully;
+- no mutation occurs.
+
+## Scenario 2 — MainNet missing ratification rejects
+
+Omit ratification sidecar.
+
+Prove:
+
+- peer-candidate check fails closed;
+- precise missing-ratification error;
+- no sequence write;
+- no root merge;
+- no node startup.
+
+## Scenario 3 — MainNet bad ratification rejects
+
+Use bad signature / wrong chain / unknown authority root.
+
+Prove fail-closed behavior and no mutation.
+
+## Scenario 4 — DevNet no opt-in preserves legacy behavior
+
+If DevNet legacy behavior remains allowed, prove:
+
+- no ratification required without opt-in;
+- logs/operator surface make this visibly non-production.
+
+## Scenario 5 — DevNet opt-in enforces ratification
+
+With DevNet opt-in:
+
+- missing/bad ratification rejects;
+- valid ratification passes.
+
+If any scenario cannot be produced honestly, return partial-positive and document the blocker.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_107.md`
+- release-binary smoke logs under `docs/devnet/`
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- update `docs/whitepaper/contradiction.md`
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Optional narrow updates:
+
+- CLI docs if peer-candidate ratification sidecar flag/help changes;
+- MainNet readiness checklist;
+- helper documentation if helper generation changes.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 107 may narrow:
+
+- peer-candidate check ratification enforcement;
+- MainNet/TestNet default-strict enforcement coverage;
+- validation-only rejection of unratified peer candidates.
+
+Run 107 may mark this sub-piece resolved only if:
+
+- peer-candidate check enforces ratification under MainNet/TestNet default-strict policy;
+- valid ratification passes;
+- missing/bad/wrong ratification rejects;
+- rejection remains non-mutating;
+- release-binary evidence proves the behavior.
+
+Run 107 MUST NOT mark resolved:
+
+- live peer-candidate wire validation;
+- propagation/rebroadcast enforcement;
+- reload-apply enforcement;
+- SIGHUP enforcement;
+- signing-key rotation/revocation;
+- authority anti-rollback persistence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- production fast-sync / broader consensus-storage restore;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 107 does not implement live propagation enforcement;
+- Run 107 does not implement reload-apply/SIGHUP enforcement;
+- Run 107 does not implement rotation or revocation;
+- Run 107 does not implement authority anti-rollback persistence;
+- Run 107 does not enable peer-driven apply;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive
+- positive
+- partial-positive
+- negative
+
+Use **strongest-positive** only if:
+
+- peer-candidate check enforces ratification under MainNet/TestNet default-strict policy;
+- DevNet opt-in/legacy behavior is proven;
+- valid and invalid release-binary cases pass/fail correctly;
+- non-mutation invariants are proven;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- implementation and tests are complete;
+- release-binary evidence is strong but not exhaustive.
+
+Use **partial-positive** if:
+
+- source/test proof lands but release-binary evidence is incomplete;
+- MainNet/TestNet strictness is implemented but DevNet evidence is incomplete;
+- some error mappings remain generic but fail-closed.
+
+Use **negative** if:
+
+- unratified local signing keys pass peer-candidate check on MainNet;
+- transport roots authorize bundle-signing keys;
+- bad ratification signatures pass;
+- sequence/root/live trust mutation occurs on rejection;
+- fallback authority is introduced;
+- live propagation/apply behavior is changed out of scope.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive
+- positive
+- partial-positive
+- negative
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- peer-candidate check wiring;
+- ratification policy behavior;
+- ratification input handling;
+- error mapping;
+- MainNet/TestNet/DevNet behavior;
+- helper/CLI changes, if any.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary/process evidence.
+
+For each scenario, state pass/fail/deferred.
+
+## 4. Key security decisions
+
+Include:
+
+- no unratified local signing key on MainNet/TestNet peer-candidate check;
+- genesis-bound authority only;
+- transport roots cannot ratify signing keys;
+- no mutation or propagation on ratification rejection;
+- no live peer-driven apply.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- Run 105 opt-in enforcement;
+- Run 106 default-strict policy;
+- contradiction.md;
+- runbook;
+- whitepaper/protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- release-binary logs;
+- scripts/harnesses, if any.
+
+## 7. Explicit non-claims
+
+State that Run 107 does NOT implement:
+
+- live peer-candidate validation enforcement;
+- propagation/rebroadcast enforcement;
+- reload-apply enforcement;
+- SIGHUP enforcement;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- authority anti-rollback persistence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 107 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+

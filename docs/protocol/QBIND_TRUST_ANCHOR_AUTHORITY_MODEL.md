@@ -1294,3 +1294,92 @@ candidate bundle's signing key at three positions:
 See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md` for the full
 artefact set, test counts, and operator workflow.
 or by populating `public_key_hex` directly.
+---
+
+## §21. Run 106 update — MainNet/TestNet ratification enforcement promoted to DEFAULT-STRICT on the two Run-105 surfaces
+
+Run 106 narrows §20 (Run 105) on one and only one axis: the **invocation
+decision** of the Run 105 bundle-signing-key ratification gate is
+promoted from operator-opt-in (`--p2p-trust-bundle-ratification-
+enforcement-enabled`) to **per-environment default-strict** on the two
+trust-bundle validation surfaces Run 105 wired — the
+`--p2p-trust-bundle` startup preflight (before the Run 055 sequence
+write and before bundle roots are merged into `trusted_roots`) and the
+`--p2p-trust-bundle-reload-check` validation-only path.
+
+### Per-environment contract
+
+| Environment | Opt-in flag | Invocation decision | Reason label |
+|-------------|-------------|--------------------|--------------|
+| MainNet     | (any)       | **Invoke**         | `mainnet-default-strict` |
+| TestNet     | (any)       | **Invoke**         | `testnet-default-strict` |
+| DevNet      | `false`     | Skip               | `devnet-no-operator-opt-in` |
+| DevNet      | `true`      | Invoke             | `devnet-operator-opt-in` |
+
+MainNet/TestNet behaviour is **independent of the opt-in flag**: the
+flag can neither enable enforcement (it is already on) nor disable it
+(the helper ignores the flag on those environments). DevNet preserves
+the Run 105 operator-opt-in behaviour so unsigned/legacy bundles
+continue to work in developer workflows. The DevNet `Skip` decision is
+structurally unreachable on MainNet/TestNet (pinned by
+`devnet_opt_in_does_not_weaken_mainnet` and
+`run_106_devnet_skip_decision_is_never_returned_for_mainnet_or_testnet`).
+
+### Helper location
+
+The decision lives in the new module
+`qbind_node::pqc_ratification_policy` (file
+`crates/qbind-node/src/pqc_ratification_policy.rs`) as the pure,
+no-I/O, no-crypto function:
+
+```text
+ratification_gate_decision(env: NetworkEnvironment, operator_opt_in: bool)
+    -> RatificationGateDecision
+```
+
+The gate body itself (`apply_run_105_ratification_gate_at_startup` and
+`validate_candidate_bundle_with_ratification`) is bit-for-bit unchanged
+from Run 105. The Run 105 in-gate `RatificationEnforcementPolicy::Strict`
+selection on MainNet is preserved as defense in depth: even if a future
+change accidentally flipped the invocation decision back to opt-in,
+MainNet would still refuse legacy unratified bundles inside the gate.
+
+### Mutation-ordering invariants
+
+Run 106 changes only the **guard** around the existing gate. The
+Run 050/051/053/055/057/061/062/063/065/091/099/103/105 ordering at
+every covered surface is preserved bit-for-bit. A refused ratification
+still fails closed BEFORE the Run 055 sequence write and BEFORE bundle
+roots are merged into `trusted_roots`; no session is touched; no
+network is started on the rejected path.
+
+### What Run 106 explicitly does NOT do
+
+- No wiring of `--p2p-trust-bundle-peer-candidate-check` into
+  ratification-aware validation (still unwired; honest blocker: needs
+  a factored ratification-context builder).
+- No live peer-candidate wire validation enforcement (still unchanged;
+  honest blocker: adding fields to `PeerCandidateRuntimeContext`
+  breaks ~18 call sites — needs `*_with_ratification` wrapper
+  factoring).
+- No propagation/rebroadcast enforcement (depends on live wire
+  validation landing first).
+- No reload-apply (Run 073) enforcement (still unchanged; honest
+  blocker: requires extending the apply context without mutating the
+  trait shape).
+- No SIGHUP live reload (Run 074) enforcement (depends on
+  reload-apply landing first).
+- No release-binary smoke logs for the Run 106 invocation-policy
+  change itself (the Run 105 smokes for the gate body remain valid
+  because the body is bit-for-bit unchanged; the operator-side CLI
+  change on MainNet/TestNet is documented in source).
+- No signing-key rotation, signing-key revocation, anti-rollback
+  persistence, KMS/HSM custody, governance, validator-set rotation,
+  peer-driven live apply, production source-code anchors, fallback
+  roots, or fallback signing keys.
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_106.md` for the full
+artefact set, test counts, mutation-ordering invariants, deferred
+surfaces with explicit blockers, and the recommended Run 107 scope
+(wire `--p2p-trust-bundle-peer-candidate-check` first, then layer the
+remaining surfaces on the resulting factored context builder).

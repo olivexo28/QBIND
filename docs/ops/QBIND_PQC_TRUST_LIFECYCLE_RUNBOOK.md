@@ -3407,3 +3407,70 @@ Run 102/Run 103.
 *If anything in this Run 104 note appears to permit a fallback that
 the binary refuses, the binary wins and this runbook is the defect.
 Open an issue against `docs/whitepaper/contradiction.md` immediately.*
+---
+
+## Run 106 update — MainNet/TestNet ratification enforcement is now DEFAULT-STRICT on startup and `--p2p-trust-bundle-reload-check`
+
+### Operator-facing change
+
+The Run 105 hidden flag
+`--p2p-trust-bundle-ratification-enforcement-enabled` is **no longer
+required on MainNet or TestNet** to invoke the Run 105 bundle-signing-
+key ratification gate on the startup preflight or on the
+`--p2p-trust-bundle-reload-check` path. The gate now runs by default
+on those environments and the operator can no longer disable it by
+omitting that flag. The other two Run 105 flags are unchanged in
+meaning:
+
+- `--p2p-trust-bundle-ratification <PATH>` — **REQUIRED** on MainNet
+  for the startup preflight and the reload-check (a missing sidecar
+  fails closed with a typed reason from
+  `qbind_ledger::enforce_bundle_signing_key_ratification`).
+- `--p2p-trust-bundle-allow-unratified-testnet-devnet` — DevNet/
+  TestNet-only legacy escape hatch. Refused on MainNet by the gate
+  body itself (Run 105 `RatificationEnforcementPolicy::Strict`
+  selection on MainNet, preserved by Run 106 as defense in depth).
+
+### Per-environment quick reference
+
+| Environment | Default gate behaviour | Effect of opt-in flag | Effect of legacy-allow flag |
+|-------------|------------------------|----------------------|----------------------------|
+| MainNet     | **Invoked** (Run 106)  | Ignored (cannot enable; cannot disable) | Refused by gate body — MainNet rejects legacy unratified bundles |
+| TestNet     | **Invoked** (Run 106)  | Ignored (cannot enable; cannot disable) | Allows legacy unratified verdict if no sidecar is supplied |
+| DevNet      | Skipped                | When supplied: invokes the gate          | Allows legacy unratified verdict when gate is invoked        |
+
+On the Skip branch (DevNet without opt-in) and on the Invoke branch
+the operator log emits one of four stable labels:
+
+- `[run-106] startup ratification gate INVOKED (policy=mainnet-default-strict, env=Mainnet).`
+- `[run-106] startup ratification gate INVOKED (policy=testnet-default-strict, env=Testnet).`
+- `[run-106] startup ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).`
+- `[run-106] startup ratification gate SKIPPED (policy=devnet-no-operator-opt-in, env=Devnet). This is NOT a passed ratification ...`
+
+The same four labels are used by the reload-check site with the
+prefix `[run-106] reload-check ratification gate ...`.
+
+### What Run 106 explicitly does NOT change
+
+- The four other trust-bundle validation surfaces (`--p2p-trust-
+  bundle-peer-candidate-check`, live peer-candidate wire validation,
+  propagation/rebroadcast, reload-apply, SIGHUP live reload) remain
+  in their Run 105 state. Operators who want ratification enforcement
+  on those surfaces today must still follow the Run 105 procedure
+  (supply `--p2p-trust-bundle-ratification-enforcement-enabled` +
+  `--p2p-trust-bundle-ratification <PATH>`). The Run 105 wiring for
+  those surfaces is unchanged or absent; Run 106 did not weaken
+  anything on them.
+- No new CLI flag is introduced.
+- No new metric family is introduced.
+- No file is read, written, created, or deleted by Run 106 beyond
+  what Run 105 already touched.
+- No change to signing-key custody, rotation, revocation, anti-
+  rollback persistence, production source-code root anchors, or any
+  fallback authority. The operator surface is otherwise unchanged
+  from Run 105.
+
+*If anything in this Run 106 note appears to permit a bypass on
+MainNet that the binary refuses, the binary wins and this runbook is
+the defect. Open an issue against `docs/whitepaper/contradiction.md`
+immediately.*

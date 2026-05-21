@@ -126,6 +126,14 @@ pub mod pqc_boot_genesis;
 // local-file-only loader; verification happens via
 // `qbind_ledger::enforce_bundle_signing_key_ratification`.
 pub mod pqc_ratification_input;
+// Run 106 — per-environment ratification-gate invocation policy.
+// Decides, for a given `NetworkEnvironment` and the operator
+// `--p2p-trust-bundle-ratification-enforcement-enabled` flag, whether
+// the Run 105 ratification gate must be invoked on a trust-bundle
+// validation surface. MainNet/TestNet are strict-by-default; DevNet
+// remains operator-opt-in to preserve developer ergonomics.
+// Pure / no-I/O / no-crypto. See module docs.
+pub mod pqc_ratification_policy;
 // Run 050 — production-honest PQC transport trust-anchor bundle
 // (environment binding, root status + window, revocation entries,
 // canonical fingerprint, DevNet-unsigned scaffolding boundary).
