@@ -1,0 +1,742 @@
+# RUN 105 — Non-Mutating Ratification Enforcement in Trust-Bundle Validation Surfaces
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into the release binary startup path and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive:
+  - `BundleSigningRatification` schema;
+  - deterministic length-prefixed canonical preimage;
+  - domain separator `QBIND:BUNDLE-SIGNING-RATIFICATION:v1`;
+  - typed `RatificationFailure` reasons;
+  - PQC verification through existing `MlDsa44SignatureSuite` / suite `100`;
+  - authority lookup restricted to `bundle_signing_authority_roots`;
+  - transport roots rejected as bundle-signing authority;
+  - `AuthorityKeyMaterialUnavailable` fail-closed boundary when genesis stores only incomplete authority material.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material:
+  - `GenesisAuthorityRoot::public_key_hex`;
+  - `key_fingerprint` remains the 64-hex SHA3-256 fingerprint, not public key material;
+  - full key material is included in canonical genesis hash;
+  - MainNet rejects fingerprint-only bundle-signing authority roots;
+  - Run 103 verifier can verify ratification signatures using genesis-bound authority public key material;
+  - `AuthorityKeyMaterialUnavailable` is preserved for incomplete/legacy roots;
+  - malformed/tampered material fails closed with `AuthorityKeyMaterialMalformed`;
+  - no trust-bundle apply-path enforcement was added.
+
+Run 104 was positive for the key-material implementation, but tracking docs had to be synchronized before continuing. Run 105 assumes the committed docs now correctly state the Run 104 boundary:
+
+- full authority public key material exists and is hash-bound;
+- MainNet requires complete authority material;
+- the ratification verifier can verify using genesis material;
+- ratification is not yet enforced on trust-bundle acceptance/apply paths;
+- full C4 and C5 remain open.
+
+Run 105 is the first enforcement run.
+
+The goal is to require bundle-signing-key ratification on **non-mutating validation surfaces first**, without yet changing live apply mutation semantics.
+
+---
+
+# Exact objective
+
+Implement the smallest safe enforcement layer that requires trust-bundle signing keys to be ratified by genesis-bound bundle-signing authority roots on non-mutating validation surfaces.
+
+The objective is:
+
+1. Define a ratification input path for trust-bundle validation.
+2. Enforce ratification for bundle-signing keys on non-mutating validation surfaces.
+3. Preserve existing signed-bundle verification, chain_id, environment, sequence, activation-height, activation_epoch, revocation, and minimum-margin checks.
+4. Fail closed on unratified, malformed, wrong-chain, wrong-environment, unknown-root, transport-root, missing-key-material, or bad-signature ratification.
+5. Preserve all non-mutation guarantees: no sequence write, no live trust mutation, no session eviction, no root merge on validation rejection.
+6. Keep DevNet/TestNet behavior explicit and MainNet strict.
+7. Do not implement rotation, revocation lifecycle, anti-rollback persistence, KMS/HSM, governance, or peer-driven live apply.
+
+Run 105 should make this statement true for non-mutating validation paths:
+
+> A trust bundle signed by an unratified bundle-signing key is rejected before any mutation side effect.
+
+---
+
+# Enforcement scope
+
+Run 105 should prioritize non-mutating surfaces.
+
+Required target surfaces:
+
+## A. Startup preflight validation before mutation
+
+Startup `--p2p-trust-bundle` path currently validates and then may sequence-write/root-merge/start networking.
+
+Run 105 must ensure ratification validation happens before:
+
+- sequence write;
+- root merge;
+- P2P trust start;
+- network startup.
+
+If ratification fails, startup must fail closed with no mutation side effect.
+
+## B. Reload-check CLI
+
+`--p2p-trust-bundle-reload-check` is validation-only.
+
+Run 105 must enforce ratification here and preserve:
+
+- no sequence write;
+- no live trust mutation;
+- no session eviction;
+- no root merge.
+
+## C. Peer-candidate check CLI
+
+`--p2p-trust-bundle-peer-candidate-check` is validation-only.
+
+Run 105 must enforce ratification here and preserve non-mutation.
+
+## D. Live peer-candidate wire validation / propagation
+
+If the live peer-candidate dispatcher can safely access the genesis-bound authority context and ratification object, enforce ratification before validation acceptance/rebroadcast.
+
+If this surface cannot be safely wired without broad redesign, leave it explicitly open and return partial-positive. Do not fake it.
+
+## E. Reload-apply / SIGHUP live reload
+
+Run 105 may include reload-apply/SIGHUP validation only if the ratification check can be inserted before the existing `validate → snapshot → swap → evict_sessions → commit_sequence` mutation boundary without broad redesign.
+
+If not, defer to Run 106 and document explicitly.
+
+Do not weaken apply ordering.
+
+---
+
+# Ratification input model
+
+Run 105 must decide and implement a narrow input model for the ratification object.
+
+Acceptable options:
+
+## Option 1 — Sidecar ratification file
+
+A local ratification file is supplied alongside the trust bundle.
+
+Possible shape:
+
+```text
+--p2p-trust-bundle <bundle.json>
+--p2p-trust-bundle-ratification <ratification.json>
+```
+
+For check modes, analogous hidden/check-only flags may be added if consistent with repo style.
+
+## Option 2 — Embedded ratification reference
+
+If the trust-bundle schema already has a safe extension point, the bundle may refer to or include ratification data.
+
+Do not change the trust-bundle wire format broadly.
+
+## Option 3 — Genesis pre-ratified static initial bundle-signing key
+
+If Run 100/101/104 already model a genesis initial bundle-signing key as pre-ratified, validation may use that explicit genesis authority state.
+
+This must still be cryptographically/hash-bound and environment-bound.
+
+Do not treat arbitrary local configured signing keys as ratified.
+
+Choose the narrowest safe model and document the decision.
+
+MainNet must not accept unratified local signing keys.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Ratification-aware validation context
+
+Add a narrow context object or fields that let trust-bundle validation access:
+
+- genesis authority config;
+- canonical genesis hash or authority context hash;
+- expected chain_id;
+- expected environment;
+- ratification object, if required;
+- bundle-signing public key/fingerprint being used.
+
+## B. Ratification enforcement before mutation
+
+Enforce ratification before any mutation side effect on target surfaces.
+
+Mutation side effects include:
+
+- sequence persistence;
+- root merge;
+- live trust swap;
+- session eviction;
+- sequence commit;
+- rebroadcast/propagation acceptance if validation failed.
+
+## C. MainNet strictness
+
+MainNet must require ratification for bundle-signing keys on enforced surfaces.
+
+No local configured signing key alone is sufficient.
+
+## D. DevNet/TestNet explicit policy
+
+DevNet/TestNet may allow legacy unratified local signing keys only under explicit non-production policy if existing workflows require it.
+
+This must be logged/documented and must not apply to MainNet.
+
+Prefer introducing explicit configuration/flag names if needed rather than silent behavior.
+
+## E. Error propagation
+
+Map `RatificationFailure` into existing trust-bundle/reload/peer-candidate error surfaces precisely.
+
+Operators must be able to distinguish:
+
+- missing ratification;
+- bad ratification signature;
+- wrong chain;
+- wrong environment;
+- unknown authority root;
+- transport root not allowed;
+- key material unavailable;
+- malformed authority material;
+- unsupported suite.
+
+---
+
+# Strict non-goals
+
+Run 105 MUST NOT:
+
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement authority anti-rollback persistence;
+- implement persistent ratified-authority state;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format broadly;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- weaken reload-check non-mutation;
+- weaken reload-apply ordering;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet signing authority;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Current trust-bundle signing-key input path
+
+Find every place the bundle-signing key is currently configured or passed.
+
+Document:
+
+- startup `--p2p-trust-bundle`;
+- reload-check;
+- reload-apply;
+- SIGHUP live reload;
+- peer-candidate check;
+- live peer-candidate wire validation;
+- helper-generated bundles;
+- tests/fixtures.
+
+Identify where the bundle-signing key fingerprint can be derived and passed into the Run 103 verifier.
+
+## 2. Ratification object transport/input choice
+
+Decide how ratification evidence is supplied.
+
+Document why the chosen model is narrow and safe.
+
+If a CLI/file surface is added, justify why it is validation-only / local / explicit.
+
+## 3. Genesis authority context availability
+
+For each target surface, determine whether genesis authority context is available.
+
+Surfaces must not silently skip ratification because context is unavailable.
+
+MainNet must fail closed.
+
+DevNet/TestNet exceptions must be explicit.
+
+## 4. Mutation boundary audit
+
+For each target surface, identify the exact point before mutation where ratification is enforced.
+
+Prove rejection happens before:
+
+- sequence write;
+- root merge;
+- live trust swap;
+- session eviction;
+- sequence commit;
+- propagation/rebroadcast.
+
+## 5. Existing error type integration
+
+Find existing trust-bundle error types and reload/peer-candidate error wrappers.
+
+Add ratification errors without collapsing everything into generic invalid bundle.
+
+## 6. Release-binary evidence feasibility
+
+Determine which surfaces can be proven with release-binary logs in Run 105.
+
+At minimum, startup / reload-check / peer-candidate check should be release-binary-testable if ratification input can be provided locally.
+
+---
+
+# Required implementation
+
+## 1. Ratification-aware validation input
+
+Add minimal data structure(s) for ratification-aware validation.
+
+Inputs should include:
+
+- ratification object or explicit absence;
+- genesis authority config/context;
+- expected chain_id;
+- expected environment;
+- canonical genesis hash / authority context hash;
+- bundle-signing key fingerprint/public key being authorized.
+
+## 2. Enforce ratification on startup preflight
+
+For startup trust-bundle load:
+
+- validate trust-bundle signature as before;
+- verify the signing key is ratified before sequence write/root merge;
+- reject unratified signing key on MainNet;
+- preserve DevNet/TestNet policy explicitly;
+- fail closed on ratification failure.
+
+## 3. Enforce ratification on reload-check
+
+For reload-check:
+
+- enforce ratification;
+- no sequence write;
+- no mutation;
+- precise error.
+
+## 4. Enforce ratification on peer-candidate check
+
+For peer-candidate check:
+
+- enforce ratification;
+- preserve validation-only behavior;
+- no mutation.
+
+## 5. Optionally enforce on live peer-candidate wire validation
+
+Only if safe and narrow.
+
+If implemented:
+
+- invalid/unratified candidate must not be rebroadcast;
+- no apply;
+- no sequence write;
+- no session eviction.
+
+If deferred, document as Run 106.
+
+## 6. Optionally enforce on reload-apply/SIGHUP
+
+Only if safe and narrow.
+
+If implemented, rejection must occur before swap/evict/commit.
+
+If deferred, document as Run 106.
+
+## 7. Tests and evidence helpers
+
+Add helper support if needed to generate ratification objects for DevNet/TestNet evidence.
+
+Do not add production shortcuts.
+
+---
+
+# Required tests
+
+Add focused tests.
+
+## A. Ratification enforcement tests
+
+Test:
+
+- valid ratification allows otherwise-valid bundle on enforced surfaces;
+- missing ratification rejects on MainNet;
+- bad signature rejects;
+- wrong chain rejects;
+- wrong environment rejects;
+- unknown authority root rejects;
+- transport root rejects;
+- missing authority key material rejects;
+- malformed authority key material rejects;
+- unsupported suite rejects.
+
+## B. Non-mutation tests
+
+For rejection cases, prove:
+
+- sequence file unchanged;
+- root set unchanged;
+- live trust unchanged;
+- no session eviction;
+- no sequence commit;
+- no propagation/rebroadcast.
+
+## C. Surface coverage tests
+
+At minimum:
+
+- startup trust-bundle preflight;
+- reload-check;
+- peer-candidate check.
+
+If implemented:
+
+- live peer-candidate wire validation;
+- reload-apply;
+- SIGHUP live reload.
+
+## D. Environment policy tests
+
+Test:
+
+- MainNet requires ratification;
+- DevNet/TestNet policy is explicit;
+- DevNet/TestNet legacy behavior, if allowed, is not available on MainNet;
+- no local configured key alone passes on MainNet.
+
+## E. Regression tests
+
+Run and report:
+
+- Run 101 genesis authority tests;
+- Run 102 genesis verification tests;
+- Run 103 ratification verifier tests;
+- Run 104 key material tests;
+- Run 050 signed trust-bundle tests;
+- Run 055 sequence anti-rollback tests;
+- Run 057 activation-height tests;
+- Run 065 minimum-margin tests;
+- Run 069 reload-check tests;
+- Run 073 reload-apply tests;
+- Run 074 SIGHUP live reload tests;
+- Run 076 peer-candidate validation tests;
+- Run 088 propagation tests;
+- Run 091–099 activation_epoch tests where relevant;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib;
+- relevant qbind-net tests if touched.
+
+If any pre-existing test target has known compile issues, identify it clearly and prove it predates Run 105.
+
+---
+
+# Release-binary evidence
+
+Produce release-binary evidence for enforced surfaces.
+
+Minimum scenarios:
+
+## Scenario 1 — Startup valid ratification passes preflight
+
+Use a trust bundle signed by a bundle-signing key with valid ratification from genesis-bound authority.
+
+Prove:
+
+- genesis authority verifies;
+- ratification verifies;
+- trust-bundle validation proceeds;
+- existing sequence/activation/revocation checks still apply.
+
+## Scenario 2 — Startup missing ratification rejects before mutation
+
+On MainNet or strict mode:
+
+- omit ratification.
+
+Prove:
+
+- startup fails closed;
+- no sequence write;
+- no root merge;
+- no network startup.
+
+## Scenario 3 — Startup bad ratification rejects before mutation
+
+Use wrong signature / wrong chain / wrong authority root.
+
+Prove fail-closed behavior and no mutation.
+
+## Scenario 4 — Reload-check valid/missing/bad ratification
+
+Prove:
+
+- valid ratification passes check;
+- missing/bad ratification rejects;
+- no sequence write in all reload-check cases.
+
+## Scenario 5 — Peer-candidate check valid/missing/bad ratification
+
+Prove:
+
+- validation-only behavior preserved;
+- missing/bad ratification rejects;
+- no mutation.
+
+## Scenario 6 — Live propagation, if implemented
+
+Prove invalid/unratified candidates are not rebroadcast and do not mutate state.
+
+If not implemented, document as deferred to Run 106.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md`
+- release-binary smoke logs under `docs/devnet/`
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- update `docs/whitepaper/contradiction.md`
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Optional narrow updates:
+
+- CLI docs if ratification sidecar flags are added;
+- MainNet readiness checklist;
+- helper documentation if helper generation changes.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 105 may narrow:
+
+- bundle-signing-key ratification enforcement;
+- non-mutating trust-bundle validation authority;
+- MainNet rejection of unratified signing keys on enforced surfaces.
+
+Run 105 may mark a sub-piece resolved only if:
+
+- required non-mutating validation surfaces enforce ratification;
+- unratified signing keys fail closed on MainNet;
+- valid ratification passes;
+- wrong-chain/wrong-env/wrong-root/bad-signature cases fail closed;
+- negative mutation invariants are proven;
+- release-binary evidence exists for startup / reload-check / peer-candidate check.
+
+Run 105 MUST NOT mark resolved:
+
+- ratification enforcement in all live apply mutation paths unless actually implemented and proven;
+- signing-key rotation/revocation;
+- authority anti-rollback persistence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- production fast-sync / broader consensus-storage restore;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 105 does not implement rotation or revocation;
+- Run 105 does not implement authority anti-rollback persistence;
+- Run 105 does not enable peer-driven apply;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive
+- positive
+- partial-positive
+- negative
+
+Use **strongest-positive** only if:
+
+- startup / reload-check / peer-candidate check enforce ratification;
+- release-binary evidence proves valid and invalid cases;
+- negative mutation invariants are proven;
+- MainNet strictness is proven;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- core non-mutating surfaces enforce ratification;
+- tests are complete;
+- release-binary evidence is strong but some live surface remains explicitly deferred.
+
+Use **partial-positive** if:
+
+- enforcement lands on only some surfaces;
+- release-binary evidence is incomplete;
+- ratification input model is implemented but not wired widely.
+
+Use **negative** if:
+
+- unratified local signing keys pass on MainNet;
+- transport roots authorize bundle-signing keys;
+- bad ratification signatures pass;
+- sequence/root/live trust mutation occurs on rejection;
+- fallback authority is introduced;
+- scope broadens into peer-driven apply or governance redesign.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive
+- positive
+- partial-positive
+- negative
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- ratification input model;
+- validation context changes;
+- enforced surfaces;
+- deferred surfaces;
+- error mapping;
+- helper/CLI changes, if any.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary/process evidence.
+
+For each target surface, state pass/fail/deferred.
+
+## 4. Key security decisions
+
+Include:
+
+- no unratified local signing key on MainNet;
+- genesis-bound authority only;
+- transport roots cannot ratify signing keys;
+- no mutation on ratification rejection;
+- no peer-driven apply.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- contradiction.md;
+- runbook;
+- whitepaper/protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- release-binary logs;
+- scripts/harnesses, if any.
+
+## 7. Explicit non-claims
+
+State that Run 105 does NOT implement:
+
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- authority anti-rollback persistence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 105 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
