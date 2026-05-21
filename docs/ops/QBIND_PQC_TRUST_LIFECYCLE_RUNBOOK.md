@@ -3278,3 +3278,50 @@ updated doc-comment help text.
 *If anything in this Run 102 note appears to permit a fallback that the
 binary refuses, the binary wins and this runbook is the defect. Open an
 issue against `docs/whitepaper/contradiction.md` immediately.*
+---
+
+## Run 103 Update — Bundle-Signing-Key Ratification Verifier (library-level)
+
+Run 103 adds the minimal bundle-signing-key ratification verifier
+primitive (`qbind_ledger::verify_bundle_signing_key_ratification`).
+The verifier is a pure function — it has **no** CLI flag, **no**
+admin API, **no** filesystem watcher, **no** network listener, and
+**no** peer-driven apply path. Run 103 does NOT change the operator
+runbook surface.
+
+What changed for operators (informational; nothing to do in Run 103):
+
+- A new library function exists that, when given a signed
+  `BundleSigningRatification` object, the parsed
+  `GenesisAuthorityConfig`, the expected chain id / environment /
+  canonical genesis hash, returns either a
+  `RatifiedBundleSigningKey` identity or a typed `RatificationFailure`
+  reason. The verifier is currently called only by tests; Run 104
+  will wire it into trust-bundle acceptance paths.
+- Operators who wish to start producing ratification objects in
+  preparation for Run 104 should ensure their
+  `genesis.authority.bundle_signing_authority_roots[*].key_fingerprint`
+  entry stores the **full ML-DSA-44 public key bytes hex-encoded**
+  (2624 hex characters = 1312 bytes) rather than only the 64-hex
+  SHA3-256 fingerprint. Run 101 already permits this within the
+  `GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX = 16 KiB` upper bound.
+  Genesis-bound roots stored as a short fingerprint will continue to
+  pass Run 101/102 verification, but Run 103's verifier will return
+  the typed `AuthorityKeyMaterialUnavailable` reason — Run 104 will
+  introduce an authority-key-material registry to lift this boundary
+  without forcing the full PK into `key_fingerprint`.
+- No SIGHUP, reload-check, reload-apply, or peer-candidate path is
+  changed in Run 103. The Run 070 `validate → swap → evict_sessions →
+  commit_sequence` ordering contract is preserved bit-for-bit. The
+  Run 102 boot-time genesis verification is preserved bit-for-bit.
+
+**Run 103 explicitly does NOT add ratification path, peer-driven
+apply, KMS/HSM custody, signing-key rotation path, signing-key
+revocation path, anti-rollback persistence, authority-key-material
+registry, source-code production trust root, fallback authority, or
+any new operator surface.** The operator surface is unchanged from
+Run 102.
+
+*If anything in this Run 103 note appears to permit a fallback that
+the binary refuses, the binary wins and this runbook is the defect.
+Open an issue against `docs/whitepaper/contradiction.md` immediately.*

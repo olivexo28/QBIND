@@ -1055,3 +1055,110 @@ ratification verifier — Run 103.
 If anything in this update drifts from the binary's behaviour once
 Run 103 lands, this update is the defect: update it before merging the
 Run 103 change.
+---
+
+## 19. Run 103 Update — Minimal Bundle-Signing-Key Ratification Verifier
+
+**Status:** POSITIVE (library-level verifier landed; consumption boundary into trust-bundle apply paths deferred to Run 104 by task design).
+**Task:** `task/RUN_103_TASK.txt`.
+**Evidence:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_103.md`.
+
+### 19.1 What landed
+
+Run 103 implements the verifier primitive that §5 and §13 require and
+that the Run 102 update (§18.3) explicitly deferred:
+
+- A versioned, domain-separated `BundleSigningRatification` schema
+  authorising **exactly one** bundle-signing public key against
+  **exactly one** genesis-bound bundle-signing authority root, on
+  **exactly one** chain/environment, under **exactly one** PQC
+  signature suite. Domain separator:
+  `b"QBIND:BUNDLE-SIGNING-RATIFICATION:v1"`. Schema version:
+  `BUNDLE_SIGNING_RATIFICATION_VERSION_V1 = 1`.
+- A deterministic, length-prefixed binary canonical preimage
+  (`canonical_ratification_preimage`) — no JSON map-order or
+  whitespace ambiguity is possible.
+- `verify_bundle_signing_key_ratification(...)` — fail-closed
+  verifier API returning `Result<RatifiedBundleSigningKey,
+  RatificationFailure>` where every reject reason is precisely typed
+  (no "invalid object" catch-all).
+- PQC-only verification via the existing production
+  `qbind_crypto::MlDsa44SignatureSuite` adapter (FIPS 204; suite id
+  `100`). No parallel crypto stack, no classical signatures, no
+  dummy verifier.
+- Authority-root lookup restricted to
+  `authority.bundle_signing_authority_roots`; entries in
+  `pqc_transport_roots` are consulted **only** to produce the precise
+  `TransportRootNotAllowed` diagnostic and can never authorise a
+  bundle-signing key.
+- Honest authority-key-material boundary: when genesis stores only a
+  64-hex SHA3 fingerprint (Run 101 allows this), the verifier returns
+  the typed `AuthorityKeyMaterialUnavailable` reason rather than
+  faking verification.
+
+### 19.2 Where it lives
+
+| Concern | Location |
+|---|---|
+| Verifier module | `crates/qbind-ledger/src/bundle_signing_ratification.rs` |
+| Re-exports | `crates/qbind-ledger/src/lib.rs` (Run 103 block) |
+| Test-helpers feature gate | `crates/qbind-ledger/Cargo.toml` (`features.test-helpers = []`) |
+| Unit tests | `crates/qbind-ledger/src/bundle_signing_ratification.rs::tests` (19) |
+| Integration tests | `crates/qbind-node/tests/run_103_bundle_signing_ratification_tests.rs` (8) |
+| Evidence | `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_103.md` |
+
+### 19.3 What Run 103 explicitly does NOT do
+
+Per the task's "Strict non-goals" rule and the Run 102 update's
+deferral, Run 103 does **NOT**:
+
+- wire the verifier into trust-bundle startup load / reload-check /
+  reload-apply / SIGHUP / peer-candidate / propagation paths
+  (Run 104);
+- add `<data_dir>/pqc_authority_state.json` (Run 104);
+- add a `RatifiedSigningKeyRegistry` cache (Run 104);
+- include an `authority_sequence` anti-rollback field in the
+  ratification object (Run 104);
+- add an authority-key-material registry to resolve short
+  fingerprints to full PKs (Run 104);
+- introduce KMS/HSM custody (Run 105);
+- implement signing-key rotation / revocation (Run 105+);
+- implement governance / validator-set rotation;
+- add peer-driven live apply (Run 106+, gated by §10);
+- change the trust-bundle wire format, peer-candidate wire format,
+  consensus, KEMTLS, or `activation_epoch` semantics;
+- introduce production static root anchors as source-code constants;
+- add CLI flags, admin-API endpoints, filesystem watchers, network
+  listeners, gossip publishers/subscribers, metric families, or
+  dependencies.
+
+### 19.4 Anchoring
+
+- Implementation: `crates/qbind-ledger/src/bundle_signing_ratification.rs`.
+- Tests: 19 in-module unit + 8 release-binary-facing integration tests
+  (the integration tests link through `qbind-node`'s Cargo against the
+  same `qbind_ledger::verify_bundle_signing_key_ratification` re-export
+  the production binary links against).
+- Evidence record: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_103.md`.
+- Contradiction tracker: see Run 103 update in
+  `docs/whitepaper/contradiction.md`.
+- Regression linkage: Run 101 (11), Run 102 (14), qbind-ledger lib
+  (196), qbind-node lib (1090), qbind-crypto lib (68) all remain green
+  bit-for-bit.
+
+### 19.5 Why positive (and not strongest-positive)
+
+Run 103 lands the full minimal verifier with strong tests and zero
+mocking of crypto. The verdict is `positive` rather than
+`strongest-positive` because the genesis-bound
+`GenesisAuthorityRoot::key_fingerprint` field still overloads
+"short fingerprint" and "full PK" semantics — cleanly separating those
+representations and lifting the `AuthorityKeyMaterialUnavailable`
+boundary is Run 104 work. Until that lands, operators that wish to
+use the verifier in production must store the full ML-DSA-44 public
+key bytes (hex-encoded) in `key_fingerprint`; Run 101 already permits
+this within `GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX = 16 KiB`.
+
+If anything in this update drifts from the binary's behaviour once
+Run 104 lands, this update is the defect: update it before merging
+the Run 104 change.

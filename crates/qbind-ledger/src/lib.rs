@@ -1,6 +1,7 @@
 pub mod account;
 pub mod apply;
 pub mod auth;
+pub mod bundle_signing_ratification;
 pub mod context;
 pub mod error;
 pub mod execution;
@@ -152,4 +153,13 @@ pub use genesis::{
     GENESIS_AUTHORITY_FINGERPRINT_MAX_HEX, GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_DEVNET,
     GENESIS_AUTHORITY_FINGERPRINT_MIN_HEX_PROD, GENESIS_AUTHORITY_POLICY_VERSION_RUN_101,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+};
+
+// Run 103: Minimal Bundle-Signing-Key Ratification Verifier exports
+pub use bundle_signing_ratification::{
+    canonical_ratification_digest, canonical_ratification_preimage,
+    classify_authority_root_kind, pqc_public_key_fingerprint,
+    verify_bundle_signing_key_ratification, BundleSigningRatification, RatificationEnvironment,
+    RatificationFailure, RatificationVerifierInputs, RatifiedBundleSigningKey,
+    BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1, BUNDLE_SIGNING_RATIFICATION_VERSION_V1,
 };

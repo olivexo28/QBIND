@@ -3,6 +3,13 @@ name = "qbind-ledger"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Run 103: expose the test-only `bundle_signing_ratification::test_helpers`
+# module to downstream integration-test crates. NOT a production feature —
+# the helper builds and ML-DSA-44-signs a ratification object using a
+# locally-generated authority secret key, which has no production use.
+test-helpers = []
+
 [dependencies]
 qbind-types = { path = "../qbind-types" }
 qbind-crypto = { path = "../qbind-crypto" }

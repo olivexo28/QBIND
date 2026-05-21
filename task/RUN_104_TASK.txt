@@ -1,0 +1,648 @@
+# RUN 104 — Genesis-Bound Authority Key Material Registry for Bundle-Signing Ratification
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model:
+  - production authority must be genesis-bound;
+  - production static source-code anchors are rejected;
+  - MainNet local/dev shortcuts are rejected;
+  - bundle-signing-key ratification is required before peer-driven apply;
+  - peer-driven live apply remains forbidden until authority ratification, anti-rollback, custody, emergency controls, and release-binary evidence exist.
+- Run 101 added additive genesis authority fields and canonical genesis verification API:
+  - `GenesisConfig.authority: Option<GenesisAuthorityConfig>`;
+  - structurally separate PQC transport roots and bundle-signing authority roots;
+  - canonical genesis hash with domain separation;
+  - environment-specific boot verification API;
+  - no source-code MainNet root anchors;
+  - no transport-root reuse as bundle-signing authority.
+- Run 102 wired canonical genesis verification into the release binary startup path and fixed `--print-genesis-hash`:
+  - release binary verifies canonical genesis authority before restore / metrics / network / consensus startup;
+  - `--print-genesis-hash` prints the canonical parsed-genesis hash;
+  - MainNet fails closed on missing/malformed/mismatched expected hash and missing/malformed authority;
+  - DevNet embedded-genesis path remains explicit non-production behavior.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive:
+  - `crates/qbind-ledger/src/bundle_signing_ratification.rs`;
+  - `BundleSigningRatification` schema;
+  - deterministic length-prefixed canonical preimage;
+  - domain separator `QBIND:BUNDLE-SIGNING-RATIFICATION:v1`;
+  - typed `RatificationFailure` reasons;
+  - PQC verification through existing `MlDsa44SignatureSuite` / suite `100`;
+  - authority lookup restricted to `bundle_signing_authority_roots`;
+  - explicit rejection of `pqc_transport_roots` as bundle-signing authority;
+  - honest `AuthorityKeyMaterialUnavailable` fail-closed boundary when genesis stores only a short fingerprint;
+  - no CLI flag, admin API, network listener, filesystem watcher, gossip surface, metric, dependency, or trust-bundle apply-path consumption.
+
+Run 103 was positive for the verifier implementation but left the expected key-material boundary:
+
+> If genesis stores only a short fingerprint for a bundle-signing authority root, the verifier cannot verify an ML-DSA-44 signature. It must fail closed with `AuthorityKeyMaterialUnavailable`.
+
+Run 104 must address only that boundary.
+
+The goal is to make genesis-bound bundle-signing authority roots carry enough validated ML-DSA-44 public key material for the Run 103 verifier to verify normal ratification signatures without overloading or misusing the short fingerprint field.
+
+Run 104 must not wire ratification enforcement into trust-bundle apply paths yet. That is Run 105+.
+
+---
+
+# Exact objective
+
+Implement a clean genesis-bound authority key material registry for bundle-signing ratification.
+
+The objective is:
+
+1. Extend genesis authority data so `bundle_signing_authority_roots` can carry full ML-DSA-44 public key material, not only short fingerprints.
+2. Keep short fingerprints and full public key material structurally distinct.
+3. Validate suite ID, public key length, fingerprint derivation, chain binding, environment binding, and duplicate/ambiguity rules.
+4. Include the full authority key material in the canonical genesis hash from Run 101.
+5. Preserve backward compatibility where appropriate, but fail closed for MainNet when full authority key material is missing.
+6. Update Run 103 verifier inputs so a valid genesis authority root with key material can verify a real ratification signature.
+7. Preserve `AuthorityKeyMaterialUnavailable` for legacy / incomplete authority roots instead of faking verification.
+8. Do not consume ratification in trust-bundle validation/apply surfaces yet.
+
+Run 104 should make this statement true at the library/verifier level:
+
+> A genesis-bound bundle-signing authority root contains validated ML-DSA-44 public key material, and the Run 103 verifier can use it to verify a bundle-signing-key ratification signature.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Additive authority key material representation
+
+Extend the genesis authority root model with a clear key-material representation.
+
+Expected conceptual shape:
+
+```text
+genesis.authority.bundle_signing_authority_roots[]:
+  root_id / fingerprint
+  suite_id
+  public_key_bytes
+  key_fingerprint
+  chain_id / chain binding if represented
+  environment / environment binding if represented
+  status / policy metadata if already present
+```
+
+Use project-appropriate names and types.
+
+Requirements:
+
+- full public key material must be distinct from short fingerprint;
+- no overloading `key_fingerprint` as public key bytes;
+- no transport-root reuse;
+- no production static source-code keys;
+- no hidden fallback key material.
+
+## B. Fingerprint derivation and consistency
+
+Implement or reuse a canonical fingerprint derivation for authority public keys.
+
+Requirements:
+
+- deterministic;
+- domain-separated if project style requires it;
+- suite-aware;
+- public-key-length-aware;
+- test-covered;
+- mismatch between declared fingerprint and derived fingerprint must fail closed.
+
+## C. Genesis canonical hash inclusion
+
+Ensure full authority public key material affects canonical genesis hash.
+
+Tests must prove:
+
+- changing one byte of bundle-signing authority public key changes genesis hash;
+- changing suite ID changes genesis hash;
+- changing fingerprint changes genesis hash;
+- changing transport roots does not get confused with bundle-signing authority roots.
+
+## D. Environment-specific validation
+
+MainNet must require complete key material for bundle-signing authority roots.
+
+DevNet/TestNet may allow legacy short-fingerprint-only roots if existing tests/workflows require it, but this must be explicit and must preserve `AuthorityKeyMaterialUnavailable` in the verifier.
+
+No missing key material may be silently accepted as verifiable authority.
+
+## E. Run 103 verifier integration
+
+Update the Run 103 verifier so that:
+
+- when full authority public key material is present and valid, it verifies ratification signatures normally;
+- when key material is absent, it still fails closed with `AuthorityKeyMaterialUnavailable`;
+- when key material is malformed, it fails closed with a typed reason;
+- when fingerprint/public key mismatch occurs, it fails closed;
+- transport roots remain rejected.
+
+## F. Evidence-only helper support if needed
+
+If existing test/helper tooling cannot generate genesis authority roots with full key material, add narrow evidence/test helper support.
+
+Allowed helper changes:
+
+- DevNet/test genesis generator support;
+- example/helper for producing ML-DSA-44 authority public key entries;
+- test fixture generation.
+
+Do not add runtime authority shortcuts.
+
+---
+
+# Strict non-goals
+
+Run 104 MUST NOT:
+
+- wire ratification enforcement into startup trust-bundle acceptance;
+- wire ratification enforcement into reload-check;
+- wire ratification enforcement into reload-apply;
+- wire ratification enforcement into SIGHUP live reload;
+- wire ratification enforcement into peer-candidate validation/propagation;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement ratified-authority state persistence;
+- implement authority anti-rollback storage;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- weaken reload-check non-mutation;
+- weaken reload-apply ordering;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet signing authority;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing genesis authority structures
+
+Inspect the Run 101 structures:
+
+- `GenesisAuthorityRoot`;
+- `GenesisAuthorityConfig`;
+- `bundle_signing_authority_roots`;
+- `pqc_transport_roots`;
+- current fingerprint fields;
+- current suite fields;
+- current validation rules;
+- canonical genesis hash implementation.
+
+Identify the narrowest additive field(s) needed for full ML-DSA-44 authority key material.
+
+## 2. Existing ML-DSA-44 public key representation
+
+Find how ML-DSA-44 public keys are represented elsewhere.
+
+Document:
+
+- expected public key length;
+- encoding convention;
+- suite ID;
+- fingerprint helper if one exists;
+- validation helper if one exists;
+- serde / hex encoding conventions.
+
+Do not create a conflicting representation if one already exists.
+
+## 3. Existing fingerprint/domain-separation conventions
+
+Find existing fingerprint domain tags and key fingerprint helpers.
+
+Use project style.
+
+If a new domain separator is required, define it explicitly and test it.
+
+## 4. Run 103 verifier boundary
+
+Inspect `bundle_signing_ratification.rs` and identify exactly where `AuthorityKeyMaterialUnavailable` is returned.
+
+Update only the minimal lookup/material extraction path needed to pass real public key material to the existing verifier.
+
+## 5. Genesis compatibility policy
+
+Decide and document compatibility:
+
+- old DevNet/TestNet genesis with fingerprint-only authority roots;
+- MainNet genesis with fingerprint-only authority roots;
+- missing authority config;
+- mixed complete/incomplete root sets;
+- duplicate roots;
+- duplicate public keys;
+- duplicate fingerprints;
+- malformed public key bytes.
+
+MainNet must be strict.
+
+---
+
+# Required implementation
+
+## 1. Add authority public key material field(s)
+
+Add additive genesis fields using repo style.
+
+Requirements:
+
+- full ML-DSA-44 public key bytes represented safely;
+- suite ID explicit;
+- fingerprint field remains separate;
+- serde parsing/serialization deterministic;
+- old genesis parsing behavior preserved where policy allows.
+
+## 2. Add validation
+
+Validation must check:
+
+- suite ID supported;
+- public key length correct;
+- declared fingerprint matches derived fingerprint;
+- no malformed hex/bytes;
+- no duplicate/ambiguous roots according to policy;
+- environment/chain binding if represented;
+- MainNet requires complete bundle-signing authority material.
+
+## 3. Include key material in canonical genesis hash
+
+Ensure canonical genesis hashing includes full key material and all security-relevant authority fields.
+
+Add tests proving one-byte key-material changes affect hash.
+
+## 4. Update Run 103 verifier integration
+
+Update verifier authority lookup to recover full key material from genesis authority root when present.
+
+Requirements:
+
+- valid full key material enables signature verification;
+- missing material still returns `AuthorityKeyMaterialUnavailable`;
+- malformed material fails closed;
+- transport roots remain rejected;
+- no fallback to local config or static keys.
+
+## 5. Add helper/test fixture support if needed
+
+If needed, update DevNet/test helper generation to produce complete authority roots.
+
+This must remain evidence/test support only and not become production fallback authority.
+
+---
+
+# Required tests
+
+Add focused tests.
+
+## A. Genesis schema / parsing tests
+
+Test:
+
+- genesis with full bundle-signing authority public key parses;
+- legacy fingerprint-only genesis parses where policy allows;
+- malformed public key rejected;
+- unsupported suite rejected;
+- missing public key rejected on MainNet;
+- missing public key explicit and non-verifiable on DevNet/TestNet if allowed.
+
+## B. Fingerprint consistency tests
+
+Test:
+
+- declared fingerprint matches derived fingerprint;
+- one-byte public key mutation fails fingerprint validation;
+- suite mismatch fails;
+- duplicate fingerprints rejected or handled according to policy;
+- transport root fingerprint cannot satisfy bundle-signing authority lookup.
+
+## C. Canonical genesis hash tests
+
+Test:
+
+- full authority public key material affects genesis hash;
+- one-byte key change changes hash;
+- suite ID change changes hash;
+- fingerprint change changes hash;
+- transport root and bundle-signing root remain separate in hash.
+
+## D. Run 103 verifier tests
+
+Test:
+
+- valid ratification signature verifies using full genesis authority public key;
+- fingerprint-only authority root still fails with `AuthorityKeyMaterialUnavailable`;
+- malformed authority key material fails closed;
+- wrong authority public key rejects bad signature;
+- transport root still rejected;
+- wrong chain/environment still rejected.
+
+## E. MainNet startup/verification tests
+
+Test:
+
+- MainNet genesis with complete authority material passes boot verification;
+- MainNet genesis with fingerprint-only authority fails;
+- MainNet genesis with malformed key material fails;
+- DevNet legacy behavior remains explicit if allowed;
+- Run 102 canonical boot verification still composes correctly.
+
+## F. Regression tests
+
+Run and report:
+
+- Run 101 genesis authority tests;
+- Run 102 genesis verification tests;
+- Run 103 ratification verifier tests;
+- trust-bundle signature verification tests;
+- Runs 091–099 activation/trust lifecycle tests where relevant;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib;
+- relevant qbind-net tests if touched.
+
+If any pre-existing test target has known compile issues, identify it clearly and prove it predates Run 104.
+
+---
+
+# Release-binary / process evidence
+
+Run 104 should include release-binary-facing evidence if genesis parsing/verification is exposed through the binary.
+
+Minimum preferred scenarios:
+
+## Scenario 1 — Canonical hash changes on authority public key material
+
+Use two genesis files differing only by one byte of bundle-signing authority public key material.
+
+Run `qbind-node --print-genesis-hash`.
+
+Prove hashes differ.
+
+## Scenario 2 — MainNet complete authority key material passes boot verification
+
+Run release binary with MainNet genesis containing complete bundle-signing authority key material and correct expected hash.
+
+Prove boot verification passes.
+
+## Scenario 3 — MainNet fingerprint-only authority fails
+
+Run release binary with MainNet genesis containing only short fingerprint authority roots.
+
+Prove fail-closed behavior with precise error.
+
+## Scenario 4 — Malformed authority key material fails
+
+Run release binary with malformed authority public key bytes or wrong length.
+
+Prove fail-closed behavior.
+
+## Scenario 5 — Ratification verifier process evidence if hook exists
+
+If there is a validation-only hook/helper, prove:
+
+- valid ratification verifies;
+- fingerprint-only authority fails with `AuthorityKeyMaterialUnavailable`;
+- bad signature fails;
+- transport root fails.
+
+If no release-binary ratification hook exists, document that Run 104 ratification evidence is library/integration-test level only.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_104.md`
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- update `docs/whitepaper/contradiction.md`
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+Optional narrow updates:
+
+- genesis docs;
+- MainNet readiness checklist;
+- helper documentation if helper generation changes.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 104 may narrow:
+
+- `AuthorityKeyMaterialUnavailable` boundary;
+- genesis-bound bundle-signing authority key material;
+- bundle-signing-key ratification verifier readiness.
+
+Run 104 may mark the key-material sub-piece resolved only if:
+
+- genesis can carry full ML-DSA-44 bundle-signing authority public key material;
+- MainNet requires complete material;
+- canonical genesis hash includes it;
+- fingerprint/public-key consistency is validated;
+- Run 103 verifier can verify a valid ratification signature using genesis material;
+- fingerprint-only roots still fail closed where not allowed.
+
+Run 104 MUST NOT mark resolved:
+
+- trust-bundle apply-path ratification enforcement;
+- signing-key rotation/revocation;
+- authority anti-rollback persistence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- production fast-sync / broader consensus-storage restore;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 104 does not wire ratification into trust-bundle acceptance surfaces;
+- Run 104 does not implement rotation or revocation;
+- Run 104 does not enable peer-driven apply;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive
+- positive
+- partial-positive
+- negative
+
+Use **strongest-positive** only if:
+
+- full authority key material representation lands;
+- MainNet requires complete key material;
+- canonical genesis hash includes key material;
+- Run 103 verifier verifies valid ratification signatures using genesis material;
+- failure cases are test-proven;
+- release-binary genesis/hash evidence is complete;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- implementation and tests are complete;
+- release-binary evidence is strong but ratification evidence remains library-level.
+
+Use **partial-positive** if:
+
+- schema lands but verifier integration remains incomplete;
+- key material is represented but MainNet enforcement is incomplete;
+- release-binary evidence is incomplete.
+
+Use **negative** if:
+
+- implementation overloads short fingerprint as key material;
+- verifier fakes verification without full public key;
+- missing key material is treated as accepted;
+- transport roots authorize bundle-signing keys;
+- production static anchors or fallback keys are introduced;
+- scope broadens into peer-driven apply or governance redesign.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive
+- positive
+- partial-positive
+- negative
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- genesis schema additions;
+- public key material representation;
+- fingerprint derivation/validation;
+- canonical hash changes;
+- Run 103 verifier integration;
+- MainNet/DevNet/TestNet behavior;
+- helper changes, if any.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary/process evidence.
+
+## 4. Key security decisions
+
+Include:
+
+- no overloading short fingerprint as public key;
+- no production static source-code anchors;
+- genesis-bound authority key material;
+- MainNet requires complete material;
+- transport roots cannot ratify bundle-signing keys;
+- no peer-driven apply.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- contradiction.md;
+- runbook;
+- whitepaper/protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- release-binary logs or explain why none are required;
+- scripts/harnesses, if any.
+
+## 7. Explicit non-claims
+
+State that Run 104 does NOT implement:
+
+- ratification enforcement in trust-bundle apply paths;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- authority anti-rollback persistence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 104 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+

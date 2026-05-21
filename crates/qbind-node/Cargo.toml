@@ -47,5 +47,6 @@ sha3           = "0.10"
 [dev-dependencies]
 qbind-serde  = { path = "../qbind-serde" }
 qbind-system = { path = "../qbind-system" }
+qbind-ledger = { path = "../qbind-ledger", features = ["test-helpers"] }
 tempfile    = "3.10"
 proptest    = "1"
