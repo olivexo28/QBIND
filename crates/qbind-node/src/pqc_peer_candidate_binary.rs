@@ -84,6 +84,7 @@ use crate::pqc_trust_peer_candidate::{
     PeerCandidateConfig, PeerCandidateEnvelope, PeerCandidateOutcome,
     PeerCandidateRuntimeContext, PeerCandidateValidator,
 };
+use crate::pqc_trust_reload::RatificationEnforcementContext;
 
 /// Run 077 partial-config / preconditions / I/O refusals. Every
 /// variant is a deterministic `exit 1` outcome that produces a safe
@@ -370,6 +371,27 @@ pub fn run077_hook_active(envelope_path: Option<&Path>, validation_enabled: bool
 ///   the function proceeds with the validator armed for the single
 ///   check.
 pub fn run_local_check(inputs: Run077Inputs<'_>, metrics: &P2pMetrics) -> Run077Result {
+    run_local_check_inner(inputs, metrics, None)
+}
+
+/// Run 107 local peer-candidate check with the existing Run 105/106
+/// ratification context applied before any successful validation
+/// verdict is returned. This is intentionally a wrapper rather than a
+/// new field on [`PeerCandidateRuntimeContext`] so live peer-candidate
+/// callers remain untouched.
+pub fn run_local_check_with_ratification(
+    inputs: Run077Inputs<'_>,
+    metrics: &P2pMetrics,
+    ratification_ctx: &RatificationEnforcementContext<'_>,
+) -> Run077Result {
+    run_local_check_inner(inputs, metrics, Some(ratification_ctx))
+}
+
+fn run_local_check_inner(
+    inputs: Run077Inputs<'_>,
+    metrics: &P2pMetrics,
+    ratification_ctx: Option<&RatificationEnforcementContext<'_>>,
+) -> Run077Result {
     // 1. Partial-config refusal. The two CLI flags are required-
     //    together. Treat "exactly one supplied" as the operator-
     //    confusion preventer; treat "neither supplied" as a caller
@@ -456,7 +478,10 @@ pub fn run_local_check(inputs: Run077Inputs<'_>, metrics: &P2pMetrics) -> Run077
     //    exercise. Validates the envelope through the SAME Run 069
     //    pipeline. NO live apply; NO sequence write; NO session
     //    eviction.
-    let outcome = validator.try_accept(envelope, &ctx);
+    let outcome = match ratification_ctx {
+        Some(rctx) => validator.try_accept_with_ratification(envelope, &ctx, rctx),
+        None => validator.try_accept(envelope, &ctx),
+    };
 
     // 7. Record the outcome-specific metric exactly once.
     record_outcome_metric(metrics, &outcome);

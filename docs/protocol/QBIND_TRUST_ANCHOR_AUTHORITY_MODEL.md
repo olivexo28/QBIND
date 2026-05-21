@@ -1383,3 +1383,21 @@ artefact set, test counts, mutation-ordering invariants, deferred
 surfaces with explicit blockers, and the recommended Run 107 scope
 (wire `--p2p-trust-bundle-peer-candidate-check` first, then layer the
 remaining surfaces on the resulting factored context builder).
+---
+
+## Run 107 update — local peer-candidate check ratification enforcement
+
+Run 107 implements one additional non-mutating enforcement surface from the Run 100 authority model: the local `--p2p-trust-bundle-peer-candidate-check <PATH>` CLI path now reuses the Run 105 sidecar ratification input and the Run 106 per-environment invocation policy.
+
+The policy is unchanged: MainNet and TestNet invoke bundle-signing-key ratification by default; DevNet invokes only when the operator supplies `--p2p-trust-bundle-ratification-enforcement-enabled`. The sidecar format remains `qbind_ledger::BundleSigningRatification` loaded through the existing `--p2p-trust-bundle-ratification <PATH>` flag.
+
+Security boundaries preserved:
+
+- local config alone is still not enough for MainNet bundle-signing authority;
+- authority is genesis-bound through the canonical genesis hash and authority block;
+- transport roots cannot authorize bundle-signing keys;
+- rejection remains validation-only and non-mutating;
+- no peer-candidate wire format change was made;
+- live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven apply, rotation/revocation, authority anti-rollback persistence, KMS/HSM, governance, and validator-set rotation remain future work.
+
+Evidence is recorded in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_107.md`. Because release-binary smoke evidence was not produced, Run 107 is partial-positive and does not claim full C4 or C5 closure.

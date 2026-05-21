@@ -98,7 +98,8 @@ use qbind_types::{ChainId, NetworkEnvironment};
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
 use crate::pqc_trust_reload::{
-    validate_candidate_bundle_full, ReloadCheckError, ReloadCheckInputs, ValidatedCandidate,
+    validate_candidate_bundle_full, validate_candidate_bundle_full_with_ratification,
+    RatificationEnforcementContext, ReloadCheckError, ReloadCheckInputs, ValidatedCandidate,
 };
 
 /// Maximum size in bytes of the peer-supplied bundle payload Run 076
@@ -639,6 +640,28 @@ impl PeerCandidateValidator {
         envelope: PeerCandidateEnvelope,
         ctx: &PeerCandidateRuntimeContext<'_>,
     ) -> PeerCandidateOutcome {
+        self.try_accept_inner(envelope, ctx, None)
+    }
+
+    /// Run 107 entry point for the local peer-candidate check CLI. It
+    /// preserves the Run 076 non-mutation contract while swapping the
+    /// inner validation call to the existing Run 105 ratification-aware
+    /// reload-check wrapper.
+    pub fn try_accept_with_ratification(
+        &mut self,
+        envelope: PeerCandidateEnvelope,
+        ctx: &PeerCandidateRuntimeContext<'_>,
+        ratification_ctx: &RatificationEnforcementContext<'_>,
+    ) -> PeerCandidateOutcome {
+        self.try_accept_inner(envelope, ctx, Some(ratification_ctx))
+    }
+
+    fn try_accept_inner(
+        &mut self,
+        envelope: PeerCandidateEnvelope,
+        ctx: &PeerCandidateRuntimeContext<'_>,
+        ratification_ctx: Option<&RatificationEnforcementContext<'_>>,
+    ) -> PeerCandidateOutcome {
         // 1. Disabled-by-default short-circuit. NO payload work, NO
         // crypto, NO temp file. This is the strictest layer.
         if !self.config.enabled {
@@ -710,7 +733,10 @@ impl PeerCandidateValidator {
             sequence_persistence_path: ctx.sequence_persistence_path,
             local_leaf_cert_bytes: ctx.local_leaf_cert_bytes,
         };
-        let res = validate_candidate_bundle_full(inputs);
+        let res = match ratification_ctx {
+            Some(rctx) => validate_candidate_bundle_full_with_ratification(inputs, rctx),
+            None => validate_candidate_bundle_full(inputs),
+        };
 
         // 7. Unlink the temp file regardless of outcome so the
         // adversary cannot accumulate scratch payloads.

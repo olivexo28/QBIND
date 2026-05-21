@@ -955,7 +955,8 @@ async fn main() {
         args.p2p_trust_bundle_peer_candidate_validation_enabled,
     ) {
         use qbind_node::pqc_peer_candidate_binary::{
-            run_local_check, Run077Inputs, Run077RefusalReason, Run077Result,
+            run_local_check, run_local_check_with_ratification, Run077Inputs, Run077RefusalReason,
+            Run077Result,
         };
         use qbind_node::pqc_root_config::PqcLeafCredentialPaths;
         use qbind_types::NetworkEnvironment;
@@ -1157,7 +1158,53 @@ async fn main() {
             now_ms,
         };
 
-        match run_local_check(inputs, &metrics) {
+        let gate_decision = qbind_node::pqc_ratification_policy::ratification_gate_decision(
+            config.environment,
+            args.p2p_trust_bundle_ratification_enforcement_enabled,
+        );
+        let run077_result = if gate_decision.should_invoke() {
+            eprintln!(
+                "[run-107] peer-candidate-check ratification gate INVOKED (policy={}, env={:?}).",
+                gate_decision.label(),
+                config.environment
+            );
+            match build_run_105_reload_check_context(&args, &config) {
+                Ok(ctx_data) => run_local_check_with_ratification(
+                    inputs,
+                    &metrics,
+                    &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
+                        authority: &ctx_data.authority,
+                        expected_genesis_hash: &ctx_data.canonical_hash,
+                        expected_environment_policy: ctx_data.env_policy,
+                        expected_chain_id_str: &ctx_data.chain_id_str,
+                        ratification: ctx_data.ratification.as_ref(),
+                        policy: ctx_data.policy,
+                    },
+                ),
+                Err(reason) => {
+                    eprintln!(
+                        "[run-107] Run 077 peer-candidate-check refused: ratification context \
+                         could not be built: {}. Envelope path={}. No live trust apply, no \
+                         sequence write, no session mutation, no propagation. See \
+                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_107.md.",
+                        reason,
+                        envelope_path.display()
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            eprintln!(
+                "[run-107] peer-candidate-check ratification gate SKIPPED (policy={}, env={:?}). \
+                 This preserves pre-Run-107 DevNet local-check behaviour only; MainNet/TestNet \
+                 always invoke the gate by default and never reach this branch.",
+                gate_decision.label(),
+                config.environment
+            );
+            run_local_check(inputs, &metrics)
+        };
+
+        match run077_result {
             Run077Result::Refused { reason } => {
                 eprintln!("[binary] FATAL: {}", reason);
                 std::process::exit(1);

@@ -1,0 +1,15 @@
+RUN 107 release-binary smoke log
+================================
+
+Status: NOT PRODUCED in this run.
+
+Reason: source wiring and focused integration tests landed, but no honest `cargo build --release -p qbind-node` plus release-binary peer-candidate-check fixture matrix was completed in this session.
+
+Required scenarios deferred:
+1. MainNet peer-candidate check valid ratification passes.
+2. MainNet missing ratification rejects.
+3. MainNet bad ratification rejects.
+4. DevNet no opt-in preserves legacy behavior.
+5. DevNet opt-in enforces ratification.
+
+The absence of release-binary smoke logs is the explicit reason for the Run 107 partial-positive verdict.

@@ -3474,3 +3474,24 @@ prefix `[run-106] reload-check ratification gate ...`.
 MainNet that the binary refuses, the binary wins and this runbook is
 the defect. Open an issue against `docs/whitepaper/contradiction.md`
 immediately.*
+---
+
+## Run 107 operator update — peer-candidate check ratification gate
+
+Run 107 extends the Run 105/106 bundle-signing-key ratification gate to the local `--p2p-trust-bundle-peer-candidate-check <PATH>` CLI surface. Operators should treat this as a validation-only check: the node does not start, no candidate is applied, no sequence record is written, no live trust state is mutated, no session is evicted, and no propagation/rebroadcast occurs.
+
+Policy:
+
+- MainNet: ratification is required by default for peer-candidate check.
+- TestNet: ratification is required by default for peer-candidate check.
+- DevNet: ratification is enforced only when `--p2p-trust-bundle-ratification-enforcement-enabled` is supplied; without it, legacy unratified local-check behavior remains available for developer workflows.
+
+Use the existing sidecar flag:
+
+```text
+--p2p-trust-bundle-ratification <PATH>
+```
+
+with the existing `BundleSigningRatification` JSON format. Do not introduce a separate peer-candidate ratification format. A missing, malformed, wrong-chain, wrong-environment, bad-signature, unknown-root, transport-root, unsupported-suite, missing-key-material, or malformed-key-material ratification fails closed before a successful peer-candidate verdict.
+
+Run 107 does not change live peer-candidate wire validation, propagation/rebroadcast, reload-apply, SIGHUP, peer-driven live apply, signing-key rotation/revocation, authority anti-rollback persistence, KMS/HSM custody, governance, validator-set rotation, full C4, or C5.
