@@ -1,0 +1,32 @@
+Run 113 reload-apply ratification release-binary evidence
+outdir: /tmp/qbind-run113-reload-apply-ratification-release-binary
+repo: /tmp/workspace/olivexo28/QBIND
+git_commit: badfb3b3fb9ca0684c6e68356a0e379eb0d2624f
+qbind-node_sha256: 83a0c3cd51103c0ccff670e4bca08d3b48fe3249a6a2c6273c61e39b8b7e7d93
+qbind-node_build_id: 72c4682d89701d616cc82696e302593c812eee34
+fixture-helper_sha256: 5e4607b483dd83461ce5d3b7dc2d0e0bd45e6f2797c168da38a7be3cedc9a020
+fixture-helper_build_id: 5cb2738810ce4b8e4e12623e0ad6279b604a6a61
+
+scenario status:
+  scenario_1_mainnet_valid: rc=0
+  scenario_2_mainnet_missing: rc=1
+  scenario_3_mainnet_bad_signature: rc=1
+  scenario_4_mainnet_wrong_chain: rc=1
+  scenario_5_mainnet_wrong_env: rc=1
+  scenario_6_mainnet_unknown_authority: rc=1
+  scenario_7_devnet_legacy_no_opt_in: rc=0
+  scenario_8_devnet_opt_in_valid: rc=0
+  scenario_9_devnet_opt_in_missing: rc=1
+
+non-mutation checks: pass
+  no pqc_trust_bundle_sequence.json was created under any refusal scenario data dir
+  no Run 070 APPLIED log line, no Run 073 VERDICT=applied, and no
+  session_evictions>=1 marker was emitted on any refusal scenario.
+apply-ordering checks: pass
+  Run 070 canonical applied_log_line + 'sequence_commit=ok' + Run 073
+  VERDICT=applied present together on every accepted scenario.
+wire-format checks: source-only, no trust-bundle or ratification structs
+  changed by this evidence harness.
+scope-non-goal checks: SIGHUP live reload, peer-driven live apply,
+  signing-key rotation/revocation, authority anti-rollback persistence,
+  KMS/HSM, governance, validator-set rotation: NOT touched.

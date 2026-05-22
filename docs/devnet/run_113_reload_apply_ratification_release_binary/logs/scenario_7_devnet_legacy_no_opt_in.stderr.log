@@ -1,0 +1,7 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run113-reload-apply-ratification-release-binary/fixtures/devnet/genesis.json, canonical_hash=0xa594f0277e9669c6887ed394c66c6814c5eff577e7d8c2619f39be64cb4c9368).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate SKIPPED (policy=devnet-no-operator-opt-in, env=Devnet). This is NOT a passed ratification; it preserves pre-Run-112 DevNet behaviour for developer workflows. MainNet/TestNet always invoke the gate by default and never reach this branch.
+[binary] Run 070: trust-bundle candidate APPLIED live (operator-triggered local reload-apply; conservative session-eviction v0 policy) (old_fp=98ff290e.. new_fp=ed646c3a.. old_sequence=Some(1) new_sequence=2 env=devnet chain_id=51424e4444455600 active_roots=1 active_revoked_roots=0 active_revoked_leaves=0 session_evictions=0 sequence_commit=ok)
+[binary] Run 073: VERDICT=applied (baseline=/tmp/qbind-run113-reload-apply-ratification-release-binary/fixtures/devnet/baseline-bundle.json candidate=/tmp/qbind-run113-reload-apply-ratification-release-binary/fixtures/devnet/candidate-bundle.unratified.json live trust state swapped; session_evictions=0 (no-active-sessions at startup-time); sequence committed). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.

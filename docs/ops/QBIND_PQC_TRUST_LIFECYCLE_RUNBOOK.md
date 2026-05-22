@@ -3622,3 +3622,24 @@ Run 112 extends ratification enforcement to the **process-start reload-apply pat
 Operators who already configure ratification for the reload-check / peer-candidate-check paths need to make no additional configuration changes for Run 112: the same flag (`--p2p-trust-bundle-ratification`) and the same sidecar file are reused. There is no new operator flag.
 
 Source and integration-test evidence is in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_112.md`; the integration test file is `crates/qbind-node/tests/run_112_reload_apply_ratification_tests.rs` (10/10 passing). Regressions on the same build: `run_070` 13/0, `run_073` 10/0, `run_105` 6/0, `run_106` 7/0. Run 112 is **positive** for source + integration-test surface and **partial-positive** for release-binary evidence (a release-binary capture of the reload-apply ratification scenarios is deferred to a follow-up evidence-only run). Run 112 does NOT introduce SIGHUP live reload ratification, peer-driven live apply, signing-key rotation/revocation, authority anti-rollback persistence, KMS/HSM custody, fast-sync ratification parity, governance, validator-set rotation, or full C4 / C5 closure.
+## Run 113 operator update — process-start reload-apply ratification enforcement release-binary evidence
+
+Run 113 is evidence-only and adds no new operator flags. Operator workflow for the process-start reload-apply path documented under Run 112 is unchanged: under default-strict MainNet/TestNet (and DevNet with `--p2p-trust-bundle-ratification-enforcement-enabled`) the operator MUST supply `--p2p-trust-bundle-reload-apply-enabled`, `--p2p-trust-bundle-reload-apply-path <candidate.json>`, `--p2p-trust-bundle <baseline.json>`, `--p2p-trust-bundle-signing-key <KEYID:SUITE_ID:PK_HEX>`, `--p2p-trust-bundle-ratification <ratification.json>`, `--genesis-path <genesis.toml>`, and `--expect-genesis-hash <hex>`. On any ratification refusal the binary aborts the reload-apply pipeline before snapshot/swap/eviction/sequence-commit and exits without writing `pqc_trust_bundle_sequence.json`; on success the binary emits the Run 070 `APPLIED live (... sequence_commit=ok)` line and the Run 073 `VERDICT=applied` marker, and the `pqc_trust_bundle_sequence.json` under `--data-dir` advances by one sequence number.
+
+The canonical Run 113 replay command, runnable from a clean checkout:
+
+```bash
+bash scripts/devnet/run_113_reload_apply_ratification_release_binary.sh
+```
+
+The harness builds `target/release/qbind-node` and the Run 113 fixture-helper example, mints per-environment ephemeral genesis-authority + ratification fixtures, runs the nine scenarios (MainNet valid / missing / bad-signature / wrong-chain / wrong-environment / unknown-authority + DevNet legacy / opt-in valid / opt-in missing) as fresh subprocesses with per-scenario `--data-dir`, and archives the full release-binary evidence under `docs/devnet/run_113_reload_apply_ratification_release_binary/`. Each scenario's expected refusal marker is listed in the harness; key reasons used by the binary are:
+
+- missing: `bundle-signing ratification missing`
+- bad signature: `bundle-signing ratification signature failed PQC verification`
+- wrong chain: `bundle-signing ratification chain_id mismatch`
+- wrong environment: `bundle-signing ratification environment mismatch`
+- unknown authority: `authority_root_fingerprint '<hex>' not present in genesis bundle_signing_authority_roots`
+
+The per-scenario sequence-file inventory at `docs/devnet/run_113_reload_apply_ratification_release_binary/sequence_inventory.txt` is the canonical operator-facing no-mutation witness: WRITTEN only for scenarios 1 (MainNet valid), 7 (DevNet legacy), and 8 (DevNet opt-in valid); NOT WRITTEN for the six refusal scenarios. Operators may use this archive as the reference release-binary baseline for process-start reload-apply ratification behaviour, alongside the Run 110 / Run 111 archive for live `0x05` peer-candidate ratification behaviour.
+
+Operator obligations for SIGHUP live reload, signing-key rotation, signing-key revocation, authority anti-rollback persistence, KMS/HSM custody, fast-sync ratification parity, governance, and validator-set rotation are unchanged: each remains OPEN. Run 113 does not introduce, narrow, or change any of these surfaces. The Run 113 evidence document is `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_113.md`.

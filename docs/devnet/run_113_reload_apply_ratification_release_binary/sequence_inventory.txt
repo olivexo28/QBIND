@@ -1,0 +1,10 @@
+Per-scenario sequence-file inventory (was a pqc_trust_bundle_sequence.json written?):
+  scenario_1_mainnet_valid                     WRITTEN sha256=30830d122ba12c814e5332b3f220fe040ef20cef1a3a81d63b9c513d0dfe5c9c
+  scenario_2_mainnet_missing                   NOT WRITTEN (no-mutation)
+  scenario_3_mainnet_bad_signature             NOT WRITTEN (no-mutation)
+  scenario_4_mainnet_wrong_chain               NOT WRITTEN (no-mutation)
+  scenario_5_mainnet_wrong_env                 NOT WRITTEN (no-mutation)
+  scenario_6_mainnet_unknown_authority         NOT WRITTEN (no-mutation)
+  scenario_7_devnet_legacy_no_opt_in           WRITTEN sha256=ff0ee3c81f34698b921280feb29d1aba797646d6d8b972eddc38eeeff71647d1
+  scenario_8_devnet_opt_in_valid               WRITTEN sha256=ff0ee3c81f34698b921280feb29d1aba797646d6d8b972eddc38eeeff71647d1
+  scenario_9_devnet_opt_in_missing             NOT WRITTEN (no-mutation)
