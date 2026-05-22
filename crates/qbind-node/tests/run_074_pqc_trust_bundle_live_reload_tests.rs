@@ -300,6 +300,7 @@ fn devnet_config(
         sequence_path,
         local_leaf_cert_bytes: None,
         ratification: None,
+        authority_marker: None,
     }
 }
 

@@ -154,18 +154,26 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use qbind_ledger::{
-    GenesisAuthorityConfig, GenesisHash, NetworkEnvironmentPolicy,
+    enforce_bundle_signing_key_ratification, GenesisAuthorityConfig, GenesisHash,
+    NetworkEnvironmentPolicy, RatificationEnforcementInputs, RatificationEnforcementOutcome,
     RatificationEnforcementPolicy,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p_session_eviction::P2pSessionEvictor;
+use crate::pqc_authority_marker_acceptance::{
+    decide_marker_acceptance, persist_accepted_marker_after_commit_boundary,
+    MarkerAcceptDecision, MarkerAcceptanceInputs, MutatingSurfaceMarkerError,
+};
+use crate::pqc_authority_state::AuthorityStateUpdateSource;
 use crate::pqc_live_trust::LivePqcTrustState;
 use crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext;
 use crate::pqc_ratification_input::{load_ratification_from_path, RatificationInputError};
 use crate::pqc_trust_activation::ActivationContext;
-use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleError};
+use crate::pqc_trust_bundle::{
+    BundleSignatureStatus, BundleSigningKeySet, TrustBundle, TrustBundleError,
+};
 use crate::pqc_trust_reload::{
     apply_validated_candidate_with_previous,
     apply_validated_candidate_with_previous_and_ratification, ApplyMode, AppliedCandidate,
@@ -238,6 +246,34 @@ pub struct LiveReloadConfig {
     /// fails closed BEFORE any snapshot / swap / eviction /
     /// commit step.
     pub ratification: Option<LiveReloadRatificationConfig>,
+    /// Run 121 — optional authority anti-rollback marker
+    /// accept-and-persist context for the SIGHUP live reload path.
+    ///
+    /// When `Some(_)` the controller invokes the Run 119
+    /// `decide_marker_acceptance` helper BEFORE any snapshot / swap /
+    /// eviction / commit of the existing apply pipeline, and the
+    /// Run 119 `persist_accepted_marker_after_commit_boundary` helper
+    /// AFTER the apply pipeline's `commit_sequence` boundary returns
+    /// `Ok`. The marker is derived ONLY from verified ratification
+    /// material — the field is populated by the binary surface only
+    /// when (1) the ratification gate is `Invoke` (so a
+    /// [`LiveReloadRatificationConfig`] is also `Some`) and (2) a
+    /// `--data-dir` is configured.
+    ///
+    /// When `None` the SIGHUP path preserves the pre-Run-121 behaviour
+    /// (Run 069/070/073/074/114 verbatim) — this is reachable on
+    /// DevNet without operator opt-in (matching the Run 106 / Run 114
+    /// gate-decision branch) and on operator configurations without a
+    /// `--data-dir`. MainNet/TestNet always reach this branch with
+    /// `Some(_)` populated (because the ratification gate is always
+    /// `Invoke` and `--data-dir` is mandatory there).
+    ///
+    /// The marker file path is captured once at controller
+    /// construction time. The controller does NOT re-resolve the
+    /// `data_dir` per-trigger because the running node cannot change
+    /// its `--data-dir` without a restart (same scope rule as the
+    /// Run 074 `sequence_path` field).
+    pub authority_marker: Option<LiveReloadAuthorityMarkerConfig>,
 }
 
 /// Run 114 — owned ratification enforcement inputs the
@@ -279,6 +315,44 @@ pub struct LiveReloadRatificationConfig {
     pub ratification_sidecar_path: Option<PathBuf>,
 }
 
+/// Run 121 — owned authority anti-rollback marker context the
+/// [`LiveReloadController`] re-uses across every SIGHUP trigger when
+/// the Run 119 `decide_marker_acceptance` /
+/// `persist_accepted_marker_after_commit_boundary` helpers must be
+/// invoked.
+///
+/// All fields are immutable for the lifetime of the controller. The
+/// marker file at `marker_path` is read on every trigger (the Run 119
+/// `decide_marker_acceptance` helper loads it via
+/// [`crate::pqc_authority_state::load_authority_state`]) so an
+/// operator-induced change (e.g. a backup restore between two
+/// SIGHUPs) is observed by the next trigger without a node restart.
+///
+/// The marker file is NEVER read, written, or otherwise touched
+/// unless the per-trigger ratification gate also produced a verified
+/// [`qbind_ledger::RatifiedBundleSigningKey`] — derivation strictly
+/// requires verified ratification material per Run 117/118/119.
+///
+/// This struct intentionally does NOT carry the
+/// `GenesisAuthorityConfig`, `expected_genesis_hash`, or
+/// `expected_environment_policy`: those live on the sibling
+/// [`LiveReloadRatificationConfig`] and the SIGHUP marker preflight
+/// reads them from there to avoid duplicating the per-environment
+/// trust-domain triple in two places. This means
+/// `LiveReloadAuthorityMarkerConfig` is only meaningful in
+/// combination with a populated
+/// `LiveReloadConfig::ratification`; the controller treats
+/// `(ratification: None, authority_marker: Some(_))` as a no-op
+/// (logs and falls through to the pre-Run-121 path) because a marker
+/// cannot be derived without a verified ratification.
+#[derive(Debug, Clone)]
+pub struct LiveReloadAuthorityMarkerConfig {
+    /// Path to `<data_dir>/pqc_authority_state.json` per
+    /// [`crate::pqc_authority_state::authority_state_file_path`].
+    /// Captured once at controller construction time.
+    pub marker_path: PathBuf,
+}
+
 /// Run 074 — outcome of a single trigger.
 ///
 /// Used by both the binary SIGHUP task (to choose a log shape and
@@ -307,13 +381,62 @@ pub enum LiveReloadOutcome {
     /// and the operator MUST recover offline before restarting the
     /// node.
     Fatal(ReloadApplyError),
+    /// Run 121 — the Run 119 `decide_marker_acceptance` preflight
+    /// refused the candidate BEFORE the existing apply pipeline
+    /// began any snapshot / swap / eviction / commit. Live trust
+    /// state, sessions, and the on-disk sequence record are all
+    /// byte-identical to the pre-trigger state. The marker file is
+    /// also byte-identical (the preflight never writes). The
+    /// embedded [`MutatingSurfaceMarkerError`] carries the precise
+    /// reject reason (rollback, same-sequence equivocation,
+    /// persisted-domain mismatch, corrupt marker, …) so the
+    /// operator log line names the exact failure class rather than
+    /// collapsing into a generic "marker check failed".
+    ///
+    /// This variant is NEVER reachable unless both
+    /// [`LiveReloadConfig::ratification`] and
+    /// [`LiveReloadConfig::authority_marker`] were `Some(_)` at
+    /// controller construction AND the per-trigger ratification gate
+    /// produced a verified [`qbind_ledger::RatifiedBundleSigningKey`].
+    /// The node continues running; the operator may re-trigger after
+    /// correcting the candidate or the on-disk marker (the latter
+    /// requires an out-of-band recovery procedure — Run 121 does
+    /// NOT implement `--allow-authority-state-reset`).
+    MarkerRejected(MutatingSurfaceMarkerError),
+    /// Run 121 — the existing apply pipeline returned `Ok` and the
+    /// trust-bundle sequence has already been committed, but the
+    /// subsequent atomic write of the authority marker file failed.
+    /// The on-disk authority marker is stale-by-one relative to the
+    /// trust-bundle sequence (safely replayable as an `Upgrade` per
+    /// Run 118 §D) but the operator MUST be told because the next
+    /// SIGHUP / startup will need to either (a) succeed and replay
+    /// the marker as an `Upgrade` or (b) be refused fail-closed if
+    /// a conflict materialises in the meantime. The caller (the
+    /// binary's SIGHUP task in `main.rs`) MUST initiate a graceful
+    /// shutdown, matching the existing
+    /// [`Self::Fatal`]-on-`SequenceCommitFailedRollbackAlsoFailed`
+    /// shutdown semantics — this preserves the Run 074 single
+    /// shutdown surface.
+    ///
+    /// [`AppliedCandidate`] is carried unchanged so operator logs
+    /// still record the successful apply (live state DID advance);
+    /// the embedded [`MutatingSurfaceMarkerError::PersistFailure`]
+    /// carries the precise I/O reason.
+    MarkerPersistFailureAfterCommit {
+        applied: AppliedCandidate,
+        marker_error: MutatingSurfaceMarkerError,
+    },
 }
 
 impl LiveReloadOutcome {
     /// `true` iff the live trust state advanced as a result of this
     /// trigger.
     pub fn is_applied(&self) -> bool {
-        matches!(self, LiveReloadOutcome::Applied(_))
+        matches!(
+            self,
+            LiveReloadOutcome::Applied(_)
+                | LiveReloadOutcome::MarkerPersistFailureAfterCommit { .. }
+        )
     }
 
     /// `true` iff the trigger was rejected by the in-progress
@@ -322,10 +445,31 @@ impl LiveReloadOutcome {
         matches!(self, LiveReloadOutcome::AlreadyInProgress)
     }
 
-    /// `true` iff the trigger surfaced a fatal
-    /// `SequenceCommitFailedRollbackAlsoFailed` branch.
+    /// `true` iff the trigger surfaced a fatal branch requiring an
+    /// operator-visible graceful shutdown. Run 074's original fatal
+    /// branch is `SequenceCommitFailedRollbackAlsoFailed`; Run 121
+    /// extends this to also cover an authority-marker persist
+    /// failure that occurs AFTER the trust-bundle `commit_sequence`
+    /// boundary — the trust-bundle sequence already advanced but
+    /// the on-disk marker is stale-by-one, and the operator MUST be
+    /// told via the same graceful-shutdown signal so a single
+    /// fail-closed surface remains.
     pub fn is_fatal(&self) -> bool {
-        matches!(self, LiveReloadOutcome::Fatal(_))
+        matches!(
+            self,
+            LiveReloadOutcome::Fatal(_)
+                | LiveReloadOutcome::MarkerPersistFailureAfterCommit { .. }
+        )
+    }
+
+    /// `true` iff the Run 121 marker preflight refused the candidate
+    /// BEFORE any apply pipeline mutation. Distinct from
+    /// [`Self::is_fatal`] because the live trust state, sessions,
+    /// and on-disk sequence/marker records are all byte-identical
+    /// to the pre-trigger state — the operator may simply re-trigger
+    /// after correcting the candidate or the on-disk marker.
+    pub fn is_marker_rejected(&self) -> bool {
+        matches!(self, LiveReloadOutcome::MarkerRejected(_))
     }
 
     /// Canonical Run 074 operator-log line summarising the
@@ -356,6 +500,25 @@ impl LiveReloadOutcome {
                  failure; live trust state may be ahead of the on-disk sequence record; \
                  graceful shutdown required; operator MUST recover offline). Reason: {}",
                 e
+            ),
+            LiveReloadOutcome::MarkerRejected(e) => format!(
+                "[binary] Run 121: VERDICT=marker-rejected (SIGHUP authority-marker preflight \
+                 refused the candidate BEFORE any snapshot, swap, eviction, or sequence \
+                 commit; live trust state, sessions, on-disk sequence record, and on-disk \
+                 authority-marker file are all unchanged). Reason: {}",
+                e
+            ),
+            LiveReloadOutcome::MarkerPersistFailureAfterCommit {
+                applied,
+                marker_error,
+            } => format!(
+                "[binary] Run 121: VERDICT=FATAL-marker-persist (live trust-bundle apply on \
+                 long-running node succeeded — session_evictions={}, sequence_commit=ok — but \
+                 authority-marker atomic persist FAILED AFTER the commit boundary; the \
+                 on-disk marker is stale-by-one relative to the trust-bundle sequence \
+                 (safely replayable as an Upgrade per Run 118 §D) but graceful shutdown is \
+                 required so the operator can surface and recover the failure). Reason: {}",
+                applied.session_evictions, marker_error
             ),
         }
     }
@@ -526,7 +689,27 @@ impl LiveReloadController {
                     applied.validated.sequence,
                 );
             }
-            LiveReloadOutcome::Invalid(_) | LiveReloadOutcome::Fatal(_) => {
+            // Run 121 — the apply pipeline DID succeed; the trust-
+            // bundle sequence committed; only the marker persist
+            // step failed AFTER the commit boundary. Bump the
+            // success counters (live state advanced; sessions were
+            // evicted; sequence was committed) — the FATAL outcome
+            // shape is carried in the variant itself and surfaced
+            // by `is_fatal()` so the binary signals shutdown.
+            LiveReloadOutcome::MarkerPersistFailureAfterCommit { applied, .. } => {
+                self.metrics.record_live_reload_apply_success(
+                    applied.session_evictions as u64,
+                    applied.validated.sequence,
+                );
+            }
+            LiveReloadOutcome::Invalid(_)
+            | LiveReloadOutcome::Fatal(_)
+            // Run 121 — marker preflight refused; no apply pipeline
+            // step ran; live state, sessions, on-disk sequence, and
+            // on-disk marker are all unchanged. Same counter shape
+            // as any other pre-mutation refusal (Run 069 validation
+            // refusal, Run 114 sidecar I/O failure).
+            | LiveReloadOutcome::MarkerRejected(_) => {
                 self.metrics.record_live_reload_apply_failure();
             }
             // AlreadyInProgress is already accounted for above and
@@ -629,15 +812,102 @@ impl LiveReloadController {
                     ratification: ratification_obj.as_ref(),
                     policy: rcfg.policy,
                 };
-                match apply_validated_candidate_with_previous_and_ratification(
+
+                // Run 121 — SIGHUP authority-marker accept-and-persist
+                // preflight. Runs AFTER the sidecar load (so a missing
+                // / unparseable sidecar still fails closed via the
+                // Run 114 path above with no marker I/O) but BEFORE
+                // any snapshot / swap / eviction / commit so a
+                // rollback / same-sequence-equivocation / wrong-
+                // domain / corrupt marker fail-closes the SIGHUP
+                // operation without burning a sequence number or
+                // mutating live trust state. The marker is derived
+                // ONLY from verified ratification material — the
+                // preflight re-runs the Run 105 enforcer (pure
+                // function; the apply pipeline will re-run it again
+                // internally for bit-identical results) to obtain a
+                // verified `RatifiedBundleSigningKey`.
+                //
+                // Returns `Ok(None)` (no marker enforcement; pre-
+                // Run-121 behaviour preserved bit-for-bit) when:
+                //   * the controller was not configured with an
+                //     `authority_marker` (DevNet no-opt-in / no
+                //     `--data-dir`);
+                //   * the candidate is DevNet-unsigned (no signing
+                //     key to anchor a marker on);
+                //   * the enforcer's outcome is `LegacyUnratifiedAccepted`
+                //     (DevNet/TestNet legacy ergonomics — Run 105
+                //     explicitly logs this as NOT a passed
+                //     ratification, so no ratified key exists to
+                //     anchor a marker on);
+                //   * the candidate cannot be pre-loaded (the apply
+                //     pipeline will surface the precise load error
+                //     itself; the marker preflight does not
+                //     double-report);
+                //   * the per-trigger ratification object is missing
+                //     under `AllowLegacyUnratified` policy (Run 105
+                //     surfaces `LegacyUnratifiedAccepted`; same
+                //     branch as above).
+                //
+                // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_121.md.
+                let marker_decision = match self.preflight_sighup_marker_decision(
+                    rcfg,
+                    ratification_obj.as_ref(),
+                    now_unix_secs,
+                ) {
+                    Ok(opt) => opt,
+                    Err(e) => return LiveReloadOutcome::MarkerRejected(e),
+                };
+
+                let apply_outcome = apply_validated_candidate_with_previous_and_ratification(
                     inputs,
                     &ratification_ctx,
                     ApplyMode::ApplyLive,
                     Some(&mut apply_ctx),
                     prev_fp_prefix,
                     prev_seq,
-                ) {
-                    Ok(applied) => LiveReloadOutcome::Applied(applied),
+                );
+
+                match apply_outcome {
+                    Ok(applied) => {
+                        // Run 121 — persist the previously-accepted
+                        // marker AFTER the apply pipeline's
+                        // `commit_sequence` boundary returned `Ok`.
+                        // No-op when:
+                        //   * preflight returned `None` (no marker
+                        //     context applicable on this trigger);
+                        //   * preflight decision was `Idempotent`
+                        //     (the on-disk marker is bit-for-bit
+                        //     identical; rewriting would only
+                        //     update the audit-only
+                        //     `updated_at_unix_secs` field for no
+                        //     operator benefit).
+                        //
+                        // On persist failure: the trust-bundle
+                        // sequence already advanced and the on-disk
+                        // authority marker is stale-by-one (safely
+                        // replayable as an `Upgrade` per Run 118 §D),
+                        // but the operator MUST be told. We surface
+                        // a Run 121
+                        // `MarkerPersistFailureAfterCommit` outcome
+                        // which `is_fatal()` returns `true` for, so
+                        // the binary's SIGHUP signal-handler task
+                        // routes it through the same graceful
+                        // shutdown signal as the existing Run 074
+                        // `SequenceCommitFailedRollbackAlsoFailed`
+                        // branch.
+                        if let Some(decision) = marker_decision.as_ref() {
+                            if let Err(e) =
+                                persist_accepted_marker_after_commit_boundary(decision)
+                            {
+                                return LiveReloadOutcome::MarkerPersistFailureAfterCommit {
+                                    applied,
+                                    marker_error: e,
+                                };
+                            }
+                        }
+                        LiveReloadOutcome::Applied(applied)
+                    }
                     Err(e @ ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed { .. }) => {
                         LiveReloadOutcome::Fatal(e)
                     }
@@ -660,6 +930,197 @@ impl LiveReloadController {
                 }
             }
         }
+    }
+
+    /// Run 121 — SIGHUP-specific marker accept-and-persist preflight.
+    ///
+    /// Mirrors the binary-side `preflight_run_119_marker_decision`
+    /// (process-start reload-apply) and
+    /// `preflight_run_120_marker_decision_for_startup` (startup
+    /// `--p2p-trust-bundle`) helpers, but lives inside the
+    /// controller because the SIGHUP trigger surface owns the
+    /// per-trigger sidecar load / Run 114 ratification gate already
+    /// and re-runs the enforcer here so a verified
+    /// `RatifiedBundleSigningKey` is in hand for the Run 119
+    /// `decide_marker_acceptance` step. Returns `Ok(None)` on every
+    /// "marker enforcement is not applicable on this trigger"
+    /// branch so SIGHUP behaviour is byte-identical to a Run-120
+    /// build on those branches.
+    ///
+    /// Re-running the enforcer is safe because
+    /// `enforce_bundle_signing_key_ratification` is a pure function
+    /// (signature / chain_id / environment / authority-root binding
+    /// / canonical genesis hash / candidate-key match) and the
+    /// apply pipeline re-runs the SAME enforcer internally —
+    /// results are bit-for-bit identical. The candidate is re-loaded
+    /// via the SAME
+    /// `TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation`
+    /// loader the apply pipeline uses internally.
+    fn preflight_sighup_marker_decision(
+        &self,
+        rcfg: &LiveReloadRatificationConfig,
+        ratification_obj: Option<&qbind_ledger::BundleSigningRatification>,
+        now_unix_secs: u64,
+    ) -> Result<Option<MarkerAcceptDecision>, MutatingSurfaceMarkerError> {
+        let marker_cfg = match &self.config.authority_marker {
+            Some(c) => c,
+            None => {
+                // No authority-marker context wired (DevNet no-opt-in
+                // / no `--data-dir`). Pre-Run-121 behaviour
+                // preserved bit-for-bit.
+                return Ok(None);
+            }
+        };
+
+        // Re-load the candidate so the bundle-signing public key
+        // bytes are available for the Run 105 enforcer. Activation
+        // is height-only here (matches the controller's captured
+        // `activation_ctx` for the height-source scope rule documented
+        // on `LiveReloadConfig::activation_ctx`).
+        let activation_ctx = ActivationContext {
+            current_height: None,
+            current_epoch: None,
+        };
+        let loaded = match TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+            self.config.candidate_path.as_path(),
+            self.config.environment,
+            self.config.chain_id,
+            now_unix_secs,
+            &self.config.signing_keys,
+            activation_ctx,
+        ) {
+            Ok((loaded, _activation)) => loaded,
+            Err(_e) => {
+                // Defer to the apply pipeline's own typed reporting —
+                // it will re-run the SAME loader and surface the
+                // precise structural error. We do NOT double-report
+                // and do NOT touch the marker file on this branch.
+                return Ok(None);
+            }
+        };
+
+        let signing_key_id_hex = match &loaded.signature_status {
+            BundleSignatureStatus::Verified { signing_key_id } => signing_key_id.clone(),
+            BundleSignatureStatus::Unsigned => {
+                // DevNet-unsigned candidate — no signing key to
+                // anchor a marker on. Same skip rule as Run 119/120.
+                return Ok(None);
+            }
+        };
+
+        let signing_key_id_bytes: [u8; 32] = match hex_decode_32_for_sighup(&signing_key_id_hex) {
+            Some(b) => b,
+            None => {
+                // Unreachable: a `Verified` status implies the loader
+                // wrote a 64-char lowercase hex signing_key_id.
+                // Defer to the Run 105 enforcer's typed reporting.
+                return Ok(None);
+            }
+        };
+        let candidate_signing_pk_bytes =
+            match self.config.signing_keys.lookup(&signing_key_id_bytes) {
+                Some(k) => k.pk_bytes.clone(),
+                None => {
+                    // Unreachable: a `Verified` status implies the
+                    // loader matched the signing_key_id against the
+                    // configured set. Defer to the apply pipeline.
+                    return Ok(None);
+                }
+            };
+
+        // Run 105 enforcement — re-runs the precise verifier the
+        // apply pipeline will run, so a verified ratification is in
+        // hand for the marker derivation step.
+        let outcome = match enforce_bundle_signing_key_ratification(
+            RatificationEnforcementInputs {
+                ratification: ratification_obj,
+                authority: &rcfg.authority,
+                expected_chain_id: &rcfg.expected_chain_id_str,
+                expected_environment: rcfg.expected_environment_policy,
+                expected_genesis_hash: &rcfg.expected_genesis_hash,
+                candidate_bundle_signing_public_key: &candidate_signing_pk_bytes,
+                policy: rcfg.policy,
+            },
+        ) {
+            Ok(o) => o,
+            Err(_e) => {
+                // Defer to the apply pipeline's own typed reporting —
+                // it will re-run the SAME enforcer and emit the
+                // precise `RatificationEnforcementFailure` variant.
+                // We do NOT double-report and we do NOT touch the
+                // marker file on this branch.
+                return Ok(None);
+            }
+        };
+        let ratified = match outcome {
+            RatificationEnforcementOutcome::Ratified(rk) => rk,
+            RatificationEnforcementOutcome::LegacyUnratifiedAccepted { .. } => {
+                // DevNet/TestNet legacy ergonomics — no ratified key
+                // to anchor a marker on. Run 105 explicitly logs this
+                // as NOT a passed ratification; the marker is simply
+                // not written. Same skip rule as Run 119/120.
+                return Ok(None);
+            }
+        };
+        let ratification = match ratification_obj {
+            Some(r) => r,
+            None => {
+                // Unreachable on the Ratified branch — Strict requires
+                // a ratification object, and AllowLegacyUnratified
+                // with no object returns LegacyUnratifiedAccepted
+                // above.
+                return Ok(None);
+            }
+        };
+
+        // Compute the runtime genesis hash hex (Run 117 format — 64
+        // lowercase hex chars).
+        let mut runtime_genesis_hash_hex = String::with_capacity(64);
+        for b in rcfg.expected_genesis_hash {
+            use std::fmt::Write;
+            let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+        }
+
+        let decision = decide_marker_acceptance(MarkerAcceptanceInputs {
+            marker_path: marker_cfg.marker_path.as_path(),
+            runtime_env: self.config.environment,
+            runtime_chain_id: self.config.chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            authority_policy_version: rcfg.authority.authority_policy_version,
+            authority_sequence: rcfg.authority.authority_sequence,
+            authority_epoch: rcfg.authority.authority_epoch,
+            ratification,
+            ratified: &ratified,
+            update_source: AuthorityStateUpdateSource::SighupReload,
+            updated_at_unix_secs: now_unix_secs,
+        })?;
+        Ok(Some(decision))
+    }
+}
+
+/// Run 121 — decode a 64-char lowercase-hex string into a `[u8; 32]`.
+/// Mirrors the `hex_decode_32` helper in `main.rs` used by the
+/// Run 119/120 preflights; duplicated here so the library module
+/// has no dependency on the binary crate.
+fn hex_decode_32_for_sighup(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let hi = hex_nibble_for_sighup(bytes[2 * i])?;
+        let lo = hex_nibble_for_sighup(bytes[2 * i + 1])?;
+        out[i] = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
+fn hex_nibble_for_sighup(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        _ => None,
     }
 }
 
@@ -753,6 +1214,7 @@ mod tests {
             sequence_path,
             local_leaf_cert_bytes: None,
             ratification: None,
+            authority_marker: None,
         }
     }
 

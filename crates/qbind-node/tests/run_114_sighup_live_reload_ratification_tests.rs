@@ -304,6 +304,7 @@ fn make_controller(
         sequence_path: seq_path,
         local_leaf_cert_bytes: None,
         ratification,
+        authority_marker: None,
     };
     let ctl = LiveReloadController::new(live.clone(), evictor, metrics.clone(), cfg);
     (ctl, live, mock, metrics)

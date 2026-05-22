@@ -5325,6 +5325,76 @@ fn spawn_run074_live_reload_task(
             None
         };
 
+    // Run 121 — SIGHUP authority anti-rollback marker
+    // accept-and-persist context.
+    //
+    // The marker preflight + post-commit persist are wired ONLY
+    // when both:
+    //   * the Run 114 ratification gate is `Invoke` (i.e.
+    //     `ratification_cfg_opt.is_some()`) — without verified
+    //     ratification material there is no `RatifiedBundleSigningKey`
+    //     to derive a marker from;
+    //   * a `--data-dir` is configured — without a data dir we have
+    //     nowhere to load or persist the
+    //     `<data_dir>/pqc_authority_state.json` marker file.
+    //
+    // MainNet/TestNet always satisfy both conditions (the
+    // ratification gate is default-strict per Run 106 and
+    // `--data-dir` is mandatory for the Run 055 sequence file).
+    // DevNet without operator opt-in falls through with
+    // `authority_marker = None` and SIGHUP behaviour is byte-
+    // identical to a Run-120 build. See
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_121.md`.
+    let authority_marker_cfg_opt: Option<
+        qbind_node::pqc_live_trust_reload::LiveReloadAuthorityMarkerConfig,
+    > = match (ratification_cfg_opt.as_ref(), config.data_dir.as_ref()) {
+        (Some(_), Some(data_dir)) => {
+            let marker_path =
+                qbind_node::pqc_authority_state::authority_state_file_path(data_dir);
+            eprintln!(
+                "[run-121] SIGHUP live reload authority-marker gate INVOKED \
+                 (policy={}, env={:?}). On every SIGHUP the on-disk authority \
+                 marker at {} is compared against the candidate's verified \
+                 ratification BEFORE any snapshot/swap/eviction/commit, and \
+                 persisted AFTER the existing Run 070 commit_sequence boundary \
+                 returns Ok.",
+                gate_decision.label(),
+                config.environment,
+                marker_path.display(),
+            );
+            Some(
+                qbind_node::pqc_live_trust_reload::LiveReloadAuthorityMarkerConfig {
+                    marker_path,
+                },
+            )
+        }
+        (Some(_), None) => {
+            eprintln!(
+                "[run-121] SIGHUP live reload authority-marker gate SKIPPED \
+                 (policy={}, env={:?}): no --data-dir configured. The Run 114 \
+                 ratification gate is invoked but the marker file cannot be \
+                 located. SIGHUP marker preflight + persist are NOT wired. \
+                 MainNet/TestNet require --data-dir and never reach this branch.",
+                gate_decision.label(),
+                config.environment,
+            );
+            None
+        }
+        (None, _) => {
+            eprintln!(
+                "[run-121] SIGHUP live reload authority-marker gate SKIPPED \
+                 (policy={}, env={:?}): the Run 114 ratification gate is also \
+                 SKIPPED on this branch, so there is no verified ratification \
+                 from which a marker could be derived. This is reachable only \
+                 on DevNet without operator opt-in; MainNet/TestNet never reach \
+                 this branch.",
+                gate_decision.label(),
+                config.environment,
+            );
+            None
+        }
+    };
+
     let cfg = LiveReloadConfig {
         candidate_path: candidate_path.clone(),
         environment: config.environment,
@@ -5342,6 +5412,7 @@ fn spawn_run074_live_reload_task(
         sequence_path: sequence_path.clone(),
         local_leaf_cert_bytes: local_leaf_bytes,
         ratification: ratification_cfg_opt,
+        authority_marker: authority_marker_cfg_opt,
     };
     let controller = LiveReloadController::new(
         Arc::new(live_state),
