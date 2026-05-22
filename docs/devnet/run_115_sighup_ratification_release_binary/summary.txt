@@ -1,0 +1,43 @@
+Run 115 SIGHUP live reload ratification release-binary evidence
+outdir: /tmp/run115-out
+repo: /home/runner/work/QBIND/QBIND
+git_commit: f728d8bb7eb2725a8792e476ca73ab6f0595eb38
+qbind-node_sha256: c9680b3cff34fc4def081bd7ec5a55650863652ccade7ec5db95e30c3b9b30b0
+qbind-node_build_id: 9680c26ac818e2838d5a9d8e255fcda8602c4ee6
+fixture-helper_sha256: 4d4743474f33d6b3850928b16167273d4b5742f483f05bd0cebf551122dc9a35
+fixture-helper_build_id: 5c4bbbdcfd874b565469bb605bbd7d73e11cf5b3
+
+scenario status:
+  scenario_1_mainnet_valid: VERDICT=applied
+  scenario_2_mainnet_missing: VERDICT=invalid
+  scenario_3_mainnet_bad_signature: VERDICT=invalid
+  scenario_4_mainnet_wrong_chain: VERDICT=invalid
+  scenario_5_mainnet_wrong_env: VERDICT=invalid
+  scenario_6_mainnet_unknown_authority: VERDICT=invalid
+  scenario_7_devnet_legacy_no_opt_in: VERDICT=applied
+  scenario_8_devnet_opt_in_valid: VERDICT=applied
+  scenario_9_devnet_opt_in_missing: VERDICT=invalid
+  scenario_10_mainnet_repeated_triggers: 1xapplied + 4xinvalid, sequence file stable post-apply
+
+non-mutation checks: pass
+  on every refusal scenario, the data dir's
+  pqc_trust_bundle_sequence.json still records the baseline
+  (highest_sequence=1), and no Run 074 VERDICT=applied marker
+  was emitted.
+apply-ordering checks: pass
+  Run 074 VERDICT=applied carrying 'session_evictions=N;
+  sequence_commit=ok' present on every accepted scenario. The
+  VERDICT=applied marker is emitted only by
+  LiveReloadOutcome::Applied after the full
+  validate -> snapshot -> swap -> evict -> commit pipeline.
+repeated-trigger safety (scenario 10): pass
+  same long-running process produced exactly 1 VERDICT=applied
+  across 5 SIGHUPs (invalid->valid->invalid->invalid->invalid);
+  on-disk sequence file is byte-identical pre and post each
+  refusal (baseline state pre-apply; post-apply state held
+  through the trailing refusals: no rollback, no advance).
+wire-format checks: source-only, no trust-bundle or ratification
+  structs changed by this evidence harness.
+scope-non-goal checks: peer-driven live apply, signing-key
+  rotation/revocation, authority anti-rollback persistence,
+  KMS/HSM, governance, validator-set rotation: NOT touched.

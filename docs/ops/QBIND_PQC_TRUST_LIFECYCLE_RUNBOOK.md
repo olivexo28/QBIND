@@ -127,7 +127,17 @@ Run 066 playbook for Runs 069–074:
   `Arc<AtomicBool>` CAS guard; only the `Fatal`
   (`SequenceCommitFailedRollbackAlsoFailed`) arm signals
   shutdown. Six new `qbind_p2p_trust_bundle_live_reload_*`
-  Prometheus counters/gauge.
+  Prometheus counters/gauge. Run 114 wired the Run 105
+  bundle-signing-key ratification enforcement body into this
+  trigger (`--p2p-trust-bundle-ratification <PATH>`, re-read on
+  every SIGHUP); Run 115 captured the release-binary evidence
+  archive across 10 scenarios (valid, missing, bad-signature,
+  wrong-chain, wrong-env, unknown-authority on MainNet; DevNet
+  legacy / opt-in valid / opt-in missing; and 5 SIGHUPs against
+  one long-running PID) under
+  `docs/devnet/run_115_sighup_ratification_release_binary/` — see
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_115.md` for the canonical
+  operator example.
 
 The Run 065 per-environment minimum activation-margin policy
 (DevNet 0 / TestNet 8 / MainNet 32 blocks; half-open

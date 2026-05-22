@@ -1,0 +1,3 @@
+qbind-node[validator=V0]: starting in environment=MainNet chain_id=0x51424e444d41494e scope=MAIN profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:34102 peers=0 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:34102 (node_id=NodeId(848d57c2d58963e7))
+[T175] P2P node builder: validator=ValidatorId(0) node_id=NodeId(848d57c2d58963e7) num_validators=1 peer_kem_overrides=0 mutual_auth=Required
