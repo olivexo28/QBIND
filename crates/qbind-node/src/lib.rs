@@ -158,6 +158,18 @@ pub mod pqc_trust_sequence;
 // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 116
 // update, and `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_authority_state;
+// Run 119 — shared mutating-surface accept-and-persist helper for the
+// Run 117/118 authority anti-rollback marker. Composes Run 118
+// `derive_authority_state_from_ratification` + `prepare_marker_for_acceptance`
+// with Run 117 `persist_authority_state_atomic` into a single typed
+// accept-or-reject decision (no disk writes) + a post-commit-boundary
+// persist step. Wired into the process-start reload-apply path only in
+// Run 119; startup `--p2p-trust-bundle` acceptance and SIGHUP live
+// reload remain deferred to Run 120/121. See
+// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md`,
+// `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 119 update,
+// and `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_authority_marker_acceptance;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

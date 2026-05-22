@@ -3689,3 +3689,34 @@ What changed under the hood (operator-irrelevant but recorded for auditors): the
 **Bounded protection limit (unchanged from Run 116/117).** Even after Run 119 wires the helpers, the marker cannot detect a same-sequence key-level downgrade — that requires the per-key monotonic field added to `BundleSigningRatification` in Run 120. The helpers preserve the explicit Run 117 reject variants (`SameSequenceConflictingHash`, `SameSequenceConflictingKey`) so the bounded scope is surfaced to operators rather than being hidden behind a misleading "rotation supported" claim.
 
 Run 118 does **not** change peer-driven live apply (Run 109 contract preserved bit-for-bit), signing-key rotation lifecycle (still deferred to Run 120), signing-key revocation lifecycle (out of scope), KMS/HSM custody, governance, validator-set rotation, fast-sync / consensus-storage-restore ratification parity, or any wire format. Static production source-code anchors remain rejected. MainNet local-config alone remains insufficient for bundle-signing authority.
+## Run 119 — Authority anti-rollback marker wired into process-start reload-apply (partial-positive)
+
+Run 119 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md`) is the **first surface-wiring step** for the Run 116/117/118 authority anti-rollback marker. The verdict is intentionally **partial-positive**: the run wires the shared `decide_marker_acceptance` + `persist_accepted_marker_after_commit_boundary` composition into the **process-start reload-apply surface only** (`--p2p-trust-bundle-reload-apply-path`), and **does not** yet wire the startup `--p2p-trust-bundle` acceptance path or the Run 074/114 SIGHUP live-reload path. Those two are deferred to Run 120a / 120b.
+
+**What operators see on a Run-119 build:**
+
+* The `<data_dir>/pqc_authority_state.json` marker file is now **written** by the binary on a successful `--p2p-trust-bundle-reload-apply-path` invocation — but **only on that one surface**. Startup `--p2p-trust-bundle` loads and SIGHUP live-reload invocations remain byte-identical to a Run-118 build (no marker file appears from those paths in Run 119).
+* Three new operator-facing log lines may appear on the reload-apply surface:
+  * `[run-119] authority-marker preflight skipped: ...` — pre-conditions for marker derivation are not met (no `--data-dir`, candidate is DevNet-unsigned, `LegacyUnratifiedAccepted` policy outcome, signing-key lookup miss, or pre-load deferred to the apply pipeline's own typed error). Behaviour on these branches is **unchanged** byte-for-byte from a Run-118 build.
+  * `[run-119] authority-marker persisted at <path> (FirstWrite|Upgrade; candidate authority_sequence=<n>).` — a clean accept persisted a new marker.
+  * `[run-119] authority-marker unchanged at <path> (idempotent; no rewrite).` — the candidate matched the on-disk marker bit-for-bit; the marker file was intentionally left unchanged.
+* Two new FATAL fail-closed lines may appear:
+  * `[run-119] FATAL: reload-apply refused by authority-marker preflight: <reason>. Candidate path=<...>. No live trust apply, no sequence write, no session eviction, no metrics mutation, no marker write.` — the marker preflight refused the candidate (rollback, same-sequence equivocation, persisted-domain mismatch, etc.) BEFORE any apply call fired. Exit code is non-zero.
+  * `[run-119] FATAL: authority-marker persist failure AFTER successful apply: <reason>. The trust-bundle sequence already committed; the on-disk authority marker is stale-by-one and will be re-derived on the next accepted mutation (Run 118 §D crash-window rule). Candidate path=<...>.` — the atomic write or fsync failed after the apply committed the trust-bundle sequence. The trust-bundle state on disk is consistent (Run 070 ordering preserved); the marker is one mutation behind and will be repaired automatically on the next accepted reload-apply. Operator action: re-issue the reload-apply against the same candidate path; the next decide call will produce an `Upgrade` outcome that re-persists the marker cleanly. No `--allow-authority-state-reset` is needed for this case.
+
+**Operator actions required for Run 119:**
+
+* If you back up `<data_dir>` and have not yet done so per the Run 116 spec, **add `pqc_authority_state.json` to your backup glob now** — the file is authoritative on the reload-apply path starting with Run 119. Failing to back it up means a restore on a fresh machine could accept a candidate that would have been rejected as a rollback or same-sequence equivocation against the original node's history (the C4 sub-item gives up its rollback-detection for that one boot until a new marker is re-derived from the next accepted ratification).
+* If you monitor `<data_dir>` disk usage, note that the marker file is small (a few hundred bytes JSON) but its `.tmp` sibling may appear briefly during an atomic write.
+* No CLI changes. No new flags. The reload-apply invocation syntax is byte-identical to a Run-118 build.
+
+**Operator actions deferred to Run 120 / Run 121:**
+
+* Startup `--p2p-trust-bundle` acceptance enforcement (Run 120a). The startup loader still does not check or write the marker in Run 119. An operator who restarts the node with a downgraded bundle file will not yet be rejected at startup time on a Run-119 build; the reject only fires on the next reload-apply invocation.
+* SIGHUP live-reload acceptance enforcement (Run 120b). The SIGHUP path still does not check or write the marker.
+* The `--allow-authority-state-reset` + `--authority-state-reset-reason <string>` operator-recovery flag remains **not implemented** in any binary on a Run-119 build; it arrives with Run 121.
+* Release-binary evidence for the four rollback-rejection scenarios is deferred to Run 120c so it can be presented alongside both startup and SIGHUP wiring evidence on the same release-binary build.
+
+**Bounded protection limit (unchanged from Run 116/117/118).** The marker cannot detect a same-sequence key-level downgrade — that requires the per-key monotonic field that arrives in `BundleSigningRatification` v2 (Run 122). The Run 119 wiring preserves the explicit `SameSequenceConflictingHash` / `SameSequenceConflictingKey` reject variants so the bounded scope is surfaced to operators rather than being hidden behind a misleading "rotation supported" claim.
+
+Run 119 does **not** change peer-driven live apply (Run 109 contract preserved bit-for-bit; the marker helpers are not invoked from any peer-driven surface), signing-key rotation lifecycle, signing-key revocation lifecycle, KMS/HSM custody, governance, validator-set rotation, fast-sync / consensus-storage-restore ratification parity, or any wire format. Static production source-code anchors remain rejected. MainNet local-config alone remains insufficient for bundle-signing authority.

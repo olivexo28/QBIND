@@ -437,6 +437,243 @@ fn build_run_105_reload_check_context(
     })
 }
 
+/// Run 119 — pre-mutation authority-marker accept-and-persist preflight
+/// for the process-start reload-apply binary path.
+///
+/// Composes (1) a fresh re-load of the candidate trust bundle so the
+/// bundle-signing public key bytes are available, (2) a Run 105 typed
+/// `enforce_bundle_signing_key_ratification` call so the verified
+/// `RatifiedBundleSigningKey` is in hand, and (3)
+/// [`qbind_node::pqc_authority_marker_acceptance::decide_marker_acceptance`]
+/// so the on-disk authority marker is compared against the candidate
+/// BEFORE the existing apply pipeline runs. The Run 070 apply pipeline
+/// re-validates everything internally; this helper exists so that a
+/// rollback / same-sequence-equivocation / wrong-domain marker
+/// fail-closes the operation without burning a sequence number or
+/// mutating live trust state.
+///
+/// # Returns
+///
+/// * `Ok(None)` — preflight is not applicable on this branch:
+///     * `data_dir` is `None` (DevNet-only convenience; MainNet/
+///       TestNet already FATAL-exit earlier in this CLI path when
+///       `--data-dir` is unset);
+///     * the candidate could not be pre-loaded (deferred to the
+///       apply pipeline's own precise load-error reporting);
+///     * the candidate is DevNet-unsigned (no signing key to bind a
+///       marker to);
+///     * the ratification policy is `AllowLegacyUnratified` AND no
+///       ratification object was supplied (DevNet legacy ergonomics;
+///       enforcement returns `LegacyUnratifiedAccepted` which has no
+///       ratified key to anchor a marker on).
+/// * `Ok(Some(decision))` — preflight accepted; the caller MUST call
+///   [`qbind_node::pqc_authority_marker_acceptance::persist_accepted_marker_after_commit_boundary`]
+///   AFTER the apply pipeline returns `Ok`.
+/// * `Err(reason)` — preflight refused; the caller MUST NOT invoke
+///   the apply pipeline and MUST surface the reason operatorially.
+#[allow(clippy::too_many_arguments)]
+fn preflight_run_119_marker_decision(
+    candidate_path: &std::path::Path,
+    runtime_env: qbind_types::NetworkEnvironment,
+    runtime_chain_id: qbind_types::ChainId,
+    validation_time_secs: u64,
+    bundle_signing_keys: &qbind_node::pqc_trust_bundle::BundleSigningKeySet,
+    ctx_data: &Run105ReloadCheckContextData,
+    data_dir: Option<&std::path::Path>,
+    updated_at_unix_secs: u64,
+) -> Result<
+    Option<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecision>,
+    qbind_node::pqc_authority_marker_acceptance::MutatingSurfaceMarkerError,
+> {
+    use qbind_ledger::{
+        enforce_bundle_signing_key_ratification, RatificationEnforcementInputs,
+        RatificationEnforcementOutcome,
+    };
+    use qbind_node::pqc_authority_marker_acceptance::{
+        decide_marker_acceptance, MarkerAcceptanceInputs, MutatingSurfaceMarkerError,
+    };
+    use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
+    use qbind_node::pqc_trust_bundle::{BundleSignatureStatus, TrustBundle};
+
+    let Some(data_dir) = data_dir else {
+        eprintln!(
+            "[run-119] authority-marker preflight skipped: --data-dir is unset (DevNet \
+             convenience only; MainNet/TestNet already require --data-dir for the \
+             reload-apply path)."
+        );
+        return Ok(None);
+    };
+
+    // Re-load the candidate so the bundle-signing public key bytes are
+    // available for the Run 105 enforcer. The apply pipeline will load
+    // the candidate again internally; both loads use the same loader
+    // (`load_from_path_with_signing_keys_chain_id_and_activation`) so
+    // the results are bit-for-bit identical.
+    let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+        current_height: None,
+        current_epoch: None,
+    };
+    let loaded = match TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        candidate_path,
+        runtime_env,
+        runtime_chain_id,
+        validation_time_secs,
+        bundle_signing_keys,
+        activation_ctx,
+    ) {
+        Ok((loaded, _activation)) => loaded,
+        Err(e) => {
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: candidate pre-load returned \
+                 {} (the apply pipeline will surface the precise load error).",
+                e
+            );
+            return Ok(None);
+        }
+    };
+
+    let signing_key_id_hex = match &loaded.signature_status {
+        BundleSignatureStatus::Verified { signing_key_id } => signing_key_id.clone(),
+        BundleSignatureStatus::Unsigned => {
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: candidate is DevNet-unsigned \
+                 (no signing key to anchor a marker on)."
+            );
+            return Ok(None);
+        }
+    };
+
+    // Convert hex signing_key_id to 32 raw bytes, then look up the
+    // configured signing key to retrieve its full public-key bytes.
+    let signing_key_id_bytes: [u8; 32] = match hex_decode_32(&signing_key_id_hex) {
+        Some(b) => b,
+        None => {
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: candidate signing_key_id is \
+                 not 64 lowercase hex chars (got {} chars). The apply pipeline will surface \
+                 the precise structural error.",
+                signing_key_id_hex.len()
+            );
+            return Ok(None);
+        }
+    };
+    let candidate_signing_pk_bytes = match bundle_signing_keys.lookup(&signing_key_id_bytes) {
+        Some(k) => k.pk_bytes.clone(),
+        None => {
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: candidate signing_key_id \
+                 {}... not present in configured bundle signing keys (the apply pipeline \
+                 would have already rejected the candidate)).",
+                &signing_key_id_hex[..signing_key_id_hex.len().min(8)]
+            );
+            return Ok(None);
+        }
+    };
+
+    // Run 105 enforcement — re-runs the precise verifier the apply
+    // pipeline will run, so a verified ratification is in hand for the
+    // marker derivation step.
+    let outcome = match enforce_bundle_signing_key_ratification(RatificationEnforcementInputs {
+        ratification: ctx_data.ratification.as_ref(),
+        authority: &ctx_data.authority,
+        expected_chain_id: &ctx_data.chain_id_str,
+        expected_environment: ctx_data.env_policy,
+        expected_genesis_hash: &ctx_data.canonical_hash,
+        candidate_bundle_signing_public_key: &candidate_signing_pk_bytes,
+        policy: ctx_data.policy,
+    }) {
+        Ok(o) => o,
+        Err(_e) => {
+            // Defer to the apply pipeline's own typed reporting — it
+            // will re-run the same enforcer and emit the precise
+            // RatificationEnforcementFailure variant. We do not
+            // double-report.
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: ratification enforcement \
+                 will fail in the apply pipeline (deferred to its typed error)."
+            );
+            return Ok(None);
+        }
+    };
+    let ratified = match outcome {
+        RatificationEnforcementOutcome::Ratified(rk) => rk,
+        RatificationEnforcementOutcome::LegacyUnratifiedAccepted { .. } => {
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: LegacyUnratifiedAccepted \
+                 (DevNet/TestNet legacy ergonomics; no ratified key to anchor a marker on)."
+            );
+            return Ok(None);
+        }
+    };
+    let ratification = match ctx_data.ratification.as_ref() {
+        Some(r) => r,
+        None => {
+            // Unreachable under Strict (the enforcer would have
+            // returned Missing) and under AllowLegacyUnratified the
+            // LegacyUnratifiedAccepted branch above already returned.
+            eprintln!(
+                "[run-119] authority-marker preflight skipped: ratification context has no \
+                 object (unreachable on Ratified branch)."
+            );
+            return Ok(None);
+        }
+    };
+
+    // Compute the runtime genesis hash hex (Run 117 chain-id-hex /
+    // genesis-hash-hex format).
+    let mut runtime_genesis_hash_hex = String::with_capacity(64);
+    for b in ctx_data.canonical_hash {
+        use std::fmt::Write;
+        let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+    }
+
+    let marker_path = authority_state_file_path(data_dir);
+
+    let decision = decide_marker_acceptance(MarkerAcceptanceInputs {
+        marker_path: &marker_path,
+        runtime_env,
+        runtime_chain_id,
+        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+        authority_policy_version: ctx_data.authority.authority_policy_version,
+        authority_sequence: ctx_data.authority.authority_sequence,
+        authority_epoch: ctx_data.authority.authority_epoch,
+        ratification,
+        ratified: &ratified,
+        update_source: AuthorityStateUpdateSource::ReloadApply,
+        updated_at_unix_secs,
+    })?;
+
+    // Keep `MutatingSurfaceMarkerError` re-export in scope for the
+    // explicit Result type without triggering an unused-import warning.
+    let _ = std::marker::PhantomData::<MutatingSurfaceMarkerError>;
+
+    Ok(Some(decision))
+}
+
+/// Decode a 64-char lowercase-hex string into a `[u8; 32]`. Returns
+/// `None` on any structural defect.
+fn hex_decode_32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let hi = hex_nibble(bytes[2 * i])?;
+        let lo = hex_nibble(bytes[2 * i + 1])?;
+        out[i] = (hi << 4) | lo;
+    }
+    Some(out)
+}
+
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        _ => None,
+    }
+}
+
 /// Main entry point for qbind-node binary.
 #[tokio::main]
 async fn main() {
@@ -1674,21 +1911,126 @@ async fn main() {
                 config.environment
             );
             match build_run_105_reload_check_context(&args, &config) {
-                Ok(ctx_data) => apply_validated_candidate_with_previous_and_ratification(
-                    inputs,
-                    &RatificationEnforcementContext {
-                        authority: &ctx_data.authority,
-                        expected_genesis_hash: &ctx_data.canonical_hash,
-                        expected_environment_policy: ctx_data.env_policy,
-                        expected_chain_id_str: &ctx_data.chain_id_str,
-                        ratification: ctx_data.ratification.as_ref(),
-                        policy: ctx_data.policy,
-                    },
-                    ApplyMode::ApplyLive,
-                    Some(&mut apply_ctx),
-                    prev_fp_prefix.clone(),
-                    prev_seq,
-                ),
+                Ok(ctx_data) => {
+                    // Run 119 — authority-marker accept-and-persist
+                    // preflight. Runs BEFORE the apply pipeline so a
+                    // rollback / same-sequence-equivocation / wrong-
+                    // domain marker fail-closes the operation without
+                    // mutating live trust state or burning a sequence
+                    // number. No-op when:
+                    //   * `--data-dir` is unset (DevNet-only convenience
+                    //     branch — the binary already FATAL-exits if
+                    //     --data-dir is unset on MainNet/TestNet for
+                    //     this CLI path);
+                    //   * the operator-supplied ratification is `None`
+                    //     under `AllowLegacyUnratified` (DevNet
+                    //     legacy ergonomics — no ratified key, so no
+                    //     marker is derivable);
+                    //   * the candidate cannot be pre-loaded (the
+                    //     apply pipeline will surface the precise
+                    //     load error itself).
+                    //
+                    // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.
+                    let marker_decision = match preflight_run_119_marker_decision(
+                        &candidate_path,
+                        config.environment,
+                        config.chain_id(),
+                        now_secs,
+                        &bundle_signing_keys,
+                        &ctx_data,
+                        config.data_dir.as_deref(),
+                        now_secs,
+                    ) {
+                        Ok(opt) => opt,
+                        Err(reason) => {
+                            eprintln!(
+                                "[run-119] FATAL: reload-apply refused by authority-marker \
+                                 preflight: {}. Candidate path={}. No live trust apply, no \
+                                 sequence write, no session eviction, no metrics mutation, \
+                                 no marker write. See \
+                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.",
+                                reason,
+                                candidate_path.display()
+                            );
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let apply_outcome = apply_validated_candidate_with_previous_and_ratification(
+                        inputs,
+                        &RatificationEnforcementContext {
+                            authority: &ctx_data.authority,
+                            expected_genesis_hash: &ctx_data.canonical_hash,
+                            expected_environment_policy: ctx_data.env_policy,
+                            expected_chain_id_str: &ctx_data.chain_id_str,
+                            ratification: ctx_data.ratification.as_ref(),
+                            policy: ctx_data.policy,
+                        },
+                        ApplyMode::ApplyLive,
+                        Some(&mut apply_ctx),
+                        prev_fp_prefix.clone(),
+                        prev_seq,
+                    );
+
+                    // Run 119 — persist the previously-accepted marker
+                    // AFTER the existing `commit_sequence` boundary.
+                    // No-op when:
+                    //   * preflight returned `None` (no marker context
+                    //     applicable on this branch);
+                    //   * preflight decision was `Idempotent` (the
+                    //     on-disk marker is bit-for-bit identical to
+                    //     the candidate; rewriting would only update
+                    //     the audit-only `updated_at_unix_secs` field
+                    //     for no operator benefit);
+                    //   * the apply pipeline returned `Err`.
+                    //
+                    // A persist failure here means the trust-bundle
+                    // sequence already advanced and the on-disk
+                    // authority marker is stale-by-one. This is
+                    // intentionally safe per Run 118 §D (the next
+                    // accepted mutation will replay it as an
+                    // `Upgrade`), but the operator MUST be told so we
+                    // exit non-zero and surface the precise reason.
+                    if apply_outcome.is_ok() {
+                        if let Some(decision) = marker_decision.as_ref() {
+                            match qbind_node::pqc_authority_marker_acceptance::persist_accepted_marker_after_commit_boundary(decision) {
+                                Ok(()) => {
+                                    if decision.should_persist() {
+                                        eprintln!(
+                                            "[run-119] authority-marker persisted at {} ({}; \
+                                             candidate authority_sequence={}).",
+                                            decision.marker_path().display(),
+                                            decision.kind(),
+                                            decision.candidate().authority_sequence
+                                        );
+                                    } else {
+                                        eprintln!(
+                                            "[run-119] authority-marker unchanged at {} \
+                                             (idempotent; no rewrite).",
+                                            decision.marker_path().display()
+                                        );
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[run-119] FATAL: authority-marker persist failure \
+                                         AFTER successful apply: {}. The trust-bundle sequence \
+                                         already committed; the on-disk authority marker is \
+                                         stale-by-one and will be re-derived on the next \
+                                         accepted mutation (Run 118 §D crash-window rule). \
+                                         Candidate path={}. See \
+                                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.",
+                                        e,
+                                        candidate_path.display()
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                    }
+
+                    apply_outcome
+                }
                 Err(reason) => {
                     eprintln!(
                         "[run-112] FATAL: reload-apply refused — ratification context could \

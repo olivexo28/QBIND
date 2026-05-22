@@ -1,0 +1,594 @@
+# RUN 120 — Startup Trust-Bundle Authority Marker Wiring
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into the release binary startup path and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive:
+  - `PersistentAuthorityStateRecord`;
+  - domain-separated digest under `QBIND:AUTHORITY-STATE:v1`;
+  - typed `AuthorityStateComparison`;
+  - fail-closed `load_authority_state`;
+  - atomic `persist_authority_state_atomic`;
+  - additive `AuthorityStateSnapshotMeta`;
+  - no production surface wiring.
+- Run 118 landed the helper layer only:
+  - `derive_authority_state_from_ratification(...)`;
+  - `prepare_marker_for_acceptance(...)`;
+  - no production surface wiring;
+  - no marker persistence on accepted mutation.
+- Run 119 landed Option A / narrowed partial-positive:
+  - new shared helper module `crates/qbind-node/src/pqc_authority_marker_acceptance.rs`;
+  - `decide_marker_acceptance(...)` is pure and never writes;
+  - `persist_accepted_marker_after_commit_boundary(...)` is separated and no-ops on `Idempotent`;
+  - process-start reload-apply is wired only;
+  - marker comparison happens before reload-apply mutation;
+  - marker persistence happens after the reload-apply `commit_sequence` boundary;
+  - rejection cases fail before any apply callback;
+  - apply failure does not persist marker;
+  - startup `--p2p-trust-bundle`, SIGHUP, validation-only surfaces, release-binary evidence, restore/snapshot conflict enforcement, and per-key monotonic schema remain deferred.
+
+Run 120 is the next narrow mutating-surface wiring run.
+
+It must wire only startup `--p2p-trust-bundle` authority marker acceptance/persistence.
+
+Do not touch SIGHUP in this run.
+Do not touch validation-only surfaces in this run.
+Do not implement release-binary evidence unless trivial and secondary.
+
+---
+
+# Exact objective
+
+Wire the Run 117/118/119 authority anti-rollback marker into the startup `--p2p-trust-bundle` acceptance path.
+
+The objective is:
+
+1. Derive `PersistentAuthorityStateRecord` only after startup trust-bundle ratification verification succeeds.
+2. Compare the derived marker against the persisted marker before startup trust mutation, sequence/root persistence, or network startup.
+3. Reject conflict, corruption, wrong-domain, or invalid marker state before any startup mutation.
+4. Persist the accepted marker atomically after the accepted startup commit boundary.
+5. Preserve all existing startup validation and ordering invariants.
+6. Keep process-start reload-apply behavior from Run 119 unchanged.
+7. Do not wire SIGHUP in this run.
+8. Do not persist from validation-only surfaces.
+9. Do not invent a fake authority sequence.
+10. Do not implement signing-key rotation/revocation lifecycle.
+11. Do not implement peer-driven live apply.
+
+Run 120 should make this statement true:
+
+> Startup `--p2p-trust-bundle` acceptance cannot silently accept a conflicting or corrupt authority marker; conflicts fail closed before startup mutation/network startup, and accepted startup mutations persist the authority marker atomically after the existing startup commit boundary.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Startup trust-bundle marker wiring only
+
+Wire only the startup path that accepts an initial `--p2p-trust-bundle` and may:
+
+- validate the signed bundle;
+- enforce ratification;
+- persist sequence/root state;
+- merge accepted trust roots;
+- start P2P/networking with accepted trust material.
+
+Do not wire:
+
+- SIGHUP live reload;
+- validation-only reload-check;
+- local peer-candidate check;
+- live inbound `0x05` validation-only path;
+- process-start reload-apply beyond regression preservation.
+
+## B. Marker derivation from verified ratification only
+
+Use Run 118 / Run 119 helpers:
+
+```text
+derive_authority_state_from_ratification(...)
+decide_marker_acceptance(...)
+prepare_marker_for_acceptance(...)
+```
+
+or the repo-equivalent wrappers.
+
+The marker must be derived only from verified ratification material.
+
+Forbidden:
+
+- deriving marker from unverified sidecar JSON;
+- deriving marker from local config alone;
+- deriving marker from trust-bundle sequence;
+- deriving marker from activation height;
+- deriving marker from activation_epoch.
+
+## C. Compare before startup mutation
+
+Before any startup trust mutation or network start:
+
+- load persisted marker;
+- fail closed on load/corruption/malformed marker;
+- validate persisted marker domain against runtime environment, chain_id, and genesis_hash;
+- compare candidate marker;
+- reject conflict before mutation;
+- do not repair, delete, or overwrite corrupt markers.
+
+## D. Persist marker after accepted startup commit boundary
+
+Use Run 117 atomic persistence through Run 119’s accept-and-persist helper.
+
+Run 119 selected the pattern:
+
+```text
+validate/ratify → compare marker → perform existing mutation/commit → persist marker after commit boundary
+```
+
+For startup, identify the equivalent startup commit boundary and persist after it.
+
+If startup has multiple commits, choose the safest point and document the crash behavior clearly.
+
+Do not claim cross-store atomicity unless it exists.
+
+## E. Preserve startup behavior when ratification is not invoked
+
+If Run 106 policy skips ratification in DevNet no-opt-in mode, startup behavior must remain unchanged and must not write authority marker from unratified state.
+
+MainNet/TestNet must enforce ratification and marker checks.
+
+---
+
+# Strict non-goals
+
+Run 120 MUST NOT:
+
+- wire SIGHUP authority marker checks;
+- wire validation-only marker checks;
+- persist marker from validation-only surfaces;
+- implement `--allow-authority-state-reset`;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- invent a fake authority sequence/epoch;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots broadly;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken Run 105–115 ratification enforcement/evidence;
+- weaken Run 117 marker corruption/fail-closed behavior;
+- weaken Run 118 derivation/compare helper behavior;
+- weaken Run 119 reload-apply marker behavior;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken Run 055 trust-bundle sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim full signing-key rotation safety;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing startup trust-bundle path
+
+Find the exact code path for startup `--p2p-trust-bundle` acceptance.
+
+Document:
+
+- where the bundle file is loaded;
+- where signed-bundle verification happens;
+- where ratification enforcement from Runs 105/106 happens;
+- where sequence/root persistence happens;
+- where trust roots are merged or made active;
+- where P2P/network startup begins;
+- where the earliest safe marker comparison point is;
+- where the safest marker persistence point is.
+
+## 2. Run 119 helper reuse
+
+Inspect:
+
+- `pqc_authority_marker_acceptance.rs`;
+- `decide_marker_acceptance(...)`;
+- `persist_accepted_marker_after_commit_boundary(...)`;
+- typed `MutatingSurfaceMarkerError`;
+- reload-apply integration points.
+
+Reuse the same helper pattern. Do not add a parallel marker acceptance stack.
+
+## 3. Startup ordering and crash behavior
+
+For startup, document:
+
+- marker comparison point;
+- startup mutation beginning;
+- sequence/root commit point;
+- marker persistence point;
+- crash before marker persistence;
+- crash after marker persistence;
+- behavior on restart.
+
+Prefer the Run 119 pattern: marker stale-by-one is safe and replayable; marker ahead of trust sequence should be avoided.
+
+## 4. DevNet/TestNet/MainNet policy
+
+Confirm startup marker behavior follows the existing ratification policy:
+
+- MainNet/TestNet require ratification and marker checks;
+- DevNet no-opt-in may skip ratification and must not write marker;
+- DevNet opt-in enforces ratification and marker checks;
+- MainNet cannot use DevNet bypass.
+
+## 5. Error mapping
+
+Map errors precisely for:
+
+- marker derivation failure;
+- marker load/corruption;
+- wrong chain;
+- wrong environment;
+- wrong genesis;
+- root mismatch;
+- key mismatch;
+- different ratification digest;
+- marker persist failure.
+
+---
+
+# Required implementation
+
+## 1. Startup marker preflight
+
+After startup ratification verifies, but before mutation/network startup:
+
+- derive candidate marker;
+- load and compare persisted marker;
+- fail closed on conflict/corruption/wrong-domain.
+
+## 2. Startup marker persistence
+
+After the accepted startup commit boundary:
+
+- persist marker atomically;
+- fail closed if marker persistence fails;
+- do not persist marker on rejection;
+- do not persist marker on DevNet no-opt-in legacy/unratified path.
+
+## 3. Shared helper reuse
+
+Reuse Run 119’s helper/module where possible.
+
+Add small startup-specific adapter only if needed.
+
+## 4. Tests
+
+Add focused tests.
+
+---
+
+# Required tests
+
+## A. Startup marker tests
+
+Test:
+
+- first accepted startup ratification persists marker;
+- same marker is idempotent;
+- conflicting marker rejects before startup mutation/network startup;
+- corrupt marker rejects before mutation;
+- marker persist failure rejects;
+- marker is not persisted on DevNet no-opt-in legacy path;
+- DevNet opt-in enforces marker;
+- MainNet/TestNet cannot bypass marker check.
+
+## B. Ordering tests
+
+Prove:
+
+- marker compare occurs before startup mutation;
+- marker persist occurs after accepted startup commit boundary;
+- failure before commit does not persist marker;
+- marker persist failure does not silently continue.
+
+## C. Regression tests
+
+Run and report:
+
+- Run 119 reload-apply marker tests;
+- Run 118 derivation/prepare tests;
+- Run 117 authority-state tests;
+- Run 105/106 startup ratification tests;
+- Run 050 signed trust-bundle tests;
+- Run 055 sequence anti-rollback tests;
+- Run 057 activation-height tests;
+- Run 065 minimum-margin tests;
+- Run 091–099 activation_epoch tests where relevant;
+- qbind-node --lib;
+- qbind-ledger --lib;
+- qbind-crypto --lib if touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 120.
+
+---
+
+# Release-binary evidence
+
+Release-binary evidence is optional for Run 120, but useful if feasible.
+
+Preferred scenarios:
+
+## Scenario 1 — First marker persisted on accepted startup
+
+Use real release binary with valid ratified startup bundle and prove marker appears.
+
+## Scenario 2 — Same marker idempotent after restart
+
+Restart with same ratification and prove acceptance.
+
+## Scenario 3 — Conflicting marker rejected before startup/network
+
+Seed conflicting marker and prove startup rejects before mutation/network startup.
+
+## Scenario 4 — Corrupt marker fails closed
+
+Corrupt marker and prove startup rejects before mutation/network startup.
+
+If release-binary evidence is not feasible, return positive or partial-positive based on source/test proof and document release evidence as future work.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_120.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+If release evidence is produced:
+
+- archive logs under `docs/devnet/run_120_*`.
+
+Optional narrow updates:
+
+- storage schema docs if marker path/key is operator-visible;
+- MainNet readiness checklist.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 120 may narrow:
+
+- startup authority marker wiring;
+- startup marker conflict checks before mutation/network startup;
+- startup marker persistence on accepted ratified startup bundle.
+
+Run 120 may mark the startup marker sub-piece resolved only if:
+
+- startup derives marker from verified ratification;
+- persisted marker is compared before mutation/network startup;
+- conflict/corruption fails closed;
+- accepted startup persists marker;
+- tests prove behavior;
+- docs are synchronized.
+
+Run 120 MUST NOT mark resolved:
+
+- SIGHUP marker wiring;
+- validation-only marker checks;
+- signing-key rotation/revocation lifecycle;
+- missing per-key monotonic authority sequence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 120 does not implement SIGHUP marker wiring;
+- Run 120 does not implement validation-only marker checks;
+- Run 120 does not implement signing-key rotation/revocation;
+- Run 120 does not invent a monotonic authority sequence;
+- Run 120 does not implement peer-driven live apply;
+- Run 120 does not implement KMS/HSM custody;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- startup marker wiring lands;
+- marker persists and rejects conflicts/corruption;
+- release-binary evidence proves core startup cases;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- startup marker wiring lands with strong tests;
+- release-binary evidence is deferred honestly;
+- SIGHUP and validation-only surfaces remain deferred.
+
+Use **partial-positive** if:
+
+- startup marker wiring is incomplete;
+- persistence is incomplete;
+- release evidence is incomplete and source/test proof is partial;
+- ordering risks remain unresolved.
+
+Use **negative** if:
+
+- rollback/conflict is silently accepted;
+- corrupt marker fails open;
+- marker is persisted before a safe startup commit boundary without proof;
+- fake authority sequence is invented;
+- peer-driven apply or rotation is introduced prematurely.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- startup surface wiring;
+- marker derivation use;
+- marker comparison use;
+- marker persistence ordering;
+- errors added/mapped;
+- surfaces deferred;
+- release-binary evidence, if any.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence if any.
+
+## 4. Key security decisions
+
+Include:
+
+- marker derived only from verified ratification;
+- marker distinct from trust-bundle sequence;
+- no fake monotonic authority sequence;
+- corruption/conflict fail closed;
+- accepted startup persists marker;
+- no marker on DevNet no-opt-in unratified path;
+- no validation-only persistence;
+- no peer-driven apply;
+- no rotation/revocation lifecycle.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- Run 105–115 ratification enforcement/evidence;
+- Run 116 model;
+- Run 117 primitive;
+- Run 118 helper layer;
+- Run 119 reload-apply wiring;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 120 does NOT implement:
+
+- SIGHUP marker wiring;
+- validation-only marker checks;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- governance;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 120 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
