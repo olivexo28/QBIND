@@ -1,0 +1,694 @@
+# RUN 117 — Persistent Authority Anti-Rollback Marker + Snapshot Metadata Extension
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into the release binary startup path and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Run 105 added first opt-in ratification enforcement for startup and reload-check.
+- Run 106 added MainNet/TestNet default-strict ratification policy for startup/reload-check.
+- Run 107 wired ratification enforcement into local `--p2p-trust-bundle-peer-candidate-check`.
+- Run 108 produced strongest-positive release-binary evidence for local peer-candidate check.
+- Run 109 wired ratification into live inbound `0x05` peer-candidate validation and Run 088 propagation gating.
+- Run 111 produced release-binary evidence for live inbound `0x05` ratification gating.
+- Run 112 wired ratification enforcement into process-start reload-apply.
+- Run 113 produced strongest-positive release-binary evidence for process-start reload-apply ratification enforcement.
+- Run 114 wired ratification enforcement into SIGHUP live reload.
+- Run 115 produced strongest-positive release-binary evidence for SIGHUP live reload ratification enforcement.
+- Run 116 produced a positive spec-first authority anti-rollback persistence model:
+  - authority anti-rollback must be distinct from Run 055 trust-bundle sequence anti-rollback;
+  - `canonical_ratification_digest` is the ratification object hash;
+  - `BundleSigningRatification` currently lacks a monotonic per-key field;
+  - snapshot/restore authority rollback is explicitly in scope;
+  - persistent marker implementation is staged for Run 117;
+  - signing-key rotation/revocation remains future work;
+  - peer-driven live apply remains forbidden.
+
+Before Run 117 implementation, first verify or fix the Run 116 tracking docs. The Run 116 review found that `contradiction.md`, `QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`, and `QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md` may not yet have explicit Run 116 entries. If they are still missing, add them before or during Run 117 and document the correction.
+
+Run 117 is the first implementation run for authority anti-rollback persistence.
+
+---
+
+# Exact objective
+
+Implement the smallest safe persistent authority anti-rollback marker and snapshot metadata extension for ratified bundle-signing authority state.
+
+The objective is:
+
+1. Add a durable authority-state marker type for ratified bundle-signing authority state.
+2. Persist/load/compare that marker through a canonical, fail-closed storage surface.
+3. Extend snapshot metadata to carry authority-state metadata without breaking old snapshots.
+4. Define and test restore behavior so older authority state cannot silently roll back a node.
+5. Keep the marker primitive separate from trust-bundle sequence, activation height, and activation epoch.
+6. Do not wire the marker into every validation/apply surface yet unless it is extremely narrow and safe.
+7. Do not implement signing-key rotation/revocation lifecycle yet.
+8. Do not implement peer-driven live apply.
+
+Run 117 should make this statement true at the storage/snapshot primitive level:
+
+> QBIND can persist and compare ratified bundle-signing authority state, detect rollback/conflict/corruption, and carry authority-state metadata through snapshots without treating missing or stale state as safe on production paths.
+
+---
+
+# Critical design constraint
+
+Current Run 103/104 ratification objects do not yet contain a monotonic per-key authority sequence/epoch suitable for signing-key rotation.
+
+Therefore Run 117 must not pretend to solve rotation.
+
+Allowed comparison basis for Run 117:
+
+- version;
+- chain_id;
+- environment;
+- genesis_hash;
+- authority_root_fingerprint;
+- ratified_bundle_signing_key_fingerprint;
+- canonical_ratification_digest;
+- optional authority_sequence/authority_epoch if already present;
+- marker status.
+
+If no monotonic field exists, the marker may protect against:
+
+- wrong-chain rollback;
+- wrong-environment rollback;
+- wrong-genesis rollback;
+- same-key/different-ratification conflict;
+- authority root/key mismatch;
+- stale snapshot conflict with existing local marker;
+- corruption;
+
+but it must not claim full rotation anti-rollback until a monotonic authority-sequence field exists.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Authority-state marker type
+
+Add a narrow type, using repo naming style, such as:
+
+```text
+RatifiedAuthorityState
+AuthorityAntiRollbackState
+BundleSigningAuthorityMarker
+```
+
+Expected conceptual fields:
+
+```text
+version
+chain_id
+environment
+genesis_hash
+authority_root_fingerprint
+ratified_bundle_signing_key_fingerprint
+canonical_ratification_digest
+authority_sequence or authority_epoch, if already available
+status
+```
+
+Do not invent a fake monotonic sequence if one is not already canonical.
+
+## B. Canonical serialization / digest
+
+Implement deterministic serialization or reuse existing canonical encoding.
+
+Requirements:
+
+- stable across platforms;
+- domain-separated;
+- includes every security-relevant field;
+- no JSON ordering ambiguity;
+- no implicit defaults that silently change semantics.
+
+Expected domain tag example:
+
+```text
+QBIND:AUTHORITY-STATE:v1
+```
+
+Follow repo conventions if different.
+
+## C. Compare function
+
+Implement a pure compare/validation function.
+
+Expected outcomes:
+
+- `AcceptFirstMarker` / equivalent;
+- `IdempotentSameMarker`;
+- `RejectWrongChain`;
+- `RejectWrongEnvironment`;
+- `RejectWrongGenesis`;
+- `RejectAuthorityRootMismatch`;
+- `RejectKeyMismatch`;
+- `RejectSameStateDifferentDigest`;
+- `RejectLowerAuthoritySequence` if a monotonic sequence exists;
+- `RejectCorruptMarker`.
+
+Return typed reasons, not boolean-only.
+
+## D. Persistence API
+
+Choose the narrowest durable location consistent with Run 116.
+
+Preferred if appropriate:
+
+- existing Run 093 production `ConsensusStorage` / RocksDB metadata;
+- a clearly versioned key under existing production consensus storage.
+
+Avoid ad hoc files if the existing durable schema is the correct place.
+
+Expected APIs:
+
+```text
+load_authority_state(...)
+compare_authority_state(...)
+persist_authority_state_atomic(...)
+```
+
+or repo-style equivalents.
+
+## E. Snapshot metadata extension
+
+Extend snapshot metadata additively with optional authority-state metadata.
+
+Requirements:
+
+- old snapshots without authority state remain parse-compatible;
+- missing authority metadata must not be treated as safe production authority state;
+- new snapshots may include authority marker digest/state;
+- restore must detect conflict between snapshot authority state and existing local persisted marker;
+- snapshot restore must not silently roll back authority state.
+
+Do not redesign snapshots broadly.
+
+## F. Reset/recovery design
+
+If implementing reset handling, it must be explicit and guarded.
+
+The Run 116 model mentioned an `--allow-authority-state-reset` style recovery path. Run 117 may specify it but should avoid adding it unless necessary.
+
+If added, it must be:
+
+- impossible to use silently;
+- environment-gated;
+- logged/audited;
+- release-evidenced;
+- unavailable or extremely constrained on MainNet.
+
+Prefer deferring reset CLI behavior unless required.
+
+---
+
+# Strict non-goals
+
+Run 117 MUST NOT:
+
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots broadly;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken Run 105–115 ratification enforcement/evidence;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken Run 055 trust-bundle sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet signing authority;
+- claim full signing-key rotation safety;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Run 116 doc-sync state
+
+Verify that the following docs contain explicit Run 116 updates:
+
+- `docs/whitepaper/contradiction.md`;
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+If missing, add them and state the fix in Run 117 evidence.
+
+## 2. Existing ratification object fields
+
+Inspect Run 103/104 `BundleSigningRatification`.
+
+Document:
+
+- fields available for marker derivation;
+- whether monotonic authority sequence/epoch exists;
+- how `canonical_ratification_digest` is computed;
+- chain_id / environment / genesis_hash binding;
+- authority root fingerprint;
+- ratified key fingerprint.
+
+## 3. Existing durable storage surfaces
+
+Inspect:
+
+- Run 093 `ConsensusStorage` / RocksDB surface;
+- current `meta:*` key patterns;
+- Run 094/097 epoch persistence APIs;
+- corruption/fail-closed checks;
+- schema/versioning behavior.
+
+Choose the safest authority marker storage location.
+
+## 4. Snapshot metadata implementation
+
+Inspect Run 097 `StateSnapshotMeta` and restore path.
+
+Document how to add optional authority metadata without breaking legacy snapshots.
+
+Define restore conflict rules.
+
+## 5. Surface wiring boundary
+
+Map current ratification-enforced surfaces:
+
+- startup;
+- reload-check;
+- peer-candidate check;
+- live inbound `0x05`;
+- process-start reload-apply;
+- SIGHUP.
+
+Run 117 should usually implement marker primitives only. If any surface is touched, justify why it is safe and narrow.
+
+---
+
+# Required implementation
+
+## 1. Add authority marker type
+
+Add the marker type in the appropriate crate.
+
+Possible locations:
+
+- `qbind-ledger` if it is storage/snapshot/general state;
+- `qbind-node` if tightly tied to node production storage;
+- follow existing module boundaries.
+
+## 2. Add compare semantics
+
+Add typed comparison and validation errors.
+
+Must handle at least:
+
+- first marker;
+- same marker;
+- wrong chain;
+- wrong environment;
+- wrong genesis;
+- root/key mismatch;
+- same logical state with different digest;
+- corrupt/malformed marker;
+- lower monotonic sequence if such field exists.
+
+## 3. Add persistence primitive
+
+Persist under chosen durable store.
+
+Requirements:
+
+- versioned;
+- fail-closed on corruption;
+- atomic write if supported;
+- no silent deletion;
+- no MainNet fallback to missing state when marker should exist.
+
+## 4. Add snapshot metadata field
+
+Extend snapshot metadata additively, conceptually:
+
+```text
+authority_state: Option<...>
+```
+
+or repo-style equivalent.
+
+Requirements:
+
+- legacy snapshots parse;
+- new metadata serializes deterministically;
+- missing field remains explicit `None`;
+- no implicit authority state is invented.
+
+## 5. Add restore comparison logic if safe
+
+If implementation can safely touch restore:
+
+- compare snapshot authority state with existing local persisted marker;
+- reject rollback/conflict;
+- preserve old snapshot compatibility;
+- do not silently downgrade authority state.
+
+If restore wiring is too broad, implement metadata type/tests and defer restore enforcement to Run 118.
+
+## 6. Tests
+
+Add focused tests as below.
+
+---
+
+# Required tests
+
+Add tests for whichever implementation lands.
+
+## A. Marker serialization tests
+
+Test:
+
+- deterministic encoding;
+- domain separator included;
+- changing chain changes digest;
+- changing environment changes digest;
+- changing genesis hash changes digest;
+- changing authority root changes digest;
+- changing ratified key changes digest;
+- changing ratification digest changes digest.
+
+## B. Marker comparison tests
+
+Test:
+
+- first marker accepted;
+- same marker idempotent;
+- wrong chain rejected;
+- wrong environment rejected;
+- wrong genesis rejected;
+- wrong root rejected;
+- wrong key rejected;
+- same root/key but different ratification digest rejected or handled by documented rule;
+- lower sequence rejected if monotonic sequence exists.
+
+## C. Persistence tests
+
+Test:
+
+- load missing marker returns explicit missing state;
+- first persist succeeds;
+- reload observes persisted marker;
+- same persist idempotent;
+- conflicting marker rejected;
+- corrupt marker fails closed;
+- wrong environment/chain/genesis marker fails closed.
+
+## D. Snapshot metadata tests
+
+Test:
+
+- old snapshot metadata without authority state parses;
+- new metadata with authority state parses;
+- missing authority state remains `None`;
+- authority metadata serializes deterministically;
+- snapshot with conflicting authority metadata is rejected if restore comparison is implemented;
+- no synthetic authority state is inferred.
+
+## E. Regression tests
+
+Run and report:
+
+- Run 097 snapshot epoch parity tests if snapshot metadata touched;
+- Run 103 ratification verifier tests;
+- Run 104 key material tests;
+- Run 105–115 ratification enforcement/evidence tests where relevant;
+- Run 055 sequence anti-rollback tests;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib if touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 117.
+
+---
+
+# Release-binary evidence
+
+Release-binary evidence is optional for Run 117 unless marker persistence is wired into a release-binary path.
+
+If release evidence is produced, preferred scenarios:
+
+## Scenario 1 — First marker persisted
+
+Valid ratification marker persists and survives restart.
+
+## Scenario 2 — Same marker idempotent
+
+Restart with same marker succeeds.
+
+## Scenario 3 — Conflicting marker rejects
+
+Same root/key but different ratification digest fails closed.
+
+## Scenario 4 — Wrong chain/environment/genesis rejects
+
+Fail closed.
+
+## Scenario 5 — Snapshot conflict rejects
+
+If restore comparison is implemented, prove old/conflicting snapshot cannot silently roll back authority state.
+
+Do not fake release evidence if the marker is not wired into a release-binary path.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_117.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow updates:
+
+- snapshot/restore docs if metadata changes;
+- storage schema docs if new storage key is added;
+- MainNet readiness checklist.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 117 may narrow:
+
+- authority anti-rollback persistence implementation;
+- authority snapshot metadata;
+- restore rollback detection.
+
+Run 117 may mark a sub-piece resolved only if:
+
+- marker type exists;
+- compare semantics exist;
+- persistence exists;
+- snapshot metadata exists;
+- rollback/conflict/corruption tests pass;
+- docs are synchronized.
+
+Run 117 MUST NOT mark resolved:
+
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 117 does not implement peer-driven live apply;
+- Run 117 does not implement signing-key rotation/revocation lifecycle;
+- Run 117 does not implement KMS/HSM custody;
+- Run 117 does not close full authority lifecycle;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- marker type, compare semantics, persistence, snapshot metadata, and conflict tests all land;
+- restore conflict handling lands if claimed;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- marker primitive + persistence + snapshot metadata land;
+- some release-binary evidence is deferred honestly;
+- no unsafe rotation claim is made.
+
+Use **partial-positive** if:
+
+- marker type/compare semantics land but persistence or snapshot metadata is incomplete;
+- snapshot metadata lands but restore conflict handling is deferred;
+- missing monotonic field blocks stronger anti-rollback enforcement.
+
+Use **negative** if:
+
+- marker conflates trust-bundle sequence with authority sequence unsafely;
+- rollback is accepted silently;
+- corruption fails open;
+- missing authority state is treated as safe MainNet authority;
+- peer-driven apply or rotation is introduced prematurely.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- marker type;
+- canonical encoding/digest;
+- compare semantics;
+- persistence location/API;
+- snapshot metadata changes;
+- restore behavior if any;
+- docs fixed from Run 116 if applicable.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence, if any.
+
+## 4. Key security decisions
+
+Include:
+
+- authority marker distinct from trust-bundle sequence;
+- no fake monotonic authority sequence;
+- fail-closed corruption behavior;
+- snapshot rollback semantics;
+- no peer-driven apply;
+- no rotation/revocation lifecycle.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- Run 105–115 ratification enforcement/evidence;
+- Run 116 model;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 117 does NOT implement:
+
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- governance;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 117 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
