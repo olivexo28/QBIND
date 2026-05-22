@@ -1397,8 +1397,9 @@ async fn main() {
         };
         use qbind_node::pqc_root_config::PqcLeafCredentialPaths;
         use qbind_node::pqc_trust_reload::{
-            apply_validated_candidate_with_previous, ApplyMode, ReloadApplyError,
-            ReloadCheckInputs,
+            apply_validated_candidate_with_previous,
+            apply_validated_candidate_with_previous_and_ratification, ApplyMode,
+            RatificationEnforcementContext, ReloadApplyError, ReloadCheckInputs,
         };
         use qbind_types::NetworkEnvironment;
         use std::sync::Arc;
@@ -1628,13 +1629,97 @@ async fn main() {
         );
         let (prev_fp_prefix, prev_seq) = apply_ctx.snapshot_previous_metadata();
 
-        match apply_validated_candidate_with_previous(
-            inputs,
-            ApplyMode::ApplyLive,
-            Some(&mut apply_ctx),
-            prev_fp_prefix.clone(),
-            prev_seq,
-        ) {
+        // Run 112 — process-start reload-apply ratification preflight.
+        //
+        // Apply the same Run 106 per-environment ratification policy
+        // already used by the reload-check (Run 069/106) and
+        // peer-candidate-check (Run 077/107) binary paths:
+        //
+        //   * MainNet / TestNet : ratification gate INVOKED by
+        //     default. The operator opt-in flag can neither enable
+        //     nor disable the gate; the gate body still drives the
+        //     full Run 103/105
+        //     `enforce_bundle_signing_key_ratification` pipeline and
+        //     refuses missing / malformed / wrong-chain /
+        //     wrong-environment / unknown-root / transport-root /
+        //     missing-key-material / malformed-key-material /
+        //     unsupported-suite / bad-signature ratification.
+        //   * DevNet : gate invoked only when the operator opts in
+        //     via `--p2p-trust-bundle-ratification-enforcement-enabled`.
+        //
+        // When `Invoke`, the apply path calls the Run 112
+        // `apply_validated_candidate_with_previous_and_ratification`
+        // entry point, which runs the Run 105 ratification
+        // preflight BEFORE any snapshot / swap / eviction / commit
+        // step. Ratification refusal surfaces as
+        // `ReloadApplyError::ValidationFailed(ReloadCheckError::RatificationRefused(_))`
+        // and triggers the existing fail-closed reporting in the
+        // `Err(e) => ...` branch below — no live trust mutation, no
+        // sequence write, no session eviction.
+        //
+        // When `Skip` (DevNet without opt-in), the apply path falls
+        // through to the unchanged Run 070/073
+        // `apply_validated_candidate_with_previous(...)` entry point
+        // so legacy DevNet ergonomics for unsigned / legacy bundles
+        // are preserved bit-for-bit; this branch is unreachable on
+        // MainNet/TestNet.
+        let gate_decision = qbind_node::pqc_ratification_policy::ratification_gate_decision(
+            config.environment,
+            args.p2p_trust_bundle_ratification_enforcement_enabled,
+        );
+        let apply_result = if gate_decision.should_invoke() {
+            eprintln!(
+                "[run-112] reload-apply ratification gate INVOKED (policy={}, env={:?}).",
+                gate_decision.label(),
+                config.environment
+            );
+            match build_run_105_reload_check_context(&args, &config) {
+                Ok(ctx_data) => apply_validated_candidate_with_previous_and_ratification(
+                    inputs,
+                    &RatificationEnforcementContext {
+                        authority: &ctx_data.authority,
+                        expected_genesis_hash: &ctx_data.canonical_hash,
+                        expected_environment_policy: ctx_data.env_policy,
+                        expected_chain_id_str: &ctx_data.chain_id_str,
+                        ratification: ctx_data.ratification.as_ref(),
+                        policy: ctx_data.policy,
+                    },
+                    ApplyMode::ApplyLive,
+                    Some(&mut apply_ctx),
+                    prev_fp_prefix.clone(),
+                    prev_seq,
+                ),
+                Err(reason) => {
+                    eprintln!(
+                        "[run-112] FATAL: reload-apply refused — ratification context could \
+                         not be built: {}. Candidate path={}. No live trust apply, no \
+                         sequence write, no session eviction, no metrics mutation. See \
+                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_112.md.",
+                        reason,
+                        candidate_path.display()
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            eprintln!(
+                "[run-112] reload-apply ratification gate SKIPPED (policy={}, env={:?}). \
+                 This is NOT a passed ratification; it preserves pre-Run-112 DevNet \
+                 behaviour for developer workflows. MainNet/TestNet always invoke the \
+                 gate by default and never reach this branch.",
+                gate_decision.label(),
+                config.environment
+            );
+            apply_validated_candidate_with_previous(
+                inputs,
+                ApplyMode::ApplyLive,
+                Some(&mut apply_ctx),
+                prev_fp_prefix.clone(),
+                prev_seq,
+            )
+        };
+
+        match apply_result {
             Ok(applied) => {
                 // Canonical operator-log line — single source of
                 // truth via `AppliedCandidate::applied_log_line`

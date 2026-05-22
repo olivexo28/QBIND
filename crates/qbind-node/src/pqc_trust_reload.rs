@@ -981,7 +981,57 @@ pub fn apply_validated_candidate(
     // guaranteed by `validate_candidate_bundle_full` itself.
     let (loaded, _activation, validated) =
         validate_candidate_bundle_full(inputs).map_err(ReloadApplyError::ValidationFailed)?;
+    apply_post_validation(loaded, validated, mode, ctx)
+}
 
+/// Run 112 — apply entry point that performs the Run 105
+/// bundle-signing-key ratification preflight BEFORE the apply
+/// pipeline takes any mutating step. On any ratification refusal the
+/// call returns
+/// [`ReloadApplyError::ValidationFailed`]`(`[`ReloadCheckError::RatificationRefused`]`)`
+/// and:
+///
+/// * NO snapshot is taken;
+/// * NO live trust state swap occurs;
+/// * NO session eviction occurs;
+/// * NO sequence commit occurs;
+/// * NO sequence persistence file is created or modified.
+///
+/// On accept this function falls through to the identical Run 070
+/// `validate → snapshot → swap → evict_sessions → commit_sequence`
+/// ordering [`apply_validated_candidate`] uses — ratification is an
+/// **additive earlier preflight**, never a replacement for the
+/// existing checks. SIGHUP live reload is explicitly NOT covered by
+/// this entry point (see `task/RUN_112_TASK.txt` §Strict non-goals).
+pub fn apply_validated_candidate_with_ratification(
+    inputs: ReloadCheckInputs<'_>,
+    ratification_ctx: &RatificationEnforcementContext<'_>,
+    mode: ApplyMode,
+    ctx: Option<&mut dyn LiveTrustApplyContext>,
+) -> Result<AppliedCandidate, ReloadApplyError> {
+    // 1. Validation + Run 105 ratification preflight in a single
+    // fail-closed step. If ratification refuses, the error surfaces
+    // BEFORE we touch the apply pipeline below.
+    let (loaded, _activation, validated) =
+        validate_candidate_bundle_full_with_ratification(inputs, ratification_ctx)
+            .map_err(ReloadApplyError::ValidationFailed)?;
+    apply_post_validation(loaded, validated, mode, ctx)
+}
+
+/// Run 070/112 shared post-validation apply pipeline.
+///
+/// Extracted so that both [`apply_validated_candidate`] and
+/// [`apply_validated_candidate_with_ratification`] drive the EXACT
+/// same `snapshot → swap → evict_sessions → commit_sequence`
+/// sequencing on the post-validation path. The only difference
+/// between the two entry points is whether the Run 105
+/// ratification gate runs as part of the validation stage.
+fn apply_post_validation(
+    loaded: LoadedTrustBundle,
+    validated: ValidatedCandidate,
+    mode: ApplyMode,
+    ctx: Option<&mut dyn LiveTrustApplyContext>,
+) -> Result<AppliedCandidate, ReloadApplyError> {
     // 2. ValidateOnly short-circuit. Live state is not touched even
     // if a context was supplied — this preserves the Run 069
     // staging boundary for callers that want a dry run.
@@ -1089,6 +1139,37 @@ pub fn apply_validated_candidate_with_previous(
     previous_sequence: Option<u64>,
 ) -> Result<AppliedCandidate, ReloadApplyError> {
     let mut applied = apply_validated_candidate(inputs, mode, ctx)?;
+    applied.previous_fingerprint_prefix = previous_fingerprint_prefix;
+    applied.previous_sequence = previous_sequence;
+    Ok(applied)
+}
+
+/// Run 112 — apply entry point combining the previous-metadata
+/// surfacing of [`apply_validated_candidate_with_previous`] with the
+/// Run 105 bundle-signing-key ratification preflight of
+/// [`apply_validated_candidate_with_ratification`].
+///
+/// This is the entry point the process-start reload-apply binary
+/// hook in `crates/qbind-node/src/main.rs` calls when the Run 106
+/// per-environment ratification policy returns `Invoke`. On any
+/// ratification refusal it returns
+/// [`ReloadApplyError::ValidationFailed`]`(`[`ReloadCheckError::RatificationRefused`]`)`
+/// BEFORE any snapshot, swap, eviction, or sequence commit; on
+/// accept it falls through to the identical Run 070
+/// `validate → snapshot → swap → evict_sessions → commit_sequence`
+/// ordering and reports the operator-supplied previous-state
+/// metadata back on success. See `task/RUN_112_TASK.txt` §Required
+/// implementation and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_112.md`.
+pub fn apply_validated_candidate_with_previous_and_ratification(
+    inputs: ReloadCheckInputs<'_>,
+    ratification_ctx: &RatificationEnforcementContext<'_>,
+    mode: ApplyMode,
+    ctx: Option<&mut dyn LiveTrustApplyContext>,
+    previous_fingerprint_prefix: String,
+    previous_sequence: Option<u64>,
+) -> Result<AppliedCandidate, ReloadApplyError> {
+    let mut applied =
+        apply_validated_candidate_with_ratification(inputs, ratification_ctx, mode, ctx)?;
     applied.previous_fingerprint_prefix = previous_fingerprint_prefix;
     applied.previous_sequence = previous_sequence;
     Ok(applied)
