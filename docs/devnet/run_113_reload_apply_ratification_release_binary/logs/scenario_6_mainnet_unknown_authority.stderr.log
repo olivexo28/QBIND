@@ -1,0 +1,6 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Mainnet, genesis=/tmp/qbind-run113-reload-apply-ratification-release-binary/fixtures/mainnet/genesis.json, canonical_hash=0xe528c275fc30843c79905e54482269167f2d9405042272cc234f9c2147ef83bf).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate INVOKED (policy=mainnet-default-strict, env=Mainnet).
+[binary] Run 073: VERDICT=invalid (candidate rejected at validation, swap, eviction, or commit stage; live trust state rolled back to baseline where applicable; on-disk sequence record preserved on fail-closed branches). Candidate path=/tmp/qbind-run113-reload-apply-ratification-release-binary/fixtures/mainnet/candidate-bundle.ratified.json. Reason: Run 070 candidate apply rejected at validation stage; live trust state unchanged; sequence not committed; sessions untouched: candidate refused by Run 105 bundle-signing-key ratification enforcement: bundle-signing ratification authority_root_fingerprint '164bbc0f9745d00b25bb9f108b2862401f579a91b001e1c1a11eee08339efe46' not present in genesis bundle_signing_authority_roots. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.
