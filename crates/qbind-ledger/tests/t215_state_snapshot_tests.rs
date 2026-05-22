@@ -32,6 +32,7 @@ fn test_meta(height: u64) -> StateSnapshotMeta {
         created_at_unix_ms: 1700000000000 + height,
         chain_id: 0x51424E444D41494E, // MainNet chain ID
         epoch: None,
+        authority_state: None,
     }
 }
 
@@ -142,6 +143,7 @@ fn test_snapshot_metadata_written() {
         created_at_unix_ms: 1700000000000,
         chain_id: 0x1234567890,
         epoch: None,
+        authority_state: None,
     };
 
     let target = snapshot_dir.path().join("12345");

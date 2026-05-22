@@ -143,6 +143,21 @@ pub mod pqc_trust_bundle;
 // domain; atomic JSON record under `<data_dir>/`; fail-closed on
 // rollback / equivocation / corrupt persistence).
 pub mod pqc_trust_sequence;
+// Run 117 — persistent authority anti-rollback marker for ratified
+// bundle-signing authority state. Distinct from the Run 055
+// `pqc_trust_sequence` module: this layer anchors on the
+// **genesis-bound** `GenesisAuthorityConfig::authority_sequence`
+// (Run 101) plus the SHA3-256 `canonical_ratification_digest`
+// (Run 103) of the most recently accepted `BundleSigningRatification`
+// object, not on the per-bundle `sequence` field. Run 117 lands the
+// storage / snapshot primitive (record type, canonical digest,
+// typed compare semantics, atomic persistence, load helper) only;
+// surface wiring into startup-load / reload-apply / SIGHUP / peer-
+// candidate / live `0x05` paths is staged for Run 118. See
+// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_117.md`,
+// `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 116
+// update, and `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_authority_state;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

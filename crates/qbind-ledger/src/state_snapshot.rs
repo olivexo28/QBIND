@@ -130,6 +130,96 @@ pub struct StateSnapshotMeta {
     /// Run 097 MUST NOT derive this value from block height, view number,
     /// wall-clock time, timer ticks, snapshot height, or directory name.
     pub epoch: Option<u64>,
+
+    /// Run 117: optional ratified bundle-signing authority state at the
+    /// moment of snapshot creation, sourced **only** from a canonical
+    /// persisted authority marker (e.g. the `<data_dir>/pqc_authority_state.json`
+    /// surface introduced by the Run 117 `pqc_authority_state` module).
+    ///
+    /// Semantics:
+    ///
+    /// - `Some(state)`: the snapshot was created on a node whose
+    ///   canonical authority marker reported these `(authority_sequence,
+    ///   ratification_object_hash, ...)` values. Run 117 lands this
+    ///   field as an **additive metadata carrier** only — the restore
+    ///   conflict-detection wiring is staged for Run 118 (see
+    ///   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_117.md`).
+    /// - `None`: no canonical authority marker was observable at
+    ///   snapshot creation (legacy snapshot pre-Run-117, or a Run-117+
+    ///   node that never accepted a ratification yet). This is an
+    ///   **explicit absence** and MUST NOT be coerced to a synthetic
+    ///   "empty/permissive" authority state. Restore on a node with
+    ///   an existing local authority marker MUST NOT silently accept a
+    ///   snapshot whose authority_state is `None` as if it were a
+    ///   match (Run 118 enforcement scope).
+    ///
+    /// Old snapshots predating Run 117 do not carry this field and
+    /// parse as `authority_state: None` (additive backward
+    /// compatibility). When `None`, the `"authority_state"` key is
+    /// omitted entirely from the JSON output.
+    ///
+    /// Run 117 MUST NOT derive any field of this value from block
+    /// height, wall-clock time, snapshot height, or directory name.
+    /// Each field must come from a canonical authority-marker source.
+    pub authority_state: Option<AuthorityStateSnapshotMeta>,
+}
+
+/// Run 117: additive authority-state metadata carried in
+/// [`StateSnapshotMeta`].
+///
+/// This carrier mirrors the security-relevant fields of the
+/// Run 117 `pqc_authority_state::PersistentAuthorityStateRecord`
+/// living in `qbind-node`, but is defined here in `qbind-ledger`
+/// because `qbind-ledger` cannot depend on `qbind-node`. Run 118
+/// restore wiring is expected to reconstruct a `PersistentAuthorityStateRecord`
+/// from this carrier (or to perform an equivalent field-wise
+/// comparison) when deciding whether a snapshot conflicts with the
+/// node's existing persisted authority marker.
+///
+/// All fields are present as canonical lowercase-ASCII strings /
+/// big-endian-tracked integers so the on-disk JSON form is stable
+/// across platforms and serializers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityStateSnapshotMeta {
+    /// 16 lowercase hex chars of the chain id (no `0x` prefix).
+    /// Used to defence-in-depth a wrong-data-dir / wrong-network
+    /// snapshot copy beyond the outer
+    /// [`StateSnapshotMeta::chain_id`] check.
+    pub chain_id_hex: String,
+
+    /// Canonical lowercase-ascii environment tag
+    /// (`"devnet"` / `"testnet"` / `"mainnet"`).
+    pub environment: String,
+
+    /// 64 lowercase hex chars of the canonical genesis hash this
+    /// authority state is bound to.
+    pub genesis_hash_hex: String,
+
+    /// `authority_policy_version` of the genesis authority block.
+    pub authority_policy_version: u32,
+
+    /// Genesis-bound monotonic authority sequence
+    /// (`GenesisAuthorityConfig::authority_sequence`, Run 101).
+    pub authority_sequence: u64,
+
+    /// Optional genesis-bound authority epoch
+    /// (`GenesisAuthorityConfig::authority_epoch`, Run 101).
+    pub authority_epoch: Option<u64>,
+
+    /// Lowercase-hex fingerprint of the genesis-bound authority
+    /// root that signed the most recently accepted ratification.
+    pub authority_root_fingerprint: String,
+
+    /// Lowercase-hex SHA3-256 fingerprint of the ratified
+    /// bundle-signing public key (NOT the private key, NOT the
+    /// full public key — fingerprint only).
+    pub ratified_bundle_signing_key_fingerprint: String,
+
+    /// 64 lowercase hex chars of the SHA3-256
+    /// `canonical_ratification_digest` of the
+    /// `BundleSigningRatification` object whose acceptance produced
+    /// this authority state.
+    pub ratification_object_hash: String,
 }
 
 impl StateSnapshotMeta {
@@ -144,6 +234,7 @@ impl StateSnapshotMeta {
             created_at_unix_ms,
             chain_id,
             epoch: None,
+            authority_state: None,
         }
     }
 
@@ -154,6 +245,20 @@ impl StateSnapshotMeta {
     /// explicit — missing epoch MUST NOT be silently coerced to `0`.
     pub fn with_epoch(mut self, epoch: Option<u64>) -> Self {
         self.epoch = epoch;
+        self
+    }
+
+    /// Run 117: builder-style setter for the optional authority-state
+    /// metadata field. Pass `Some(state)` only when each field was
+    /// sourced from the canonical persisted authority marker
+    /// (`<data_dir>/pqc_authority_state.json` per Run 117). Pass
+    /// `None` to keep absence explicit — missing authority state MUST
+    /// NOT be silently coerced to a synthetic empty/permissive state.
+    pub fn with_authority_state(
+        mut self,
+        authority_state: Option<AuthorityStateSnapshotMeta>,
+    ) -> Self {
+        self.authority_state = authority_state;
         self
     }
 
@@ -195,9 +300,40 @@ impl StateSnapshotMeta {
             Some(e) => format!(",\n  \"epoch\": {}", e),
             None => String::new(),
         };
+        // Run 117: additive authority-state block. When `None`, the
+        // entire `"authority_state"` key is omitted so pre-Run-117
+        // parsers (including the Run 097 parser) continue to see
+        // backward-compatible JSON. Field ordering is deterministic
+        // so the serialised output is byte-stable across runs.
+        let authority_state_field = match &self.authority_state {
+            Some(a) => {
+                let epoch_inner = match a.authority_epoch {
+                    Some(e) => format!(",\n    \"authority_epoch\": {}", e),
+                    None => String::new(),
+                };
+                format!(
+                    ",\n  \"authority_state\": {{\n    \"chain_id_hex\": \"{}\",\n    \"environment\": \"{}\",\n    \"genesis_hash_hex\": \"{}\",\n    \"authority_policy_version\": {},\n    \"authority_sequence\": {}{},\n    \"authority_root_fingerprint\": \"{}\",\n    \"ratified_bundle_signing_key_fingerprint\": \"{}\",\n    \"ratification_object_hash\": \"{}\"\n  }}",
+                    a.chain_id_hex,
+                    a.environment,
+                    a.genesis_hash_hex,
+                    a.authority_policy_version,
+                    a.authority_sequence,
+                    epoch_inner,
+                    a.authority_root_fingerprint,
+                    a.ratified_bundle_signing_key_fingerprint,
+                    a.ratification_object_hash,
+                )
+            }
+            None => String::new(),
+        };
         format!(
-            "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}{}\n}}",
-            self.height, block_hash_hex, self.created_at_unix_ms, self.chain_id, epoch_field
+            "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}{}{}\n}}",
+            self.height,
+            block_hash_hex,
+            self.created_at_unix_ms,
+            self.chain_id,
+            epoch_field,
+            authority_state_field,
         )
         .into_bytes()
     }
@@ -230,6 +366,16 @@ impl StateSnapshotMeta {
             // an unreadable epoch as absent.
             Err(_) => return None,
         };
+        // Run 117: additive authority-state block. Absent → `None`
+        // (pre-Run-117 snapshot, parses cleanly). Present but
+        // malformed → `None` returned from this function (fail-closed
+        // on the parse path so `validate_snapshot_dir` surfaces
+        // `MissingMetadata`). Missing authority state MUST NOT be
+        // silently coerced to a synthetic empty/permissive state.
+        let authority_state = match Self::extract_optional_authority_state(s) {
+            Ok(opt) => opt,
+            Err(_) => return None,
+        };
 
         // Parse block hash from hex
         if block_hash_hex.len() != 64 {
@@ -247,7 +393,131 @@ impl StateSnapshotMeta {
             created_at_unix_ms,
             chain_id,
             epoch,
+            authority_state,
         })
+    }
+
+    /// Run 117: extract the optional additive `"authority_state"`
+    /// JSON object.
+    ///
+    /// Returns:
+    /// - `Ok(None)` when the key is absent (pre-Run-117 snapshot;
+    ///   additive backward compatibility).
+    /// - `Ok(Some(meta))` when the key is present and every
+    ///   required sub-field parses cleanly.
+    /// - `Err(())` when the key is present but the value is not a
+    ///   structurally valid authority-state object (missing field,
+    ///   malformed, non-object, etc.). The caller MUST fail closed —
+    ///   Run 117 does not silently downgrade a malformed
+    ///   authority-state block to `None`.
+    fn extract_optional_authority_state(
+        s: &str,
+    ) -> Result<Option<AuthorityStateSnapshotMeta>, ()> {
+        let key_pattern = "\"authority_state\":";
+        let Some(start) = s.find(key_pattern) else {
+            return Ok(None);
+        };
+        let after_key = &s[start + key_pattern.len()..];
+        let after_key = after_key.trim_start();
+        // Forward compatibility: explicit `null` is treated as absent.
+        if after_key.starts_with("null") {
+            return Ok(None);
+        }
+        if !after_key.starts_with('{') {
+            return Err(());
+        }
+        // Find the matching closing brace (simple depth counter; the
+        // authority-state block does not contain nested objects in
+        // the Run 117 schema).
+        let bytes = after_key.as_bytes();
+        let mut depth: i32 = 0;
+        let mut end_idx: Option<usize> = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_idx = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end_idx.ok_or(())?;
+        let block = &after_key[..=end];
+
+        let chain_id_hex = Self::extract_string(block, "chain_id_hex").ok_or(())?;
+        let environment = Self::extract_string(block, "environment").ok_or(())?;
+        let genesis_hash_hex =
+            Self::extract_string(block, "genesis_hash_hex").ok_or(())?;
+        let authority_policy_version =
+            Self::extract_u64(block, "authority_policy_version").ok_or(())?;
+        if authority_policy_version > u32::MAX as u64 {
+            return Err(());
+        }
+        let authority_policy_version = authority_policy_version as u32;
+        let authority_sequence =
+            Self::extract_u64(block, "authority_sequence").ok_or(())?;
+        let authority_epoch = Self::extract_optional_u64(block, "authority_epoch")?;
+        let authority_root_fingerprint =
+            Self::extract_string(block, "authority_root_fingerprint").ok_or(())?;
+        let ratified_bundle_signing_key_fingerprint =
+            Self::extract_string(block, "ratified_bundle_signing_key_fingerprint")
+                .ok_or(())?;
+        let ratification_object_hash =
+            Self::extract_string(block, "ratification_object_hash").ok_or(())?;
+
+        // Structural sanity. Run 117 deliberately fails closed on any
+        // shape violation so the snapshot is not silently accepted
+        // with a corrupted authority block.
+        if chain_id_hex.len() != 16 || !Self::is_lower_hex_ascii(&chain_id_hex) {
+            return Err(());
+        }
+        if genesis_hash_hex.len() != 64 || !Self::is_lower_hex_ascii(&genesis_hash_hex)
+        {
+            return Err(());
+        }
+        if ratification_object_hash.len() != 64
+            || !Self::is_lower_hex_ascii(&ratification_object_hash)
+        {
+            return Err(());
+        }
+        if !matches!(environment.as_str(), "devnet" | "testnet" | "mainnet") {
+            return Err(());
+        }
+        if authority_policy_version == 0 {
+            return Err(());
+        }
+        if authority_root_fingerprint.is_empty()
+            || !Self::is_lower_hex_ascii(&authority_root_fingerprint)
+        {
+            return Err(());
+        }
+        if ratified_bundle_signing_key_fingerprint.is_empty()
+            || !Self::is_lower_hex_ascii(&ratified_bundle_signing_key_fingerprint)
+        {
+            return Err(());
+        }
+
+        Ok(Some(AuthorityStateSnapshotMeta {
+            chain_id_hex,
+            environment,
+            genesis_hash_hex,
+            authority_policy_version,
+            authority_sequence,
+            authority_epoch,
+            authority_root_fingerprint,
+            ratified_bundle_signing_key_fingerprint,
+            ratification_object_hash,
+        }))
+    }
+
+    fn is_lower_hex_ascii(s: &str) -> bool {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     }
 
     /// Extract a u64 value from JSON-like text.
@@ -714,6 +984,7 @@ mod tests {
             created_at_unix_ms: 1700000000000,
             chain_id: 0x51424E444D41494E,
             epoch: None,
+            authority_state: None,
         };
 
         let json = meta.to_json();
@@ -949,5 +1220,226 @@ mod tests {
         let parsed = StateSnapshotMeta::from_json(&json).unwrap();
         assert_eq!(parsed.epoch, None);
         assert_eq!(parsed.height, 100);
+    }
+
+    // ========================================================================
+    // Run 117 — additive snapshot authority-state parity unit tests
+    // ========================================================================
+
+    fn sample_authority_state() -> AuthorityStateSnapshotMeta {
+        AuthorityStateSnapshotMeta {
+            chain_id_hex: "0000000000000001".to_string(),
+            environment: "devnet".to_string(),
+            genesis_hash_hex: "a".repeat(64),
+            authority_policy_version: 1,
+            authority_sequence: 7,
+            authority_epoch: Some(3),
+            authority_root_fingerprint: "b".repeat(40),
+            ratified_bundle_signing_key_fingerprint: "c".repeat(40),
+            ratification_object_hash: "d".repeat(64),
+        }
+    }
+
+    /// Run 117: a snapshot meta with `authority_state: Some(_)` emits
+    /// the authority_state JSON block and round-trips losslessly.
+    #[test]
+    fn run117_authority_state_some_serializes_and_round_trips() {
+        let auth = sample_authority_state();
+        let meta = StateSnapshotMeta::new(100, [0x33; 32], 1700000000000, 0xC1)
+            .with_authority_state(Some(auth.clone()));
+        let json = meta.to_json();
+        let json_str = std::str::from_utf8(&json).unwrap();
+        assert!(
+            json_str.contains("\"authority_state\":"),
+            "authority_state block must be emitted when Some: {json_str}"
+        );
+        assert!(json_str.contains("\"authority_sequence\": 7"));
+        assert!(json_str.contains("\"authority_epoch\": 3"));
+        assert!(json_str.contains("\"environment\": \"devnet\""));
+
+        let parsed = StateSnapshotMeta::from_json(&json).expect("parses");
+        assert_eq!(parsed.authority_state, Some(auth));
+        assert_eq!(parsed.height, 100);
+        assert_eq!(parsed.chain_id, 0xC1);
+    }
+
+    /// Run 117: `authority_state: None` MUST omit the field entirely
+    /// so pre-Run-117 parsers still accept the snapshot unchanged.
+    #[test]
+    fn run117_authority_state_none_omits_field_for_backward_compatibility() {
+        let meta = StateSnapshotMeta::new(100, [0x33; 32], 1700000000000, 0xC1);
+        let json = meta.to_json();
+        let json_str = std::str::from_utf8(&json).unwrap();
+        assert!(
+            !json_str.contains("authority_state"),
+            "authority_state field must be omitted when None: {json_str}"
+        );
+        let parsed = StateSnapshotMeta::from_json(&json).expect("parses");
+        assert_eq!(parsed.authority_state, None);
+    }
+
+    /// Run 117: an old (pre-Run-117) snapshot JSON without
+    /// `authority_state` continues to parse cleanly and yields
+    /// `authority_state: None`. This is the explicit additive
+    /// backward-compatibility contract.
+    #[test]
+    fn run117_old_snapshot_without_authority_state_parses_as_none() {
+        let legacy = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99\n}";
+        let parsed = StateSnapshotMeta::from_json(legacy).expect("legacy parses");
+        assert_eq!(parsed.authority_state, None);
+        assert_eq!(parsed.epoch, None);
+        assert_eq!(parsed.height, 5);
+    }
+
+    /// Run 117: a legacy snapshot carrying only `epoch` (Run 097
+    /// vintage) still parses cleanly with `authority_state: None`,
+    /// preserving the Run 097 contract.
+    #[test]
+    fn run117_run097_snapshot_with_epoch_only_parses_with_authority_none() {
+        let legacy = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"epoch\": 11\n}";
+        let parsed =
+            StateSnapshotMeta::from_json(legacy).expect("run097 snapshot parses");
+        assert_eq!(parsed.epoch, Some(11));
+        assert_eq!(parsed.authority_state, None);
+    }
+
+    /// Run 117: explicit `"authority_state": null` is treated as
+    /// absence (forward compatibility with future serializers).
+    #[test]
+    fn run117_authority_state_explicit_null_is_treated_as_absent() {
+        let payload = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"authority_state\": null\n}";
+        let parsed = StateSnapshotMeta::from_json(payload)
+            .expect("null authority_state parses");
+        assert_eq!(parsed.authority_state, None);
+    }
+
+    /// Run 117: a malformed authority_state block (missing required
+    /// field) fails closed — `from_json` returns `None` so downstream
+    /// validation reports `MissingMetadata`. Run 117 does NOT silently
+    /// downgrade a malformed authority block to `None`.
+    #[test]
+    fn run117_malformed_authority_state_fails_closed() {
+        // Missing `ratification_object_hash`.
+        let bad = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"authority_state\": {\n    \"chain_id_hex\": \"0000000000000001\",\
+            \n    \"environment\": \"devnet\",\
+            \n    \"genesis_hash_hex\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\
+            \n    \"authority_policy_version\": 1,\
+            \n    \"authority_sequence\": 5,\
+            \n    \"authority_root_fingerprint\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\
+            \n    \"ratified_bundle_signing_key_fingerprint\": \"cccccccccccccccccccccccccccccccccccccccc\"\
+            \n  }\n}";
+        assert!(
+            StateSnapshotMeta::from_json(bad).is_none(),
+            "missing field must fail closed"
+        );
+
+        // Wrong environment tag.
+        let bad_env = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"authority_state\": {\n    \"chain_id_hex\": \"0000000000000001\",\
+            \n    \"environment\": \"hacknet\",\
+            \n    \"genesis_hash_hex\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\
+            \n    \"authority_policy_version\": 1,\
+            \n    \"authority_sequence\": 5,\
+            \n    \"authority_root_fingerprint\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\
+            \n    \"ratified_bundle_signing_key_fingerprint\": \"cccccccccccccccccccccccccccccccccccccccc\",\
+            \n    \"ratification_object_hash\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"\
+            \n  }\n}";
+        assert!(
+            StateSnapshotMeta::from_json(bad_env).is_none(),
+            "unknown environment tag must fail closed"
+        );
+
+        // Wrong-length genesis_hash_hex.
+        let bad_genesis = b"{\n  \"height\": 5,\n  \"block_hash\": \"\
+            aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+            \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
+            \n  \"authority_state\": {\n    \"chain_id_hex\": \"0000000000000001\",\
+            \n    \"environment\": \"devnet\",\
+            \n    \"genesis_hash_hex\": \"aaaa\",\
+            \n    \"authority_policy_version\": 1,\
+            \n    \"authority_sequence\": 5,\
+            \n    \"authority_root_fingerprint\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\
+            \n    \"ratified_bundle_signing_key_fingerprint\": \"cccccccccccccccccccccccccccccccccccccccc\",\
+            \n    \"ratification_object_hash\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"\
+            \n  }\n}";
+        assert!(
+            StateSnapshotMeta::from_json(bad_genesis).is_none(),
+            "short genesis_hash must fail closed"
+        );
+    }
+
+    /// Run 117: an `authority_state` block with `authority_epoch`
+    /// **absent** parses as `Some(meta { authority_epoch: None })`
+    /// — this is the explicit absence semantic, not a synthetic `0`.
+    #[test]
+    fn run117_authority_state_with_no_authority_epoch_parses_as_none() {
+        let mut auth = sample_authority_state();
+        auth.authority_epoch = None;
+        let meta = StateSnapshotMeta::new(7, [0x42; 32], 1700000000000, 0xA)
+            .with_authority_state(Some(auth.clone()));
+        let json = meta.to_json();
+        let parsed = StateSnapshotMeta::from_json(&json).expect("parses");
+        assert_eq!(parsed.authority_state.as_ref().unwrap().authority_epoch, None);
+        assert_eq!(parsed.authority_state, Some(auth));
+    }
+
+    /// Run 117: serialization of a Run-117 snapshot with
+    /// `authority_state=Some(...)` is deterministic — repeated
+    /// `to_json` calls produce byte-identical output.
+    #[test]
+    fn run117_authority_state_serialization_is_deterministic() {
+        let meta = StateSnapshotMeta::new(7, [0x42; 32], 1700000000000, 0xA)
+            .with_authority_state(Some(sample_authority_state()))
+            .with_epoch(Some(11));
+        let j1 = meta.to_json();
+        let j2 = meta.to_json();
+        assert_eq!(j1, j2);
+    }
+
+    /// Run 117: authority_state and epoch are independently
+    /// additive. A snapshot may carry `epoch=Some, authority_state=None`,
+    /// `epoch=None, authority_state=Some`, both, or neither, and
+    /// each combination round-trips losslessly.
+    #[test]
+    fn run117_epoch_and_authority_state_are_independent() {
+        // Both None.
+        let m = StateSnapshotMeta::new(1, [0; 32], 0, 1);
+        let p = StateSnapshotMeta::from_json(&m.to_json()).unwrap();
+        assert_eq!(p.epoch, None);
+        assert_eq!(p.authority_state, None);
+
+        // Epoch only.
+        let m = StateSnapshotMeta::new(1, [0; 32], 0, 1).with_epoch(Some(2));
+        let p = StateSnapshotMeta::from_json(&m.to_json()).unwrap();
+        assert_eq!(p.epoch, Some(2));
+        assert_eq!(p.authority_state, None);
+
+        // Authority only.
+        let m = StateSnapshotMeta::new(1, [0; 32], 0, 1)
+            .with_authority_state(Some(sample_authority_state()));
+        let p = StateSnapshotMeta::from_json(&m.to_json()).unwrap();
+        assert_eq!(p.epoch, None);
+        assert_eq!(p.authority_state, Some(sample_authority_state()));
+
+        // Both.
+        let m = StateSnapshotMeta::new(1, [0; 32], 0, 1)
+            .with_epoch(Some(2))
+            .with_authority_state(Some(sample_authority_state()));
+        let p = StateSnapshotMeta::from_json(&m.to_json()).unwrap();
+        assert_eq!(p.epoch, Some(2));
+        assert_eq!(p.authority_state, Some(sample_authority_state()));
     }
 }

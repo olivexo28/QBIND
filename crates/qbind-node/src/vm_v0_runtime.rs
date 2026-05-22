@@ -135,6 +135,7 @@ impl VmV0RuntimeState {
             created_at_unix_ms: StateSnapshotMeta::now_unix_ms(),
             chain_id,
             epoch,
+            authority_state: None,
         };
 
         eprintln!(
@@ -466,6 +467,7 @@ mod tests {
                     created_at_unix_ms: StateSnapshotMeta::now_unix_ms(),
                     chain_id: 1337,
                     epoch: None,
+                    authority_state: None,
                 },
                 &source.path().join("snapshot"),
             )

@@ -124,6 +124,11 @@ pub use state_snapshot::{
     StateSnapshotMeta, StateSnapshotter,
 };
 
+// Run 117: Authority-state snapshot metadata exports (additive carrier
+// for the persistent authority anti-rollback marker; restore wiring is
+// staged for Run 118).
+pub use state_snapshot::AuthorityStateSnapshotMeta;
+
 // T230: Slashing Ledger exports
 // M1: Persistent RocksDB-backed slashing ledger
 // M1.2: Atomic persistence for slashing updates
