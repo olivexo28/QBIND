@@ -1,0 +1,16 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run110-live-peer-candidate-ratification-n3/fixtures/genesis.json, canonical_hash=0x7a08fee4543a152013f12489f575a525d2fecd38b559d3625194b6ecfc3caf8b).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[metrics_http] Enabling metrics HTTP server on 127.0.0.1:9571 (from QBIND_METRICS_HTTP_ADDR)
+[metrics] Spawning metrics HTTP server on 127.0.0.1:9571 (set via QBIND_METRICS_HTTP_ADDR)
+[metrics_http] Listening on 127.0.0.1:9571
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=/tmp/qbind-run110-live-peer-candidate-ratification-n3/data/bad_ratification_startup_refuse_v1/consensus
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Required (source: --p2p-mutual-auth)
+[binary] Run 057: trust-bundle activation gate satisfied (required_height=None current_height=Some(0) required_epoch=None current_epoch=None)
+[run-106] startup ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[run-105] FATAL: bundle-signing-key ratification refused at startup; sequence record NOT written, bundle roots NOT merged into the live PQC trust set, no live trust mutation occurred. Reason: bundle-signing ratification signature failed PQC verification
+[run-105] qbind-node refuses to start. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md, docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md §"Run 105 ratification enforcement".

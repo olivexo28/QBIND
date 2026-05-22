@@ -190,3 +190,9 @@ Run 110 does **not** close any of the following C4 sub-pieces, all of which rema
 C5 remains OPEN / unchanged.
 
 Run 110 is **partial-positive** because the harness, helper, and docs land in-tree and are repeatable, but a fresh full release-binary multi-node capture under this PR was not produced (no archived `docs/devnet/run_110_live_peer_candidate_ratification_n3/` tree is added in this commit). Operators or CI environments with a release toolchain can produce the archive with a single command (`scripts/devnet/run_110_live_peer_candidate_ratification_n3.sh`); the harness self-archives into the canonical directory on success.
+
+---
+
+## Run 111 closure update
+
+The Run 110 release-binary capture gap was closed by **Run 111** (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_111.md`). Run 111 executed `scripts/devnet/run_110_live_peer_candidate_ratification_n3.sh` end-to-end on real release `qbind-node` processes with no harness, helper, or production runtime changes; all six scenarios passed first-shot. The archived release-binary capture is `docs/devnet/run_110_live_peer_candidate_ratification_n3/` (per-node `logs/`, `metrics/`, `sequence/`, `fixtures/`, plus `summary.txt`, `artifact_sha256.txt`, `artifact_build_id.txt`, `ratification_lines.txt`, `run033_run040_lines.txt`). With Run 111's capture in place, Run 110's deliverable shape is now **strongest-positive at the Run 110 + Run 111 boundary**: the harness, fixture helper, doc updates, and the fresh release-binary multi-node capture all exist in-tree. Run 110's own verdict line above is preserved verbatim for historical accuracy; the closure is recorded here, in the Run 111 evidence doc, and in `docs/whitepaper/contradiction.md`. Run 110 + Run 111 together still do not claim full C4 closure and still do not claim C5 closure — every future-work item listed in "Future work" above remains OPEN.
