@@ -299,6 +299,7 @@ fn devnet_config(
         activation_ctx: ActivationContext::height_only(activation_current_height),
         sequence_path,
         local_leaf_cert_bytes: None,
+        ratification: None,
     }
 }
 

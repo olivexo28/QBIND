@@ -153,17 +153,23 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use qbind_ledger::{
+    GenesisAuthorityConfig, GenesisHash, NetworkEnvironmentPolicy,
+    RatificationEnforcementPolicy,
+};
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p_session_eviction::P2pSessionEvictor;
 use crate::pqc_live_trust::LivePqcTrustState;
 use crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext;
+use crate::pqc_ratification_input::{load_ratification_from_path, RatificationInputError};
 use crate::pqc_trust_activation::ActivationContext;
-use crate::pqc_trust_bundle::BundleSigningKeySet;
+use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleError};
 use crate::pqc_trust_reload::{
-    apply_validated_candidate_with_previous, ApplyMode, AppliedCandidate, ReloadApplyError,
-    ReloadCheckInputs,
+    apply_validated_candidate_with_previous,
+    apply_validated_candidate_with_previous_and_ratification, ApplyMode, AppliedCandidate,
+    RatificationEnforcementContext, ReloadApplyError, ReloadCheckError, ReloadCheckInputs,
 };
 
 /// Run 074 — clonable bundle of every input needed to validate +
@@ -208,6 +214,69 @@ pub struct LiveReloadConfig {
     /// (local-leaf-not-revoked) and Run 063 (local-leaf-issuer-
     /// root-not-revoked) self-checks fire against the candidate.
     pub local_leaf_cert_bytes: Option<Vec<u8>>,
+    /// Run 114 — optional bundle-signing-key ratification
+    /// enforcement context for the SIGHUP live reload path.
+    ///
+    /// When `Some(_)` the controller invokes the Run 105 / Run 103
+    /// genesis-bound bundle-signing-key ratification gate BEFORE
+    /// any live trust mutation. The Run 106 per-environment policy
+    /// decision (MainNet/TestNet default-strict; DevNet only under
+    /// `--p2p-trust-bundle-ratification-enforcement-enabled`) is
+    /// made once at controller construction time and reflected in
+    /// the `Some`/`None` shape of this field — the controller does
+    /// not re-evaluate the gate decision per-trigger.
+    ///
+    /// When `None` the SIGHUP path preserves the pre-Run-114
+    /// behaviour (Run 069/070/073/074 verbatim) — this is reachable
+    /// only on DevNet without operator opt-in, and is never
+    /// reachable on MainNet/TestNet (Run 106 invariant).
+    ///
+    /// The sidecar file (if `ratification_sidecar_path` is set) is
+    /// re-read on every trigger so an operator can replace the
+    /// sidecar JSON in-place between SIGHUPs without restarting
+    /// the node. A missing / unreadable / unparseable sidecar
+    /// fails closed BEFORE any snapshot / swap / eviction /
+    /// commit step.
+    pub ratification: Option<LiveReloadRatificationConfig>,
+}
+
+/// Run 114 — owned ratification enforcement inputs the
+/// [`LiveReloadController`] re-uses across every SIGHUP trigger.
+///
+/// All fields except `ratification_sidecar_path` are immutable for
+/// the lifetime of the controller. The sidecar JSON file at
+/// `ratification_sidecar_path` is **re-read on every trigger** so
+/// the operator can update the sidecar in-place between SIGHUPs
+/// without restarting the node. A missing path (`None`) is passed
+/// through to the verifier as "no ratification supplied" — under
+/// [`RatificationEnforcementPolicy::Strict`] this surfaces a
+/// `Missing` refusal BEFORE any mutation, exactly matching the
+/// Run 112 reload-apply behaviour.
+#[derive(Debug, Clone)]
+pub struct LiveReloadRatificationConfig {
+    /// Genesis-bound authority block (Run 101/104). The enforcer
+    /// consults `bundle_signing_authority_roots` only.
+    pub authority: GenesisAuthorityConfig,
+    /// Canonical genesis hash the runtime computed at startup
+    /// (Run 102).
+    pub expected_genesis_hash: GenesisHash,
+    /// Per-environment policy enum for the verifier (1:1 with
+    /// `LiveReloadConfig::environment` mapped to
+    /// [`NetworkEnvironmentPolicy`]).
+    pub expected_environment_policy: NetworkEnvironmentPolicy,
+    /// Hex-encoded chain-id string the verifier expects.
+    pub expected_chain_id_str: String,
+    /// Per-surface enforcement policy (Run 105/106): `Strict` on
+    /// MainNet and on TestNet by default; `AllowLegacyUnratified`
+    /// only when the operator additionally supplies
+    /// `--p2p-trust-bundle-allow-unratified-testnet-devnet` on
+    /// TestNet/DevNet. MainNet is always `Strict`.
+    pub policy: RatificationEnforcementPolicy,
+    /// Local sidecar JSON path produced by the genesis-bound
+    /// bundle-signing authority. Re-read on every trigger.
+    /// `None` means "no sidecar supplied" — the verifier surfaces
+    /// the typed `Missing` failure under `Strict` policy.
+    pub ratification_sidecar_path: Option<PathBuf>,
 }
 
 /// Run 074 — outcome of a single trigger.
@@ -509,20 +578,104 @@ impl LiveReloadController {
             local_leaf_cert_bytes: leaf_bytes_ref,
         };
 
-        match apply_validated_candidate_with_previous(
-            inputs,
-            ApplyMode::ApplyLive,
-            Some(&mut apply_ctx),
-            prev_fp_prefix,
-            prev_seq,
-        ) {
-            Ok(applied) => LiveReloadOutcome::Applied(applied),
-            Err(e @ ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed { .. }) => {
-                LiveReloadOutcome::Fatal(e)
+        // Run 114 — SIGHUP live reload ratification enforcement.
+        //
+        // If the controller was constructed with a
+        // `LiveReloadRatificationConfig` (Run 106 policy decided
+        // `Invoke` at controller-construction time — always true on
+        // MainNet/TestNet by default, DevNet only under explicit
+        // operator opt-in), the candidate MUST pass the Run 105
+        // genesis-bound bundle-signing-key ratification gate
+        // BEFORE any snapshot / swap / eviction / commit. Sidecar
+        // I/O / parse failures fail closed at the SAME point — no
+        // live trust mutation, no session eviction, no sequence
+        // write. See `task/RUN_114_TASK.txt`.
+        match &self.config.ratification {
+            Some(rcfg) => {
+                // Per-trigger sidecar load: operator can replace the
+                // file in-place between SIGHUPs. A missing path
+                // (`None`) passes through as `ratification: None` to
+                // the verifier so the typed `Missing` refusal is
+                // surfaced under `Strict` policy.
+                let ratification_obj = match rcfg.ratification_sidecar_path.as_ref() {
+                    Some(path) => match load_ratification_from_path(path) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            // Map I/O / parse failure of the operator-
+                            // supplied sidecar into a fail-closed
+                            // `Invalid` outcome. The shape mirrors the
+                            // candidate-load fail-closed pathway used
+                            // by Run 069 (`ReloadCheckError::Bundle`),
+                            // so operator logs and metrics treat
+                            // sidecar-load failure the same way as
+                            // any other pre-mutation validation
+                            // refusal.
+                            return LiveReloadOutcome::Invalid(
+                                ReloadApplyError::ValidationFailed(
+                                    ReloadCheckError::Bundle(TrustBundleError::Io(
+                                        ratification_input_io_message(&e),
+                                    )),
+                                ),
+                            );
+                        }
+                    },
+                    None => None,
+                };
+                let ratification_ctx = RatificationEnforcementContext {
+                    authority: &rcfg.authority,
+                    expected_genesis_hash: &rcfg.expected_genesis_hash,
+                    expected_environment_policy: rcfg.expected_environment_policy,
+                    expected_chain_id_str: &rcfg.expected_chain_id_str,
+                    ratification: ratification_obj.as_ref(),
+                    policy: rcfg.policy,
+                };
+                match apply_validated_candidate_with_previous_and_ratification(
+                    inputs,
+                    &ratification_ctx,
+                    ApplyMode::ApplyLive,
+                    Some(&mut apply_ctx),
+                    prev_fp_prefix,
+                    prev_seq,
+                ) {
+                    Ok(applied) => LiveReloadOutcome::Applied(applied),
+                    Err(e @ ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed { .. }) => {
+                        LiveReloadOutcome::Fatal(e)
+                    }
+                    Err(e) => LiveReloadOutcome::Invalid(e),
+                }
             }
-            Err(e) => LiveReloadOutcome::Invalid(e),
+            None => {
+                match apply_validated_candidate_with_previous(
+                    inputs,
+                    ApplyMode::ApplyLive,
+                    Some(&mut apply_ctx),
+                    prev_fp_prefix,
+                    prev_seq,
+                ) {
+                    Ok(applied) => LiveReloadOutcome::Applied(applied),
+                    Err(e @ ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed { .. }) => {
+                        LiveReloadOutcome::Fatal(e)
+                    }
+                    Err(e) => LiveReloadOutcome::Invalid(e),
+                }
+            }
         }
     }
+}
+
+/// Run 114 — render a [`RatificationInputError`] into the human-
+/// readable message embedded in a fail-closed
+/// [`TrustBundleError::Io`]. The full `Display` form already
+/// contains the typed reason (`[run-105] failed to read … sidecar
+/// file …` / `[run-105] failed to parse … sidecar JSON …`) so we
+/// route it through unchanged; the wrapping `TrustBundleError::Io`
+/// is purely a transport for the existing `ReloadCheckError`
+/// enum shape.
+fn ratification_input_io_message(e: &RatificationInputError) -> String {
+    format!(
+        "[run-114] SIGHUP live reload refused — ratification sidecar input error: {}",
+        e
+    )
 }
 
 #[cfg(test)]
@@ -599,6 +752,7 @@ mod tests {
             activation_ctx: ActivationContext::height_only(0),
             sequence_path,
             local_leaf_cert_bytes: None,
+            ratification: None,
         }
     }
 

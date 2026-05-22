@@ -4513,6 +4513,99 @@ fn spawn_run074_live_reload_task(
         .as_ref()
         .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
     let local_leaf_bytes: Option<Vec<u8>> = local_leaf_cert_bytes;
+
+    // Run 114 — SIGHUP live reload ratification enforcement.
+    //
+    // Apply the Run 106 per-environment policy already used by the
+    // reload-check (Run 069/106), peer-candidate-check (Run 077/107),
+    // and process-start reload-apply (Run 073/112) binary paths:
+    //
+    //   * MainNet / TestNet : ratification gate INVOKED by default;
+    //     the operator opt-in flag can neither enable nor disable it.
+    //   * DevNet : gate invoked only when the operator opts in via
+    //     `--p2p-trust-bundle-ratification-enforcement-enabled`.
+    //
+    // When `Invoke`, the controller is constructed with a populated
+    // `LiveReloadRatificationConfig` so every SIGHUP trigger:
+    //   * re-reads the sidecar JSON (operator may swap it between
+    //     SIGHUPs without restarting the node);
+    //   * runs the full Run 105/103
+    //     `enforce_bundle_signing_key_ratification` pipeline
+    //     (signature / chain_id / environment / authority-root
+    //     binding / canonical genesis hash / candidate key match)
+    //     BEFORE any snapshot / swap / eviction / commit;
+    //   * surfaces every refusal as
+    //     `LiveReloadOutcome::Invalid(_)` with no live trust mutation,
+    //     no session eviction, and no sequence write.
+    //
+    // When `Skip` (DevNet without opt-in), the controller is
+    // constructed with `ratification: None` so the pre-Run-114
+    // SIGHUP path is preserved bit-for-bit. MainNet/TestNet never
+    // reach this branch.
+    //
+    // If the gate decision is `Invoke` but the ratification context
+    // cannot be built (missing genesis file, missing authority
+    // block, missing/unparseable sidecar at construction time), the
+    // SIGHUP handler is NOT installed and a fail-closed
+    // operator-facing message is printed. The node keeps running on
+    // the baseline trust bundle with no SIGHUP-driven reload
+    // surface, mirroring the no-fallback discipline of every other
+    // Run 105/106 gate.
+    let gate_decision = qbind_node::pqc_ratification_policy::ratification_gate_decision(
+        config.environment,
+        args.p2p_trust_bundle_ratification_enforcement_enabled,
+    );
+    let ratification_cfg_opt: Option<qbind_node::pqc_live_trust_reload::LiveReloadRatificationConfig> =
+        if gate_decision.should_invoke() {
+            match build_run_105_reload_check_context(args, config) {
+                Ok(ctx_data) => {
+                    eprintln!(
+                        "[run-114] SIGHUP live reload ratification gate INVOKED \
+                         (policy={}, env={:?}). On every SIGHUP the ratification \
+                         sidecar JSON is re-read and verified BEFORE any snapshot, \
+                         swap, eviction, or sequence commit.",
+                        gate_decision.label(),
+                        config.environment
+                    );
+                    Some(qbind_node::pqc_live_trust_reload::LiveReloadRatificationConfig {
+                        authority: ctx_data.authority,
+                        expected_genesis_hash: ctx_data.canonical_hash,
+                        expected_environment_policy: ctx_data.env_policy,
+                        expected_chain_id_str: ctx_data.chain_id_str,
+                        policy: ctx_data.policy,
+                        ratification_sidecar_path: args
+                            .p2p_trust_bundle_ratification
+                            .clone(),
+                    })
+                }
+                Err(reason) => {
+                    eprintln!(
+                        "[run-114] FATAL: SIGHUP live reload ratification gate INVOKED \
+                         (policy={}, env={:?}) but ratification context could not be \
+                         built: {}. SIGHUP trigger NOT installed; the node continues \
+                         running on the baseline trust bundle. No live trust apply, \
+                         no sequence write, no session eviction will occur via \
+                         SIGHUP. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_114.md.",
+                        gate_decision.label(),
+                        config.environment,
+                        reason,
+                    );
+                    return None;
+                }
+            }
+        } else {
+            eprintln!(
+                "[run-114] SIGHUP live reload ratification gate SKIPPED \
+                 (policy={}, env={:?}). This is NOT a passed ratification; it \
+                 preserves pre-Run-114 DevNet behaviour for developer workflows. \
+                 MainNet/TestNet always invoke the gate by default and never \
+                 reach this branch.",
+                gate_decision.label(),
+                config.environment
+            );
+            None
+        };
+
     let cfg = LiveReloadConfig {
         candidate_path: candidate_path.clone(),
         environment: config.environment,
@@ -4529,6 +4622,7 @@ fn spawn_run074_live_reload_task(
         activation_ctx: ActivationContext::height_only(0),
         sequence_path: sequence_path.clone(),
         local_leaf_cert_bytes: local_leaf_bytes,
+        ratification: ratification_cfg_opt,
     };
     let controller = LiveReloadController::new(
         Arc::new(live_state),
