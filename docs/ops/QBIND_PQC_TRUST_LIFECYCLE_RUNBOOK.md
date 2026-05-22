@@ -3720,3 +3720,56 @@ Run 119 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md`) is the **first surface-
 **Bounded protection limit (unchanged from Run 116/117/118).** The marker cannot detect a same-sequence key-level downgrade — that requires the per-key monotonic field that arrives in `BundleSigningRatification` v2 (Run 122). The Run 119 wiring preserves the explicit `SameSequenceConflictingHash` / `SameSequenceConflictingKey` reject variants so the bounded scope is surfaced to operators rather than being hidden behind a misleading "rotation supported" claim.
 
 Run 119 does **not** change peer-driven live apply (Run 109 contract preserved bit-for-bit; the marker helpers are not invoked from any peer-driven surface), signing-key rotation lifecycle, signing-key revocation lifecycle, KMS/HSM custody, governance, validator-set rotation, fast-sync / consensus-storage-restore ratification parity, or any wire format. Static production source-code anchors remain rejected. MainNet local-config alone remains insufficient for bundle-signing authority.
+## Run 120 — Authority anti-rollback marker on the startup `--p2p-trust-bundle` surface
+
+Run 120 wires the same Run 119 `decide_marker_acceptance` + `persist_accepted_marker_after_commit_boundary` composition into the startup `--p2p-trust-bundle` acceptance path. The marker file `<data_dir>/pqc_authority_state.json` is now authoritative on **two** of the three mutating surfaces (startup acceptance and process-start reload-apply); the Run 074/114 SIGHUP live-reload surface is the only mutating surface that still does not check or write the marker, and is staged to the next sub-run.
+
+**What operators see on a normal accepted startup with a bundle (`--p2p-trust-bundle <path>` + `--data-dir <dir>` + a verified ratification per Run 105/106):**
+
+```
+[run-106] startup ratification gate INVOKED (policy=..., env=...).
+[run-105] ... (existing Run 105 log lines)
+[binary] Run 055: trust-bundle sequence persistence env=... chain_id=... path=... first-load persisted_sequence=N fp=........
+[run-120] authority-marker persisted at <data_dir>/pqc_authority_state.json (first-write; candidate authority_sequence=<n>).
+[binary] Run 050/051: trust bundle loaded path=... env=... fp=... active_roots=...
+```
+
+On a subsequent restart with the **same** bundle and the **same** ratification, the marker compare returns `Idempotent` and the persist step is a strict no-op:
+
+```
+[run-120] authority-marker unchanged at <data_dir>/pqc_authority_state.json (idempotent; no rewrite).
+```
+
+(`updated_at_unix_secs` deliberately does NOT bump on idempotent re-accept — re-running the binary against an unchanged bundle does not churn the marker file.)
+
+On a restart that attempts to downgrade to an older ratification (lower `authority_sequence` than what's on disk), the startup fails closed BEFORE any mutation:
+
+```
+[run-120] FATAL: startup --p2p-trust-bundle refused by authority-marker preflight:
+         Run 119: authority-marker rollback rejected: attempted authority_sequence=4 is
+         lower than persisted authority_sequence=7 (fail closed). Path=<bundle.bin>.
+         No Run 055 sequence write, no bundle-root merge, no live trust mutation, no
+         P2P startup, no marker write.
+```
+
+The node exits non-zero. The on-disk marker file, the on-disk sequence file, and the trust-anchor set are all unchanged from the previous accepted boot. Operator recovery: identify why the older ratification was supplied (wrong file, wrong snapshot copy, wrong `--data-dir` mount); restart with the correct bundle + ratification.
+
+**Operator actions required for Run 120:**
+
+* Continue backing up `<data_dir>/pqc_authority_state.json` (Run 119 added this requirement; Run 120 makes it apply on every accepted startup as well as every accepted reload-apply).
+* When migrating a node to a new machine, ensure `<data_dir>/pqc_authority_state.json` AND the Run 055 sequence file are copied **as a pair** to the new machine. A copy of the trust bundle + sequence file without the matching marker file will produce a `[run-120] authority-marker startup preflight skipped: ...` first-write on the next boot (legitimate) and then continue normally — no operator visible regression. Copying ONE of the two files without the other and then booting will at worst force a `FirstWrite` on the marker file (safe — fails closed only if a conflicting marker is found, never on a missing one).
+* When deliberately rotating to a new genesis-bound authority block (new `authority_sequence` strictly higher than the on-disk marker's), the next accepted boot logs `[run-120] authority-marker persisted at ... (upgrade <old> -> <new>; ...)`. No additional operator step is required — the upgrade is recorded transparently.
+* DevNet operators who run without `--p2p-trust-bundle-ratification-enforcement-enabled` continue to see no marker activity at all (log: `[run-120] authority-marker startup write skipped: ratification gate was not invoked (DevNet no-opt-in legacy path). The marker file is NOT written from unratified state.`). This is the same legacy ergonomics behaviour pre-Run-120. To enable Run-120 marker checking on DevNet, opt in by passing `--p2p-trust-bundle-ratification-enforcement-enabled` AND supplying a ratification sidecar (`--p2p-trust-bundle-ratification` per Run 103/105).
+
+**What is explicitly NOT changed by Run 120:**
+
+* Run 074/114 SIGHUP live-reload acceptance enforcement. The SIGHUP path still does not check or write the marker in Run 120. An operator who SIGHUPs the node with a downgraded bundle will not yet be rejected at SIGHUP time on a Run-120 build; the reject only fires on a subsequent startup or reload-apply.
+* The Run 109 peer-candidate validation contract. The marker is not consumed from any peer-driven path; peer-supplied ratifications still cannot mutate or compare against the marker.
+* The Run 105/106 startup ratification gate semantics. Run 120 runs strictly AFTER the gate returns `Ok` and never bypasses, weakens, or overrides any Run 105/106 fail-closed condition.
+* The Run 055 trust-bundle sequence anti-rollback file format or location. Run 055 and Run 120 maintain two distinct files at distinct purposes: Run 055 enforces monotonicity on the trust-bundle's own per-bundle `sequence` field; Run 120 enforces monotonicity on the genesis-bound `authority_sequence` of the ratification chain.
+* The Run 057 / Run 062 / Run 065 activation gate. Marker compare runs AFTER all activation gates have already accepted the candidate.
+* MainNet operability. MainNet has always required `--data-dir`, a verified ratification, and an enabled ratification gate — Run 120 only adds an additional fail-closed reject reason (marker rollback / same-sequence-equivocation / wrong-domain / corrupt) onto a path that was already strict.
+
+**Bounded protection limit (unchanged from Run 116/117/118/119).** The marker cannot detect a same-sequence key-level downgrade where two distinct signing keys share the same `authority_sequence` AND the same ratification digest — that requires the per-key monotonic field staged to Run 122 (`BundleSigningRatification` v2). The Run 120 wiring preserves the explicit `SameSequenceConflictingKey` reject variant so the bounded scope is surfaced to operators on the startup surface rather than being hidden behind a misleading "rotation supported" claim.
+
+Run 120 does **not** change peer-driven live apply (Run 109 contract preserved bit-for-bit), signing-key rotation lifecycle, signing-key revocation lifecycle, KMS/HSM custody, governance, validator-set rotation, fast-sync / consensus-storage-restore ratification parity, or any wire format. Static production source-code anchors remain rejected. MainNet local-config alone remains insufficient for bundle-signing authority.

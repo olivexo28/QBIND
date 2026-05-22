@@ -1137,4 +1137,293 @@ mod tests {
     // (devnet_inputs is the underlying test-helper; make_inputs is the
     // in-test alias that delegates to it. Both stay live as long as
     // any test uses make_inputs.)
+
+    // ----- §A (Run 120): startup surface uses StartupLoad audit tag -----
+
+    /// Build an inputs struct tagged as a startup acceptance (Run 120
+    /// surface). Mirrors `make_inputs` but uses
+    /// `AuthorityStateUpdateSource::StartupLoad` so the persisted
+    /// audit-only tag reflects the actual mutating surface.
+    fn make_startup_inputs<'a>(
+        marker_path: &'a Path,
+        gh_hex: &'a str,
+        ratification: &'a BundleSigningRatification,
+        ratified: &'a RatifiedBundleSigningKey,
+    ) -> MarkerAcceptanceInputs<'a> {
+        let mut inputs = devnet_inputs(marker_path, gh_hex, ratification, ratified);
+        inputs.update_source = AuthorityStateUpdateSource::StartupLoad;
+        inputs
+    }
+
+    /// Run 120 §A.1 — first accepted startup ratification produces a
+    /// `FirstWrite` decision, persisting the marker exactly once after
+    /// the simulated commit boundary. The persisted record carries the
+    /// `StartupLoad` audit tag (mirrors the Run 120 binary surface).
+    #[test]
+    fn run_120_startup_first_accepted_persists_marker() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let decision = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect("first-write accepts");
+        assert!(matches!(decision.kind(), MarkerAcceptKind::FirstWrite));
+        // No file written by decide alone — proves compare happens
+        // before any startup mutation/persistence.
+        assert!(!marker_path.exists());
+        // Persist after the simulated startup commit boundary.
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+        let on_disk = load_authority_state(&marker_path)
+            .expect("load ok")
+            .expect("file present");
+        assert_eq!(
+            on_disk.last_update_source,
+            AuthorityStateUpdateSource::StartupLoad,
+            "Run 120 startup persists with the StartupLoad audit tag"
+        );
+        assert_eq!(
+            canonical_authority_state_digest(&on_disk),
+            canonical_authority_state_digest(decision.candidate())
+        );
+    }
+
+    /// Run 120 §A.2 — same marker is idempotent across a simulated
+    /// restart. The on-disk bytes are NOT rewritten (so the audit-only
+    /// `updated_at_unix_secs` does not bump for no operator benefit).
+    #[test]
+    fn run_120_startup_same_marker_is_idempotent() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let d1 = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&d1).expect("persist ok");
+
+        let before = std::fs::read(&marker_path).unwrap();
+        let d2 = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect("idempotent accepts");
+        assert!(matches!(d2.kind(), MarkerAcceptKind::Idempotent));
+        assert!(!d2.should_persist());
+        persist_accepted_marker_after_commit_boundary(&d2).expect("idempotent persist no-op");
+        let after = std::fs::read(&marker_path).unwrap();
+        assert_eq!(before, after, "idempotent must NOT rewrite the file");
+    }
+
+    /// Run 120 §A.3 — conflicting marker (rollback to lower
+    /// `authority_sequence`) rejects BEFORE any startup mutation; the
+    /// on-disk marker is unchanged.
+    #[test]
+    fn run_120_startup_conflicting_marker_rejects_before_mutation() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let mut high = make_startup_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        high.authority_sequence = 9;
+        let d_high = decide_marker_acceptance(high).expect("high first-write");
+        persist_accepted_marker_after_commit_boundary(&d_high).expect("persist ok");
+        let before = std::fs::read(&marker_path).unwrap();
+
+        // Attempt to lower the authority_sequence at the next startup.
+        let mut low = make_startup_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        low.authority_sequence = 4;
+        let err =
+            decide_marker_acceptance(low).expect_err("rollback must reject before mutation");
+        assert!(
+            matches!(err, MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }),
+            "got {:?}",
+            err
+        );
+        // No marker mutation occurred.
+        let after = std::fs::read(&marker_path).unwrap();
+        assert_eq!(before, after, "rejected startup must not mutate marker");
+    }
+
+    /// Run 120 §A.4 — corrupt persisted marker fails closed BEFORE any
+    /// startup mutation; the garbage on disk is NOT auto-overwritten
+    /// (per Run 117 fail-closed corruption semantics).
+    #[test]
+    fn run_120_startup_corrupt_marker_fails_closed() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        std::fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        std::fs::write(&marker_path, b"{ garbage").unwrap();
+        let err = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect_err("corrupt marker must fail closed at startup");
+        assert!(
+            matches!(err, MutatingSurfaceMarkerError::LoadOrCorruption(_)),
+            "got {:?}",
+            err
+        );
+        let bytes = std::fs::read(&marker_path).unwrap();
+        assert_eq!(bytes, b"{ garbage", "Run 120 must NOT auto-overwrite corrupt marker");
+    }
+
+    /// Run 120 §A.5 — persisted-domain mismatch (wrong-data-dir /
+    /// wrong-snapshot-copy) rejects startup BEFORE any mutation; the
+    /// on-disk marker is unchanged.
+    #[test]
+    fn run_120_startup_wrong_domain_rejects_before_mutation() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let foreign = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect("first-write accepts");
+        // Mutate the on-disk record to claim a foreign genesis hash.
+        let mut foreign_record = foreign.candidate().clone();
+        foreign_record.genesis_hash = "b".repeat(64);
+        std::fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &marker_path,
+            serde_json::to_vec_pretty(&foreign_record).unwrap(),
+        )
+        .unwrap();
+        let before = std::fs::read(&marker_path).unwrap();
+
+        let err = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect_err("foreign-domain marker must reject startup");
+        assert!(
+            matches!(err, MutatingSurfaceMarkerError::PersistedDomainMismatch(_)),
+            "got {:?}",
+            err
+        );
+        let after = std::fs::read(&marker_path).unwrap();
+        assert_eq!(before, after, "rejected startup must not mutate marker");
+    }
+
+    /// Run 120 §A.6 — upgrade from a strictly lower
+    /// `authority_sequence` on a subsequent startup accepts and
+    /// rewrites the marker. Mirrors operator workflow of rotating to a
+    /// newer ratified bundle across restarts.
+    #[test]
+    fn run_120_startup_upgrade_accepts_strictly_higher_sequence() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let mut low = make_startup_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        low.authority_sequence = 4;
+        let d_low = decide_marker_acceptance(low).expect("first-write");
+        persist_accepted_marker_after_commit_boundary(&d_low).expect("persist ok");
+
+        let mut high = make_startup_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        high.authority_sequence = 7;
+        let d_high = decide_marker_acceptance(high).expect("upgrade accepts");
+        match d_high.kind() {
+            MarkerAcceptKind::Upgrade {
+                previous_sequence,
+                new_sequence,
+            } => {
+                assert_eq!(previous_sequence, 4);
+                assert_eq!(new_sequence, 7);
+            }
+            other => panic!("expected Upgrade, got {:?}", other),
+        }
+        persist_accepted_marker_after_commit_boundary(&d_high).expect("persist ok");
+        let on_disk = load_authority_state(&marker_path)
+            .expect("load ok")
+            .expect("file present");
+        assert_eq!(on_disk.authority_sequence, 7);
+    }
+
+    /// Run 120 §A.7 — same-`authority_sequence` ratification swap
+    /// (e.g. silent replacement of one ratification object with
+    /// another that shares the same authority_sequence) rejects.
+    /// Refuses the silent equivocation at startup.
+    #[test]
+    fn run_120_startup_same_sequence_conflicting_digest_rejects() {
+        let (_dir, marker_path, ratification1, ratified1, gh_hex) = matched_devnet_setup();
+        let d1 = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification1,
+            &ratified1,
+        ))
+        .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&d1).expect("persist ok");
+
+        let mut ratification2 = ratification1.clone();
+        // Mutate a field in the canonical preimage so the digest
+        // changes; keep authority_sequence and signing key identical.
+        ratification2.genesis_hash[0] ^= 0xFF;
+        let ratified2 = ratified_from(&ratification2);
+        let err = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification2,
+            &ratified2,
+        ))
+        .expect_err("same-sequence-different-digest must reject");
+        assert!(
+            matches!(
+                err,
+                MutatingSurfaceMarkerError::SameSequenceConflictingRatificationDigest { .. }
+            ),
+            "got {:?}",
+            err
+        );
+    }
+
+    /// Run 120 §B — ordering proof: `decide_marker_acceptance` never
+    /// touches disk, even on accept. This is what lets the startup
+    /// binary surface call compare BEFORE the Run 055 sequence write
+    /// and persist ONLY after that write has committed.
+    #[test]
+    fn run_120_decide_does_not_persist_on_startup_path() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let _d = decide_marker_acceptance(make_startup_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ))
+        .expect("first-write accepts");
+        assert!(
+            !marker_path.exists(),
+            "decide_marker_acceptance must NOT persist on the Run 120 startup surface"
+        );
+    }
+
+    /// Run 120 §B — ordering proof: dropping a decision (simulating a
+    /// failure of the Run 055 sequence write AFTER preflight accepted
+    /// the marker) leaves the on-disk marker file untouched. There is
+    /// no path by which Run 120 persists a marker for a startup that
+    /// did not actually commit.
+    #[test]
+    fn run_120_dropped_decision_does_not_persist_marker() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        assert!(!marker_path.exists());
+        {
+            let _decision = decide_marker_acceptance(make_startup_inputs(
+                &marker_path,
+                &gh_hex,
+                &ratification,
+                &ratified,
+            ))
+            .expect("first-write accepts");
+            // Drop without calling persist (simulates the Err arm of
+            // the Run 055 sequence write killing the process before
+            // the persist step is reached).
+        }
+        assert!(
+            !marker_path.exists(),
+            "dropped Run 120 decision must NOT persist the marker"
+        );
+    }
 }
