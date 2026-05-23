@@ -1,0 +1,40 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run125/fixtures/genesis.json, canonical_hash=0x70c64204f41660b54efe5ea3fccf08f8d385bc4c1cf7019c603df71b5842f9c4).
+[restore] requested: snapshot_dir=/tmp/qbind-run125/fixtures/snapshots/snap-matching data_dir=/tmp/qbind-run125/data/scenario_3_matching_snapshot_and_local_marker expected_chain_id=0x51424e4444455600
+[restore] Run 124 authority-marker check: local authority marker matches snapshot authority metadata bit-for-bit (restore may proceed; local marker NOT rewritten) (proceeding with materialization)
+[restore] complete: height=101 chain_id=0x51424e4444455600 bytes_copied=8572 target=/tmp/qbind-run125/data/scenario_3_matching_snapshot_and_local_marker/state_vm_v0
+[restore] audit marker written to /tmp/qbind-run125/data/scenario_3_matching_snapshot_and_local_marker/RESTORED_FROM_SNAPSHOT.json
+[restore] OK: restored from snapshot height=101 chain_id=0x51424e4444455600
+[binary] B5: restore-aware consensus start enabled (snapshot_height=101, starting_view=102)
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=/tmp/qbind-run125/data/scenario_3_matching_snapshot_and_local_marker/consensus
+[restore] Run 097 snapshot meta carries no canonical epoch (epoch=None); leaving <data_dir>/consensus meta:current_epoch unchanged (explicit absence, NOT 0)
+[binary] Run 097: no snapshot epoch persistence performed (snapshot_epoch=None, storage_state=present-no-committed-epoch).
+[binary] LocalMesh mode: starting consensus loop. environment=DevNet profile=nonce-only
+[binary] Run 094: binary consensus loop wired to canonical production ConsensusStorage handle (LocalMesh).
+[binary] Consensus loop config: local_validator_id=ValidatorId(0) num_validators=1 restore_baseline=true
+[binary] Single-validator LocalMesh: leader self-quorum will commit a block per tick.
+[snapshot] VM-v0 SIGUSR1 snapshot trigger disabled: --snapshot-dir not configured
+[binary] Consensus loop running. Press Ctrl+C to exit.
+[binary-consensus] B5: applied restore baseline: snapshot_height=101 starting_view=102 (engine committed_height=Some(101))
+[binary-consensus] Starting consensus loop: local_id=ValidatorId(0) num_validators=1 tick=100ms restore_baseline=true interconnect=none late_peer_reemit=off timeout_verification=off
+[snapshot] periodic snapshot trigger disabled: snapshot config disabled
+[binary-consensus] committed_anchor height=102 block_id=0000000000000000660000000000000065656565656565656565656565656565
+[binary-consensus] committed_anchor height=103 block_id=0000000000000000670000000000000000000000000000006600000000000000
+[binary-consensus] committed_anchor height=104 block_id=0000000000000000680000000000000000000000000000006700000000000000
+[binary-consensus] committed_anchor height=105 block_id=0000000000000000690000000000000000000000000000006800000000000000
+[binary-consensus] committed_anchor height=106 block_id=00000000000000006a0000000000000000000000000000006900000000000000
+[binary-consensus] committed_anchor height=107 block_id=00000000000000006b0000000000000000000000000000006a00000000000000
+[binary-consensus] committed_anchor height=108 block_id=00000000000000006c0000000000000000000000000000006b00000000000000
+[binary-consensus] committed_anchor height=109 block_id=00000000000000006d0000000000000000000000000000006c00000000000000
+[binary-consensus] committed_anchor height=110 block_id=00000000000000006e0000000000000000000000000000006d00000000000000
+[binary-consensus] committed_anchor height=111 block_id=00000000000000006f0000000000000000000000000000006e00000000000000
+[binary-consensus] committed_anchor height=112 block_id=0000000000000000700000000000000000000000000000006f00000000000000
+[binary-consensus] committed_anchor height=113 block_id=0000000000000000710000000000000000000000000000007000000000000000
+[binary-consensus] committed_anchor height=114 block_id=0000000000000000720000000000000000000000000000007100000000000000
+[binary-consensus] committed_anchor height=115 block_id=0000000000000000730000000000000000000000000000007200000000000000
+[binary-consensus] committed_anchor height=116 block_id=0000000000000000740000000000000000000000000000007300000000000000
+[binary-consensus] committed_anchor height=117 block_id=0000000000000000750000000000000000000000000000007400000000000000
+[binary-consensus] committed_anchor height=118 block_id=0000000000000000760000000000000000000000000000007500000000000000
+[binary-consensus] committed_anchor height=119 block_id=0000000000000000770000000000000000000000000000007600000000000000

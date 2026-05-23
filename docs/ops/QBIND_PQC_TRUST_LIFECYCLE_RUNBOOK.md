@@ -3889,3 +3889,42 @@ Run 124 wires the authority anti-rollback marker into the **snapshot restore** s
 - No peer-driven live apply.
 - Per-key monotonic ratification schema bump — future run (Run 125+).
 - Full C4 / C5 closure remain open.
+
+## Run 125 — Release-binary evidence for the Run 124 snapshot/restore authority anti-rollback marker conflict enforcement
+
+**What Run 125 adds:**
+
+Run 125 is **evidence-only**; it closes the release-binary evidence gap that Run 124 explicitly deferred. The harness `scripts/devnet/run_125_snapshot_restore_authority_marker_release_binary.sh` builds `target/release/qbind-node` and a new evidence-only fixture helper (`crates/qbind-node/examples/run_125_snapshot_restore_authority_marker_fixture_helper.rs`), mints an ephemeral DevNet genesis with a Run 101 authority block, and exercises the snapshot/restore surface against four real B3 snapshot directories (legacy / matching / same-sequence-conflicting / wrong-genesis-domain) and two local-marker fixtures (matching JSON / corrupt non-JSON bytes).
+
+**Operator-visible behaviour (unchanged from Run 124; evidenced on release binary):**
+
+| Scenario | Operator sees | Disk side-effects |
+|----------|---------------|-------------------|
+| Legacy snapshot into fresh data dir | `[restore] Run 124 authority-marker check: no local authority marker and no snapshot authority metadata ... proceeding with materialization` then `[restore] OK: ...` | `RESTORED_FROM_SNAPSHOT.json` + `state_vm_v0/` materialized; no `pqc_authority_state.json` invented |
+| Legacy snapshot + local marker present | `[restore] FATAL: refused by Run 124 authority-marker check: ... snapshot carries no authority metadata (fail closed; accepting would silently erase or roll back the local persisted authority state)`; rc=1 | No state materialization; no audit marker; local marker bytes byte-identical (sha256 before == sha256 after) |
+| Matching snapshot + matching local marker | `[restore] Run 124 authority-marker check: local authority marker matches snapshot authority metadata bit-for-bit (restore may proceed; local marker NOT rewritten)` then `[restore] OK: ...` | `RESTORED_FROM_SNAPSHOT.json` + `state_vm_v0/` materialized; local marker bytes byte-identical (never rewritten on accept either) |
+| Same-sequence different `ratification_object_hash` | `[restore] FATAL: ... authority-state same-sequence equivocation rejected: authority_sequence=N persisted_ratification_hash=... attempted_ratification_hash=...`; rc=1 | No state materialization; no audit marker; local bytes preserved |
+| Corrupt local marker (non-JSON) | `[restore] FATAL: ... local authority marker is corrupt or unsupported: ... (bytes preserved verbatim)`; rc=1 | No state materialization; no audit marker; corrupt bytes byte-identical (no auto-repair) |
+| Wrong-domain snapshot (`genesis_hash_hex` mismatches runtime canonical Run 101 hash) | `[restore] FATAL: ... snapshot authority metadata has wrong trust domain: snapshot.genesis_hash_hex=... runtime.genesis_hash_hex=...`; rc=1 | No state materialization; no audit marker |
+| Legacy no-context entry point (`--restore-from-snapshot` WITHOUT `--genesis-path`) + local marker present | `[restore] ERROR: restore-from-snapshot refused: a local pqc_authority_state.json marker exists but no runtime authority context (env, chain_id, genesis_hash) was supplied to the restore surface (fail closed). Use restore_from_snapshot_with_authority_marker_check from a binary surface that has loaded the canonical genesis.`; rc=1 | No state materialization; no audit marker; local bytes preserved |
+
+**Operator actions:** none. No new CLI flag, no new environment variable, no new file path, no new metric family. The release binary's behavior with `--restore-from-snapshot` is unchanged by Run 125 — Run 125 only adds release-binary evidence that the Run 124 wiring behaves on a real binary the same way it behaves under unit and integration tests.
+
+**Evidence archive:** `docs/devnet/run_125_snapshot_restore_authority_marker/` (per-scenario stderr/exit codes for all 7 scenarios, the matching marker fixture JSON, snapshot meta JSON for the matching and conflicting cases, and a summary that records the captured binary's sha256 + build-id and the before/after local marker sha256s).
+
+**Per-scenario test counts on the same build:** `run_124_snapshot_restore_authority_marker_tests` 7/7, `b3_snapshot_restore_tests` 10/10, `run_119_authority_marker_acceptance_tests` 4/4, `run_121_sighup_authority_marker_tests` 7/7, `qbind-node --lib pqc_authority_state` 74/74. No existing test was modified.
+
+**What is explicitly NOT changed by Run 125:**
+
+- The Run 124 production wiring — unchanged.
+- The mutating-surface marker behavior (Runs 119/120/121) — unchanged.
+- The validation-only marker behavior (Run 123) — unchanged.
+- The B3 snapshot layout, B5 restore-aware consensus startup, Run 097 snapshot epoch parity — all preserved bit-for-bit on accept paths.
+- The local `<data_dir>/pqc_authority_state.json` file is NEVER written, rewritten, or deleted by the restore surface — only mutating surfaces persist the marker (re-evidenced on the release binary by Scenarios 2, 3, 5, 7).
+- No new wire format changes.
+- No new persistence format changes.
+- No new CLI flag (still no `--allow-authority-state-reset`).
+- No signing-key rotation/revocation lifecycle.
+- No peer-driven live apply.
+- Per-key monotonic ratification schema bump — future run (Run 126+).
+- Full C4 / C5 closure remain open.

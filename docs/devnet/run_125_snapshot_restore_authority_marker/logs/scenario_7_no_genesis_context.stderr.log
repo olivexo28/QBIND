@@ -1,0 +1,4 @@
+[run-102] no external --genesis-path configured; canonical boot verification skipped (env=Devnet, embedded-genesis path). MainNet always requires --genesis-path so this branch is unreachable on MainNet.
+[restore] requested: snapshot_dir=/tmp/qbind-run125/fixtures/snapshots/snap-matching data_dir=/tmp/qbind-run125/data/scenario_7_no_genesis_context expected_chain_id=0x51424e4444455600
+[restore] ERROR: restore-from-snapshot refused: a local pqc_authority_state.json marker exists but no runtime authority context (env, chain_id, genesis_hash) was supplied to the restore surface (fail closed). Use restore_from_snapshot_with_authority_marker_check from a binary surface that has loaded the canonical genesis.
+[restore] qbind-node refuses to start because the requested snapshot restore could not be honestly applied. See docs/ops/QBIND_BACKUP_AND_RECOVERY_BASELINE.md and docs/whitepaper/contradiction.md C4 (B3).

@@ -1,0 +1,42 @@
+Run 125 snapshot/restore authority marker release-binary evidence
+outdir: /tmp/qbind-run125
+repo: /home/runner/work/QBIND/QBIND
+git_commit: 42a11f34b62a7191652c1696ef71fb7ade53a6da
+qbind-node_sha256: ab64d496c9c3048dec0af7b5579e006a4e678125c7ea4773425c2e937f62fbcd
+qbind-node_build_id: 787f9e6e31b217838235ed9169697c2c1bf48f01
+fixture-helper_sha256: aa7f9841aca229dc2e8b9766efd7a05751e5532f4b77da8d1b0aec160e07fd58
+fixture-helper_build_id: 538e740d5120d83d909a2e8fdc35b697c444140e
+accept_timeout_secs: 6
+
+scenario status:
+manifest:
+  # Run 125 fixture helper manifest (shell-sourceable).
+  RUN_125_GENESIS_PATH=/tmp/qbind-run125/fixtures/genesis.json
+  RUN_125_GENESIS_HASH=0x70c64204f41660b54efe5ea3fccf08f8d385bc4c1cf7019c603df71b5842f9c4
+  RUN_125_GENESIS_HASH_NO_PREFIX=70c64204f41660b54efe5ea3fccf08f8d385bc4c1cf7019c603df71b5842f9c4
+  RUN_125_CHAIN_ID_HEX=51424e4444455600
+  RUN_125_AUTH_SEQUENCE=7
+  RUN_125_SNAP_LEGACY=/tmp/qbind-run125/fixtures/snapshots/snap-legacy
+  RUN_125_SNAP_MATCHING=/tmp/qbind-run125/fixtures/snapshots/snap-matching
+  RUN_125_SNAP_CONFLICTING=/tmp/qbind-run125/fixtures/snapshots/snap-conflicting
+  RUN_125_SNAP_WRONG_DOMAIN=/tmp/qbind-run125/fixtures/snapshots/snap-wrong-domain
+  RUN_125_LOCAL_MARKER_MATCHING=/tmp/qbind-run125/fixtures/markers/matching.json
+  RUN_125_LOCAL_MARKER_CORRUPT=/tmp/qbind-run125/fixtures/markers/corrupt.bin
+
+fixture sha256:
+  matching-marker-fixture: a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff
+  corrupt-marker-fixture:  b3ef3c781f73c95e46e1d73cd209f235b58b7942d49110a3991295dccaeb4be5
+  snap-legacy/meta.json: bb2c6b2c20e91655b6776ab38489c5c76e6302cc8fbeaad5852d26bb0ee05c7f
+  snap-matching/meta.json: 0cbb9c4f28c449384fa82324b0dba894c4a37c9a564bfcf58301c06bff2dbfc4
+  snap-conflicting/meta.json: d965ba84004d0232e07038fc69d9966ea3b637c1c6a7dd7c2c941a4a5fe84f40
+  snap-wrong-domain/meta.json: d849bccf483fdd22962e1030be610b042e1c3aeb52d2a892829eafb1cada33b3
+
+  scenario_1_legacy_snapshot_no_local_marker: rc=137 sha_before=<none> sha_after=<none>
+  scenario_2_legacy_snapshot_local_marker_present: rc=1 sha_before=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff sha_after=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff
+  scenario_3_matching_snapshot_and_local_marker: rc=137 sha_before=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff sha_after=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff
+  scenario_4_conflicting_snapshot: rc=1 sha_before=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff sha_after=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff
+  scenario_5_corrupt_local_marker: rc=1 sha_before=b3ef3c781f73c95e46e1d73cd209f235b58b7942d49110a3991295dccaeb4be5 sha_after=b3ef3c781f73c95e46e1d73cd209f235b58b7942d49110a3991295dccaeb4be5
+  scenario_6_wrong_domain_snapshot_no_local: rc=1 sha_before=<none> sha_after=<none>
+  scenario_7_no_genesis_context: rc=1 sha_before=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff sha_after=a3008fd4c8a1c86a9d3a4ca33b753f943c90f19201477d3c415b65e5457535ff
+
+VERDICT: strongest-positive (release-binary)

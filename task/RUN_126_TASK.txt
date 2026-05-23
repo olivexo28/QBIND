@@ -1,0 +1,640 @@
+# RUN 126 — Explicit Authority-State Reset / Recovery Procedure Specification
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle`.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement:
+  - all seven restore scenarios passed on `target/release/qbind-node`;
+  - legacy snapshot with no local marker restores successfully and does not synthesize marker;
+  - legacy snapshot with existing local marker rejects fail-closed;
+  - matching snapshot marker restores successfully;
+  - conflicting snapshot marker rejects before restore acceptance;
+  - corrupt local marker rejects fail-closed;
+  - wrong-domain snapshot marker rejects;
+  - no-genesis-context restore with local marker rejects fail-closed;
+  - rejection paths preserve local marker bytes and do not write the B3 restore audit marker;
+  - Run 097 epoch/snapshot behavior remains intact;
+  - no reset/recovery flag was added.
+
+Run 125 review found tracking-doc issues to fix before Run 126:
+
+- the runbook did not contain a clear Run 125 operator update;
+- the authority model did not contain a clear Run 125 update;
+- contradiction.md did not contain a clear Run 125 update.
+
+Run 126 must first fix that documentation sync issue.
+
+Run 126 is **spec-first**.
+
+The goal is to define an explicit authority-state reset/recovery procedure without implementing a bypass. This procedure is dangerous because a reset path can undermine the entire authority anti-rollback model if it is not tightly controlled, environment-gated, auditable, and operationally explicit.
+
+---
+
+# Exact objective
+
+Write the formal specification for authority-state reset / recovery after fail-closed anti-rollback events.
+
+The objective is to define, without implementing a CLI bypass yet:
+
+1. When authority-state reset/recovery is allowed.
+2. When it is forbidden.
+3. Which environments may support it.
+4. What operator ceremony is required.
+5. What evidence/audit artifacts must be produced.
+6. What must be verified before reset.
+7. What must be preserved before reset.
+8. What marker bytes and snapshot metadata must be archived.
+9. How reset interacts with genesis-bound authority, ratification, snapshot restore, and Run 055 sequence anti-rollback.
+10. Why reset must not become a MainNet local-config bypass.
+11. What implementation boundaries a later run must obey.
+
+Run 126 should make this statement true:
+
+> QBIND has a formal, security-reviewed authority-state reset/recovery procedure specification that cannot be confused with ordinary startup, restore, reload, or peer-driven behavior, and which preserves the anti-rollback security model by default.
+
+---
+
+# First checkpoint: Run 125 doc-sync fix
+
+Before writing new Run 126 content, verify and fix these docs:
+
+- `docs/whitepaper/contradiction.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+They must explicitly state:
+
+- Run 125 produced release-binary evidence for snapshot/restore authority-marker conflict enforcement.
+- All seven restore scenarios passed.
+- Legacy no-marker restore remains compatible.
+- Legacy snapshot with local marker rejects.
+- Matching marker restores.
+- Conflicting/corrupt/wrong-domain/no-context cases reject fail-closed.
+- Local marker bytes remain unchanged on rejection.
+- B3 restore audit marker is not written on rejected restore.
+- Reset/recovery remains open until Run 126+.
+- Ratification v2 per-key monotonic schema remains future work.
+- Full C4 and C5 remain open.
+
+Document this correction in the Run 126 evidence file.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Specification-only reset/recovery model
+
+Create a formal reset/recovery section in the authority model and evidence docs.
+
+This must describe:
+
+- threat model;
+- operator intent;
+- failure cases;
+- allowed recovery cases;
+- forbidden recovery cases;
+- environment gating;
+- audit artifacts;
+- expected future CLI shape;
+- refusal cases;
+- evidence requirements;
+- post-reset verification requirements.
+
+## B. Runbook operator procedure
+
+Add an operator-facing procedure to the runbook.
+
+It must be written as a controlled recovery ceremony, not a routine maintenance action.
+
+It should include:
+
+- stop the node;
+- preserve old data directory;
+- preserve old `pqc_authority_state.json` bytes;
+- preserve snapshot metadata;
+- preserve genesis file and expected genesis hash;
+- verify target environment and chain_id;
+- verify candidate ratification under genesis authority;
+- require explicit future reset command;
+- require audit log / marker archive output;
+- restart and verify marker state.
+
+## C. Contradiction tracker update
+
+Update C4/C5 tracking honestly.
+
+Run 126 may narrow reset/recovery design risk, but must not claim implementation or C4 closure.
+
+## D. Future implementation plan
+
+Define exact follow-up run boundaries:
+
+- future Run 127: implement reset/recovery CLI skeleton with explicit refusal cases, if accepted;
+- future Run 128: release-binary evidence for reset refusal/allowed cases;
+- future Run 129 or later: ratification v2 per-key monotonic schema design;
+- future runs: rotation/revocation, KMS/HSM, governance.
+
+Use normal run numbers. Do not use `126a/126b` unless unavoidable.
+
+---
+
+# Strict non-goals
+
+Run 126 MUST NOT:
+
+- implement `--allow-authority-state-reset`;
+- implement any CLI reset command;
+- delete or rewrite `pqc_authority_state.json`;
+- change production runtime code;
+- change snapshot restore behavior;
+- change authority marker persistence behavior;
+- change validation-only marker behavior;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- invent a fake authority sequence/epoch;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots broadly;
+- weaken Run 097 snapshot epoch parity;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken Run 105–115 ratification enforcement/evidence;
+- weaken Run 117 marker corruption/fail-closed behavior;
+- weaken Run 119–121 mutating marker behavior;
+- weaken Run 123 validation-only no-persistence behavior;
+- weaken Run 124 restore conflict enforcement;
+- weaken Run 125 release-binary restore evidence invariants;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken Run 055 trust-bundle sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim full signing-key rotation safety;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before writing the final spec, investigate and document:
+
+## 1. Existing authority marker failure modes
+
+Review all fail-closed states from Runs 117–125:
+
+- corrupt local marker;
+- conflicting local marker;
+- wrong-domain marker;
+- legacy snapshot with local marker;
+- no-genesis-context restore with local marker;
+- marker persist failure after commit;
+- validation-only marker conflict;
+- live `0x05` marker conflict.
+
+Classify each as:
+
+- operator-recoverable;
+- environment-reset-only;
+- MainNet governance-required;
+- forbidden local recovery;
+- evidence-only / investigation-required.
+
+## 2. Environment policy
+
+Define reset policy separately for:
+
+### DevNet
+
+May allow explicit reset for test automation and local recovery, but must require explicit command and audit output.
+
+### TestNet
+
+May allow controlled reset under explicit operator ceremony, but should require stronger proof and produce audit artifacts.
+
+### MainNet
+
+Local reset should be disallowed by default.
+
+Any MainNet recovery should require a future governance/ratification procedure or offline signed recovery artifact, not local config alone.
+
+Do not implement this in Run 126; specify it.
+
+## 3. Operator artifact requirements
+
+Define what must be archived before any future reset:
+
+- old `pqc_authority_state.json` bytes and hash;
+- candidate new marker bytes and hash;
+- genesis file hash;
+- expected genesis hash;
+- chain_id;
+- environment;
+- snapshot metadata if involved;
+- ratification sidecar;
+- trust bundle fingerprint;
+- timestamp/operator note;
+- binary sha256/build-id if used.
+
+## 4. Reset safety invariants
+
+Define mandatory invariants:
+
+- reset must never run implicitly;
+- reset must never run during normal startup;
+- reset must never be triggered by peer input;
+- reset must never persist from validation-only surfaces;
+- reset must never synthesize marker from legacy snapshot;
+- reset must never bypass ratification verification;
+- reset must never allow transport root authority;
+- reset must never allow local config alone as MainNet authority;
+- reset must always produce an audit record;
+- reset must be irreversible without another explicit audited ceremony.
+
+## 5. Future CLI / command design
+
+Define a future command shape, but do not implement it.
+
+Example conceptual shape:
+
+```text
+qbind-node authority-state-reset \
+  --data-dir <PATH> \
+  --genesis-path <PATH> \
+  --expected-genesis-hash <HASH> \
+  --p2p-trust-bundle <BUNDLE> \
+  --p2p-trust-bundle-ratification <RATIFICATION> \
+  --output-audit <PATH> \
+  --environment <devnet|testnet|mainnet>
+```
+
+The exact names should follow repo conventions in a future implementation run.
+
+The spec must state MainNet behavior separately and should default to refusal unless a future governance-approved artifact exists.
+
+---
+
+# Required design content
+
+## 1. Threat model
+
+Include at least:
+
+- malicious operator rollback;
+- accidental data-dir restore;
+- stale snapshot restore;
+- stale ratification sidecar reuse;
+- conflicting marker injection;
+- corrupt marker recovery temptation;
+- bypass via DevNet flags leaking into MainNet;
+- peer-triggered reset attempt;
+- local config-only authority escalation.
+
+## 2. Recovery classification table
+
+Create a table with columns:
+
+```text
+Failure condition | DevNet | TestNet | MainNet | Required artifacts | Future implementation behavior
+```
+
+## 3. Reset ceremony
+
+Define the exact staged operator process:
+
+1. stop node;
+2. archive current data dir / marker / snapshot metadata;
+3. compute hashes;
+4. verify genesis and environment;
+5. verify target ratification under genesis authority;
+6. compare old/new markers;
+7. produce audit plan;
+8. require explicit operator confirmation;
+9. write new marker only via future reset command;
+10. produce final audit record;
+11. restart node;
+12. verify marker and trust state.
+
+## 4. Refusal cases
+
+The spec must require future implementation to refuse:
+
+- missing genesis hash;
+- wrong genesis hash;
+- wrong chain_id;
+- wrong environment;
+- malformed authority root;
+- transport root attempting to authorize bundle signing key;
+- missing ratification;
+- bad ratification;
+- local config-only MainNet reset;
+- peer-provided reset request;
+- reset while node is running, unless a future design safely supports offline-only lock;
+- missing audit output path;
+- attempt to erase marker without replacement on MainNet/TestNet.
+
+## 5. Audit record schema
+
+Define conceptual fields for a future audit record, such as:
+
+```text
+record_version
+action = authority_state_reset
+environment
+chain_id
+genesis_hash
+old_marker_hash
+old_marker_record
+new_marker_hash
+new_marker_record
+ratification_hash
+trust_bundle_fingerprint
+snapshot_metadata_hash_if_any
+operator_note_hash
+binary_sha256
+binary_build_id
+timestamp
+result
+```
+
+No implementation is required in Run 126.
+
+## 6. Interaction with future ratification v2 monotonic schema
+
+State clearly:
+
+- current marker can detect conflict/wrong-domain/corruption but does not prove per-key monotonic authority progression;
+- future ratification v2 must add canonical per-key monotonic field;
+- reset/recovery must not be used as a substitute for rotation/revocation lifecycle;
+- any future reset after ratification v2 must respect monotonic authority sequence.
+
+---
+
+# Required tests
+
+Since Run 126 is spec-first and docs-only by default:
+
+- No runtime tests are required if no code changes are made.
+- If the repo has docs linting, run it.
+- If any code is touched accidentally, run affected tests and explain why code changed.
+
+Expected: no production runtime code changes.
+
+---
+
+# Release-binary evidence
+
+None required for Run 126.
+
+Run 126 is a design/spec run.
+
+Do not fake release-binary evidence.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_126.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow docs:
+
+- MainNet readiness checklist;
+- security review checklist;
+- reset ceremony appendix.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 126 may narrow:
+
+- reset/recovery procedure design;
+- operator recovery ceremony;
+- explicit refusal cases;
+- future implementation constraints.
+
+Run 126 may mark the reset/recovery **specification** sub-piece as narrowed only if:
+
+- environment policy is defined;
+- operator ceremony is defined;
+- refusal cases are defined;
+- audit record schema is defined;
+- MainNet local reset remains disallowed by default;
+- docs are synchronized.
+
+Run 126 MUST NOT mark resolved:
+
+- reset/recovery implementation;
+- ratification v2 monotonic schema;
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 126 does not implement a reset command;
+- Run 126 does not implement signing-key rotation/revocation;
+- Run 126 does not invent a monotonic authority sequence;
+- Run 126 does not implement peer-driven live apply;
+- Run 126 does not implement KMS/HSM custody;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- positive;
+- partial-positive;
+- negative.
+
+Use **positive** if:
+
+- reset/recovery specification is complete;
+- environment policy is clear;
+- audit schema is clear;
+- future implementation boundaries are clear;
+- docs are synchronized;
+- no runtime behavior is changed.
+
+Use **partial-positive** if:
+
+- the reset model is incomplete;
+- MainNet/TestNet policy remains unresolved;
+- audit schema remains ambiguous;
+- docs are only partly synchronized.
+
+Use **negative** if:
+
+- the spec creates a local MainNet bypass;
+- reset can be peer-triggered;
+- reset can run implicitly;
+- reset can erase marker without replacement on production networks;
+- local config alone can authorize MainNet reset;
+- the spec weakens anti-rollback invariants.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What changed
+
+Include:
+
+- docs changed;
+- Run 125 doc-sync fix;
+- reset/recovery model sections added;
+- explicit statement if no runtime code changed.
+
+## 3. Key design decisions
+
+Include:
+
+- environment gating;
+- operator ceremony;
+- refusal cases;
+- audit record schema;
+- MainNet default refusal posture;
+- relation to future ratification v2 monotonic schema.
+
+## 4. What was proven
+
+Separate:
+
+- docs/spec proof;
+- code/test proof if any;
+- release-binary evidence if any.
+
+## 5. What was not changed
+
+Explicitly confirm:
+
+- no reset command;
+- no runtime code change;
+- no marker deletion/rewrite behavior;
+- no trust-bundle wire change;
+- no peer-candidate wire change;
+- no peer-driven apply;
+- no KMS/HSM;
+- no signing-key rotation/revocation;
+- no authority monotonic schema;
+- no full C4 closure;
+- no C5 closure.
+
+## 6. Contradictions or inconsistencies
+
+Cross-check new docs against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- Run 105–115 ratification enforcement/evidence;
+- Run 116 model;
+- Run 117 primitive;
+- Run 118 helper layer;
+- Run 119 reload-apply wiring;
+- Run 120 startup wiring;
+- Run 121 SIGHUP wiring;
+- Run 122 release-binary mutating-surface evidence;
+- Run 123 validation-only marker checks;
+- Run 124 restore conflict enforcement;
+- Run 125 release-binary restore evidence;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- docs updated;
+- docs/test commands if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 126 actually proved.
+
+No hype.
+No broad redesign.
+No sil
