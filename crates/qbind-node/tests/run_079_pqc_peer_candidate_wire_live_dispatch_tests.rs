@@ -233,6 +233,7 @@ fn live_dispatcher_for_devnet(
         propagation: PeerCandidatePropagationConfig::default(),
         propagation_sender: None,
         live_ratification: None,
+        authority_marker_path: None,
     };
     LivePeerCandidateWireDispatcher::new(cfg, metrics)
 }
@@ -496,6 +497,7 @@ fn run079_live_dispatcher_rate_limit_kicks_in() {
         propagation: PeerCandidatePropagationConfig::default(),
         propagation_sender: None,
         live_ratification: None,
+        authority_marker_path: None,
     };
     let dispatcher = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
     // First admit: passes rate-limit; subsequent identical frames

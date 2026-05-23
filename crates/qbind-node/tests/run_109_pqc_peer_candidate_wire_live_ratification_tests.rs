@@ -370,6 +370,7 @@ fn dispatcher(
             propagation,
             propagation_sender,
             live_ratification,
+            authority_marker_path: None,
         },
         metrics,
     )

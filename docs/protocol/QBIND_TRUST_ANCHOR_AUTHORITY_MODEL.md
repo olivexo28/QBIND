@@ -1624,3 +1624,20 @@ The evidence proves on real `target/release/qbind-node` binaries:
 The startup surface (Run 120) is implicitly proven by scenario 7: the SIGHUP evidence shows the marker was written at startup by Run 120 (with `last_update_source: "startup-load"`) before the SIGHUP handler was installed, confirming the startup marker write path works on a real release binary.
 
 The "authority anti-rollback persistence" C4 sub-item status: **OPEN, all three mutating surfaces wired (Run 119/120/121) and release-binary evidence captured (Run 122)**. Remaining items: restore-side conflict enforcement, `--allow-authority-state-reset` operator-recovery flag, `BundleSigningRatification` v2 per-key monotonic field, signing-key rotation/revocation lifecycle, peer-driven live apply (intentionally non-mutating), KMS/HSM custody, governance, validator-set rotation, full C4 closure, C5 closure. Run 122 explicitly does NOT mark resolved any of these remaining items. No production source change, no test change, no metric change, no wire format change.
+### Run 123 update — validation-only authority marker conflict checks
+
+Run 123 extends the authority anti-rollback marker system to the three **validation-only** surfaces that never persist marker state:
+
+| Surface | Marker check wired | On conflict | On no marker | Persists? |
+|---------|-------------------|-------------|--------------|-----------|
+| `--p2p-trust-bundle-reload-check` (Run 069/106) | After ratification, before success exit | `exit(1)` | Pass (first-seen) | Never |
+| `--p2p-trust-bundle-peer-candidate-check` (Run 077/107) | After ratification, before success exit | `exit(1)` | Pass (first-seen) | Never |
+| Live inbound `0x05` (Run 109) | After ratification, before propagation eligibility | `Rejected(MarkerConflict)` — propagation suppressed | Pass (first-seen) | Never |
+
+The shared helper `verify_marker_for_validation_only(...)` composes `derive_authority_state_from_ratification` + `prepare_marker_for_acceptance` (single source of truth with the mutating-surface helpers from Run 119) but calls no disk-write function.
+
+Missing-marker policy: validation-only surfaces pass when no persisted marker exists. This is safe because (a) the candidate is already fully ratified by Run 103/105, (b) no trust mutation occurs from a validation-only surface, and (c) the next mutating surface will write the marker.
+
+The per-key monotonic ratification schema bump is future work (Run 125+, not Run 122 as previously referenced).
+
+The "authority anti-rollback persistence" C4 sub-item status: **OPEN, all three mutating surfaces wired and evidenced (Runs 119/120/121/122), all three validation-only surfaces wired (Run 123)**. Remaining items: restore-side conflict enforcement, `--allow-authority-state-reset` operator-recovery flag, per-key monotonic field schema bump (Run 125+), signing-key rotation/revocation lifecycle, peer-driven live apply, KMS/HSM custody, governance, validator-set rotation, full C4 closure, C5 closure.

@@ -541,6 +541,349 @@ pub fn persist_accepted_marker_after_commit_boundary(
 }
 
 // =============================================================================
+// Run 123 — validation-only authority marker conflict check helper
+// =============================================================================
+
+/// Run 123 — typed error returned by [`verify_marker_for_validation_only`].
+/// Every variant is a fail-closed condition; a validation-only surface MUST
+/// reject the candidate trust bundle / peer-candidate envelope when any
+/// variant is returned.
+///
+/// This enum is deliberately a superset of the reject reasons
+/// [`MutatingSurfaceMarkerError`] can produce, minus the persist-failure
+/// variant (validation-only paths never persist). It shares the same precision
+/// guarantee: the binary surface can emit a single operator-facing log line
+/// that names the exact reason.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidationOnlyMarkerError {
+    /// Derivation refused — the verifier output was passed in inconsistently
+    /// or the derived record failed Run 117 structural validation.
+    DerivationFailed(AuthorityStateDerivationError),
+
+    /// `load_authority_state` returned a fatal I/O / parse / unsupported-
+    /// version / structural error on the on-disk record. The marker is
+    /// unusable and MUST NOT be silently deleted or overwritten.
+    LoadOrCorruption(AuthorityStateError),
+
+    /// The on-disk marker is structurally valid but belongs to a different
+    /// `(environment, chain_id, genesis_hash)` trust domain.
+    PersistedDomainMismatch(AuthorityStateComparison),
+
+    /// Authority-policy schema regression.
+    PolicyVersionRegression {
+        persisted_policy_version: u32,
+        candidate_policy_version: u32,
+    },
+
+    /// Persisted `authority_sequence` is strictly higher than candidate's.
+    AuthoritySequenceRollback {
+        persisted_sequence: u64,
+        attempted_sequence: u64,
+    },
+
+    /// Equal `authority_sequence` but different `ratification_object_hash`.
+    SameSequenceConflictingRatificationDigest {
+        sequence: u64,
+        persisted_hash: String,
+        attempted_hash: String,
+    },
+
+    /// Equal `authority_sequence`, equal authority root, but different
+    /// `ratified_bundle_signing_key_fingerprint`.
+    SameSequenceConflictingKey {
+        sequence: u64,
+        persisted_key_fingerprint: String,
+        attempted_key_fingerprint: String,
+    },
+
+    /// Catch-all for any other reject variant.
+    Conflict(AuthorityStateComparison),
+}
+
+impl std::fmt::Display for ValidationOnlyMarkerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DerivationFailed(e) => write!(
+                f,
+                "Run 123: validation-only authority-marker derivation refused: {} \
+                 (fail closed; candidate rejected; no marker persistence)",
+                e
+            ),
+            Self::LoadOrCorruption(e) => write!(
+                f,
+                "Run 123: persisted authority-marker load/corruption: {} \
+                 (fail closed; candidate rejected; no marker persistence; \
+                 this helper does NOT auto-recover corrupt markers)",
+                e
+            ),
+            Self::PersistedDomainMismatch(c) => write!(
+                f,
+                "Run 123: persisted authority-marker belongs to a different trust domain: \
+                 {} (fail closed; candidate rejected; no marker persistence; \
+                 wrong-data-dir / wrong-snapshot-copy)",
+                c
+            ),
+            Self::PolicyVersionRegression {
+                persisted_policy_version,
+                candidate_policy_version,
+            } => write!(
+                f,
+                "Run 123: authority-marker policy-version regression rejected: persisted={} \
+                 candidate={} (fail closed; no marker persistence)",
+                persisted_policy_version, candidate_policy_version
+            ),
+            Self::AuthoritySequenceRollback {
+                persisted_sequence,
+                attempted_sequence,
+            } => write!(
+                f,
+                "Run 123: authority-marker rollback rejected: attempted authority_sequence={} \
+                 is lower than persisted authority_sequence={} \
+                 (fail closed; no marker persistence)",
+                attempted_sequence, persisted_sequence
+            ),
+            Self::SameSequenceConflictingRatificationDigest {
+                sequence,
+                persisted_hash,
+                attempted_hash,
+            } => write!(
+                f,
+                "Run 123: authority-marker same-sequence equivocation rejected: \
+                 authority_sequence={} persisted_ratification_hash={} \
+                 attempted_ratification_hash={} \
+                 (fail closed; no marker persistence)",
+                sequence, persisted_hash, attempted_hash
+            ),
+            Self::SameSequenceConflictingKey {
+                sequence,
+                persisted_key_fingerprint,
+                attempted_key_fingerprint,
+            } => write!(
+                f,
+                "Run 123: authority-marker same-sequence key conflict rejected: \
+                 authority_sequence={} persisted_key_fingerprint={} \
+                 attempted_key_fingerprint={} (fail closed; no marker persistence)",
+                sequence, persisted_key_fingerprint, attempted_key_fingerprint
+            ),
+            Self::Conflict(c) => write!(
+                f,
+                "Run 123: authority-marker comparison rejected: {} \
+                 (fail closed; no marker persistence)",
+                c
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ValidationOnlyMarkerError {}
+
+/// Run 123 — typed outcome of [`verify_marker_for_validation_only`] on
+/// the accept path. Distinguishes the reason validation passed so
+/// operator log lines are precise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ValidationOnlyMarkerAcceptReason {
+    /// No persisted marker exists yet. The candidate is otherwise fully
+    /// ratified; the validation-only surface allows it through because
+    /// it cannot be expected to reject a valid candidate before any
+    /// mutating surface has ever run. **No marker is written.**
+    ///
+    /// Policy decision (Run 123): missing local marker on a validation-
+    /// only surface is treated as "first-seen pass" — the candidate
+    /// cannot be compared against something that does not exist, and
+    /// rejecting every candidate before the first mutating surface run
+    /// would make operator workflows impossible. This is safe because:
+    /// (a) the candidate is already fully ratified by Run 103/105;
+    /// (b) no trust mutation occurs from a validation-only surface; and
+    /// (c) the next mutating surface will write the marker and future
+    /// validation-only checks will compare against it.
+    NoPersistedMarkerYet,
+
+    /// The derived candidate marker is identical to the persisted marker
+    /// (ignoring audit-only fields). Safe to accept.
+    Idempotent,
+
+    /// The candidate's `authority_sequence` is strictly higher than the
+    /// persisted marker. This represents a legitimate upgrade that a
+    /// future mutating surface will persist. Validation passes.
+    UpgradeCompatible {
+        previous_sequence: u64,
+        new_sequence: u64,
+    },
+}
+
+impl std::fmt::Display for ValidationOnlyMarkerAcceptReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoPersistedMarkerYet => write!(
+                f,
+                "no-persisted-marker-yet (first-seen pass; no marker persistence)"
+            ),
+            Self::Idempotent => write!(f, "idempotent (same marker; no marker persistence)"),
+            Self::UpgradeCompatible {
+                previous_sequence,
+                new_sequence,
+            } => write!(
+                f,
+                "upgrade-compatible {} -> {} (no marker persistence)",
+                previous_sequence, new_sequence
+            ),
+        }
+    }
+}
+
+/// Inputs to [`verify_marker_for_validation_only`]. Same shape as
+/// [`MarkerAcceptanceInputs`] minus the `update_source` and
+/// `updated_at_unix_secs` fields (which are audit-only and only
+/// meaningful for persisting surfaces).
+#[derive(Debug, Clone)]
+pub struct ValidationOnlyMarkerInputs<'a> {
+    /// `<data_dir>/pqc_authority_state.json`.
+    pub marker_path: &'a Path,
+    /// Runtime network environment.
+    pub runtime_env: NetworkEnvironment,
+    /// Runtime chain id.
+    pub runtime_chain_id: ChainId,
+    /// 64 lowercase hex chars of the canonical genesis hash.
+    pub runtime_genesis_hash_hex: &'a str,
+    /// Genesis-bound authority-policy version (Run 101).
+    pub authority_policy_version: u32,
+    /// Genesis-bound authority sequence anchor (Run 101).
+    pub authority_sequence: u64,
+    /// Optional genesis-bound authority epoch (Run 101).
+    pub authority_epoch: Option<u64>,
+    /// The verified ratification object.
+    pub ratification: &'a BundleSigningRatification,
+    /// The verifier's typed result identifying the ratified key.
+    pub ratified: &'a RatifiedBundleSigningKey,
+}
+
+/// Run 123 — validation-only authority marker conflict check.
+///
+/// Composes:
+///
+/// 1. [`derive_authority_state_from_ratification`] — derive a candidate
+///    marker from the verified ratification.
+/// 2. [`prepare_marker_for_acceptance`] — load + domain-validate any
+///    persisted marker and compare against the candidate.
+/// 3. Map the outcome to a validation-only accept/reject result.
+///
+/// # Critical guarantees
+///
+/// - **Never persists marker.** There is no call to
+///   [`persist_authority_state_atomic`] or any other disk write in this
+///   function. The validation-only surface cannot advance the on-disk
+///   marker state under any code path.
+/// - **Fail-closed on conflict/corruption/wrong-domain.** Every
+///   non-accept comparison outcome is surfaced as a typed error.
+/// - **Missing marker → pass.** When no marker file exists, the
+///   candidate is otherwise fully ratified and the validation-only
+///   surface cannot be expected to reject it (see
+///   [`ValidationOnlyMarkerAcceptReason::NoPersistedMarkerYet`] docs).
+///
+/// # Ordering in validation-only surfaces
+///
+/// Callers MUST invoke this AFTER ratification verification succeeds
+/// and BEFORE emitting a validation-success verdict / granting
+/// rebroadcast eligibility.
+pub fn verify_marker_for_validation_only(
+    inputs: ValidationOnlyMarkerInputs<'_>,
+) -> Result<ValidationOnlyMarkerAcceptReason, ValidationOnlyMarkerError> {
+    // Step 1: derive candidate marker. Use a placeholder update_source
+    // and timestamp — they are excluded from the canonical digest and
+    // never persisted from this path.
+    let candidate = derive_authority_state_from_ratification(AuthorityStateDerivationInputs {
+        runtime_env: inputs.runtime_env,
+        runtime_chain_id: inputs.runtime_chain_id,
+        runtime_genesis_hash_hex: inputs.runtime_genesis_hash_hex,
+        authority_policy_version: inputs.authority_policy_version,
+        authority_sequence: inputs.authority_sequence,
+        authority_epoch: inputs.authority_epoch,
+        ratification: inputs.ratification,
+        ratified: inputs.ratified,
+        update_source: AuthorityStateUpdateSource::TestOrFixture,
+        updated_at_unix_secs: 0,
+    })
+    .map_err(ValidationOnlyMarkerError::DerivationFailed)?;
+
+    // Step 2 + 3: load + domain-validate + compare via the Run 118
+    // helper. Single source of truth.
+    let outcome = prepare_marker_for_acceptance(
+        inputs.marker_path,
+        &candidate,
+        inputs.runtime_env,
+        inputs.runtime_chain_id,
+        inputs.runtime_genesis_hash_hex,
+    );
+
+    match outcome {
+        AuthorityStatePrepareOutcome::FirstWrite => {
+            Ok(ValidationOnlyMarkerAcceptReason::NoPersistedMarkerYet)
+        }
+        AuthorityStatePrepareOutcome::AlreadyPersistedIdempotent => {
+            Ok(ValidationOnlyMarkerAcceptReason::Idempotent)
+        }
+        AuthorityStatePrepareOutcome::Upgrade {
+            previous_sequence,
+            new_sequence,
+        } => Ok(ValidationOnlyMarkerAcceptReason::UpgradeCompatible {
+            previous_sequence,
+            new_sequence,
+        }),
+        AuthorityStatePrepareOutcome::LoadFailedFailClosed(e) => {
+            Err(ValidationOnlyMarkerError::LoadOrCorruption(e))
+        }
+        AuthorityStatePrepareOutcome::PersistedDomainMismatch(c) => {
+            Err(ValidationOnlyMarkerError::PersistedDomainMismatch(c))
+        }
+        AuthorityStatePrepareOutcome::ConflictReject(c) => {
+            Err(map_conflict_to_validation_only_error(c))
+        }
+    }
+}
+
+/// Map a [`AuthorityStateComparison`] reject variant into the most
+/// precise [`ValidationOnlyMarkerError`] available.
+fn map_conflict_to_validation_only_error(
+    c: AuthorityStateComparison,
+) -> ValidationOnlyMarkerError {
+    match c {
+        AuthorityStateComparison::RollbackRefused {
+            persisted_sequence,
+            attempted_sequence,
+        } => ValidationOnlyMarkerError::AuthoritySequenceRollback {
+            persisted_sequence,
+            attempted_sequence,
+        },
+        AuthorityStateComparison::SameSequenceConflictingHash {
+            sequence,
+            persisted_hash,
+            attempted_hash,
+        } => ValidationOnlyMarkerError::SameSequenceConflictingRatificationDigest {
+            sequence,
+            persisted_hash,
+            attempted_hash,
+        },
+        AuthorityStateComparison::SameSequenceConflictingKey {
+            sequence,
+            persisted_key_fingerprint,
+            attempted_key_fingerprint,
+        } => ValidationOnlyMarkerError::SameSequenceConflictingKey {
+            sequence,
+            persisted_key_fingerprint,
+            attempted_key_fingerprint,
+        },
+        AuthorityStateComparison::PolicyVersionRegression {
+            persisted_policy_version,
+            candidate_policy_version,
+        } => ValidationOnlyMarkerError::PolicyVersionRegression {
+            persisted_policy_version,
+            candidate_policy_version,
+        },
+        other => ValidationOnlyMarkerError::Conflict(other),
+    }
+}
+
+// =============================================================================
 // Unit tests — §A from task/RUN_119_TASK.txt
 // =============================================================================
 
@@ -1425,5 +1768,278 @@ mod tests {
             !marker_path.exists(),
             "dropped Run 120 decision must NOT persist the marker"
         );
+    }
+
+    // =========================================================================
+    // Run 123 — validation-only marker check tests
+    // =========================================================================
+
+    fn validation_only_inputs<'a>(
+        marker_path: &'a Path,
+        gh_hex: &'a str,
+        ratification: &'a BundleSigningRatification,
+        ratified: &'a RatifiedBundleSigningKey,
+    ) -> super::ValidationOnlyMarkerInputs<'a> {
+        super::ValidationOnlyMarkerInputs {
+            marker_path,
+            runtime_env: NetworkEnvironment::Devnet,
+            runtime_chain_id: chain_id_42(),
+            runtime_genesis_hash_hex: gh_hex,
+            authority_policy_version: 1,
+            authority_sequence: 5,
+            authority_epoch: Some(2),
+            ratification,
+            ratified,
+        }
+    }
+
+    #[test]
+    fn run123_no_persisted_marker_passes_validation_only() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        let result = super::verify_marker_for_validation_only(validation_only_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ));
+        assert!(result.is_ok());
+        assert!(matches!(
+            result.unwrap(),
+            super::ValidationOnlyMarkerAcceptReason::NoPersistedMarkerYet
+        ));
+        // Critical: marker file was NOT created.
+        assert!(
+            !marker_path.exists(),
+            "validation-only helper must NEVER persist marker"
+        );
+    }
+
+    #[test]
+    fn run123_idempotent_marker_passes_validation_only() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Pre-persist a matching marker via the mutating-surface helper.
+        let decision =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+        assert!(marker_path.exists());
+
+        // Now the validation-only check should see idempotent.
+        let result = super::verify_marker_for_validation_only(validation_only_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ));
+        assert!(result.is_ok());
+        assert!(matches!(
+            result.unwrap(),
+            super::ValidationOnlyMarkerAcceptReason::Idempotent
+        ));
+    }
+
+    #[test]
+    fn run123_upgrade_compatible_passes_validation_only() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Pre-persist a marker at authority_sequence=5.
+        let decision =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+
+        // Now check with authority_sequence=6 (upgrade).
+        let mut inputs = validation_only_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        inputs.authority_sequence = 6;
+        let result = super::verify_marker_for_validation_only(inputs);
+        assert!(result.is_ok());
+        match result.unwrap() {
+            super::ValidationOnlyMarkerAcceptReason::UpgradeCompatible {
+                previous_sequence,
+                new_sequence,
+            } => {
+                assert_eq!(previous_sequence, 5);
+                assert_eq!(new_sequence, 6);
+            }
+            other => panic!("expected UpgradeCompatible, got {:?}", other),
+        }
+        // Marker unchanged on disk.
+        let persisted = load_authority_state(&marker_path).unwrap().unwrap();
+        assert_eq!(persisted.authority_sequence, 5);
+    }
+
+    #[test]
+    fn run123_rollback_rejected_by_validation_only() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Pre-persist a marker at authority_sequence=5.
+        let decision =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+
+        // Now check with authority_sequence=3 (rollback).
+        let mut inputs = validation_only_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        inputs.authority_sequence = 3;
+        let result = super::verify_marker_for_validation_only(inputs);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            super::ValidationOnlyMarkerError::AuthoritySequenceRollback {
+                persisted_sequence,
+                attempted_sequence,
+            } => {
+                assert_eq!(persisted_sequence, 5);
+                assert_eq!(attempted_sequence, 3);
+            }
+            other => panic!("expected AuthoritySequenceRollback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn run123_corrupt_marker_rejected_by_validation_only() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Write corrupt data to the marker file.
+        std::fs::write(&marker_path, b"not valid json").unwrap();
+
+        let result = super::verify_marker_for_validation_only(validation_only_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            super::ValidationOnlyMarkerError::LoadOrCorruption(_)
+        ));
+        // Corrupt marker NOT overwritten.
+        let content = std::fs::read_to_string(&marker_path).unwrap();
+        assert_eq!(content, "not valid json");
+    }
+
+    #[test]
+    fn run123_wrong_domain_rejected_by_validation_only() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Pre-persist a marker at the correct domain.
+        let decision =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+
+        // Now check with a DIFFERENT genesis hash (wrong data-dir).
+        let wrong_gh_hex = "ff".repeat(32);
+        let wrong_gh = [0xff; 32];
+        let wrong_ratification = sample_ratification(
+            RatificationEnvironment::Devnet,
+            &chain_id_hex_42(),
+            wrong_gh,
+            0x01,
+        );
+        let wrong_ratified = ratified_from(&wrong_ratification);
+        let inputs = super::ValidationOnlyMarkerInputs {
+            marker_path: &marker_path,
+            runtime_env: NetworkEnvironment::Devnet,
+            runtime_chain_id: chain_id_42(),
+            runtime_genesis_hash_hex: &wrong_gh_hex,
+            authority_policy_version: 1,
+            authority_sequence: 5,
+            authority_epoch: Some(2),
+            ratification: &wrong_ratification,
+            ratified: &wrong_ratified,
+        };
+        let result = super::verify_marker_for_validation_only(inputs);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            super::ValidationOnlyMarkerError::PersistedDomainMismatch(_)
+        ));
+    }
+
+    #[test]
+    fn run123_same_sequence_conflicting_hash_rejected() {
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Pre-persist a marker at authority_sequence=5.
+        let decision =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+
+        // Build a ratification with the SAME authority_sequence but a
+        // DIFFERENT signing key (produces a different canonical digest).
+        let gh = {
+            let mut b = [0u8; 32];
+            for (i, v) in b.iter_mut().enumerate() {
+                *v = (i as u8).wrapping_mul(7);
+            }
+            b
+        };
+        let different_ratification = sample_ratification(
+            RatificationEnvironment::Devnet,
+            &chain_id_hex_42(),
+            gh,
+            0x02, // different signing key byte
+        );
+        let different_ratified = ratified_from(&different_ratification);
+        let inputs = super::ValidationOnlyMarkerInputs {
+            marker_path: &marker_path,
+            runtime_env: NetworkEnvironment::Devnet,
+            runtime_chain_id: chain_id_42(),
+            runtime_genesis_hash_hex: &gh_hex,
+            authority_policy_version: 1,
+            authority_sequence: 5,
+            authority_epoch: Some(2),
+            ratification: &different_ratification,
+            ratified: &different_ratified,
+        };
+        let result = super::verify_marker_for_validation_only(inputs);
+        assert!(result.is_err());
+        // Either SameSequenceConflictingRatificationDigest or
+        // SameSequenceConflictingKey depending on which Run 117
+        // comparator fires first.
+        let err = result.unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                super::ValidationOnlyMarkerError::SameSequenceConflictingRatificationDigest { .. }
+                    | super::ValidationOnlyMarkerError::SameSequenceConflictingKey { .. }
+            ),
+            "expected equivocation rejection, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn run123_validation_only_never_persists_on_any_outcome() {
+        // Verify that across accept, reject, and upgrade outcomes the
+        // marker file content is NEVER changed by the validation-only
+        // helper.
+        let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
+        // Pre-persist a marker at authority_sequence=5.
+        let decision =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
+        persist_accepted_marker_after_commit_boundary(&decision).expect("persist ok");
+        let original_bytes = std::fs::read(&marker_path).unwrap();
+
+        // Idempotent check — file untouched.
+        let _ = super::verify_marker_for_validation_only(validation_only_inputs(
+            &marker_path,
+            &gh_hex,
+            &ratification,
+            &ratified,
+        ));
+        assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
+
+        // Upgrade check — file still untouched.
+        let mut upgrade_inputs =
+            validation_only_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        upgrade_inputs.authority_sequence = 10;
+        let _ = super::verify_marker_for_validation_only(upgrade_inputs);
+        assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
+
+        // Rollback check — file still untouched.
+        let mut rollback_inputs =
+            validation_only_inputs(&marker_path, &gh_hex, &ratification, &ratified);
+        rollback_inputs.authority_sequence = 1;
+        let _ = super::verify_marker_for_validation_only(rollback_inputs);
+        assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
     }
 }

@@ -3821,3 +3821,36 @@ Run 122 closes the release-binary evidence gap that Runs 119, 120, and 121 each 
 
 
 Run 121 does **not** change peer-driven live apply (Run 109 contract preserved bit-for-bit; the marker helpers are not invoked from any peer-driven path), signing-key rotation lifecycle, signing-key revocation lifecycle, KMS/HSM custody, governance, validator-set rotation, or fast-sync / consensus-storage-restore ratification parity (the Run 117 `AuthorityStateSnapshotMeta` carrier is present but no restore-side conflict check consumes it yet).
+---
+
+## Run 123 — Validation-Only Authority Marker Conflict Checks
+
+**What Run 123 adds:**
+
+Run 123 extends the authority anti-rollback marker checks to the three validation-only surfaces that never persist marker state. These surfaces now reject candidates that conflict with the persisted authority marker, providing defense-in-depth against rollback attacks even on non-mutating paths.
+
+**Surfaces wired in Run 123:**
+
+| Surface | Operator impact on marker conflict | Operator impact on no prior marker |
+|---------|-----------------------------------|-----------------------------------|
+| `--p2p-trust-bundle-reload-check` | Exit code 1; log message identifies marker conflict | No change (pass) |
+| `--p2p-trust-bundle-peer-candidate-check` | Exit code 1; log message identifies marker conflict | No change (pass) |
+| Live inbound `0x05` peer-candidate | Frame rejected; propagation suppressed; `peer_candidate_rejected_total` incremented | No change (pass; propagation eligible as before) |
+
+**Operator notes:**
+
+- No new CLI flags. The marker check activates automatically when the ratification gate is invoked (MainNet/TestNet by default, DevNet opt-in) AND `--data-dir` is configured.
+- A missing marker file (no prior mutating-surface run) does NOT block validation. The marker is only compared if it exists.
+- A corrupt or wrong-domain marker always fail-closes (same behavior as mutating surfaces from Runs 119–121).
+- The marker file is NEVER written by validation-only surfaces. Only startup (Run 120), reload-apply (Run 119), and SIGHUP (Run 121) persist markers.
+- If a reload-check or peer-candidate-check fails with a marker conflict, the operator should investigate whether the `--data-dir` state directory was copied from a different trust domain or was tampered with.
+
+**What is explicitly NOT changed by Run 123:**
+
+- Mutating-surface marker behavior (Runs 119/120/121) — unchanged.
+- Snapshot/restore conflict enforcement — future run.
+- `--allow-authority-state-reset` operator recovery — future run.
+- Per-key monotonic field schema bump — future run (Run 125+).
+- No new wire format changes.
+- No new persistence format changes.
+- No signing-key rotation/revocation lifecycle.

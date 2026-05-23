@@ -991,6 +991,9 @@ pub struct LivePeerCandidateWireDispatcher {
     /// `None` preserves the pre-Run-109 unguarded path used by older
     /// tests and DevNet operators who have not yet wired ratification.
     live_ratification: Option<LiveRatificationConfig>,
+    /// Run 123 — optional authority-marker file path for validation-only
+    /// conflict checks. See [`LivePeerCandidateWireDispatcherConfig::authority_marker_path`].
+    authority_marker_path: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
@@ -1017,6 +1020,10 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
             .field(
                 "ratification_gate_invoked",
                 &self.ratification_gate_is_invoked(),
+            )
+            .field(
+                "authority_marker_path",
+                &self.authority_marker_path,
             )
             .finish()
     }
@@ -1092,6 +1099,15 @@ pub struct LivePeerCandidateWireDispatcherConfig {
     /// material lives in the operator-supplied genesis file, not in
     /// the dispatcher itself.
     pub live_ratification: Option<LiveRatificationConfig>,
+    /// Run 123 — optional authority-marker file path for validation-only
+    /// conflict checks on live inbound `0x05` frames. When `Some`, the
+    /// dispatcher performs a marker compare AFTER ratification-aware
+    /// validation succeeds and BEFORE propagation eligibility. On
+    /// conflict/corruption/wrong-domain, the frame outcome is changed
+    /// to `Rejected` and propagation is suppressed. The marker file is
+    /// **never** written by the dispatcher (validation-only contract).
+    /// When `None`, no marker check is performed (pre-Run-123 behavior).
+    pub authority_marker_path: Option<PathBuf>,
 }
 
 /// Run 109 — owned ratification context for live inbound
@@ -1207,10 +1223,9 @@ impl LivePeerCandidateWireDispatcher {
             metrics,
             clock_ms_fn,
             live_ratification: config.live_ratification,
+            authority_marker_path: config.authority_marker_path,
         }
     }
-
-    /// `true` iff the wrapped receiver is armed.
     pub fn is_enabled(&self) -> bool {
         self.receiver.lock().is_enabled()
     }
@@ -1345,8 +1360,153 @@ impl LivePeerCandidateWireDispatcher {
             _ => receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref()),
         };
         drop(receiver);
+
+        // Run 123 — validation-only authority marker conflict check for live
+        // inbound `0x05` frames. Runs AFTER ratification-aware validation
+        // succeeds, BEFORE propagation eligibility. On marker conflict/
+        // corruption/wrong-domain, changes the outcome to Rejected so
+        // `maybe_propagate_after_validation` observes a non-Validated outcome
+        // and suppresses rebroadcast. The marker file is NEVER written.
+        let outcome = self.maybe_reject_on_marker_conflict(outcome);
+
         self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
         outcome
+    }
+
+    /// Run 123 — if the inner validation returned `Validated` and we have
+    /// both a ratification context (for marker derivation) and a marker
+    /// path (for the on-disk compare), perform the validation-only marker
+    /// conflict check. On conflict/corruption/wrong-domain, change the
+    /// outcome to `Rejected` with a synthetic `ReloadCheckError`-shaped
+    /// rejection so the propagation gate observes a non-validated outcome
+    /// and suppresses rebroadcast automatically.
+    ///
+    /// Never persists marker. Never touches live trust state.
+    fn maybe_reject_on_marker_conflict(
+        &self,
+        outcome: PeerCandidateWireOutcome,
+    ) -> PeerCandidateWireOutcome {
+        // Only relevant if the validation produced a Validated result.
+        let is_validated = matches!(
+            &outcome,
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Validated(_))
+        );
+        if !is_validated {
+            return outcome;
+        }
+
+        // Must have both marker_path and live_ratification to derive a
+        // candidate marker.
+        let marker_path = match self.authority_marker_path.as_ref() {
+            Some(p) => p,
+            None => return outcome,
+        };
+        let rc = match self.live_ratification.as_ref() {
+            Some(rc) if rc.gate_decision.should_invoke() => rc,
+            _ => return outcome,
+        };
+
+        // Compute genesis hash hex from the owned ratification context.
+        let mut runtime_genesis_hash_hex = String::with_capacity(64);
+        for b in rc.expected_genesis_hash {
+            use std::fmt::Write;
+            let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+        }
+
+        // The ratification context carries the ratification object and
+        // authority — derive the ratified key by re-running enforcement.
+        // This is cheap (pure computation, no I/O except the marker file
+        // read) and matches the pattern used by the reload-check and
+        // peer-candidate-check binary paths.
+        let ratification = match rc.ratification.as_ref() {
+            Some(r) => r,
+            None => return outcome,
+        };
+
+        // We need the candidate's signing public key from the validated
+        // outcome to run the enforcer. However, the validated result
+        // carries only the fingerprint, not the raw bytes. We re-use
+        // the signing_keys set to look up the pk by fingerprint.
+        // Actually — the enforcer needs the candidate's public key bytes
+        // which the signing_keys set already has indexed by key_id.
+        // But we don't have the signing_key_id from the validated outcome.
+        // The simpler path: just use the ratification context's own
+        // key material directly. The ratification was already verified
+        // by the inner pipeline; we trust it carried the correct key.
+        // We can derive the marker from the ratification alone.
+
+        // Derive candidate marker from the already-verified ratification.
+        // The `bundle_signing_public_key` in the ratification is the key
+        // that was ratified; we need a RatifiedBundleSigningKey from
+        // enforce_bundle_signing_key_ratification. Let's call the enforcer.
+        use qbind_ledger::{
+            enforce_bundle_signing_key_ratification, RatificationEnforcementInputs,
+            RatificationEnforcementOutcome,
+        };
+        use crate::pqc_authority_marker_acceptance::{
+            verify_marker_for_validation_only, ValidationOnlyMarkerInputs,
+        };
+
+        let signing_pk = &ratification.bundle_signing_public_key;
+        let enforcer_result = enforce_bundle_signing_key_ratification(
+            RatificationEnforcementInputs {
+                ratification: Some(ratification),
+                authority: &rc.authority,
+                expected_chain_id: &rc.expected_chain_id_str,
+                expected_environment: rc.expected_environment_policy,
+                expected_genesis_hash: &rc.expected_genesis_hash,
+                candidate_bundle_signing_public_key: signing_pk,
+                policy: rc.policy,
+            },
+        );
+        let ratified = match enforcer_result {
+            Ok(RatificationEnforcementOutcome::Ratified(rk)) => rk,
+            _ => return outcome, // Skip if not ratified (legacy path, etc.)
+        };
+
+        let marker_result = verify_marker_for_validation_only(ValidationOnlyMarkerInputs {
+            marker_path,
+            runtime_env: self.expected_environment,
+            runtime_chain_id: self.expected_chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            authority_policy_version: rc.authority.authority_policy_version,
+            authority_sequence: rc.authority.authority_sequence,
+            authority_epoch: rc.authority.authority_epoch,
+            ratification,
+            ratified: &ratified,
+        });
+
+        match marker_result {
+            Ok(reason) => {
+                eprintln!(
+                    "[run-123] live 0x05 authority-marker check passed: {} \
+                     (validation-only; no marker persistence; no trust mutation; \
+                     propagation eligibility preserved).",
+                    reason
+                );
+                outcome
+            }
+            Err(marker_err) => {
+                eprintln!(
+                    "[binary] Run 123: live 0x05 authority-marker conflict rejected: {} \
+                     (validation-only; no marker persistence; no trust mutation; \
+                     propagation suppressed; NOT applied; sessions untouched).",
+                    marker_err
+                );
+                self.metrics.record_peer_candidate_rejected();
+                // Convert to a Rejected outcome so downstream propagation
+                // and log lines see a non-validated state.
+                PeerCandidateWireOutcome::ValidatorRan(
+                    PeerCandidateOutcome::Rejected(
+                        crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                            crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(
+                                format!("{}", marker_err)
+                            ),
+                        ),
+                    ),
+                )
+            }
+        }
     }
 
     fn maybe_propagate_after_validation(
@@ -2313,6 +2473,7 @@ mod tests {
             propagation: PeerCandidatePropagationConfig::default(),
             propagation_sender: None,
             live_ratification: None,
+            authority_marker_path: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(!disp.is_enabled());
@@ -2354,6 +2515,7 @@ mod tests {
             propagation: PeerCandidatePropagationConfig::default(),
             propagation_sender: None,
             live_ratification: None,
+            authority_marker_path: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(disp.is_enabled());
@@ -2404,6 +2566,7 @@ mod tests {
             propagation: PeerCandidatePropagationConfig::default(),
             propagation_sender: None,
             live_ratification: None,
+            authority_marker_path: None,
         };
         let disp = LivePeerCandidateWireDispatcher::with_clock(
             cfg,

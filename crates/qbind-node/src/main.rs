@@ -889,6 +889,180 @@ fn hex_nibble(b: u8) -> Option<u8> {
     }
 }
 
+/// Run 123 — validation-only authority marker conflict check for surfaces
+/// that never persist marker state (reload-check, peer-candidate-check,
+/// live inbound `0x05`).
+///
+/// Composes:
+/// 1. Re-load the candidate bundle to get the signing-key id.
+/// 2. Re-run the Run 105 `enforce_bundle_signing_key_ratification` to
+///    obtain a verified `RatifiedBundleSigningKey`.
+/// 3. Call [`qbind_node::pqc_authority_marker_acceptance::verify_marker_for_validation_only`]
+///    to derive a candidate marker and compare against the persisted marker.
+///
+/// # Returns
+///
+/// * `Ok(None)` — check is not applicable (no data-dir, DevNet-unsigned,
+///   LegacyUnratifiedAccepted, or pre-load failure); validation may proceed.
+/// * `Ok(Some(reason))` — marker check passed; validation may proceed.
+/// * `Err(reason)` — marker conflict/corruption/wrong-domain; the surface
+///   MUST reject the candidate.
+///
+/// # Critical guarantee: never persists marker.
+#[allow(clippy::too_many_arguments)]
+fn preflight_run_123_validation_only_marker_check(
+    candidate_path: &std::path::Path,
+    runtime_env: qbind_types::NetworkEnvironment,
+    runtime_chain_id: qbind_types::ChainId,
+    validation_time_secs: u64,
+    bundle_signing_keys: &qbind_node::pqc_trust_bundle::BundleSigningKeySet,
+    ctx_data: &Run105ReloadCheckContextData,
+    data_dir: Option<&std::path::Path>,
+) -> Result<
+    Option<qbind_node::pqc_authority_marker_acceptance::ValidationOnlyMarkerAcceptReason>,
+    qbind_node::pqc_authority_marker_acceptance::ValidationOnlyMarkerError,
+> {
+    use qbind_ledger::{
+        enforce_bundle_signing_key_ratification, RatificationEnforcementInputs,
+        RatificationEnforcementOutcome,
+    };
+    use qbind_node::pqc_authority_marker_acceptance::{
+        verify_marker_for_validation_only, ValidationOnlyMarkerInputs,
+    };
+    use qbind_node::pqc_authority_state::authority_state_file_path;
+    use qbind_node::pqc_trust_bundle::{BundleSignatureStatus, TrustBundle};
+
+    let Some(data_dir) = data_dir else {
+        eprintln!(
+            "[run-123] validation-only authority-marker check skipped: --data-dir is unset \
+             (DevNet convenience only; MainNet/TestNet already require --data-dir)."
+        );
+        return Ok(None);
+    };
+
+    // Re-load the candidate to obtain signing-key identity.
+    let activation_ctx = qbind_node::pqc_trust_activation::ActivationContext {
+        current_height: None,
+        current_epoch: None,
+    };
+    let loaded = match TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        candidate_path,
+        runtime_env,
+        runtime_chain_id,
+        validation_time_secs,
+        bundle_signing_keys,
+        activation_ctx,
+    ) {
+        Ok((loaded, _activation)) => loaded,
+        Err(e) => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: candidate pre-load \
+                 returned {} (the validation pipeline will surface the precise load error).",
+                e
+            );
+            return Ok(None);
+        }
+    };
+
+    let signing_key_id_hex = match &loaded.signature_status {
+        BundleSignatureStatus::Verified { signing_key_id } => signing_key_id.clone(),
+        BundleSignatureStatus::Unsigned => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: candidate is \
+                 DevNet-unsigned (no signing key to anchor a marker on)."
+            );
+            return Ok(None);
+        }
+    };
+
+    let signing_key_id_bytes: [u8; 32] = match hex_decode_32(&signing_key_id_hex) {
+        Some(b) => b,
+        None => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: candidate \
+                 signing_key_id is not 64 lowercase hex chars (got {} chars).",
+                signing_key_id_hex.len()
+            );
+            return Ok(None);
+        }
+    };
+    let candidate_signing_pk_bytes = match bundle_signing_keys.lookup(&signing_key_id_bytes) {
+        Some(k) => k.pk_bytes.clone(),
+        None => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: candidate \
+                 signing_key_id {}... not in configured bundle signing keys.",
+                &signing_key_id_hex[..signing_key_id_hex.len().min(8)]
+            );
+            return Ok(None);
+        }
+    };
+
+    // Re-run the Run 105 enforcer to get the typed RatifiedBundleSigningKey.
+    let outcome = match enforce_bundle_signing_key_ratification(RatificationEnforcementInputs {
+        ratification: ctx_data.ratification.as_ref(),
+        authority: &ctx_data.authority,
+        expected_chain_id: &ctx_data.chain_id_str,
+        expected_environment: ctx_data.env_policy,
+        expected_genesis_hash: &ctx_data.canonical_hash,
+        candidate_bundle_signing_public_key: &candidate_signing_pk_bytes,
+        policy: ctx_data.policy,
+    }) {
+        Ok(o) => o,
+        Err(_e) => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: ratification \
+                 enforcement will fail in the validation pipeline (deferred to its typed error)."
+            );
+            return Ok(None);
+        }
+    };
+    let ratified = match outcome {
+        RatificationEnforcementOutcome::Ratified(rk) => rk,
+        RatificationEnforcementOutcome::LegacyUnratifiedAccepted { .. } => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: \
+                 LegacyUnratifiedAccepted (DevNet/TestNet legacy; no ratified key to \
+                 anchor a marker on)."
+            );
+            return Ok(None);
+        }
+    };
+    let ratification = match ctx_data.ratification.as_ref() {
+        Some(r) => r,
+        None => {
+            eprintln!(
+                "[run-123] validation-only authority-marker check skipped: ratification \
+                 context has no object (unreachable on Ratified branch)."
+            );
+            return Ok(None);
+        }
+    };
+
+    // Compute genesis hash hex (Run 117 format).
+    let mut runtime_genesis_hash_hex = String::with_capacity(64);
+    for b in ctx_data.canonical_hash {
+        use std::fmt::Write;
+        let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+    }
+
+    let marker_path = authority_state_file_path(data_dir);
+
+    let accept_reason = verify_marker_for_validation_only(ValidationOnlyMarkerInputs {
+        marker_path: &marker_path,
+        runtime_env,
+        runtime_chain_id,
+        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+        authority_policy_version: ctx_data.authority.authority_policy_version,
+        authority_sequence: ctx_data.authority.authority_sequence,
+        authority_epoch: ctx_data.authority.authority_epoch,
+        ratification,
+        ratified: &ratified,
+    })?;
+
+    Ok(Some(accept_reason))
+}
+
 /// Main entry point for qbind-node binary.
 #[tokio::main]
 async fn main() {
@@ -1286,24 +1460,27 @@ async fn main() {
             config.environment,
             args.p2p_trust_bundle_ratification_enforcement_enabled,
         );
-        let reload_check_result = if gate_decision.should_invoke() {
+        let (reload_check_result, reload_check_ctx_data) = if gate_decision.should_invoke() {
             eprintln!(
                 "[run-106] reload-check ratification gate INVOKED (policy={}, env={:?}).",
                 gate_decision.label(),
                 config.environment
             );
             match build_run_105_reload_check_context(&args, &config) {
-                Ok(ctx_data) => qbind_node::pqc_trust_reload::validate_candidate_bundle_with_ratification(
-                    inputs,
-                    &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
-                        authority: &ctx_data.authority,
-                        expected_genesis_hash: &ctx_data.canonical_hash,
-                        expected_environment_policy: ctx_data.env_policy,
-                        expected_chain_id_str: &ctx_data.chain_id_str,
-                        ratification: ctx_data.ratification.as_ref(),
-                        policy: ctx_data.policy,
-                    },
-                ),
+                Ok(ctx_data) => {
+                    let result = qbind_node::pqc_trust_reload::validate_candidate_bundle_with_ratification(
+                        inputs,
+                        &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
+                            authority: &ctx_data.authority,
+                            expected_genesis_hash: &ctx_data.canonical_hash,
+                            expected_environment_policy: ctx_data.env_policy,
+                            expected_chain_id_str: &ctx_data.chain_id_str,
+                            ratification: ctx_data.ratification.as_ref(),
+                            policy: ctx_data.policy,
+                        },
+                    );
+                    (result, Some(ctx_data))
+                }
                 Err(reason) => {
                     eprintln!(
                         "[run-105] Run 069 reload-check refused: ratification context could \
@@ -1325,10 +1502,46 @@ async fn main() {
                 gate_decision.label(),
                 config.environment
             );
-            qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs)
+            (qbind_node::pqc_trust_reload::validate_candidate_bundle(inputs), None)
         };
         match reload_check_result {
             Ok(candidate) => {
+                // Run 123 — validation-only authority marker conflict check.
+                // Runs AFTER ratification succeeds, BEFORE success exit.
+                // Never persists marker. Rejects conflict/corruption/wrong-domain.
+                if let Some(ref ctx_data) = reload_check_ctx_data {
+                    match preflight_run_123_validation_only_marker_check(
+                        candidate_path,
+                        config.environment,
+                        config.chain_id(),
+                        now_secs,
+                        &bundle_signing_keys,
+                        ctx_data,
+                        config.data_dir.as_deref(),
+                    ) {
+                        Ok(Some(reason)) => {
+                            eprintln!(
+                                "[run-123] reload-check authority-marker check passed: {} \
+                                 (validation-only; no marker persistence; no trust mutation).",
+                                reason
+                            );
+                        }
+                        Ok(None) => {
+                            // Check not applicable (DevNet-unsigned, etc.)
+                        }
+                        Err(marker_err) => {
+                            eprintln!(
+                                "[binary] Run 123: VERDICT=invalid (reload-check authority-marker \
+                                 conflict; no live trust apply; no sequence persistence write; \
+                                 no marker persistence; no peer/session mutation; no /metrics \
+                                 mutation). Candidate path={}. Reason: {}.",
+                                candidate_path.display(),
+                                marker_err
+                            );
+                            std::process::exit(1);
+                        }
+                    }
+                }
                 eprintln!("{}", candidate.staged_metadata_log_line());
                 eprintln!(
                     "[binary] Run 069: VERDICT=valid (validation-only; no live trust apply; \
@@ -1614,25 +1827,28 @@ async fn main() {
             config.environment,
             args.p2p_trust_bundle_ratification_enforcement_enabled,
         );
-        let run077_result = if gate_decision.should_invoke() {
+        let (run077_result, peer_check_ctx_data) = if gate_decision.should_invoke() {
             eprintln!(
                 "[run-107] peer-candidate-check ratification gate INVOKED (policy={}, env={:?}).",
                 gate_decision.label(),
                 config.environment
             );
             match build_run_105_reload_check_context(&args, &config) {
-                Ok(ctx_data) => run_local_check_with_ratification(
-                    inputs,
-                    &metrics,
-                    &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
-                        authority: &ctx_data.authority,
-                        expected_genesis_hash: &ctx_data.canonical_hash,
-                        expected_environment_policy: ctx_data.env_policy,
-                        expected_chain_id_str: &ctx_data.chain_id_str,
-                        ratification: ctx_data.ratification.as_ref(),
-                        policy: ctx_data.policy,
-                    },
-                ),
+                Ok(ctx_data) => {
+                    let result = run_local_check_with_ratification(
+                        inputs,
+                        &metrics,
+                        &qbind_node::pqc_trust_reload::RatificationEnforcementContext {
+                            authority: &ctx_data.authority,
+                            expected_genesis_hash: &ctx_data.canonical_hash,
+                            expected_environment_policy: ctx_data.env_policy,
+                            expected_chain_id_str: &ctx_data.chain_id_str,
+                            ratification: ctx_data.ratification.as_ref(),
+                            policy: ctx_data.policy,
+                        },
+                    );
+                    (result, Some(ctx_data))
+                }
                 Err(reason) => {
                     eprintln!(
                         "[run-107] Run 077 peer-candidate-check refused: ratification context \
@@ -1653,7 +1869,7 @@ async fn main() {
                 gate_decision.label(),
                 config.environment
             );
-            run_local_check(inputs, &metrics)
+            (run_local_check(inputs, &metrics), None)
         };
 
         match run077_result {
@@ -1668,6 +1884,48 @@ async fn main() {
             } => {
                 if let Some(line) = observed_log_line {
                     eprintln!("{}", line);
+                }
+                // Run 123 — validation-only authority marker conflict check
+                // for peer-candidate-check. Fires only on Validated outcome
+                // (ratification already passed). Never persists marker.
+                if matches!(
+                    outcome,
+                    qbind_node::pqc_trust_peer_candidate::PeerCandidateOutcome::Validated(_)
+                ) {
+                    if let Some(ref ctx_data) = peer_check_ctx_data {
+                        match preflight_run_123_validation_only_marker_check(
+                            envelope_path,
+                            config.environment,
+                            config.chain_id(),
+                            now_secs,
+                            &bundle_signing_keys,
+                            ctx_data,
+                            config.data_dir.as_deref(),
+                        ) {
+                            Ok(Some(reason)) => {
+                                eprintln!(
+                                    "[run-123] peer-candidate-check authority-marker check \
+                                     passed: {} (validation-only; no marker persistence; \
+                                     no trust mutation).",
+                                    reason
+                                );
+                            }
+                            Ok(None) => {
+                                // Check not applicable
+                            }
+                            Err(marker_err) => {
+                                eprintln!(
+                                    "[binary] Run 123: VERDICT=invalid (peer-candidate-check \
+                                     authority-marker conflict; no live trust apply; no sequence \
+                                     persistence write; no marker persistence; no peer/session \
+                                     mutation). Envelope path={}. Reason: {}.",
+                                    envelope_path.display(),
+                                    marker_err
+                                );
+                                std::process::exit(1);
+                            }
+                        }
+                    }
                 }
                 if !matches!(
                     outcome,
@@ -4362,6 +4620,37 @@ async fn run_p2p_node(
                                      the gate by default and never reach this branch.",
                                     gate_decision.label(),
                                     config.environment
+                                );
+                                None
+                            }
+                        },
+                        // Run 123 — validation-only authority marker path
+                        // for live inbound `0x05` conflict checks. Computed
+                        // from --data-dir + the Run 109 ratification gate
+                        // being invoked. When both are present, the
+                        // dispatcher performs a marker compare on every
+                        // Validated outcome BEFORE propagation. Never
+                        // persists marker.
+                        authority_marker_path: {
+                            let gate_decision =
+                                qbind_node::pqc_ratification_policy::ratification_gate_decision(
+                                    config.environment,
+                                    args.p2p_trust_bundle_ratification_enforcement_enabled,
+                                );
+                            if gate_decision.should_invoke() {
+                                config.data_dir.as_ref().map(|d| {
+                                    let p = qbind_node::pqc_authority_state::authority_state_file_path(d);
+                                    eprintln!(
+                                        "[run-123] live 0x05 authority-marker validation-only \
+                                         check ARMED (marker_path={}).",
+                                        p.display()
+                                    );
+                                    p
+                                })
+                            } else {
+                                eprintln!(
+                                    "[run-123] live 0x05 authority-marker check SKIPPED \
+                                     (ratification gate not invoked; DevNet legacy path)."
                                 );
                                 None
                             }

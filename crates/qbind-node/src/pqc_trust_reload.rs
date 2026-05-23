@@ -230,6 +230,11 @@ pub enum ReloadCheckError {
     /// surface that opts into enforcement. Live trust state, the
     /// on-disk sequence record, and all sessions are unchanged.
     RatificationRefused(RatificationEnforcementFailure),
+    /// Run 123 — the candidate bundle conflicts with the persisted
+    /// authority-state marker. The marker was NOT modified (validation-
+    /// only surface). No live trust mutation, no sequence write, no
+    /// session eviction, no propagation.
+    MarkerConflict(String),
 }
 
 impl std::fmt::Display for ReloadCheckError {
@@ -251,6 +256,11 @@ impl std::fmt::Display for ReloadCheckError {
                 f,
                 "candidate refused by Run 105 bundle-signing-key ratification enforcement: {}",
                 e
+            ),
+            Self::MarkerConflict(reason) => write!(
+                f,
+                "candidate refused by Run 123 authority-marker conflict check: {}",
+                reason
             ),
         }
     }
