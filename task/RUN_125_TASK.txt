@@ -1,0 +1,559 @@
+# RUN 125 — Release-Binary Evidence for Snapshot/Restore Authority Marker Conflict Enforcement
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into the release binary startup path and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle`.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement:
+  - `AuthorityStateSnapshotMeta` is checked against the local persisted authority marker before restore acceptance;
+  - conflicts reject before materializing restored state or writing the B3 restore audit marker;
+  - legacy snapshots still parse;
+  - no synthetic marker is invented from legacy snapshots;
+  - local marker is never deleted, rewritten, or repaired by restore;
+  - corrupt local marker fails closed;
+  - wrong-domain snapshot marker fails closed;
+  - matching snapshot marker restores;
+  - missing snapshot marker with existing local marker rejects;
+  - Run 097 epoch/snapshot behavior is preserved;
+  - no reset/recovery flag was added.
+
+Run 124 was positive for source + unit + integration scope. Release-binary restore evidence remains open.
+
+Run 125 is evidence-only.
+
+The goal is to prove Run 124 snapshot/restore authority marker enforcement on real release binaries before starting reset/recovery procedure design or ratification v2 monotonic schema work.
+
+---
+
+# Exact objective
+
+Produce release-binary evidence proving that snapshot restore cannot silently roll back, conflict with, erase, rewrite, or repair the locally persisted authority marker.
+
+Run 125 should prefer **no production runtime code changes**.
+
+Allowed changes are limited to:
+
+- release-binary evidence scripts;
+- evidence-only fixture/helper generation;
+- log/assertion helpers;
+- documentation/evidence updates;
+- narrow bug fixes if release-binary evidence exposes a real Run 124 defect.
+
+The objective is to prove on real `target/release/qbind-node` binaries:
+
+1. Legacy snapshot with no local authority marker restores successfully if policy allows.
+2. Legacy snapshot with an existing local marker rejects; it must not silently erase local authority state.
+3. Snapshot with matching authority marker restores successfully.
+4. Snapshot with conflicting authority marker rejects before restore materialization.
+5. Corrupt local authority marker rejects restore fail-closed.
+6. Wrong-domain snapshot marker rejects if feasible.
+7. Local marker bytes remain unchanged on every rejection.
+8. No B3 restore audit marker is written on rejected restore.
+9. Run 097 epoch/snapshot behavior remains intact.
+10. No reset/recovery flag is introduced.
+11. No fake authority sequence is introduced.
+12. No signing-key rotation/revocation, KMS/HSM, governance, or peer-driven live apply is introduced.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Release-binary snapshot/restore evidence harness
+
+Create or update a script such as:
+
+```text
+scripts/devnet/run_125_snapshot_restore_authority_marker_release_binary.sh
+```
+
+The harness should:
+
+- build or use `target/release/qbind-node`;
+- generate or reuse snapshots with and without `authority_state` metadata;
+- seed local authority marker records;
+- seed conflicting/corrupt authority marker records;
+- run release-binary restore scenarios;
+- capture stdout/stderr/exit codes/logs;
+- compare marker bytes before/after;
+- assert restore materialization or rejection;
+- archive all evidence deterministically.
+
+## B. Evidence helper updates
+
+Allowed only if needed:
+
+- helper for creating authority-state snapshot metadata;
+- helper for legacy snapshot metadata fixture;
+- helper for corrupt marker creation;
+- helper for conflicting marker creation;
+- helper for marker byte comparison;
+- helper for checking restore audit marker absence/presence.
+
+Helpers must remain evidence-only and must not become production bypasses.
+
+## C. Narrow bug fixes
+
+If release-binary evidence reveals a real defect in Run 124, fix it narrowly.
+
+Any bug fix must:
+
+- preserve Run 097 epoch/snapshot behavior;
+- preserve Run 117 marker fail-closed semantics;
+- preserve Run 124 no-mutation-on-rejected-restore behavior;
+- preserve legacy snapshot parsing compatibility;
+- add focused tests;
+- be documented honestly.
+
+## D. Documentation/evidence updates
+
+Required docs/evidence updates are listed below.
+
+---
+
+# Strict non-goals
+
+Run 125 MUST NOT:
+
+- implement `--allow-authority-state-reset`;
+- implement reset/recovery workflow;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- invent a fake authority sequence/epoch;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync broadly;
+- redesign snapshots broadly;
+- weaken Run 097 snapshot epoch parity;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken Run 105–115 ratification enforcement/evidence;
+- weaken Run 117 marker corruption/fail-closed behavior;
+- weaken Run 118 derivation/compare helper behavior;
+- weaken Run 119 reload-apply marker behavior;
+- weaken Run 120 startup marker behavior;
+- weaken Run 121 SIGHUP marker behavior;
+- weaken Run 122 release-binary evidence invariants;
+- weaken Run 123 validation-only no-persistence behavior;
+- weaken Run 124 restore conflict enforcement;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken Run 055 trust-bundle sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim full signing-key rotation safety;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation before execution
+
+Before running evidence, investigate and document:
+
+## 1. Release-binary restore invocation
+
+Identify the exact release-binary command shape for snapshot restore.
+
+Document flags such as:
+
+```text
+--restore-from-snapshot <PATH>
+--data-dir <PATH>
+--genesis-path <PATH>
+--expected-genesis-hash <HASH>
+```
+
+or the repo’s exact current equivalents.
+
+Also document any required:
+
+- environment selection;
+- execution profile;
+- snapshot directory layout;
+- B3 restore marker location;
+- authority marker path;
+- current epoch / Run 097 metadata requirements.
+
+## 2. Snapshot fixture generation
+
+Confirm how to create:
+
+- legacy snapshot metadata with no `authority_state`;
+- snapshot metadata with matching `authority_state`;
+- snapshot metadata with conflicting `authority_state`;
+- malformed/wrong-domain snapshot metadata if feasible.
+
+Reuse existing Run 097/124 helpers where possible.
+
+## 3. Local marker fixture generation
+
+Confirm how to seed:
+
+- no marker;
+- matching marker;
+- conflicting marker;
+- corrupt marker.
+
+The harness must compare pre/post bytes for rejection cases.
+
+## 4. Restore acceptance/rejection observability
+
+Identify observable evidence for:
+
+- restore accepted;
+- restore rejected;
+- B3 restore audit marker present/absent;
+- restored data materialized/not materialized;
+- local marker unchanged;
+- Run 097 epoch metadata still honored.
+
+Avoid relying only on generic non-zero exit code.
+
+---
+
+# Required release-binary evidence scenarios
+
+Produce logs, exit codes, marker files/bytes, and a summary.
+
+## Scenario 1 — Legacy snapshot with no local marker succeeds if policy allows
+
+Use a legacy snapshot without `authority_state` and no local marker.
+
+Prove:
+
+- release binary accepts restore if policy allows;
+- legacy parsing compatibility is preserved;
+- no synthetic authority marker is created;
+- Run 097 epoch behavior remains intact.
+
+If policy rejects legacy snapshots even with no local marker, document that honestly and cite the expected fail-closed reason.
+
+## Scenario 2 — Legacy snapshot with existing local marker rejects
+
+Seed local marker, then restore legacy snapshot without authority metadata.
+
+Prove:
+
+- release binary rejects;
+- local marker bytes remain unchanged;
+- no B3 restore audit marker is written;
+- no restored state is accepted/materialized.
+
+## Scenario 3 — Matching snapshot marker restores
+
+Seed local marker and restore snapshot with matching authority metadata.
+
+Prove:
+
+- restore succeeds;
+- marker bytes remain unchanged;
+- B3 restore audit marker behavior is as expected;
+- Run 097 epoch behavior remains intact.
+
+## Scenario 4 — Conflicting snapshot marker rejects
+
+Seed local marker and restore snapshot with conflicting authority metadata.
+
+Prove:
+
+- release binary rejects before restore acceptance;
+- local marker bytes remain unchanged;
+- no B3 restore audit marker is written;
+- no restored state is accepted/materialized.
+
+## Scenario 5 — Corrupt local marker rejects restore
+
+Corrupt local authority marker and attempt restore.
+
+Prove:
+
+- release binary fails closed;
+- corrupt marker is not repaired, deleted, or overwritten;
+- no B3 restore audit marker is written;
+- no restored state is accepted/materialized.
+
+## Scenario 6 — Wrong-domain snapshot marker rejects, if feasible
+
+Use wrong chain/environment/genesis marker in snapshot metadata.
+
+Prove fail-closed behavior.
+
+If not feasible, document as covered by Run 124 source/integration tests only.
+
+---
+
+# Required tests
+
+Run targeted tests.
+
+Add tests only if evidence reveals a gap or bug.
+
+Minimum tests to run and report:
+
+- Run 124 snapshot/restore authority marker tests;
+- Run 123 validation-only marker tests;
+- Run 122 evidence helper/tests if present;
+- Run 121 SIGHUP marker tests;
+- Run 120 startup marker tests;
+- Run 119 reload-apply marker tests;
+- Run 117 authority-state/snapshot metadata tests;
+- Run 097 snapshot epoch parity tests;
+- qbind-node --lib;
+- qbind-ledger --lib;
+- qbind-crypto --lib if helper generation touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 125.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_125.md`;
+- release-binary evidence archive under a deterministic directory, for example:
+  - `docs/devnet/run_125_snapshot_restore_authority_marker/`;
+- release-binary harness under `scripts/devnet/` if added;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow updates:
+
+- snapshot/restore docs;
+- storage schema docs if marker path/key is operator-visible;
+- MainNet readiness checklist.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 125 may strengthen evidence for:
+
+- snapshot/restore authority marker conflict enforcement;
+- legacy snapshot policy in presence of local marker;
+- corrupt/malformed marker restore fail-closed behavior;
+- no mutation/no audit marker on rejected restore.
+
+Run 125 may mark release-binary restore evidence resolved only if:
+
+- real release-binary restore evidence proves legacy/no-marker behavior;
+- legacy + local marker rejection is proven;
+- matching marker restore is proven;
+- conflicting marker rejection is proven;
+- corrupt marker fail-closed behavior is proven;
+- local marker unchanged on rejection is proven;
+- B3 restore audit marker absence on rejection is proven;
+- docs are synchronized.
+
+Run 125 MUST NOT mark resolved:
+
+- reset/recovery flag;
+- signing-key rotation/revocation lifecycle;
+- missing per-key monotonic authority sequence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 125 does not implement reset/recovery;
+- Run 125 does not implement signing-key rotation/revocation;
+- Run 125 does not invent a monotonic authority sequence;
+- Run 125 does not implement peer-driven live apply;
+- Run 125 does not implement KMS/HSM custody;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- release-binary evidence covers all core restore scenarios;
+- local marker unchanged on rejection is proven;
+- restore audit marker absence on rejection is proven;
+- Run 097 compatibility is proven;
+- docs are synchronized;
+- no runtime code changes were needed, or any bug fixes are narrow and fully proven.
+
+Use **positive** if:
+
+- main release-binary restore scenarios pass;
+- one secondary scenario has a narrow documented limitation;
+- no-mutation/no-marker-change evidence is strong.
+
+Use **partial-positive** if:
+
+- evidence improves but one or more core scenarios remain blocked;
+- release-binary archive is incomplete;
+- Run 097 compatibility evidence is incomplete.
+
+Use **negative** if:
+
+- restore silently rolls back local marker;
+- conflict/corrupt marker is accepted;
+- local marker is overwritten/repaired/deleted on rejection;
+- B3 restore audit marker is written on rejection;
+- synthetic authority marker is invented from legacy snapshot;
+- reset/recovery bypass is introduced unsafely;
+- peer-driven apply or rotation is introduced prematurely.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What changed
+
+Include:
+
+- scripts changed;
+- helpers changed;
+- docs changed;
+- release-binary archive path;
+- any runtime bug fixes, if any;
+- explicit statement if no production runtime code changed.
+
+## 3. What was proven
+
+Separate:
+
+- release-binary/process evidence;
+- source-level evidence;
+- test evidence.
+
+For each scenario, state pass/fail/blocked.
+
+## 4. What was not changed
+
+Explicitly confirm:
+
+- no reset/recovery flag;
+- no trust-bundle wire change;
+- no peer-candidate wire change;
+- no peer-driven apply;
+- no KMS/HSM;
+- no signing-key rotation/revocation;
+- no authority monotonic schema;
+- no full C4 closure;
+- no C5 closure.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new evidence against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- Run 105–115 ratification enforcement/evidence;
+- Run 116 model;
+- Run 117 primitive;
+- Run 118 helper layer;
+- Run 119 reload-apply wiring;
+- Run 120 startup wiring;
+- Run 121 SIGHUP wiring;
+- Run 122 release-binary mutating-surface evidence;
+- Run 123 validation-only marker checks;
+- Run 124 restore conflict enforcement;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Evidence references
+
+List:
+
+- evidence document;
+- release-binary archive directory;
+- summary file;
+- per-scenario logs;
+- tests run;
+- exact command/scenario summaries.
+
+## 7. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 125 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
