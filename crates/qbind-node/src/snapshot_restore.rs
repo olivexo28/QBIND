@@ -56,8 +56,13 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use qbind_ledger::{validate_snapshot_dir, SnapshotValidationResult, StateSnapshotMeta};
+use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::node_config::NodeConfig;
+use crate::pqc_authority_state::{
+    authority_state_file_path, verify_snapshot_authority_state_for_restore,
+    SnapshotRestoreAuthorityCheckInputs, SnapshotRestoreAuthorityCheckOutcome,
+};
 
 /// Subdirectory within `data_dir` where the VM-v0 RocksDB state lives.
 ///
@@ -96,6 +101,28 @@ pub enum RestoreError {
 
     /// IO error during snapshot materialization (copy / mkdir / write).
     Io(String),
+
+    /// **Run 124.** The snapshot's authority-state metadata conflicts with
+    /// the locally persisted authority marker (rollback, equivocation,
+    /// key conflict, policy regression, wrong-domain, etc.), or one side
+    /// is present while the other is missing in a way that would silently
+    /// downgrade or erase the local marker. The embedded outcome captures
+    /// the precise reject reason. Fail-closed: the restore is refused
+    /// BEFORE any state materialization or audit-marker write, so on-disk
+    /// state under `<data_dir>` is byte-identical to its pre-restore form
+    /// (including the local authority marker file, which is never mutated
+    /// or deleted by the restore surface).
+    AuthorityMarkerConflict(SnapshotRestoreAuthorityCheckOutcome),
+
+    /// **Run 124.** The restore surface was invoked without the runtime
+    /// authority context (`NetworkEnvironment` + canonical genesis hash)
+    /// needed to honestly evaluate the snapshot vs. local-marker
+    /// comparison. The surface fails closed rather than silently skipping
+    /// the check; production callers (the binary in `main.rs`) always
+    /// provide the context. Surfaces this only on the legacy
+    /// no-context [`apply_snapshot_restore_if_requested`] path when a
+    /// local marker file already exists on disk.
+    AuthorityContextMissing,
 }
 
 impl fmt::Display for RestoreError {
@@ -120,6 +147,15 @@ impl fmt::Display for RestoreError {
                 p.display()
             ),
             RestoreError::Io(msg) => write!(f, "restore-from-snapshot IO error: {}", msg),
+            RestoreError::AuthorityMarkerConflict(o) => write!(
+                f,
+                "restore-from-snapshot refused by authority-marker check: {} (no state mutation, no audit-marker write; local pqc_authority_state.json bytes preserved verbatim)",
+                o
+            ),
+            RestoreError::AuthorityContextMissing => write!(
+                f,
+                "restore-from-snapshot refused: a local pqc_authority_state.json marker exists but no runtime authority context (env, chain_id, genesis_hash) was supplied to the restore surface (fail closed). Use restore_from_snapshot_with_authority_marker_check from a binary surface that has loaded the canonical genesis."
+            ),
         }
     }
 }
@@ -170,6 +206,38 @@ pub struct RestoreOutcome {
 pub fn apply_snapshot_restore_if_requested(
     config: &NodeConfig,
 ) -> Result<Option<RestoreOutcome>, RestoreError> {
+    apply_snapshot_restore_if_requested_inner(config, None)
+}
+
+/// **Run 124.** Apply a restore-from-snapshot with the runtime authority
+/// context required to enforce the snapshot/restore authority-marker
+/// conflict check (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_124.md`).
+///
+/// This is the production entry point the binary (`main.rs`) calls once the
+/// canonical Run 101 genesis hash has been computed and verified (Run 102).
+/// It composes the existing B3 validate→materialize pipeline with the pure
+/// Run 124 [`verify_snapshot_authority_state_for_restore`] helper, refusing
+/// the restore BEFORE any state copy or audit-marker write whenever the
+/// snapshot would silently downgrade, conflict with, or erase the locally
+/// persisted `<data_dir>/pqc_authority_state.json` marker.
+///
+/// The legacy [`apply_snapshot_restore_if_requested`] entry point remains
+/// available for callers that have no genesis context (no marker
+/// enforcement is attempted there; but if a local marker file already
+/// exists the legacy path fails closed with
+/// [`RestoreError::AuthorityContextMissing`] rather than silently
+/// permitting a restore that could shadow the marker).
+pub fn apply_snapshot_restore_if_requested_with_authority_context(
+    config: &NodeConfig,
+    authority_ctx: &RestoreAuthorityContext<'_>,
+) -> Result<Option<RestoreOutcome>, RestoreError> {
+    apply_snapshot_restore_if_requested_inner(config, Some(authority_ctx))
+}
+
+fn apply_snapshot_restore_if_requested_inner(
+    config: &NodeConfig,
+    authority_ctx: Option<&RestoreAuthorityContext<'_>>,
+) -> Result<Option<RestoreOutcome>, RestoreError> {
     if !config.fast_sync_config.is_enabled() {
         return Ok(None);
     }
@@ -196,7 +264,25 @@ pub fn apply_snapshot_restore_if_requested(
         expected_chain_id,
     );
 
-    let outcome = restore_from_snapshot(&snapshot_dir, &data_dir, expected_chain_id)?;
+    let outcome = match authority_ctx {
+        Some(ctx) => restore_from_snapshot_with_authority_marker_check(
+            &snapshot_dir,
+            &data_dir,
+            expected_chain_id,
+            ctx,
+        )?,
+        None => {
+            // Legacy no-context path: still enforce the conservative
+            // fail-closed rule that a pre-existing local marker requires
+            // a runtime authority context (Run 124 strict non-goal: no
+            // silent shadowing of an existing local marker).
+            let marker_path = authority_state_file_path(&data_dir);
+            if marker_path.exists() {
+                return Err(RestoreError::AuthorityContextMissing);
+            }
+            restore_from_snapshot(&snapshot_dir, &data_dir, expected_chain_id)?
+        }
+    };
 
     eprintln!(
         "[restore] complete: height={} chain_id=0x{:016x} bytes_copied={} target={}",
@@ -213,27 +299,121 @@ pub fn apply_snapshot_restore_if_requested(
     Ok(Some(outcome))
 }
 
+/// **Run 124.** Borrowed bundle of runtime authority-trust-domain inputs
+/// required to enforce the snapshot/restore authority-marker conflict
+/// check. Constructed by the binary surface from the same Run 102/105
+/// boot context the rest of the trust-bundle pipeline uses.
+#[derive(Debug, Clone, Copy)]
+pub struct RestoreAuthorityContext<'a> {
+    /// Runtime network environment (Devnet / Testnet / Mainnet).
+    pub runtime_env: NetworkEnvironment,
+    /// Runtime chain id (Run 069+).
+    pub runtime_chain_id: ChainId,
+    /// 64 lowercase hex chars of the canonical genesis hash this node booted
+    /// against. Equals `compute_canonical_genesis_hash(...)` on the runtime
+    /// genesis config rendered without the `0x` prefix.
+    pub runtime_genesis_hash_hex: &'a str,
+}
+
 /// Lower-level restore primitive that does not depend on `NodeConfig`.
 ///
 /// Exposed `pub` so integration tests can drive the exact same code path
 /// the binary uses without standing up a full `NodeConfig`.
+///
+/// **This entry point does not enforce the Run 124 snapshot/restore
+/// authority-marker conflict check.** Production callers should prefer
+/// [`restore_from_snapshot_with_authority_marker_check`], which composes
+/// the same materialization pipeline with the typed
+/// [`verify_snapshot_authority_state_for_restore`] check from
+/// `pqc_authority_state`.
 pub fn restore_from_snapshot(
     snapshot_dir: &Path,
     data_dir: &Path,
     expected_chain_id: u64,
 ) -> Result<RestoreOutcome, RestoreError> {
-    // 1. Snapshot path must exist on disk.
+    let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
+    materialize_validated_snapshot(snapshot_dir, data_dir, meta)
+}
+
+/// **Run 124.** Validate a snapshot AND enforce the snapshot/restore
+/// authority-marker conflict check against the locally persisted
+/// `<data_dir>/pqc_authority_state.json` marker BEFORE any state
+/// materialization or audit-marker write.
+///
+/// On reject, no bytes are copied, the audit marker is not written, and
+/// the local authority-marker file (if any) is byte-identical to its
+/// pre-restore state. The typed
+/// [`SnapshotRestoreAuthorityCheckOutcome`] is surfaced via
+/// [`RestoreError::AuthorityMarkerConflict`] so the operator log line
+/// can pinpoint the precise reason.
+pub fn restore_from_snapshot_with_authority_marker_check(
+    snapshot_dir: &Path,
+    data_dir: &Path,
+    expected_chain_id: u64,
+    authority_ctx: &RestoreAuthorityContext<'_>,
+) -> Result<RestoreOutcome, RestoreError> {
+    // 1. Validate snapshot layout / chain id / meta parse first, so any
+    //    snapshot-layer failure is reported as such (not as an authority
+    //    check failure).
+    let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
+
+    // 2. Compute the local marker path and run the Run 124 pure check
+    //    against the snapshot's (optional) AuthorityStateSnapshotMeta.
+    let marker_path = authority_state_file_path(data_dir);
+    let check_outcome =
+        verify_snapshot_authority_state_for_restore(SnapshotRestoreAuthorityCheckInputs {
+            marker_path: &marker_path,
+            snapshot_meta: meta.authority_state.as_ref(),
+            runtime_env: authority_ctx.runtime_env,
+            runtime_chain_id: authority_ctx.runtime_chain_id,
+            runtime_genesis_hash_hex: authority_ctx.runtime_genesis_hash_hex,
+        });
+
+    if check_outcome.is_reject() {
+        eprintln!(
+            "[restore] FATAL: refused by Run 124 authority-marker check: {}",
+            check_outcome
+        );
+        return Err(RestoreError::AuthorityMarkerConflict(check_outcome));
+    }
+
+    eprintln!(
+        "[restore] Run 124 authority-marker check: {} (proceeding with materialization)",
+        check_outcome
+    );
+
+    // 3. Materialize. The marker file under <data_dir> is NEVER written,
+    //    rewritten, or deleted by the restore surface — only the audit
+    //    marker (RESTORED_FROM_SNAPSHOT.json) plus the state checkpoint.
+    materialize_validated_snapshot(snapshot_dir, data_dir, meta)
+}
+
+/// Run the existing B3 validation pipeline and return the parsed meta.
+/// Factored out so [`restore_from_snapshot`] and
+/// [`restore_from_snapshot_with_authority_marker_check`] share identical
+/// snapshot-layer semantics.
+fn validate_snapshot_for_restore(
+    snapshot_dir: &Path,
+    expected_chain_id: u64,
+) -> Result<StateSnapshotMeta, RestoreError> {
     if !snapshot_dir.exists() {
         return Err(RestoreError::SnapshotPathMissing(snapshot_dir.to_path_buf()));
     }
+    match validate_snapshot_dir(snapshot_dir, expected_chain_id) {
+        SnapshotValidationResult::Valid(m) => Ok(m),
+        other => Err(RestoreError::SnapshotInvalid(other)),
+    }
+}
 
-    // 2. Validate via the existing T215 validator (chain-id, layout, height).
-    let meta = match validate_snapshot_dir(snapshot_dir, expected_chain_id) {
-        SnapshotValidationResult::Valid(m) => m,
-        other => return Err(RestoreError::SnapshotInvalid(other)),
-    };
-
-    // 3. Ensure data_dir exists.
+/// Copy the snapshot state checkpoint into `<data_dir>/state_vm_v0/` and
+/// write the audit marker. Factored out so both restore entry points share
+/// identical materialization semantics.
+fn materialize_validated_snapshot(
+    snapshot_dir: &Path,
+    data_dir: &Path,
+    meta: StateSnapshotMeta,
+) -> Result<RestoreOutcome, RestoreError> {
+    // Ensure data_dir exists.
     std::fs::create_dir_all(data_dir).map_err(|e| {
         RestoreError::Io(format!(
             "cannot create data_dir {}: {}",

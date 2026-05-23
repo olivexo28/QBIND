@@ -1197,57 +1197,98 @@ async fn main() {
     // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and
     // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
     // ------------------------------------------------------------------
-    match qbind_node::pqc_boot_genesis::run_boot_time_genesis_verification(&config) {
-        Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::Verified {
-            canonical_hash,
-            env,
-            genesis_path,
-        }) => {
-            eprintln!(
-                "[run-102] OK: canonical Run 101 genesis verification passed \
-                 (env={:?}, genesis={}, canonical_hash={}).",
+    let canonical_genesis_hash_hex_for_restore: Option<String> =
+        match qbind_node::pqc_boot_genesis::run_boot_time_genesis_verification(&config) {
+            Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::Verified {
+                canonical_hash,
                 env,
-                genesis_path.display(),
-                qbind_node::pqc_boot_genesis::format_for_operator(&canonical_hash),
-            );
-        }
-        Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::SkippedNoExternalGenesis { env }) => {
-            eprintln!(
-                "[run-102] no external --genesis-path configured; canonical boot \
-                 verification skipped (env={:?}, embedded-genesis path). MainNet \
-                 always requires --genesis-path so this branch is unreachable on MainNet.",
+                genesis_path,
+            }) => {
+                eprintln!(
+                    "[run-102] OK: canonical Run 101 genesis verification passed \
+                     (env={:?}, genesis={}, canonical_hash={}).",
+                    env,
+                    genesis_path.display(),
+                    qbind_node::pqc_boot_genesis::format_for_operator(&canonical_hash),
+                );
+                // Run 124: surface the 64-char lowercase-hex (no `0x` prefix)
+                // form for the snapshot/restore authority-marker check, which
+                // matches PersistentAuthorityStateRecord.genesis_hash.
+                Some(canonical_hash.iter().map(|b| format!("{:02x}", b)).collect())
+            }
+            Ok(qbind_node::pqc_boot_genesis::BootGenesisOutcome::SkippedNoExternalGenesis {
                 env,
-            );
-        }
-        Err(e) => {
-            eprintln!("[run-102] FATAL: {}", e);
-            eprintln!(
-                "[run-102] qbind-node refuses to start. No fallback authority, no fallback \
-                 expected-hash, no source-code production anchor. See \
-                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md and \
-                 docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md."
-            );
-            std::process::exit(1);
-        }
-    }
+            }) => {
+                eprintln!(
+                    "[run-102] no external --genesis-path configured; canonical boot \
+                     verification skipped (env={:?}, embedded-genesis path). MainNet \
+                     always requires --genesis-path so this branch is unreachable on MainNet.",
+                    env,
+                );
+                None
+            }
+            Err(e) => {
+                eprintln!("[run-102] FATAL: {}", e);
+                eprintln!(
+                    "[run-102] qbind-node refuses to start. No fallback authority, no fallback \
+                     expected-hash, no source-code production anchor. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md and \
+                     docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md."
+                );
+                std::process::exit(1);
+            }
+        };
 
     // ------------------------------------------------------------------
-    // B3: Restore-from-snapshot startup path.
+    // B3 + Run 124: Restore-from-snapshot startup path with
+    // authority-marker conflict enforcement.
     //
     // If `--restore-from-snapshot <path>` was passed, the node validates
     // and materializes the snapshot into the configured data dir before
     // doing anything else. Failures here are non-zero exits with a clear
     // reason — we never silently degrade to "no restore".
-    // See `crates/qbind-node/src/snapshot_restore.rs` and
-    // `docs/whitepaper/contradiction.md` C4 (B3).
+    //
+    // Run 124 adds the authority-marker conflict check (run BEFORE any
+    // state materialization or audit-marker write): the snapshot's
+    // optional `AuthorityStateSnapshotMeta` block is compared against
+    // the locally persisted `<data_dir>/pqc_authority_state.json`
+    // marker using the pure `verify_snapshot_authority_state_for_restore`
+    // helper. A rollback / equivocation / wrong-domain / missing /
+    // corrupt outcome exits non-zero BEFORE any state copy, and the
+    // local marker file is never mutated or deleted by this surface.
+    //
+    // The authority context is only available when the canonical Run 101
+    // genesis hash was computed at boot (Run 102 `Verified` branch). On
+    // DevNet/TestNet without `--genesis-path` (Run 102
+    // `SkippedNoExternalGenesis` branch) the legacy
+    // `apply_snapshot_restore_if_requested` is used, which itself fails
+    // closed if a pre-existing local marker is present
+    // (`AuthorityContextMissing`) — there is no silent shadowing.
+    //
+    // See `crates/qbind-node/src/snapshot_restore.rs`,
+    // `crates/qbind-node/src/pqc_authority_state.rs`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_124.md`, and
+    // `docs/whitepaper/contradiction.md` C4 (B3, Run 124).
     //
     // B5: the resulting `RestoreOutcome` (when present) is threaded into
     // the binary-path consensus startup so the engine begins from the
     // restored height/view baseline rather than from view 0. See
     // `binary_consensus_loop::RestoreBaseline`.
     // ------------------------------------------------------------------
-    let restore_outcome: Option<RestoreOutcome> =
-        match qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config) {
+    let restore_result = match canonical_genesis_hash_hex_for_restore.as_deref() {
+        Some(genesis_hex) => {
+            let ctx = qbind_node::snapshot_restore::RestoreAuthorityContext {
+                runtime_env: config.environment,
+                runtime_chain_id: config.chain_id(),
+                runtime_genesis_hash_hex: genesis_hex,
+            };
+            qbind_node::snapshot_restore::apply_snapshot_restore_if_requested_with_authority_context(
+                &config, &ctx,
+            )
+        }
+        None => qbind_node::snapshot_restore::apply_snapshot_restore_if_requested(&config),
+    };
+    let restore_outcome: Option<RestoreOutcome> = match restore_result {
             Ok(None) => {
                 eprintln!("[restore] no --restore-from-snapshot requested; normal startup.");
                 None

@@ -161,7 +161,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use qbind_ledger::{
-    canonical_ratification_digest, BundleSigningRatification, RatifiedBundleSigningKey,
+    canonical_ratification_digest, AuthorityStateSnapshotMeta, BundleSigningRatification,
+    RatifiedBundleSigningKey,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
@@ -1532,6 +1533,345 @@ pub fn prepare_marker_for_acceptance(
 }
 
 // ===========================================================================
+// Run 124 — Snapshot/restore authority marker conflict enforcement
+// ===========================================================================
+
+/// Inputs required to evaluate whether a snapshot can be restored without
+/// silently downgrading, conflicting with, or erasing the locally persisted
+/// ratified bundle-signing authority marker.
+///
+/// Run 124 deliberately keeps this pure: callers compute the runtime trust
+/// domain (`runtime_env`, `runtime_chain_id`, `runtime_genesis_hash_hex`)
+/// from the same canonical sources Run 102 / 105 already use, the `marker_path`
+/// is the canonical `<data_dir>/pqc_authority_state.json` location from
+/// [`authority_state_file_path`], and `snapshot_meta` is the additive
+/// [`AuthorityStateSnapshotMeta`] block parsed out of the snapshot
+/// `meta.json` by the Run 117 parser (`None` for legacy pre-Run-117
+/// snapshots, `Some` for Run-117+ snapshots produced on a node that
+/// observed a canonical authority marker at snapshot creation).
+#[derive(Debug, Clone)]
+pub struct SnapshotRestoreAuthorityCheckInputs<'a> {
+    /// Canonical marker file path under the operator-supplied `--data-dir`.
+    pub marker_path: &'a Path,
+    /// Snapshot authority-state metadata if the snapshot carries it; `None`
+    /// for pre-Run-117 legacy snapshots.
+    pub snapshot_meta: Option<&'a AuthorityStateSnapshotMeta>,
+    /// Runtime network environment.
+    pub runtime_env: NetworkEnvironment,
+    /// Runtime chain id (Run 069+).
+    pub runtime_chain_id: ChainId,
+    /// 64 lowercase hex chars of the canonical genesis hash this node booted
+    /// against. Equals `compute_canonical_genesis_hash(...)` on the runtime
+    /// genesis config.
+    pub runtime_genesis_hash_hex: &'a str,
+}
+
+/// Typed outcome of [`verify_snapshot_authority_state_for_restore`]. Every
+/// variant is a single deterministic decision suitable for a restore
+/// surface to branch on. Reject variants carry the information necessary to
+/// emit a precise operator log line without re-inspecting either marker.
+///
+/// Accept variants (`NoMarkerEitherSide`, `AcceptSnapshotMarkerNoLocal`,
+/// `AcceptMatchingMarker`) explicitly mean **restore may proceed and the
+/// local marker file MUST NOT be mutated or deleted**. Run 124 never
+/// synthesises a local marker from a snapshot block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotRestoreAuthorityCheckOutcome {
+    /// No local marker present and the snapshot carries no authority
+    /// metadata. Legacy pre-Run-117 snapshot restoring into a fresh data
+    /// directory; restore may proceed without authority enforcement on
+    /// this surface (the next mutating surface will write the marker).
+    NoMarkerEitherSide,
+
+    /// No local marker present and the snapshot carries authority metadata
+    /// that matches the runtime trust domain. Restore may proceed; the
+    /// local marker is **not** synthesised from snapshot bytes (Run 124
+    /// strict non-goal). The next mutating surface will derive and persist
+    /// the canonical marker from a verified ratification.
+    AcceptSnapshotMarkerNoLocal,
+
+    /// Local marker and snapshot marker agree bit-for-bit on every
+    /// security-relevant field. Restore may proceed; the local marker
+    /// file MUST NOT be rewritten by the restore surface.
+    AcceptMatchingMarker,
+
+    /// A local marker exists and the snapshot does not carry authority
+    /// metadata. Restore is rejected fail-closed: accepting would erase
+    /// or silently roll back the local persisted authority state.
+    /// Recovery is a future operator-recovery flag (Run 116 spec
+    /// `--allow-authority-state-reset`), explicitly not implemented in
+    /// Run 124.
+    RejectMissingSnapshotMarker,
+
+    /// Both a local marker and a snapshot marker exist but they disagree
+    /// (rollback, equivocation, key conflict, policy regression, etc.).
+    /// The embedded [`AuthorityStateComparison`] captures the precise
+    /// reject reason.
+    RejectConflict(AuthorityStateComparison),
+
+    /// The on-disk local marker file is structurally invalid or the
+    /// `record_version` is not supported by this binary. Restore is
+    /// rejected fail-closed; the marker bytes on disk are preserved
+    /// verbatim (Run 124 never silently overwrites a corrupt marker).
+    RejectLocalMarkerCorrupt(AuthorityStateError),
+
+    /// The local marker is structurally valid but belongs to a different
+    /// `(environment, chain_id, genesis_hash)` trust domain than the
+    /// running runtime — the wrong-data-dir case. Restore is rejected
+    /// before any further comparison so the operator log line is
+    /// precise.
+    RejectLocalMarkerWrongDomain(AuthorityStateComparison),
+
+    /// The snapshot authority metadata has the wrong `chain_id_hex`,
+    /// `environment`, or `genesis_hash_hex` for the runtime trust
+    /// domain. Restore is rejected fail-closed.
+    RejectSnapshotMarkerWrongDomain { reason: String },
+}
+
+impl SnapshotRestoreAuthorityCheckOutcome {
+    /// True iff this outcome means restore may proceed.
+    pub fn is_accept(&self) -> bool {
+        matches!(
+            self,
+            Self::NoMarkerEitherSide
+                | Self::AcceptSnapshotMarkerNoLocal
+                | Self::AcceptMatchingMarker
+        )
+    }
+
+    /// True iff this outcome is a rejection. Equivalent to `!is_accept()`.
+    pub fn is_reject(&self) -> bool {
+        !self.is_accept()
+    }
+}
+
+impl std::fmt::Display for SnapshotRestoreAuthorityCheckOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoMarkerEitherSide => write!(
+                f,
+                "no local authority marker and no snapshot authority metadata (legacy snapshot, fresh data dir; restore may proceed without authority enforcement on the restore surface)"
+            ),
+            Self::AcceptSnapshotMarkerNoLocal => write!(
+                f,
+                "no local authority marker; snapshot authority metadata matches the runtime trust domain (restore may proceed; local marker is NOT synthesised from snapshot bytes)"
+            ),
+            Self::AcceptMatchingMarker => write!(
+                f,
+                "local authority marker matches snapshot authority metadata bit-for-bit (restore may proceed; local marker NOT rewritten)"
+            ),
+            Self::RejectMissingSnapshotMarker => write!(
+                f,
+                "snapshot restore rejected: local authority marker exists but snapshot carries no authority metadata (fail closed; accepting would silently erase or roll back the local persisted authority state)"
+            ),
+            Self::RejectConflict(c) => write!(
+                f,
+                "snapshot restore rejected: snapshot authority metadata conflicts with local marker: {} (fail closed)",
+                c
+            ),
+            Self::RejectLocalMarkerCorrupt(e) => write!(
+                f,
+                "snapshot restore rejected: local authority marker is corrupt or unsupported: {} (fail closed; bytes preserved verbatim)",
+                e
+            ),
+            Self::RejectLocalMarkerWrongDomain(c) => write!(
+                f,
+                "snapshot restore rejected: local authority marker belongs to a different trust domain than the running runtime: {} (fail closed; wrong-data-dir / wrong-snapshot-copy)",
+                c
+            ),
+            Self::RejectSnapshotMarkerWrongDomain { reason } => write!(
+                f,
+                "snapshot restore rejected: snapshot authority metadata has wrong trust domain: {} (fail closed)",
+                reason
+            ),
+        }
+    }
+}
+
+/// Compare a snapshot's optional [`AuthorityStateSnapshotMeta`] against the
+/// locally persisted [`PersistentAuthorityStateRecord`] (if any) and decide,
+/// fail-closed, whether a snapshot restore may proceed without silently
+/// downgrading or erasing the local marker.
+///
+/// This function is **pure**: it reads the local marker file via
+/// [`load_authority_state`] and never writes, deletes, or otherwise mutates
+/// any on-disk state. It is the Run 124 restore-side counterpart to the
+/// Run 118 [`prepare_marker_for_acceptance`] wrapper used by mutating /
+/// validation-only surfaces.
+///
+/// Ordering (first match wins):
+///
+/// 1. [`load_authority_state`] returns a fatal error → `RejectLocalMarkerCorrupt`.
+/// 2. A persisted local marker exists but its `(env, chain_id, genesis_hash)`
+///    does not match the runtime → `RejectLocalMarkerWrongDomain`.
+/// 3. Both local and snapshot markers absent → `NoMarkerEitherSide`.
+/// 4. Local absent, snapshot present:
+///    - snapshot domain matches runtime → `AcceptSnapshotMarkerNoLocal`;
+///    - snapshot domain mismatches runtime → `RejectSnapshotMarkerWrongDomain`.
+/// 5. Local present, snapshot absent → `RejectMissingSnapshotMarker`.
+/// 6. Both present:
+///    - snapshot domain mismatches runtime → `RejectSnapshotMarkerWrongDomain`;
+///    - reconstruct a candidate [`PersistentAuthorityStateRecord`] from
+///      the snapshot metadata and route through [`compare_authority_state`]:
+///      `EqualIdempotent` → `AcceptMatchingMarker`,
+///      anything else → `RejectConflict(...)`.
+pub fn verify_snapshot_authority_state_for_restore(
+    inputs: SnapshotRestoreAuthorityCheckInputs<'_>,
+) -> SnapshotRestoreAuthorityCheckOutcome {
+    // Step 1: load + structurally validate the persisted local marker.
+    let persisted = match load_authority_state(inputs.marker_path) {
+        Ok(p) => p,
+        Err(e) => return SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerCorrupt(e),
+    };
+
+    // Step 2: if a local marker exists, it must belong to the runtime
+    // trust domain BEFORE we look at the snapshot block.
+    if let Some(prev) = persisted.as_ref() {
+        if let Err(mismatch) = validate_record_for_domain(
+            prev,
+            inputs.runtime_env,
+            inputs.runtime_chain_id,
+            inputs.runtime_genesis_hash_hex,
+        ) {
+            return SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerWrongDomain(
+                mismatch,
+            );
+        }
+    }
+
+    // Step 3-5: branch on (local, snapshot) presence.
+    match (persisted.as_ref(), inputs.snapshot_meta) {
+        (None, None) => SnapshotRestoreAuthorityCheckOutcome::NoMarkerEitherSide,
+        (None, Some(snap)) => {
+            if let Err(reason) = check_snapshot_meta_domain(
+                snap,
+                inputs.runtime_env,
+                inputs.runtime_chain_id,
+                inputs.runtime_genesis_hash_hex,
+            ) {
+                return SnapshotRestoreAuthorityCheckOutcome::RejectSnapshotMarkerWrongDomain {
+                    reason,
+                };
+            }
+            SnapshotRestoreAuthorityCheckOutcome::AcceptSnapshotMarkerNoLocal
+        }
+        (Some(_), None) => SnapshotRestoreAuthorityCheckOutcome::RejectMissingSnapshotMarker,
+        (Some(prev), Some(snap)) => {
+            if let Err(reason) = check_snapshot_meta_domain(
+                snap,
+                inputs.runtime_env,
+                inputs.runtime_chain_id,
+                inputs.runtime_genesis_hash_hex,
+            ) {
+                return SnapshotRestoreAuthorityCheckOutcome::RejectSnapshotMarkerWrongDomain {
+                    reason,
+                };
+            }
+            // Reconstruct a comparable PersistentAuthorityStateRecord from
+            // the snapshot block. `last_update_source` and
+            // `updated_at_unix_secs` are intentionally synthesised from a
+            // neutral test-or-fixture tag plus the persisted marker's own
+            // wall-clock; neither field participates in
+            // canonical_authority_state_digest (Run 117 §canonical digest)
+            // so this reconstruction is byte-equivalent to the persisted
+            // record at the security-relevant layer iff every other field
+            // agrees. compare_authority_state then returns EqualIdempotent
+            // on a true match and a typed reject variant otherwise.
+            let candidate = match snapshot_meta_to_record(snap) {
+                Ok(c) => c,
+                Err(e) => {
+                    return SnapshotRestoreAuthorityCheckOutcome::RejectSnapshotMarkerWrongDomain {
+                        reason: format!(
+                            "snapshot authority block could not be reconstructed as a PersistentAuthorityStateRecord: {}",
+                            e
+                        ),
+                    };
+                }
+            };
+            match compare_authority_state(Some(prev), &candidate) {
+                AuthorityStateComparison::EqualIdempotent => {
+                    SnapshotRestoreAuthorityCheckOutcome::AcceptMatchingMarker
+                }
+                reject => SnapshotRestoreAuthorityCheckOutcome::RejectConflict(reject),
+            }
+        }
+    }
+}
+
+/// Verify that a snapshot authority-state block carries the runtime trust
+/// domain. Returns the precise reason on mismatch.
+fn check_snapshot_meta_domain(
+    snap: &AuthorityStateSnapshotMeta,
+    runtime_env: NetworkEnvironment,
+    runtime_chain_id: ChainId,
+    runtime_genesis_hash_hex: &str,
+) -> Result<(), String> {
+    let expected_env_tag = match runtime_env {
+        NetworkEnvironment::Devnet => "devnet",
+        NetworkEnvironment::Testnet => "testnet",
+        NetworkEnvironment::Mainnet => "mainnet",
+    };
+    if snap.environment != expected_env_tag {
+        return Err(format!(
+            "snapshot.environment={} runtime.environment={}",
+            snap.environment, expected_env_tag
+        ));
+    }
+    let expected_chain_hex = chain_id_hex(runtime_chain_id);
+    if snap.chain_id_hex != expected_chain_hex {
+        return Err(format!(
+            "snapshot.chain_id_hex={} runtime.chain_id_hex={}",
+            snap.chain_id_hex, expected_chain_hex
+        ));
+    }
+    if snap.genesis_hash_hex != runtime_genesis_hash_hex {
+        return Err(format!(
+            "snapshot.genesis_hash_hex={} runtime.genesis_hash_hex={}",
+            snap.genesis_hash_hex, runtime_genesis_hash_hex
+        ));
+    }
+    Ok(())
+}
+
+/// Reconstruct a [`PersistentAuthorityStateRecord`] from a snapshot
+/// [`AuthorityStateSnapshotMeta`] block so that the comparison can go
+/// through the same [`compare_authority_state`] surface mutating callers
+/// use. The two informational-only audit fields (`last_update_source`,
+/// `updated_at_unix_secs`) are intentionally filled with neutral values
+/// because neither participates in [`canonical_authority_state_digest`]
+/// nor in [`compare_authority_state`]'s equality rules.
+fn snapshot_meta_to_record(
+    snap: &AuthorityStateSnapshotMeta,
+) -> Result<PersistentAuthorityStateRecord, AuthorityStateError> {
+    let environment = match snap.environment.as_str() {
+        "devnet" => TrustBundleEnvironment::Devnet,
+        "testnet" => TrustBundleEnvironment::Testnet,
+        "mainnet" => TrustBundleEnvironment::Mainnet,
+        other => {
+            return Err(AuthorityStateError::Malformed(format!(
+                "snapshot authority block has unknown environment tag {}",
+                other
+            )));
+        }
+    };
+    let record = PersistentAuthorityStateRecord::new(
+        snap.chain_id_hex.clone(),
+        environment,
+        snap.genesis_hash_hex.clone(),
+        snap.authority_policy_version,
+        snap.authority_sequence,
+        snap.authority_epoch,
+        snap.authority_root_fingerprint.clone(),
+        snap.ratified_bundle_signing_key_fingerprint.clone(),
+        snap.ratification_object_hash.clone(),
+        AuthorityStateUpdateSource::TestOrFixture,
+        0,
+    );
+    record.validate_structure()?;
+    Ok(record)
+}
+
+// ===========================================================================
 // Unit tests
 // ===========================================================================
 
@@ -2646,6 +2986,302 @@ mod tests {
             );
             assert!(load_fail.is_reject());
             assert!(!load_fail.should_persist());
+        }
+    }
+
+    // =======================================================================
+    // Run 124 — snapshot/restore authority marker conflict tests
+    // =======================================================================
+
+    mod run124 {
+        use super::*;
+
+        // Runtime trust domain used by every test below.
+        const RUNTIME_CHAIN_HEX: &str = "0000000000000001";
+        const RUNTIME_GENESIS_HEX: &str =
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+        fn runtime_env() -> NetworkEnvironment {
+            NetworkEnvironment::Devnet
+        }
+
+        fn runtime_chain() -> ChainId {
+            ChainId::new(1)
+        }
+
+        fn matching_snapshot_meta() -> AuthorityStateSnapshotMeta {
+            AuthorityStateSnapshotMeta {
+                chain_id_hex: RUNTIME_CHAIN_HEX.to_string(),
+                environment: "devnet".to_string(),
+                genesis_hash_hex: RUNTIME_GENESIS_HEX.to_string(),
+                authority_policy_version: 1,
+                authority_sequence: 5,
+                authority_epoch: Some(2),
+                authority_root_fingerprint: "b".repeat(40),
+                ratified_bundle_signing_key_fingerprint: "c".repeat(40),
+                ratification_object_hash: "d".repeat(64),
+            }
+        }
+
+        fn matching_local_record() -> PersistentAuthorityStateRecord {
+            PersistentAuthorityStateRecord::new(
+                RUNTIME_CHAIN_HEX.to_string(),
+                TrustBundleEnvironment::Devnet,
+                RUNTIME_GENESIS_HEX.to_string(),
+                1,
+                5,
+                Some(2),
+                "b".repeat(40),
+                "c".repeat(40),
+                "d".repeat(64),
+                AuthorityStateUpdateSource::StartupLoad,
+                1_700_000_000,
+            )
+        }
+
+        fn run_check(
+            marker_path: &Path,
+            snapshot: Option<&AuthorityStateSnapshotMeta>,
+        ) -> SnapshotRestoreAuthorityCheckOutcome {
+            verify_snapshot_authority_state_for_restore(SnapshotRestoreAuthorityCheckInputs {
+                marker_path,
+                snapshot_meta: snapshot,
+                runtime_env: runtime_env(),
+                runtime_chain_id: runtime_chain(),
+                runtime_genesis_hash_hex: RUNTIME_GENESIS_HEX,
+            })
+        }
+
+        // --- Accept variants ---
+
+        #[test]
+        fn no_local_no_snapshot_is_legacy_accept() {
+            let tmp = TempDir::new().unwrap();
+            let outcome = run_check(&authority_state_file_path(tmp.path()), None);
+            assert_eq!(outcome, SnapshotRestoreAuthorityCheckOutcome::NoMarkerEitherSide);
+            assert!(outcome.is_accept());
+            // Restore surface must not have created any marker.
+            assert!(!authority_state_file_path(tmp.path()).exists());
+        }
+
+        #[test]
+        fn no_local_snapshot_present_accepts_without_synthesising_local() {
+            let tmp = TempDir::new().unwrap();
+            let snap = matching_snapshot_meta();
+            let outcome = run_check(&authority_state_file_path(tmp.path()), Some(&snap));
+            assert_eq!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::AcceptSnapshotMarkerNoLocal
+            );
+            // Run 124 strict non-goal: never synthesise a local marker from
+            // snapshot bytes.
+            assert!(!authority_state_file_path(tmp.path()).exists());
+        }
+
+        #[test]
+        fn matching_local_and_snapshot_is_idempotent_accept() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            persist_authority_state_atomic(&path, &matching_local_record()).unwrap();
+            let bytes_before = std::fs::read(&path).unwrap();
+            let snap = matching_snapshot_meta();
+            let outcome = run_check(&path, Some(&snap));
+            assert_eq!(outcome, SnapshotRestoreAuthorityCheckOutcome::AcceptMatchingMarker);
+            // Restore must not rewrite the local marker.
+            let bytes_after = std::fs::read(&path).unwrap();
+            assert_eq!(bytes_before, bytes_after, "marker bytes preserved");
+        }
+
+        // --- Reject variants ---
+
+        #[test]
+        fn local_present_snapshot_absent_rejects_fail_closed() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            persist_authority_state_atomic(&path, &matching_local_record()).unwrap();
+            let bytes_before = std::fs::read(&path).unwrap();
+            let outcome = run_check(&path, None);
+            assert_eq!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::RejectMissingSnapshotMarker
+            );
+            assert!(outcome.is_reject());
+            // Local marker bytes must be byte-identical after a reject.
+            assert_eq!(std::fs::read(&path).unwrap(), bytes_before);
+        }
+
+        #[test]
+        fn rollback_snapshot_against_higher_local_rejects() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            let mut local = matching_local_record();
+            local.authority_sequence = 9;
+            persist_authority_state_atomic(&path, &local).unwrap();
+            let snap = matching_snapshot_meta(); // authority_sequence = 5
+            let outcome = run_check(&path, Some(&snap));
+            match outcome {
+                SnapshotRestoreAuthorityCheckOutcome::RejectConflict(
+                    AuthorityStateComparison::RollbackRefused { .. },
+                ) => {}
+                other => panic!("expected RollbackRefused conflict, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn same_sequence_conflicting_hash_rejects() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            persist_authority_state_atomic(&path, &matching_local_record()).unwrap();
+            let mut snap = matching_snapshot_meta();
+            snap.ratification_object_hash = "e".repeat(64);
+            let outcome = run_check(&path, Some(&snap));
+            match outcome {
+                SnapshotRestoreAuthorityCheckOutcome::RejectConflict(
+                    AuthorityStateComparison::SameSequenceConflictingHash { .. },
+                ) => {}
+                other => panic!("expected SameSequenceConflictingHash, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn policy_version_regression_rejects() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            let mut local = matching_local_record();
+            local.authority_policy_version = 5;
+            persist_authority_state_atomic(&path, &local).unwrap();
+            let snap = matching_snapshot_meta(); // policy_version=1
+            let outcome = run_check(&path, Some(&snap));
+            match outcome {
+                SnapshotRestoreAuthorityCheckOutcome::RejectConflict(
+                    AuthorityStateComparison::PolicyVersionRegression { .. },
+                ) => {}
+                other => panic!("expected PolicyVersionRegression, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn corrupt_local_marker_rejects_and_preserves_bytes() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            std::fs::write(&path, b"not valid json").unwrap();
+            let bytes_before = std::fs::read(&path).unwrap();
+            let snap = matching_snapshot_meta();
+            let outcome = run_check(&path, Some(&snap));
+            assert!(matches!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerCorrupt(_)
+            ));
+            assert_eq!(std::fs::read(&path).unwrap(), bytes_before);
+        }
+
+        #[test]
+        fn unsupported_record_version_local_rejects() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            let local = matching_local_record();
+            // Forge a record_version through the serde layer.
+            let mut json = serde_json::to_value(&local).unwrap();
+            json["record_version"] = serde_json::json!(999);
+            std::fs::write(&path, serde_json::to_vec(&json).unwrap()).unwrap();
+            let outcome = run_check(&path, Some(&matching_snapshot_meta()));
+            match outcome {
+                SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerCorrupt(
+                    AuthorityStateError::UnsupportedRecordVersion(999),
+                ) => {}
+                other => panic!("expected UnsupportedRecordVersion(999), got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn wrong_domain_local_marker_rejects_before_snapshot_compare() {
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            let mut local = matching_local_record();
+            local.environment = TrustBundleEnvironment::Testnet;
+            persist_authority_state_atomic(&path, &local).unwrap();
+            let outcome = run_check(&path, Some(&matching_snapshot_meta()));
+            assert!(matches!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerWrongDomain(
+                    AuthorityStateComparison::EnvironmentMismatch { .. }
+                )
+            ));
+        }
+
+        #[test]
+        fn snapshot_marker_wrong_chain_rejects() {
+            let tmp = TempDir::new().unwrap();
+            let mut snap = matching_snapshot_meta();
+            snap.chain_id_hex = "0000000000000099".to_string();
+            let outcome = run_check(&authority_state_file_path(tmp.path()), Some(&snap));
+            assert!(matches!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::RejectSnapshotMarkerWrongDomain { .. }
+            ));
+        }
+
+        #[test]
+        fn snapshot_marker_wrong_genesis_rejects_even_without_local_marker() {
+            let tmp = TempDir::new().unwrap();
+            let mut snap = matching_snapshot_meta();
+            snap.genesis_hash_hex = "f".repeat(64);
+            let outcome = run_check(&authority_state_file_path(tmp.path()), Some(&snap));
+            match outcome {
+                SnapshotRestoreAuthorityCheckOutcome::RejectSnapshotMarkerWrongDomain {
+                    reason,
+                } => assert!(reason.contains("genesis_hash_hex")),
+                other => panic!("expected snapshot wrong-domain, got {:?}", other),
+            }
+        }
+
+        #[test]
+        fn snapshot_marker_wrong_environment_rejects() {
+            let tmp = TempDir::new().unwrap();
+            let mut snap = matching_snapshot_meta();
+            snap.environment = "mainnet".to_string();
+            let outcome = run_check(&authority_state_file_path(tmp.path()), Some(&snap));
+            assert!(matches!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::RejectSnapshotMarkerWrongDomain { .. }
+            ));
+        }
+
+        // --- Classification helpers ---
+
+        #[test]
+        fn outcome_classification_helpers() {
+            assert!(SnapshotRestoreAuthorityCheckOutcome::NoMarkerEitherSide.is_accept());
+            assert!(
+                SnapshotRestoreAuthorityCheckOutcome::AcceptSnapshotMarkerNoLocal.is_accept()
+            );
+            assert!(SnapshotRestoreAuthorityCheckOutcome::AcceptMatchingMarker.is_accept());
+            assert!(
+                SnapshotRestoreAuthorityCheckOutcome::RejectMissingSnapshotMarker.is_reject()
+            );
+            assert!(SnapshotRestoreAuthorityCheckOutcome::RejectConflict(
+                AuthorityStateComparison::RollbackRefused {
+                    persisted_sequence: 9,
+                    attempted_sequence: 4,
+                },
+            )
+            .is_reject());
+        }
+
+        #[test]
+        fn pure_helper_never_creates_marker_on_accept_paths() {
+            // No-local + no-snapshot
+            let tmp = TempDir::new().unwrap();
+            let path = authority_state_file_path(tmp.path());
+            let _ = run_check(&path, None);
+            assert!(!path.exists());
+
+            // No-local + snapshot present
+            let tmp2 = TempDir::new().unwrap();
+            let path2 = authority_state_file_path(tmp2.path());
+            let snap = matching_snapshot_meta();
+            let _ = run_check(&path2, Some(&snap));
+            assert!(!path2.exists());
         }
     }
 }

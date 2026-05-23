@@ -3854,3 +3854,38 @@ Run 123 extends the authority anti-rollback marker checks to the three validatio
 - No new wire format changes.
 - No new persistence format changes.
 - No signing-key rotation/revocation lifecycle.
+## Run 124 — Snapshot/restore authority anti-rollback marker conflict enforcement
+
+**What Run 124 adds:**
+
+Run 124 wires the authority anti-rollback marker into the **snapshot restore** surface (`--restore-from-snapshot <path>`). The restore path now compares the snapshot's optional `AuthorityStateSnapshotMeta` block (Run 117 additive metadata) against the locally persisted `<data_dir>/pqc_authority_state.json` marker BEFORE materializing any state checkpoint or writing the B3 `RESTORED_FROM_SNAPSHOT.json` audit marker. A conflict — rollback, equivocation, key conflict, policy regression, wrong-domain, corrupt local marker, or a snapshot that would silently shadow a pre-existing local marker — exits non-zero with a precise operator log line before any state mutation occurs.
+
+**Surfaces wired in Run 124:**
+
+| Surface | Marker check wired | On conflict / corrupt / missing-when-required | On no marker either side | Persists marker? |
+|---------|-------------------|-----------------------------------------------|--------------------------|------------------|
+| `--restore-from-snapshot` (B3 / B5) | After snapshot layout validation, BEFORE state materialization and audit-marker write | `exit(1)` with `[restore] FATAL: refused by Run 124 authority-marker check: ...` | Pass (legacy snapshot into fresh data dir) | Never — the marker file is the *outcome* of a mutating-surface acceptance, never synthesised from a snapshot block |
+
+**Operator notes:**
+
+- No new CLI flag. The marker check activates automatically when `--restore-from-snapshot` is used AND the canonical Run 101 genesis hash was computed at boot (Run 102 `Verified` branch — i.e. an external `--genesis-path` is configured, which is mandatory on MainNet and recommended on TestNet/DevNet).
+- A legacy pre-Run-117 snapshot (no `authority_state` block) restoring into a fresh `--data-dir` with no local marker is **accepted** — first-time DevNet/TestNet restores still work. The next mutating surface (startup, reload-apply, SIGHUP) will write the canonical marker from the verified ratification.
+- A legacy snapshot restoring into a `--data-dir` that already has a local `pqc_authority_state.json` marker is **rejected fail-closed** on every environment, including DevNet — accepting it would silently shadow the persisted ratified authority state. Operator recovery is a future flag (`--allow-authority-state-reset`); Run 124 does NOT implement it.
+- A Run-117+ snapshot whose authority block matches the local marker bit-for-bit is **accepted idempotently** and the local marker bytes are NOT rewritten.
+- A Run-117+ snapshot whose authority block conflicts with the local marker (lower `authority_sequence`, same `authority_sequence` with a different `ratification_object_hash` or different `ratified_bundle_signing_key_fingerprint`, `authority_policy_version` regression, wrong `chain_id` / `environment` / `genesis_hash`) is **rejected fail-closed** — no state copy, no audit-marker write, local marker bytes preserved verbatim.
+- A corrupt or unsupported-version local marker fails closed; the on-disk bytes are preserved exactly.
+- The legacy `apply_snapshot_restore_if_requested` entry point (used by tests that have no genesis context) refuses the restore with `AuthorityContextMissing` whenever a pre-existing local marker is on disk — there is no silent shadowing through that path either.
+
+**What is explicitly NOT changed by Run 124:**
+
+- Mutating-surface marker behavior (Runs 119/120/121) — unchanged.
+- Validation-only marker behavior (Run 123) — unchanged.
+- The B3 snapshot layout, B5 restore-aware consensus startup, Run 097 snapshot epoch parity — all preserved bit-for-bit on accept paths.
+- The local `<data_dir>/pqc_authority_state.json` file is NEVER written, rewritten, or deleted by the restore surface — only mutating surfaces persist the marker.
+- No new wire format changes.
+- No new persistence format changes.
+- No new CLI flag (no `--allow-authority-state-reset` in this run).
+- No signing-key rotation/revocation lifecycle.
+- No peer-driven live apply.
+- Per-key monotonic ratification schema bump — future run (Run 125+).
+- Full C4 / C5 closure remain open.
