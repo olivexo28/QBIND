@@ -4054,3 +4054,60 @@ operator_note_hash, binary_sha256, binary_build_id, timestamp, result
 | Run 129+ | Ratification v2 per-key monotonic schema design |
 | Future | Signing-key rotation/revocation, MainNet governance, KMS/HSM |
 - Full C4 / C5 closure remain open.
+---
+
+## Run 127 — offline authority-state reset CLI skeleton
+
+**Date:** 2026-05-23
+**Evidence:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_127.md`
+
+Run 127 implements the Run 126 specification skeleton. The `--authority-state-reset` CLI flag is now operative on DevNet and TestNet; MainNet is refused by default.
+
+### What changed for operators
+
+| Item | Status |
+|---|---|
+| `--authority-state-reset` flag | Now available (hidden) |
+| `--authority-state-reset-output-audit` | Required when reset flag is set |
+| `--authority-state-reset-operator-note` | Optional ceremony note (stored as hash) |
+| Reset allowed on DevNet / TestNet | Yes, when all checks pass |
+| Reset allowed on MainNet | **No — MainNetLocalResetUnsupported** |
+| Audit record emitted | Always (success and refusal) |
+| Existing corrupt marker auto-repaired | **Never — operator must remove out-of-band** |
+
+### Operator ceremony (DevNet/TestNet)
+
+```
+qbind-node \
+  --authority-state-reset \
+  --env devnet \
+  --data-dir <data-dir> \
+  --genesis-path <genesis.json> \
+  --expect-genesis-hash <hash> \
+  --p2p-trust-bundle <bundle.json> \
+  --p2p-trust-bundle-signing-key <keyspec> \
+  --p2p-trust-bundle-ratification <ratification.json> \
+  --authority-state-reset-output-audit <audit.json> \
+  --authority-state-reset-operator-note "ceremony note"
+```
+
+Exit code `0` means success; exit code `1` means refused. The audit record is always written first (or best-effort on refusal).
+
+### Typed refusal cases
+
+See `AuthorityResetRefusal` in `crates/qbind-node/src/pqc_authority_state_reset.rs` for the full 23-variant enum. The `stable_id()` appears in `refusal_reason` of the audit record and is never renamed without a documented schema migration.
+
+### Evidence archive
+
+18 unit tests in `pqc_authority_state_reset::tests` cover all structural refusal cases, crash-safe audit behavior, canonical JSON determinism, and stable-id surface. All 126 prior `pqc_authority*` tests pass.
+
+### Non-changes
+
+- No wire format change.
+- No persistence format change.
+- No change to Run 117–121 mutating surfaces.
+- No change to Run 123 validation-only surfaces.
+- No change to Run 124–125 restore conflict enforcement.
+- No peer-driven anything.
+- No MainNet reset path implemented.
+- Static production source-code anchors remain rejected.

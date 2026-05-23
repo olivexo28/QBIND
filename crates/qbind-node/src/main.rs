@@ -1078,6 +1078,57 @@ async fn main() {
     };
 
     // ------------------------------------------------------------------
+    // Run 127 — `--authority-state-reset` offline operator ceremony.
+    //
+    // When `--authority-state-reset` is present the binary performs the
+    // Run 126 offline reset ceremony, writes a deterministic JSON audit
+    // record, and exits (0 on success, 1 on refusal). The early-exit fires
+    // here — before `--print-genesis-hash`, before MainNet profile
+    // validation, before P2P trust-bundle startup, before networking,
+    // consensus, metrics, SIGHUP handlers, reload tasks, and peer-
+    // candidate dispatch. Normal node startup is never reachable through
+    // this code path.
+    // ------------------------------------------------------------------
+    if args.authority_state_reset {
+        use qbind_node::pqc_authority_state_reset::{
+            AuthorityResetInputs, execute_authority_state_reset,
+        };
+        let validation_time_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let updated_at_unix_secs = validation_time_secs;
+        let reset_inputs = AuthorityResetInputs {
+            data_dir: args.data_dir.clone(),
+            genesis_path: args.genesis_path.clone(),
+            expected_genesis_hash: args.expect_genesis_hash.clone(),
+            trust_bundle_path: args.p2p_trust_bundle.clone(),
+            bundle_signing_key_specs: args.p2p_trust_bundle_signing_keys.clone(),
+            ratification_path: args.p2p_trust_bundle_ratification.clone(),
+            audit_output_path: args.authority_state_reset_output_audit.clone(),
+            environment: config.environment,
+            operator_note: args.authority_state_reset_operator_note.clone(),
+            validation_time_secs,
+            updated_at_unix_secs,
+        };
+        match execute_authority_state_reset(&reset_inputs) {
+            Ok(success) => {
+                eprintln!(
+                    "[run-127] authority-state-reset: SUCCESS.                      marker={} new_marker_hash={} audit={}",
+                    success.marker_path.display(),
+                    success.new_marker_hash_hex,
+                    success.audit_path.display(),
+                );
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("[run-127] FATAL: authority-state-reset refused: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
     // Run 102 — `--print-genesis-hash` operator tooling.
     //
     // When `--print-genesis-hash` is passed, load the configured external

@@ -1720,3 +1720,58 @@ Run 126 defines the formal specification for authority-state reset/recovery afte
 The "authority anti-rollback persistence" C4 sub-item status: **OPEN, all three mutating surfaces wired and evidenced (Runs 119/120/121, evidenced by Run 122), all three validation-only surfaces wired (Run 123), snapshot/restore surface wired (Run 124) and release-binary evidence captured (Run 125), reset/recovery procedure formally specified (Run 126)**. Remaining items: `--allow-authority-state-reset` implementation (Run 127), release-binary evidence for reset refusal/allowed cases (Run 128), `BundleSigningRatification` v2 per-key monotonic field (Run 129+), signing-key rotation/revocation lifecycle, peer-driven live apply (intentionally non-mutating), KMS/HSM custody, MainNet governance artifact design, validator-set rotation, fast-sync / consensus-storage-restore ratification parity beyond the local restore surface, full C4 closure, C5 closure.
 
 Run 126 explicitly does NOT implement: `--allow-authority-state-reset`; any reset CLI command; any runtime code change; signing-key rotation/revocation; peer-driven live apply; KMS/HSM custody; governance artifact format; validator-set rotation; ratification v2 monotonic schema. Run 126 does not claim full C4 closure and does not claim C5 closure. Run 126 does not weaken any Run 050–125 invariant. Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority.
+## Run 127 update — offline authority-state reset CLI skeleton
+
+**Date:** 2026-05-23
+**Source:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_127.md`
+**Verdict:** positive (source + unit test evidence; release-binary evidence deferred)
+
+Run 127 implements the Run 126 specification skeleton for the offline authority-state reset ceremony. Key implementation facts:
+
+### New module: `pqc_authority_state_reset`
+
+`crates/qbind-node/src/pqc_authority_state_reset.rs` provides:
+
+- **`AuthorityResetRefusal`** — 23-variant typed enum; every variant has a `stable_id()` for the audit log and a `detail()` for stderr/operator.
+- **`AuthorityResetAuditRecord`** — deterministic Serde struct (fixed field order); no wall-clock in security-relevant fields; operator note embedded as SHA3-256 fingerprint only; no private key material.
+- **`verify_authority_reset_inputs`** — pure pre-flight; all validation, no disk writes.
+- **`execute_authority_state_reset`** — orchestrates the full ceremony with crash-safe pending→success audit update.
+
+### Environment policy
+
+| Environment | Reset allowed |
+|---|---|
+| DevNet | Yes, when all checks pass and audit output path is supplied |
+| TestNet | Yes, under same strict ceremony as DevNet |
+| MainNet | **REFUSED** by default (before opening any files) |
+
+### Refusal ordering (fail-closed)
+
+1. Structural input presence (`MissingDataDir`, `MissingGenesisPath`, `MissingExpectedGenesisHash`, `MissingTrustBundle`, `MissingRatification`, `AuditOutputMissing`)
+2. MainNet policy check (`MainNetLocalResetUnsupported`) — fires BEFORE opening any files
+3. Expected genesis hash parse (`MalformedExpectedGenesisHash`)
+4. Genesis file load (`GenesisLoadFailed`)
+5. Genesis hash mismatch (`GenesisHashMismatch`)
+6. Authority block presence/validity (`MissingAuthorityConfig`, `InvalidAuthorityConfig`)
+7. Trust-bundle load/validate (`InvalidTrustBundle`)
+8. Signing-key bytes resolution (`AuthorityKeyMaterialMalformed`, `AuthorityKeyMaterialUnavailable`)
+9. Ratification load/parse (`InvalidRatification`)
+10. Ratification enforcement — always `Strict`; `LegacyUnratifiedAccepted` → `TransportRootNotAllowed` (`RatificationEnforcementFailed`, `TransportRootNotAllowed`)
+11. Marker derivation (`TargetMarkerDerivationFailed`)
+12. Existing marker archive — corrupt is a refusal, never auto-repaired (`ExistingMarkerCorrupt`)
+13. Audit write failure (`AuditWriteFailed`)
+14. Marker persist failure (`MarkerPersistFailed`)
+
+### Crash safety
+
+The audit record is written as `result = "pending"` before `persist_authority_state_atomic`, then updated to `result = "success"` after. A crash between the two steps leaves a self-describing pending artifact. A persist failure re-writes the audit record as `result = "refused"` / `MarkerPersistFailed`. A crash before the audit write leaves the marker untouched.
+
+### CLI surface
+
+Three new hidden opt-in flags: `--authority-state-reset`, `--authority-state-reset-output-audit`, `--authority-state-reset-operator-note`. The early-exit dispatch fires before `--print-genesis-hash`, before MainNet invariant validation, before all networking/consensus/metrics/SIGHUP/reload/peer-candidate machinery.
+
+### C4 status after Run 127
+
+**OPEN**, all three mutating surfaces wired and evidenced (Runs 119/120/121/122), all three validation-only surfaces wired (Run 123), snapshot/restore surface wired and evidenced (Runs 124/125), reset/recovery specified (Run 126) and CLI skeleton implemented (Run 127). Remaining: release-binary evidence for reset (Run 128), `BundleSigningRatification` v2 monotonic field (Run 129+), signing-key rotation/revocation, peer-driven live apply, KMS/HSM custody, MainNet governance artifact, validator-set rotation, full C4 closure, C5 closure.
+
+Run 127 does NOT implement: MainNet governance artifact verification; signing-key rotation/revocation; per-key monotonic authority sequence; peer-driven live apply; KMS/HSM custody. Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority. Run 127 does not claim full C4 closure and does not claim C5 closure. Run 127 weakens no Run 050–126 invariant.

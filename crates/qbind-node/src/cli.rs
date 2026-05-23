@@ -1074,6 +1074,42 @@ pub struct CliArgs {
     /// staging-vs-commit boundary.
     #[arg(long = "devnet-reconfig-proposal-next-epoch", hide = true)]
     pub devnet_reconfig_proposal_next_epoch: Option<u64>,
+
+    // ========================================================================
+    // Run 127 — offline authority-state reset
+    // ========================================================================
+    /// Run 127 — trigger the offline authority-state reset ceremony.
+    ///
+    /// When this flag is present the binary exits BEFORE any normal node
+    /// startup (networking, consensus, metrics, SIGHUP handlers, reload
+    /// tasks, and peer-candidate dispatch are never installed).
+    ///
+    /// **Required companion flags:**
+    ///   * `--data-dir` — resolved marker path.
+    ///   * `--genesis-path` — external genesis JSON file.
+    ///   * `--expect-genesis-hash` — canonical Run 101 genesis hash.
+    ///   * `--p2p-trust-bundle` — candidate signed trust-bundle.
+    ///   * `--p2p-trust-bundle-ratification` — ratification sidecar.
+    ///   * `--authority-state-reset-output-audit` — audit record path.
+    ///
+    /// **Environment policy:** DevNet/TestNet allowed; MainNet REFUSED.
+    ///
+    /// Hidden because it is an operator ceremony command.
+    #[arg(long = "authority-state-reset", hide = true)]
+    pub authority_state_reset: bool,
+
+    /// Run 127 — output path for the authority-state-reset audit record.
+    ///
+    /// Required when `--authority-state-reset` is present.
+    #[arg(long = "authority-state-reset-output-audit", hide = true)]
+    pub authority_state_reset_output_audit: Option<PathBuf>,
+
+    /// Run 127 — optional operator ceremony note for the audit record.
+    ///
+    /// When supplied, its SHA3-256 fingerprint is embedded in the audit
+    /// record (raw text is never stored).
+    #[arg(long = "authority-state-reset-operator-note", hide = true)]
+    pub authority_state_reset_operator_note: Option<String>,
 }
 
 // ============================================================================

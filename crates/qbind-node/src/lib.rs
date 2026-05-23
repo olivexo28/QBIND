@@ -170,6 +170,15 @@ pub mod pqc_authority_state;
 // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 119 update,
 // and `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_authority_marker_acceptance;
+// Run 127 — offline-only authority-state reset CLI skeleton with typed
+// refusal cases and deterministic audit records. Implements the Run 126
+// reset/recovery specification: allows DevNet/TestNet reset under strict
+// ceremony inputs; refuses MainNet local reset by default; emits a typed
+// refusal audit record on every failed attempt; never writes the marker on
+// any refusal path. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_127.md`,
+// `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 127 update,
+// and `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_authority_state_reset;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
