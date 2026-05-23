@@ -1,0 +1,719 @@
+# RUN 127 — Authority-State Reset CLI Skeleton with Typed Refusal Cases
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established, wired, and partially release-binary-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle`.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement.
+- Run 126 produced a positive, spec-first authority-state reset/recovery procedure:
+  - no runtime code changed;
+  - no reset CLI was implemented;
+  - reset is offline-only and explicit;
+  - DevNet/TestNet/MainNet policies are separated;
+  - MainNet local reset is refused by default;
+  - reset cannot be peer-triggered;
+  - reset cannot use transport roots as authority;
+  - reset cannot rely on local config alone for MainNet;
+  - audit artifacts are mandatory;
+  - operator ceremony, refusal cases, and conceptual audit schema are defined;
+  - ratification v2 per-key monotonic schema remains future work.
+
+Run 127 is the first implementation run for the reset/recovery surface.
+
+This must be an implementation-narrow CLI skeleton with typed refusal cases. It must not become a bypass around the authority anti-rollback model.
+
+---
+
+# Exact objective
+
+Implement an offline-only authority-state reset CLI skeleton that performs strict validation, emits an audit record, and refuses unsafe cases by default.
+
+The objective is:
+
+1. Add a local/offline `authority-state-reset` command surface or repo-equivalent command.
+2. Require explicit operator inputs; never run implicitly.
+3. Refuse MainNet by default unless future governance artifact support exists.
+4. Allow DevNet reset only under explicit operator command and full audit output.
+5. Allow TestNet reset only under stricter explicit ceremony inputs and full audit output if the Run 126 policy permits.
+6. Verify genesis hash, chain_id, environment, genesis authority config, ratification sidecar, authority root, ratified signing key, and target marker derivation.
+7. Archive the old marker bytes/hash before writing any new marker.
+8. Write an audit record for both success and refusal where feasible.
+9. Persist a new authority marker only after all validation succeeds and only on allowed environments.
+10. Refuse peer-triggered, startup-triggered, automatic, or local-config-only reset behavior.
+11. Do not implement MainNet governance artifact verification yet.
+12. Do not implement signing-key rotation/revocation lifecycle.
+13. Do not invent a fake per-key monotonic authority sequence.
+
+Run 127 should make this statement true:
+
+> QBIND has an explicit offline reset command skeleton that can safely reset authority marker state only under tightly validated DevNet/TestNet recovery conditions, while refusing MainNet local reset and all implicit/peer-triggered bypasses.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Offline reset command skeleton
+
+Add a command surface such as:
+
+```text
+qbind-node authority-state-reset ...
+```
+
+or the repo’s preferred equivalent.
+
+The command must be offline/local only. It must not start networking, consensus, P2P, SIGHUP handlers, reload tasks, peer-candidate dispatchers, or normal node runtime.
+
+## B. Required inputs
+
+The command should require explicit inputs similar to:
+
+```text
+--data-dir <PATH>
+--genesis-path <PATH>
+--expected-genesis-hash <HASH>
+--p2p-trust-bundle <BUNDLE>
+--p2p-trust-bundle-ratification <RATIFICATION>
+--output-audit <PATH>
+--environment <devnet|testnet|mainnet>
+--operator-note <TEXT or PATH>   # optional if repo style prefers
+```
+
+Use repo naming/style where possible.
+
+Do not add a normal-startup flag like `--allow-authority-state-reset` for this run.
+
+## C. Environment policy
+
+Implement Run 126 policy:
+
+### DevNet
+
+May allow reset with explicit command, valid inputs, and audit record.
+
+### TestNet
+
+May allow reset if Run 126 policy permits, but must require explicit command, valid inputs, stricter refusal checks, and audit record.
+
+### MainNet
+
+Must refuse local reset by default.
+
+A future governance/recovery artifact may be designed later, but Run 127 must not implement or fake it.
+
+## D. Validation pipeline
+
+The reset command must validate:
+
+- genesis file exists and parses;
+- canonical genesis hash matches `--expected-genesis-hash`;
+- runtime environment matches genesis authority policy;
+- chain_id matches expected environment/domain;
+- genesis authority config is present and valid;
+- trust bundle is signed and valid under existing checks where applicable;
+- ratification sidecar is present and verifies under genesis-bound bundle-signing authority roots;
+- transport roots cannot authorize bundle-signing keys;
+- derived target authority marker is domain-consistent;
+- existing marker is loaded, archived, and compared;
+- corrupt existing marker is treated as a recovery case requiring audit, not silently repaired;
+- no local-config-only MainNet authority is accepted.
+
+## E. Audit record
+
+Implement a deterministic audit record file, likely JSON if repo conventions allow.
+
+It must include at least:
+
+```text
+record_version
+action = authority_state_reset
+environment
+chain_id
+genesis_hash
+old_marker_present
+old_marker_hash
+old_marker_record_if_parseable
+old_marker_raw_sha256
+new_marker_hash
+new_marker_record
+ratification_hash
+trust_bundle_fingerprint
+snapshot_metadata_hash_if_any
+operator_note_hash_or_value
+binary_sha256_or_unavailable
+binary_build_id_or_unavailable
+result = success | refused
+refusal_reason_if_any
+timestamp_or_explicitly_no_wall_clock_if deterministic policy requires
+```
+
+If project policy avoids wall-clock in deterministic artifacts, document and use deterministic fields only. Do not use wall-clock for consensus-critical behavior.
+
+## F. Typed refusal cases
+
+Add typed refusal reasons, not boolean-only failures.
+
+Expected refusal cases:
+
+- MissingDataDir;
+- MissingGenesisPath;
+- MissingExpectedGenesisHash;
+- GenesisHashMismatch;
+- MissingAuthorityConfig;
+- WrongEnvironment;
+- WrongChainId;
+- MainNetLocalResetUnsupported;
+- MissingTrustBundle;
+- InvalidTrustBundle;
+- MissingRatification;
+- InvalidRatification;
+- TransportRootNotAllowed;
+- AuthorityKeyMaterialUnavailable;
+- AuthorityKeyMaterialMalformed;
+- TargetMarkerDerivationFailed;
+- ExistingMarkerCorrupt;
+- AuditOutputMissing;
+- AuditWriteFailed;
+- MarkerPersistFailed;
+- PeerTriggeredResetUnsupported / RuntimeResetUnsupported if applicable.
+
+Use repo-appropriate names.
+
+## G. Marker write behavior
+
+Only after all validation succeeds and the environment policy allows reset:
+
+- write audit record or prepare audit record first according to safe ordering;
+- persist target marker atomically using Run 117 persistence;
+- preserve old marker archive/hash in audit output;
+- never delete marker without replacement;
+- never synthesize marker from legacy snapshot;
+- never write marker from validation-only path.
+
+---
+
+# Strict non-goals
+
+Run 127 MUST NOT:
+
+- implement MainNet governance artifact verification;
+- allow MainNet local reset;
+- add normal-startup reset flag;
+- allow reset during normal node runtime;
+- allow peer-triggered reset;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- invent a fake authority sequence/epoch;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- implement KMS/HSM custody;
+- implement governance;
+- implement validator-set rotation;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- redesign consensus;
+- redesign fast-sync broadly;
+- redesign snapshots broadly;
+- weaken Run 097 snapshot epoch parity;
+- weaken Run 102 genesis verification;
+- weaken Run 103 ratification verifier failure semantics;
+- weaken Run 104 key-material validation;
+- weaken Run 105–115 ratification enforcement/evidence;
+- weaken Run 117 marker corruption/fail-closed behavior;
+- weaken Run 119–121 mutating marker behavior;
+- weaken Run 123 validation-only no-persistence behavior;
+- weaken Run 124 restore conflict enforcement;
+- weaken Run 125 release-binary restore evidence invariants;
+- weaken existing signed-bundle verification;
+- weaken chain_id enforcement;
+- weaken environment enforcement;
+- weaken Run 055 trust-bundle sequence anti-rollback;
+- weaken activation-height checks;
+- weaken activation_epoch checks;
+- weaken Run 065 minimum-margin policy;
+- weaken revocation checks;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim full signing-key rotation safety;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing CLI architecture
+
+Identify how `qbind-node` currently handles:
+
+- subcommands if any;
+- early-exit maintenance commands;
+- `--print-genesis-hash`;
+- reload-check / peer-candidate-check style one-shot commands;
+- error-to-exit-code behavior;
+- audit/log conventions.
+
+Use existing patterns. Do not create a parallel CLI architecture.
+
+## 2. Run 126 spec mapping
+
+Map every Run 126 requirement to either:
+
+- implemented in Run 127;
+- explicitly deferred;
+- explicitly refused.
+
+## 3. Existing marker APIs
+
+Inspect and reuse:
+
+- `PersistentAuthorityStateRecord`;
+- `load_authority_state`;
+- `persist_authority_state_atomic`;
+- `derive_authority_state_from_ratification(...)`;
+- `decide_marker_acceptance(...)` if useful;
+- `canonical_ratification_digest`;
+- Run 117/118 typed errors.
+
+## 4. Audit file safety
+
+Determine safe ordering between:
+
+- validating inputs;
+- writing audit plan;
+- persisting marker;
+- writing final audit result.
+
+Document crash behavior. A crash must not create a misleading success audit if marker was not written.
+
+## 5. Environment policy enforcement
+
+Prove MainNet refuses before any marker write.
+
+Prove DevNet/TestNet cannot bypass genesis hash, chain_id, authority config, or ratification checks.
+
+---
+
+# Required implementation
+
+## 1. Add reset command parser path
+
+Add the smallest CLI surface consistent with existing command style.
+
+It must exit before normal node startup and must not install networking, metrics, consensus, SIGHUP, reload, or peer dispatch.
+
+## 2. Add reset verification module/helper
+
+Add a module/helper such as:
+
+```text
+pqc_authority_state_reset.rs
+```
+
+or repo-equivalent.
+
+It should expose pure/testable functions where possible:
+
+```text
+build_authority_reset_plan(...)
+verify_authority_reset_inputs(...)
+write_authority_reset_audit(...)
+execute_authority_state_reset(...)
+```
+
+Use repo naming style.
+
+## 3. Add typed errors/refusals
+
+Return structured refusal types.
+
+Ensure final CLI output includes a clear refusal reason without leaking private key material.
+
+## 4. Add audit record
+
+Add an audit record type and deterministic serialization.
+
+Do not include private keys.
+
+Do not include secret material.
+
+## 5. Persist marker only on allowed success
+
+Use Run 117 atomic persistence.
+
+Do not delete old marker.
+
+Do not repair corrupt marker silently.
+
+Do not write on MainNet local reset.
+
+---
+
+# Required tests
+
+## A. Pure reset-plan tests
+
+Test:
+
+- DevNet valid reset plan succeeds;
+- TestNet valid reset plan succeeds or refuses according to Run 126 policy;
+- MainNet local reset refuses;
+- missing genesis refuses;
+- genesis hash mismatch refuses;
+- wrong environment refuses;
+- wrong chain_id refuses;
+- missing authority config refuses;
+- transport root authorization refuses;
+- missing ratification refuses;
+- bad ratification refuses;
+- malformed authority key material refuses;
+- target marker derivation failure refuses.
+
+## B. Audit record tests
+
+Test:
+
+- success audit includes required fields;
+- refusal audit includes refusal reason;
+- old marker hash is recorded;
+- new marker hash is recorded on success;
+- private keys are not serialized;
+- deterministic serialization if required by repo style.
+
+## C. Marker persistence tests
+
+Test:
+
+- valid DevNet reset writes target marker;
+- MainNet refusal does not write marker;
+- invalid ratification refusal does not write marker;
+- audit write failure does not silently write marker unless explicitly safe and documented;
+- marker persist failure emits refusal/failure audit if possible.
+
+## D. CLI tests
+
+If CLI integration tests exist, add tests for:
+
+- DevNet success;
+- MainNet refusal;
+- missing audit path refusal;
+- missing genesis hash refusal;
+- bad ratification refusal;
+- normal startup unaffected.
+
+## E. Regression tests
+
+Run and report:
+
+- Run 125 snapshot restore evidence helper/tests if present;
+- Run 124 snapshot/restore authority marker tests;
+- Run 123 validation-only marker tests;
+- Run 122 evidence helper/tests if present;
+- Run 119/120/121 mutating marker tests;
+- Run 117/118 authority state tests;
+- Run 103/104 ratification tests;
+- qbind-node --lib;
+- qbind-ledger --lib;
+- qbind-crypto --lib if touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 127.
+
+---
+
+# Release-binary evidence
+
+Release-binary evidence is recommended if feasible but not required for a positive source/test verdict.
+
+Preferred scenarios:
+
+## Scenario 1 — DevNet reset succeeds with audit
+
+Use real `target/release/qbind-node authority-state-reset ...`.
+
+Prove:
+
+- command exits success;
+- marker is written;
+- audit record exists;
+- audit record contains old/new marker hash and ratification hash;
+- no normal node startup markers appear.
+
+## Scenario 2 — MainNet local reset refuses
+
+Prove:
+
+- command exits non-zero;
+- marker is not written/changed;
+- audit refusal record is written if policy requires;
+- no normal node startup markers appear.
+
+## Scenario 3 — Bad ratification refuses
+
+Prove no marker write.
+
+## Scenario 4 — Missing audit output refuses
+
+Prove no marker write.
+
+If release evidence is not produced, document it honestly and defer to a follow-up evidence run.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_127.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+If release evidence is produced:
+
+- archive logs under `docs/devnet/run_127_*`.
+
+Optional narrow updates:
+
+- CLI/operator docs for the reset command;
+- MainNet readiness checklist;
+- storage/audit schema docs.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 127 may narrow:
+
+- reset/recovery implementation skeleton;
+- typed refusal behavior;
+- audit record format;
+- DevNet/TestNet controlled reset behavior;
+- MainNet local reset refusal.
+
+Run 127 may mark the reset CLI skeleton sub-piece resolved only if:
+
+- reset command exists;
+- MainNet local reset refuses;
+- DevNet/TestNet behavior follows the Run 126 policy;
+- typed refusal cases exist;
+- audit output exists;
+- no marker write occurs on refusal;
+- tests prove behavior;
+- docs are synchronized.
+
+Run 127 MUST NOT mark resolved:
+
+- MainNet governance recovery artifact support;
+- reset release-binary evidence unless produced;
+- signing-key rotation/revocation lifecycle;
+- missing per-key monotonic authority sequence;
+- KMS/HSM custody;
+- peer-driven live apply;
+- governance;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 127 does not implement MainNet governance artifact verification;
+- Run 127 does not implement signing-key rotation/revocation;
+- Run 127 does not invent a monotonic authority sequence;
+- Run 127 does not implement peer-driven live apply;
+- Run 127 does not implement KMS/HSM custody;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- reset CLI skeleton lands;
+- typed refusal cases land;
+- audit schema/output lands;
+- tests cover success/refusal/no-write cases;
+- release-binary evidence covers key scenarios;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- reset CLI skeleton, typed refusals, audit output, and tests land;
+- release-binary evidence is deferred honestly.
+
+Use **partial-positive** if:
+
+- CLI skeleton lands but audit output or refusal coverage is incomplete;
+- MainNet policy remains unresolved;
+- tests are incomplete.
+
+Use **negative** if:
+
+- MainNet local reset can write marker;
+- reset can run implicitly or during normal startup;
+- reset can be peer-triggered;
+- marker is written on refusal;
+- local config alone can authorize reset;
+- reset weakens anti-rollback invariants.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- reset CLI surface;
+- environment policy;
+- typed refusal cases;
+- audit record behavior;
+- marker write behavior;
+- docs updated;
+- release-binary evidence if any.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence if any.
+
+## 4. Key security decisions
+
+Include:
+
+- offline-only reset;
+- MainNet local reset refusal;
+- audit required;
+- no marker write on refusal;
+- no peer-triggered reset;
+- no normal-startup reset;
+- no fake authority sequence;
+- no peer-driven apply;
+- no rotation/revocation lifecycle.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 verifier;
+- Run 104 key material registry;
+- Run 105–115 ratification enforcement/evidence;
+- Run 116 model;
+- Run 117 primitive;
+- Run 118 helper layer;
+- Run 119 reload-apply wiring;
+- Run 120 startup wiring;
+- Run 121 SIGHUP wiring;
+- Run 122 release-binary mutating-surface evidence;
+- Run 123 validation-only marker checks;
+- Run 124 restore conflict enforcement;
+- Run 125 release-binary restore evidence;
+- Run 126 reset specification;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 127 does NOT implement:
+
+- MainNet governance artifact verification;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- governance;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 127 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+

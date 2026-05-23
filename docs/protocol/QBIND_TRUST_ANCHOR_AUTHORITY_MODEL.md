@@ -1690,3 +1690,33 @@ All existing unit and integration tests pass byte-identically on the same build:
 The "authority anti-rollback persistence" C4 sub-item status: **OPEN, all three mutating surfaces wired and evidenced (Runs 119/120/121, evidenced by Run 122), all three validation-only surfaces wired (Run 123), snapshot/restore surface wired (Run 124) and release-binary evidence captured (Run 125)**. Remaining items: `--allow-authority-state-reset` operator-recovery flag (future run), `BundleSigningRatification` v2 per-key monotonic field (future run, Run 126+), signing-key rotation/revocation lifecycle, peer-driven live apply (intentionally non-mutating), KMS/HSM custody, governance, validator-set rotation, fast-sync / consensus-storage-restore ratification parity beyond the local restore surface, full C4 closure, C5 closure.
 
 Run 125 explicitly does NOT mark resolved any of these remaining items, does not implement `--allow-authority-state-reset`, does not change any wire format, does not change the persistence format, does not weaken any Run 050–124 invariant (B3 / B5 / Run 097 snapshot epoch parity all preserved bit-for-bit on accept paths), and does not introduce a static production source-code anchor.
+
+### Run 126 update — explicit authority-state reset/recovery procedure specification (positive, spec-first / docs-only)
+
+Run 126 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_126.md`) is **spec-first / docs-only** — no production runtime code was changed, no CLI reset command was implemented, and no runtime behavior was modified. The verdict is **positive**.
+
+Run 126 defines the formal specification for authority-state reset/recovery after fail-closed anti-rollback events. The specification covers:
+
+1. **Threat model** (9 threats: malicious rollback, accidental restore, stale snapshot, stale ratification, conflicting injection, corrupt marker temptation, DevNet-to-MainNet flag leak, peer-triggered reset, local config authority escalation).
+2. **Failure mode classification** (8 failure conditions from Runs 117–125 classified as operator-recoverable, environment-reset-only, governance-required, or forbidden).
+3. **Environment policy** (DevNet: allow with ceremony + audit; TestNet: allow with ceremony + stronger proof + audit; MainNet: disallowed by default, governance-required).
+4. **Operator ceremony** (12-step staged process: stop → archive → verify → compare → execute future command → restart and verify).
+5. **Refusal cases** (13 mandatory conditions: missing/wrong genesis, wrong chain_id/env, malformed root, transport root authority, missing/bad ratification, MainNet-without-governance, peer-triggered, node-running, missing audit path, marker erasure without replacement).
+6. **Audit record schema** (17-field conceptual schema: record_version, action, environment, chain_id, genesis_hash, old/new marker hash/record, ratification_hash, bundle fingerprint, snapshot metadata, operator note, binary sha256/build-id, timestamp, result).
+7. **Reset safety invariants** (10 mandatory invariants: never implicit, never at startup, never peer-triggered, never from validation-only, never synthesize from snapshot, never bypass ratification, never transport root authority, never local-config-only MainNet, always audit, irreversible without new ceremony).
+8. **Future ratification v2 interaction** (current marker detects conflict but does not prove per-key monotonic progression; future v2 must add monotonic field; reset must not substitute for rotation/revocation; post-v2 reset must respect monotonic chain).
+9. **Future CLI design** (conceptual `qbind-node authority-state-reset` subcommand with environment-gated behavior: DevNet allows, TestNet requires confirmation, MainNet refuses without governance artifact).
+10. **Future implementation plan** (Run 127: CLI skeleton + refusal; Run 128: release-binary evidence; Run 129+: ratification v2 monotonic schema).
+
+**Key design decisions:**
+
+- MainNet local reset is disallowed by default. Any MainNet recovery requires a future governance/ratification procedure or offline signed recovery artifact — not local config alone.
+- Reset is a separate subcommand (`authority-state-reset`), not a flag on normal startup. This prevents implicit or accidental reset during routine operations.
+- Audit record production is mandatory in all environments (including DevNet).
+- Reset must be offline-only (node stopped) — no live reset, no peer-triggered reset.
+- Transport roots cannot authorize reset (preserving Run 100/101 authority separation).
+- Ratification verification is required before reset (the target key must be provably ratified under genesis authority).
+
+The "authority anti-rollback persistence" C4 sub-item status: **OPEN, all three mutating surfaces wired and evidenced (Runs 119/120/121, evidenced by Run 122), all three validation-only surfaces wired (Run 123), snapshot/restore surface wired (Run 124) and release-binary evidence captured (Run 125), reset/recovery procedure formally specified (Run 126)**. Remaining items: `--allow-authority-state-reset` implementation (Run 127), release-binary evidence for reset refusal/allowed cases (Run 128), `BundleSigningRatification` v2 per-key monotonic field (Run 129+), signing-key rotation/revocation lifecycle, peer-driven live apply (intentionally non-mutating), KMS/HSM custody, MainNet governance artifact design, validator-set rotation, fast-sync / consensus-storage-restore ratification parity beyond the local restore surface, full C4 closure, C5 closure.
+
+Run 126 explicitly does NOT implement: `--allow-authority-state-reset`; any reset CLI command; any runtime code change; signing-key rotation/revocation; peer-driven live apply; KMS/HSM custody; governance artifact format; validator-set rotation; ratification v2 monotonic schema. Run 126 does not claim full C4 closure and does not claim C5 closure. Run 126 does not weaken any Run 050–125 invariant. Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority.

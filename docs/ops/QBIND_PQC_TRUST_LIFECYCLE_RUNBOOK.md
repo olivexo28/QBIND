@@ -3928,3 +3928,129 @@ Run 125 is **evidence-only**; it closes the release-binary evidence gap that Run
 - No peer-driven live apply.
 - Per-key monotonic ratification schema bump — future run (Run 126+).
 - Full C4 / C5 closure remain open.
+
+## Run 126 — Explicit authority-state reset/recovery procedure specification (spec-first / docs-only)
+
+**What Run 126 adds:**
+
+Run 126 is **spec-first / docs-only**; no production runtime code was changed, no CLI reset command was implemented, and no runtime behavior was modified. Run 126 defines the formal specification for authority-state reset/recovery after fail-closed anti-rollback events.
+
+**Operator actions:** none in Run 126. No new CLI flag, no new environment variable, no new file path, no new metric family. The specification defines a FUTURE operator procedure (see below).
+
+**Future operator procedure (authority-state reset ceremony):**
+
+When a future run implements `authority-state-reset`, operators will follow this staged process:
+
+```
+STAGE 1: STOP
+  1. Stop the node (SIGTERM / SIGKILL).
+  2. Confirm the node process is not running.
+
+STAGE 2: ARCHIVE
+  3. Copy the current data directory to a timestamped archive.
+  4. Copy <data-dir>/pqc_authority_state.json to the archive.
+  5. Compute SHA-256 of the archived marker.
+  6. If snapshot-related: archive snapshot metadata.
+
+STAGE 3: VERIFY
+  7. Verify the genesis file and compute canonical genesis hash:
+       qbind-node --print-genesis-hash --genesis-path <GENESIS_PATH>
+  8. Verify chain_id and environment match the target deployment.
+  9. Verify candidate ratification under genesis authority:
+       qbind-node --p2p-trust-bundle <BUNDLE> \
+                  --p2p-trust-bundle-ratification <RATIFICATION> \
+                  --genesis-path <GENESIS_PATH> \
+                  --p2p-trust-bundle-reload-check \
+                  --data-dir <TEMP_EMPTY_DIR>
+
+STAGE 4: COMPARE
+  10. Document old vs. candidate marker fields.
+
+STAGE 5: EXECUTE (future command — NOT yet implemented)
+  11. qbind-node authority-state-reset \
+        --data-dir <DATA_DIR> \
+        --genesis-path <GENESIS_PATH> \
+        --expected-genesis-hash <HASH> \
+        --p2p-trust-bundle <BUNDLE> \
+        --p2p-trust-bundle-ratification <RATIFICATION> \
+        --output-audit <AUDIT_PATH> \
+        --environment <devnet|testnet|mainnet> \
+        [--confirm]
+  12. Verify audit record at <AUDIT_PATH>.
+
+STAGE 6: RESTART AND VERIFY
+  13. Start node normally with standard flags.
+  14. Verify no authority-marker errors in startup logs.
+  15. Verify new marker on disk: cat <DATA_DIR>/pqc_authority_state.json
+  16. Verify audit record is complete and archived.
+```
+
+**Environment policy:**
+
+| Environment | Reset allowed? | Requirements |
+|-------------|---------------|--------------|
+| DevNet | Yes, with ceremony | Valid ratification + genesis + audit output |
+| TestNet | Yes, with ceremony | Valid ratification + genesis + audit + operator confirmation |
+| MainNet | **No (default refuse)** | Requires future governance artifact (not yet designed) |
+
+**Mandatory refusal cases (future implementation must refuse when):**
+
+- Missing or wrong genesis hash
+- Wrong chain_id or environment
+- Malformed authority root
+- Transport root attempting bundle-signing authorization
+- Missing or invalid ratification
+- Local config-only MainNet reset (no governance artifact)
+- Peer-provided reset request
+- Node still running
+- Missing audit output path
+- Marker erasure without replacement on MainNet/TestNet
+
+**Reset safety invariants:**
+
+1. Never runs implicitly (no auto-repair, no silent overwrite).
+2. Never runs during normal startup (separate subcommand).
+3. Never triggered by peer input.
+4. Never persists from validation-only surfaces.
+5. Never synthesizes marker from legacy snapshot.
+6. Never bypasses ratification verification.
+7. Never allows transport root authority.
+8. Never allows local config alone as MainNet authority.
+9. Always produces an audit record (even DevNet).
+10. Irreversible without another explicit audited ceremony.
+
+**Audit record schema (conceptual, 17 fields):**
+
+```
+record_version, action, environment, chain_id, genesis_hash,
+old_marker_hash, old_marker_record, new_marker_hash, new_marker_record,
+ratification_hash, trust_bundle_fingerprint, snapshot_metadata_hash,
+operator_note_hash, binary_sha256, binary_build_id, timestamp, result
+```
+
+**What is explicitly NOT changed or implemented by Run 126:**
+
+- No `--allow-authority-state-reset` CLI flag.
+- No reset CLI command or subcommand.
+- No runtime code changes.
+- No `pqc_authority_state.json` deletion or rewrite.
+- No snapshot restore behavior change.
+- No trust-bundle wire format change.
+- No signing-key rotation/revocation lifecycle.
+- No peer-driven live apply.
+- No KMS/HSM custody.
+- No governance artifact format.
+- No ratification v2 per-key monotonic schema.
+- No full C4 / C5 closure.
+- Static production source-code anchors remain rejected.
+- Local config alone remains insufficient for MainNet authority.
+
+**Future implementation plan:**
+
+| Run | Scope |
+|-----|-------|
+| Run 127 | Implement `authority-state-reset` CLI skeleton with refusal cases |
+| Run 128 | Release-binary evidence for reset refusal/allowed cases |
+| Run 129+ | Ratification v2 per-key monotonic schema design |
+| Future | Signing-key rotation/revocation, MainNet governance, KMS/HSM |
+- Full C4 / C5 closure remain open.
