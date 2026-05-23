@@ -1,0 +1,8 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Mainnet, genesis=/tmp/qbind-run122-evidence/fixtures/mainnet/genesis.json, canonical_hash=0xa893350be5fd2a4c888a271b290a61a054053daf20f3dd33de8f8f65e67cefb2).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate INVOKED (policy=mainnet-default-strict, env=Mainnet).
+[run-119] authority-marker unchanged at /tmp/qbind-run122-evidence/data/scenario_1_first_marker/pqc_authority_state.json (idempotent; no rewrite).
+[binary] Run 070: trust-bundle candidate APPLIED live (operator-triggered local reload-apply; conservative session-eviction v0 policy) (old_fp=a3c6e172.. new_fp=cf446b95.. old_sequence=Some(1) new_sequence=2 env=mainnet chain_id=51424e444d41494e active_roots=1 active_revoked_roots=0 active_revoked_leaves=0 session_evictions=0 sequence_commit=ok)
+[binary] Run 073: VERDICT=applied (baseline=/tmp/qbind-run122-evidence/fixtures/mainnet/baseline-bundle.json candidate=/tmp/qbind-run122-evidence/fixtures/mainnet/candidate-bundle.ratified.json live trust state swapped; session_evictions=0 (no-active-sessions at startup-time); sequence committed). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.

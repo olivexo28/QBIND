@@ -1,0 +1,6 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Mainnet, genesis=/tmp/qbind-run122-evidence/fixtures/mainnet/genesis.json, canonical_hash=0xa893350be5fd2a4c888a271b290a61a054053daf20f3dd33de8f8f65e67cefb2).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate INVOKED (policy=mainnet-default-strict, env=Mainnet).
+[run-119] FATAL: reload-apply refused by authority-marker preflight: Run 119: authority-marker same-sequence equivocation rejected: authority_sequence=0 persisted_ratification_hash=a9099a02f3a2229c195653dd52042373e45da21ce40710ae2c70bb8819667fc4 attempted_ratification_hash=a9b99a02f3a2229c195653dd52042373e45da21ce40710ae2c70bb8819667fc4 (fail closed; two distinct ratifications cannot share the same authority_sequence). Candidate path=/tmp/qbind-run122-evidence/fixtures/mainnet/candidate-bundle.ratified.json. No live trust apply, no sequence write, no session eviction, no metrics mutation, no marker write. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.

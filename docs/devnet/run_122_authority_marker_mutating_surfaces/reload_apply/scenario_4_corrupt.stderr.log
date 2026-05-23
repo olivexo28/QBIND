@@ -1,0 +1,6 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Mainnet, genesis=/tmp/qbind-run122-evidence/fixtures/mainnet/genesis.json, canonical_hash=0xa893350be5fd2a4c888a271b290a61a054053daf20f3dd33de8f8f65e67cefb2).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate INVOKED (policy=mainnet-default-strict, env=Mainnet).
+[run-119] FATAL: reload-apply refused by authority-marker preflight: Run 119: persisted authority-marker load/corruption: pqc authority-state malformed: expected value at line 1 column 1 (fail closed) (fail closed; no trust mutation; this helper does NOT auto-recover corrupt markers). Candidate path=/tmp/qbind-run122-evidence/fixtures/mainnet/candidate-bundle.ratified.json. No live trust apply, no sequence write, no session eviction, no metrics mutation, no marker write. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_119.md.

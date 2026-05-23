@@ -1,0 +1,14 @@
+=== SIGHUP Scenario 7: First marker write ===
+Marker written at startup by Run 120 (startup-load), SIGHUP gate invoked by Run 121.
+[run-120] authority-marker persisted at /tmp/qbind-run122-evidence/data/sighup_s7_first/pqc_authority_state.json (first-write; candidate authority_sequence=0).
+[run-121] SIGHUP live reload authority-marker gate INVOKED (policy=mainnet-default-strict, env=Mainnet). On every SIGHUP the on-disk authority marker at /tmp/qbind-run122-evidence/data/sighup_s7_first/pqc_authority_state.json is compared against the candidate's verified ratification BEFORE any snapshot/swap/eviction/commit, and persisted AFTER the existing Run 070 commit_sequence boundary returns Ok.
+[binary] Run 074: VERDICT=applied (live trust-bundle apply on long-running node; session_evictions=0; sequence_commit=ok)
+
+=== SIGHUP Scenario 9: Conflicting marker reject ===
+Marker tampered after startup; SIGHUP detected equivocation and rejected.
+[binary] Run 121: VERDICT=marker-rejected (SIGHUP authority-marker preflight refused the candidate BEFORE any snapshot, swap, eviction, or sequence commit; live trust state, sessions, on-disk sequence record, and on-disk authority-marker file are all unchanged). Reason: Run 119: authority-marker same-sequence equivocation rejected: authority_sequence=0 persisted_ratification_hash=eb0822158de09b5fbd6b77792412a3d51633f61c5e4fdaf95de360d0026f6cf5 attempted_ratification_hash=ebc822158de09b5fbd6b77792412a3d51633f61c5e4fdaf95de360d0026f6cf5 (fail closed; two distinct ratifications cannot share the same authority_sequence)
+[binary] Run 121: VERDICT=marker-rejected (SIGHUP authority-marker preflight refused the candidate BEFORE any snapshot, swap, eviction, or sequence commit; live trust state, sessions, on-disk sequence record, and on-disk authority-marker file are all unchanged). Reason: Run 119: persisted authority-marker load/corruption: pqc authority-state malformed: expected value at line 1 column 1 (fail closed) (fail closed; no trust mutation; this helper does NOT auto-recover corrupt markers)
+
+=== SIGHUP Scenario 10: Corrupt marker fail-closed ===
+Marker corrupted to non-JSON; SIGHUP detected corruption and rejected.
+[binary] Run 121: VERDICT=marker-rejected (SIGHUP authority-marker preflight refused the candidate BEFORE any snapshot, swap, eviction, or sequence commit; live trust state, sessions, on-disk sequence record, and on-disk authority-marker file are all unchanged). Reason: Run 119: persisted authority-marker load/corruption: pqc authority-state malformed: expected value at line 1 column 1 (fail closed) (fail closed; no trust mutation; this helper does NOT auto-recover corrupt markers)

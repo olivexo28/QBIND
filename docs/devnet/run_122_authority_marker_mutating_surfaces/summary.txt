@@ -1,0 +1,19 @@
+Run 122 authority marker mutating surfaces release-binary evidence
+git_commit: see QBIND_DEVNET_EVIDENCE_RUN_122.md
+
+Reload-apply marker scenarios (process-start, Run 119 wiring):
+  scenario_1_first_marker:     rc=0  PASS  marker persisted (first-write)
+  scenario_2_idempotent:       rc=0  PASS  marker byte-identical (no rewrite)
+  scenario_3_conflicting:      rc=1  PASS  rejected before mutation, marker preserved
+  scenario_4_corrupt:          rc=1  PASS  fail-closed, corrupt marker preserved
+  scenario_5_devnet_no_marker: rc=0  PASS  no marker written (DevNet no-opt-in)
+  scenario_6_commit_boundary:  PASS  proven by cross-check of scenarios 1+2
+
+Non-goal checks:
+  no validation-only marker writes
+  no fake authority sequence
+  no peer-driven live apply
+  no signing-key rotation/revocation
+  no KMS/HSM, no governance
+  no trust-bundle wire format change
+  no peer-candidate wire format change

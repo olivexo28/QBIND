@@ -3798,4 +3798,26 @@ Run 121 wires the same Run 119 `decide_marker_acceptance` + `persist_accepted_ma
 
 **Bounded protection limit (unchanged from Run 116/117/118/119/120).** The marker cannot detect a same-sequence key-level downgrade where two distinct candidates carry the same `authority_sequence` AND the persisted ratification digest somehow matches the older candidate (e.g. via deliberate operator overwrite of the marker file). The per-key monotonic `BundleSigningRatification` v2 schema bump is the long-term fix and remains deferred to a future run.
 
+## Run 122 — Release-binary evidence for authority anti-rollback marker on mutating surfaces
+
+**No operator action required.** Run 122 is evidence-only — no production runtime code was changed, no new flag was introduced, no existing flag was renamed or deprecated, no new file is created or expected under `<data_dir>`. The Run 117–121 operator workflows are unchanged.
+
+**What Run 122 proves on real `target/release/qbind-node` binaries:**
+
+Run 122 closes the release-binary evidence gap that Runs 119, 120, and 121 each deferred. The evidence harness (`scripts/devnet/run_122_authority_marker_mutating_surfaces_release_binary.sh`) exercises 10 scenarios across two surfaces:
+
+* **Reload-apply (Run 119 wiring):** First marker persist (`first-write`); idempotent re-run (marker byte-identical, no rewrite); conflicting marker (same-sequence equivocation) rejects before mutation with `rc=1` and no trust state change; corrupt marker (non-JSON) fails closed before mutation with `rc=1` and marker bytes preserved; DevNet no-opt-in produces no marker file.
+* **SIGHUP (Run 121 wiring):** First marker written at startup (Run 120) before SIGHUP handler installed; SIGHUP gate (Run 121) invoked and applied; conflicting marker (tampered post-startup) produces `Run 121: VERDICT=marker-rejected` before any live trust mutation; corrupt marker (non-JSON, tampered post-startup) fails closed with same verdict.
+* **Startup (Run 120 wiring, implicit):** Proven via the SIGHUP evidence — the startup path wrote the marker with `last_update_source: "startup-load"` before the SIGHUP handler was installed.
+
+**Evidence artifacts:** `docs/devnet/run_122_authority_marker_mutating_surfaces/` (stderr logs for each scenario, marker JSON, summary). Evidence document: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_122.md`.
+
+**What is explicitly NOT changed by Run 122:**
+
+* No production `crates/**/src/**` change. No test change. No metric change. No wire format change. No new dependency.
+* All Runs 050–121 invariants preserved bit-for-bit.
+* Validation-only surfaces remain validation-only and never persist the marker.
+* The bounded protection limit (same-sequence key-level downgrade) is unchanged from Run 116/117/118/119/120/121.
+
+
 Run 121 does **not** change peer-driven live apply (Run 109 contract preserved bit-for-bit; the marker helpers are not invoked from any peer-driven path), signing-key rotation lifecycle, signing-key revocation lifecycle, KMS/HSM custody, governance, validator-set rotation, or fast-sync / consensus-storage-restore ratification parity (the Run 117 `AuthorityStateSnapshotMeta` carrier is present but no restore-side conflict check consumes it yet).
