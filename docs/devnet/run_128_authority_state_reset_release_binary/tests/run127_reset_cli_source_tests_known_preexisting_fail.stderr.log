@@ -1,0 +1,62 @@
+warning: use of deprecated function `bincode::config`: please use `options()` instead
+    --> crates/qbind-node/src/binary_consensus_loop.rs:2808:28
+     |
+2808 |             match bincode::config()
+     |                            ^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `bincode::config`: please use `options()` instead
+    --> crates/qbind-node/src/binary_consensus_loop.rs:2937:28
+     |
+2937 |             match bincode::config()
+     |                            ^^^^^^
+
+warning: `qbind-node` (lib) generated 2 warnings
+   Compiling qbind-node v0.1.0 (/home/runner/work/QBIND/QBIND/crates/qbind-node)
+warning: function `fingerprint_64` is never used
+  --> crates/qbind-node/tests/run_101_genesis_authority_tests.rs:32:4
+   |
+32 | fn fingerprint_64(seed: u8) -> String {
+   |    ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `qbind-node` (test "run_101_genesis_authority_tests") generated 1 warning
+warning: `qbind-node` (lib test) generated 2 warnings (2 duplicates)
+error[E0599]: no method named `set_inject_write_failure` found for struct `RocksDbConsensusStorage` in the current scope
+   --> crates/qbind-node/tests/m16_epoch_transition_hardening_tests.rs:181:13
+    |
+181 |     storage.set_inject_write_failure(true);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `RocksDbConsensusStorage`
+
+error[E0599]: no method named `set_inject_write_failure` found for struct `RocksDbConsensusStorage` in the current scope
+   --> crates/qbind-node/tests/m16_epoch_transition_hardening_tests.rs:194:13
+    |
+194 |     storage.set_inject_write_failure(false);
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `RocksDbConsensusStorage`
+
+error[E0599]: no method named `set_inject_write_failure` found for struct `RocksDbConsensusStorage` in the current scope
+   --> crates/qbind-node/tests/m16_epoch_transition_hardening_tests.rs:232:17
+    |
+232 |         storage.set_inject_write_failure(true);
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `RocksDbConsensusStorage`
+
+error[E0599]: no method named `clear_epoch_transition_marker` found for struct `RocksDbConsensusStorage` in the current scope
+   --> crates/qbind-node/tests/m16_epoch_transition_hardening_tests.rs:505:13
+    |
+505 |     storage.clear_epoch_transition_marker().unwrap();
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: there is a method `write_epoch_transition_marker` with a similar name, but with different arguments
+   --> crates/qbind-node/src/storage.rs:268:5
+    |
+268 | /     fn write_epoch_transition_marker(
+269 | |         &self,
+270 | |         marker: &EpochTransitionMarker,
+271 | |     ) -> Result<(), StorageError>;
+    | |__________________________________^
+
+For more information about this error, try `rustc --explain E0599`.
+error: could not compile `qbind-node` (test "m16_epoch_transition_hardening_tests") due to 4 previous errors
+warning: build failed, waiting for other jobs to finish...

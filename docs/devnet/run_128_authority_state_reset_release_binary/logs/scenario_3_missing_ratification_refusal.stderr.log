@@ -1,0 +1,1 @@
+[run-127] FATAL: authority-state-reset refused: [run-127] MissingRatification: --p2p-trust-bundle-ratification is required (Run 117 derivation refuses unratified anchors)

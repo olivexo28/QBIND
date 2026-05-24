@@ -1,0 +1,12 @@
+
+running 7 tests
+test run124_matching_snapshot_and_local_marker_accepts_and_preserves_local ... ok
+test run124_legacy_snapshot_into_data_dir_with_local_marker_is_rejected ... ok
+test run124_corrupt_local_marker_fails_closed_and_preserves_bytes ... ok
+test run124_legacy_snapshot_into_fresh_data_dir_is_accepted ... ok
+test run124_rollback_snapshot_against_higher_local_is_rejected ... ok
+test run124_same_sequence_conflicting_hash_is_rejected ... ok
+test run124_snapshot_with_wrong_domain_is_rejected_even_without_local_marker ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

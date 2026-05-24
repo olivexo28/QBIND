@@ -4111,3 +4111,42 @@ See `AuthorityResetRefusal` in `crates/qbind-node/src/pqc_authority_state_reset.
 - No peer-driven anything.
 - No MainNet reset path implemented.
 - Static production source-code anchors remain rejected.
+
+## Run 128 — release-binary evidence for authority-state reset CLI
+
+**Date:** 2026-05-24  
+**Evidence:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_128.md`  
+**Harness:** `scripts/devnet/run_128_authority_state_reset_release_binary.sh`
+
+Run 128 is evidence-only and proves Run 127 reset behavior on real release binaries (`target/release/qbind-node`) with deterministic archived artifacts under `docs/devnet/run_128_authority_state_reset_release_binary/`.
+
+### Release-binary scenario outcomes
+
+| Scenario | Result |
+|---|---|
+| DevNet valid reset writes marker + audit | PASS |
+| MainNet local reset refused (`MainNetLocalResetUnsupported`) | PASS |
+| Missing ratification refused (`MissingRatification`) | PASS |
+| Bad ratification refused (`RatificationEnforcementFailed`) | PASS |
+| Wrong expected genesis hash refused (`GenesisHashMismatch`) | PASS |
+| Corrupt existing marker refused (`ExistingMarkerCorrupt`) and preserved | PASS |
+| Missing audit output flag refused (`AuditOutputMissing`) | PASS |
+| Wrong-chain and wrong-environment ratification refused | PASS |
+
+### Operator-visible guarantees proven by Run 128
+
+- Marker file is written only on success.
+- Every refusal preserves marker bytes (sha256 before == sha256 after).
+- Reset path exits before normal startup surfaces (no P2P/consensus/metrics/SIGHUP/reload/peer-candidate startup markers).
+- Refusal reasons remain typed/stable (`refusal_reason_if_any` in audit).
+- Success/refusal audit records are emitted when audit path flag is supplied.
+
+### Run 128 explicit non-changes
+
+- No MainNet governance artifact support.
+- No peer-driven reset/apply path.
+- No trust-bundle wire format or peer-candidate wire format change.
+- No signing-key rotation/revocation implementation.
+- No KMS/HSM, governance, or validator-set rotation implementation.
+- No ratification-v2 monotonic authority sequence implementation.
+- No full C4 or C5 closure claim.

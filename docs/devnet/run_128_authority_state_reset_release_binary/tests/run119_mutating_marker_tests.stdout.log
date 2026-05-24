@@ -1,0 +1,9 @@
+
+running 4 tests
+test run119_pre_persisted_marker_rollback_rejects_before_apply ... ok
+test run119_clean_first_write_decide_then_apply_then_persist ... ok
+test run119_idempotent_re_apply_does_not_rewrite_marker ... ok
+test run119_apply_failure_after_accept_does_not_persist_marker ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s
+

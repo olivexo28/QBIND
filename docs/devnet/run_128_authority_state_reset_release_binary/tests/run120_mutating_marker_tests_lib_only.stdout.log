@@ -1,0 +1,14 @@
+
+running 9 tests
+test pqc_authority_marker_acceptance::tests::run_120_decide_does_not_persist_on_startup_path ... ok
+test pqc_authority_marker_acceptance::tests::run_120_dropped_decision_does_not_persist_marker ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_corrupt_marker_fails_closed ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_conflicting_marker_rejects_before_mutation ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_first_accepted_persists_marker ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_same_sequence_conflicting_digest_rejects ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_wrong_domain_rejects_before_mutation ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_same_marker_is_idempotent ... ok
+test pqc_authority_marker_acceptance::tests::run_120_startup_upgrade_accepts_strictly_higher_sequence ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 1216 filtered out; finished in 0.01s
+

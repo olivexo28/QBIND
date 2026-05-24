@@ -1,0 +1,15 @@
+
+running 10 tests
+test b3_missing_snapshot_path_is_rejected ... ok
+test b3_missing_meta_json_is_rejected ... ok
+test b3_no_restore_flag_is_a_noop ... ok
+test b3_missing_state_dir_is_rejected ... ok
+test b3_target_state_dir_already_populated_is_rejected ... ok
+test b3_apply_with_no_data_dir_is_rejected ... ok
+test b3_apply_via_node_config_round_trip ... ok
+test b3_restored_state_is_observable_after_reopen ... ok
+test b3_wrong_chain_id_is_rejected ... ok
+test b3_valid_snapshot_is_accepted_and_materialized ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+

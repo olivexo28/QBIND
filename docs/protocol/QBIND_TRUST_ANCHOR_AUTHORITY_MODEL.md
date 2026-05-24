@@ -1775,3 +1775,28 @@ Three new hidden opt-in flags: `--authority-state-reset`, `--authority-state-res
 **OPEN**, all three mutating surfaces wired and evidenced (Runs 119/120/121/122), all three validation-only surfaces wired (Run 123), snapshot/restore surface wired and evidenced (Runs 124/125), reset/recovery specified (Run 126) and CLI skeleton implemented (Run 127). Remaining: release-binary evidence for reset (Run 128), `BundleSigningRatification` v2 monotonic field (Run 129+), signing-key rotation/revocation, peer-driven live apply, KMS/HSM custody, MainNet governance artifact, validator-set rotation, full C4 closure, C5 closure.
 
 Run 127 does NOT implement: MainNet governance artifact verification; signing-key rotation/revocation; per-key monotonic authority sequence; peer-driven live apply; KMS/HSM custody. Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority. Run 127 does not claim full C4 closure and does not claim C5 closure. Run 127 weakens no Run 050–126 invariant.
+
+## Run 128 update — release-binary authority-state reset evidence
+
+**Date:** 2026-05-24  
+**Source:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_128.md`  
+**Verdict:** strongest-positive (release-binary evidence)
+
+Run 128 is evidence-only and lands no production runtime source changes. It adds the release-binary harness `scripts/devnet/run_128_authority_state_reset_release_binary.sh` and archive `docs/devnet/run_128_authority_state_reset_release_binary/`, proving on a real `target/release/qbind-node` binary:
+
+1. DevNet valid reset succeeds (`rc=0`) and writes both marker + audit.
+2. MainNet local reset refuses (`MainNetLocalResetUnsupported`) with no marker write.
+3. Missing ratification refuses (`MissingRatification`) with no marker write.
+4. Bad ratification refuses (`RatificationEnforcementFailed`) with no marker write.
+5. Wrong expected genesis hash refuses (`GenesisHashMismatch`) with no marker write.
+6. Corrupt existing marker refuses (`ExistingMarkerCorrupt`) and corrupt bytes are preserved verbatim (no repair/delete/overwrite).
+7. Missing audit-output flag refuses (`AuditOutputMissing`) with no marker write.
+8. Wrong-chain and wrong-environment ratification sidecars refuse (`RatificationEnforcementFailed`) with no marker write.
+
+Run 128 additionally proves:
+
+- no normal startup markers on reset path (no P2P, consensus, metrics, SIGHUP, reload, peer-candidate dispatch);
+- stable audit schema presence for success/refusal records (`record_version`, `action`, `environment`, `result`, refusal stable-id on refusal);
+- marker write only on success path; every refusal case preserves marker SHA before/after.
+
+C4 status after Run 128: **OPEN but narrowed** — all three mutating surfaces wired/evidenced (Runs 119/120/121 + 122), all three validation-only surfaces wired (Run 123), snapshot/restore wired/evidenced (Runs 124/125), reset/recovery specified (Run 126), reset CLI implemented (Run 127), and release-binary reset refusal/success evidence captured (Run 128). Remaining open pieces are unchanged: MainNet governance artifact verification, ratification v2 per-key monotonic schema, signing-key rotation/revocation lifecycle, peer-driven live apply, KMS/HSM custody, validator-set rotation, full C4 closure, and C5 closure.

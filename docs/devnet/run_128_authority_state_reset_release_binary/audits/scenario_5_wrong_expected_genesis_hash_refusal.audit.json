@@ -1,0 +1,22 @@
+{
+  "record_version": 1,
+  "action": "authority_state_reset",
+  "environment": "devnet",
+  "chain_id": null,
+  "genesis_hash": null,
+  "old_marker_present": false,
+  "old_marker_raw_sha256": null,
+  "old_marker_record_if_parseable": null,
+  "new_marker_hash": null,
+  "new_marker_record": null,
+  "ratification_hash": null,
+  "trust_bundle_fingerprint": null,
+  "snapshot_metadata_hash_if_any": null,
+  "operator_note_hash": "c2d7503d20af8004aec8f839c924a04089a4d2a0d895d9403ffa0f06be2b0c92",
+  "binary_sha256_or_unavailable": "fb1b99e11e25a36cf14e5d01e307fb2ee30bbc0e10366c14099cefdabdcbff7c",
+  "binary_build_id_or_unavailable": "qbind-node@0.1.0",
+  "result": "refused",
+  "refusal_reason_if_any": "GenesisHashMismatch",
+  "refusal_detail_if_any": "canonical genesis hash computed from --genesis-path (0xd10eb82492491208c588e6153ceb7cd6fd8d1b5317739e76e7afb9a0388653d1) does not match --expect-genesis-hash (0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)",
+  "wall_clock_unix_secs": 1779618591
+}

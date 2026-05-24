@@ -1,0 +1,1 @@
+[run-127] FATAL: authority-state-reset refused: [run-127] MainNetLocalResetUnsupported: MainNet local authority-state reset is refused by default; a future governance/recovery artifact may be designed in a later run. Run 127 does NOT implement or fake MainNet local reset
