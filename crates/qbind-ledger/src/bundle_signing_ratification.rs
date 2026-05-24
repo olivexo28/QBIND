@@ -1223,6 +1223,842 @@ pub fn enforce_bundle_signing_key_ratification<'a>(
 }
 
 // ===========================================================================
+// Run 130 — Ratification v2 schema, preimage, and verifier
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// v2 domain tag and version constant
+// ---------------------------------------------------------------------------
+
+/// Domain separator for the v2 bundle-signing-key ratification preimage.
+///
+/// Distinct from the v1 domain tag
+/// [`BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1`] so that no v1 preimage can
+/// be confused with a v2 preimage under any input combination.
+pub const BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2: &[u8] =
+    b"QBIND:BUNDLE-SIGNING-RATIFICATION:v2";
+
+/// Schema version for v2 ratification objects. Run 130 = `2`.
+pub const BUNDLE_SIGNING_RATIFICATION_VERSION_V2: u32 = 2;
+
+// ---------------------------------------------------------------------------
+// v2 lifecycle action
+// ---------------------------------------------------------------------------
+
+/// The lifecycle action carried by a v2 ratification object.
+///
+/// The action is included in the canonical preimage so that `ratify`,
+/// `rotate`, and `revoke` objects produce different digests even when all
+/// other fields are identical.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BundleSigningRatificationV2Action {
+    /// Initial ratification of a new bundle-signing key by an authority root.
+    Ratify,
+    /// Rotation from one bundle-signing key to another; binds the previous
+    /// key fingerprint and the previous ratification digest for chain linking.
+    Rotate,
+    /// Revocation of a bundle-signing key; binds revocation reason and scope.
+    Revoke,
+}
+
+impl BundleSigningRatificationV2Action {
+    /// Stable one-byte encoding used in the canonical preimage.
+    ///
+    /// `Ratify = 0`, `Rotate = 1`, `Revoke = 2`. These values are fixed
+    /// by Run 130 and must never be reassigned.
+    pub const fn as_byte(self) -> u8 {
+        match self {
+            Self::Ratify => 0,
+            Self::Rotate => 1,
+            Self::Revoke => 2,
+        }
+    }
+
+    /// Lowercase ASCII tag used in log messages and operator tooling.
+    pub const fn tag(self) -> &'static str {
+        match self {
+            Self::Ratify => "ratify",
+            Self::Rotate => "rotate",
+            Self::Revoke => "revoke",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v2 ratification object
+// ---------------------------------------------------------------------------
+
+/// Run 130 — v2 bundle-signing-key ratification object.
+///
+/// Extends the v1 [`BundleSigningRatification`] model with:
+///
+/// * `authority_policy_version` — authority governance policy version;
+/// * `authority_root_suite_id` — explicit suite for the authority root (may
+///   differ from the target-key suite in future evolutions);
+/// * `target_bundle_signing_key_suite_id` — explicit suite for the target key;
+/// * `authority_domain_sequence` — per-authority-domain monotonic counter
+///   (sequences start at 1; 0 is invalid);
+/// * `key_lifecycle_action` — `ratify`, `rotate`, or `revoke`;
+/// * `previous_key_fingerprint` / `previous_ratification_digest` — rotation
+///   chain linking (required for `rotate`, must be absent for `ratify`);
+/// * `valid_from_epoch` / `valid_until_epoch` — optional validity window;
+/// * `revocation_reason` / `capabilities_scope` — revocation metadata
+///   (at least one must be present for `revoke`).
+///
+/// The `signature` field is the ML-DSA-44 signature over
+/// `sha3_256(v2_canonical_preimage(self))`.
+///
+/// Run 130 does NOT wire v2 into production enforcement surfaces.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleSigningRatificationV2 {
+    /// Schema version. MUST equal [`BUNDLE_SIGNING_RATIFICATION_VERSION_V2`]
+    /// (= 2). v1 objects are not accepted by the v2 verifier and vice versa.
+    pub schema_version: u32,
+
+    /// Environment tag this ratification is bound to.
+    pub environment: RatificationEnvironment,
+
+    /// Chain identifier this ratification is bound to.
+    pub chain_id: String,
+
+    /// Canonical genesis hash this ratification is bound to.
+    pub genesis_hash: GenesisHash,
+
+    /// Authority governance policy version. Included in the signed material
+    /// so that a policy change invalidates all older ratification objects.
+    pub authority_policy_version: u32,
+
+    /// SHA3-256 fingerprint (lowercase hex) of the authority root that signed
+    /// this ratification. Looked up in
+    /// [`GenesisAuthorityConfig::bundle_signing_authority_roots`]; never in
+    /// `pqc_transport_roots`.
+    pub authority_root_fingerprint: String,
+
+    /// PQC suite identifier of the authority root's key. Run 130 accepts only
+    /// [`GENESIS_AUTHORITY_SUITE_ML_DSA_44`] (= 100).
+    pub authority_root_suite_id: GenesisAuthoritySuiteId,
+
+    /// SHA3-256 fingerprint (lowercase hex) of the target bundle-signing key
+    /// being authorised, rotated to, or revoked.
+    pub target_bundle_signing_key_fingerprint: String,
+
+    /// PQC suite identifier of the target bundle-signing key. Run 130 accepts
+    /// only ML-DSA-44 (= 100) for the target key as well.
+    pub target_bundle_signing_key_suite_id: GenesisAuthoritySuiteId,
+
+    /// Full public key bytes of the target bundle-signing key.
+    ///
+    /// For ML-DSA-44 this MUST be exactly [`ML_DSA_44_PUBLIC_KEY_SIZE`]
+    /// (1312) bytes. Carried in full so that downstream consumers do not
+    /// need an extra resolution step.
+    #[serde(with = "hex_vec")]
+    pub target_bundle_signing_public_key: Vec<u8>,
+
+    /// Per-authority-domain monotonic sequence number for this ratification.
+    ///
+    /// The authority domain is `(environment, chain_id, genesis_hash,
+    /// authority_root_fingerprint)`. Sequences must be strictly increasing
+    /// within one domain; 0 is rejected as invalid.
+    pub authority_domain_sequence: u64,
+
+    /// Lifecycle action: `ratify`, `rotate`, or `revoke`.
+    pub key_lifecycle_action: BundleSigningRatificationV2Action,
+
+    /// Fingerprint of the key being rotated away from.
+    ///
+    /// Required when `key_lifecycle_action == Rotate`; MUST be absent for
+    /// `Ratify` (presence of this field for a `Ratify` action is refused
+    /// with [`RatificationV2Failure::UnexpectedRotateFieldsForRatify`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_key_fingerprint: Option<String>,
+
+    /// SHA3-256 digest (lowercase hex, 64 chars) of the previous ratification
+    /// object, for chain linking.
+    ///
+    /// Required when `key_lifecycle_action == Rotate`; MUST be absent for
+    /// `Ratify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_ratification_digest: Option<String>,
+
+    /// Optional epoch from which this ratification is valid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_from_epoch: Option<u64>,
+
+    /// Optional epoch at which this ratification expires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_until_epoch: Option<u64>,
+
+    /// Human-readable revocation reason. At least one of `revocation_reason`
+    /// or `capabilities_scope` MUST be present when
+    /// `key_lifecycle_action == Revoke`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revocation_reason: Option<String>,
+
+    /// Revocation scope (e.g. `"all"`, `"signing-only"`). At least one of
+    /// `revocation_reason` or `capabilities_scope` MUST be present when
+    /// `key_lifecycle_action == Revoke`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities_scope: Option<String>,
+
+    /// ML-DSA-44 signature over `sha3_256(v2_canonical_preimage(self))`,
+    /// produced by the authority root's private key.
+    #[serde(with = "hex_vec")]
+    pub signature: Vec<u8>,
+}
+
+// ---------------------------------------------------------------------------
+// v2 canonical preimage and digest
+// ---------------------------------------------------------------------------
+
+/// Compute the deterministic, domain-separated v2 signing preimage.
+///
+/// Layout (all integers big-endian, all variable-length fields
+/// length-prefixed with a `u32` byte count, optional fields preceded by a
+/// `u8` presence flag `0x00` or `0x01`):
+///
+/// ```text
+/// BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2
+/// u32  schema_version
+/// u32  len(environment_tag)             | environment_tag
+/// u32  len(chain_id)                    | chain_id
+/// 32   genesis_hash
+/// u32  authority_policy_version
+/// u32  len(authority_root_fingerprint)  | authority_root_fingerprint
+/// u8   authority_root_suite_id
+/// u32  len(target_key_fingerprint)      | target_key_fingerprint
+/// u8   target_key_suite_id
+/// u32  len(target_key_pk)               | target_key_pk (raw bytes, NOT hex)
+/// u64  authority_domain_sequence
+/// u8   key_lifecycle_action             (0=ratify, 1=rotate, 2=revoke)
+/// u8   has_previous_key_fp
+///   [u32 len(previous_key_fp) | previous_key_fp]   (if has=1)
+/// u8   has_previous_ratification_digest
+///   [u32 len(previous_digest_hex) | previous_digest_hex]  (if has=1)
+/// u8   has_revocation_reason
+///   [u32 len(revocation_reason) | revocation_reason]  (if has=1)
+/// u8   has_valid_from_epoch
+///   [u64 valid_from_epoch]  (if has=1)
+/// u8   has_valid_until_epoch
+///   [u64 valid_until_epoch]  (if has=1)
+/// u8   has_capabilities_scope
+///   [u32 len(capabilities_scope) | capabilities_scope]  (if has=1)
+/// ```
+///
+/// The `signature` field is intentionally NOT included.
+/// Changing **any** security-relevant field produces different bytes.
+pub fn ratification_v2_signing_preimage(v: &BundleSigningRatificationV2) -> Vec<u8> {
+    let env_tag = v.environment.tag().as_bytes();
+    let mut buf: Vec<u8> = Vec::with_capacity(256 + v.chain_id.len() + v.target_bundle_signing_public_key.len());
+
+    buf.extend_from_slice(BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2);
+    buf.extend_from_slice(&v.schema_version.to_be_bytes());
+    encode_length_prefixed_bytes(&mut buf, env_tag);
+    encode_length_prefixed_bytes(&mut buf, v.chain_id.as_bytes());
+    buf.extend_from_slice(&v.genesis_hash);
+    buf.extend_from_slice(&v.authority_policy_version.to_be_bytes());
+    encode_length_prefixed_bytes(&mut buf, v.authority_root_fingerprint.as_bytes());
+    buf.push(v.authority_root_suite_id);
+    encode_length_prefixed_bytes(&mut buf, v.target_bundle_signing_key_fingerprint.as_bytes());
+    buf.push(v.target_bundle_signing_key_suite_id);
+    encode_length_prefixed_bytes(&mut buf, &v.target_bundle_signing_public_key);
+    buf.extend_from_slice(&v.authority_domain_sequence.to_be_bytes());
+    buf.push(v.key_lifecycle_action.as_byte());
+
+    // Optional / lifecycle-specific fields — each guarded by a u8 presence flag.
+    encode_optional_string(&mut buf, v.previous_key_fingerprint.as_deref());
+    encode_optional_string(&mut buf, v.previous_ratification_digest.as_deref());
+    encode_optional_string(&mut buf, v.revocation_reason.as_deref());
+
+    if let Some(epoch) = v.valid_from_epoch {
+        buf.push(1u8);
+        buf.extend_from_slice(&epoch.to_be_bytes());
+    } else {
+        buf.push(0u8);
+    }
+    if let Some(epoch) = v.valid_until_epoch {
+        buf.push(1u8);
+        buf.extend_from_slice(&epoch.to_be_bytes());
+    } else {
+        buf.push(0u8);
+    }
+    encode_optional_string(&mut buf, v.capabilities_scope.as_deref());
+
+    buf
+}
+
+fn encode_optional_string(buf: &mut Vec<u8>, opt: Option<&str>) {
+    if let Some(s) = opt {
+        buf.push(1u8);
+        encode_length_prefixed_bytes(buf, s.as_bytes());
+    } else {
+        buf.push(0u8);
+    }
+}
+
+/// SHA3-256 digest of [`ratification_v2_signing_preimage`].
+///
+/// This is exactly the digest signed and verified under the ML-DSA-44
+/// [`SignatureSuite`] adapter for v2 objects.
+pub fn canonical_ratification_v2_digest(v: &BundleSigningRatificationV2) -> [u8; 32] {
+    qbind_hash::sha3_256(&ratification_v2_signing_preimage(v))
+}
+
+// ---------------------------------------------------------------------------
+// v2 verifier
+// ---------------------------------------------------------------------------
+
+/// Success result of [`verify_bundle_signing_key_ratification_v2`].
+///
+/// Carries the target key identity and the bound monotonic metadata so that
+/// callers cannot accidentally drop the sequence/action binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RatifiedBundleSigningKeyV2 {
+    /// Full ML-DSA-44 public key bytes of the ratified/rotated/revoked
+    /// bundle-signing key.
+    pub public_key: Vec<u8>,
+    /// Lowercase hex SHA3-256 fingerprint of `public_key`.
+    pub fingerprint: String,
+    /// PQC suite id of the target key (Run 130 = ML-DSA-44 = 100).
+    pub suite_id: GenesisAuthoritySuiteId,
+    /// Lowercase hex fingerprint of the authority root that signed this.
+    pub authority_root_fingerprint: String,
+    /// Authority governance policy version at time of ratification.
+    pub authority_policy_version: u32,
+    /// Per-authority-domain monotonic sequence bound into this ratification.
+    pub authority_domain_sequence: u64,
+    /// Lifecycle action this ratification implements.
+    pub key_lifecycle_action: BundleSigningRatificationV2Action,
+}
+
+/// Typed failure reasons returned by
+/// [`verify_bundle_signing_key_ratification_v2`].
+///
+/// Every variant is precise enough to drive a fail-closed operator log
+/// message without any "invalid object" catch-all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RatificationV2Failure {
+    /// `schema_version` is not [`BUNDLE_SIGNING_RATIFICATION_VERSION_V2`].
+    UnsupportedSchemaVersion { got: u32, expected: u32 },
+
+    /// `environment` does not match the runtime's expected environment.
+    WrongEnvironment {
+        expected: RatificationEnvironment,
+        got: RatificationEnvironment,
+    },
+
+    /// `chain_id` does not match the runtime's expected chain id.
+    ChainMismatch { expected: String, got: String },
+
+    /// `genesis_hash` does not match the canonical genesis hash for this
+    /// runtime.
+    GenesisHashMismatch {
+        expected: GenesisHash,
+        got: GenesisHash,
+    },
+
+    /// No `bundle_signing_authority_roots` entry matches
+    /// `authority_root_fingerprint` / `authority_root_suite_id`.
+    AuthorityRootUnknown { fingerprint: String },
+
+    /// The fingerprint resolves to a `pqc_transport_root` — transport roots
+    /// MUST NOT authorise bundle-signing keys.
+    TransportRootNotAllowed { fingerprint: String },
+
+    /// `authority_root_suite_id` is not accepted (only ML-DSA-44 = 100).
+    AuthoritySuiteUnsupported { suite_id: GenesisAuthoritySuiteId },
+
+    /// The matched authority root carries only a short SHA3-256 fingerprint;
+    /// full public-key bytes are required for signature verification.
+    AuthorityKeyMaterialUnavailable {
+        fingerprint: String,
+        suite_id: GenesisAuthoritySuiteId,
+        got_hex_len: usize,
+        required_hex_len: usize,
+    },
+
+    /// The matched authority root's `public_key_hex` is malformed (non-hex,
+    /// wrong length, or fingerprint mismatch).
+    AuthorityKeyMaterialMalformed {
+        fingerprint: String,
+        suite_id: GenesisAuthoritySuiteId,
+        reason: String,
+    },
+
+    /// The authority root's key-fingerprint computed from the resolved public
+    /// key does not match the `authority_root_fingerprint` declared in the
+    /// ratification object. (Defense-in-depth check for canonical fingerprint
+    /// format.)
+    AuthorityFingerprintMismatch { declared: String, derived: String },
+
+    /// `target_bundle_signing_key_suite_id` is not accepted (only ML-DSA-44).
+    TargetKeySuiteUnsupported { suite_id: GenesisAuthoritySuiteId },
+
+    /// `target_bundle_signing_public_key` has the wrong length for the
+    /// declared target suite.
+    MalformedTargetPublicKey {
+        suite_id: GenesisAuthoritySuiteId,
+        got_len: usize,
+        expected_len: usize,
+    },
+
+    /// `target_bundle_signing_key_fingerprint` does not equal
+    /// `sha3_256_hex(target_bundle_signing_public_key)`.
+    TargetKeyFingerprintMismatch { expected: String, got: String },
+
+    /// `authority_domain_sequence` is zero (sequences start at 1).
+    ///
+    /// Note: for a field that is entirely absent from JSON/wire input the
+    /// deserialiser would fail before the verifier is called; this variant
+    /// covers the case where the field is present but carries an invalid
+    /// value.
+    MissingAuthorityDomainSequence,
+
+    /// `authority_domain_sequence` is otherwise invalid. Currently fires
+    /// only for value 0 (same condition as `MissingAuthorityDomainSequence`
+    /// is kept separate for forward-compatibility with future constraints).
+    InvalidAuthorityDomainSequence { got: u64 },
+
+    /// `key_lifecycle_action` is absent. Not currently reachable via the
+    /// typed Rust API (the field is non-optional); retained as a typed
+    /// variant for the wire/serde boundary in future evolution.
+    MissingLifecycleAction,
+
+    /// `key_lifecycle_action` carries an unrecognized discriminant.
+    /// Not currently reachable via the typed Rust enum; retained for
+    /// wire/serde boundaries.
+    InvalidLifecycleAction,
+
+    /// `key_lifecycle_action == Rotate` but `previous_key_fingerprint` is
+    /// absent.
+    MissingPreviousKeyForRotate,
+
+    /// `key_lifecycle_action == Rotate` but `previous_ratification_digest`
+    /// is absent.
+    MissingPreviousDigestForRotate,
+
+    /// `previous_ratification_digest` is present but is not a 64-character
+    /// lowercase hex string (32 bytes).
+    MalformedPreviousDigest { reason: String },
+
+    /// `key_lifecycle_action == Revoke` but neither `revocation_reason` nor
+    /// `capabilities_scope` is present.
+    MissingRevocationFieldsForRevoke,
+
+    /// `key_lifecycle_action == Ratify` but rotation-only fields
+    /// (`previous_key_fingerprint` and/or `previous_ratification_digest`)
+    /// are present, which is a protocol violation.
+    UnexpectedRotateFieldsForRatify,
+
+    /// The ML-DSA-44 signature failed PQC verification.
+    SignatureInvalid,
+
+    /// `signature` has the wrong length for the declared suite.
+    MalformedSignature {
+        suite_id: GenesisAuthoritySuiteId,
+        got_len: usize,
+        expected_len: usize,
+    },
+}
+
+impl std::fmt::Display for RatificationV2Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RatificationV2Failure::UnsupportedSchemaVersion { got, expected } => write!(
+                f,
+                "ratification v2: schema_version {got} unsupported (expected {expected})"
+            ),
+            RatificationV2Failure::WrongEnvironment { expected, got } => write!(
+                f,
+                "ratification v2: environment mismatch: expected {:?} got {:?}",
+                expected, got
+            ),
+            RatificationV2Failure::ChainMismatch { expected, got } => write!(
+                f,
+                "ratification v2: chain_id mismatch: expected '{expected}' got '{got}'"
+            ),
+            RatificationV2Failure::GenesisHashMismatch { .. } => write!(
+                f,
+                "ratification v2: genesis_hash does not match runtime canonical genesis hash"
+            ),
+            RatificationV2Failure::AuthorityRootUnknown { fingerprint } => write!(
+                f,
+                "ratification v2: authority_root_fingerprint '{fingerprint}' not in genesis bundle_signing_authority_roots"
+            ),
+            RatificationV2Failure::TransportRootNotAllowed { fingerprint } => write!(
+                f,
+                "ratification v2: refused: fingerprint '{fingerprint}' resolves to pqc_transport_root, which cannot authorise bundle-signing keys"
+            ),
+            RatificationV2Failure::AuthoritySuiteUnsupported { suite_id } => write!(
+                f,
+                "ratification v2: authority_root_suite_id {suite_id} not accepted (only ML-DSA-44 = {GENESIS_AUTHORITY_SUITE_ML_DSA_44})"
+            ),
+            RatificationV2Failure::AuthorityKeyMaterialUnavailable {
+                fingerprint, suite_id, got_hex_len, required_hex_len,
+            } => write!(
+                f,
+                "ratification v2: authority root '{fingerprint}' (suite {suite_id}) carries only a {got_hex_len}-hex fingerprint; {required_hex_len}-hex PQC public key required"
+            ),
+            RatificationV2Failure::AuthorityKeyMaterialMalformed { fingerprint, suite_id, reason } => write!(
+                f,
+                "ratification v2: authority root '{fingerprint}' (suite {suite_id}) public_key_hex malformed: {reason}"
+            ),
+            RatificationV2Failure::AuthorityFingerprintMismatch { declared, derived } => write!(
+                f,
+                "ratification v2: authority_root_fingerprint declared='{declared}' does not match derived='{derived}'"
+            ),
+            RatificationV2Failure::TargetKeySuiteUnsupported { suite_id } => write!(
+                f,
+                "ratification v2: target_bundle_signing_key_suite_id {suite_id} not accepted (only ML-DSA-44 = {GENESIS_AUTHORITY_SUITE_ML_DSA_44})"
+            ),
+            RatificationV2Failure::MalformedTargetPublicKey { suite_id, got_len, expected_len } => write!(
+                f,
+                "ratification v2: target_bundle_signing_public_key length {got_len} invalid for suite {suite_id} (expected {expected_len})"
+            ),
+            RatificationV2Failure::TargetKeyFingerprintMismatch { expected, got } => write!(
+                f,
+                "ratification v2: target key fingerprint mismatch: sha3_256_hex expected={expected} got={got}"
+            ),
+            RatificationV2Failure::MissingAuthorityDomainSequence => write!(
+                f,
+                "ratification v2: authority_domain_sequence is missing or zero (sequences start at 1)"
+            ),
+            RatificationV2Failure::InvalidAuthorityDomainSequence { got } => write!(
+                f,
+                "ratification v2: authority_domain_sequence={got} is invalid (must be >= 1)"
+            ),
+            RatificationV2Failure::MissingLifecycleAction => write!(
+                f,
+                "ratification v2: key_lifecycle_action is missing"
+            ),
+            RatificationV2Failure::InvalidLifecycleAction => write!(
+                f,
+                "ratification v2: key_lifecycle_action carries an unrecognized discriminant"
+            ),
+            RatificationV2Failure::MissingPreviousKeyForRotate => write!(
+                f,
+                "ratification v2: key_lifecycle_action=rotate requires previous_key_fingerprint but it is absent"
+            ),
+            RatificationV2Failure::MissingPreviousDigestForRotate => write!(
+                f,
+                "ratification v2: key_lifecycle_action=rotate requires previous_ratification_digest but it is absent"
+            ),
+            RatificationV2Failure::MalformedPreviousDigest { reason } => write!(
+                f,
+                "ratification v2: previous_ratification_digest is malformed: {reason}"
+            ),
+            RatificationV2Failure::MissingRevocationFieldsForRevoke => write!(
+                f,
+                "ratification v2: key_lifecycle_action=revoke requires at least one of revocation_reason or capabilities_scope"
+            ),
+            RatificationV2Failure::UnexpectedRotateFieldsForRatify => write!(
+                f,
+                "ratification v2: key_lifecycle_action=ratify must not carry rotation-only fields (previous_key_fingerprint / previous_ratification_digest)"
+            ),
+            RatificationV2Failure::SignatureInvalid => write!(
+                f,
+                "ratification v2: signature failed ML-DSA-44 PQC verification"
+            ),
+            RatificationV2Failure::MalformedSignature { suite_id, got_len, expected_len } => write!(
+                f,
+                "ratification v2: signature length {got_len} invalid for suite {suite_id} (expected {expected_len})"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RatificationV2Failure {}
+
+/// Inputs to [`verify_bundle_signing_key_ratification_v2`].
+pub struct RatificationV2VerifierInputs<'a> {
+    /// v2 Ratification object under test.
+    pub ratification: &'a BundleSigningRatificationV2,
+    /// Genesis authority block from the runtime's authoritative genesis.
+    pub authority: &'a GenesisAuthorityConfig,
+    /// Expected chain id (from runtime).
+    pub expected_chain_id: &'a str,
+    /// Expected environment policy (from runtime).
+    pub expected_environment: NetworkEnvironmentPolicy,
+    /// Canonical genesis hash the runtime computed.
+    pub expected_genesis_hash: &'a GenesisHash,
+}
+
+/// Run 130 — v2 bundle-signing-key ratification verifier.
+///
+/// Performs, in order:
+///
+///   1. Schema-version check (must be 2).
+///   2. Environment / chain / genesis-hash binding.
+///   3. Authority-root suite allow-list (ML-DSA-44 only).
+///   4. Authority-root lookup in `bundle_signing_authority_roots` only.
+///   5. Authority public-key resolution (Run 104 resolution order).
+///   6. Target-key suite allow-list (ML-DSA-44 only).
+///   7. Target-key length and fingerprint self-consistency.
+///   8. `authority_domain_sequence` validity (must be >= 1).
+///   9. Lifecycle-action-specific field checks.
+///  10. Signature length check.
+///  11. ML-DSA-44 signature verification over `sha3_256(v2_preimage)`.
+///
+/// Returns [`RatifiedBundleSigningKeyV2`] on success; a typed
+/// [`RatificationV2Failure`] on every error path. Fail-closed: no
+/// `Ok` return is possible unless ALL checks pass.
+///
+/// Run 130 does **not** wire this verifier into production enforcement
+/// surfaces; that is deferred to Run 132.
+pub fn verify_bundle_signing_key_ratification_v2(
+    inputs: RatificationV2VerifierInputs<'_>,
+) -> Result<RatifiedBundleSigningKeyV2, RatificationV2Failure> {
+    let v = inputs.ratification;
+
+    // 1. Schema version.
+    if v.schema_version != BUNDLE_SIGNING_RATIFICATION_VERSION_V2 {
+        return Err(RatificationV2Failure::UnsupportedSchemaVersion {
+            got: v.schema_version,
+            expected: BUNDLE_SIGNING_RATIFICATION_VERSION_V2,
+        });
+    }
+
+    // 2a. Environment.
+    let expected_env = RatificationEnvironment::from_policy(inputs.expected_environment);
+    if v.environment != expected_env {
+        return Err(RatificationV2Failure::WrongEnvironment {
+            expected: expected_env,
+            got: v.environment,
+        });
+    }
+
+    // 2b. Chain.
+    if v.chain_id != inputs.expected_chain_id {
+        return Err(RatificationV2Failure::ChainMismatch {
+            expected: inputs.expected_chain_id.to_string(),
+            got: v.chain_id.clone(),
+        });
+    }
+
+    // 2c. Genesis hash.
+    if &v.genesis_hash != inputs.expected_genesis_hash {
+        return Err(RatificationV2Failure::GenesisHashMismatch {
+            expected: *inputs.expected_genesis_hash,
+            got: v.genesis_hash,
+        });
+    }
+
+    // 3. Authority-root suite allow-list.
+    if v.authority_root_suite_id != GENESIS_AUTHORITY_SUITE_ML_DSA_44 {
+        return Err(RatificationV2Failure::AuthoritySuiteUnsupported {
+            suite_id: v.authority_root_suite_id,
+        });
+    }
+
+    // 4. Authority-root lookup (bundle_signing_authority_roots ONLY).
+    let bundle_root = find_root(
+        &inputs.authority.bundle_signing_authority_roots,
+        &v.authority_root_fingerprint,
+        v.authority_root_suite_id,
+    );
+    if bundle_root.is_none() {
+        let transport_hit = find_root(
+            &inputs.authority.pqc_transport_roots,
+            &v.authority_root_fingerprint,
+            v.authority_root_suite_id,
+        );
+        if transport_hit.is_some() {
+            return Err(RatificationV2Failure::TransportRootNotAllowed {
+                fingerprint: v.authority_root_fingerprint.clone(),
+            });
+        }
+        return Err(RatificationV2Failure::AuthorityRootUnknown {
+            fingerprint: v.authority_root_fingerprint.clone(),
+        });
+    }
+    let bundle_root = bundle_root.expect("checked above");
+
+    // 5. Resolve authority public-key bytes (Run 104 resolution order).
+    let required_hex_len = ML_DSA_44_PUBLIC_KEY_SIZE * 2;
+    let authority_pk: Vec<u8> = if let Some(pk_hex) = bundle_root.public_key_hex.as_deref() {
+        if pk_hex.len() != GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN {
+            return Err(RatificationV2Failure::AuthorityKeyMaterialMalformed {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                reason: format!(
+                    "public_key_hex length {} != expected {}",
+                    pk_hex.len(),
+                    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN
+                ),
+            });
+        }
+        let pk_bytes = decode_hex(pk_hex).ok_or_else(|| RatificationV2Failure::AuthorityKeyMaterialMalformed {
+            fingerprint: bundle_root.key_fingerprint.clone(),
+            suite_id: bundle_root.suite_id,
+            reason: "public_key_hex is not valid lowercase hex".into(),
+        })?;
+        if pk_bytes.len() != GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES {
+            return Err(RatificationV2Failure::AuthorityKeyMaterialMalformed {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                reason: format!(
+                    "decoded public_key_hex is {} bytes; ML-DSA-44 requires {}",
+                    pk_bytes.len(),
+                    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES
+                ),
+            });
+        }
+        // Enforce fingerprint ↔ public_key_hex binding.
+        if bundle_root.key_fingerprint.len() == GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN {
+            let derived = authority_public_key_fingerprint(&pk_bytes);
+            if derived != bundle_root.key_fingerprint {
+                return Err(RatificationV2Failure::AuthorityKeyMaterialMalformed {
+                    fingerprint: bundle_root.key_fingerprint.clone(),
+                    suite_id: bundle_root.suite_id,
+                    reason: format!(
+                        "public_key_hex sha3_256={derived} does not match declared key_fingerprint={}",
+                        bundle_root.key_fingerprint
+                    ),
+                });
+            }
+        }
+        // Defense-in-depth: check that the authority fingerprint declared in
+        // the ratification itself matches the derived fingerprint, for the
+        // canonical short-fingerprint case.
+        if v.authority_root_fingerprint.len() == GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN {
+            let derived = authority_public_key_fingerprint(&pk_bytes);
+            if derived != v.authority_root_fingerprint {
+                return Err(RatificationV2Failure::AuthorityFingerprintMismatch {
+                    declared: v.authority_root_fingerprint.clone(),
+                    derived,
+                });
+            }
+        }
+        pk_bytes
+    } else {
+        // Legacy fallback: key_fingerprint may carry the full PK hex.
+        let fp_hex = &bundle_root.key_fingerprint;
+        if fp_hex.len() != required_hex_len {
+            return Err(RatificationV2Failure::AuthorityKeyMaterialUnavailable {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                got_hex_len: fp_hex.len(),
+                required_hex_len,
+            });
+        }
+        let pk = decode_hex(fp_hex).ok_or_else(|| RatificationV2Failure::AuthorityKeyMaterialUnavailable {
+            fingerprint: bundle_root.key_fingerprint.clone(),
+            suite_id: bundle_root.suite_id,
+            got_hex_len: fp_hex.len(),
+            required_hex_len,
+        })?;
+        if pk.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
+            return Err(RatificationV2Failure::AuthorityKeyMaterialUnavailable {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                got_hex_len: fp_hex.len(),
+                required_hex_len,
+            });
+        }
+        pk
+    };
+
+    // 6. Target-key suite allow-list.
+    if v.target_bundle_signing_key_suite_id != GENESIS_AUTHORITY_SUITE_ML_DSA_44 {
+        return Err(RatificationV2Failure::TargetKeySuiteUnsupported {
+            suite_id: v.target_bundle_signing_key_suite_id,
+        });
+    }
+
+    // 7a. Target-key length.
+    if v.target_bundle_signing_public_key.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
+        return Err(RatificationV2Failure::MalformedTargetPublicKey {
+            suite_id: v.target_bundle_signing_key_suite_id,
+            got_len: v.target_bundle_signing_public_key.len(),
+            expected_len: ML_DSA_44_PUBLIC_KEY_SIZE,
+        });
+    }
+
+    // 7b. Target-key fingerprint self-consistency.
+    let recomputed_fp = sha3_256_hex(&v.target_bundle_signing_public_key);
+    if v.target_bundle_signing_key_fingerprint != recomputed_fp {
+        return Err(RatificationV2Failure::TargetKeyFingerprintMismatch {
+            expected: recomputed_fp,
+            got: v.target_bundle_signing_key_fingerprint.clone(),
+        });
+    }
+
+    // 8. authority_domain_sequence must be >= 1.
+    if v.authority_domain_sequence == 0 {
+        return Err(RatificationV2Failure::InvalidAuthorityDomainSequence {
+            got: v.authority_domain_sequence,
+        });
+    }
+
+    // 9. Lifecycle-action-specific field checks.
+    match v.key_lifecycle_action {
+        BundleSigningRatificationV2Action::Ratify => {
+            // Ratify must NOT carry rotation-only fields.
+            if v.previous_key_fingerprint.is_some() || v.previous_ratification_digest.is_some() {
+                return Err(RatificationV2Failure::UnexpectedRotateFieldsForRatify);
+            }
+        }
+        BundleSigningRatificationV2Action::Rotate => {
+            // Rotate MUST have both previous_key_fingerprint and
+            // previous_ratification_digest.
+            if v.previous_key_fingerprint.is_none() {
+                return Err(RatificationV2Failure::MissingPreviousKeyForRotate);
+            }
+            if v.previous_ratification_digest.is_none() {
+                return Err(RatificationV2Failure::MissingPreviousDigestForRotate);
+            }
+            // Validate the digest hex format.
+            let digest_hex = v.previous_ratification_digest.as_deref().expect("checked above");
+            if digest_hex.len() != 64 {
+                return Err(RatificationV2Failure::MalformedPreviousDigest {
+                    reason: format!(
+                        "previous_ratification_digest must be 64 hex chars (32 bytes); got {} chars",
+                        digest_hex.len()
+                    ),
+                });
+            }
+            if decode_hex(digest_hex).is_none() {
+                return Err(RatificationV2Failure::MalformedPreviousDigest {
+                    reason: "previous_ratification_digest is not valid lowercase hex".into(),
+                });
+            }
+        }
+        BundleSigningRatificationV2Action::Revoke => {
+            // Revoke MUST have at least one of revocation_reason or
+            // capabilities_scope.
+            if v.revocation_reason.is_none() && v.capabilities_scope.is_none() {
+                return Err(RatificationV2Failure::MissingRevocationFieldsForRevoke);
+            }
+        }
+    }
+
+    // 10. Signature length.
+    if v.signature.len() != ML_DSA_44_SIGNATURE_SIZE {
+        return Err(RatificationV2Failure::MalformedSignature {
+            suite_id: v.authority_root_suite_id,
+            got_len: v.signature.len(),
+            expected_len: ML_DSA_44_SIGNATURE_SIZE,
+        });
+    }
+
+    // 11. ML-DSA-44 signature verification using the existing production adapter.
+    let digest = canonical_ratification_v2_digest(v);
+    let suite = MlDsa44SignatureSuite::new(GENESIS_AUTHORITY_SUITE_ML_DSA_44);
+    match suite.verify(&authority_pk, &digest, &v.signature) {
+        Ok(()) => Ok(RatifiedBundleSigningKeyV2 {
+            public_key: v.target_bundle_signing_public_key.clone(),
+            fingerprint: v.target_bundle_signing_key_fingerprint.clone(),
+            suite_id: v.target_bundle_signing_key_suite_id,
+            authority_root_fingerprint: v.authority_root_fingerprint.clone(),
+            authority_policy_version: v.authority_policy_version,
+            authority_domain_sequence: v.authority_domain_sequence,
+            key_lifecycle_action: v.key_lifecycle_action,
+        }),
+        Err(_) => Err(RatificationV2Failure::SignatureInvalid),
+    }
+}
+
+// ===========================================================================
 // Test-only signer helper
 // ===========================================================================
 
@@ -1268,6 +2104,67 @@ pub mod test_helpers {
             .expect("ml_dsa_44_sign_digest in test helper must succeed");
         r.signature = sig;
         r
+    }
+}
+
+/// Test-only helper to mint a fully-signed [`BundleSigningRatificationV2`].
+///
+/// Only compiled under `cfg(any(test, feature = "test-helpers"))`.
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod v2_test_helpers {
+    use super::*;
+    use qbind_crypto::ml_dsa_44_sign_digest;
+
+    /// Build and sign a v2 ratification object with the given lifecycle action.
+    ///
+    /// `authority_pk_hex` is the lowercase hex of the authority public key,
+    /// used as `authority_root_fingerprint` in the object and as the
+    /// genesis-bound root's `key_fingerprint`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_signed_ratification_v2(
+        chain_id: &str,
+        environment: RatificationEnvironment,
+        genesis_hash: GenesisHash,
+        authority_policy_version: u32,
+        authority_pk_hex: &str,
+        authority_sk: &[u8],
+        target_bsk_pk: &[u8],
+        authority_domain_sequence: u64,
+        action: BundleSigningRatificationV2Action,
+        previous_key_fingerprint: Option<String>,
+        previous_ratification_digest: Option<String>,
+        valid_from_epoch: Option<u64>,
+        valid_until_epoch: Option<u64>,
+        revocation_reason: Option<String>,
+        capabilities_scope: Option<String>,
+    ) -> BundleSigningRatificationV2 {
+        let fp = pqc_public_key_fingerprint(target_bsk_pk);
+        let mut v = BundleSigningRatificationV2 {
+            schema_version: BUNDLE_SIGNING_RATIFICATION_VERSION_V2,
+            environment,
+            chain_id: chain_id.to_string(),
+            genesis_hash,
+            authority_policy_version,
+            authority_root_fingerprint: authority_pk_hex.to_string(),
+            authority_root_suite_id: GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            target_bundle_signing_key_fingerprint: fp,
+            target_bundle_signing_key_suite_id: GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            target_bundle_signing_public_key: target_bsk_pk.to_vec(),
+            authority_domain_sequence,
+            key_lifecycle_action: action,
+            previous_key_fingerprint,
+            previous_ratification_digest,
+            valid_from_epoch,
+            valid_until_epoch,
+            revocation_reason,
+            capabilities_scope,
+            signature: Vec::new(),
+        };
+        let digest = canonical_ratification_v2_digest(&v);
+        let sig = ml_dsa_44_sign_digest(authority_sk, &digest)
+            .expect("ml_dsa_44_sign_digest in v2 test helper must succeed");
+        v.signature = sig;
+        v
     }
 }
 
@@ -2480,5 +3377,770 @@ mod tests {
                 other
             ),
         }
+    }
+
+    // =======================================================================
+    // Run 130 — Ratification v2 tests
+    // =======================================================================
+
+    use super::{
+        v2_test_helpers::build_signed_ratification_v2, BundleSigningRatificationV2,
+        BundleSigningRatificationV2Action, BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2,
+        BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1,
+        RatificationV2Failure, RatificationV2VerifierInputs,
+        canonical_ratification_v2_digest, ratification_v2_signing_preimage,
+        verify_bundle_signing_key_ratification_v2,
+    };
+
+    // -----------------------------------------------------------------------
+    // v2 helpers
+    // -----------------------------------------------------------------------
+
+    fn mk_v2_inputs<'a>(
+        v: &'a BundleSigningRatificationV2,
+        authority: &'a GenesisAuthorityConfig,
+        chain_id: &'a str,
+        env: NetworkEnvironmentPolicy,
+        gh: &'a GenesisHash,
+    ) -> RatificationV2VerifierInputs<'a> {
+        RatificationV2VerifierInputs {
+            ratification: v,
+            authority,
+            expected_chain_id: chain_id,
+            expected_environment: env,
+            expected_genesis_hash: gh,
+        }
+    }
+
+    fn build_v2_ratify(
+        chain_id: &str,
+        env: RatificationEnvironment,
+        genesis_hash: GenesisHash,
+        authority_pk_hex: &str,
+        authority_sk: &[u8],
+        target_bsk_pk: &[u8],
+        seq: u64,
+    ) -> BundleSigningRatificationV2 {
+        build_signed_ratification_v2(
+            chain_id,
+            env,
+            genesis_hash,
+            1,
+            authority_pk_hex,
+            authority_sk,
+            target_bsk_pk,
+            seq,
+            BundleSigningRatificationV2Action::Ratify,
+            None, None, None, None, None, None,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // A. Canonical preimage / digest tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn v2_preimage_starts_with_v2_domain_tag() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let p = ratification_v2_signing_preimage(&v);
+        assert!(p.starts_with(BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2));
+        assert!(!p.starts_with(BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1));
+    }
+
+    #[test]
+    fn v2_preimage_is_deterministic() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let p1 = ratification_v2_signing_preimage(&v);
+        let p2 = ratification_v2_signing_preimage(&v);
+        assert_eq!(p1, p2);
+        let d1 = canonical_ratification_v2_digest(&v);
+        let d2 = canonical_ratification_v2_digest(&v);
+        assert_eq!(d1, d2);
+    }
+
+    #[test]
+    fn v2_and_v1_domain_tags_are_distinct() {
+        assert_ne!(
+            BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1,
+            BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2
+        );
+    }
+
+    #[test]
+    fn v2_preimage_changes_with_each_security_field() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let base = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let base_p = ratification_v2_signing_preimage(&base);
+
+        // environment
+        let mut m = base.clone();
+        m.environment = RatificationEnvironment::Testnet;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "environment must change digest");
+
+        // chain_id
+        let mut m = base.clone();
+        m.chain_id = "qbind-mainnet-vX".into();
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "chain_id must change digest");
+
+        // genesis_hash
+        let mut m = base.clone();
+        m.genesis_hash[0] ^= 0xFF;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "genesis_hash must change digest");
+
+        // authority_root_fingerprint
+        let mut m = base.clone();
+        m.authority_root_fingerprint.push('0');
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "authority fp must change digest");
+
+        // authority_root_suite_id
+        let mut m = base.clone();
+        m.authority_root_suite_id = 7;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "authority suite must change digest");
+
+        // target key fingerprint
+        let mut m = base.clone();
+        m.target_bundle_signing_key_fingerprint = "00".repeat(32);
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "target fp must change digest");
+
+        // target key suite_id
+        let mut m = base.clone();
+        m.target_bundle_signing_key_suite_id = 7;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "target suite must change digest");
+
+        // target key bytes
+        let mut m = base.clone();
+        m.target_bundle_signing_public_key[0] ^= 0xFF;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "target key must change digest");
+
+        // authority_domain_sequence
+        let mut m = base.clone();
+        m.authority_domain_sequence = 99;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "sequence must change digest");
+
+        // lifecycle action
+        let mut m = base.clone();
+        m.key_lifecycle_action = BundleSigningRatificationV2Action::Revoke;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "lifecycle action must change digest");
+
+        // authority_policy_version
+        let mut m = base.clone();
+        m.authority_policy_version = 99;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "authority_policy_version must change digest");
+    }
+
+    #[test]
+    fn v2_preimage_rotate_fields_change_digest() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (prev_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let prev_digest_hex = "aa".repeat(32);
+        let base = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            2,
+            BundleSigningRatificationV2Action::Rotate,
+            Some(pqc_public_key_fingerprint(&prev_pk)),
+            Some(prev_digest_hex.clone()),
+            None, None, None, None,
+        );
+        let base_p = ratification_v2_signing_preimage(&base);
+
+        // changing previous_key_fingerprint
+        let mut m = base.clone();
+        m.previous_key_fingerprint = Some("bb".repeat(32));
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p);
+
+        // changing previous_ratification_digest
+        let mut m = base.clone();
+        m.previous_ratification_digest = Some("cc".repeat(32));
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p);
+
+        // removing previous_key_fingerprint
+        let mut m = base.clone();
+        m.previous_key_fingerprint = None;
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p);
+    }
+
+    #[test]
+    fn v2_preimage_revoke_reason_changes_digest() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let base = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            3,
+            BundleSigningRatificationV2Action::Revoke,
+            None, None, None, None,
+            Some("compromised".to_string()),
+            Some("all".to_string()),
+        );
+        let base_p = ratification_v2_signing_preimage(&base);
+
+        // changing revocation_reason
+        let mut m = base.clone();
+        m.revocation_reason = Some("expired".to_string());
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p);
+
+        // changing capabilities_scope
+        let mut m = base.clone();
+        m.capabilities_scope = Some("signing-only".to_string());
+        assert_ne!(ratification_v2_signing_preimage(&m), base_p);
+    }
+
+    #[test]
+    fn v2_same_object_produces_same_digest() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        assert_eq!(
+            canonical_ratification_v2_digest(&v),
+            canonical_ratification_v2_digest(&v),
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // B. Verifier success tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn v2_ratify_verifies_successfully() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let ok = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).expect("valid v2 ratify must verify");
+        assert_eq!(ok.public_key, bsk_pk);
+        assert_eq!(ok.authority_domain_sequence, 1);
+        assert_eq!(ok.key_lifecycle_action, BundleSigningRatificationV2Action::Ratify);
+        assert_eq!(ok.suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44);
+    }
+
+    #[test]
+    fn v2_rotate_verifies_successfully_with_previous_fields() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (prev_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let prev_digest = "ab".repeat(32);
+        let v = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            2,
+            BundleSigningRatificationV2Action::Rotate,
+            Some(pqc_public_key_fingerprint(&prev_pk)),
+            Some(prev_digest),
+            None, None, None, None,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let ok = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).expect("valid v2 rotate must verify");
+        assert_eq!(ok.key_lifecycle_action, BundleSigningRatificationV2Action::Rotate);
+        assert_eq!(ok.authority_domain_sequence, 2);
+    }
+
+    #[test]
+    fn v2_revoke_verifies_successfully_with_revoke_fields() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            3,
+            BundleSigningRatificationV2Action::Revoke,
+            None, None, None, None,
+            Some("compromised".to_string()),
+            Some("all".to_string()),
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let ok = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).expect("valid v2 revoke must verify");
+        assert_eq!(ok.key_lifecycle_action, BundleSigningRatificationV2Action::Revoke);
+    }
+
+    #[test]
+    fn v2_authority_lookup_uses_bundle_signing_roots_only() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (transport_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        // Genesis: bundle-signing set = auth_pk, transport set = transport_pk.
+        let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        cfg.authority.as_mut().unwrap().pqc_transport_roots = vec![
+            GenesisAuthorityRoot::new(
+                GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+                full_pk_hex(&transport_pk),
+                "transport-1",
+            )
+        ];
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        // Ratification signed by auth_pk (in bundle-signing set) must succeed.
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).expect("bundle-signing root must succeed in v2");
+    }
+
+    // -----------------------------------------------------------------------
+    // C. Verifier failure tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn v2_wrong_schema_version_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.schema_version = 1;
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::UnsupportedSchemaVersion { got: 1, .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_wrong_environment_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.environment = RatificationEnvironment::Testnet;
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::WrongEnvironment { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_wrong_chain_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.chain_id = "qbind-testnet-beta".into();
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::ChainMismatch { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_wrong_genesis_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let mut wrong_gh = gh;
+        wrong_gh[0] ^= 0xFF;
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &wrong_gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::GenesisHashMismatch { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_unknown_authority_root_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (other_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        // Genesis trusts other_pk; ratification claims auth_pk.
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&other_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::AuthorityRootUnknown { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_transport_root_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (other_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&other_pk));
+        cfg.authority.as_mut().unwrap().pqc_transport_roots = vec![
+            GenesisAuthorityRoot::new(
+                GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+                full_pk_hex(&auth_pk),
+                "transport-1",
+            )
+        ];
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::TransportRootNotAllowed { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_malformed_authority_public_key_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let mut cfg = mk_genesis_run_104_clean("qbind-mainnet-v0", &auth_pk);
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let fp_hex = pqc_public_key_fingerprint(&auth_pk);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &fp_hex, &auth_sk, &bsk_pk, 1,
+        );
+        // Corrupt the genesis-bound public_key_hex.
+        let pk_mut = cfg.authority.as_mut().unwrap()
+            .bundle_signing_authority_roots[0]
+            .public_key_hex
+            .as_mut()
+            .unwrap();
+        pk_mut.truncate(pk_mut.len() - 2);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::AuthorityKeyMaterialMalformed { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_target_key_fingerprint_mismatch_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.target_bundle_signing_key_fingerprint = "00".repeat(32);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::TargetKeyFingerprintMismatch { .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_bad_signature_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.signature[0] ^= 0xFF;
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::SignatureInvalid), "{err}");
+    }
+
+    #[test]
+    fn v2_missing_authority_domain_sequence_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        // sequence 0 is invalid (must be >= 1).
+        v.authority_domain_sequence = 0;
+        // Re-sign so the signature is valid for this (invalid) object.
+        let digest = canonical_ratification_v2_digest(&v);
+        v.signature = qbind_crypto::ml_dsa_44_sign_digest(&auth_sk, &digest).unwrap();
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::InvalidAuthorityDomainSequence { got: 0 }),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn v2_rotate_missing_previous_key_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            2,
+            BundleSigningRatificationV2Action::Rotate,
+            None,                       // ← missing previous_key_fingerprint
+            Some("ab".repeat(32)),
+            None, None, None, None,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::MissingPreviousKeyForRotate), "{err}");
+    }
+
+    #[test]
+    fn v2_rotate_missing_previous_digest_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let (prev_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            2,
+            BundleSigningRatificationV2Action::Rotate,
+            Some(pqc_public_key_fingerprint(&prev_pk)),
+            None,                       // ← missing previous_ratification_digest
+            None, None, None, None,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::MissingPreviousDigestForRotate), "{err}");
+    }
+
+    #[test]
+    fn v2_ratify_with_unexpected_rotate_fields_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
+            BundleSigningRatificationV2Action::Ratify,
+            Some("ff".repeat(32)),      // ← unexpected rotation field
+            None,
+            None, None, None, None,
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::UnexpectedRotateFieldsForRatify), "{err}");
+    }
+
+    #[test]
+    fn v2_revoke_missing_revoke_fields_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_signed_ratification_v2(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            1,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            3,
+            BundleSigningRatificationV2Action::Revoke,
+            None, None, None, None,
+            None,   // ← missing revocation_reason
+            None,   // ← missing capabilities_scope
+        );
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::MissingRevocationFieldsForRevoke), "{err}");
+    }
+
+    #[test]
+    fn v2_malformed_signature_rejected() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.signature.truncate(50);
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::MalformedSignature { .. }), "{err}");
+    }
+
+    // -----------------------------------------------------------------------
+    // D. v1 regression — existing verifier unaffected by Run 130 additions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn v1_verifier_still_rejects_v2_schema_version() {
+        // If someone sets version=2 on a v1 struct, the v1 verifier must
+        // refuse it with UnsupportedVersion.
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut r = test_helpers::build_signed_ratification(
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+        );
+        r.version = 2;
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification(mk_inputs(
+            &r, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationFailure::UnsupportedVersion { got: 2, .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_verifier_rejects_v1_schema_version() {
+        // A BundleSigningRatificationV2 with schema_version=1 is rejected.
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let mut v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        v.schema_version = 1;
+        let auth = cfg.authority.as_ref().unwrap();
+        let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).unwrap_err();
+        assert!(matches!(err, RatificationV2Failure::UnsupportedSchemaVersion { got: 1, .. }), "{err}");
+    }
+
+    #[test]
+    fn v2_json_round_trip_preserves_object_and_still_verifies() {
+        let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+        let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+        let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
+        let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
+        let v = build_v2_ratify(
+            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
+            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+        );
+        let s = serde_json::to_string(&v).expect("v2 ser");
+        let v2: BundleSigningRatificationV2 = serde_json::from_str(&s).expect("v2 de");
+        assert_eq!(v, v2);
+        let auth = cfg.authority.as_ref().unwrap();
+        verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
+            &v2, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
+        )).expect("v2 must still verify after JSON round-trip");
     }
 }

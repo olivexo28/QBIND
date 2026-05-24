@@ -4204,3 +4204,42 @@ Run 129 confirms and synchronizes the Run 128 operator-facing facts:
 - No MainNet governance artifact implementation.
 - No peer-driven live apply implementation.
 - No full C4 or C5 closure claim.
+
+## Run 130 — ratification v2 schema, canonical preimage, and verifier tests
+
+**Type:** Implementation (additive; no production wiring).
+
+Run 130 implements the ratification v2 schema per the Run 129 specification. It adds all new types to `crates/qbind-ledger/src/bundle_signing_ratification.rs` and passes 32 new unit tests.
+
+### Operator-visible guarantees added by Run 130
+
+- `BundleSigningRatificationV2` objects can be constructed and signed with `v2_test_helpers::build_signed_ratification_v2`.
+- `verify_bundle_signing_key_ratification_v2` is a fail-closed primitive: every error path returns a typed `RatificationV2Failure`; no `Ok` is possible unless ALL checks pass including ML-DSA-44 signature verification.
+- v2 `authority_domain_sequence` is validated ≥ 1 before any signature check.
+- v2 lifecycle-action fields are validated: rotation fields are required/forbidden per action; revoke requires at least one reason/scope field.
+- The v2 domain tag `QBIND:BUNDLE-SIGNING-RATIFICATION:v2` is cryptographically distinct from the v1 tag; no preimage collision is possible.
+- Transport roots remain rejected for v2 ratifications (`TransportRootNotAllowed`).
+- v1 verifier behavior is unchanged.
+
+### Roadmap position
+
+| Run | Description |
+|-----|-------------|
+| Run 129 | Ratification v2 monotonic schema specification (docs-only) |
+| **Run 130** | **v2 types + canonical preimage + verifier tests (this run)** |
+| Run 131 | Authority marker v2 extension and migration |
+| Run 132 | Production v2 enforcement wiring |
+| Run 133 | Release-binary v2 evidence |
+| Run 134+ | Rotation, then revocation lifecycle |
+
+### Run 130 explicit non-changes
+
+- No production enforcement wiring.
+- No authority marker persistence change.
+- No trust-bundle or peer-candidate wire format change.
+- No reset CLI behavior change.
+- No rotation/revocation lifecycle implementation.
+- No KMS/HSM implementation.
+- No MainNet governance artifact implementation.
+- No peer-driven live apply implementation.
+- No full C4 or C5 closure claim.

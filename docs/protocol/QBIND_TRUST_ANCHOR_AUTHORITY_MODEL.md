@@ -1988,3 +1988,56 @@ Run 129 is spec-only and does **not** implement:
 - MainNet governance artifact verification;
 - peer-driven live apply;
 - full C4 closure or C5 closure.
+
+## Run 130 update — ratification v2 schema, canonical preimage, and verifier tests
+
+**Type:** Implementation (additive types + verifier tests; no production wiring).
+**Date:** 2026-05-24.
+
+Run 130 implements the ratification v2 schema, canonical preimage, domain-separated digest, and verifier primitive exactly per the Run 129 specification. No production enforcement surface is wired to v2.
+
+### New types and functions
+
+All v2 additions are in `crates/qbind-ledger/src/bundle_signing_ratification.rs`:
+
+- `BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2` — domain tag `QBIND:BUNDLE-SIGNING-RATIFICATION:v2` (distinct from v1).
+- `BUNDLE_SIGNING_RATIFICATION_VERSION_V2 = 2`.
+- `BundleSigningRatificationV2Action` enum: `Ratify`, `Rotate`, `Revoke`.
+- `BundleSigningRatificationV2` struct — full v2 object with `authority_domain_sequence`, `key_lifecycle_action`, rotation-chain linkage, and revocation fields.
+- `ratification_v2_signing_preimage` — deterministic length-prefixed preimage.
+- `canonical_ratification_v2_digest` — SHA3-256 of preimage.
+- `RatificationV2Failure` — 22-variant typed failure enum.
+- `RatifiedBundleSigningKeyV2` — typed success result.
+- `RatificationV2VerifierInputs` / `verify_bundle_signing_key_ratification_v2` — verifier entry point.
+- `v2_test_helpers::build_signed_ratification_v2` — test-only signer.
+
+### Security invariants
+
+- v2 domain tag is cryptographically distinct from v1; no preimage ambiguity.
+- `authority_domain_sequence` bound into every v2 digest; sequence 0 is invalid.
+- `key_lifecycle_action` bound into every v2 digest.
+- Authority root lookup restricted to `bundle_signing_authority_roots`; transport roots rejected with `TransportRootNotAllowed`.
+- All ML-DSA-44 signature verification performed via the existing `MlDsa44SignatureSuite` adapter — no parallel crypto stack.
+- Rotation fields absent on `Ratify`; absent on `Revoke`; mandatory on `Rotate`.
+- `Revoke` requires at least one of `revocation_reason` or `capabilities_scope`.
+
+### Test coverage
+
+32 new v2-specific tests (preimage determinism, domain tag separation, per-field digest change, verifier success for all three actions, typed failure cases, v1 regression, v1/v2 separation).
+
+### Run 130 explicit non-changes
+
+Run 130 does NOT implement:
+
+- production v2 enforcement wiring (startup, reload-check, peer-candidate, live inbound 0x05, SIGHUP);
+- authority marker v2 migration;
+- signing-key rotation lifecycle;
+- signing-key revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact verification;
+- peer-driven live apply;
+- full C4 closure or C5 closure.
+
+Static production source-code anchors remain rejected. Local config alone is still not enough for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.
+
+C4 status after Run 130: **OPEN but narrowed** — ratification v2 schema/types/preimage/verifier primitive are now implemented and tested. Remaining open pieces: production v2 enforcement wiring (Run 132), marker v2 migration (Run 131), signing-key rotation/revocation lifecycle (Run 134+), peer-driven live apply, KMS/HSM custody, MainNet governance artifact verification, validator-set rotation, full C4 closure, C5 closure.

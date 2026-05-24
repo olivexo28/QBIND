@@ -1,0 +1,664 @@
+# RUN 131 — Authority Marker v2 Extension and v1→v2 Migration Primitive
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established and release-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle`.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement.
+- Run 126 produced the spec-first authority-state reset/recovery procedure.
+- Run 127 implemented the offline authority-state reset CLI skeleton with typed refusal cases.
+- Run 128 produced strongest-positive release-binary evidence for the offline authority-state reset CLI.
+- Run 129 produced the spec-first ratification v2 design:
+  - selected monotonic model: per-authority-domain monotonic sequence `authority_domain_sequence`;
+  - v2 domain tag: `QBIND:BUNDLE-SIGNING-RATIFICATION:v2`;
+  - lifecycle action binding: `ratify`, `rotate`, `revoke`;
+  - v2-after-v1 is the explicit migration path;
+  - v1-after-v2 is fail-closed;
+  - lower sequence is rejected;
+  - same sequence with different digest is rejected;
+  - marker v2 evolution was specified but not implemented.
+- Run 130 implemented the ratification v2 primitive in `qbind-ledger`:
+  - v2 schema/types;
+  - `BundleSigningRatificationV2Action` with `Ratify`, `Rotate`, `Revoke`;
+  - v2 canonical length-prefixed preimage;
+  - `canonical_ratification_v2_digest`;
+  - `RatificationV2Failure` typed failures;
+  - `verify_bundle_signing_key_ratification_v2`;
+  - 32 new tests / 260 ledger tests passing;
+  - no production v2 enforcement wiring;
+  - no marker v2 migration;
+  - no rotation/revocation lifecycle.
+
+Run 130 review found tracking-doc sync still needed before Run 131. Run 131 must first verify/fix the Run 130 updates in the three tracking docs.
+
+Run 131 is the marker-model implementation run for v2. It must not wire production surfaces yet.
+
+---
+
+# Exact objective
+
+Extend the authority marker model to represent ratification v2 monotonic state and implement the v1→v2 migration primitive, without wiring v2 into production enforcement surfaces.
+
+The objective is:
+
+1. Add a versioned marker model capable of representing both current v1 marker state and new v2 monotonic state.
+2. Add v2 marker fields required by Run 129/130:
+   - `authority_schema_version` or equivalent;
+   - `latest_authority_domain_sequence`;
+   - `latest_lifecycle_action`;
+   - active/current key fingerprint;
+   - previous key fingerprint where applicable;
+   - latest v2 ratification digest;
+   - optional revoked-key digest/metadata placeholder if specified.
+3. Implement pure comparison rules for v2 markers:
+   - first v2 marker;
+   - same sequence / same digest idempotent;
+   - same sequence / different digest rejected;
+   - lower sequence rejected;
+   - higher sequence accepted;
+   - wrong domain rejected;
+   - wrong key/action linkage rejected.
+4. Implement v1→v2 migration primitive:
+   - v2-after-v1 is allowed only through explicit migration rules;
+   - v1-after-v2 is fail-closed;
+   - v1 marker remains parse-compatible;
+   - v2 marker remains deterministic and fail-closed on corruption.
+5. Extend snapshot metadata representation if needed so v2 marker state can be carried later.
+6. Preserve all v1 marker behavior and tests.
+7. Do not wire v2 marker comparison into startup/reload/SIGHUP/reload-check/peer-candidate/live `0x05` yet.
+8. Do not implement signing-key rotation/revocation lifecycle yet.
+
+Run 131 should make this statement true:
+
+> QBIND can represent, serialize, parse, digest, compare, and migrate authority marker state from v1 to v2 monotonic semantics, but no production surface consumes v2 marker logic yet.
+
+---
+
+# First checkpoint: Run 130 doc-sync fix
+
+Before code changes, verify and fix these docs:
+
+- `docs/whitepaper/contradiction.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+
+They must explicitly state:
+
+- Run 130 implemented v2 schema/types/preimage/digest/verifier tests.
+- `RatificationV2Failure` / typed v2 failures landed.
+- v2 verifier is not wired into production surfaces yet.
+- marker v2 migration remains Run 131.
+- production enforcement wiring remains Run 132.
+- release-binary v2 evidence remains Run 133.
+- rotation/revocation lifecycle remains future.
+- full C4 and C5 remain open.
+
+Document this correction in the Run 131 evidence file.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Marker v2 schema/model
+
+Extend the authority marker type(s) in the appropriate module, likely:
+
+```text
+crates/qbind-node/src/pqc_authority_state.rs
+```
+
+or repo-equivalent.
+
+The marker must remain versioned and parse-compatible with existing v1 marker files.
+
+## B. Deterministic v2 marker serialization/digest
+
+Add deterministic serialization/digest coverage for the v2 marker state.
+
+Requirements:
+
+- domain-separated from v1 marker digest if needed;
+- stable across platforms;
+- includes all security-relevant v2 fields;
+- changes to sequence/action/key/digest/domain fields change marker digest;
+- no JSON-order ambiguity in canonical digest path.
+
+## C. v2 comparison primitive
+
+Add pure comparison logic for candidate v2 marker against persisted marker.
+
+Required typed outcomes/errors:
+
+- first v2 marker accepted;
+- same v2 marker idempotent;
+- higher sequence accepted;
+- lower sequence rejected;
+- same sequence different digest rejected;
+- wrong environment rejected;
+- wrong chain_id rejected;
+- wrong genesis_hash rejected;
+- wrong authority root rejected;
+- v1 candidate after v2 marker rejected;
+- v2 candidate after v1 marker accepted only as explicit migration;
+- malformed/unsupported marker rejected.
+
+## D. v1→v2 migration primitive
+
+Implement pure helper(s), conceptually:
+
+```text
+migrate_authority_marker_v1_to_v2(...)
+compare_authority_marker_v2(...)
+prepare_v2_marker_for_acceptance(...)
+```
+
+Use repo naming style.
+
+Migration must not silently rewrite marker files. It should be a pure decision/output primitive in Run 131 unless a narrow storage helper is already appropriate.
+
+## E. Snapshot metadata compatibility
+
+If `AuthorityStateSnapshotMeta` needs extension for v2 marker fields, add it additively and preserve legacy parsing.
+
+Do not change restore enforcement behavior in Run 131 unless strictly necessary for type compatibility.
+
+---
+
+# Strict non-goals
+
+Run 131 MUST NOT:
+
+- wire v2 verifier into startup trust-bundle acceptance;
+- wire v2 verifier into reload-check;
+- wire v2 verifier into local peer-candidate check;
+- wire v2 verifier into live inbound `0x05`;
+- wire v2 verifier into reload-apply;
+- wire v2 verifier into SIGHUP;
+- change production enforcement policy;
+- write v2 marker from production surfaces;
+- migrate existing marker files automatically during normal startup;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement KMS/HSM custody;
+- implement MainNet governance artifact verification;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- change reset CLI behavior;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots broadly;
+- weaken v1 ratification verification;
+- weaken Run 117–130 anti-rollback/reset/v2 verifier behavior;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim rotation/revocation implemented;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing marker v1 implementation
+
+Inspect:
+
+- `PersistentAuthorityStateRecord`;
+- v1 marker fields;
+- marker serialization/digest;
+- `load_authority_state`;
+- `persist_authority_state_atomic`;
+- `compare_authority_state`;
+- `prepare_marker_for_acceptance`;
+- snapshot metadata carrier.
+
+Document what must remain unchanged.
+
+## 2. Run 130 v2 verifier output
+
+Inspect:
+
+- `RatifiedBundleSigningKeyV2`;
+- `BundleSigningRatificationV2`;
+- `BundleSigningRatificationV2Action`;
+- `canonical_ratification_v2_digest`;
+- typed failure behavior.
+
+Determine exactly what data is available to derive a v2 marker.
+
+## 3. v1/v2 coexistence policy
+
+Map Run 129 policy into code-level outcomes:
+
+- v1 marker + v1 candidate;
+- v1 marker + v2 candidate;
+- v2 marker + v1 candidate;
+- v2 marker + v2 candidate;
+- no marker + v1 candidate;
+- no marker + v2 candidate.
+
+## 4. Snapshot metadata compatibility
+
+Inspect whether `AuthorityStateSnapshotMeta` can carry v2 marker fields additively or whether a versioned enum/wrapper is safer.
+
+Preserve Run 124/125 restore behavior.
+
+---
+
+# Required implementation
+
+## 1. Add versioned marker representation
+
+Add or extend marker representation with v2 support.
+
+Prefer explicit versioning over optional-field ambiguity.
+
+Examples:
+
+```rust
+enum PersistentAuthorityStateRecordVersioned {
+    V1(PersistentAuthorityStateRecord),
+    V2(PersistentAuthorityStateRecordV2),
+}
+```
+
+or repo-equivalent.
+
+If the existing `PersistentAuthorityStateRecord` must remain the on-disk type, add explicit version fields and fail-closed parsing.
+
+## 2. Add v2 marker record
+
+Expected conceptual fields:
+
+```text
+record_version
+authority_schema_version = 2
+environment
+chain_id
+genesis_hash
+authority_root_fingerprint
+authority_root_suite_id
+active_key_fingerprint
+active_key_suite_id
+latest_authority_domain_sequence
+latest_lifecycle_action
+previous_key_fingerprint_if_any
+latest_ratification_v2_digest
+revoked_key_digest_or_placeholder_if_any
+last_update_source
+```
+
+Use repo style and only include fields that are well-defined by Run 129/130.
+
+## 3. Add v2 marker derivation helper
+
+Add a helper deriving v2 marker from verified v2 ratification output.
+
+It must:
+
+- use verified v2 ratification/result only;
+- bind `authority_domain_sequence`;
+- bind lifecycle action;
+- bind active/target key;
+- bind previous key/digest for rotate;
+- bind revocation metadata for revoke if represented;
+- fail closed on missing action-specific fields.
+
+## 4. Add v2 marker comparison helper
+
+Implement pure comparison with typed outcomes.
+
+Do not persist marker in Run 131 unless explicitly limited to tests.
+
+## 5. Add migration helper
+
+Implement v1→v2 migration decision helper.
+
+It must:
+
+- accept v2-after-v1 as explicit migration only;
+- reject v1-after-v2;
+- preserve v1 marker bytes unless a future wiring run persists migration;
+- never silently downgrade.
+
+## 6. Tests
+
+Add focused tests.
+
+---
+
+# Required tests
+
+## A. v2 marker serialization/digest tests
+
+Test:
+
+- deterministic serialization;
+- domain/version separation from v1;
+- changing environment changes digest;
+- changing chain changes digest;
+- changing genesis changes digest;
+- changing authority root changes digest;
+- changing active key changes digest;
+- changing authority_domain_sequence changes digest;
+- changing lifecycle action changes digest;
+- changing latest v2 ratification digest changes digest.
+
+## B. v2 marker derivation tests
+
+Test deriving from verified v2 results for:
+
+- ratify;
+- rotate;
+- revoke, if supported by marker model;
+- missing rotate previous key/digest fails;
+- wrong domain fails;
+- wrong target key binding fails.
+
+## C. v2 comparison tests
+
+Test:
+
+- no marker + v2 candidate accepted;
+- same v2 marker idempotent;
+- higher sequence accepted;
+- lower sequence rejected;
+- same sequence different digest rejected;
+- wrong environment rejected;
+- wrong chain rejected;
+- wrong genesis rejected;
+- wrong authority root rejected;
+- unsupported marker version rejected;
+- corrupt marker rejected.
+
+## D. v1/v2 migration tests
+
+Test:
+
+- v1 marker + v2 candidate allowed as explicit migration;
+- v2 marker + v1 candidate rejected;
+- v1 marker + v1 candidate behavior unchanged;
+- no marker + v1 candidate behavior unchanged;
+- no marker + v2 candidate behavior follows documented policy;
+- v1-after-v2 downgrade fails closed.
+
+## E. Snapshot metadata tests, if touched
+
+Test:
+
+- legacy metadata parses;
+- v1 authority metadata parses;
+- v2 authority metadata parses;
+- malformed v2 authority metadata fails closed;
+- Run 124 restore tests remain green.
+
+## F. Regression tests
+
+Run and report:
+
+- qbind-node --lib;
+- qbind-ledger --lib;
+- Run 130 v2 verifier tests;
+- Run 129 docs/spec no runtime change is not applicable but cross-check docs;
+- Run 124/125 restore authority marker tests/evidence helpers if affected;
+- Run 119/120/121 marker tests;
+- Run 123 validation-only marker tests;
+- Run 117/118 authority state tests.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 131.
+
+---
+
+# Release-binary evidence
+
+None required for Run 131.
+
+Do not fake release-binary evidence.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_131.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow docs:
+
+- marker v2 schema appendix;
+- v1→v2 migration matrix;
+- failure matrix.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 131 may narrow:
+
+- marker v2 schema implementation;
+- v1→v2 marker migration primitive;
+- v1-after-v2 downgrade refusal;
+- v2 marker monotonic comparison.
+
+Run 131 may mark marker v2 primitive as narrowed only if:
+
+- v2 marker type exists;
+- v2 marker derivation exists;
+- v2 marker comparison exists;
+- v1→v2 migration primitive exists;
+- v1-after-v2 rejects;
+- v1 marker behavior remains unchanged;
+- docs are synchronized.
+
+Run 131 MUST NOT mark resolved:
+
+- production v2 enforcement wiring;
+- release-binary v2 evidence;
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- peer-driven live apply;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 131 does not wire v2 into production surfaces;
+- Run 131 does not implement signing-key rotation/revocation;
+- Run 131 does not implement KMS/HSM custody;
+- Run 131 does not implement peer-driven live apply;
+- Run 131 does not implement MainNet governance artifacts;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- v2 marker type/derivation/comparison/migration all land;
+- v1 behavior is regression-proven unchanged;
+- docs are synchronized;
+- no production surface wiring occurs.
+
+Use **positive** if:
+
+- v2 marker type/comparison/migration mostly lands;
+- one secondary lifecycle action is deferred honestly;
+- no unsafe production wiring occurs.
+
+Use **partial-positive** if:
+
+- v2 marker type lands but migration/comparison is incomplete;
+- v1/v2 compatibility tests are incomplete;
+- snapshot metadata compatibility is unresolved.
+
+Use **negative** if:
+
+- lower sequence is accepted;
+- same-sequence different digest is accepted;
+- v1-after-v2 is accepted silently;
+- v1 marker behavior regresses;
+- production surfaces are changed out of scope;
+- local config alone can authorize MainNet authority.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- Run 130 doc-sync fix;
+- v2 marker type/schema;
+- v2 derivation helper;
+- v2 comparison helper;
+- v1→v2 migration helper;
+- snapshot metadata changes if any;
+- tests added;
+- docs updated;
+- explicit statement that no production surface wiring was added.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence if any.
+
+## 4. Key security decisions
+
+Include:
+
+- v2 marker binds authority_domain_sequence;
+- v2 marker binds lifecycle action;
+- lower sequence rejected;
+- same sequence different digest rejected;
+- v1-after-v2 rejected;
+- v2-after-v1 migration explicit;
+- v1 behavior preserved;
+- no production v2 consumption yet.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 v1 verifier;
+- Run 104 key material registry;
+- Run 105–128 enforcement/evidence/reset lineage;
+- Run 129 v2 schema spec;
+- Run 130 v2 verifier implementation;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 131 does NOT implement:
+
+- production v2 enforcement wiring;
+- release-binary v2 evidence;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- docs updated;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 131 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
