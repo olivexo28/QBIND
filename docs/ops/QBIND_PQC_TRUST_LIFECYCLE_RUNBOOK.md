@@ -4150,3 +4150,57 @@ Run 128 is evidence-only and proves Run 127 reset behavior on real release binar
 - No KMS/HSM, governance, or validator-set rotation implementation.
 - No ratification-v2 monotonic authority sequence implementation.
 - No full C4 or C5 closure claim.
+
+## Run 129 — ratification v2 monotonic schema specification (docs-only)
+
+**Date:** 2026-05-24  
+**Evidence:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_129.md`
+
+Run 129 is spec-first/docs-only. It does not change runtime behavior. It defines the ratification v2 schema and fail-closed comparison model required for safe future signing-key rotation/revocation.
+
+### Run 128 doc-sync checkpoint (required correction)
+
+Run 129 confirms and synchronizes the Run 128 operator-facing facts:
+
+- Run 128 is release-binary evidence for offline authority-state reset CLI behavior.
+- DevNet valid reset writes marker + audit.
+- MainNet local reset refuses.
+- Missing/bad ratification, wrong expected genesis hash, corrupt marker, missing audit output flag, and wrong-chain/wrong-environment sidecars all refuse.
+- Refusal paths do not write/mutate marker bytes.
+- Reset exits before normal startup surfaces.
+- MainNet governance artifacts remain OPEN.
+- Ratification v2 monotonic schema remains OPEN until Run 129 specification and future implementation runs.
+- Rotation/revocation, KMS/HSM, peer-driven live apply, full C4 closure, and C5 closure remain OPEN.
+
+### Run 129 design decisions (operator-impact summary)
+
+1. **Monotonic model selected:** one monotonic `authority_domain_sequence` per authority domain (`environment + chain_id + genesis_hash + authority_root_fingerprint`), not per-key counters.
+2. **v2 lifecycle actions:** `ratify`, `rotate`, `revoke`, with mandatory action-linked fields (`previous_*` for rotate; revocation reason for revoke).
+3. **Canonical v2 signing domain:** `QBIND:BUNDLE-SIGNING-RATIFICATION:v2` with deterministic length-prefixed preimage over all security-relevant fields.
+4. **Marker v2 extension (future implementation):** track schema version, latest authority sequence, latest action, active/previous key fingerprints, latest ratification digest, and revocation accumulator digest.
+5. **Compatibility/downgrade policy:** v1 after v2 marker exists is fail-closed refuse; v2 after v1 marker is migration path; same-sequence conflicting digest is fail-closed equivocation.
+6. **Activation policy:** v2 enablement must be explicit and authority-policy/governance bound; MainNet cannot rely on local config alone.
+
+### Future run staging
+
+| Run | Scope |
+|-----|-------|
+| Run 130 | Implement v2 schema/types + canonical preimage + verifier tests |
+| Run 131 | Implement marker v2 extension + v1→v2 marker migration |
+| Run 132 | Wire v2 verifier/comparison into enforcement surfaces under compatibility gates |
+| Run 133 | Release-binary v2 acceptance/rejection evidence |
+| Run 134+ | Rotation lifecycle, then revocation lifecycle, then governance/KMS/HSM extensions |
+
+### Run 129 explicit non-changes
+
+- No v2 verifier code implementation.
+- No runtime code changes.
+- No trust-bundle wire format change.
+- No peer-candidate wire format change.
+- No reset CLI behavior change.
+- No marker persistence behavior change.
+- No rotation/revocation lifecycle implementation.
+- No KMS/HSM implementation.
+- No MainNet governance artifact implementation.
+- No peer-driven live apply implementation.
+- No full C4 or C5 closure claim.

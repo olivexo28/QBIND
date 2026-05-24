@@ -1,0 +1,620 @@
+# RUN 130 — Ratification v2 Schema, Canonical Preimage, and Verifier Tests
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established and release-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle`.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement.
+- Run 126 produced the spec-first authority-state reset/recovery procedure.
+- Run 127 implemented the offline authority-state reset CLI skeleton with typed refusal cases.
+- Run 128 produced strongest-positive release-binary evidence for the offline authority-state reset CLI.
+- Run 129 produced the spec-first ratification v2 design:
+  - selected monotonic model: per-authority-domain monotonic sequence `authority_domain_sequence`;
+  - v2 domain tag: `QBIND:BUNDLE-SIGNING-RATIFICATION:v2`;
+  - lifecycle action binding: `ratify`, `rotate`, `revoke`;
+  - v2-after-v1 is the explicit migration path;
+  - v1-after-v2 is fail-closed;
+  - lower sequence is rejected;
+  - same sequence with different digest is rejected;
+  - marker v2 evolution is specified but not implemented;
+  - Run 130 is staged for v2 schema/types/preimage/verifier tests;
+  - Run 131 is staged for marker v2 extension/migration;
+  - Run 132 is staged for enforcement wiring;
+  - Run 133 is staged for release-binary v2 evidence;
+  - Run 134+ is staged for rotation/revocation lifecycle work.
+
+Run 130 is the first implementation run for ratification v2.
+
+It must implement schema/types, canonical preimage/digest, and verifier tests only. It must not wire v2 into production enforcement surfaces yet.
+
+---
+
+# Exact objective
+
+Implement the ratification v2 schema/types, deterministic canonical preimage, domain-separated digest, and verifier test surface exactly according to the Run 129 spec.
+
+The objective is:
+
+1. Add ratification v2 data types without breaking v1.
+2. Add deterministic v2 canonical preimage using domain tag `QBIND:BUNDLE-SIGNING-RATIFICATION:v2`.
+3. Add v2 canonical digest.
+4. Add v2 verifier logic and typed failure reasons.
+5. Verify ML-DSA-44 signatures using the existing crypto stack only.
+6. Enforce v2 domain binding: environment, chain_id, genesis_hash, authority root fingerprint, target key fingerprint, lifecycle action, and `authority_domain_sequence`.
+7. Enforce lifecycle-action-specific fields:
+   - `ratify` must bind target key and sequence;
+   - `rotate` must bind previous key and previous ratification digest;
+   - `revoke` must bind revoked key/reason/scope as specified.
+8. Preserve v1 behavior unchanged.
+9. Do not wire v2 into startup/reload/SIGHUP/validation-only surfaces yet.
+10. Do not alter authority marker persistence behavior yet.
+11. Do not implement signing-key rotation/revocation lifecycle yet.
+
+Run 130 should make this statement true:
+
+> QBIND has a tested ratification v2 object, canonical preimage/digest, and verifier primitive with typed fail-closed behavior, but no production enforcement path consumes v2 yet.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. v2 schema/types
+
+Add new ratification v2 types in the appropriate crate, likely near the existing v1 verifier:
+
+```text
+crates/qbind-ledger/src/bundle_signing_ratification.rs
+```
+
+or a narrowly split module if that is cleaner.
+
+Expected conceptual fields from Run 129:
+
+```text
+schema_version = 2
+environment
+chain_id
+genesis_hash
+authority_policy_version
+authority_root_fingerprint
+authority_root_suite_id
+ratified_bundle_signing_key_fingerprint
+ratified_bundle_signing_key_suite_id
+ratified_bundle_signing_public_key_hash_or_public_key_ref
+authority_domain_sequence
+key_lifecycle_action
+previous_key_fingerprint_if_rotation
+previous_ratification_digest_if_rotation
+valid_from_epoch_or_height_if already canonical
+valid_until_epoch_or_height_if used
+revocation_reason_if action = revoke
+capabilities / scope
+signature
+```
+
+Use repo naming/types and existing conventions. Do not invent runtime semantics that Run 129 did not define.
+
+## B. v2 lifecycle action enum
+
+Add a typed lifecycle action enum, conceptually:
+
+```text
+Ratify
+Rotate
+Revoke
+```
+
+The action must be included in the canonical preimage and digest.
+
+## C. v2 canonical preimage and digest
+
+Implement deterministic length-prefixed encoding.
+
+Requirements:
+
+- domain tag distinct from v1: `QBIND:BUNDLE-SIGNING-RATIFICATION:v2`;
+- no JSON ordering ambiguity;
+- includes all security-relevant fields;
+- includes lifecycle action;
+- includes `authority_domain_sequence`;
+- includes previous-key / previous-digest linkage for rotation;
+- includes revoke reason/scope for revocation if present;
+- changes to any security field change digest;
+- deterministic across platforms.
+
+## D. v2 verifier primitive
+
+Add a verifier function for v2, for example:
+
+```text
+verify_bundle_signing_key_ratification_v2(...)
+```
+
+or repo-equivalent.
+
+It must:
+
+- use existing ML-DSA-44 verifier stack only;
+- only accept roots from `bundle_signing_authority_roots`;
+- reject transport roots;
+- verify authority root key material from genesis-bound full public key material;
+- check authority root fingerprint matches;
+- check suite IDs;
+- check chain_id/environment/genesis_hash;
+- check target signing key fingerprint/public key binding;
+- check lifecycle-action-specific required fields;
+- return typed failures, not boolean-only failure.
+
+## E. Compatibility with v1
+
+Preserve existing v1 verifier behavior bit-for-bit except for additive code.
+
+Do not make v1 accept v2 objects.
+Do not make v2 accept v1 objects.
+Do not wire v1/v2 compatibility policy into production surfaces yet.
+
+Run 130 may add pure comparison/helper tests for v1/v2 downgrade semantics if they are strictly local and do not change production enforcement.
+
+---
+
+# Strict non-goals
+
+Run 130 MUST NOT:
+
+- wire v2 verifier into startup trust-bundle acceptance;
+- wire v2 verifier into reload-check;
+- wire v2 verifier into local peer-candidate check;
+- wire v2 verifier into live inbound `0x05`;
+- wire v2 verifier into reload-apply;
+- wire v2 verifier into SIGHUP;
+- change authority marker persistence behavior;
+- implement marker v2 extension/migration;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement KMS/HSM custody;
+- implement MainNet governance artifact verification;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- change reset CLI behavior;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken v1 ratification verification;
+- weaken Run 117–128 anti-rollback/reset behavior;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim rotation/revocation implemented;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing v1 implementation
+
+Inspect:
+
+- `crates/qbind-ledger/src/bundle_signing_ratification.rs`;
+- v1 data types;
+- v1 canonical preimage;
+- v1 digest;
+- v1 verifier function;
+- v1 typed failures;
+- genesis authority root lookup;
+- ML-DSA-44 verification path;
+- transport-root rejection path.
+
+Do not duplicate crypto logic. Reuse the existing verifier stack.
+
+## 2. Existing authority root/key material types
+
+Inspect Run 104 additions:
+
+- `GenesisAuthorityRoot::public_key_hex` or equivalent;
+- public key fingerprint checks;
+- suite ID checks;
+- MainNet missing-key-material refusal.
+
+v2 verifier must preserve these rules.
+
+## 3. Existing canonical encoding style
+
+Inspect repo conventions for length-prefixed canonical encoding and domain separation.
+
+Use existing style where possible.
+
+## 4. Run 129 schema details
+
+Map each Run 129 field into a concrete type.
+
+If a field is ambiguous, choose the narrowest type and document the assumption in evidence.
+
+---
+
+# Required implementation
+
+## 1. Add v2 types
+
+Add additive v2 types, such as:
+
+```text
+BundleSigningRatificationV2
+BundleSigningRatificationV2Action
+BundleSigningRatificationV2Failure
+RatifiedBundleSigningKeyV2 or reuse existing key type if safe
+```
+
+Use repo style.
+
+## 2. Add v2 canonical preimage/digest
+
+Add functions such as:
+
+```text
+ratification_v2_signing_preimage(...)
+canonical_ratification_v2_digest(...)
+```
+
+or repo equivalents.
+
+## 3. Add v2 verifier primitive
+
+Add verifier function with typed errors.
+
+Required typed failure classes should include at least:
+
+- UnsupportedSchemaVersion;
+- WrongEnvironment;
+- ChainMismatch;
+- GenesisHashMismatch;
+- AuthorityRootUnknown;
+- TransportRootNotAllowed;
+- AuthoritySuiteUnsupported;
+- AuthorityKeyMaterialUnavailable;
+- AuthorityKeyMaterialMalformed;
+- AuthorityFingerprintMismatch;
+- TargetKeySuiteUnsupported;
+- TargetKeyFingerprintMismatch;
+- MissingAuthorityDomainSequence;
+- InvalidAuthorityDomainSequence;
+- MissingLifecycleAction;
+- InvalidLifecycleAction;
+- MissingPreviousKeyForRotate;
+- MissingPreviousDigestForRotate;
+- MissingRevocationFieldsForRevoke;
+- UnexpectedRotateFieldsForRatify;
+- SignatureInvalid;
+- MalformedSignature.
+
+Use repo names where appropriate.
+
+## 4. Add tests
+
+Add focused tests as below.
+
+## 5. Docs/evidence
+
+Add evidence and update docs honestly.
+
+---
+
+# Required tests
+
+## A. Canonical preimage/digest tests
+
+Test:
+
+- deterministic preimage;
+- domain tag is v2 and distinct from v1;
+- changing environment changes digest;
+- changing chain_id changes digest;
+- changing genesis_hash changes digest;
+- changing authority root changes digest;
+- changing target key changes digest;
+- changing `authority_domain_sequence` changes digest;
+- changing lifecycle action changes digest;
+- changing previous key/digest changes rotate digest;
+- changing revoke reason/scope changes revoke digest;
+- same object produces same digest.
+
+## B. Verifier success tests
+
+Test:
+
+- valid v2 `ratify` verifies;
+- valid v2 `rotate` verifies with previous key and previous digest;
+- valid v2 `revoke` verifies with required revoke fields;
+- authority root lookup uses `bundle_signing_authority_roots` only;
+- existing ML-DSA-44 suite path is used.
+
+## C. Verifier failure tests
+
+Test:
+
+- wrong environment rejects;
+- wrong chain rejects;
+- wrong genesis rejects;
+- unknown authority root rejects;
+- transport root rejects;
+- malformed authority public key rejects;
+- target key fingerprint mismatch rejects;
+- bad signature rejects;
+- schema version mismatch rejects;
+- missing/invalid authority_domain_sequence rejects;
+- `rotate` missing previous key rejects;
+- `rotate` missing previous digest rejects;
+- `ratify` with unexpected rotate-only fields rejects;
+- `revoke` missing revoke fields rejects;
+- v1 object is not accepted by v2 verifier;
+- v2 object is not accepted by v1 verifier if testable.
+
+## D. v1 regression tests
+
+Run existing v1 ratification tests and ensure behavior is unchanged.
+
+## E. Regression tests
+
+Run and report:
+
+- qbind-ledger --lib;
+- qbind-node --lib if touched indirectly;
+- qbind-crypto --lib if verifier path touched;
+- Run 103 v1 ratification tests;
+- Run 104 authority key material tests;
+- any authority model tests in repo.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 130.
+
+---
+
+# Release-binary evidence
+
+None required for Run 130.
+
+Do not fake release-binary evidence.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_130.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow docs:
+
+- v2 schema appendix;
+- verifier failure matrix;
+- marker v2 migration note.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 130 may narrow:
+
+- ratification v2 schema implementation;
+- v2 canonical preimage/digest implementation;
+- v2 verifier primitive tests;
+- v1/v2 separation.
+
+Run 130 may mark the v2 verifier primitive sub-piece as narrowed only if:
+
+- v2 types exist;
+- v2 preimage/digest exist;
+- v2 verifier primitive exists;
+- typed v2 failures exist;
+- v1 regression tests pass;
+- docs are synchronized.
+
+Run 130 MUST NOT mark resolved:
+
+- production v2 enforcement wiring;
+- authority marker v2 migration;
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- peer-driven live apply;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 130 does not wire v2 verifier into production surfaces;
+- Run 130 does not implement marker v2 migration;
+- Run 130 does not implement signing-key rotation/revocation;
+- Run 130 does not implement KMS/HSM custody;
+- Run 130 does not implement peer-driven live apply;
+- Run 130 does not implement MainNet governance artifacts;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- v2 types/preimage/digest/verifier land;
+- lifecycle-action-specific success/failure tests land;
+- v1 regression tests pass;
+- docs are synchronized;
+- no production surface wiring occurs.
+
+Use **positive** if:
+
+- v2 schema/preimage/verifier mostly lands;
+- a secondary lifecycle action is deferred honestly;
+- no unsafe production wiring occurs.
+
+Use **partial-positive** if:
+
+- v2 types/preimage land but verifier is incomplete;
+- verifier exists but rotate/revoke validation remains incomplete;
+- tests are incomplete.
+
+Use **negative** if:
+
+- v2 verifier accepts invalid signatures;
+- v2 verifier accepts transport roots;
+- v2 verifier lacks monotonic field binding;
+- v1 accepts v2 unsafely;
+- production surfaces are changed out of scope;
+- local config alone can authorize MainNet authority.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- v2 types;
+- v2 canonical preimage/digest;
+- v2 verifier primitive;
+- typed failures;
+- tests added;
+- docs updated;
+- explicit statement that no production surface wiring was added.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence if any.
+
+## 4. Key security decisions
+
+Include:
+
+- v2 domain tag distinct from v1;
+- authority_domain_sequence bound into digest;
+- lifecycle action bound into digest;
+- transport roots rejected;
+- genesis-bound authority roots only;
+- v1 behavior preserved;
+- no production v2 consumption yet.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 v1 verifier;
+- Run 104 key material registry;
+- Run 105–128 enforcement/evidence/reset lineage;
+- Run 129 v2 schema spec;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 130 does NOT implement:
+
+- production v2 enforcement wiring;
+- marker v2 migration;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- docs updated;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 130 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+

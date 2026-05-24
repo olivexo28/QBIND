@@ -1800,3 +1800,191 @@ Run 128 additionally proves:
 - marker write only on success path; every refusal case preserves marker SHA before/after.
 
 C4 status after Run 128: **OPEN but narrowed** — all three mutating surfaces wired/evidenced (Runs 119/120/121 + 122), all three validation-only surfaces wired (Run 123), snapshot/restore wired/evidenced (Runs 124/125), reset/recovery specified (Run 126), reset CLI implemented (Run 127), and release-binary reset refusal/success evidence captured (Run 128). Remaining open pieces are unchanged: MainNet governance artifact verification, ratification v2 per-key monotonic schema, signing-key rotation/revocation lifecycle, peer-driven live apply, KMS/HSM custody, validator-set rotation, full C4 closure, and C5 closure.
+
+## Run 129 update — ratification v2 monotonic schema specification (spec-first / docs-only)
+
+**Date:** 2026-05-24  
+**Source:** `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_129.md`  
+**Verdict:** positive (spec/design only; no runtime behavior change)
+
+### Run 128 doc-sync checkpoint (corrected and synchronized)
+
+Run 129 first performs the required Run 128 documentation synchronization across protocol/runbook/contradiction tracking. The synchronized statement is:
+
+- Run 128 produced release-binary evidence for the offline authority-state reset CLI.
+- DevNet valid reset succeeds and writes marker + audit.
+- MainNet local reset refuses (`MainNetLocalResetUnsupported`).
+- Missing/bad ratification, wrong expected genesis hash, corrupt marker, missing audit output flag, wrong-chain ratification, and wrong-environment ratification all refuse.
+- Refusal paths do not write or mutate marker bytes.
+- Reset exits before normal startup surfaces.
+- MainNet governance artifact support remains OPEN.
+- Ratification v2 monotonic schema remains OPEN before Run 129 specification.
+- Rotation/revocation lifecycle, KMS/HSM custody, peer-driven live apply, full C4 closure, and C5 closure remain OPEN.
+
+### 1) Current v1 baseline (investigation result)
+
+Current ratification object is `BundleSigningRatification` (Run 103, schema version `1`) with canonical domain tag `QBIND:BUNDLE-SIGNING-RATIFICATION:v1`, deterministic length-prefixed preimage, and SHA3-256 digest binding:
+
+- `version`
+- `chain_id`
+- `environment`
+- `genesis_hash`
+- `authority_root_fingerprint`
+- `signature_suite_id`
+- `bundle_signing_public_key`
+- `bundle_signing_public_key_fingerprint`
+- signature over `sha3_256(canonical_preimage)` (signature bytes are not in the preimage)
+
+Current verifier failure modes are typed (`RatificationFailure`) and fail closed (unsupported version/suite, chain/environment/genesis mismatch, unknown or transport authority root, key material unavailable/malformed, malformed key/signature sizes, bad signature, missing authority block).
+
+### 2) Current authority marker baseline (investigation result)
+
+Current marker record is `PersistentAuthorityStateRecord` (`record_version=1`) and carries:
+
+- domain binding: `chain_id`, `environment`, `genesis_hash`
+- authority binding: `authority_policy_version`, `authority_sequence`, `authority_epoch`, `authority_root_fingerprint`
+- ratified key anchor: `ratified_bundle_signing_key_fingerprint`
+- canonical ratification anchor: `ratification_object_hash` (`canonical_ratification_digest` hex)
+- informational fields: `last_update_source`, `updated_at_unix_secs` (not in marker digest)
+
+Current `authority_sequence` is a genesis authority-policy sequence anchor, not a signing-key lifecycle sequence. It is insufficient for key-rotation/revocation ordering because same-sequence conflicting key/digest outcomes are only fail-closed conflicts, not a canonical lifecycle progression.
+
+### 3) Threat model addressed by v2 schema
+
+Run 129 schema explicitly targets:
+
+- replay of older ratifications for an old key;
+- same-sequence equivocation (different ratification at same sequence);
+- key rollback after rotation;
+- stale sidecar reuse;
+- cross-environment / cross-chain replay;
+- reset/recovery downgrade attempts;
+- v1 downgrade after v2 activation;
+- compromised authority root issuing conflicting histories;
+- partitioned nodes observing divergent histories.
+
+### 4) Monotonic design decision
+
+Run 129 selects **per-authority-domain monotonic sequencing** (one sequence line per `(environment, chain_id, genesis_hash, authority_root_fingerprint)` domain), not per-key sequencing.
+
+Rationale:
+
+- Orders all lifecycle actions (ratify/rotate/revoke) in one total order.
+- Eliminates ambiguity when transitioning between different keys.
+- Makes reset/recovery comparison deterministic against a single persisted `latest_authority_sequence`.
+- Avoids per-key counters that cannot naturally order cross-key transitions.
+
+Conflict prevention rule: same sequence with different canonical ratification digest is always fail-closed equivocation.
+
+### 5) Ratification v2 object schema (design)
+
+Run 129 defines conceptual `BundleSigningRatificationV2` fields:
+
+- `schema_version` (=2)
+- `environment`
+- `chain_id`
+- `genesis_hash`
+- `authority_policy_version`
+- `authority_root_fingerprint`
+- `authority_root_suite_id`
+- `target_bundle_signing_key_fingerprint`
+- `target_bundle_signing_key_suite_id`
+- `target_bundle_signing_public_key` (or canonical reference when explicitly standardized)
+- `authority_domain_sequence` (u64 monotonic per authority domain)
+- `key_lifecycle_action` (`ratify` | `rotate` | `revoke`)
+- `previous_key_fingerprint_if_rotation` (required for `rotate`)
+- `previous_ratification_digest_if_rotation` (required for `rotate`)
+- `valid_from_epoch_if_used` (optional and explicit)
+- `valid_until_epoch_if_used` (optional and explicit)
+- `revocation_reason_if_revoke` (required for `revoke`)
+- `capabilities_scope` (explicit bound scope)
+- `signature`
+
+### 6) Canonical v2 preimage and digest
+
+Run 129 defines a deterministic length-prefixed preimage with distinct domain tag:
+
+- domain tag: `QBIND:BUNDLE-SIGNING-RATIFICATION:v2`
+- includes all security-relevant fields above except `signature`
+- big-endian integer encoding, length-prefixed variable fields, no JSON map-order ambiguity
+- binds chain/environment/genesis, authority root, target key, monotonic sequence, and lifecycle action
+- canonical digest is `sha3_256(v2_preimage)`
+
+Wrong domain tag, missing required lifecycle-linked fields, or malformed preimage fields are verifier refusal conditions.
+
+### 7) Signature verification and comparison policy (v2)
+
+Verifier policy remains typed and fail-closed:
+
+- reject on domain/environment/chain/genesis mismatch;
+- reject on unsupported schema version or suite;
+- reject on unknown/transport authority roots;
+- reject on malformed key material or bad signature;
+- reject on lifecycle-field inconsistency (e.g., `rotate` without `previous_*`, `revoke` without reason);
+- reject on sequence downgrade or same-sequence conflicting digest.
+
+Comparison outcomes:
+
+- first v2 in domain (no v2 marker state): accept and persist;
+- same sequence + same digest: idempotent accept;
+- same sequence + different digest: reject equivocation;
+- lower sequence: reject rollback;
+- higher sequence: accept upgrade;
+- wrong domain/root/key bindings: reject;
+- revoked key attempt after revoke state: reject;
+- v1 after v2 marker exists: reject downgrade (fail closed);
+- v2 after v1 marker exists: allowed only via explicit migration rule below.
+
+### 8) Marker v2 evolution (design-only, no implementation in Run 129)
+
+`PersistentAuthorityStateRecord` evolution target (`record_version=2` in future implementation):
+
+- `authority_schema_version`
+- `latest_authority_sequence`
+- `latest_key_lifecycle_action`
+- `active_key_fingerprint`
+- `previous_key_fingerprint`
+- `latest_ratification_digest`
+- `revoked_key_set_digest` (or explicit future revocation accumulator field)
+
+Migration principle: upgrade in place from v1 marker when first accepted v2 ratification is validated; do not require local reset for normal migration.
+
+### 9) Compatibility and migration policy
+
+- v1 on node with no marker: allowed under existing v1 rules pre-v2 activation.
+- v1 on node with v1 marker: allowed under existing v1 rules pre-v2 activation.
+- v2 on node with v1 marker: allowed as migration path when v2 verifies and sequence policy passes.
+- v1 after v2 marker exists: **refused fail-closed** (downgrade ambiguity).
+- v2 lower sequence: refused.
+- v2 same sequence + same digest: idempotent.
+- v2 same sequence + different digest: refused.
+- v2 higher sequence: accepted.
+- migration from v1 to v2: first accepted v2 ratification establishes v2 monotonic state; no reset required.
+- migration after reset/recovery: reset must not bypass sequence policy; recovered state must still reject downgrade/replay.
+
+Activation policy: v2 acceptance MUST be explicit and domain-bound, tied to authoritative policy (e.g., authority policy version/governance artifact) and MUST NOT be local-config-only on MainNet.
+
+### 10) Future implementation staging
+
+- **Run 130** — implement v2 schema/types/canonical preimage + verifier unit tests.
+- **Run 131** — implement marker v2 record extension and migration logic.
+- **Run 132** — wire v2 verification/comparison into enforcement surfaces with compatibility gates.
+- **Run 133** — release-binary evidence for v2 acceptance/rejection matrix.
+- **Run 134+** — key rotation lifecycle.
+- **Later** — revocation lifecycle, KMS/HSM custody, MainNet governance artifact support, broader C4/C5 closure work.
+
+### Run 129 explicit non-changes
+
+Run 129 is spec-only and does **not** implement:
+
+- v2 verifier/runtime code;
+- production runtime behavior changes;
+- trust-bundle wire changes;
+- peer-candidate wire changes;
+- reset CLI behavior changes;
+- authority marker persistence behavior changes;
+- rotation/revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact verification;
+- peer-driven live apply;
+- full C4 closure or C5 closure.
