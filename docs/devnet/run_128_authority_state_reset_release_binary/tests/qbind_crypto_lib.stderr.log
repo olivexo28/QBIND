@@ -1,0 +1,26 @@
+   Compiling libc v0.2.178
+   Compiling syn v2.0.112
+   Compiling getrandom v0.2.16
+   Compiling rand_core v0.6.4
+   Compiling crypto-common v0.1.7
+   Compiling password-hash v0.5.0
+   Compiling digest v0.10.7
+   Compiling universal-hash v0.5.1
+   Compiling poly1305 v0.8.0
+   Compiling sha3 v0.10.8
+   Compiling sha2 v0.10.9
+   Compiling qbind-wire v0.1.0 (/home/runner/work/QBIND/QBIND/crates/qbind-wire)
+   Compiling hmac v0.12.1
+   Compiling aead v0.5.2
+   Compiling pbkdf2 v0.12.2
+   Compiling qbind-hash v0.1.0 (/home/runner/work/QBIND/QBIND/crates/qbind-hash)
+   Compiling zeroize_derive v1.4.3
+   Compiling zeroize v1.8.2
+   Compiling cipher v0.4.4
+   Compiling fips204 v0.4.6
+   Compiling fips203 v0.4.3
+   Compiling chacha20 v0.9.1
+   Compiling chacha20poly1305 v0.10.1
+   Compiling qbind-crypto v0.1.0 (/home/runner/work/QBIND/QBIND/crates/qbind-crypto)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.44s
+     Running unittests src/lib.rs (target/debug/deps/qbind_crypto-d1368b1940b3d24f)

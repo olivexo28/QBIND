@@ -1,0 +1,14 @@
+
+running 9 tests
+test run_104_a_authority_public_key_fingerprint_helper_is_canonical ... ok
+test run_104_b_mainnet_rejects_bundle_signing_root_missing_public_key_hex ... ok
+test run_104_b_mainnet_rejects_malformed_public_key_length ... ok
+test run_104_b_mainnet_rejects_public_key_fingerprint_mismatch ... ok
+test run_104_c_rejects_duplicate_root_pair ... ok
+test run_104_f_devnet_remains_permissive_for_legacy_short_fingerprint_roots ... ok
+test run_104_a_public_key_hex_is_hash_bound ... ok
+test run_104_e_tampered_public_key_hex_fails_closed_in_verifier ... ok
+test run_104_d_verifier_accepts_signed_by_genesis_bound_key ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+

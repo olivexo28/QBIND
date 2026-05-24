@@ -1,0 +1,1 @@
+[run-127] FATAL: authority-state-reset refused: [run-127] AuditOutputMissing: --authority-state-reset-output-audit is required; the reset path never runs silently

@@ -1,0 +1,1 @@
+[run-127] FATAL: authority-state-reset refused: [run-127] GenesisHashMismatch: canonical genesis hash computed from --genesis-path (0xd10eb82492491208c588e6153ceb7cd6fd8d1b5317739e76e7afb9a0388653d1) does not match --expect-genesis-hash (0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)

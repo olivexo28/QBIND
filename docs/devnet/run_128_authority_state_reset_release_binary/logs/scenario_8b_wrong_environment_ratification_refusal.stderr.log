@@ -1,0 +1,1 @@
+[run-127] FATAL: authority-state-reset refused: [run-127] RatificationEnforcementFailed: ratification enforcement failed (signature / chain_id / environment / authority-root binding / candidate key match): bundle-signing ratification environment mismatch: expected Devnet got Mainnet

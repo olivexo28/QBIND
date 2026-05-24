@@ -1,0 +1,18 @@
+warning: use of deprecated function `bincode::config`: please use `options()` instead
+    --> crates/qbind-node/src/binary_consensus_loop.rs:2808:28
+     |
+2808 |             match bincode::config()
+     |                            ^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `bincode::config`: please use `options()` instead
+    --> crates/qbind-node/src/binary_consensus_loop.rs:2937:28
+     |
+2937 |             match bincode::config()
+     |                            ^^^^^^
+
+warning: `qbind-node` (lib) generated 2 warnings
+   Compiling qbind-node v0.1.0 (/home/runner/work/QBIND/QBIND/crates/qbind-node)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.33s
+     Running tests/run_124_snapshot_restore_authority_marker_tests.rs (target/debug/deps/run_124_snapshot_restore_authority_marker_tests-9f519a78bc2be20d)

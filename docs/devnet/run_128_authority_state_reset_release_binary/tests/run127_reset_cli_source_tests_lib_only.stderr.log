@@ -1,0 +1,17 @@
+warning: use of deprecated function `bincode::config`: please use `options()` instead
+    --> crates/qbind-node/src/binary_consensus_loop.rs:2808:28
+     |
+2808 |             match bincode::config()
+     |                            ^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated function `bincode::config`: please use `options()` instead
+    --> crates/qbind-node/src/binary_consensus_loop.rs:2937:28
+     |
+2937 |             match bincode::config()
+     |                            ^^^^^^
+
+warning: `qbind-node` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.77s
+     Running unittests src/lib.rs (target/debug/deps/qbind_node-f00f1cc43ad93c75)

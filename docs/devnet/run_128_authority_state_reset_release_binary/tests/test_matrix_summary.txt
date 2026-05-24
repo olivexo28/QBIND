@@ -1,0 +1,14 @@
+run127_reset_cli_source_tests_known_preexisting_fail: rc=101
+run127_reset_cli_source_tests_lib_only: rc=0
+run125_snapshot_restore_tests: rc=0
+run124_snapshot_restore_authority_marker_tests: rc=0
+run123_validation_only_marker_tests_lib_only: rc=0
+run119_mutating_marker_tests: rc=0
+run120_mutating_marker_tests_lib_only: rc=0
+run121_mutating_marker_tests: rc=0
+run117_118_authority_state_tests_lib: rc=0
+run103_ratification_tests: rc=0
+run104_ratification_tests: rc=0
+qbind_node_lib: rc=0
+qbind_ledger_lib: rc=0
+qbind_crypto_lib: rc=0

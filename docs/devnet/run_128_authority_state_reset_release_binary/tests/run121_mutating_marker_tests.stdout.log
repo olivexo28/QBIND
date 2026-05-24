@@ -1,0 +1,12 @@
+
+running 7 tests
+test run121_devnet_no_opt_in_skips_marker_and_preserves_pre_run121_path ... ok
+test run121_corrupt_marker_file_refuses_and_is_not_overwritten ... ok
+test run121_persist_failure_after_commit_is_fatal_and_apply_did_succeed ... ok
+test run121_first_write_creates_marker_with_sighup_audit_tag ... ok
+test run121_pre_persisted_higher_sequence_refuses_before_any_mutation ... ok
+test run121_pre_persisted_different_domain_refuses_before_any_mutation ... ok
+test run121_re_apply_same_candidate_is_idempotent_no_marker_rewrite ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+

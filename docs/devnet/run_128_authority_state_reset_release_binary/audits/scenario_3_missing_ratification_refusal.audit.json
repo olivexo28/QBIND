@@ -1,0 +1,22 @@
+{
+  "record_version": 1,
+  "action": "authority_state_reset",
+  "environment": "devnet",
+  "chain_id": null,
+  "genesis_hash": null,
+  "old_marker_present": false,
+  "old_marker_raw_sha256": null,
+  "old_marker_record_if_parseable": null,
+  "new_marker_hash": null,
+  "new_marker_record": null,
+  "ratification_hash": null,
+  "trust_bundle_fingerprint": null,
+  "snapshot_metadata_hash_if_any": null,
+  "operator_note_hash": "a285b83637eec2c43e19b3b4380be53ddb16026a18d863dc72990f1413d53513",
+  "binary_sha256_or_unavailable": "fb1b99e11e25a36cf14e5d01e307fb2ee30bbc0e10366c14099cefdabdcbff7c",
+  "binary_build_id_or_unavailable": "qbind-node@0.1.0",
+  "result": "refused",
+  "refusal_reason_if_any": "MissingRatification",
+  "refusal_detail_if_any": "--p2p-trust-bundle-ratification is required (Run 117 derivation refuses unratified anchors)",
+  "wall_clock_unix_secs": 1779618591
+}

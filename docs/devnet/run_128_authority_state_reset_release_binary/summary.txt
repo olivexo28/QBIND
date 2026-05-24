@@ -1,0 +1,27 @@
+Run 128 authority-state-reset release-binary evidence
+outdir: /home/runner/work/QBIND/QBIND/docs/devnet/run_128_authority_state_reset_release_binary
+repo: /home/runner/work/QBIND/QBIND
+git_commit: 372eaff49cd1dc44876d5ba7e08098f7a6b4b9e4
+qbind-node_sha256: 712fd2343571d630fbd9692ba95319345e61cb9381076f7a253efb92ef213834
+qbind-node_build_id: 6b5d13e5b64e2503e49256125c17099fa2c4d28b
+fixture-helper_sha256: 5bfcd9513656983f0123828eab4ece8b901198e06e0026f6a5c8c9fcc387e4cd
+fixture-helper_build_id: fdac676806dc61110c5caca5d103a5ef953eeb21
+
+scenario status:
+  scenario_1_devnet_success: rc=0 marker_sha_before=<none> marker_sha_after=8cd1c14ac8a31c1e7f6b4f3d96444966eec8fcb5fd7459d944663def4f5468fe audit=audit-required
+  scenario_2_mainnet_local_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=audit-required
+  scenario_3_missing_ratification_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=audit-required
+  scenario_4_bad_ratification_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=audit-required
+  scenario_5_wrong_expected_genesis_hash_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=audit-required
+  scenario_6_corrupt_existing_marker_refusal: rc=1 marker_sha_before=7f802bafd3f03dca3b98bb3a0eb9c06c1e50d9c7a0f9a3d3b5e98c738585db2b marker_sha_after=7f802bafd3f03dca3b98bb3a0eb9c06c1e50d9c7a0f9a3d3b5e98c738585db2b audit=audit-required
+  scenario_7_missing_audit_output_path_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=no-audit-flag
+  scenario_8a_wrong_chain_ratification_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=audit-required
+  scenario_8b_wrong_environment_ratification_refusal: rc=1 marker_sha_before=<none> marker_sha_after=<none> audit=audit-required
+
+assertions: pass
+  marker written only on success scenario
+  marker sha unchanged on every refusal scenario
+  no normal startup markers observed in any scenario
+  audit schema fields validated for success/refusal scenarios with audit path
+  no private key material observed in audit records
+VERDICT: strongest-positive (release-binary harness scope)

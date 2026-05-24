@@ -1,0 +1,25 @@
+
+running 18 tests
+test pqc_authority_state_reset::tests::run127_archive_absent_marker_returns_not_present ... ok
+test pqc_authority_state_reset::tests::run127_execute_refuses_without_audit_path_and_no_marker ... ok
+test pqc_authority_state_reset::tests::run127_parse_expected_hash_accepts_0x_prefix ... ok
+test pqc_authority_state_reset::tests::run127_parse_expected_hash_accepts_bare_hex ... ok
+test pqc_authority_state_reset::tests::run127_parse_expected_hash_refuses_wrong_length ... ok
+test pqc_authority_state_reset::tests::run127_refusal_stable_ids_are_stable ... ok
+test pqc_authority_state_reset::tests::run127_refuses_mainnet_before_any_io ... ok
+test pqc_authority_state_reset::tests::run127_refuses_malformed_expected_hash ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_audit_output_missing ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_data_dir_missing ... ok
+test pqc_authority_state_reset::tests::run127_archive_corrupt_marker_refuses_and_bytes_unchanged ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_expected_hash_missing ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_genesis_path_missing ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_ratification_missing ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_trust_bundle_missing ... ok
+test pqc_authority_state_reset::tests::run127_refuses_when_genesis_file_nonexistent ... ok
+test pqc_authority_state_reset::tests::run127_audit_record_canonical_json_deterministic_and_no_raw_note has been running for over 60 seconds
+test pqc_authority_state_reset::tests::run127_execute_emits_refusal_audit_for_mainnet_and_no_marker has been running for over 60 seconds
+test pqc_authority_state_reset::tests::run127_audit_record_canonical_json_deterministic_and_no_raw_note ... ok
+test pqc_authority_state_reset::tests::run127_execute_emits_refusal_audit_for_mainnet_and_no_marker ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 1207 filtered out; finished in 68.19s
+
