@@ -1,0 +1,583 @@
+# RUN 136 — Wire v2 Ratification + Marker Compatibility into Startup `--p2p-trust-bundle`
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established and release-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification v1 verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced v1 ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply for v1.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle` for v1.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload for v1.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on v1 mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement.
+- Run 126 produced the spec-first authority-state reset/recovery procedure.
+- Run 127 implemented the offline authority-state reset CLI skeleton with typed refusal cases.
+- Run 128 produced strongest-positive release-binary evidence for the offline authority-state reset CLI.
+- Run 129 produced the spec-first ratification v2 design.
+- Run 130 implemented the v2 ratification primitive.
+- Run 131 implemented the v2 authority marker primitive.
+- Run 132 wired v2 ratification and v2 marker compatibility into validation-only reload-check and local peer-candidate-check.
+- Run 133 produced strongest-positive release-binary evidence for v2 validation-only surfaces.
+- Run 134 wired v2 ratification and v2 marker compatibility into process-start reload-apply only.
+- Run 135 produced strongest-positive release-binary evidence for v2 process-start reload-apply:
+  - v2 first-write persisted V2 marker after accepted commit;
+  - v1→v2 migration persisted V2 marker after accepted commit;
+  - idempotent same-sequence/same-digest preserved marker bytes;
+  - higher-sequence upgrade persisted updated V2 marker after accepted commit;
+  - lower-sequence and same-sequence/different-digest rejected before mutation;
+  - bad-signature / wrong-domain rejected before mutation;
+  - v1 reload-apply regression passed;
+  - no startup v2, SIGHUP v2, or live `0x05` v2 wiring;
+  - no rotation/revocation lifecycle, KMS/HSM, MainNet governance, full C4, or C5 closure.
+
+Run 136 is the second mutating-surface v2 wiring run.
+
+It must wire **startup `--p2p-trust-bundle` only**.
+
+Do not wire SIGHUP v2 in this run.
+Do not wire live inbound `0x05` v2 in this run.
+Do not implement signing-key rotation/revocation lifecycle in this run.
+
+---
+
+# Exact objective
+
+Wire ratification v2 verification and v2 authority-marker compatibility into the startup `--p2p-trust-bundle` mutating surface only.
+
+The objective is:
+
+1. Extend startup `--p2p-trust-bundle` to accept either v1 or v2 ratification sidecars through the existing versioned dispatch model.
+2. Preserve existing v1 startup behavior exactly.
+3. For v2 sidecars, verify using Run 130 `verify_bundle_signing_key_ratification_v2`.
+4. For v2 sidecars, derive v2 marker using Run 131 helpers.
+5. Compare v2 marker against the persisted authority marker before any startup trust mutation or network start.
+6. Reject unsafe v2 cases before Run 055 sequence/root mutation, bundle-root merge, or P2P/network startup.
+7. Persist the v2 marker only after the accepted startup commit boundary.
+8. Enforce v1/v2 compatibility policy:
+   - v2-after-v1 is explicit migration and may persist V2 marker only after accepted startup commit;
+   - v1-after-v2 fails closed;
+   - lower v2 sequence fails closed;
+   - same-sequence/different-digest fails closed;
+   - same-sequence/same-digest is idempotent;
+   - higher sequence is accepted only if verified and marker comparison allows it.
+9. Preserve DevNet no-opt-in behavior: if ratification is skipped by policy, do not write v2 marker from unratified state.
+10. Do not wire SIGHUP, live `0x05`, or other mutating surfaces.
+
+Run 136 should make this statement true:
+
+> Startup `--p2p-trust-bundle` can safely consume v2 ratifications and persist v2 authority marker state only after the existing startup commit boundary, while rejecting downgrade/replay/equivocation before startup mutation or network start and preserving all v1 behavior.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Startup v2 support only
+
+Wire v2 into the startup path that was previously wired for v1 authority marker enforcement in Run 120.
+
+Do not wire:
+
+- SIGHUP v2;
+- live inbound `0x05` v2;
+- reset CLI v2;
+- snapshot/restore v2 beyond regression preservation;
+- peer-driven apply;
+- rotation/revocation lifecycle.
+
+## B. Versioned sidecar dispatch reuse
+
+Reuse the Run 132 versioned sidecar dispatch model.
+
+Requirements:
+
+- v1 path unchanged;
+- v2 path uses Run 130 verifier;
+- unknown/malformed schema fails closed;
+- no ambiguous v1/v2 interpretation.
+
+## C. v2 marker prepare/accept/persist
+
+Use Run 131 helpers:
+
+- `derive_authority_state_v2_from_ratification(...)` or repo equivalent;
+- `prepare_v2_marker_for_acceptance(...)` or repo equivalent;
+- `compare_authority_marker_v2(...)` or repo equivalent.
+
+For startup:
+
+- compare before any startup mutation or network start;
+- persist after accepted startup commit boundary;
+- never persist on rejection;
+- if marker persistence fails after startup commit, follow the existing Run 120 post-commit failure/fatal behavior or the repo’s established pattern.
+
+## D. Compatibility policy
+
+Enforce:
+
+- no marker + v2 candidate: accept if ratification and marker comparison allow, persist after startup commit;
+- v1 marker + v2 candidate: explicit migration candidate, persist V2 marker after startup commit;
+- v2 marker + v1 candidate: reject before startup mutation;
+- v2 marker + lower v2 sequence: reject before startup mutation;
+- v2 marker + same sequence / same digest: idempotent, no rewrite unless existing convention requires;
+- v2 marker + same sequence / different digest: reject before startup mutation;
+- v2 marker + higher sequence: accept only if verified and comparison allows, persist after startup commit.
+
+## E. Startup ordering preservation
+
+Preserve Run 050/055/057/065/091/098/105/106/120 ordering.
+
+Required shape:
+
+```text
+load/validate signed bundle
+→ ratification gate/verify
+→ marker compare
+→ sequence/root/startup commit boundary
+→ merge/activate accepted trust roots according to existing order
+→ persist authority marker after accepted startup commit boundary
+→ continue startup/P2P only after accepted state is coherent
+```
+
+If the actual implementation order differs, document it precisely and justify why it preserves the same safety invariant.
+
+Do not move marker persistence before the startup commit boundary.
+Do not claim cross-store atomicity.
+
+---
+
+# Strict non-goals
+
+Run 136 MUST NOT:
+
+- wire v2 into SIGHUP live reload;
+- wire v2 into live inbound `0x05`;
+- change process-start reload-apply v2 behavior from Run 134/135 except for shared-helper regression-safe changes;
+- persist v2 marker state from validation-only surfaces;
+- auto-migrate marker files during validation-only checks;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement MainNet governance artifact support;
+- implement KMS/HSM custody;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- change reset CLI behavior;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken v1 ratification verification;
+- weaken Run 117–135 anti-rollback/reset/v2 behavior;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim rotation/revocation lifecycle implemented;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing startup v1 path
+
+Inspect:
+
+- startup `--p2p-trust-bundle` flag handling;
+- v1 ratification sidecar loading;
+- v1 marker preflight from Run 120;
+- Run 055 sequence/root mutation;
+- bundle-root merge/activation order;
+- P2P/network startup point;
+- post-commit marker persistence;
+- marker persistence failure behavior.
+
+Document exactly where v2 dispatch will be inserted.
+
+## 2. Run 132 versioned sidecar dispatch
+
+Inspect:
+
+- sidecar loader;
+- v1/v2 dispatch;
+- typed errors;
+- v2 validation-only marker compatibility checks.
+
+Reuse as much as possible. Do not create a separate v2 sidecar loader unless necessary.
+
+## 3. Run 131 v2 marker acceptance helpers
+
+Inspect:
+
+- v2 marker derivation;
+- v2 marker comparison;
+- v1→v2 migration helper;
+- prepare helper;
+- typed outcomes/errors.
+
+Map these into startup mutating behavior.
+
+## 4. Failure and crash behavior
+
+Document behavior for:
+
+- rejection before startup mutation/network start;
+- startup mutation failure before commit boundary;
+- commit success but marker persist failure;
+- crash after commit before marker persist;
+- crash after marker persist.
+
+Use the Run 120 stale-by-one safety rationale. Do not overclaim atomicity.
+
+---
+
+# Required implementation
+
+## 1. Add startup v2 preflight
+
+After signed bundle validation and v2 ratification verification, before startup mutation/network start:
+
+- derive v2 marker;
+- compare persisted marker;
+- reject unsafe cases;
+- produce typed accept decision.
+
+## 2. Add startup v2 post-commit persistence
+
+After accepted startup commit boundary:
+
+- persist v2 marker when accept decision requires it;
+- no-op on idempotent cases if that matches Run 120/134 convention;
+- fail closed/fatal on persist failure according to existing startup semantics.
+
+## 3. Preserve v1 path
+
+v1 startup behavior and tests must remain unchanged.
+
+## 4. Add focused tests
+
+Add tests for v2 startup matrix.
+
+---
+
+# Required tests
+
+## A. v2 startup acceptance tests
+
+Test:
+
+- no marker + valid v2 ratification starts and persists V2 marker after startup commit;
+- v1 marker + valid v2 ratification starts and migrates to V2 marker after startup commit;
+- v2 marker + same sequence/same digest starts/idempotent with no unintended rewrite;
+- v2 marker + higher sequence starts and persists updated V2 marker after startup commit.
+
+## B. v2 startup rejection tests
+
+Test:
+
+- v2 marker + v1 candidate rejects before startup mutation/network start;
+- lower v2 sequence rejects before startup mutation/network start;
+- same sequence/different digest rejects before startup mutation/network start;
+- malformed v2 sidecar rejects before startup mutation/network start;
+- bad v2 signature rejects before startup mutation/network start;
+- wrong chain/environment/genesis rejects before startup mutation/network start;
+- corrupt persisted marker rejects before startup mutation/network start;
+- unsupported marker version rejects before startup mutation/network start.
+
+## C. Ordering/no-mutation tests
+
+Test:
+
+- rejection occurs before Run 055 sequence update;
+- rejection occurs before bundle-root merge;
+- rejection occurs before P2P/network startup;
+- startup failure before commit does not persist V2 marker;
+- successful startup persists marker after the startup commit boundary, not before.
+
+## D. v1 regression tests
+
+Run existing v1 startup marker tests from Run 120 and ensure unchanged behavior.
+
+## E. Regression tests
+
+Run and report:
+
+- Run 135 release evidence helper/tests if present;
+- Run 134 v2 reload-apply tests;
+- Run 133 release evidence helper/tests if present;
+- Run 132 validation-only v2 tests;
+- Run 131 v2 marker tests;
+- Run 130 v2 verifier tests;
+- Run 120 startup v1 marker tests;
+- Run 050/055/057/065 startup trust-bundle tests;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib if touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 136.
+
+---
+
+# Release-binary evidence
+
+Release-binary evidence is optional for Run 136 but not required for a positive source/test verdict.
+
+If feasible, produce limited release-binary evidence for:
+
+- v2 startup no-marker success and marker persistence;
+- v1 marker → v2 startup migration success;
+- lower-sequence startup rejection before network start;
+- same-sequence/different-digest startup rejection before network start;
+- no marker write on rejection.
+
+If not feasible, document release-binary evidence as Run 137.
+
+Do not fake release-binary evidence.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_136.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional, if release evidence is produced:
+
+- archive logs under `docs/devnet/run_136_*`.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 136 may narrow:
+
+- mutating-surface v2 enforcement on startup `--p2p-trust-bundle`;
+- v2 marker persistence after startup commit boundary;
+- v1→v2 migration in startup surface;
+- downgrade/replay/equivocation refusal before startup mutation/network start.
+
+Run 136 may mark the startup v2 mutating-surface sub-piece narrowed/resolved only if:
+
+- startup accepts valid v2 and persists V2 marker after commit;
+- v1→v2 startup migration persists V2 marker only after commit;
+- v1-after-v2 rejects before startup mutation;
+- lower sequence rejects before startup mutation;
+- same-sequence/different-digest rejects before startup mutation;
+- v1 regression tests pass;
+- docs are synchronized.
+
+Run 136 MUST NOT mark resolved:
+
+- SIGHUP v2 mutating-surface wiring;
+- live inbound `0x05` v2 wiring;
+- release-binary v2 startup evidence unless produced;
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- peer-driven live apply;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 136 wires only startup `--p2p-trust-bundle` for v2 mutating behavior;
+- Run 136 does not wire SIGHUP/live `0x05` for v2;
+- Run 136 does not implement signing-key rotation/revocation;
+- Run 136 does not implement KMS/HSM custody;
+- Run 136 does not implement peer-driven live apply;
+- Run 136 does not implement MainNet governance artifacts;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- startup v2 mutating wiring lands;
+- full acceptance/rejection/order matrix tests pass;
+- release-binary evidence is produced for core cases;
+- docs are synchronized;
+- no scope expansion occurs.
+
+Use **positive** if:
+
+- startup v2 mutating wiring lands with strong tests;
+- release-binary evidence is deferred honestly;
+- SIGHUP/live `0x05` remain deferred.
+
+Use **partial-positive** if:
+
+- startup v2 wiring is incomplete;
+- marker persistence is incomplete;
+- ordering/no-mutation tests are incomplete.
+
+Use **negative** if:
+
+- V2 marker is persisted before startup commit;
+- rejection mutates trust state or starts network;
+- v1-after-v2 is accepted;
+- lower sequence is accepted;
+- same-sequence/different-digest is accepted;
+- v1 behavior regresses;
+- SIGHUP/live `0x05` are changed out of scope;
+- local config alone can authorize MainNet authority.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- startup v2 wiring;
+- v2 verifier use;
+- v2 marker comparison use;
+- v2 marker persistence ordering;
+- v1 behavior preservation;
+- tests added;
+- docs updated;
+- release-binary evidence if any.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence if any.
+
+## 4. Key security decisions
+
+Include:
+
+- marker compare before startup mutation/network start;
+- marker persist after startup commit boundary;
+- v1-after-v2 rejected;
+- lower sequence rejected;
+- same-sequence/different-digest rejected;
+- v1→v2 migration explicit;
+- no SIGHUP/live `0x05` v2 wiring;
+- no rotation/revocation lifecycle.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 v1 verifier;
+- Run 104 key material registry;
+- Run 105–128 enforcement/evidence/reset lineage;
+- Run 129 v2 schema spec;
+- Run 130 v2 verifier implementation;
+- Run 131 v2 marker implementation;
+- Run 132 validation-only v2 wiring;
+- Run 133 release-binary validation-only v2 evidence;
+- Run 134 v2 reload-apply source wiring;
+- Run 135 v2 reload-apply release-binary evidence;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 136 does NOT implement:
+
+- SIGHUP v2 mutating-surface wiring;
+- live inbound `0x05` v2 wiring;
+- release-binary v2 startup evidence unless actually produced;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- docs updated;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 136 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
