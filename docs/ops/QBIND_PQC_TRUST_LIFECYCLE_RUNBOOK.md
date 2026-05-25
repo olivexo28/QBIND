@@ -4566,10 +4566,50 @@ already captured above; do not hand-edit the marker file.
 | SIGHUP live reload                        | Run 074/121           | OPEN — deferred       |
 | snapshot/restore                          | Run 088/124           | OPEN — deferred       |
 
-Release-binary evidence for the Run 136 wiring is **not** included in
-this run; a follow-on run mirroring Run 133's / Run 135's
-`scripts/devnet/run_*_release_binary.sh` shape is required to capture
-the startup-surface release-binary scenario matrix. Operators running
-DevNet preview builds today can grep for `[run-136]` to identify the
-v2 startup path and `[run-120]` for the v1 startup path; the two are
-mutually exclusive per startup.
+Release-binary evidence for the Run 136 wiring is **captured by
+Run 137** in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_137.md` and
+`scripts/devnet/run_137_v2_startup_trust_bundle_release_binary.sh`,
+mirroring Run 133's / Run 135's `scripts/devnet/run_*_release_binary.sh`
+shape on an 11-scenario matrix (A1 v2-first-write, A2 v2-after-v1
+migration, A3 idempotent, A4 higher-sequence upgrade, R1 lower-sequence
+refused, R2 same-sequence different-digest refused, R3a bad signature,
+R3b wrong environment, R4 wrong chain, R5 wrong genesis, V1 v1
+regression). The acceptance scenarios bound the still-running release
+binary with `timeout --signal=TERM --kill-after=5s` after observing the
+`[run-136] v2 authority-marker persisted ... (... candidate
+latest_authority_domain_sequence=<N>)` (or `... unchanged ...
+(idempotent; no rewrite)`) line strictly after the corresponding
+`[binary] Run 055: trust-bundle sequence persistence` line; the
+rejection scenarios exit `rc=1` BEFORE `[binary] P2P transport up`
+appears and BEFORE any sequence-file or `.tmp` marker sibling is
+written. Operators running DevNet preview builds today can grep for
+`[run-136]` to identify the v2 startup path and `[run-120]` for the v1
+startup path; the two are mutually exclusive per startup.
+
+## Run 137 — release-binary evidence for the Run 136 startup `--p2p-trust-bundle` v2 wiring
+
+Run 137 is **release-binary evidence only**; it changes no production
+runtime source, no CLI flag, no log line, no metric, and no wire format.
+The harness
+`scripts/devnet/run_137_v2_startup_trust_bundle_release_binary.sh`
+exercises an 11-scenario matrix on DevNet against `target/release/
+qbind-node` using the mutating startup block (`--network-mode p2p
+--enable-p2p --p2p-listen-addr 127.0.0.1:<port> --p2p-trust-bundle
+<bundle> --p2p-trust-bundle-signing-key <ratified-spec>
+--p2p-trust-bundle-ratification <sidecar>
+--p2p-trust-bundle-ratification-enforcement-enabled --data-dir
+<data_dir>`) and the Run 133 fixture helper to mint ephemeral v1 and v2
+sidecars on DevNet's `(env, chain_id, genesis_hash, authority_root_
+fingerprint)` trust domain. Every accepted v2 scenario proves the
+post-`commit_sequence` ordering (Run 055 sequence persistence line
+strictly precedes `[run-136] v2 authority-marker persisted` /
+`unchanged`), and every rejected scenario proves the fail-closed
+boundary (no sequence file, no `.tmp` marker sibling, pre-seeded marker
+bytes byte-identical post-run, no `[binary] P2P transport up`). The
+Run 134 §C.3 / Run 135 R4 / Run 136 §A.8 corner case (apply failure
+between preflight and the Run 055 commit boundary) is not feasible to
+trigger on a release binary using operator-supplied flag inputs alone
+and remains test-only. After Run 137 the mutating-surface v2 coverage
+matrix is updated to show **Run 136 wired + Run 137 release-binary-
+evidenced** on the startup `--p2p-trust-bundle` row; the SIGHUP and
+snapshot/restore rows remain OPEN.
