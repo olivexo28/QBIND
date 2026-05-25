@@ -1996,6 +1996,8 @@ Run 129 is spec-only and does **not** implement:
 
 Run 130 implements the ratification v2 schema, canonical preimage, domain-separated digest, and verifier primitive exactly per the Run 129 specification. No production enforcement surface is wired to v2.
 
+Run 131 doc-sync checkpoint confirms this Run 130 status remains exact: `RatificationV2Failure` typed failures are landed; marker v2 migration is Run 131 scope; production enforcement wiring remains Run 132; release-binary v2 evidence remains Run 133; rotation/revocation lifecycle remains future work; full C4 and C5 remain open.
+
 ### New types and functions
 
 All v2 additions are in `crates/qbind-ledger/src/bundle_signing_ratification.rs`:

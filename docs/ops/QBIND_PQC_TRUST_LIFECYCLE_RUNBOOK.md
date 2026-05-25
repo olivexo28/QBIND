@@ -4211,6 +4211,8 @@ Run 129 confirms and synchronizes the Run 128 operator-facing facts:
 
 Run 130 implements the ratification v2 schema per the Run 129 specification. It adds all new types to `crates/qbind-ledger/src/bundle_signing_ratification.rs` and passes 32 new unit tests.
 
+Run 131 doc-sync checkpoint: Run 130 landed `RatificationV2Failure` typed failures and the v2 verifier primitive only; marker v2 migration is Run 131 scope, production v2 enforcement wiring is Run 132 scope, release-binary v2 evidence is Run 133 scope, rotation/revocation lifecycle remains future scope, and full C4/C5 closure remains open.
+
 ### Operator-visible guarantees added by Run 130
 
 - `BundleSigningRatificationV2` objects can be constructed and signed with `v2_test_helpers::build_signed_ratification_v2`.

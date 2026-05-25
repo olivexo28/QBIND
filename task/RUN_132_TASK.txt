@@ -1,0 +1,616 @@
+# RUN 132 — Wire v2 Ratification + Marker Compatibility into Validation-Only Enforcement Surfaces
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established and release-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced v1 ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle`.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement.
+- Run 126 produced the spec-first authority-state reset/recovery procedure.
+- Run 127 implemented the offline authority-state reset CLI skeleton with typed refusal cases.
+- Run 128 produced strongest-positive release-binary evidence for the offline authority-state reset CLI.
+- Run 129 produced the spec-first ratification v2 design:
+  - selected monotonic model: per-authority-domain monotonic sequence `authority_domain_sequence`;
+  - v2 domain tag: `QBIND:BUNDLE-SIGNING-RATIFICATION:v2`;
+  - lifecycle action binding: `ratify`, `rotate`, `revoke`;
+  - v2-after-v1 is the explicit migration path;
+  - v1-after-v2 is fail-closed;
+  - lower sequence is rejected;
+  - same sequence with different digest is rejected.
+- Run 130 implemented the v2 ratification primitive:
+  - v2 schema/types;
+  - v2 canonical preimage/digest;
+  - v2 typed verifier failures;
+  - `verify_bundle_signing_key_ratification_v2`;
+  - no production v2 enforcement wiring.
+- Run 131 implemented the v2 authority marker primitive:
+  - `PersistentAuthorityStateRecordVersioned::{V1,V2}`;
+  - `PersistentAuthorityStateRecordV2`;
+  - `derive_authority_state_v2_from_ratification(...)`;
+  - `compare_authority_marker_v2(...)`;
+  - `migrate_authority_marker_v1_to_v2(...)`;
+  - `prepare_v2_marker_for_acceptance(...)`;
+  - lower v2 sequence rejected;
+  - same-sequence/different-digest rejected;
+  - v1-after-v2 rejected fail-closed;
+  - v2-after-v1 allowed only through explicit migration helper;
+  - no production v2 surface wiring;
+  - no rotation/revocation lifecycle.
+
+Run 132 is the first production-surface wiring run for v2 ratification and v2 marker compatibility.
+
+It must start with validation-only surfaces, not mutating surfaces.
+
+---
+
+# Exact objective
+
+Wire v2 ratification verification and v2 authority-marker compatibility checks into the safest validation-only surfaces first.
+
+Primary surfaces for Run 132:
+
+1. `--p2p-trust-bundle-reload-check`;
+2. local `--p2p-trust-bundle-peer-candidate-check`.
+
+Optional only if clearly narrow after primary surfaces:
+
+3. live inbound `0x05` validation-only path.
+
+The objective is:
+
+1. Allow validation-only surfaces to verify either v1 or v2 ratification sidecars according to a strict compatibility policy.
+2. Preserve existing v1 behavior bit-for-bit when a v1 sidecar is used.
+3. For v2 sidecars, use `verify_bundle_signing_key_ratification_v2` from Run 130.
+4. For v2 sidecars, derive and compare v2 authority marker state using Run 131 helpers.
+5. Enforce the Run 129/131 compatibility policy:
+   - v2-after-v1 may be accepted only as explicit migration candidate;
+   - v1-after-v2 must fail closed;
+   - lower v2 sequence must fail closed;
+   - same-sequence/different-digest must fail closed;
+   - same-sequence/same-digest is idempotent;
+   - higher v2 sequence may be accepted by validation-only check but never persisted by validation-only surfaces.
+6. Never persist marker state from validation-only surfaces.
+7. Do not wire v2 into startup, reload-apply, or SIGHUP mutating surfaces yet.
+8. Do not implement signing-key rotation/revocation lifecycle yet.
+9. Do not add peer-driven apply.
+
+Run 132 should make this statement true:
+
+> QBIND validation-only trust-bundle checks can safely evaluate v2 ratifications and v2 monotonic marker compatibility without mutating local authority state, while preserving v1 fail-closed behavior and refusing unsafe downgrade/replay cases.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. v1/v2 sidecar dispatch for validation-only surfaces
+
+Add a narrow sidecar loader/dispatcher that can distinguish v1 and v2 ratification sidecars.
+
+Requirements:
+
+- no ambiguity between v1 and v2;
+- unknown schema version fails closed;
+- malformed sidecar fails closed;
+- v1 verifier remains unchanged;
+- v2 verifier uses Run 130 primitive;
+- no production mutating surface consumes v2 in Run 132.
+
+## B. Reload-check v2 support
+
+Wire `--p2p-trust-bundle-reload-check` so that:
+
+- v1 behavior is unchanged;
+- v2 sidecar is verified by v2 verifier;
+- v2 marker candidate is derived;
+- v2 marker candidate is compared against local persisted marker;
+- conflicts/downgrades/replays fail closed;
+- no marker is persisted.
+
+## C. Local peer-candidate check v2 support
+
+Wire local `--p2p-trust-bundle-peer-candidate-check` so that:
+
+- v1 behavior is unchanged;
+- v2 sidecar is verified by v2 verifier;
+- v2 marker candidate is derived;
+- v2 marker candidate is compared against local persisted marker;
+- conflicts/downgrades/replays fail closed;
+- no marker is persisted.
+
+## D. Optional live inbound `0x05` v2 support
+
+Only if narrow and safe after A–C:
+
+- v2 ratification sidecar/config must already be available to the live path or be plumbed without wire-format change;
+- marker conflicts must convert to validation rejection before rebroadcast eligibility;
+- no marker persistence;
+- no apply.
+
+If live `0x05` requires broad design or wire changes, defer it.
+
+## E. Typed failure mapping
+
+Add precise typed failures for v2 validation-only surfaces.
+
+Expected categories:
+
+- unknown ratification schema;
+- malformed sidecar;
+- v2 verifier failure;
+- marker v2 derivation failure;
+- marker v2 comparison failure;
+- v1-after-v2 downgrade refusal;
+- lower v2 sequence refusal;
+- same-sequence/different-digest refusal;
+- unsupported marker version;
+- corrupt local marker.
+
+---
+
+# Strict non-goals
+
+Run 132 MUST NOT:
+
+- wire v2 into startup trust-bundle acceptance;
+- wire v2 into process-start reload-apply;
+- wire v2 into SIGHUP live reload;
+- persist v2 marker state from validation-only surfaces;
+- auto-migrate marker files during validation-only checks;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement MainNet governance artifact support;
+- implement KMS/HSM custody;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- change reset CLI behavior;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken v1 ratification verification;
+- weaken Run 117–131 anti-rollback/reset/v2 verifier behavior;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim rotation/revocation implemented;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation
+
+Before implementation, investigate and document:
+
+## 1. Existing v1 sidecar loading and enforcement path
+
+Inspect how v1 ratification sidecars are loaded for:
+
+- reload-check;
+- local peer-candidate check;
+- live inbound `0x05` if considered.
+
+Document where schema dispatch should occur without changing v1 behavior.
+
+## 2. Run 130 v2 verifier interface
+
+Inspect:
+
+- `BundleSigningRatificationV2`;
+- `BundleSigningRatificationV2Action`;
+- `RatificationV2Failure`;
+- `RatifiedBundleSigningKeyV2`;
+- `verify_bundle_signing_key_ratification_v2`;
+- `canonical_ratification_v2_digest`.
+
+Document exactly how the validation-only path will call it.
+
+## 3. Run 131 v2 marker interface
+
+Inspect:
+
+- `PersistentAuthorityStateRecordVersioned`;
+- `PersistentAuthorityStateRecordV2`;
+- `derive_authority_state_v2_from_ratification(...)`;
+- `compare_authority_marker_v2(...)`;
+- `migrate_authority_marker_v1_to_v2(...)`;
+- `prepare_v2_marker_for_acceptance(...)`.
+
+Document exactly how validation-only checks use these helpers without writing marker state.
+
+## 4. Missing marker and v1/v2 policy
+
+Define behavior for validation-only checks when local persisted marker is:
+
+- absent;
+- v1;
+- v2;
+- corrupt;
+- unsupported version.
+
+Policy must align with Run 129/131:
+
+- no marker + v2 candidate may validate but not persist;
+- v1 marker + v2 candidate may validate as explicit migration candidate but not persist;
+- v2 marker + v1 candidate must reject;
+- v2 lower sequence rejects;
+- v2 same-sequence/different-digest rejects;
+- corrupt/unsupported marker rejects.
+
+## 5. Non-mutation proof
+
+Document how each validation-only surface proves:
+
+- no marker write;
+- no sequence write;
+- no root merge;
+- no live trust mutation;
+- no rebroadcast if live `0x05` marker check rejects.
+
+---
+
+# Required implementation
+
+## 1. Add schema-dispatch helper
+
+Add a helper such as:
+
+```text
+load_ratification_sidecar_versioned(...)
+verify_bundle_signing_ratification_versioned_for_validation_only(...)
+```
+
+or repo-equivalent.
+
+It must return typed v1/v2 verified results and must not mutate state.
+
+## 2. Add validation-only v2 marker helper
+
+Add or reuse a helper that performs:
+
+```text
+verified v2 ratification
+→ derive v2 marker
+→ compare against persisted versioned marker
+→ validation-only accept/reject
+```
+
+It must not persist.
+
+## 3. Wire reload-check
+
+After signed-bundle validation and ratification sidecar verification:
+
+- dispatch v1/v2;
+- for v1: preserve existing behavior;
+- for v2: verify v2, compare v2 marker compatibility;
+- reject unsafe cases;
+- do not persist marker.
+
+## 4. Wire local peer-candidate check
+
+Same as reload-check.
+
+## 5. Optionally wire live `0x05`
+
+Only if narrow.
+
+If deferred, document why.
+
+---
+
+# Required tests
+
+## A. Versioned sidecar dispatch tests
+
+Test:
+
+- v1 sidecar dispatches to v1 verifier;
+- v2 sidecar dispatches to v2 verifier;
+- unknown version fails closed;
+- malformed sidecar fails closed;
+- v1 behavior unchanged.
+
+## B. Reload-check v2 tests
+
+Test:
+
+- v2 no marker passes but does not persist;
+- v2 after v1 marker passes as migration candidate but does not persist;
+- v1 after v2 marker rejects;
+- v2 lower sequence rejects;
+- v2 same-sequence same-digest passes;
+- v2 same-sequence different-digest rejects;
+- corrupt local marker rejects;
+- no marker write occurs in all cases.
+
+## C. Local peer-candidate check v2 tests
+
+Same matrix as reload-check, focused on local peer-candidate check behavior.
+
+## D. Live `0x05` tests, if wired
+
+Test:
+
+- v2 same-marker/higher-sequence valid candidate may rebroadcast under existing Run 088 rules;
+- v2 conflict rejects before rebroadcast;
+- v1-after-v2 rejects before rebroadcast;
+- no marker persistence;
+- no apply.
+
+If live `0x05` is deferred, state it explicitly and do not fake tests.
+
+## E. Regression tests
+
+Run and report:
+
+- Run 130 v2 verifier tests;
+- Run 131 v2 marker tests;
+- Run 123 validation-only marker tests;
+- Run 107 peer-candidate tests;
+- Run 109 live inbound `0x05` tests if touched;
+- Run 088 propagation tests if touched;
+- Run 103 v1 ratification tests;
+- Run 104 authority key material tests;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib if touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 132.
+
+---
+
+# Release-binary evidence
+
+None required for Run 132.
+
+Do not fake release-binary evidence.
+
+Release-binary v2 evidence remains Run 133 unless intentionally expanded later.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_132.md`;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow docs:
+
+- v2 validation-only compatibility matrix;
+- sidecar schema dispatch note.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 132 may narrow:
+
+- validation-only v2 enforcement wiring;
+- v1/v2 compatibility checks in validation-only surfaces;
+- downgrade/replay refusal in validation-only surfaces.
+
+Run 132 may mark this sub-piece narrowed/resolved only if:
+
+- reload-check supports v2 safely;
+- local peer-candidate check supports v2 safely;
+- v1-after-v2 rejects;
+- lower sequence rejects;
+- same-sequence/different-digest rejects;
+- no marker persistence occurs;
+- v1 regressions pass;
+- docs are synchronized.
+
+Run 132 MUST NOT mark resolved:
+
+- mutating-surface v2 enforcement;
+- release-binary v2 evidence;
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- peer-driven live apply;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 132 does not wire v2 into mutating surfaces;
+- Run 132 does not persist v2 marker state from validation-only checks;
+- Run 132 does not implement signing-key rotation/revocation;
+- Run 132 does not implement KMS/HSM custody;
+- Run 132 does not implement peer-driven live apply;
+- Run 132 does not implement MainNet governance artifacts;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- reload-check and local peer-candidate check both support v2 with full compatibility matrix;
+- live `0x05` is either safely wired with full tests or explicitly deferred with no ambiguity;
+- no marker persistence occurs;
+- v1 regressions pass;
+- docs are synchronized.
+
+Use **positive** if:
+
+- reload-check and local peer-candidate check support v2;
+- live `0x05` is deferred honestly;
+- tests are strong.
+
+Use **partial-positive** if:
+
+- only one validation-only surface is wired;
+- v2 compatibility matrix is incomplete;
+- live `0x05` wiring is attempted but incomplete.
+
+Use **negative** if:
+
+- validation-only surface persists marker;
+- v1-after-v2 is accepted;
+- lower sequence is accepted;
+- same-sequence/different-digest is accepted;
+- v1 behavior regresses;
+- mutating surfaces are changed out of scope;
+- local config alone can authorize MainNet authority.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What was implemented
+
+Include:
+
+- files changed;
+- versioned sidecar dispatch;
+- surfaces wired;
+- v2 verifier use;
+- v2 marker comparison use;
+- compatibility policy enforced;
+- no-persistence guarantee;
+- live `0x05` status;
+- tests added;
+- docs updated.
+
+## 3. What was proven
+
+Separate:
+
+- source-level proof;
+- test proof;
+- release-binary evidence if any.
+
+## 4. Key security decisions
+
+Include:
+
+- v1 behavior preserved;
+- v2 verifier used only after schema dispatch;
+- authority_domain_sequence compatibility enforced;
+- v1-after-v2 rejected;
+- lower sequence rejected;
+- same-sequence/different-digest rejected;
+- validation-only surfaces never persist marker;
+- no mutating v2 consumption yet.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new implementation against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 v1 verifier;
+- Run 104 key material registry;
+- Run 105–128 enforcement/evidence/reset lineage;
+- Run 129 v2 schema spec;
+- Run 130 v2 verifier implementation;
+- Run 131 v2 marker implementation;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Explicit non-claims
+
+State that Run 132 does NOT implement:
+
+- mutating-surface v2 enforcement;
+- marker persistence from validation-only v2 checks;
+- release-binary v2 evidence;
+- signing-key rotation;
+- signing-key revocation lifecycle;
+- peer-driven live apply;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- validator-set rotation;
+- full C4 closure;
+- C5 closure.
+
+## 7. Evidence references
+
+List:
+
+- evidence document;
+- tests added;
+- tests run;
+- docs updated;
+- release-binary logs if any.
+
+## 8. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 132 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+

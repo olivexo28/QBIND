@@ -161,8 +161,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use qbind_ledger::{
-    canonical_ratification_digest, AuthorityStateSnapshotMeta, BundleSigningRatification,
-    RatifiedBundleSigningKey,
+    canonical_ratification_digest, canonical_ratification_v2_digest, AuthorityStateSnapshotMeta,
+    BundleSigningRatification, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+    RatifiedBundleSigningKey, RatifiedBundleSigningKeyV2,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
@@ -174,10 +175,16 @@ use crate::pqc_trust_bundle::TrustBundleEnvironment;
 /// Bumping the trailing `v1` invalidates every previously computed
 /// authority-state digest.
 pub const AUTHORITY_STATE_DOMAIN_V1: &[u8] = b"QBIND:AUTHORITY-STATE:v1";
+/// Domain-separation tag for v2 authority-state marker digests.
+pub const AUTHORITY_STATE_DOMAIN_V2: &[u8] = b"QBIND:AUTHORITY-STATE:v2";
 
 /// Current `record_version` for the persisted authority-state file.
 /// Any other value fails closed.
 pub const AUTHORITY_STATE_RECORD_VERSION: u32 = 1;
+/// Record version for the additive v2 authority-state marker schema.
+pub const AUTHORITY_STATE_RECORD_VERSION_V2: u32 = 2;
+/// Marker schema version for v2 monotonic semantics.
+pub const AUTHORITY_STATE_SCHEMA_VERSION_V2: u32 = 2;
 
 /// Default file name written under `<data_dir>/`.
 pub const AUTHORITY_STATE_FILENAME: &str = "pqc_authority_state.json";
@@ -334,7 +341,244 @@ impl PersistentAuthorityStateRecord {
             updated_at_unix_secs,
         }
     }
+}
 
+/// Run 131: versioned authority marker representation that can carry either
+/// legacy v1 marker state or additive v2 monotonic marker state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PersistentAuthorityStateRecordVersioned {
+    V1(PersistentAuthorityStateRecord),
+    V2(PersistentAuthorityStateRecordV2),
+}
+
+/// Run 131: additive v2 marker state for ratification-v2 monotonic semantics.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PersistentAuthorityStateRecordV2 {
+    pub record_version: u32,
+    pub authority_schema_version: u32,
+    pub chain_id: String,
+    pub environment: TrustBundleEnvironment,
+    pub genesis_hash: String,
+    pub authority_root_fingerprint: String,
+    pub authority_root_suite_id: u8,
+    pub active_bundle_signing_key_fingerprint: String,
+    pub active_bundle_signing_key_suite_id: u8,
+    pub latest_authority_domain_sequence: u64,
+    pub latest_lifecycle_action: BundleSigningRatificationV2Action,
+    pub previous_bundle_signing_key_fingerprint: Option<String>,
+    pub latest_ratification_v2_digest: String,
+    pub revoked_key_metadata: Option<String>,
+    pub last_update_source: AuthorityStateUpdateSource,
+    pub updated_at_unix_secs: u64,
+}
+
+impl PersistentAuthorityStateRecordV2 {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        chain_id_hex: String,
+        environment: TrustBundleEnvironment,
+        genesis_hash_hex: String,
+        authority_root_fingerprint: String,
+        authority_root_suite_id: u8,
+        active_bundle_signing_key_fingerprint: String,
+        active_bundle_signing_key_suite_id: u8,
+        latest_authority_domain_sequence: u64,
+        latest_lifecycle_action: BundleSigningRatificationV2Action,
+        previous_bundle_signing_key_fingerprint: Option<String>,
+        latest_ratification_v2_digest: String,
+        revoked_key_metadata: Option<String>,
+        last_update_source: AuthorityStateUpdateSource,
+        updated_at_unix_secs: u64,
+    ) -> Self {
+        Self {
+            record_version: AUTHORITY_STATE_RECORD_VERSION_V2,
+            authority_schema_version: AUTHORITY_STATE_SCHEMA_VERSION_V2,
+            chain_id: chain_id_hex,
+            environment,
+            genesis_hash: genesis_hash_hex,
+            authority_root_fingerprint,
+            authority_root_suite_id,
+            active_bundle_signing_key_fingerprint,
+            active_bundle_signing_key_suite_id,
+            latest_authority_domain_sequence,
+            latest_lifecycle_action,
+            previous_bundle_signing_key_fingerprint,
+            latest_ratification_v2_digest,
+            revoked_key_metadata,
+            last_update_source,
+            updated_at_unix_secs,
+        }
+    }
+
+    pub fn validate_structure(&self) -> Result<(), AuthorityStateError> {
+        if self.record_version != AUTHORITY_STATE_RECORD_VERSION_V2 {
+            return Err(AuthorityStateError::UnsupportedRecordVersion(
+                self.record_version,
+            ));
+        }
+        if self.authority_schema_version != AUTHORITY_STATE_SCHEMA_VERSION_V2 {
+            return Err(AuthorityStateError::Malformed(format!(
+                "authority_schema_version must be {} for v2 markers (got {})",
+                AUTHORITY_STATE_SCHEMA_VERSION_V2, self.authority_schema_version
+            )));
+        }
+        if self.chain_id.len() != 16 || !is_lower_hex(&self.chain_id) {
+            return Err(AuthorityStateError::Malformed(format!(
+                "v2 chain_id must be exactly 16 lowercase hex chars (length {})",
+                self.chain_id.len()
+            )));
+        }
+        if self.genesis_hash.len() != 64 || !is_lower_hex(&self.genesis_hash) {
+            return Err(AuthorityStateError::Malformed(format!(
+                "v2 genesis_hash must be exactly 64 lowercase hex chars (length {})",
+                self.genesis_hash.len()
+            )));
+        }
+        if self.authority_root_fingerprint.is_empty()
+            || !is_lower_hex(&self.authority_root_fingerprint)
+        {
+            return Err(AuthorityStateError::Malformed(format!(
+                "v2 authority_root_fingerprint must be non-empty lowercase hex (length {})",
+                self.authority_root_fingerprint.len()
+            )));
+        }
+        if self.active_bundle_signing_key_fingerprint.is_empty()
+            || !is_lower_hex(&self.active_bundle_signing_key_fingerprint)
+        {
+            return Err(AuthorityStateError::Malformed(format!(
+                    "v2 active_bundle_signing_key_fingerprint must be non-empty lowercase hex (length {})",
+                    self.active_bundle_signing_key_fingerprint.len()
+                )));
+        }
+        if self.latest_authority_domain_sequence == 0 {
+            return Err(AuthorityStateError::Malformed(
+                "v2 latest_authority_domain_sequence must be >= 1".to_string(),
+            ));
+        }
+        if self.latest_ratification_v2_digest.len() != 64
+            || !is_lower_hex(&self.latest_ratification_v2_digest)
+        {
+            return Err(AuthorityStateError::Malformed(format!(
+                    "v2 latest_ratification_v2_digest must be exactly 64 lowercase hex chars (length {})",
+                    self.latest_ratification_v2_digest.len()
+                )));
+        }
+        if let Some(prev) = self.previous_bundle_signing_key_fingerprint.as_ref() {
+            if prev.is_empty() || !is_lower_hex(prev) {
+                return Err(AuthorityStateError::Malformed(format!(
+                        "v2 previous_bundle_signing_key_fingerprint must be non-empty lowercase hex (length {})",
+                        prev.len()
+                    )));
+            }
+        }
+        if let Some(revoked) = self.revoked_key_metadata.as_ref() {
+            if revoked.is_empty() || !is_lower_hex(revoked) {
+                return Err(AuthorityStateError::Malformed(format!(
+                    "v2 revoked_key_metadata must be non-empty lowercase hex (length {})",
+                    revoked.len()
+                )));
+            }
+        }
+
+        match self.latest_lifecycle_action {
+            BundleSigningRatificationV2Action::Ratify => {
+                if self.previous_bundle_signing_key_fingerprint.is_some() {
+                    return Err(AuthorityStateError::Malformed(
+                        "v2 ratify marker must not carry previous_bundle_signing_key_fingerprint"
+                            .to_string(),
+                    ));
+                }
+                if self.revoked_key_metadata.is_some() {
+                    return Err(AuthorityStateError::Malformed(
+                        "v2 ratify marker must not carry revoked_key_metadata".to_string(),
+                    ));
+                }
+            }
+            BundleSigningRatificationV2Action::Rotate => {
+                let Some(prev) = self.previous_bundle_signing_key_fingerprint.as_ref() else {
+                    return Err(AuthorityStateError::Malformed(
+                        "v2 rotate marker requires previous_bundle_signing_key_fingerprint"
+                            .to_string(),
+                    ));
+                };
+                if prev == &self.active_bundle_signing_key_fingerprint {
+                    return Err(AuthorityStateError::Malformed(
+                        "v2 rotate marker previous key must differ from active key".to_string(),
+                    ));
+                }
+                if self.revoked_key_metadata.is_some() {
+                    return Err(AuthorityStateError::Malformed(
+                        "v2 rotate marker must not carry revoked_key_metadata".to_string(),
+                    ));
+                }
+            }
+            BundleSigningRatificationV2Action::Revoke => {
+                if self.revoked_key_metadata.is_none() {
+                    return Err(AuthorityStateError::Malformed(
+                        "v2 revoke marker requires revoked_key_metadata placeholder".to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// Parse a persisted marker payload into a versioned marker record. v1 payloads
+/// remain parse-compatible and unsupported versions fail closed.
+pub fn parse_versioned_authority_state_record_bytes(
+    bytes: &[u8],
+) -> Result<PersistentAuthorityStateRecordVersioned, AuthorityStateError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|e| AuthorityStateError::Malformed(format!("{}", e)))?;
+    let Some(record_version_u64) = value.get("record_version").and_then(|v| v.as_u64()) else {
+        return Err(AuthorityStateError::Malformed(
+            "missing numeric record_version".to_string(),
+        ));
+    };
+    let record_version = u32::try_from(record_version_u64).map_err(|_| {
+        AuthorityStateError::Malformed(format!(
+            "record_version {} does not fit in u32",
+            record_version_u64
+        ))
+    })?;
+    match record_version {
+        AUTHORITY_STATE_RECORD_VERSION => {
+            let r: PersistentAuthorityStateRecord = serde_json::from_value(value)
+                .map_err(|e| AuthorityStateError::Malformed(format!("{}", e)))?;
+            r.validate_structure()?;
+            Ok(PersistentAuthorityStateRecordVersioned::V1(r))
+        }
+        AUTHORITY_STATE_RECORD_VERSION_V2 => {
+            let r: PersistentAuthorityStateRecordV2 = serde_json::from_value(value)
+                .map_err(|e| AuthorityStateError::Malformed(format!("{}", e)))?;
+            r.validate_structure()?;
+            Ok(PersistentAuthorityStateRecordVersioned::V2(r))
+        }
+        v => Err(AuthorityStateError::UnsupportedRecordVersion(v)),
+    }
+}
+
+/// Load a versioned authority marker from disk.
+pub fn load_authority_state_versioned(
+    path: &Path,
+) -> Result<Option<PersistentAuthorityStateRecordVersioned>, AuthorityStateError> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(AuthorityStateError::Io(format!(
+                "{}: {}",
+                path.display(),
+                e.kind()
+            )));
+        }
+    };
+    parse_versioned_authority_state_record_bytes(&bytes).map(Some)
+}
+
+impl PersistentAuthorityStateRecord {
     /// Strict structural validation of a freshly-deserialised record.
     /// Returns the precise [`AuthorityStateError`] variant on any
     /// defect so the binary surface can fail closed with a precise
@@ -682,22 +926,26 @@ pub fn genesis_hash_hex(h: &[u8; 32]) -> String {
 /// must not contribute to the security digest (otherwise a benign
 /// restart would change the digest without changing the security-
 /// relevant state).
-pub fn canonical_authority_state_preimage(
-    r: &PersistentAuthorityStateRecord,
-) -> Vec<u8> {
+pub fn canonical_authority_state_preimage(r: &PersistentAuthorityStateRecord) -> Vec<u8> {
     let mut buf = Vec::with_capacity(
         AUTHORITY_STATE_DOMAIN_V1.len()
             + 4
-            + 4 + r.chain_id.len()
-            + 4 + r.environment.as_tag().len()
-            + 4 + r.genesis_hash.len()
+            + 4
+            + r.chain_id.len()
+            + 4
+            + r.environment.as_tag().len()
+            + 4
+            + r.genesis_hash.len()
             + 4
             + 8
             + 1
             + 8
-            + 4 + r.authority_root_fingerprint.len()
-            + 4 + r.ratified_bundle_signing_key_fingerprint.len()
-            + 4 + r.ratification_object_hash.len(),
+            + 4
+            + r.authority_root_fingerprint.len()
+            + 4
+            + r.ratified_bundle_signing_key_fingerprint.len()
+            + 4
+            + r.ratification_object_hash.len(),
     );
     buf.extend_from_slice(AUTHORITY_STATE_DOMAIN_V1);
     buf.extend_from_slice(&r.record_version.to_be_bytes());
@@ -732,10 +980,76 @@ pub fn canonical_authority_state_preimage(
 /// 32-byte SHA3-256 digest over
 /// [`canonical_authority_state_preimage`]. Stable across platforms
 /// and includes every security-relevant field.
-pub fn canonical_authority_state_digest(
-    r: &PersistentAuthorityStateRecord,
-) -> [u8; 32] {
+pub fn canonical_authority_state_digest(r: &PersistentAuthorityStateRecord) -> [u8; 32] {
     qbind_hash::sha3_256(&canonical_authority_state_preimage(r))
+}
+
+/// Canonical deterministic preimage for a v2 marker record.
+pub fn canonical_authority_state_v2_preimage(r: &PersistentAuthorityStateRecordV2) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(
+        AUTHORITY_STATE_DOMAIN_V2.len()
+            + 4
+            + 4
+            + 4
+            + r.chain_id.len()
+            + 4
+            + r.environment.as_tag().len()
+            + 4
+            + r.genesis_hash.len()
+            + 4
+            + r.authority_root_fingerprint.len()
+            + 1
+            + 4
+            + r.active_bundle_signing_key_fingerprint.len()
+            + 1
+            + 8
+            + 1
+            + 1
+            + 4
+            + r.previous_bundle_signing_key_fingerprint
+                .as_ref()
+                .map(|s| s.len())
+                .unwrap_or(0)
+            + 4
+            + r.latest_ratification_v2_digest.len()
+            + 1
+            + 4
+            + r.revoked_key_metadata
+                .as_ref()
+                .map(|s| s.len())
+                .unwrap_or(0),
+    );
+    buf.extend_from_slice(AUTHORITY_STATE_DOMAIN_V2);
+    buf.extend_from_slice(&r.record_version.to_be_bytes());
+    buf.extend_from_slice(&r.authority_schema_version.to_be_bytes());
+    encode_length_prefixed(&mut buf, r.chain_id.as_bytes());
+    encode_length_prefixed(&mut buf, r.environment.as_tag().as_bytes());
+    encode_length_prefixed(&mut buf, r.genesis_hash.as_bytes());
+    encode_length_prefixed(&mut buf, r.authority_root_fingerprint.as_bytes());
+    buf.push(r.authority_root_suite_id);
+    encode_length_prefixed(&mut buf, r.active_bundle_signing_key_fingerprint.as_bytes());
+    buf.push(r.active_bundle_signing_key_suite_id);
+    buf.extend_from_slice(&r.latest_authority_domain_sequence.to_be_bytes());
+    buf.push(r.latest_lifecycle_action.as_byte());
+    if let Some(prev) = r.previous_bundle_signing_key_fingerprint.as_ref() {
+        buf.push(1);
+        encode_length_prefixed(&mut buf, prev.as_bytes());
+    } else {
+        buf.push(0);
+    }
+    encode_length_prefixed(&mut buf, r.latest_ratification_v2_digest.as_bytes());
+    if let Some(revoked) = r.revoked_key_metadata.as_ref() {
+        buf.push(1);
+        encode_length_prefixed(&mut buf, revoked.as_bytes());
+    } else {
+        buf.push(0);
+    }
+    buf
+}
+
+/// Domain-separated SHA3-256 digest for a v2 marker.
+pub fn canonical_authority_state_v2_digest(r: &PersistentAuthorityStateRecordV2) -> [u8; 32] {
+    qbind_hash::sha3_256(&canonical_authority_state_v2_preimage(r))
 }
 
 fn encode_length_prefixed(buf: &mut Vec<u8>, bytes: &[u8]) {
@@ -840,8 +1154,7 @@ pub fn compare_authority_state(
     if candidate.authority_sequence == prev.authority_sequence {
         // Equal-sequence policy.
         let same_hash = prev.ratification_object_hash == candidate.ratification_object_hash;
-        let same_root = prev.authority_root_fingerprint
-            == candidate.authority_root_fingerprint;
+        let same_root = prev.authority_root_fingerprint == candidate.authority_root_fingerprint;
         let same_key = prev.ratified_bundle_signing_key_fingerprint
             == candidate.ratified_bundle_signing_key_fingerprint;
         let same_epoch = prev.authority_epoch == candidate.authority_epoch;
@@ -854,9 +1167,7 @@ pub fn compare_authority_state(
         if same_root && !same_key {
             return AuthorityStateComparison::SameSequenceConflictingKey {
                 sequence: prev.authority_sequence,
-                persisted_key_fingerprint: prev
-                    .ratified_bundle_signing_key_fingerprint
-                    .clone(),
+                persisted_key_fingerprint: prev.ratified_bundle_signing_key_fingerprint.clone(),
                 attempted_key_fingerprint: candidate
                     .ratified_bundle_signing_key_fingerprint
                     .clone(),
@@ -999,12 +1310,11 @@ pub fn persist_authority_state_atomic(
     record: &PersistentAuthorityStateRecord,
 ) -> Result<(), AuthorityStateError> {
     use std::io::Write;
-    record
-        .validate_structure()
-        .map_err(|e| AuthorityStateError::PersistFailure(format!("pre-write structural validation: {}", e)))?;
-    let bytes = serde_json::to_vec(record).map_err(|e| {
-        AuthorityStateError::PersistFailure(format!("serialise: {}", e))
+    record.validate_structure().map_err(|e| {
+        AuthorityStateError::PersistFailure(format!("pre-write structural validation: {}", e))
     })?;
+    let bytes = serde_json::to_vec(record)
+        .map_err(|e| AuthorityStateError::PersistFailure(format!("serialise: {}", e)))?;
     let parent = path.parent();
     if let Some(parent) = parent {
         if !parent.as_os_str().is_empty() {
@@ -1270,8 +1580,7 @@ fn digest32_hex(d: &[u8; 32]) -> String {
 pub fn derive_authority_state_from_ratification(
     inputs: AuthorityStateDerivationInputs<'_>,
 ) -> Result<PersistentAuthorityStateRecord, AuthorityStateDerivationError> {
-    if inputs.runtime_genesis_hash_hex.len() != 64
-        || !is_lower_hex(inputs.runtime_genesis_hash_hex)
+    if inputs.runtime_genesis_hash_hex.len() != 64 || !is_lower_hex(inputs.runtime_genesis_hash_hex)
     {
         return Err(AuthorityStateDerivationError::MalformedRuntimeGenesisHash(
             inputs.runtime_genesis_hash_hex.to_string(),
@@ -1302,8 +1611,7 @@ pub fn derive_authority_state_from_ratification(
         });
     }
 
-    if inputs.ratification.authority_root_fingerprint
-        != inputs.ratified.authority_root_fingerprint
+    if inputs.ratification.authority_root_fingerprint != inputs.ratified.authority_root_fingerprint
     {
         return Err(
             AuthorityStateDerivationError::RatificationVerifierInconsistent(format!(
@@ -1337,6 +1645,512 @@ pub fn derive_authority_state_from_ratification(
         .map_err(AuthorityStateDerivationError::InvalidDerivedRecord)?;
 
     Ok(record)
+}
+
+/// Inputs required to derive a v2 marker from verified v2 ratification output.
+#[derive(Debug, Clone)]
+pub struct AuthorityStateDerivationV2Inputs<'a> {
+    pub runtime_env: NetworkEnvironment,
+    pub runtime_chain_id: ChainId,
+    pub runtime_genesis_hash_hex: &'a str,
+    pub ratification: &'a BundleSigningRatificationV2,
+    pub ratified: &'a RatifiedBundleSigningKeyV2,
+    pub update_source: AuthorityStateUpdateSource,
+    pub updated_at_unix_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorityStateDerivationV2Error {
+    MalformedRuntimeGenesisHash(String),
+    UnsupportedRatificationSchemaVersion(u32),
+    EnvironmentMismatch {
+        ratification_env: String,
+        runtime_env: String,
+    },
+    ChainIdMismatch {
+        ratification_chain_id: String,
+        runtime_chain_id_hex: String,
+    },
+    GenesisHashMismatch {
+        ratification_genesis_hash_hex: String,
+        runtime_genesis_hash_hex: String,
+    },
+    AuthorityRootMismatch {
+        ratification_authority_root_fingerprint: String,
+        verifier_authority_root_fingerprint: String,
+    },
+    TargetKeyBindingMismatch {
+        ratification_target_fingerprint: String,
+        verifier_target_fingerprint: String,
+    },
+    TargetSuiteBindingMismatch {
+        ratification_target_suite_id: u8,
+        verifier_target_suite_id: u8,
+    },
+    SequenceBindingMismatch {
+        ratification_sequence: u64,
+        verifier_sequence: u64,
+    },
+    ActionBindingMismatch {
+        ratification_action: BundleSigningRatificationV2Action,
+        verifier_action: BundleSigningRatificationV2Action,
+    },
+    MissingPreviousKeyForRotate,
+    MissingPreviousDigestForRotate,
+    MalformedPreviousDigest(String),
+    UnexpectedRotateFieldsForRatify,
+    MissingRevokedMetadataForRevoke,
+    InvalidDerivedRecord(AuthorityStateError),
+}
+
+impl std::fmt::Display for AuthorityStateDerivationV2Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::MalformedRuntimeGenesisHash(s) => write!(
+                f,
+                "authority-state v2 derivation: malformed runtime genesis hash {} (expected 64 lowercase hex chars)",
+                s
+            ),
+            Self::UnsupportedRatificationSchemaVersion(v) => write!(
+                f,
+                "authority-state v2 derivation: unsupported ratification schema version {} (expected 2)",
+                v
+            ),
+            Self::EnvironmentMismatch {
+                ratification_env,
+                runtime_env,
+            } => write!(
+                f,
+                "authority-state v2 derivation: ratification environment {} disagrees with runtime environment {}",
+                ratification_env, runtime_env
+            ),
+            Self::ChainIdMismatch {
+                ratification_chain_id,
+                runtime_chain_id_hex,
+            } => write!(
+                f,
+                "authority-state v2 derivation: ratification chain_id {} disagrees with runtime chain_id {}",
+                ratification_chain_id, runtime_chain_id_hex
+            ),
+            Self::GenesisHashMismatch {
+                ratification_genesis_hash_hex,
+                runtime_genesis_hash_hex,
+            } => write!(
+                f,
+                "authority-state v2 derivation: ratification genesis {} disagrees with runtime genesis {}",
+                ratification_genesis_hash_hex, runtime_genesis_hash_hex
+            ),
+            Self::AuthorityRootMismatch {
+                ratification_authority_root_fingerprint,
+                verifier_authority_root_fingerprint,
+            } => write!(
+                f,
+                "authority-state v2 derivation: authority-root binding mismatch ratification={} verifier={}",
+                ratification_authority_root_fingerprint, verifier_authority_root_fingerprint
+            ),
+            Self::TargetKeyBindingMismatch {
+                ratification_target_fingerprint,
+                verifier_target_fingerprint,
+            } => write!(
+                f,
+                "authority-state v2 derivation: target-key binding mismatch ratification={} verifier={}",
+                ratification_target_fingerprint, verifier_target_fingerprint
+            ),
+            Self::TargetSuiteBindingMismatch {
+                ratification_target_suite_id,
+                verifier_target_suite_id,
+            } => write!(
+                f,
+                "authority-state v2 derivation: target-suite binding mismatch ratification={} verifier={}",
+                ratification_target_suite_id, verifier_target_suite_id
+            ),
+            Self::SequenceBindingMismatch {
+                ratification_sequence,
+                verifier_sequence,
+            } => write!(
+                f,
+                "authority-state v2 derivation: sequence binding mismatch ratification={} verifier={}",
+                ratification_sequence, verifier_sequence
+            ),
+            Self::ActionBindingMismatch {
+                ratification_action,
+                verifier_action,
+            } => write!(
+                f,
+                "authority-state v2 derivation: action binding mismatch ratification={} verifier={}",
+                ratification_action.tag(),
+                verifier_action.tag()
+            ),
+            Self::MissingPreviousKeyForRotate => write!(
+                f,
+                "authority-state v2 derivation: rotate action requires previous key fingerprint"
+            ),
+            Self::MissingPreviousDigestForRotate => write!(
+                f,
+                "authority-state v2 derivation: rotate action requires previous ratification digest"
+            ),
+            Self::MalformedPreviousDigest(d) => write!(
+                f,
+                "authority-state v2 derivation: previous ratification digest {} must be 64 lowercase hex chars",
+                d
+            ),
+            Self::UnexpectedRotateFieldsForRatify => write!(
+                f,
+                "authority-state v2 derivation: ratify action must not carry rotate linkage fields"
+            ),
+            Self::MissingRevokedMetadataForRevoke => write!(
+                f,
+                "authority-state v2 derivation: revoke action requires revocation metadata placeholder"
+            ),
+            Self::InvalidDerivedRecord(e) => write!(
+                f,
+                "authority-state v2 derivation: derived v2 marker is structurally invalid: {}",
+                e
+            ),
+        }
+    }
+}
+
+impl std::error::Error for AuthorityStateDerivationV2Error {}
+
+/// Derive a v2 marker from a verified v2 ratification and typed verifier output.
+pub fn derive_authority_state_v2_from_ratification(
+    inputs: AuthorityStateDerivationV2Inputs<'_>,
+) -> Result<PersistentAuthorityStateRecordV2, AuthorityStateDerivationV2Error> {
+    if inputs.runtime_genesis_hash_hex.len() != 64 || !is_lower_hex(inputs.runtime_genesis_hash_hex)
+    {
+        return Err(
+            AuthorityStateDerivationV2Error::MalformedRuntimeGenesisHash(
+                inputs.runtime_genesis_hash_hex.to_string(),
+            ),
+        );
+    }
+    if inputs.ratification.schema_version != 2 {
+        return Err(
+            AuthorityStateDerivationV2Error::UnsupportedRatificationSchemaVersion(
+                inputs.ratification.schema_version,
+            ),
+        );
+    }
+    let runtime_env_tag = match inputs.runtime_env {
+        NetworkEnvironment::Devnet => "devnet",
+        NetworkEnvironment::Testnet => "testnet",
+        NetworkEnvironment::Mainnet => "mainnet",
+    };
+    if inputs.ratification.environment.tag() != runtime_env_tag {
+        return Err(AuthorityStateDerivationV2Error::EnvironmentMismatch {
+            ratification_env: inputs.ratification.environment.tag().to_string(),
+            runtime_env: runtime_env_tag.to_string(),
+        });
+    }
+    let runtime_chain_id_hex = chain_id_hex(inputs.runtime_chain_id);
+    if inputs.ratification.chain_id != runtime_chain_id_hex {
+        return Err(AuthorityStateDerivationV2Error::ChainIdMismatch {
+            ratification_chain_id: inputs.ratification.chain_id.clone(),
+            runtime_chain_id_hex,
+        });
+    }
+    let ratification_genesis_hex = genesis_hash_hex(&inputs.ratification.genesis_hash);
+    if ratification_genesis_hex != inputs.runtime_genesis_hash_hex {
+        return Err(AuthorityStateDerivationV2Error::GenesisHashMismatch {
+            ratification_genesis_hash_hex: ratification_genesis_hex,
+            runtime_genesis_hash_hex: inputs.runtime_genesis_hash_hex.to_string(),
+        });
+    }
+    if inputs.ratification.authority_root_fingerprint != inputs.ratified.authority_root_fingerprint
+    {
+        return Err(AuthorityStateDerivationV2Error::AuthorityRootMismatch {
+            ratification_authority_root_fingerprint: inputs
+                .ratification
+                .authority_root_fingerprint
+                .clone(),
+            verifier_authority_root_fingerprint: inputs.ratified.authority_root_fingerprint.clone(),
+        });
+    }
+    if inputs.ratification.target_bundle_signing_key_fingerprint != inputs.ratified.fingerprint {
+        return Err(AuthorityStateDerivationV2Error::TargetKeyBindingMismatch {
+            ratification_target_fingerprint: inputs
+                .ratification
+                .target_bundle_signing_key_fingerprint
+                .clone(),
+            verifier_target_fingerprint: inputs.ratified.fingerprint.clone(),
+        });
+    }
+    if inputs.ratification.target_bundle_signing_key_suite_id != inputs.ratified.suite_id {
+        return Err(
+            AuthorityStateDerivationV2Error::TargetSuiteBindingMismatch {
+                ratification_target_suite_id: inputs
+                    .ratification
+                    .target_bundle_signing_key_suite_id,
+                verifier_target_suite_id: inputs.ratified.suite_id,
+            },
+        );
+    }
+    if inputs.ratification.authority_domain_sequence != inputs.ratified.authority_domain_sequence {
+        return Err(AuthorityStateDerivationV2Error::SequenceBindingMismatch {
+            ratification_sequence: inputs.ratification.authority_domain_sequence,
+            verifier_sequence: inputs.ratified.authority_domain_sequence,
+        });
+    }
+    if inputs.ratification.key_lifecycle_action != inputs.ratified.key_lifecycle_action {
+        return Err(AuthorityStateDerivationV2Error::ActionBindingMismatch {
+            ratification_action: inputs.ratification.key_lifecycle_action,
+            verifier_action: inputs.ratified.key_lifecycle_action,
+        });
+    }
+
+    let (previous_key, revoked_key_metadata) = match inputs.ratified.key_lifecycle_action {
+        BundleSigningRatificationV2Action::Ratify => {
+            if inputs.ratification.previous_key_fingerprint.is_some()
+                || inputs.ratification.previous_ratification_digest.is_some()
+            {
+                return Err(AuthorityStateDerivationV2Error::UnexpectedRotateFieldsForRatify);
+            }
+            (None, None)
+        }
+        BundleSigningRatificationV2Action::Rotate => {
+            let Some(previous_key) = inputs.ratification.previous_key_fingerprint.clone() else {
+                return Err(AuthorityStateDerivationV2Error::MissingPreviousKeyForRotate);
+            };
+            let Some(previous_digest) = inputs.ratification.previous_ratification_digest.as_ref()
+            else {
+                return Err(AuthorityStateDerivationV2Error::MissingPreviousDigestForRotate);
+            };
+            if previous_digest.len() != 64 || !is_lower_hex(previous_digest) {
+                return Err(AuthorityStateDerivationV2Error::MalformedPreviousDigest(
+                    previous_digest.clone(),
+                ));
+            }
+            (Some(previous_key), None)
+        }
+        BundleSigningRatificationV2Action::Revoke => {
+            if inputs.ratification.revocation_reason.is_none()
+                && inputs.ratification.capabilities_scope.is_none()
+            {
+                return Err(AuthorityStateDerivationV2Error::MissingRevokedMetadataForRevoke);
+            }
+            (None, Some(inputs.ratified.fingerprint.clone()))
+        }
+    };
+
+    let digest_hex = digest32_hex(&canonical_ratification_v2_digest(inputs.ratification));
+    let record = PersistentAuthorityStateRecordV2::new(
+        chain_id_hex(inputs.runtime_chain_id),
+        TrustBundleEnvironment::from_runtime(inputs.runtime_env),
+        inputs.runtime_genesis_hash_hex.to_string(),
+        inputs.ratified.authority_root_fingerprint.clone(),
+        inputs.ratification.authority_root_suite_id,
+        inputs.ratified.fingerprint.clone(),
+        inputs.ratified.suite_id,
+        inputs.ratified.authority_domain_sequence,
+        inputs.ratified.key_lifecycle_action,
+        previous_key,
+        digest_hex,
+        revoked_key_metadata,
+        inputs.update_source,
+        inputs.updated_at_unix_secs,
+    );
+    record
+        .validate_structure()
+        .map_err(AuthorityStateDerivationV2Error::InvalidDerivedRecord)?;
+    Ok(record)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorityMarkerV2ComparisonOutcome {
+    LegacyV1(AuthorityStateComparison),
+    FirstV2MarkerAccepted,
+    SameV2MarkerIdempotent,
+    HigherSequenceAccepted {
+        persisted_sequence: u64,
+        candidate_sequence: u64,
+    },
+    LowerSequenceRejected {
+        persisted_sequence: u64,
+        candidate_sequence: u64,
+    },
+    SameSequenceDifferentDigestRejected {
+        sequence: u64,
+        persisted_digest: String,
+        candidate_digest: String,
+    },
+    WrongEnvironmentRejected {
+        persisted_environment: TrustBundleEnvironment,
+        candidate_environment: TrustBundleEnvironment,
+    },
+    WrongChainIdRejected {
+        persisted_chain_id: String,
+        candidate_chain_id: String,
+    },
+    WrongGenesisHashRejected {
+        persisted_genesis_hash: String,
+        candidate_genesis_hash: String,
+    },
+    WrongAuthorityRootRejected {
+        persisted_authority_root: String,
+        candidate_authority_root: String,
+    },
+    WrongKeyActionLinkageRejected {
+        reason: String,
+    },
+    V1AfterV2Rejected,
+    V2AfterV1ExplicitMigrationAllowed,
+    MalformedOrUnsupportedMarkerRejected {
+        reason: String,
+    },
+}
+
+impl AuthorityMarkerV2ComparisonOutcome {
+    pub fn is_accept(&self) -> bool {
+        matches!(
+            self,
+            Self::LegacyV1(c) if c.is_accept()
+        ) || matches!(
+            self,
+            Self::FirstV2MarkerAccepted
+                | Self::SameV2MarkerIdempotent
+                | Self::HigherSequenceAccepted { .. }
+                | Self::V2AfterV1ExplicitMigrationAllowed
+        )
+    }
+}
+
+pub fn migrate_authority_marker_v1_to_v2(
+    persisted_v1: &PersistentAuthorityStateRecord,
+    candidate_v2: &PersistentAuthorityStateRecordV2,
+) -> AuthorityMarkerV2ComparisonOutcome {
+    if let Err(e) = candidate_v2.validate_structure() {
+        return AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+            reason: e.to_string(),
+        };
+    }
+    if persisted_v1.environment != candidate_v2.environment {
+        return AuthorityMarkerV2ComparisonOutcome::WrongEnvironmentRejected {
+            persisted_environment: persisted_v1.environment,
+            candidate_environment: candidate_v2.environment,
+        };
+    }
+    if persisted_v1.chain_id != candidate_v2.chain_id {
+        return AuthorityMarkerV2ComparisonOutcome::WrongChainIdRejected {
+            persisted_chain_id: persisted_v1.chain_id.clone(),
+            candidate_chain_id: candidate_v2.chain_id.clone(),
+        };
+    }
+    if persisted_v1.genesis_hash != candidate_v2.genesis_hash {
+        return AuthorityMarkerV2ComparisonOutcome::WrongGenesisHashRejected {
+            persisted_genesis_hash: persisted_v1.genesis_hash.clone(),
+            candidate_genesis_hash: candidate_v2.genesis_hash.clone(),
+        };
+    }
+    if persisted_v1.authority_root_fingerprint != candidate_v2.authority_root_fingerprint {
+        return AuthorityMarkerV2ComparisonOutcome::WrongAuthorityRootRejected {
+            persisted_authority_root: persisted_v1.authority_root_fingerprint.clone(),
+            candidate_authority_root: candidate_v2.authority_root_fingerprint.clone(),
+        };
+    }
+    AuthorityMarkerV2ComparisonOutcome::V2AfterV1ExplicitMigrationAllowed
+}
+
+pub fn compare_authority_marker_v2(
+    persisted: Option<&PersistentAuthorityStateRecordVersioned>,
+    candidate: &PersistentAuthorityStateRecordV2,
+) -> AuthorityMarkerV2ComparisonOutcome {
+    if let Err(e) = candidate.validate_structure() {
+        return AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+            reason: e.to_string(),
+        };
+    }
+    let Some(prev) = persisted else {
+        return AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted;
+    };
+    match prev {
+        PersistentAuthorityStateRecordVersioned::V1(v1) => {
+            migrate_authority_marker_v1_to_v2(v1, candidate)
+        }
+        PersistentAuthorityStateRecordVersioned::V2(v2) => {
+            if let Err(e) = v2.validate_structure() {
+                return AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+                    reason: e.to_string(),
+                };
+            }
+            if v2.environment != candidate.environment {
+                return AuthorityMarkerV2ComparisonOutcome::WrongEnvironmentRejected {
+                    persisted_environment: v2.environment,
+                    candidate_environment: candidate.environment,
+                };
+            }
+            if v2.chain_id != candidate.chain_id {
+                return AuthorityMarkerV2ComparisonOutcome::WrongChainIdRejected {
+                    persisted_chain_id: v2.chain_id.clone(),
+                    candidate_chain_id: candidate.chain_id.clone(),
+                };
+            }
+            if v2.genesis_hash != candidate.genesis_hash {
+                return AuthorityMarkerV2ComparisonOutcome::WrongGenesisHashRejected {
+                    persisted_genesis_hash: v2.genesis_hash.clone(),
+                    candidate_genesis_hash: candidate.genesis_hash.clone(),
+                };
+            }
+            if v2.authority_root_fingerprint != candidate.authority_root_fingerprint {
+                return AuthorityMarkerV2ComparisonOutcome::WrongAuthorityRootRejected {
+                    persisted_authority_root: v2.authority_root_fingerprint.clone(),
+                    candidate_authority_root: candidate.authority_root_fingerprint.clone(),
+                };
+            }
+            if v2.latest_authority_domain_sequence > candidate.latest_authority_domain_sequence {
+                return AuthorityMarkerV2ComparisonOutcome::LowerSequenceRejected {
+                    persisted_sequence: v2.latest_authority_domain_sequence,
+                    candidate_sequence: candidate.latest_authority_domain_sequence,
+                };
+            }
+            if v2.latest_authority_domain_sequence < candidate.latest_authority_domain_sequence {
+                return AuthorityMarkerV2ComparisonOutcome::HigherSequenceAccepted {
+                    persisted_sequence: v2.latest_authority_domain_sequence,
+                    candidate_sequence: candidate.latest_authority_domain_sequence,
+                };
+            }
+            if v2.latest_ratification_v2_digest != candidate.latest_ratification_v2_digest {
+                return AuthorityMarkerV2ComparisonOutcome::SameSequenceDifferentDigestRejected {
+                    sequence: v2.latest_authority_domain_sequence,
+                    persisted_digest: v2.latest_ratification_v2_digest.clone(),
+                    candidate_digest: candidate.latest_ratification_v2_digest.clone(),
+                };
+            }
+            if v2.latest_lifecycle_action != candidate.latest_lifecycle_action
+                || v2.active_bundle_signing_key_fingerprint
+                    != candidate.active_bundle_signing_key_fingerprint
+            {
+                return AuthorityMarkerV2ComparisonOutcome::WrongKeyActionLinkageRejected {
+                    reason: "equal sequence requires identical action and active key binding"
+                        .to_string(),
+                };
+            }
+            AuthorityMarkerV2ComparisonOutcome::SameV2MarkerIdempotent
+        }
+    }
+}
+
+pub fn prepare_v2_marker_for_acceptance(
+    persisted: Option<&PersistentAuthorityStateRecordVersioned>,
+    candidate: &PersistentAuthorityStateRecordVersioned,
+) -> AuthorityMarkerV2ComparisonOutcome {
+    match candidate {
+        PersistentAuthorityStateRecordVersioned::V1(v1) => match persisted {
+            Some(PersistentAuthorityStateRecordVersioned::V2(_)) => {
+                AuthorityMarkerV2ComparisonOutcome::V1AfterV2Rejected
+            }
+            Some(PersistentAuthorityStateRecordVersioned::V1(prev_v1)) => {
+                AuthorityMarkerV2ComparisonOutcome::LegacyV1(compare_authority_state(
+                    Some(prev_v1),
+                    v1,
+                ))
+            }
+            None => AuthorityMarkerV2ComparisonOutcome::LegacyV1(compare_authority_state(None, v1)),
+        },
+        PersistentAuthorityStateRecordVersioned::V2(v2) => {
+            compare_authority_marker_v2(persisted, v2)
+        }
+    }
 }
 
 // ===========================================================================
@@ -1733,9 +2547,7 @@ pub fn verify_snapshot_authority_state_for_restore(
             inputs.runtime_chain_id,
             inputs.runtime_genesis_hash_hex,
         ) {
-            return SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerWrongDomain(
-                mismatch,
-            );
+            return SnapshotRestoreAuthorityCheckOutcome::RejectLocalMarkerWrongDomain(mismatch);
         }
     }
 
@@ -2121,10 +2933,7 @@ mod tests {
                 assert_eq!(persisted_hash, "d".repeat(64));
                 assert_eq!(attempted_hash, "1".repeat(64));
             }
-            other => panic!(
-                "expected SameSequenceConflictingHash, got {:?}",
-                other
-            ),
+            other => panic!("expected SameSequenceConflictingHash, got {:?}", other),
         }
     }
 
@@ -2244,13 +3053,8 @@ mod tests {
     #[test]
     fn validate_record_for_domain_accepts_matching_runtime() {
         let r = sample_record();
-        validate_record_for_domain(
-            &r,
-            NetworkEnvironment::Devnet,
-            ChainId(1),
-            &"a".repeat(64),
-        )
-        .unwrap();
+        validate_record_for_domain(&r, NetworkEnvironment::Devnet, ChainId(1), &"a".repeat(64))
+            .unwrap();
     }
 
     #[test]
@@ -2272,13 +3076,9 @@ mod tests {
     #[test]
     fn validate_record_for_domain_rejects_wrong_chain() {
         let r = sample_record();
-        let err = validate_record_for_domain(
-            &r,
-            NetworkEnvironment::Devnet,
-            ChainId(2),
-            &"a".repeat(64),
-        )
-        .unwrap_err();
+        let err =
+            validate_record_for_domain(&r, NetworkEnvironment::Devnet, ChainId(2), &"a".repeat(64))
+                .unwrap_err();
         assert!(matches!(
             err,
             AuthorityStateComparison::ChainMismatch { .. }
@@ -2288,13 +3088,9 @@ mod tests {
     #[test]
     fn validate_record_for_domain_rejects_wrong_genesis() {
         let r = sample_record();
-        let err = validate_record_for_domain(
-            &r,
-            NetworkEnvironment::Devnet,
-            ChainId(1),
-            &"e".repeat(64),
-        )
-        .unwrap_err();
+        let err =
+            validate_record_for_domain(&r, NetworkEnvironment::Devnet, ChainId(1), &"e".repeat(64))
+                .unwrap_err();
         assert!(matches!(
             err,
             AuthorityStateComparison::GenesisHashMismatch { .. }
@@ -2308,7 +3104,10 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = authority_state_file_path(tmp.path());
         let loaded = load_authority_state(&path).unwrap();
-        assert!(loaded.is_none(), "missing file must surface as None (explicit absence)");
+        assert!(
+            loaded.is_none(),
+            "missing file must surface as None (explicit absence)"
+        );
     }
 
     #[test]
@@ -2419,9 +3218,7 @@ mod tests {
         use super::*;
         use qbind_crypto::MlDsa44Backend;
         use qbind_ledger::bundle_signing_ratification::test_helpers as ratification_helpers;
-        use qbind_ledger::{
-            pqc_public_key_fingerprint, RatificationEnvironment,
-        };
+        use qbind_ledger::{pqc_public_key_fingerprint, RatificationEnvironment};
 
         fn full_pk_hex(pk: &[u8]) -> String {
             let mut s = String::with_capacity(pk.len() * 2);
@@ -2517,7 +3314,10 @@ mod tests {
             // And in this fixture the records themselves are identical.
             assert_eq!(r1, r2);
             assert_eq!(r1.authority_root_fingerprint, f.authority_pk_hex);
-            assert_eq!(r1.ratified_bundle_signing_key_fingerprint, f.ratified.fingerprint);
+            assert_eq!(
+                r1.ratified_bundle_signing_key_fingerprint,
+                f.ratified.fingerprint
+            );
         }
 
         #[test]
@@ -2536,16 +3336,13 @@ mod tests {
 
         #[test]
         fn derive_environment_change_changes_marker() {
-            let f_dev =
-                build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
+            let f_dev = build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
             let f_main =
                 build_verified_fixture(RatificationEnvironment::Mainnet, "0000000000000001");
-            let r_dev =
-                derive_authority_state_from_ratification(devnet_inputs(&f_dev, 5)).unwrap();
+            let r_dev = derive_authority_state_from_ratification(devnet_inputs(&f_dev, 5)).unwrap();
             let mut inputs_main = devnet_inputs(&f_main, 5);
             inputs_main.runtime_env = NetworkEnvironment::Mainnet;
-            let r_main =
-                derive_authority_state_from_ratification(inputs_main).unwrap();
+            let r_main = derive_authority_state_from_ratification(inputs_main).unwrap();
             assert_ne!(
                 canonical_authority_state_digest(&r_dev),
                 canonical_authority_state_digest(&r_main)
@@ -2628,7 +3425,10 @@ mod tests {
             let f_b = mk(&bsk_pk_b);
             let r_a = derive_authority_state_from_ratification(devnet_inputs(&f_a, 5)).unwrap();
             let r_b = derive_authority_state_from_ratification(devnet_inputs(&f_b, 5)).unwrap();
-            assert_eq!(r_a.authority_root_fingerprint, r_b.authority_root_fingerprint);
+            assert_eq!(
+                r_a.authority_root_fingerprint,
+                r_b.authority_root_fingerprint
+            );
             assert_ne!(
                 r_a.ratified_bundle_signing_key_fingerprint,
                 r_b.ratified_bundle_signing_key_fingerprint
@@ -2676,7 +3476,9 @@ mod tests {
             inputs.runtime_genesis_hash_hex = "deadbeef"; // too short
             assert!(matches!(
                 derive_authority_state_from_ratification(inputs),
-                Err(AuthorityStateDerivationError::MalformedRuntimeGenesisHash(_))
+                Err(AuthorityStateDerivationError::MalformedRuntimeGenesisHash(
+                    _
+                ))
             ));
         }
 
@@ -2731,8 +3533,7 @@ mod tests {
             let tmp = TempDir::new().unwrap();
             let path = authority_state_file_path(tmp.path());
             let f = build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
-            let cand =
-                derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
+            let cand = derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
             let outcome = prepare_marker_for_acceptance(
                 &path,
                 &cand,
@@ -2750,8 +3551,7 @@ mod tests {
             let tmp = TempDir::new().unwrap();
             let path = authority_state_file_path(tmp.path());
             let f = build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
-            let cand =
-                derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
+            let cand = derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
             persist_authority_state_atomic(&path, &cand).unwrap();
             // Re-derive with different audit fields — must still be
             // idempotent because the digest excludes audit fields.
@@ -2766,7 +3566,10 @@ mod tests {
                 ChainId(1),
                 &f.genesis_hash_hex,
             );
-            assert_eq!(outcome, AuthorityStatePrepareOutcome::AlreadyPersistedIdempotent);
+            assert_eq!(
+                outcome,
+                AuthorityStatePrepareOutcome::AlreadyPersistedIdempotent
+            );
             assert!(outcome.is_accept());
             assert!(!outcome.should_persist());
         }
@@ -2835,11 +3638,9 @@ mod tests {
             // Use the same genesis_hash on both fixtures (build_verified_fixture
             // already does), but force runtime hex to match fixture A so the
             // domain check passes for the persisted record.
-            let prev =
-                derive_authority_state_from_ratification(devnet_inputs(&f_a, 5)).unwrap();
+            let prev = derive_authority_state_from_ratification(devnet_inputs(&f_a, 5)).unwrap();
             persist_authority_state_atomic(&path, &prev).unwrap();
-            let cand =
-                derive_authority_state_from_ratification(devnet_inputs(&f_b, 5)).unwrap();
+            let cand = derive_authority_state_from_ratification(devnet_inputs(&f_b, 5)).unwrap();
             let outcome = prepare_marker_for_acceptance(
                 &path,
                 &cand,
@@ -2888,10 +3689,8 @@ mod tests {
             persist_authority_state_atomic(&path, &on_disk).unwrap();
 
             // Build a devnet candidate for the wrapper.
-            let f_dev =
-                build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
-            let cand =
-                derive_authority_state_from_ratification(devnet_inputs(&f_dev, 5)).unwrap();
+            let f_dev = build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
+            let cand = derive_authority_state_from_ratification(devnet_inputs(&f_dev, 5)).unwrap();
             let outcome = prepare_marker_for_acceptance(
                 &path,
                 &cand,
@@ -2912,8 +3711,7 @@ mod tests {
             let path = authority_state_file_path(tmp.path());
             std::fs::write(&path, b"{ not valid json").unwrap();
             let f = build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
-            let cand =
-                derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
+            let cand = derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
             let outcome = prepare_marker_for_acceptance(
                 &path,
                 &cand,
@@ -2939,8 +3737,7 @@ mod tests {
             let tmp = TempDir::new().unwrap();
             let path = authority_state_file_path(tmp.path());
             let f = build_verified_fixture(RatificationEnvironment::Devnet, "0000000000000001");
-            let cand =
-                derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
+            let cand = derive_authority_state_from_ratification(devnet_inputs(&f, 5)).unwrap();
             let outcome = prepare_marker_for_acceptance(
                 &path,
                 &cand,
@@ -2961,9 +3758,7 @@ mod tests {
             assert!(AuthorityStatePrepareOutcome::FirstWrite.should_persist());
 
             assert!(AuthorityStatePrepareOutcome::AlreadyPersistedIdempotent.is_accept());
-            assert!(
-                !AuthorityStatePrepareOutcome::AlreadyPersistedIdempotent.should_persist()
-            );
+            assert!(!AuthorityStatePrepareOutcome::AlreadyPersistedIdempotent.should_persist());
 
             let upgrade = AuthorityStatePrepareOutcome::Upgrade {
                 previous_sequence: 1,
@@ -3058,7 +3853,10 @@ mod tests {
         fn no_local_no_snapshot_is_legacy_accept() {
             let tmp = TempDir::new().unwrap();
             let outcome = run_check(&authority_state_file_path(tmp.path()), None);
-            assert_eq!(outcome, SnapshotRestoreAuthorityCheckOutcome::NoMarkerEitherSide);
+            assert_eq!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::NoMarkerEitherSide
+            );
             assert!(outcome.is_accept());
             // Restore surface must not have created any marker.
             assert!(!authority_state_file_path(tmp.path()).exists());
@@ -3086,7 +3884,10 @@ mod tests {
             let bytes_before = std::fs::read(&path).unwrap();
             let snap = matching_snapshot_meta();
             let outcome = run_check(&path, Some(&snap));
-            assert_eq!(outcome, SnapshotRestoreAuthorityCheckOutcome::AcceptMatchingMarker);
+            assert_eq!(
+                outcome,
+                SnapshotRestoreAuthorityCheckOutcome::AcceptMatchingMarker
+            );
             // Restore must not rewrite the local marker.
             let bytes_after = std::fs::read(&path).unwrap();
             assert_eq!(bytes_before, bytes_after, "marker bytes preserved");
@@ -3252,13 +4053,9 @@ mod tests {
         #[test]
         fn outcome_classification_helpers() {
             assert!(SnapshotRestoreAuthorityCheckOutcome::NoMarkerEitherSide.is_accept());
-            assert!(
-                SnapshotRestoreAuthorityCheckOutcome::AcceptSnapshotMarkerNoLocal.is_accept()
-            );
+            assert!(SnapshotRestoreAuthorityCheckOutcome::AcceptSnapshotMarkerNoLocal.is_accept());
             assert!(SnapshotRestoreAuthorityCheckOutcome::AcceptMatchingMarker.is_accept());
-            assert!(
-                SnapshotRestoreAuthorityCheckOutcome::RejectMissingSnapshotMarker.is_reject()
-            );
+            assert!(SnapshotRestoreAuthorityCheckOutcome::RejectMissingSnapshotMarker.is_reject());
             assert!(SnapshotRestoreAuthorityCheckOutcome::RejectConflict(
                 AuthorityStateComparison::RollbackRefused {
                     persisted_sequence: 9,
@@ -3282,6 +4079,396 @@ mod tests {
             let snap = matching_snapshot_meta();
             let _ = run_check(&path2, Some(&snap));
             assert!(!path2.exists());
+        }
+    }
+
+    // =======================================================================
+    // Run 131 — marker v2 representation / comparison / migration
+    // =======================================================================
+    mod run131 {
+        use super::*;
+        use qbind_ledger::RatificationEnvironment;
+
+        fn sample_v2_record() -> PersistentAuthorityStateRecordV2 {
+            PersistentAuthorityStateRecordV2::new(
+                "0000000000000001".to_string(),
+                TrustBundleEnvironment::Devnet,
+                "a".repeat(64),
+                "b".repeat(40),
+                100,
+                "c".repeat(40),
+                100,
+                7,
+                BundleSigningRatificationV2Action::Ratify,
+                None,
+                "d".repeat(64),
+                None,
+                AuthorityStateUpdateSource::TestOrFixture,
+                1_700_000_123,
+            )
+        }
+
+        fn sample_ratification_v2(
+            action: BundleSigningRatificationV2Action,
+        ) -> BundleSigningRatificationV2 {
+            BundleSigningRatificationV2 {
+                schema_version: 2,
+                environment: RatificationEnvironment::Devnet,
+                chain_id: "0000000000000001".to_string(),
+                genesis_hash: [0xaa; 32],
+                authority_policy_version: 1,
+                authority_root_fingerprint: "b".repeat(40),
+                authority_root_suite_id: 100,
+                target_bundle_signing_key_fingerprint: "c".repeat(40),
+                target_bundle_signing_key_suite_id: 100,
+                target_bundle_signing_public_key: vec![0u8; 1312],
+                authority_domain_sequence: 7,
+                key_lifecycle_action: action,
+                previous_key_fingerprint: None,
+                previous_ratification_digest: None,
+                valid_from_epoch: None,
+                valid_until_epoch: None,
+                revocation_reason: None,
+                capabilities_scope: None,
+                signature: vec![0u8; 2420],
+            }
+        }
+
+        fn sample_ratifed_v2(
+            action: BundleSigningRatificationV2Action,
+        ) -> RatifiedBundleSigningKeyV2 {
+            RatifiedBundleSigningKeyV2 {
+                public_key: vec![0u8; 1312],
+                fingerprint: "c".repeat(40),
+                suite_id: 100,
+                authority_root_fingerprint: "b".repeat(40),
+                authority_policy_version: 1,
+                authority_domain_sequence: 7,
+                key_lifecycle_action: action,
+            }
+        }
+
+        #[test]
+        fn v2_digest_is_deterministic_and_domain_separated_from_v1() {
+            let v2 = sample_v2_record();
+            assert_eq!(
+                canonical_authority_state_v2_digest(&v2),
+                canonical_authority_state_v2_digest(&v2)
+            );
+            assert!(
+                canonical_authority_state_v2_preimage(&v2).starts_with(AUTHORITY_STATE_DOMAIN_V2)
+            );
+            let v1 = sample_record();
+            assert!(canonical_authority_state_preimage(&v1).starts_with(AUTHORITY_STATE_DOMAIN_V1));
+            assert_ne!(
+                canonical_authority_state_v2_digest(&v2),
+                canonical_authority_state_digest(&v1)
+            );
+        }
+
+        #[test]
+        fn v2_digest_changes_with_security_fields() {
+            let base = sample_v2_record();
+            let base_digest = canonical_authority_state_v2_digest(&base);
+
+            let mut r = base.clone();
+            r.environment = TrustBundleEnvironment::Mainnet;
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.chain_id = "0000000000000002".to_string();
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.genesis_hash = "f".repeat(64);
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.authority_root_fingerprint = "e".repeat(40);
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.active_bundle_signing_key_fingerprint = "9".repeat(40);
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.latest_authority_domain_sequence += 1;
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.latest_lifecycle_action = BundleSigningRatificationV2Action::Revoke;
+            r.revoked_key_metadata = Some("7".repeat(40));
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+
+            let mut r = base.clone();
+            r.latest_ratification_v2_digest = "1".repeat(64);
+            assert_ne!(canonical_authority_state_v2_digest(&r), base_digest);
+        }
+
+        #[test]
+        fn derive_v2_marker_ratify_rotate_revoke_and_fail_closed_cases() {
+            let ratify = sample_ratification_v2(BundleSigningRatificationV2Action::Ratify);
+            let out =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+                    runtime_env: NetworkEnvironment::Devnet,
+                    runtime_chain_id: ChainId::new(1),
+                    runtime_genesis_hash_hex: &"aa".repeat(32),
+                    ratification: &ratify,
+                    ratified: &sample_ratifed_v2(BundleSigningRatificationV2Action::Ratify),
+                    update_source: AuthorityStateUpdateSource::TestOrFixture,
+                    updated_at_unix_secs: 1,
+                })
+                .expect("ratify derives");
+            assert_eq!(
+                out.latest_lifecycle_action,
+                BundleSigningRatificationV2Action::Ratify
+            );
+
+            let mut rotate = sample_ratification_v2(BundleSigningRatificationV2Action::Rotate);
+            rotate.previous_key_fingerprint = Some("d".repeat(40));
+            rotate.previous_ratification_digest = Some("e".repeat(64));
+            let out_rotate =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+                    runtime_env: NetworkEnvironment::Devnet,
+                    runtime_chain_id: ChainId::new(1),
+                    runtime_genesis_hash_hex: &"aa".repeat(32),
+                    ratification: &rotate,
+                    ratified: &sample_ratifed_v2(BundleSigningRatificationV2Action::Rotate),
+                    update_source: AuthorityStateUpdateSource::TestOrFixture,
+                    updated_at_unix_secs: 1,
+                })
+                .expect("rotate derives");
+            assert_eq!(
+                out_rotate.previous_bundle_signing_key_fingerprint,
+                Some("d".repeat(40))
+            );
+
+            let mut revoke = sample_ratification_v2(BundleSigningRatificationV2Action::Revoke);
+            revoke.revocation_reason = Some("compromised".to_string());
+            let out_revoke =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+                    runtime_env: NetworkEnvironment::Devnet,
+                    runtime_chain_id: ChainId::new(1),
+                    runtime_genesis_hash_hex: &"aa".repeat(32),
+                    ratification: &revoke,
+                    ratified: &sample_ratifed_v2(BundleSigningRatificationV2Action::Revoke),
+                    update_source: AuthorityStateUpdateSource::TestOrFixture,
+                    updated_at_unix_secs: 1,
+                })
+                .expect("revoke derives");
+            assert!(out_revoke.revoked_key_metadata.is_some());
+
+            let mut rotate_missing_prev =
+                sample_ratification_v2(BundleSigningRatificationV2Action::Rotate);
+            rotate_missing_prev.previous_ratification_digest = Some("e".repeat(64));
+            let err =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+                    runtime_env: NetworkEnvironment::Devnet,
+                    runtime_chain_id: ChainId::new(1),
+                    runtime_genesis_hash_hex: &"aa".repeat(32),
+                    ratification: &rotate_missing_prev,
+                    ratified: &sample_ratifed_v2(BundleSigningRatificationV2Action::Rotate),
+                    update_source: AuthorityStateUpdateSource::TestOrFixture,
+                    updated_at_unix_secs: 1,
+                })
+                .expect_err("missing rotate previous key must fail");
+            assert!(matches!(
+                err,
+                AuthorityStateDerivationV2Error::MissingPreviousKeyForRotate
+            ));
+
+            let mut wrong_domain =
+                sample_ratification_v2(BundleSigningRatificationV2Action::Ratify);
+            wrong_domain.environment = RatificationEnvironment::Mainnet;
+            let err =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+                    runtime_env: NetworkEnvironment::Devnet,
+                    runtime_chain_id: ChainId::new(1),
+                    runtime_genesis_hash_hex: &"aa".repeat(32),
+                    ratification: &wrong_domain,
+                    ratified: &sample_ratifed_v2(BundleSigningRatificationV2Action::Ratify),
+                    update_source: AuthorityStateUpdateSource::TestOrFixture,
+                    updated_at_unix_secs: 1,
+                })
+                .expect_err("wrong domain must fail");
+            assert!(matches!(
+                err,
+                AuthorityStateDerivationV2Error::EnvironmentMismatch { .. }
+            ));
+
+            let mut wrong_target =
+                sample_ratification_v2(BundleSigningRatificationV2Action::Ratify);
+            wrong_target.target_bundle_signing_key_fingerprint = "f".repeat(40);
+            let err =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+                    runtime_env: NetworkEnvironment::Devnet,
+                    runtime_chain_id: ChainId::new(1),
+                    runtime_genesis_hash_hex: &"aa".repeat(32),
+                    ratification: &wrong_target,
+                    ratified: &sample_ratifed_v2(BundleSigningRatificationV2Action::Ratify),
+                    update_source: AuthorityStateUpdateSource::TestOrFixture,
+                    updated_at_unix_secs: 1,
+                })
+                .expect_err("wrong target binding must fail");
+            assert!(matches!(
+                err,
+                AuthorityStateDerivationV2Error::TargetKeyBindingMismatch { .. }
+            ));
+        }
+
+        #[test]
+        fn compare_v2_and_migration_rules() {
+            let base = sample_v2_record();
+            assert!(matches!(
+                compare_authority_marker_v2(None, &base),
+                AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted
+            ));
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &base
+                ),
+                AuthorityMarkerV2ComparisonOutcome::SameV2MarkerIdempotent
+            ));
+
+            let mut higher = base.clone();
+            higher.latest_authority_domain_sequence += 1;
+            higher.latest_ratification_v2_digest = "f".repeat(64);
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &higher
+                ),
+                AuthorityMarkerV2ComparisonOutcome::HigherSequenceAccepted { .. }
+            ));
+
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(higher.clone())),
+                    &base
+                ),
+                AuthorityMarkerV2ComparisonOutcome::LowerSequenceRejected { .. }
+            ));
+
+            let mut same_seq_diff_digest = base.clone();
+            same_seq_diff_digest.latest_ratification_v2_digest = "1".repeat(64);
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &same_seq_diff_digest
+                ),
+                AuthorityMarkerV2ComparisonOutcome::SameSequenceDifferentDigestRejected { .. }
+            ));
+
+            let mut wrong_env = base.clone();
+            wrong_env.environment = TrustBundleEnvironment::Mainnet;
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &wrong_env
+                ),
+                AuthorityMarkerV2ComparisonOutcome::WrongEnvironmentRejected { .. }
+            ));
+
+            let mut wrong_chain = base.clone();
+            wrong_chain.chain_id = "0000000000000002".to_string();
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &wrong_chain
+                ),
+                AuthorityMarkerV2ComparisonOutcome::WrongChainIdRejected { .. }
+            ));
+
+            let mut wrong_genesis = base.clone();
+            wrong_genesis.genesis_hash = "f".repeat(64);
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &wrong_genesis
+                ),
+                AuthorityMarkerV2ComparisonOutcome::WrongGenesisHashRejected { .. }
+            ));
+
+            let mut wrong_root = base.clone();
+            wrong_root.authority_root_fingerprint = "9".repeat(40);
+            assert!(matches!(
+                compare_authority_marker_v2(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(base.clone())),
+                    &wrong_root
+                ),
+                AuthorityMarkerV2ComparisonOutcome::WrongAuthorityRootRejected { .. }
+            ));
+
+            let mut bad_version = base.clone();
+            bad_version.record_version = 99;
+            assert!(matches!(
+                compare_authority_marker_v2(None, &bad_version),
+                AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected { .. }
+            ));
+        }
+
+        #[test]
+        fn versioned_parse_and_v1_v2_policy_paths() {
+            let unsupported = br#"{"record_version": 999}"#;
+            assert!(matches!(
+                parse_versioned_authority_state_record_bytes(unsupported),
+                Err(AuthorityStateError::UnsupportedRecordVersion(999))
+            ));
+            assert!(matches!(
+                parse_versioned_authority_state_record_bytes(b"{not json"),
+                Err(AuthorityStateError::Malformed(_))
+            ));
+
+            let v1_prev = sample_record();
+            let v1_candidate = sample_record();
+            let legacy = prepare_v2_marker_for_acceptance(
+                Some(&PersistentAuthorityStateRecordVersioned::V1(
+                    v1_prev.clone(),
+                )),
+                &PersistentAuthorityStateRecordVersioned::V1(v1_candidate.clone()),
+            );
+            assert_eq!(
+                legacy,
+                AuthorityMarkerV2ComparisonOutcome::LegacyV1(compare_authority_state(
+                    Some(&v1_prev),
+                    &v1_candidate
+                ))
+            );
+
+            let v2_candidate = sample_v2_record();
+            assert!(matches!(
+                prepare_v2_marker_for_acceptance(
+                    Some(&PersistentAuthorityStateRecordVersioned::V1(sample_record())),
+                    &PersistentAuthorityStateRecordVersioned::V2(v2_candidate.clone()),
+                ),
+                AuthorityMarkerV2ComparisonOutcome::V2AfterV1ExplicitMigrationAllowed
+            ));
+
+            assert!(matches!(
+                prepare_v2_marker_for_acceptance(
+                    Some(&PersistentAuthorityStateRecordVersioned::V2(
+                        v2_candidate.clone()
+                    )),
+                    &PersistentAuthorityStateRecordVersioned::V1(sample_record()),
+                ),
+                AuthorityMarkerV2ComparisonOutcome::V1AfterV2Rejected
+            ));
+
+            assert!(matches!(
+                prepare_v2_marker_for_acceptance(
+                    None,
+                    &PersistentAuthorityStateRecordVersioned::V1(sample_record())
+                ),
+                AuthorityMarkerV2ComparisonOutcome::LegacyV1(AuthorityStateComparison::FirstLoad)
+            ));
+            assert!(matches!(
+                prepare_v2_marker_for_acceptance(
+                    None,
+                    &PersistentAuthorityStateRecordVersioned::V2(sample_v2_record())
+                ),
+                AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted
+            ));
         }
     }
 }

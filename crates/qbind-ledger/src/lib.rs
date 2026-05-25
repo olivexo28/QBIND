@@ -133,8 +133,9 @@ pub use state_snapshot::AuthorityStateSnapshotMeta;
 // M1: Persistent RocksDB-backed slashing ledger
 // M1.2: Atomic persistence for slashing updates
 pub use slashing_ledger::{
-    EpochNumber, InMemorySlashingLedger, RocksDbSlashingLedger, SlashingLedger, SlashingLedgerError,
-    SlashingRecord, SlashingUpdateBatch, StakeAmount, ValidatorLedgerId, ValidatorSlashingState,
+    EpochNumber, InMemorySlashingLedger, RocksDbSlashingLedger, SlashingLedger,
+    SlashingLedgerError, SlashingRecord, SlashingUpdateBatch, StakeAmount, ValidatorLedgerId,
+    ValidatorSlashingState,
 };
 
 // T232: Genesis & Launch State exports
@@ -163,22 +164,28 @@ pub use genesis::{
 // Run 104: Genesis-Bound Authority Key Material Registry exports
 pub use genesis::{
     authority_public_key_fingerprint, GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN,
-    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES,
-    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN,
+    GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES, GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN,
 };
 
 // Run 103: Minimal Bundle-Signing-Key Ratification Verifier exports
 pub use bundle_signing_ratification::{
-    canonical_ratification_digest, canonical_ratification_preimage,
-    classify_authority_root_kind, pqc_public_key_fingerprint,
-    verify_bundle_signing_key_ratification, BundleSigningRatification, RatificationEnvironment,
-    RatificationFailure, RatificationVerifierInputs, RatifiedBundleSigningKey,
-    BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1, BUNDLE_SIGNING_RATIFICATION_VERSION_V1,
+    canonical_ratification_digest, canonical_ratification_preimage, classify_authority_root_kind,
+    pqc_public_key_fingerprint, verify_bundle_signing_key_ratification, BundleSigningRatification,
+    RatificationEnvironment, RatificationFailure, RatificationVerifierInputs,
+    RatifiedBundleSigningKey, BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1,
+    BUNDLE_SIGNING_RATIFICATION_VERSION_V1,
+};
+
+// Run 130: Ratification v2 primitive exports.
+pub use bundle_signing_ratification::{
+    canonical_ratification_v2_digest, verify_bundle_signing_key_ratification_v2,
+    BundleSigningRatificationV2, BundleSigningRatificationV2Action, RatificationV2Failure,
+    RatificationV2VerifierInputs, RatifiedBundleSigningKeyV2,
+    BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2, BUNDLE_SIGNING_RATIFICATION_VERSION_V2,
 };
 
 // Run 105: Non-mutating ratification enforcement layer exports.
 pub use bundle_signing_ratification::{
     enforce_bundle_signing_key_ratification, RatificationEnforcementFailure,
-    RatificationEnforcementInputs, RatificationEnforcementOutcome,
-    RatificationEnforcementPolicy,
+    RatificationEnforcementInputs, RatificationEnforcementOutcome, RatificationEnforcementPolicy,
 };
