@@ -1,0 +1,38 @@
+Run 135 v2 reload-apply release-binary evidence
+outdir: /tmp/qbind-run135
+repo: /home/runner/work/QBIND/QBIND
+git_commit: 1cc756883f51f78bd1de421afc1e6f4b5632462c
+qbind-node_sha256: afa84c932a0bfbde1ceb1e85b82e0a866e1468f454a55de3ae98f45099b7444d
+qbind-node_build_id: 6a4fb410891d8f2f43da2bf9faadf23d5e4b3d4f
+fixture-helper_sha256: 888ac3a2b967a93ba1ac4c07b1d5a8febec75863f87fb97cbad391cc5a379ca6
+fixture-helper_build_id: 9fee794c6389f4af7dc99fc12261829a441d22a5
+
+scenario status:
+  scenario_A1_v2_first_write: rc=0
+  scenario_A2_v2_after_v1_migration: rc=0
+  scenario_A3_v2_idempotent: rc=0
+  scenario_A4_v2_higher_sequence: rc=0
+  scenario_R1_v2_lower_sequence: rc=1
+  scenario_R2_v2_same_seq_different_digest: rc=1
+  scenario_R3a_v2_bad_signature: rc=1
+  scenario_R3b_v2_wrong_environment: rc=1
+  scenario_V1_v1_regression: rc=0
+
+non-mutation checks: pass
+  no pqc_trust_bundle_sequence.json created under any refusal scenario data dir
+  no pqc_authority_state.json.tmp sibling left behind under any scenario
+  pre-seeded marker bytes preserved on every refusal path
+  no marker file created on refusal scenarios with no pre-seeded marker
+post-commit persist checks: pass
+  v2 marker present with record_version=2 + expected sequence/action
+  on every accepted v2 scenario (A1/A2/A4)
+  v2 marker bytes byte-identical across idempotent run (A3)
+  v1 marker present with record_version=1 on the V1 regression scenario
+wire-format checks: source-only; no trust-bundle, ratification, or
+  peer-candidate wire format changed by this evidence harness
+scope non-goal checks: no SIGHUP v2, no startup v2, no live 0x05 v2,
+  no KMS/HSM, no peer-driven apply, no rotation/revocation lifecycle
+  observed in stderr of any scenario
+R4 (apply failure after preflight): covered by Run 134 §C.3 test-only
+  (FakeLiveTrustApplyContext swap-stage failure); release binary
+  cannot trigger a deterministic post-preflight apply failure.
