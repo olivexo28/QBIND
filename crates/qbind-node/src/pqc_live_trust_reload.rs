@@ -154,22 +154,31 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use qbind_ledger::{
-    enforce_bundle_signing_key_ratification, GenesisAuthorityConfig, GenesisHash,
-    NetworkEnvironmentPolicy, RatificationEnforcementInputs, RatificationEnforcementOutcome,
-    RatificationEnforcementPolicy,
+    enforce_bundle_signing_key_ratification, verify_bundle_signing_key_ratification_v2,
+    BundleSigningRatificationV2, GenesisAuthorityConfig, GenesisHash, NetworkEnvironmentPolicy,
+    RatificationEnforcementInputs, RatificationEnforcementOutcome, RatificationEnforcementPolicy,
+    RatificationV2VerifierInputs,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p_session_eviction::P2pSessionEvictor;
 use crate::pqc_authority_marker_acceptance::{
-    decide_marker_acceptance, persist_accepted_marker_after_commit_boundary,
-    MarkerAcceptDecision, MarkerAcceptanceInputs, MutatingSurfaceMarkerError,
+    decide_marker_acceptance, decide_marker_acceptance_v2,
+    persist_accepted_marker_after_commit_boundary,
+    persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecision,
+    MarkerAcceptDecisionV2, MarkerAcceptanceInputs, MarkerAcceptanceV2Inputs,
+    MutatingSurfaceMarkerError, MutatingSurfaceMarkerV2Error,
 };
-use crate::pqc_authority_state::AuthorityStateUpdateSource;
+use crate::pqc_authority_state::{
+    AuthorityMarkerV2ComparisonOutcome, AuthorityStateUpdateSource,
+};
 use crate::pqc_live_trust::LivePqcTrustState;
 use crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext;
-use crate::pqc_ratification_input::{load_ratification_from_path, RatificationInputError};
+use crate::pqc_ratification_input::{
+    load_versioned_ratification_from_path, VersionedRatificationInputError,
+    VersionedRatificationSidecar,
+};
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{
     BundleSignatureStatus, BundleSigningKeySet, TrustBundle, TrustBundleError,
@@ -426,6 +435,42 @@ pub enum LiveReloadOutcome {
         applied: AppliedCandidate,
         marker_error: MutatingSurfaceMarkerError,
     },
+    /// Run 138 — the v2 SIGHUP marker preflight refused the candidate
+    /// BEFORE any apply pipeline mutation. v2 twin of
+    /// [`Self::MarkerRejected`]: pre-mutation refusal, live trust
+    /// state / sessions / on-disk sequence record / on-disk marker
+    /// file all byte-identical to the pre-trigger state. The embedded
+    /// [`MutatingSurfaceMarkerV2Error`] carries the precise reject
+    /// reason (lower-sequence rollback, same-sequence equivocation,
+    /// persisted-domain mismatch, v2 verifier failure mapped to
+    /// `Conflict`, …).
+    ///
+    /// This variant is NEVER reachable unless the per-trigger
+    /// ratification sidecar parsed as `schema_version=2` AND both
+    /// [`LiveReloadConfig::ratification`] and
+    /// [`LiveReloadConfig::authority_marker`] were `Some(_)` at
+    /// controller construction. The node continues running; the
+    /// operator may re-trigger after correcting the candidate or the
+    /// on-disk marker.
+    MarkerRejectedV2(MutatingSurfaceMarkerV2Error),
+    /// Run 138 — the v2 SIGHUP path's apply pipeline returned `Ok`
+    /// and the trust-bundle sequence already committed, but the
+    /// subsequent atomic v2 marker write failed. v2 twin of
+    /// [`Self::MarkerPersistFailureAfterCommit`].
+    ///
+    /// The on-disk v2 authority marker is stale-by-one relative to
+    /// the trust-bundle sequence (safely replayable per Run 118 §D /
+    /// Run 131 as an `UpgradeV2` on the next accepted v2 mutation),
+    /// but the operator MUST be told. The caller (the binary's
+    /// SIGHUP task in `main.rs`) MUST initiate a graceful shutdown,
+    /// matching the existing
+    /// [`Self::MarkerPersistFailureAfterCommit`] / [`Self::Fatal`]
+    /// shutdown semantics — this preserves the Run 074 single
+    /// shutdown surface.
+    MarkerPersistFailureAfterCommitV2 {
+        applied: AppliedCandidate,
+        marker_error: MutatingSurfaceMarkerV2Error,
+    },
 }
 
 impl LiveReloadOutcome {
@@ -436,6 +481,7 @@ impl LiveReloadOutcome {
             self,
             LiveReloadOutcome::Applied(_)
                 | LiveReloadOutcome::MarkerPersistFailureAfterCommit { .. }
+                | LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 { .. }
         )
     }
 
@@ -459,6 +505,7 @@ impl LiveReloadOutcome {
             self,
             LiveReloadOutcome::Fatal(_)
                 | LiveReloadOutcome::MarkerPersistFailureAfterCommit { .. }
+                | LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 { .. }
         )
     }
 
@@ -469,7 +516,10 @@ impl LiveReloadOutcome {
     /// to the pre-trigger state — the operator may simply re-trigger
     /// after correcting the candidate or the on-disk marker.
     pub fn is_marker_rejected(&self) -> bool {
-        matches!(self, LiveReloadOutcome::MarkerRejected(_))
+        matches!(
+            self,
+            LiveReloadOutcome::MarkerRejected(_) | LiveReloadOutcome::MarkerRejectedV2(_)
+        )
     }
 
     /// Canonical Run 074 operator-log line summarising the
@@ -518,6 +568,26 @@ impl LiveReloadOutcome {
                  on-disk marker is stale-by-one relative to the trust-bundle sequence \
                  (safely replayable as an Upgrade per Run 118 §D) but graceful shutdown is \
                  required so the operator can surface and recover the failure). Reason: {}",
+                applied.session_evictions, marker_error
+            ),
+            LiveReloadOutcome::MarkerRejectedV2(e) => format!(
+                "[binary] Run 138: VERDICT=marker-rejected-v2 (SIGHUP v2 authority-marker \
+                 preflight refused the candidate BEFORE any snapshot, swap, eviction, or \
+                 sequence commit; live trust state, sessions, on-disk sequence record, and \
+                 on-disk authority-marker file are all unchanged). Reason: {}",
+                e
+            ),
+            LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 {
+                applied,
+                marker_error,
+            } => format!(
+                "[binary] Run 138: VERDICT=FATAL-marker-persist-v2 (live trust-bundle apply \
+                 on long-running node succeeded — session_evictions={}, sequence_commit=ok — \
+                 but v2 authority-marker atomic persist FAILED AFTER the commit boundary; \
+                 the on-disk v2 marker is stale-by-one relative to the trust-bundle sequence \
+                 (safely replayable as an UpgradeV2 per Run 118 §D / Run 131) but graceful \
+                 shutdown is required so the operator can surface and recover the failure). \
+                 Reason: {}",
                 applied.session_evictions, marker_error
             ),
         }
@@ -702,6 +772,17 @@ impl LiveReloadController {
                     applied.validated.sequence,
                 );
             }
+            // Run 138 — same shape as the v1 marker-persist-fatal
+            // branch above. The trust-bundle sequence already
+            // committed; the v2 marker write failed after the commit
+            // boundary. Bump success counters; FATAL shape is carried
+            // by the variant via `is_fatal()`.
+            LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 { applied, .. } => {
+                self.metrics.record_live_reload_apply_success(
+                    applied.session_evictions as u64,
+                    applied.validated.sequence,
+                );
+            }
             LiveReloadOutcome::Invalid(_)
             | LiveReloadOutcome::Fatal(_)
             // Run 121 — marker preflight refused; no apply pipeline
@@ -709,7 +790,11 @@ impl LiveReloadController {
             // on-disk marker are all unchanged. Same counter shape
             // as any other pre-mutation refusal (Run 069 validation
             // refusal, Run 114 sidecar I/O failure).
-            | LiveReloadOutcome::MarkerRejected(_) => {
+            | LiveReloadOutcome::MarkerRejected(_)
+            // Run 138 — v2 marker preflight refused (or v2 verifier
+            // failure mapped to the marker error). Same pre-mutation
+            // refusal counter shape as the v1 branch above.
+            | LiveReloadOutcome::MarkerRejectedV2(_) => {
                 self.metrics.record_live_reload_apply_failure();
             }
             // AlreadyInProgress is already accounted for above and
@@ -775,28 +860,73 @@ impl LiveReloadController {
         // write. See `task/RUN_114_TASK.txt`.
         match &self.config.ratification {
             Some(rcfg) => {
-                // Per-trigger sidecar load: operator can replace the
-                // file in-place between SIGHUPs. A missing path
-                // (`None`) passes through as `ratification: None` to
-                // the verifier so the typed `Missing` refusal is
-                // surfaced under `Strict` policy.
-                let ratification_obj = match rcfg.ratification_sidecar_path.as_ref() {
-                    Some(path) => match load_ratification_from_path(path) {
-                        Ok(r) => Some(r),
+                // Run 132/138 — peek the sidecar schema version once
+                // per trigger. v1 sidecars take the existing Run
+                // 114/121 path verbatim. v2 sidecars take the Run 138
+                // dispatch (Run 130 v2 verifier + Run 134/136 v2
+                // marker decision + `apply_validated_candidate_with_previous`
+                // without a v1 ratification context). `None` (no
+                // sidecar) falls through to the existing v1
+                // verifier path which surfaces the typed `Missing`
+                // refusal under Strict policy.
+                let ratification_obj_v1 = match rcfg.ratification_sidecar_path.as_ref() {
+                    Some(path) => match load_versioned_ratification_from_path(path) {
+                        Ok(VersionedRatificationSidecar::V1(r)) => Some(r),
+                        Ok(VersionedRatificationSidecar::V2(r2)) => {
+                            // Run 138 — v2 dispatch. Skip the v1
+                            // ratification context entirely; the v2
+                            // verifier runs inside the preflight
+                            // helper. Apply via
+                            // `apply_validated_candidate_with_previous`
+                            // (no v1 ratification ctx), mirroring the
+                            // Run 134 reload-apply v2 branch.
+                            let marker_decision_v2 =
+                                match self.preflight_sighup_v2_marker_decision(
+                                    rcfg,
+                                    &r2,
+                                    now_unix_secs,
+                                ) {
+                                    Ok(opt) => opt,
+                                    Err(e) => {
+                                        return LiveReloadOutcome::MarkerRejectedV2(e);
+                                    }
+                                };
+
+                            let apply_outcome = apply_validated_candidate_with_previous(
+                                inputs,
+                                ApplyMode::ApplyLive,
+                                Some(&mut apply_ctx),
+                                prev_fp_prefix,
+                                prev_seq,
+                            );
+
+                            return match apply_outcome {
+                                Ok(applied) => {
+                                    if let Some(decision) = marker_decision_v2.as_ref() {
+                                        if let Err(e) =
+                                            persist_accepted_v2_marker_after_commit_boundary(
+                                                decision,
+                                            )
+                                        {
+                                            return LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 {
+                                                applied,
+                                                marker_error: e,
+                                            };
+                                        }
+                                    }
+                                    LiveReloadOutcome::Applied(applied)
+                                }
+                                Err(
+                                    e @ ReloadApplyError::SequenceCommitFailedRollbackAlsoFailed { .. },
+                                ) => LiveReloadOutcome::Fatal(e),
+                                Err(e) => LiveReloadOutcome::Invalid(e),
+                            };
+                        }
                         Err(e) => {
-                            // Map I/O / parse failure of the operator-
-                            // supplied sidecar into a fail-closed
-                            // `Invalid` outcome. The shape mirrors the
-                            // candidate-load fail-closed pathway used
-                            // by Run 069 (`ReloadCheckError::Bundle`),
-                            // so operator logs and metrics treat
-                            // sidecar-load failure the same way as
-                            // any other pre-mutation validation
-                            // refusal.
                             return LiveReloadOutcome::Invalid(
                                 ReloadApplyError::ValidationFailed(
                                     ReloadCheckError::Bundle(TrustBundleError::Io(
-                                        ratification_input_io_message(&e),
+                                        versioned_ratification_input_io_message(&e),
                                     )),
                                 ),
                             );
@@ -804,6 +934,7 @@ impl LiveReloadController {
                     },
                     None => None,
                 };
+                let ratification_obj = ratification_obj_v1;
                 let ratification_ctx = RatificationEnforcementContext {
                     authority: &rcfg.authority,
                     expected_genesis_hash: &rcfg.expected_genesis_hash,
@@ -1096,6 +1227,110 @@ impl LiveReloadController {
         })?;
         Ok(Some(decision))
     }
+
+    /// Run 138 — SIGHUP-specific **v2** marker accept-and-persist
+    /// preflight.
+    ///
+    /// v2 twin of [`Self::preflight_sighup_marker_decision`]. Mirrors
+    /// the binary-side `preflight_run_134_v2_marker_decision`
+    /// (process-start reload-apply) and
+    /// `preflight_run_136_v2_marker_decision_for_startup` (startup
+    /// `--p2p-trust-bundle`) helpers but lives inside the controller
+    /// because the SIGHUP trigger surface owns the per-trigger
+    /// versioned sidecar load already and re-runs the Run 130 v2
+    /// verifier here so a verified
+    /// [`qbind_ledger::RatifiedBundleSigningKeyV2`] is in hand for the
+    /// Run 134 `decide_marker_acceptance_v2` step.
+    ///
+    /// Composes:
+    ///   1. [`verify_bundle_signing_key_ratification_v2`] (Run 130 v2 verifier).
+    ///   2. [`decide_marker_acceptance_v2`] (Run 134/136 v2 decision).
+    ///
+    /// Tags the persisted-record audit field with
+    /// [`AuthorityStateUpdateSource::SighupReload`] — the exact
+    /// existing enum variant the v1 SIGHUP marker path uses, per
+    /// Run 138 §5. The task allows either a new `SighupLiveReload`
+    /// variant OR the existing v1 SIGHUP variant; reusing the
+    /// existing variant avoids `AuthorityStateUpdateSource` schema
+    /// drift (forbidden by Run 138 strict scope).
+    ///
+    /// Returns `Ok(None)` when the controller was not configured
+    /// with an `authority_marker` (DevNet no-opt-in / no
+    /// `--data-dir`). On any v2 verifier failure, returns
+    /// `Err(MutatingSurfaceMarkerV2Error::Conflict(MalformedOrUnsupportedMarkerRejected{reason}))`
+    /// so the caller surfaces the precise reason in the
+    /// `MarkerRejectedV2` outcome's log line — matching the Run
+    /// 134/136 v2 verifier-failure-mapping shape.
+    ///
+    /// Performs **no** disk writes: every disk side-effect is
+    /// deferred to
+    /// [`persist_accepted_v2_marker_after_commit_boundary`], which
+    /// the caller invokes only AFTER the apply pipeline's
+    /// `commit_sequence` step succeeds.
+    fn preflight_sighup_v2_marker_decision(
+        &self,
+        rcfg: &LiveReloadRatificationConfig,
+        ratification_v2: &BundleSigningRatificationV2,
+        now_unix_secs: u64,
+    ) -> Result<Option<MarkerAcceptDecisionV2>, MutatingSurfaceMarkerV2Error> {
+        let marker_cfg = match &self.config.authority_marker {
+            Some(c) => c,
+            None => {
+                // No authority-marker context wired (DevNet
+                // no-opt-in / no `--data-dir`). Pre-Run-138
+                // behaviour preserved bit-for-bit — the apply
+                // pipeline still runs without v1 ratification
+                // context (the v2 sidecar bypasses the v1 gate).
+                return Ok(None);
+            }
+        };
+
+        // Step 1 — Run 130 v2 verifier. Re-run here so a verified
+        // ratified-key is in hand for the v2 marker derivation; the
+        // verifier is a pure function and the binary's other v2
+        // surfaces (Run 134/136) run the SAME verifier with
+        // bit-identical results.
+        let ratified_v2 = verify_bundle_signing_key_ratification_v2(
+            RatificationV2VerifierInputs {
+                ratification: ratification_v2,
+                authority: &rcfg.authority,
+                expected_chain_id: &rcfg.expected_chain_id_str,
+                expected_environment: rcfg.expected_environment_policy,
+                expected_genesis_hash: &rcfg.expected_genesis_hash,
+            },
+        )
+        .map_err(|e| {
+            // Map verifier failure into the typed marker error so
+            // the SIGHUP operator log line names the exact failure
+            // class. Mirrors the Run 134/136 v2 verifier-failure
+            // mapping.
+            MutatingSurfaceMarkerV2Error::Conflict(
+                AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+                    reason: format!("v2 ratification verifier failure: {}", e),
+                },
+            )
+        })?;
+
+        // Step 2 — runtime genesis hash hex.
+        let mut runtime_genesis_hash_hex = String::with_capacity(64);
+        for b in rcfg.expected_genesis_hash {
+            use std::fmt::Write;
+            let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+        }
+
+        // Step 3 — Run 134/136 v2 marker decision (no disk write).
+        let decision = decide_marker_acceptance_v2(MarkerAcceptanceV2Inputs {
+            marker_path: marker_cfg.marker_path.as_path(),
+            runtime_env: self.config.environment,
+            runtime_chain_id: self.config.chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            ratification: ratification_v2,
+            ratified: &ratified_v2,
+            update_source: AuthorityStateUpdateSource::SighupReload,
+            updated_at_unix_secs: now_unix_secs,
+        })?;
+        Ok(Some(decision))
+    }
 }
 
 /// Run 121 — decode a 64-char lowercase-hex string into a `[u8; 32]`.
@@ -1124,17 +1359,17 @@ fn hex_nibble_for_sighup(b: u8) -> Option<u8> {
     }
 }
 
-/// Run 114 — render a [`RatificationInputError`] into the human-
-/// readable message embedded in a fail-closed
-/// [`TrustBundleError::Io`]. The full `Display` form already
-/// contains the typed reason (`[run-105] failed to read … sidecar
-/// file …` / `[run-105] failed to parse … sidecar JSON …`) so we
-/// route it through unchanged; the wrapping `TrustBundleError::Io`
-/// is purely a transport for the existing `ReloadCheckError`
-/// enum shape.
-fn ratification_input_io_message(e: &RatificationInputError) -> String {
+/// Run 138 — render a [`VersionedRatificationInputError`] (Run 132
+/// versioned sidecar loader I/O / JSON / unknown version / malformed)
+/// into the human-readable message embedded in a fail-closed
+/// [`TrustBundleError::Io`]. The full `Display` form already contains
+/// the typed `[run-132] ...` reason so we route it through unchanged;
+/// the wrapping `TrustBundleError::Io` is purely a transport for the
+/// existing `ReloadCheckError` enum shape. This is the v2 SIGHUP twin
+/// of the pre-Run-138 v1-only `ratification_input_io_message` shape.
+fn versioned_ratification_input_io_message(e: &VersionedRatificationInputError) -> String {
     format!(
-        "[run-114] SIGHUP live reload refused — ratification sidecar input error: {}",
+        "[run-138] SIGHUP live reload refused — versioned ratification sidecar input error: {}",
         e
     )
 }

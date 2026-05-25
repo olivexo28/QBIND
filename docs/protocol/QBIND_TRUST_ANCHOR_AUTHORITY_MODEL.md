@@ -2420,3 +2420,53 @@ mutating surface — already wired by Run 136 — is now release-binary-
 evidenced**. The remaining open mutating surfaces are SIGHUP live
 reload and snapshot/restore. All other Run 136 open items remain
 open. No Run 050–136 invariant was changed.
+
+## Run 138 — SIGHUP live-reload as a v2-marker-discipline mutating surface
+
+Prior to Run 138, two of the three in-process mutating surfaces accepted
+v2 ratifications and produced v2 authority-state markers:
+
+| Mutating surface                                | v1 wiring | v2 wiring |
+|-------------------------------------------------|-----------|-----------|
+| Process-start reload-apply                      | Run 119   | **Run 134** |
+| Startup `--p2p-trust-bundle` (one-shot apply)   | Run 119   | **Run 136** |
+| SIGHUP live trust-bundle reload                 | Run 121   | **Run 138** |
+
+Run 138 closes that gap by wiring the v2 verifier (Run 130) and the v2
+marker accept-and-persist composition (Run 131) onto the Run 074 SIGHUP
+live-reload controller. Selection is automatic per-trigger: a
+`schema_version=2` sidecar dispatches through the v2 path, and a
+`schema_version=1` or absent sidecar preserves the Run 121 v1 path
+bit-for-bit.
+
+The v2 SIGHUP path enforces the same invariants the Run 134 reload-apply
+and Run 136 startup v2 paths enforce:
+
+* **Pre-mutation refusal is non-fatal**: v2 verifier failures and v2
+  marker pre-mutation refusals surface as `LiveReloadOutcome::MarkerRejectedV2`
+  with no live mutation, no eviction, no sequence write, and no marker
+  write.
+* **Post-commit persist failure is fatal**: a v2 marker-persist
+  failure after `sequence_commit=ok` surfaces as
+  `LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 { applied,
+  marker_error }` with `is_fatal() == true`, mirroring the Run 121 v1
+  fatal contract; the SIGHUP signal-handler task initiates graceful
+  shutdown.
+* **Audit source**: the v2 marker carries
+  `AuthorityStateUpdateSource::SighupReload` — the existing v1 SIGHUP
+  audit variant is reused (no `AuthorityStateUpdateSource` schema
+  drift).
+* **V1→V2 migration through SIGHUP**: an existing on-disk v1 marker is
+  rewritten as v2 strictly AFTER the Run 070 sequence commit succeeds.
+* **Crash-window reconciliation**: a marker that was committed but not
+  persisted (because the process was killed between sequence commit and
+  marker write) reconciles on the next mutation as `UpgradeV2` under the
+  Run 131 stale-by-one discipline.
+
+Run 138 does NOT change v1 verifier behaviour, the v1 marker on-disk
+format, the trust-bundle / peer-candidate / ratification wire format,
+the CLI flag surface, or the `/metrics` family set. Snapshot/restore v2
+marker wiring, live inbound `0x05` v2 wiring, peer-driven live apply,
+signing-key rotation/revocation lifecycle, KMS/HSM custody, MainNet
+governance artifact verification, and full C4 / C5 closure all remain
+out of scope.

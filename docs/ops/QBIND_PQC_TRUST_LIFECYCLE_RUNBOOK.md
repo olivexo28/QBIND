@@ -4613,3 +4613,82 @@ and remains test-only. After Run 137 the mutating-surface v2 coverage
 matrix is updated to show **Run 136 wired + Run 137 release-binary-
 evidenced** on the startup `--p2p-trust-bundle` row; the SIGHUP and
 snapshot/restore rows remain OPEN.
+## Run 138 — SIGHUP live-reload v2 ratification + v2 authority-marker support
+
+**Scope**: Source/test wiring only. Release-binary SIGHUP v2 evidence is
+deferred to Run 139.
+
+**What changed**: The Run 074 SIGHUP live-reload controller now supports
+the v2 bundle-signing-key ratification schema (`schema_version=2`) and
+the v2 authority-marker discipline. Selection is automatic, per-trigger,
+and based on the operator-supplied sidecar file:
+
+* The controller re-reads `ratification_sidecar_path` on every SIGHUP
+  (unchanged) and peeks the schema discriminator via the existing
+  `load_versioned_ratification_from_path` helper.
+* If the sidecar declares `schema_version=2`:
+  1. The Run 130 v2 verifier runs **before** any live mutation. A
+     verifier failure surfaces as `MarkerRejectedV2` — no live mutation,
+     no eviction, no sequence write, no marker write.
+  2. The Run 131 v2 marker decision runs **before** any live mutation.
+     A pre-mutation refusal (rollback / same-seq-different-digest /
+     wrong-domain / corrupt persisted marker) surfaces as
+     `MarkerRejectedV2` — same pre-mutation invariants.
+  3. The Run 070 apply pipeline runs unchanged.
+  4. On `Ok(applied)`, the v2 marker is persisted strictly AFTER
+     `sequence_commit=ok` via the same
+     `persist_accepted_v2_marker_after_commit_boundary` helper Run 134
+     and Run 136 use. **A v2 marker-persist failure after successful
+     commit is FATAL** — the binary's SIGHUP signal-handler task
+     initiates graceful shutdown, matching the Run 121 v1 fatal shape.
+* If the sidecar declares `schema_version=1` (or no sidecar / no
+  ratification config / no marker config), behaviour is **bit-for-bit
+  identical** to the Run 121 / Run 074 v1 path. Operators do not need
+  to change anything.
+
+**Operator opt-in (unchanged from Run 121)**:
+
+* `--p2p-trust-bundle-ratification-enforcement-enabled true` (or the
+  equivalent `LiveReloadConfig.ratification = Some(_)`).
+* `--p2p-trust-bundle-ratification-sidecar-path /path/to/sidecar.json`.
+* `--authority-state-file /path/to/pqc_authority_state.json` (or the
+  equivalent `LiveReloadConfig.authority_marker = Some(_)`).
+
+To switch a deployment from v1 to v2 SIGHUP:
+
+1. Generate a `schema_version=2` ratification object signed by the
+   genesis-bound authority key.
+2. Atomically replace the sidecar file at
+   `--p2p-trust-bundle-ratification-sidecar-path`.
+3. Send `kill -HUP <qbind-node-pid>` to the running daemon (no flag
+   changes required).
+4. The next SIGHUP will dispatch through the Run 138 v2 path. If the
+   on-disk marker is a Run 121 v1 record, it will be **migrated to v2
+   in place** strictly AFTER the Run 070 sequence commit succeeds
+   (Run 138 A4 scenario).
+
+**Failure modes**:
+
+* `MarkerRejectedV2(_)` — pre-mutation refusal. No live mutation, no
+  sequence write, no marker write. The binary continues running and
+  serves the existing live trust state. Operator action: fix the
+  sidecar / authority-state file and SIGHUP again.
+* `MarkerPersistFailureAfterCommitV2 { applied, marker_error }` — the
+  apply pipeline succeeded (live trust state is advanced, the
+  sequence file is written, peers have been evicted), but the
+  authority-state file could not be written (e.g. disk full,
+  read-only FS, EACCES). **This is fatal** — the SIGHUP task
+  initiates graceful shutdown. The next process start will see a
+  stale-by-one marker which will be reconciled as `UpgradeV2` (the
+  Run 131 crash-window discipline). Operator action: fix the
+  `--authority-state-file` parent directory permissions / disk
+  capacity, then restart.
+
+**What did NOT change**:
+
+* No new CLI flags.
+* No new `/metrics` counters or labels.
+* No change to the trust-bundle / peer-candidate / ratification wire
+  format.
+* No change to the on-disk format of the v1 authority-state marker.
+* No change to v1 SIGHUP behaviour when the sidecar is v1 or absent.
