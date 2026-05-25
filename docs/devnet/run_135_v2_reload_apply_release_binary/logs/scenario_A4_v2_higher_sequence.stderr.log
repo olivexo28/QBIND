@@ -1,0 +1,9 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run135/fixtures/devnet/genesis.json, canonical_hash=0x3c0a7374551ec1c4ec175bb00cba4a1eaa3900e97de5c2a28498641affcfd0d8).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[run-134] reload-apply v2 ratification path SELECTED (v2 sidecar present; v1 ratification context skipped).
+[run-134] v2 authority-marker persisted at /tmp/qbind-run135/data/scenario_A4_v2_higher_sequence/pqc_authority_state.json (v2-upgrade 1 -> 2; candidate latest_authority_domain_sequence=2).
+[binary] Run 070: trust-bundle candidate APPLIED live (operator-triggered local reload-apply; conservative session-eviction v0 policy) (old_fp=5e2824e2.. new_fp=a7b6da62.. old_sequence=Some(1) new_sequence=2 env=devnet chain_id=51424e4444455600 active_roots=1 active_revoked_roots=0 active_revoked_leaves=0 session_evictions=0 sequence_commit=ok)
+[binary] Run 073: VERDICT=applied (baseline=/tmp/qbind-run135/fixtures/devnet/baseline-bundle.json candidate=/tmp/qbind-run135/fixtures/devnet/candidate-bundle.json live trust state swapped; session_evictions=0 (no-active-sessions at startup-time); sequence committed). See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_073.md.

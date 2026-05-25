@@ -1,0 +1,7 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run135/fixtures/devnet/genesis.json, canonical_hash=0x3c0a7374551ec1c4ec175bb00cba4a1eaa3900e97de5c2a28498641affcfd0d8).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-112] reload-apply ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[run-134] reload-apply v2 ratification path SELECTED (v2 sidecar present; v1 ratification context skipped).
+[run-134] FATAL: reload-apply refused by v2 authority-marker preflight: Run 134: v2 authority-marker comparison rejected: MalformedOrUnsupportedMarkerRejected { reason: "v2 ratification verifier failure: ratification v2: environment mismatch: expected Devnet got Testnet" } (fail closed). Candidate path=/tmp/qbind-run135/fixtures/devnet/candidate-bundle.json. No live trust apply, no sequence write, no session eviction, no metrics mutation, no marker write. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_134.md.

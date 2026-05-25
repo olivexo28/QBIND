@@ -4405,3 +4405,82 @@ Run 134 stderr markers an operator can grep for:
 | `--p2p-trust-bundle` startup acceptance            | Run 120 (wired)   | deferred                         |
 | SIGHUP live-reload (`--p2p-trust-bundle-live-reload-*`) | Run 121 (wired) | deferred                       |
 | Snapshot/restore                                   | Run 124 (wired)   | deferred                         |
+
+### Run 135 operator note — release-binary evidence for v2 reload-apply
+
+Run 135 added **release-binary evidence** for the Run 134 wiring of v2
+ratification into the process-start reload-apply mutating surface. It
+did not change any production runtime code or CLI flag. The behaviour
+operators should observe on `target/release/qbind-node` matches the
+Run 134 description above and is now captured end-to-end by
+`scripts/devnet/run_135_v2_reload_apply_release_binary.sh` and archived
+under `docs/devnet/run_135_v2_reload_apply_release_binary/`.
+
+For operators running a v2 reload-apply on a real release binary, the
+expected stderr sequence on an accepted v2 ratify is exactly:
+
+```
+[run-112] reload-apply ratification gate INVOKED (policy=..., env=Devnet).
+[run-134] reload-apply v2 ratification path SELECTED (v2 sidecar present; v1 ratification context skipped).
+[binary] Run 070: trust-bundle candidate APPLIED live ... sequence_commit=ok
+[binary] Run 073: VERDICT=applied (... sequence committed).
+[run-134] v2 authority-marker persisted at <data_dir>/pqc_authority_state.json (<kind>; candidate latest_authority_domain_sequence=<N>).
+```
+
+On an idempotent v2 ratify the last line reads `v2 authority-marker
+unchanged ... (idempotent; no rewrite)` instead.
+
+On a v2 refusal (rollback, equivocation, bad signature, wrong
+environment, etc.) the expected stderr line is:
+
+```
+[run-134] FATAL: reload-apply refused by v2 authority-marker preflight: <typed reason>. ...
+   No live trust apply, no sequence write, no session eviction, no metrics mutation, no marker write.
+   See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_134.md.
+```
+
+and the process exits with code `1`. Operators can confirm
+fail-closure by verifying that `pqc_authority_state.json` is
+byte-identical pre/post (`cmp -s` succeeds when a marker was
+pre-seeded; the file does not appear when no marker was pre-seeded)
+and that no `pqc_trust_bundle_sequence.json` was written.
+
+If a v2 persist failure occurs AFTER `commit_sequence` (the rare
+mid-write FS failure on the v2 marker), the binary surfaces:
+
+```
+[run-134] FATAL: v2 authority-marker persist failure AFTER successful apply: ...
+   The trust-bundle sequence already committed; the on-disk v2 authority
+   marker is stale-by-one and will be re-derived on the next accepted
+   mutation (Run 118 §D / Run 131 crash-window rule).
+```
+
+In this case the operator may restart the binary; the next accepted
+v2 ratification re-persists the v2 marker via Run 134
+`UpgradeV2{previous_sequence=stale,new_sequence=current}` and the
+stale marker is replaced after the next `commit_sequence`. **Do
+not** attempt to hand-edit `pqc_authority_state.json` — the Run 134
+v2 atomic persister is the only supported write path.
+
+Run 135 also confirmed (across 9 scenarios on the release binary)
+that the v1 path is preserved bit-for-bit when no v2 sidecar is
+supplied. Operators currently running v1 ratification sidecars
+(`schema_version=1`) need not change anything; the Run 119 v1 path
+continues to fire and the on-disk marker remains v1
+(`record_version=1`).
+
+Run 135 confirmed deferrals (no operator-visible change yet):
+
+- SIGHUP-driven live trust-bundle reload-apply v2 wiring.
+- `--p2p-trust-bundle` startup-acceptance v2 wiring.
+- Snapshot/restore v2 marker wiring.
+- Peer-driven live apply v2.
+- Live inbound `0x05` v2 wiring.
+- Signing-key rotation/revocation lifecycle plumbing beyond verifier-
+  level enforcement.
+- KMS/HSM custody.
+- MainNet governance artifact verification.
+
+For these surfaces, the v1 enforcement paths (Run 074 / Run 120 /
+Run 124 / Run 105 / Run 088) remain the authoritative behaviour
+until a follow-on run lands their v2 wiring.
