@@ -2385,7 +2385,7 @@ mod tests {
         use crate::pqc_authority_state::{
             authority_state_file_path, load_authority_state_versioned,
             persist_authority_state_atomic, AuthorityStateUpdateSource,
-            PersistentAuthorityStateRecord, PersistentAuthorityStateRecordV2,
+            PersistentAuthorityStateRecord,
             PersistentAuthorityStateRecordVersioned,
             derive_authority_state_v2_from_ratification, AuthorityStateDerivationV2Inputs,
         };
@@ -2425,7 +2425,7 @@ mod tests {
             authority_pk: Vec<u8>,
             authority_sk: Vec<u8>,
             bsk_pk: Vec<u8>,
-            genesis_cfg: GenesisConfig,
+            _genesis_cfg: GenesisConfig,
             authority: GenesisAuthorityConfig,
             canonical_hash: qbind_ledger::GenesisHash,
             canonical_hash_hex: String,
@@ -2482,7 +2482,7 @@ mod tests {
                     authority_pk: auth_pk,
                     authority_sk: auth_sk,
                     bsk_pk,
-                    genesis_cfg: cfg,
+                    _genesis_cfg: cfg,
                     authority,
                     canonical_hash: gh,
                     canonical_hash_hex: gh_hex_str,

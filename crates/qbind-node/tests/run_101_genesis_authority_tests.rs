@@ -29,10 +29,6 @@ use qbind_ledger::{
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 
-fn fingerprint_64(seed: u8) -> String {
-    format!("{:02x}", seed).repeat(32)
-}
-
 /// Run 104: synthetic 1312-byte ML-DSA-44 public key filled with `seed`.
 fn synthetic_ml_dsa_44_pk(seed: u8) -> Vec<u8> {
     vec![seed; GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES]
