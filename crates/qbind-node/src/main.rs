@@ -658,6 +658,107 @@ fn preflight_run_119_marker_decision(
     Ok(Some(decision))
 }
 
+/// Run 134 — pre-mutation v2 authority-marker accept-and-persist preflight
+/// for the process-start reload-apply binary path.
+///
+/// Mirrors [`preflight_run_119_marker_decision`] but for v2 ratification
+/// sidecars. Composes:
+///
+/// 1. Run 130 [`qbind_ledger::verify_bundle_signing_key_ratification_v2`]
+///    so the verified [`qbind_ledger::RatifiedBundleSigningKeyV2`] is in
+///    hand for the v2 marker derivation step.
+/// 2. [`qbind_node::pqc_authority_marker_acceptance::decide_marker_acceptance_v2`]
+///    so the on-disk versioned authority marker is compared against the
+///    v2 candidate BEFORE any apply pipeline call.
+///
+/// # Returns
+///
+/// * `Ok(None)` — preflight not applicable:
+///     * `data_dir` is unset (DevNet-only convenience; MainNet/TestNet
+///       FATAL-exit earlier when `--data-dir` is unset);
+///     * `ctx_data.ratification_v2` is `None` (caller must only call this
+///       helper when a v2 sidecar is present).
+/// * `Ok(Some(decision))` — preflight accepted; the caller MUST call
+///   [`qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary`]
+///   AFTER the apply pipeline returns `Ok`.
+/// * `Err(reason)` — preflight refused; the caller MUST NOT invoke the
+///   apply pipeline and MUST surface the typed reason operatorially.
+fn preflight_run_134_v2_marker_decision(
+    runtime_env: qbind_types::NetworkEnvironment,
+    runtime_chain_id: qbind_types::ChainId,
+    ctx_data: &Run105ReloadCheckContextData,
+    data_dir: Option<&std::path::Path>,
+    updated_at_unix_secs: u64,
+) -> Result<
+    Option<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2>,
+    qbind_node::pqc_authority_marker_acceptance::MutatingSurfaceMarkerV2Error,
+> {
+    use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
+    use qbind_node::pqc_authority_marker_acceptance::{
+        decide_marker_acceptance_v2, MarkerAcceptanceV2Inputs,
+        MutatingSurfaceMarkerV2Error,
+    };
+    use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
+
+    let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
+        // Caller bug: this helper is only meaningful when the operator
+        // supplied a v2 sidecar.
+        return Ok(None);
+    };
+
+    let Some(data_dir) = data_dir else {
+        eprintln!(
+            "[run-134] v2 authority-marker preflight skipped: --data-dir is unset (DevNet \
+             convenience only; MainNet/TestNet already require --data-dir for the \
+             reload-apply path)."
+        );
+        return Ok(None);
+    };
+
+    // Step 1: Run 130 v2 verifier.
+    let ratified_v2 = verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
+        ratification: ratification_v2,
+        authority: &ctx_data.authority,
+        expected_chain_id: &ctx_data.chain_id_str,
+        expected_environment: ctx_data.env_policy,
+        expected_genesis_hash: &ctx_data.canonical_hash,
+    })
+    .map_err(|e| {
+        // The v2 verifier already produced the precise typed failure; the
+        // Run 131 derivation step does not have a v2-verifier-failure
+        // variant, so we map verifier failures into the conflict bucket
+        // for operator visibility. The post-commit persist call will not
+        // run because we exit before that point.
+        MutatingSurfaceMarkerV2Error::Conflict(
+            qbind_node::pqc_authority_state::AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+                reason: format!("v2 ratification verifier failure: {}", e),
+            },
+        )
+    })?;
+
+    // Step 2: compute runtime genesis hash hex.
+    let mut runtime_genesis_hash_hex = String::with_capacity(64);
+    for b in ctx_data.canonical_hash {
+        use std::fmt::Write;
+        let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+    }
+
+    let marker_path = authority_state_file_path(data_dir);
+
+    let decision = decide_marker_acceptance_v2(MarkerAcceptanceV2Inputs {
+        marker_path: &marker_path,
+        runtime_env,
+        runtime_chain_id,
+        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+        ratification: ratification_v2,
+        ratified: &ratified_v2,
+        update_source: AuthorityStateUpdateSource::ReloadApply,
+        updated_at_unix_secs,
+    })?;
+
+    Ok(Some(decision))
+}
+
 /// Run 120 — pre-mutation authority-marker accept-and-persist preflight
 /// for the **startup `--p2p-trust-bundle`** acceptance path.
 ///
@@ -2625,6 +2726,111 @@ async fn main() {
             );
             match build_run_105_reload_check_context(&args, &config) {
                 Ok(ctx_data) => {
+                    // Run 134 — v2 sidecar dispatch. When the operator
+                    // supplied a v2 ratification sidecar, run the v2
+                    // marker preflight (Run 134), apply the candidate
+                    // through the existing Run 070 pipeline WITHOUT a
+                    // v1 ratification context (v2 verification has
+                    // already happened in the preflight), then persist
+                    // the v2 marker AFTER `commit_sequence`. v1
+                    // dispatch (the existing branch) is preserved
+                    // unchanged.
+                    if ctx_data.ratification_v2.is_some() {
+                        eprintln!(
+                            "[run-134] reload-apply v2 ratification path SELECTED \
+                             (v2 sidecar present; v1 ratification context skipped)."
+                        );
+
+                        let v2_decision = match preflight_run_134_v2_marker_decision(
+                            config.environment,
+                            config.chain_id(),
+                            &ctx_data,
+                            config.data_dir.as_deref(),
+                            now_secs,
+                        ) {
+                            Ok(opt) => opt,
+                            Err(reason) => {
+                                eprintln!(
+                                    "[run-134] FATAL: reload-apply refused by v2 \
+                                     authority-marker preflight: {}. Candidate path={}. \
+                                     No live trust apply, no sequence write, no session \
+                                     eviction, no metrics mutation, no marker write. See \
+                                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_134.md.",
+                                    reason,
+                                    candidate_path.display()
+                                );
+                                std::process::exit(1);
+                            }
+                        };
+
+                        // Run 070 — apply the candidate without a v1
+                        // ratification context. The candidate's
+                        // structural / sequence / signature /
+                        // activation checks still run inside the
+                        // pipeline; only the v1 ratification preflight
+                        // step is skipped (the v2 verifier already
+                        // ran in `preflight_run_134_v2_marker_decision`).
+                        let apply_outcome = apply_validated_candidate_with_previous(
+                            inputs,
+                            ApplyMode::ApplyLive,
+                            Some(&mut apply_ctx),
+                            prev_fp_prefix.clone(),
+                            prev_seq,
+                        );
+
+                        // Run 134 — persist v2 marker AFTER
+                        // `commit_sequence`. No-op when:
+                        //   * preflight returned `None`;
+                        //   * preflight decision was `Idempotent`;
+                        //   * the apply pipeline returned `Err`.
+                        //
+                        // A persist failure here means the trust-bundle
+                        // sequence already advanced; the on-disk v2
+                        // marker is stale-by-one (safely replayable per
+                        // Run 118 §D / Run 131), but the operator MUST
+                        // be told.
+                        if apply_outcome.is_ok() {
+                            if let Some(decision) = v2_decision.as_ref() {
+                                match qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(decision) {
+                                    Ok(()) => {
+                                        if decision.should_persist() {
+                                            eprintln!(
+                                                "[run-134] v2 authority-marker persisted at {} \
+                                                 ({}; candidate \
+                                                 latest_authority_domain_sequence={}).",
+                                                decision.marker_path().display(),
+                                                decision.kind(),
+                                                decision.candidate().latest_authority_domain_sequence
+                                            );
+                                        } else {
+                                            eprintln!(
+                                                "[run-134] v2 authority-marker unchanged at {} \
+                                                 (idempotent; no rewrite).",
+                                                decision.marker_path().display()
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!(
+                                            "[run-134] FATAL: v2 authority-marker persist \
+                                             failure AFTER successful apply: {}. The \
+                                             trust-bundle sequence already committed; the \
+                                             on-disk v2 authority marker is stale-by-one and \
+                                             will be re-derived on the next accepted \
+                                             mutation (Run 118 §D / Run 131 crash-window \
+                                             rule). Candidate path={}. See \
+                                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_134.md.",
+                                            e,
+                                            candidate_path.display()
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                }
+                            }
+                        }
+
+                        apply_outcome
+                    } else {
                     // Run 119 — authority-marker accept-and-persist
                     // preflight. Runs BEFORE the apply pipeline so a
                     // rollback / same-sequence-equivocation / wrong-
@@ -2743,6 +2949,7 @@ async fn main() {
                     }
 
                     apply_outcome
+                    }
                 }
                 Err(reason) => {
                     eprintln!(

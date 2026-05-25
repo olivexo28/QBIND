@@ -1217,6 +1217,468 @@ impl std::fmt::Display for ValidationOnlyVersionedError {
 impl std::error::Error for ValidationOnlyVersionedError {}
 
 // =============================================================================
+// Run 134 — v2 mutating-surface accept-and-persist helpers
+// =============================================================================
+//
+// These mirror the Run 119 v1 helpers (`decide_marker_acceptance` /
+// `persist_accepted_marker_after_commit_boundary`) but operate on v2
+// ratification objects and v2 authority markers.
+//
+// Strict scope:
+//
+// * Does NOT verify the v2 ratification — callers MUST run
+//   [`qbind_ledger::verify_bundle_signing_key_ratification_v2`] first and
+//   pass the typed [`qbind_ledger::RatifiedBundleSigningKeyV2`] result here.
+// * Compare-before-mutation (Run 131 `compare_authority_marker_v2`); the
+//   helper NEVER writes to disk in [`decide_marker_acceptance_v2`].
+// * Post-commit persistence
+//   ([`persist_accepted_v2_marker_after_commit_boundary`]) writes only when
+//   the prior decision was a v2 first-write / v2 upgrade / explicit v1→v2
+//   migration. Idempotent accepts are a strict no-op (no rewrite).
+// * v1-after-v2 rejection is impossible by signature: this helper consumes
+//   a v2 ratification, so v1 candidates cannot reach it. The dispatch at the
+//   binary surface ensures the v1 path is taken when a v1 sidecar is
+//   present, and a v2 marker on disk in front of a v1 sidecar is refused
+//   on the v1 side via the existing v1 reload-apply route (Run 131
+//   `prepare_v2_marker_for_acceptance` returns `V1AfterV2Rejected` when
+//   the binary dispatches to the v2 path with a v1 candidate, which we
+//   never do here).
+// * Does NOT implement signing-key rotation / revocation lifecycle. The
+//   helper accepts the typed Run 130 verifier outcome verbatim; the
+//   marker layer preserves the lifecycle-action / previous-key linkage
+//   that Run 131 derivation produced.
+
+/// Run 134 — typed errors for v2 mutating-surface accept / persist.
+///
+/// Every variant is a fail-closed condition: the mutating surface MUST
+/// refuse to begin (or finish) trust mutation on any reject.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MutatingSurfaceMarkerV2Error {
+    /// v2 marker derivation refused (caller bug or verifier output
+    /// inconsistent with the candidate ratification).
+    DerivationFailed(crate::pqc_authority_state::AuthorityStateDerivationV2Error),
+
+    /// `load_authority_state_versioned` returned a fatal I/O / parse /
+    /// unsupported-version / structural error. The on-disk marker is
+    /// unusable; the helper MUST NOT silently delete or overwrite it.
+    LoadOrCorruption(crate::pqc_authority_state::AuthorityStateError),
+
+    /// On-disk marker belongs to a different trust domain
+    /// (environment / chain_id / genesis_hash / authority_root_fingerprint).
+    /// Wrong-data-dir / wrong-snapshot-copy.
+    PersistedDomainMismatch(crate::pqc_authority_state::AuthorityMarkerV2ComparisonOutcome),
+
+    /// Persisted v2 `authority_domain_sequence` is strictly higher than
+    /// the candidate's. Refuses the rollback.
+    LowerV2SequenceRefused {
+        persisted_sequence: u64,
+        attempted_sequence: u64,
+    },
+
+    /// Equal `authority_domain_sequence`, different ratification-v2 digest.
+    /// Refuses the silent ratification swap.
+    SameSequenceConflictingDigest {
+        sequence: u64,
+        persisted_digest: String,
+        attempted_digest: String,
+    },
+
+    /// Equal `authority_domain_sequence`, equal digest, but mismatching
+    /// active-key / lifecycle-action linkage. Refuses the silent linkage
+    /// swap.
+    SameSequenceConflictingKeyOrAction {
+        reason: String,
+    },
+
+    /// A v1 ratification candidate landed on the v2 path. The dispatch
+    /// SHOULD route v1 candidates to the v1 path; this variant exists
+    /// as defence-in-depth in case a future caller bug routes the wrong
+    /// schema here.
+    V1AfterV2Rejected,
+
+    /// The persisted marker is structurally malformed or carries an
+    /// unsupported `record_version`. Operator recovery is out of Run 134
+    /// scope.
+    UnsupportedMarkerVersion {
+        reason: String,
+    },
+
+    /// Catch-all for any other reject outcome from
+    /// [`compare_authority_marker_v2`] that does not map to a more
+    /// precise field above.
+    Conflict(crate::pqc_authority_state::AuthorityMarkerV2ComparisonOutcome),
+
+    /// Atomic v2 persistence failed at the commit boundary. The trust-
+    /// bundle sequence has already committed; the on-disk v2 marker is
+    /// stale-by-one (safely replayable per Run 118 §D / Run 131) but the
+    /// operator MUST be told.
+    PersistFailure(crate::pqc_authority_state::AuthorityStateError),
+}
+
+impl std::fmt::Display for MutatingSurfaceMarkerV2Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DerivationFailed(e) => write!(
+                f,
+                "Run 134: v2 authority-marker derivation refused: {} \
+                 (fail closed; no trust mutation)",
+                e
+            ),
+            Self::LoadOrCorruption(e) => write!(
+                f,
+                "Run 134: persisted authority-marker load/corruption: {} \
+                 (fail closed; no trust mutation; this helper does NOT \
+                 auto-recover corrupt markers)",
+                e
+            ),
+            Self::PersistedDomainMismatch(o) => write!(
+                f,
+                "Run 134: persisted authority-marker belongs to a different \
+                 trust domain: {:?} (fail closed; wrong-data-dir / \
+                 wrong-snapshot-copy)",
+                o
+            ),
+            Self::LowerV2SequenceRefused {
+                persisted_sequence,
+                attempted_sequence,
+            } => write!(
+                f,
+                "Run 134: v2 authority-marker rollback rejected: attempted \
+                 authority_domain_sequence={} is lower than persisted \
+                 authority_domain_sequence={} (fail closed)",
+                attempted_sequence, persisted_sequence
+            ),
+            Self::SameSequenceConflictingDigest {
+                sequence,
+                persisted_digest,
+                attempted_digest,
+            } => write!(
+                f,
+                "Run 134: v2 authority-marker same-sequence equivocation \
+                 rejected: authority_domain_sequence={} persisted_digest={} \
+                 attempted_digest={} (fail closed; two distinct v2 \
+                 ratifications cannot share the same \
+                 authority_domain_sequence)",
+                sequence, persisted_digest, attempted_digest
+            ),
+            Self::SameSequenceConflictingKeyOrAction { reason } => write!(
+                f,
+                "Run 134: v2 authority-marker same-sequence key/action \
+                 conflict rejected: {} (fail closed)",
+                reason
+            ),
+            Self::V1AfterV2Rejected => write!(
+                f,
+                "Run 134: v1 ratification candidate routed to v2 path \
+                 (caller bug or invalid dispatch); fail closed; no trust \
+                 mutation"
+            ),
+            Self::UnsupportedMarkerVersion { reason } => write!(
+                f,
+                "Run 134: persisted authority-marker unsupported version: \
+                 {} (fail closed; no auto-recovery)",
+                reason
+            ),
+            Self::Conflict(o) => write!(
+                f,
+                "Run 134: v2 authority-marker comparison rejected: {:?} \
+                 (fail closed)",
+                o
+            ),
+            Self::PersistFailure(e) => write!(
+                f,
+                "Run 134: v2 authority-marker persist failure at commit \
+                 boundary: {} (the trust-bundle mutation already committed; \
+                 the on-disk v2 authority marker is stale-by-one and will \
+                 be re-derived on the next accepted mutation per the Run \
+                 118 §D crash-window rule. Operator MUST surface this \
+                 failure)",
+                e
+            ),
+        }
+    }
+}
+
+impl std::error::Error for MutatingSurfaceMarkerV2Error {}
+
+/// Run 134 — inputs to [`decide_marker_acceptance_v2`].
+///
+/// Mirrors [`MarkerAcceptanceInputs`] but consumes the typed v2
+/// ratification + verifier output. The runtime trust-domain triple is
+/// required exactly as for v1 so the helper never falls back to ambient
+/// state.
+#[derive(Debug, Clone)]
+pub struct MarkerAcceptanceV2Inputs<'a> {
+    /// `<data_dir>/pqc_authority_state.json` per
+    /// [`crate::pqc_authority_state::authority_state_file_path`].
+    pub marker_path: &'a Path,
+    /// Runtime network environment.
+    pub runtime_env: NetworkEnvironment,
+    /// Runtime chain id.
+    pub runtime_chain_id: ChainId,
+    /// 64 lowercase hex chars of the canonical genesis hash.
+    pub runtime_genesis_hash_hex: &'a str,
+    /// Verified v2 ratification object.
+    pub ratification: &'a qbind_ledger::BundleSigningRatificationV2,
+    /// Verifier's typed v2 result identifying the ratified key.
+    pub ratified: &'a qbind_ledger::RatifiedBundleSigningKeyV2,
+    /// Informational tag identifying which mutating surface called this
+    /// helper. Never participates in the security digest.
+    pub update_source: AuthorityStateUpdateSource,
+    /// Wall-clock seconds for the audit-only `updated_at_unix_secs`
+    /// field. Never participates in the security digest.
+    pub updated_at_unix_secs: u64,
+}
+
+/// Run 134 — result of [`decide_marker_acceptance_v2`]. Carries the
+/// derived v2 candidate marker and the typed accept kind. Identical
+/// usage pattern to [`MarkerAcceptDecision`]: drop on apply failure,
+/// pass to [`persist_accepted_v2_marker_after_commit_boundary`] after
+/// `commit_sequence` succeeds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkerAcceptDecisionV2 {
+    marker_path: PathBuf,
+    candidate: crate::pqc_authority_state::PersistentAuthorityStateRecordV2,
+    should_persist: bool,
+    kind: MarkerAcceptKindV2,
+}
+
+/// Run 134 — audit-only acceptance kind retained on a
+/// [`MarkerAcceptDecisionV2`] for the binary's operator-log line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MarkerAcceptKindV2 {
+    /// No prior marker existed; v2 first-write.
+    FirstV2Write,
+    /// Prior marker existed and matched bit-for-bit on v2 schema.
+    Idempotent,
+    /// Prior v2 marker existed at a strictly lower
+    /// `authority_domain_sequence`.
+    UpgradeV2 {
+        previous_sequence: u64,
+        new_sequence: u64,
+    },
+    /// Prior marker is v1; this is an explicit v1→v2 migration.
+    V2AfterV1Migration,
+}
+
+impl std::fmt::Display for MarkerAcceptKindV2 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FirstV2Write => write!(f, "v2-first-write"),
+            Self::Idempotent => write!(f, "v2-idempotent"),
+            Self::UpgradeV2 {
+                previous_sequence,
+                new_sequence,
+            } => write!(
+                f,
+                "v2-upgrade {} -> {}",
+                previous_sequence, new_sequence
+            ),
+            Self::V2AfterV1Migration => write!(f, "v2-after-v1-migration"),
+        }
+    }
+}
+
+impl MarkerAcceptDecisionV2 {
+    /// Destination marker file path.
+    pub fn marker_path(&self) -> &Path {
+        &self.marker_path
+    }
+
+    /// Derived v2 candidate marker.
+    pub fn candidate(
+        &self,
+    ) -> &crate::pqc_authority_state::PersistentAuthorityStateRecordV2 {
+        &self.candidate
+    }
+
+    /// Whether the post-commit persist step will actually write.
+    pub fn should_persist(&self) -> bool {
+        self.should_persist
+    }
+
+    /// Audit-only acceptance kind.
+    pub fn kind(&self) -> &MarkerAcceptKindV2 {
+        &self.kind
+    }
+}
+
+/// Run 134 — derive a v2 candidate marker from a verified v2 ratification,
+/// load any persisted versioned marker, compare candidate against
+/// persisted, and produce a typed accept-or-reject outcome.
+///
+/// This function performs **no** disk writes. It is safe to call before
+/// the existing trust-mutation pipeline begins; if mutation then fails,
+/// dropping the decision leaves the on-disk marker untouched.
+///
+/// Ordering:
+///
+/// 1. Derive v2 candidate via
+///    [`crate::pqc_authority_state::derive_authority_state_v2_from_ratification`].
+/// 2. Load the persisted versioned marker via
+///    [`crate::pqc_authority_state::load_authority_state_versioned`]. A
+///    fatal load error → [`MutatingSurfaceMarkerV2Error::LoadOrCorruption`].
+/// 3. Compare via [`crate::pqc_authority_state::compare_authority_marker_v2`].
+///    Accept variants → `Ok(decision)`; reject variants are routed to the
+///    most precise error variant available.
+///
+/// Fail-closed guarantees:
+///
+/// - Never silently turns a reject comparison into an accept.
+/// - Never repairs, deletes, or overwrites a corrupt persisted marker.
+/// - Never reads or writes any file other than `marker_path`.
+pub fn decide_marker_acceptance_v2(
+    inputs: MarkerAcceptanceV2Inputs<'_>,
+) -> Result<MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
+    use crate::pqc_authority_state::{
+        compare_authority_marker_v2, derive_authority_state_v2_from_ratification,
+        load_authority_state_versioned, AuthorityMarkerV2ComparisonOutcome,
+        AuthorityStateDerivationV2Inputs, PersistentAuthorityStateRecordVersioned,
+    };
+
+    // Step 1: derive v2 candidate marker from the verified ratification.
+    let candidate = derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+        runtime_env: inputs.runtime_env,
+        runtime_chain_id: inputs.runtime_chain_id,
+        runtime_genesis_hash_hex: inputs.runtime_genesis_hash_hex,
+        ratification: inputs.ratification,
+        ratified: inputs.ratified,
+        update_source: inputs.update_source,
+        updated_at_unix_secs: inputs.updated_at_unix_secs,
+    })
+    .map_err(MutatingSurfaceMarkerV2Error::DerivationFailed)?;
+
+    // Step 2: load persisted versioned marker.
+    let persisted = load_authority_state_versioned(inputs.marker_path)
+        .map_err(MutatingSurfaceMarkerV2Error::LoadOrCorruption)?;
+
+    // Pre-step 3: detect persisted-domain mismatch on a v1 record before
+    // routing through migrate (so the operator sees a clear "wrong trust
+    // domain" reason rather than "v2-after-v1 migration allowed" on a
+    // mis-targeted data dir).
+    if let Some(PersistentAuthorityStateRecordVersioned::V1(ref v1)) = persisted {
+        // Compute the runtime triple in the same shape the v1 record
+        // serialises with. `validate_record_for_domain` exists for v1
+        // records; reuse it to surface a precise domain-mismatch error.
+        if let Err(comp) = crate::pqc_authority_state::validate_record_for_domain(
+            v1,
+            inputs.runtime_env,
+            inputs.runtime_chain_id,
+            inputs.runtime_genesis_hash_hex,
+        ) {
+            // Map the v1 comparison reject into the v2 outcome carrying
+            // the same conflict information for the operator log.
+            return Err(MutatingSurfaceMarkerV2Error::PersistedDomainMismatch(
+                AuthorityMarkerV2ComparisonOutcome::LegacyV1(comp),
+            ));
+        }
+    }
+
+    // Step 3: compare v2 candidate against persisted (v1 / v2 / none).
+    let outcome = compare_authority_marker_v2(persisted.as_ref(), &candidate);
+
+    match outcome {
+        AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted => Ok(MarkerAcceptDecisionV2 {
+            marker_path: inputs.marker_path.to_path_buf(),
+            candidate,
+            should_persist: true,
+            kind: MarkerAcceptKindV2::FirstV2Write,
+        }),
+        AuthorityMarkerV2ComparisonOutcome::SameV2MarkerIdempotent => Ok(MarkerAcceptDecisionV2 {
+            marker_path: inputs.marker_path.to_path_buf(),
+            candidate,
+            should_persist: false,
+            kind: MarkerAcceptKindV2::Idempotent,
+        }),
+        AuthorityMarkerV2ComparisonOutcome::HigherSequenceAccepted {
+            persisted_sequence,
+            candidate_sequence,
+        } => Ok(MarkerAcceptDecisionV2 {
+            marker_path: inputs.marker_path.to_path_buf(),
+            candidate,
+            should_persist: true,
+            kind: MarkerAcceptKindV2::UpgradeV2 {
+                previous_sequence: persisted_sequence,
+                new_sequence: candidate_sequence,
+            },
+        }),
+        AuthorityMarkerV2ComparisonOutcome::V2AfterV1ExplicitMigrationAllowed => {
+            Ok(MarkerAcceptDecisionV2 {
+                marker_path: inputs.marker_path.to_path_buf(),
+                candidate,
+                should_persist: true,
+                kind: MarkerAcceptKindV2::V2AfterV1Migration,
+            })
+        }
+        AuthorityMarkerV2ComparisonOutcome::LowerSequenceRejected {
+            persisted_sequence,
+            candidate_sequence,
+        } => Err(MutatingSurfaceMarkerV2Error::LowerV2SequenceRefused {
+            persisted_sequence,
+            attempted_sequence: candidate_sequence,
+        }),
+        AuthorityMarkerV2ComparisonOutcome::SameSequenceDifferentDigestRejected {
+            sequence,
+            persisted_digest,
+            candidate_digest,
+        } => Err(MutatingSurfaceMarkerV2Error::SameSequenceConflictingDigest {
+            sequence,
+            persisted_digest,
+            attempted_digest: candidate_digest,
+        }),
+        AuthorityMarkerV2ComparisonOutcome::WrongKeyActionLinkageRejected { reason } => Err(
+            MutatingSurfaceMarkerV2Error::SameSequenceConflictingKeyOrAction { reason },
+        ),
+        AuthorityMarkerV2ComparisonOutcome::V1AfterV2Rejected => {
+            Err(MutatingSurfaceMarkerV2Error::V1AfterV2Rejected)
+        }
+        AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected { reason } => {
+            Err(MutatingSurfaceMarkerV2Error::UnsupportedMarkerVersion { reason })
+        }
+        other @ AuthorityMarkerV2ComparisonOutcome::WrongEnvironmentRejected { .. }
+        | other @ AuthorityMarkerV2ComparisonOutcome::WrongChainIdRejected { .. }
+        | other @ AuthorityMarkerV2ComparisonOutcome::WrongGenesisHashRejected { .. }
+        | other @ AuthorityMarkerV2ComparisonOutcome::WrongAuthorityRootRejected { .. } => {
+            Err(MutatingSurfaceMarkerV2Error::PersistedDomainMismatch(other))
+        }
+        // Legacy v1 outcome — should not occur on the v2-derive path since
+        // the candidate is v2 and migrate produces V2AfterV1ExplicitMigrationAllowed,
+        // but route defensively.
+        other @ AuthorityMarkerV2ComparisonOutcome::LegacyV1(_) => {
+            Err(MutatingSurfaceMarkerV2Error::Conflict(other))
+        }
+    }
+}
+
+/// Run 134 — persist a previously-accepted v2 marker after the existing
+/// `commit_sequence` boundary.
+///
+/// This is the only place the v2 helper layer touches disk. The function
+/// is a no-op when [`MarkerAcceptDecisionV2::should_persist`] is false
+/// (idempotent case); callers may unconditionally invoke it after a
+/// successful mutation without checking `should_persist` themselves.
+///
+/// On persist failure the helper returns
+/// [`MutatingSurfaceMarkerV2Error::PersistFailure`]. The mutating surface
+/// MUST surface that failure operatorially — the trust-bundle sequence
+/// has already advanced, so the on-disk marker is stale-by-one. Per
+/// Run 118 §D / Run 131 this is intentionally safe to replay as an
+/// `Upgrade` on the next accepted ratification, but the operator must
+/// know it happened.
+pub fn persist_accepted_v2_marker_after_commit_boundary(
+    decision: &MarkerAcceptDecisionV2,
+) -> Result<(), MutatingSurfaceMarkerV2Error> {
+    if !decision.should_persist {
+        return Ok(());
+    }
+    crate::pqc_authority_state::persist_authority_state_v2_atomic(
+        &decision.marker_path,
+        &decision.candidate,
+    )
+    .map_err(MutatingSurfaceMarkerV2Error::PersistFailure)
+}
+
+// =============================================================================
 // Unit tests — §A from task/RUN_119_TASK.txt
 // =============================================================================
 

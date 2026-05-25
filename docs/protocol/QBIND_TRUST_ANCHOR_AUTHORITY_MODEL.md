@@ -2141,3 +2141,37 @@ Run 133 also fixes three pre-existing release-build warnings on `qbind-node` so 
 Run 133 confirms the Run 132 trust-anchor model invariants on the binary path: (1) validation-only surfaces never persist marker state, regardless of acceptance/refusal outcome or sidecar version; (2) the v1 path is unchanged when the sidecar is v1; (3) the v2 path emits its typed accept reason verbatim on success and its typed refusal verbatim on failure, with `Run 132: VERDICT=invalid` on every refusal; (4) the v2-after-v1 case yields `V2AfterV1MigrationCandidate` (not a refusal) on the validation-only surface, leaving explicit migration to a future Run on the mutating surface; (5) the same-sequence-different-digest case fail-closes the binary at runtime with the typed `V2SameSequenceDifferentDigestRefused`, demonstrating per-authority-domain monotonicity from Run 129 / Run 131 is honored end-to-end.
 
 Run 133 does NOT change any wire format, does NOT wire v2 into any mutating surface, does NOT persist v2 markers from the release binary on any path, does NOT introduce KMS/HSM custody, does NOT add MainNet governance artifact verification, does NOT implement signing-key rotation or revocation, does NOT change the v1 marker on-disk format, and does NOT auto-migrate existing v1 markers on production. Trust-anchor model invariants from Run 050–132 are preserved verbatim.
+
+## Run 134 update — v2 mutating-surface accept-and-persist on the process-start reload-apply path
+
+Run 134 narrows the Run 133 "v2 wired only on validation-only surfaces" status: as of Run 134, the **process-start reload-apply** mutating surface (`--p2p-trust-bundle-reload-apply-path` + `--p2p-trust-bundle-reload-apply-enabled`) now accepts v2 sidecars, runs the Run 130 v2 verifier and the Run 131 v2 marker comparison as a pre-mutation preflight, drives the Run 070 apply pipeline, and persists the v2 marker after `commit_sequence`. The v1 path remains bit-for-bit unchanged. Other mutating surfaces (startup `--p2p-trust-bundle`, SIGHUP live reload, snapshot/restore, peer-driven live apply) remain v1-only and are deferred to follow-on runs.
+
+### What Run 134 wired into the trust-anchor authority model
+
+- `persist_authority_state_v2_atomic` (in `crates/qbind-node/src/pqc_authority_state.rs`) mirrors the Run 117 v1 atomic-persister durability contract bit-for-bit (`tmp + sync_all(tmp) + rename + sync_all(parent_dir)`); the on-disk JSON keeps the same versioned discriminator so `load_authority_state_versioned` reads back as `PersistentAuthorityStateRecordVersioned::V2`.
+- `decide_marker_acceptance_v2(...)` composes Run 131 `derive_authority_state_v2_from_ratification` + `load_authority_state_versioned` + `compare_authority_marker_v2`; performs zero disk writes; returns a typed `MutatingSurfaceMarkerV2Error` (10 variants) or a `MarkerAcceptDecisionV2` carrying the derived candidate + `should_persist` + `MarkerAcceptKindV2` (`FirstV2Write` / `Idempotent` / `UpgradeV2{prev,new}` / `V2AfterV1Migration`).
+- `persist_accepted_v2_marker_after_commit_boundary(...)` is the only Run 134 v2-write path; it is the post-`commit_sequence` partner of `decide_marker_acceptance_v2` and is a strict no-op when `should_persist=false`.
+- `preflight_run_134_v2_marker_decision(...)` and the reload-apply dispatch in `crates/qbind-node/src/main.rs` invoke the v2 path when `Run105ReloadCheckContextData::ratification_v2` is `Some`, driving the apply pipeline through `apply_validated_candidate_with_previous` **without** a v1 `RatificationEnforcementContext` (the v2 verifier already ran in the preflight).
+
+### Run 134 preserved invariants
+
+- v1 reload-apply path (Run 119) is bit-for-bit unchanged when the sidecar is v1 (or absent under `AllowLegacyUnratified`).
+- Run 070 apply-callback ordering (`snapshot_active` → `swap_trust_state` → `evict_sessions` → `commit_sequence`) is preserved bit-for-bit on the v2 path (asserted by `run134_clean_v2_first_write_decide_then_apply_then_persist`).
+- Run 118 §D / Run 131 stale-by-one crash-window rule: a mid-write crash AFTER `commit_sequence` leaves the on-disk v2 marker stale-by-one but safely replayable as `UpgradeV2` on the next accepted v2 ratification; a non-crash persist failure is FATAL on the binary and surfaced operatorially.
+- Fail-closed compare-before-mutation: rollback (`LowerV2SequenceRefused`), same-sequence equivocation (`SameSequenceConflictingDigest`), and wrong-domain rejects all run BEFORE any apply callback fires; on reject the on-disk marker is byte-for-byte unchanged and no sequence-file write occurs.
+- MainNet behavior: `--p2p-trust-bundle-reload-apply-path` requires `--data-dir`, the same precondition the v1 path enforces; the v2 preflight returns `Ok(None)` when `--data-dir` is unset (DevNet-only convenience, identical to the v1 branch).
+- CLI flag surface, wire formats, /metrics families: all unchanged.
+
+### Run 134 explicit non-changes
+
+- SIGHUP live-reload-apply v2 wiring (Run 074 / Run 121 pattern) — deferred.
+- Snapshot/restore v2 marker wiring (Run 124 pattern) — deferred.
+- Startup `--p2p-trust-bundle` v2 wiring (Run 120 pattern) — deferred.
+- Peer-driven live apply v2 wiring (live inbound `0x05` over the v2 protocol) — deferred.
+- Release-binary v2 mutating-surface evidence harness mirroring Run 133's shape — deferred.
+- Signing-key rotation/revocation lifecycle plumbing beyond what the Run 130 verifier and Run 131 derivation already enforce — deferred.
+- KMS/HSM custody, MainNet governance artifact verification, validator-set rotation, peer-driven live apply: all deferred.
+
+### C4 status after Run 134
+
+**OPEN but further narrowed for the process-start reload-apply mutating surface**. v2 schema/verifier (Run 130), v2 marker primitives (Run 131), v2 validation-only wiring (Run 132), release-binary v2 validation-only evidence (Run 133), and v2 mutating-surface wiring on the process-start reload-apply path (Run 134) are all implemented and tested. Remaining open pieces: v2 wiring on the other mutating surfaces (startup `--p2p-trust-bundle`, SIGHUP live reload, snapshot/restore), peer-driven live apply v2, release-binary v2 mutating-surface evidence, signing-key rotation/revocation lifecycle, KMS/HSM custody, MainNet governance artifact verification, validator-set rotation, full C4 closure, C5 closure. Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority. No Run 050–133 invariant was changed.

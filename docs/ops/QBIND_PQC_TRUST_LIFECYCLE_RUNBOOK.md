@@ -4353,3 +4353,55 @@ All 16 scenarios produce the expected exit code, the expected typed accept/refus
 Run 133 also fixes three pre-existing release-build warnings on `qbind-node` so that `cargo build --release -p qbind-node --bin qbind-node` is warning-free: the deprecated `bincode::config()` call is replaced by `bincode::options()` at two sites in `crates/qbind-node/src/binary_consensus_loop.rs` (wire-compatible — the binary-consensus framing tests pass unchanged), and the release-build unused `worker_id` parameter in `crates/qbind-node/src/verify_pool.rs::worker_loop` is gated by `cfg(not(debug_assertions))` so the debug-build self-check is preserved.
 
 **Operator change required: none.** Run 133 is evidence-only; the production runbook for v2 sidecars on validation-only surfaces is unchanged from Run 132. Mutating-surface v2 wiring (startup `--p2p-trust-bundle`, process-start reload-apply, SIGHUP live reload) remains v1-only until a future Run designs and tests v2 persistence atomicity, v1→v2 marker migration, and sequence-after-marker ordering. Operators with a v2 sidecar today MUST continue to apply trust via a v1 sidecar on any mutating surface; the v2 sidecar is currently only accepted on the two validation-only surfaces listed above.
+
+## Run 134 — v2 ratification wired into the process-start reload-apply mutating surface
+
+Run 134 narrows the "operators with a v2 sidecar must use v1 on mutating surfaces" statement above: as of Run 134, **the process-start reload-apply mutating surface** (`--p2p-trust-bundle-reload-apply-path` + `--p2p-trust-bundle-reload-apply-enabled`) now accepts v2 sidecars and persists the v2 authority marker after `commit_sequence`. SIGHUP live reload, snapshot/restore, and startup `--p2p-trust-bundle` remain v1-only until a follow-on run lands their v2 wiring on the same pattern.
+
+### What Run 134 wired
+
+- v2 atomic persister `persist_authority_state_v2_atomic` in `crates/qbind-node/src/pqc_authority_state.rs` (same `tmp + rename + parent-dir fsync` durability as the v1 persister; same on-disk versioned discriminator so `load_authority_state_versioned` reads it back as V2).
+- v2 mutating-surface helpers in `crates/qbind-node/src/pqc_authority_marker_acceptance.rs`:
+  - `MutatingSurfaceMarkerV2Error` (10 typed-failure variants).
+  - `MarkerAcceptanceV2Inputs` / `MarkerAcceptDecisionV2` / `MarkerAcceptKindV2` (`FirstV2Write` / `Idempotent` / `UpgradeV2{prev,new}` / `V2AfterV1Migration`).
+  - `decide_marker_acceptance_v2(...)` — composes Run 131 derivation + load + `compare_authority_marker_v2`; performs **no** disk writes.
+  - `persist_accepted_v2_marker_after_commit_boundary(...)` — idempotent no-op when `should_persist=false`; the only v2-write path in Run 134; strictly post-`commit_sequence`.
+- Binary preflight `preflight_run_134_v2_marker_decision(...)` that runs the Run 130 v2 verifier on the operator-supplied v2 sidecar carried in `Run105ReloadCheckContextData::ratification_v2`, then calls `decide_marker_acceptance_v2`.
+- Reload-apply dispatch: when `ctx_data.ratification_v2.is_some()`, the binary takes the v2 path (preflight → Run 070 apply pipeline without v1 ratification context → v2 persist after commit). Otherwise the Run 119 v1 path is preserved bit-for-bit.
+
+### Operator-visible behavior on the reload-apply path
+
+| Sidecar version | Dispatch | Marker persisted? |
+|---|---|---|
+| v1 (or no sidecar with `AllowLegacyUnratified`) | Run 119 v1 path (unchanged) | v1 marker after `commit_sequence` |
+| v2 | Run 134 v2 path (NEW) | v2 marker after `commit_sequence` |
+
+Run 134 stderr markers an operator can grep for:
+
+- `[run-134] reload-apply v2 ratification path SELECTED` — v2 dispatch chosen.
+- `[run-134] v2 authority-marker persisted at <PATH> (<kind>; candidate latest_authority_domain_sequence=<N>)` — v2 marker written after commit.
+- `[run-134] v2 authority-marker unchanged at <PATH> (idempotent; no rewrite)` — re-apply of identical v2 candidate.
+- `[run-134] FATAL: reload-apply refused by v2 authority-marker preflight: <reason>` — fail-closed pre-mutation refusal.
+- `[run-134] FATAL: v2 authority-marker persist failure AFTER successful apply: <reason>` — stale-by-one crash-window FATAL.
+
+### Run 134 explicit non-changes
+
+- CLI flag surface is unchanged. The same `--p2p-trust-bundle-reload-apply-path` / `--p2p-trust-bundle-reload-apply-enabled` flags accept v1 or v2 sidecars; dispatch is by file content.
+- v1 reload-apply behavior is bit-for-bit unchanged (Run 119 path).
+- /metrics families are unchanged (the binary exits with `0`/`1` after this subcommand; `/metrics` is never bound).
+- MainNet `--data-dir` precondition is unchanged.
+- No SIGHUP, snapshot/restore, peer-driven live apply, or startup `--p2p-trust-bundle` v2 wiring (all deferred).
+- No signing-key rotation / revocation lifecycle (deferred).
+- No KMS/HSM, no MainNet governance artifact verification (deferred).
+- No release-binary v2 mutating-surface evidence harness (deferred to a follow-on run mirroring Run 133's shape).
+
+### Status table snapshot
+
+| Surface                                            | v1 status (today) | v2 status (today)                |
+|----------------------------------------------------|-------------------|----------------------------------|
+| `--p2p-trust-bundle-reload-check`                  | Run 123 (wired)   | Run 132 (wired, validation-only) |
+| `--p2p-trust-bundle-peer-candidate-check`          | Run 123 (wired)   | Run 132 (wired, validation-only) |
+| `--p2p-trust-bundle-reload-apply-path` (this run)  | Run 119 (wired)   | **Run 134 (wired, mutating)**    |
+| `--p2p-trust-bundle` startup acceptance            | Run 120 (wired)   | deferred                         |
+| SIGHUP live-reload (`--p2p-trust-bundle-live-reload-*`) | Run 121 (wired) | deferred                       |
+| Snapshot/restore                                   | Run 124 (wired)   | deferred                         |

@@ -1394,6 +1394,105 @@ pub fn persist_authority_state_atomic(
     Ok(())
 }
 
+/// Run 134 — atomic write for the v2 authority-marker record.
+///
+/// Mirrors [`persist_authority_state_atomic`] exactly (validate → serialise →
+/// `<path>.tmp` → fsync(tmp) → rename → fsync(parent_dir on Unix)) but for
+/// [`PersistentAuthorityStateRecordV2`]. The on-disk JSON keeps the same
+/// versioned discriminator (`record_version` / `authority_schema_version`),
+/// so [`load_authority_state_versioned`] / [`parse_versioned_authority_state_record_bytes`]
+/// read it back as [`PersistentAuthorityStateRecordVersioned::V2`].
+///
+/// This is the only place the Run 134 mutating-surface wiring touches disk
+/// for v2 markers. Validation-only v2 surfaces (Run 132) NEVER call this.
+/// The mutating-surface helper
+/// [`crate::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary`]
+/// calls this AFTER the trust-bundle `commit_sequence` boundary so a
+/// mid-write crash leaves the marker stale-by-one (safely replayable per
+/// Run 118 §D) but never ahead of the trust-bundle sequence record.
+pub fn persist_authority_state_v2_atomic(
+    path: &Path,
+    record: &PersistentAuthorityStateRecordV2,
+) -> Result<(), AuthorityStateError> {
+    use std::io::Write;
+    record.validate_structure().map_err(|e| {
+        AuthorityStateError::PersistFailure(format!("pre-write v2 structural validation: {}", e))
+    })?;
+    let bytes = serde_json::to_vec(record)
+        .map_err(|e| AuthorityStateError::PersistFailure(format!("serialise v2: {}", e)))?;
+    let parent = path.parent();
+    if let Some(parent) = parent {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                AuthorityStateError::PersistFailure(format!(
+                    "create_dir_all {}: {}",
+                    parent.display(),
+                    e.kind()
+                ))
+            })?;
+        }
+    }
+    let tmp_path = {
+        let mut p = path.as_os_str().to_owned();
+        p.push(".tmp");
+        PathBuf::from(p)
+    };
+    {
+        let mut f = std::fs::File::create(&tmp_path).map_err(|e| {
+            AuthorityStateError::PersistFailure(format!(
+                "create {}: {}",
+                tmp_path.display(),
+                e.kind()
+            ))
+        })?;
+        f.write_all(&bytes).map_err(|e| {
+            AuthorityStateError::PersistFailure(format!(
+                "write {}: {}",
+                tmp_path.display(),
+                e.kind()
+            ))
+        })?;
+        f.sync_all().map_err(|e| {
+            AuthorityStateError::PersistFailure(format!(
+                "sync_all {}: {}",
+                tmp_path.display(),
+                e.kind()
+            ))
+        })?;
+    }
+    std::fs::rename(&tmp_path, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        AuthorityStateError::PersistFailure(format!(
+            "rename {} -> {}: {}",
+            tmp_path.display(),
+            path.display(),
+            e.kind()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        if let Some(parent) = parent {
+            if !parent.as_os_str().is_empty() {
+                let dir = std::fs::File::open(parent).map_err(|e| {
+                    AuthorityStateError::PersistFailure(format!(
+                        "open parent dir {} for fsync: {}",
+                        parent.display(),
+                        e.kind()
+                    ))
+                })?;
+                dir.sync_all().map_err(|e| {
+                    AuthorityStateError::PersistFailure(format!(
+                        "sync_all parent dir {}: {}",
+                        parent.display(),
+                        e.kind()
+                    ))
+                })?;
+            }
+        }
+    }
+    Ok(())
+}
+
 // ===========================================================================
 // Run 118 — Marker derivation from a verified ratification
 // ===========================================================================

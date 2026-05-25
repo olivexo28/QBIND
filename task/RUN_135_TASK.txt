@@ -1,0 +1,584 @@
+# RUN 135 — Release-Binary Evidence for v2 Reload-Apply Mutating Surface
+
+## Current state
+
+QBIND is a post-quantum-secure L1 blockchain. Security, correctness, production safety, and evidence discipline take priority over speed or convenience.
+
+Recent state:
+
+- Runs 050–068 completed signed PQC trust-bundle lifecycle.
+- Runs 069–075 completed local operator reload lifecycle.
+- Runs 076–086 completed peer-candidate `0x05` validation-only lifecycle.
+- Run 087 added peer-driven propagation/apply safety specification.
+- Run 088 implemented disabled-by-default validation-before-rebroadcast propagation prototype.
+- Run 089 produced strongest-positive N=3 DevNet release-binary propagation evidence.
+- Run 090 updated the operator runbook for propagation-only behavior.
+- Runs 091–099 established and release-evidenced canonical `activation_epoch` runtime-source behavior while preserving fail-closed behavior when no committed epoch exists.
+- Run 100 added the formal production trust-anchor authority and bundle-signing-key ratification model.
+- Run 101 added additive genesis authority fields and canonical genesis verification API.
+- Run 102 wired canonical genesis verification into release-binary startup and fixed `--print-genesis-hash`.
+- Run 103 implemented the minimal bundle-signing-key ratification v1 verifier primitive.
+- Run 104 added genesis-bound full ML-DSA-44 authority public key material.
+- Runs 105–115 wired and release-evidenced v1 ratification enforcement across startup, reload-check, peer-candidate check, live inbound `0x05`, process-start reload-apply, and SIGHUP live reload.
+- Run 116 produced the spec-first authority anti-rollback persistence model.
+- Run 117 implemented the authority marker storage/snapshot primitive.
+- Run 118 added authority-marker derivation and compare-before-accept helpers.
+- Run 119 wired authority marker compare/persist into process-start reload-apply for v1.
+- Run 120 wired authority marker compare/persist into startup `--p2p-trust-bundle` for v1.
+- Run 121 wired authority marker compare/persist into SIGHUP live reload for v1.
+- Run 122 produced strongest-positive release-binary evidence for authority marker behavior on v1 mutating surfaces.
+- Run 123 wired validation-only authority marker conflict checks for reload-check, local peer-candidate check, and live inbound `0x05`.
+- Run 124 wired snapshot/restore authority marker conflict enforcement.
+- Run 125 produced strongest-positive release-binary evidence for snapshot/restore authority marker conflict enforcement.
+- Run 126 produced the spec-first authority-state reset/recovery procedure.
+- Run 127 implemented the offline authority-state reset CLI skeleton with typed refusal cases.
+- Run 128 produced strongest-positive release-binary evidence for the offline authority-state reset CLI.
+- Run 129 produced the spec-first ratification v2 design.
+- Run 130 implemented the v2 ratification primitive.
+- Run 131 implemented the v2 authority marker primitive.
+- Run 132 wired v2 ratification and v2 marker compatibility into validation-only reload-check and local peer-candidate-check.
+- Run 133 produced strongest-positive release-binary evidence for v2 validation-only surfaces.
+- Run 134 wired v2 ratification and v2 marker compatibility into **process-start reload-apply only**:
+  - v2 sidecar dispatch in reload-apply;
+  - v2 verifier from Run 130;
+  - v2 marker comparison from Run 131;
+  - v2 marker compare before mutation;
+  - v2 marker persistence after `commit_sequence`;
+  - v1 path unchanged;
+  - v2-after-v1 migration supported only after successful commit;
+  - lower-sequence / same-sequence-different-digest / rollback rejected before mutation;
+  - apply failure before commit does not persist marker;
+  - startup v2, SIGHUP v2, live `0x05` v2 remain open;
+  - release-binary v2 mutating evidence remains open.
+
+Run 135 is evidence-only.
+
+The goal is to prove Run 134’s v2 process-start reload-apply behavior on real release binaries.
+
+---
+
+# Exact objective
+
+Produce release-binary evidence proving that process-start reload-apply can safely consume v2 ratifications and persist v2 authority marker state only after the existing commit boundary.
+
+Run 135 should prefer **no production runtime code changes**.
+
+Allowed changes are limited to:
+
+- release-binary evidence scripts;
+- evidence-only fixture/helper generation;
+- log/assertion helpers;
+- documentation/evidence updates;
+- narrow bug fixes if release-binary evidence exposes a real Run 134 defect.
+
+The objective is to prove on real `target/release/qbind-node` binaries:
+
+1. v2 no-marker reload-apply succeeds and persists a v2 marker after `commit_sequence`.
+2. v1 marker → v2 migration reload-apply succeeds and persists a v2 marker after `commit_sequence`.
+3. v2 same-sequence/same-digest idempotent reload-apply succeeds without unintended marker rewrite.
+4. v2 higher-sequence reload-apply succeeds and persists updated v2 marker after `commit_sequence`, if fixture support is feasible.
+5. lower-sequence v2 rejects before mutation.
+6. same-sequence/different-digest v2 rejects before mutation.
+7. bad v2 signature or wrong-domain v2 rejects before mutation.
+8. apply failure before `commit_sequence` does not persist a v2 marker.
+9. v1 reload-apply regression still passes.
+10. Rejection cases do not alter marker bytes, sequence files, root state, live trust state, session state, or apply outputs.
+11. No startup v2, SIGHUP v2, or live `0x05` v2 wiring is added.
+12. No signing-key rotation/revocation lifecycle is implemented.
+
+Run 135 should make this statement true:
+
+> Real release binaries prove that v2 process-start reload-apply persists v2 authority marker state only after accepted mutation, refuses downgrade/replay/equivocation before mutation, and preserves v1 behavior.
+
+---
+
+# Strict scope
+
+Allowed:
+
+## A. Release-binary v2 reload-apply evidence harness
+
+Create or update a script such as:
+
+```text
+scripts/devnet/run_135_v2_reload_apply_release_binary.sh
+```
+
+The harness should:
+
+- build or use `target/release/qbind-node`;
+- generate or reuse genesis-bound authority material;
+- generate v1 trust bundle + ratification fixtures;
+- generate v2 trust bundle + ratification fixtures;
+- seed absent/v1/v2 authority marker states as needed;
+- run process-start reload-apply release-binary scenarios;
+- capture stdout/stderr/exit codes;
+- capture marker bytes before/after;
+- capture sequence/root/apply side effects where available;
+- assert marker persistence only after successful commit;
+- assert no marker writes on rejection or apply failure;
+- archive all evidence deterministically.
+
+## B. Evidence helper updates
+
+Allowed only if needed:
+
+- helper for generating v2 reload-apply fixtures;
+- helper for same-sequence/same-digest fixture;
+- helper for same-sequence/different-digest fixture;
+- helper for lower-sequence fixture;
+- helper for v1 marker → v2 migration fixture;
+- helper for apply-failure fixture;
+- helper for marker byte comparison.
+
+Helpers must remain evidence-only and must not become production bypasses.
+
+## C. Narrow bug fixes
+
+If release-binary evidence reveals a real Run 134 defect, fix it narrowly.
+
+Any bug fix must:
+
+- preserve v1 reload-apply behavior;
+- preserve marker compare-before-mutation;
+- preserve marker persist-after-commit;
+- preserve no-marker-write on rejection;
+- preserve no-marker-write on apply failure before commit;
+- not wire startup/SIGHUP/live `0x05` v2;
+- add focused tests;
+- be documented honestly.
+
+## D. Documentation/evidence updates
+
+Required docs/evidence updates are listed below.
+
+---
+
+# Strict non-goals
+
+Run 135 MUST NOT:
+
+- wire v2 into startup trust-bundle acceptance;
+- wire v2 into SIGHUP live reload;
+- wire v2 into live inbound `0x05`;
+- persist v2 marker state from validation-only surfaces;
+- auto-migrate marker files during validation-only checks;
+- implement signing-key rotation lifecycle;
+- implement signing-key revocation lifecycle;
+- implement MainNet governance artifact support;
+- implement KMS/HSM custody;
+- implement peer-driven live apply;
+- implement peer-driven trust synchronization;
+- change trust-bundle wire format;
+- change peer-candidate wire format;
+- change reset CLI behavior;
+- redesign consensus;
+- redesign fast-sync;
+- redesign snapshots;
+- weaken v1 ratification verification;
+- weaken Run 117–134 anti-rollback/reset/v2 behavior;
+- add production static source-code anchors;
+- add fallback roots;
+- add fallback signing keys;
+- allow transport roots to authorize bundle-signing keys;
+- allow local config alone to act as MainNet bundle-signing authority;
+- claim rotation/revocation lifecycle implemented;
+- claim full C4 closure;
+- claim C5 closure.
+
+---
+
+# Required investigation before evidence
+
+Before running release evidence, investigate and document:
+
+## 1. Release-binary reload-apply command shape
+
+Identify exact command flags for process-start reload-apply, including current equivalents of:
+
+```text
+--p2p-trust-bundle-reload-apply-enabled
+--p2p-trust-bundle-reload-apply-path <PATH>
+--p2p-trust-bundle-ratification <PATH>
+--data-dir <PATH>
+--genesis-path <PATH>
+--expected-genesis-hash <HASH>
+--environment <devnet|testnet|mainnet>
+```
+
+## 2. v2 fixture generation
+
+Confirm how to generate:
+
+- valid v2 no-marker fixture;
+- v1 marker → v2 migration fixture;
+- idempotent same-sequence/same-digest fixture;
+- higher-sequence fixture;
+- lower-sequence fixture;
+- same-sequence/different-digest fixture;
+- bad-signature fixture;
+- wrong-chain/wrong-env/wrong-genesis fixture;
+- apply-failure fixture if feasible.
+
+## 3. Mutation and marker observability
+
+Define how to prove:
+
+- reload-apply succeeded;
+- `commit_sequence` happened;
+- marker was persisted after commit;
+- rejection occurred before mutation;
+- marker bytes unchanged on rejection;
+- apply failure did not persist marker;
+- v1 path still works.
+
+Avoid relying only on generic exit code if logs/side effects are available.
+
+## 4. Non-scope observability
+
+Prove logs do not indicate:
+
+- normal long-running node startup beyond one-shot reload-apply command;
+- SIGHUP reload;
+- startup trust-bundle v2 wiring;
+- live `0x05` v2 behavior;
+- propagation/apply from peer input.
+
+---
+
+# Required release-binary evidence scenarios
+
+Produce logs, exit codes, marker before/after hashes, and summary.
+
+## Scenario A1 — v2 no-marker first write succeeds
+
+No local authority marker exists.
+
+Run v2 reload-apply.
+
+Prove:
+
+- exit success;
+- reload-apply commit occurred;
+- v2 marker was persisted;
+- marker is versioned V2;
+- marker contains expected `authority_domain_sequence` and lifecycle action;
+- no startup/SIGHUP/live `0x05` v2 markers appear.
+
+## Scenario A2 — v1 marker → v2 migration succeeds
+
+Seed v1 marker.
+
+Run valid v2 reload-apply.
+
+Prove:
+
+- exit success;
+- v1 marker is replaced by V2 marker only after commit;
+- migration is explicit;
+- no mutation occurs before marker preflight passes.
+
+## Scenario A3 — idempotent same-sequence/same-digest succeeds
+
+Seed matching V2 marker.
+
+Run same v2 reload-apply.
+
+Prove:
+
+- exit success;
+- marker bytes remain byte-identical if idempotent no-op is intended;
+- no unintended rewrite.
+
+## Scenario A4 — higher-sequence succeeds, if feasible
+
+Seed lower V2 marker, run higher-sequence v2 reload-apply.
+
+Prove:
+
+- exit success;
+- marker advances only after commit.
+
+If not feasible, document source/test-only coverage from Run 134.
+
+## Scenario R1 — lower-sequence rejects before mutation
+
+Seed higher V2 marker, run lower-sequence v2 candidate.
+
+Prove:
+
+- non-zero exit;
+- typed rejection log;
+- marker bytes unchanged;
+- no apply callbacks / sequence/root mutation.
+
+## Scenario R2 — same-sequence/different-digest rejects before mutation
+
+Seed V2 marker, run same sequence but different digest.
+
+Prove same no-mutation invariants.
+
+## Scenario R3 — bad-signature or wrong-domain rejects before mutation
+
+Use one or more wrong-domain fixtures.
+
+Prove no marker write or mutation.
+
+## Scenario R4 — apply failure before commit does not persist marker
+
+If feasible, trigger apply failure after marker preflight but before commit.
+
+Prove:
+
+- marker is not written/advanced;
+- failure does not leave tmp marker file;
+- existing marker unchanged.
+
+If not feasible on release binary, document source/test-only coverage from Run 134.
+
+## Scenario V1 — v1 reload-apply regression
+
+Run an existing v1 reload-apply scenario.
+
+Prove:
+
+- v1 path still succeeds;
+- v1 marker behavior remains unchanged;
+- no v2 marker is written from v1 sidecar unless existing v1 behavior requires otherwise.
+
+---
+
+# Required tests
+
+Run targeted tests.
+
+Add tests only if release evidence reveals a gap or bug.
+
+Minimum tests to run and report:
+
+- Run 134 v2 reload-apply tests;
+- Run 133 release evidence helper/tests if present;
+- Run 132 validation-only v2 tests;
+- Run 131 v2 marker tests;
+- Run 130 v2 verifier tests;
+- Run 119 reload-apply v1 marker tests;
+- Run 070/073 reload-apply tests;
+- qbind-ledger --lib;
+- qbind-node --lib;
+- qbind-crypto --lib if helper generation touched.
+
+If any pre-existing test target has known compile/format issues, identify it clearly and prove it predates Run 135.
+
+---
+
+# Docs and evidence deliverables
+
+Required:
+
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_135.md`;
+- release-binary evidence archive under a deterministic directory, for example:
+  - `docs/devnet/run_135_v2_reload_apply_release_binary/`;
+- release-binary harness under `scripts/devnet/` if added;
+- update `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`;
+- update `docs/whitepaper/contradiction.md`;
+- update `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`.
+
+Optional narrow docs:
+
+- v2 reload-apply release matrix;
+- v1/v2 mutating-surface evidence note.
+
+Do not perform broad documentation rewrite.
+
+---
+
+# contradiction.md update rules
+
+Update `docs/whitepaper/contradiction.md` honestly.
+
+Run 135 may strengthen evidence for:
+
+- v2 process-start reload-apply release-binary behavior;
+- v2 marker persistence after commit;
+- v1→v2 migration on mutating surface;
+- no-marker-write on rejection;
+- no-marker-write on apply failure.
+
+Run 135 may mark release-binary evidence for v2 reload-apply narrowed/resolved only if:
+
+- v2 no-marker first-write succeeds and persists marker;
+- v1→v2 migration succeeds and persists V2 marker;
+- lower-sequence rejects before mutation;
+- same-sequence/different-digest rejects before mutation;
+- no marker write on rejection is proven;
+- v1 reload-apply regression is proven;
+- docs are synchronized.
+
+Run 135 MUST NOT mark resolved:
+
+- startup v2 mutating-surface wiring;
+- SIGHUP v2 mutating-surface wiring;
+- live inbound `0x05` v2 wiring;
+- signing-key rotation/revocation lifecycle;
+- KMS/HSM custody;
+- MainNet governance artifact support;
+- peer-driven live apply;
+- validator-set rotation;
+- full C4;
+- C5.
+
+The update must explicitly state:
+
+- Run 135 is release-binary evidence only for process-start reload-apply v2 behavior;
+- Run 135 does not wire startup/SIGHUP/live `0x05` for v2;
+- Run 135 does not implement signing-key rotation/revocation;
+- Run 135 does not implement KMS/HSM custody;
+- Run 135 does not implement peer-driven live apply;
+- Run 135 does not implement MainNet governance artifacts;
+- static production source-code anchors remain rejected;
+- local config alone is still not enough for MainNet bundle-signing authority.
+
+---
+
+# Expected verdicts
+
+Acceptable verdicts:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+Use **strongest-positive** only if:
+
+- release-binary evidence covers core v2 reload-apply acceptance and rejection matrix;
+- marker post-commit persistence is proven;
+- no-write-on-rejection is proven;
+- v1 regression is proven;
+- docs are synchronized;
+- no production runtime code changes were needed, or narrow bug fixes are fully proven.
+
+Use **positive** if:
+
+- main release-binary v2 reload-apply scenarios pass;
+- one secondary scenario is source/test-only with honest limitation;
+- no-write evidence is strong.
+
+Use **partial-positive** if:
+
+- release-binary evidence improves but one or more core scenarios remain blocked;
+- release archive is incomplete;
+- v1 regression evidence is incomplete.
+
+Use **negative** if:
+
+- v2 marker is written on rejection;
+- marker persists before commit;
+- lower sequence is accepted;
+- same-sequence/different-digest is accepted;
+- v1 path regresses;
+- startup/SIGHUP/live `0x05` are changed out of scope;
+- local config alone can authorize MainNet authority.
+
+---
+
+# Required final response format
+
+Your final response MUST contain:
+
+## 1. Exact verdict
+
+One of:
+
+- strongest-positive;
+- positive;
+- partial-positive;
+- negative.
+
+## 2. What changed
+
+Include:
+
+- scripts changed;
+- helpers changed;
+- docs changed;
+- release-binary archive path;
+- any runtime bug fixes, if any;
+- explicit statement if no production runtime code changed.
+
+## 3. What was proven
+
+Separate:
+
+- release-binary/process evidence;
+- source-level evidence;
+- test evidence.
+
+For each scenario, state pass/fail/blocked.
+
+## 4. What was not changed
+
+Explicitly confirm:
+
+- no startup v2 wiring;
+- no SIGHUP v2 wiring;
+- no live `0x05` v2 wiring;
+- no trust-bundle wire change;
+- no peer-candidate wire change;
+- no peer-driven apply;
+- no KMS/HSM;
+- no signing-key rotation/revocation;
+- no MainNet governance artifact support;
+- no full C4 closure;
+- no C5 closure.
+
+## 5. Contradictions or inconsistencies
+
+Cross-check new evidence against:
+
+- Run 100 authority model;
+- Run 101 genesis authority implementation;
+- Run 102 boot verification;
+- Run 103 v1 verifier;
+- Run 104 key material registry;
+- Run 105–128 enforcement/evidence/reset lineage;
+- Run 129 v2 schema spec;
+- Run 130 v2 verifier implementation;
+- Run 131 v2 marker implementation;
+- Run 132 validation-only v2 wiring;
+- Run 133 release-binary validation-only v2 evidence;
+- Run 134 v2 reload-apply source wiring;
+- contradiction.md;
+- runbook;
+- protocol docs.
+
+If contradictions or inconsistencies are found:
+
+- document them in `docs/whitepaper/contradiction.md`;
+- explain them in final response.
+
+Do not silently ignore contradictions.
+
+## 6. Evidence references
+
+List:
+
+- evidence document;
+- release-binary archive directory;
+- summary file;
+- per-scenario logs;
+- marker before/after hashes;
+- tests run;
+- exact command/scenario summaries.
+
+## 7. Residual risks and next recommended run
+
+List remaining risks honestly.
+
+Recommend the next run only after stating what Run 135 actually proved.
+
+No hype.
+No broad redesign.
+No silent regressions.
+No overclaiming.
+
