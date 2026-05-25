@@ -258,6 +258,7 @@ where
     }
 
     /// Worker thread main loop.
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))]
     fn worker_loop<K, B>(
         worker_id: usize,
         job_rx: Receiver<ConsensusVerifyJob<BlockIdT>>,

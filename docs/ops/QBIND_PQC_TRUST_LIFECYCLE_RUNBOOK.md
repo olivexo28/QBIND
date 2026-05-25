@@ -4245,3 +4245,79 @@ Run 131 doc-sync checkpoint: Run 130 landed `RatificationV2Failure` typed failur
 - No MainNet governance artifact implementation.
 - No peer-driven live apply implementation.
 - No full C4 or C5 closure claim.
+## Run 131 — authority marker v2 extension and migration helpers
+
+**Type:** Implementation (additive marker types + comparison helpers; no production wiring).
+
+Run 131 implements the authority marker v2 primitive: `PersistentAuthorityStateRecordVersioned::{V1, V2}`, `PersistentAuthorityStateRecordV2`, `derive_authority_state_v2_from_ratification`, `compare_authority_marker_v2`, `migrate_authority_marker_v1_to_v2`, and `prepare_v2_marker_for_acceptance`. v1 marker on-disk format is preserved bit-for-bit. No production v2 surface is wired in Run 131.
+
+### Operator-visible guarantees added by Run 131
+
+- v2 marker comparison helpers exist and are unit-tested; they cover idempotent, upgrade-compatible, lower-sequence-refused, same-sequence-different-digest-refused, and v1-after-v2-refused outcomes.
+- Comparison helpers are validation-only: they never persist marker state.
+- v1→v2 marker migration is a one-way helper consumed by Run 132 validation-only surfaces; it is never invoked automatically on a mutating surface in Run 131.
+
+### Run 131 explicit non-changes
+
+- No production v2 surface wiring (deferred to Run 132).
+- No release-binary v2 evidence (deferred to Run 133).
+- No CLI flag changes.
+- No wire-format changes.
+- No automatic v1→v2 marker migration on production surfaces.
+- No rotation/revocation lifecycle.
+- No KMS/HSM, MainNet governance artifact, or peer-driven live apply.
+
+## Run 132 — v2 validation-only surface wiring
+
+**Type:** Implementation (validation-only surface wiring; no mutating-surface wiring; no persistence).
+
+Run 132 wires v2 ratification and v2 marker compatibility into the two validation-only binary surfaces consumed by operators: `--p2p-trust-bundle-reload-check` and the local `--p2p-peer-candidate-check`. Mutating-surface v2 wiring, live inbound `0x05` v2 wiring, and release-binary v2 evidence remain deferred.
+
+### What Run 132 wired
+
+| Item | Detail |
+|------|--------|
+| Versioned sidecar dispatch | `VersionedRatificationSidecar::{V1, V2}` + `load_versioned_ratification_from_path()` in `crates/qbind-node/src/pqc_ratification_input.rs`. Unknown/malformed schema fails closed. |
+| `reload-check` v2 support | `--p2p-trust-bundle-reload-check` accepts v2 sidecars under the documented validation-only compatibility policy. |
+| Local `peer-candidate-check` v2 support | `--p2p-peer-candidate-check` accepts v2 sidecars under the documented validation-only compatibility policy. |
+| v2 verifier | Uses Run 130 `verify_bundle_signing_key_ratification_v2`. |
+| v2 marker comparison | Uses Run 131 `derive_authority_state_v2_from_ratification` + `compare_authority_marker_v2`. |
+| v1 behavior | Preserved bit-for-bit. Falls through to existing v1 preflight when sidecar is v1. |
+
+### v2 validation-only compatibility/downgrade policy
+
+| Case | Outcome |
+|------|---------|
+| valid v2, no local marker | accept (`NoPersistedMarkerYet`) |
+| same-sequence + same-digest | idempotent accept (`Idempotent`) |
+| higher v2 sequence | accept (`UpgradeCompatible`) |
+| v2-after-v1 | accept only as explicit migration candidate (`V2AfterV1MigrationCandidate`) |
+| v1-after-v2 | refuse (`V1AfterV2Rejected`) |
+| lower v2 sequence | refuse (`LowerV2SequenceRefused`) |
+| same-sequence + different-digest | refuse (`SameSequenceDifferentDigestRefused`) |
+| unknown/malformed schema | refuse (`VersionedRatificationInputError`) |
+
+### Persistence invariant
+
+Validation-only surfaces never persist marker state. Enforced structurally (no `persist_authority_state_atomic` call on any validation-only path) and verified by 9 dedicated unit tests including `run132_v2_no_marker_write_occurs_in_any_case`.
+
+### Deferred / future scope
+
+- Live inbound `0x05` v2 wiring remains deferred.
+- Mutating-surface v2 wiring (startup `--p2p-trust-bundle`, process-start reload-apply, SIGHUP live reload) remains deferred.
+- Release-binary v2 evidence remains open until Run 133.
+- Rotation lifecycle, revocation lifecycle, KMS/HSM custody, MainNet governance artifact support, peer-driven live apply, full C4 and C5 closure all remain future work.
+
+### Run 132 explicit non-changes
+
+- No mutating-surface v2 wiring.
+- No v2 marker persistence from validation-only checks.
+- No live inbound `0x05` v2 wiring.
+- No trust-bundle wire-format change.
+- No peer-candidate wire-format change.
+- No reset CLI behavior change.
+- No KMS/HSM, MainNet governance artifact, or peer-driven live apply implementation.
+- No rotation or revocation lifecycle implementation.
+- No full C4 or C5 closure claim.
+
+Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.

@@ -2043,3 +2043,87 @@ Run 130 does NOT implement:
 Static production source-code anchors remain rejected. Local config alone is still not enough for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.
 
 C4 status after Run 130: **OPEN but narrowed** — ratification v2 schema/types/preimage/verifier primitive are now implemented and tested. Remaining open pieces: production v2 enforcement wiring (Run 132), marker v2 migration (Run 131), signing-key rotation/revocation lifecycle (Run 134+), peer-driven live apply, KMS/HSM custody, MainNet governance artifact verification, validator-set rotation, full C4 closure, C5 closure.
+## Run 131 update — authority marker v2 primitive
+
+**Type:** Implementation (additive marker types + comparison helpers; no production surface wiring).
+**Date:** 2026-05-24.
+
+Run 131 implements the authority marker v2 primitive needed to compose the Run 130 v2 verifier into validation-only surfaces in Run 132. No production v2 surface is wired in Run 131.
+
+### New types and functions
+
+All v2 marker additions live alongside the existing Run 117/118 authority marker code:
+
+- `PersistentAuthorityStateRecordVersioned::{V1, V2}` — versioned record dispatch.
+- `PersistentAuthorityStateRecordV2` — versioned record schema carrying `schema_version=2`, latest accepted `authority_domain_sequence`, latest `key_lifecycle_action`, latest active/previous key fingerprints, and latest accepted v2 ratification digest.
+- `derive_authority_state_v2_from_ratification(...)` — derives a v2 marker candidate from a verified `RatifiedBundleSigningKeyV2` (Run 130) under an explicit `AuthorityStateUpdateSource`.
+- `compare_authority_marker_v2(...)` — typed comparison helper that distinguishes idempotent (same sequence + same digest), upgrade-compatible (higher sequence), lower-sequence-refused, same-sequence-different-digest-refused, and v1-after-v2-refused outcomes.
+- `migrate_authority_marker_v1_to_v2(...)` — one-way migration helper used by Run 132 validation-only surfaces to assemble a v2 marker candidate from an existing v1 marker on disk.
+- `prepare_v2_marker_for_acceptance(...)` — validation-only assembly entry point that does not persist.
+
+### Security invariants
+
+- v2 marker comparison NEVER persists; persistence is the caller's responsibility on mutating surfaces.
+- v1 marker on-disk format is preserved bit-for-bit; the versioned dispatch is the only consumer of the new variant.
+- Migration from v1 to v2 marker state is one-way and explicit; downgrade is not modeled.
+- v2 marker comparison is fail-closed on corrupt records, unknown schema versions, and bound-domain mismatches.
+
+### Run 131 explicit non-changes
+
+- No production v2 surface wiring (deferred to Run 132).
+- No release-binary v2 evidence (deferred to Run 133).
+- No CLI flag changes.
+- No trust-bundle or peer-candidate wire format changes.
+- No automatic v1→v2 marker migration on production surfaces.
+- No rotation or revocation lifecycle implementation.
+- No KMS/HSM, MainNet governance artifact, or peer-driven live apply.
+- No full C4 or C5 closure claim.
+
+## Run 132 update — v2 validation-only surface wiring
+
+**Type:** Implementation (validation-only surface wiring; no mutating-surface wiring; no persistence).
+**Date:** 2026-05-24.
+
+Run 132 wires v2 ratification and v2 marker compatibility into the two validation-only binary surfaces: `--p2p-trust-bundle-reload-check` and the local `--p2p-peer-candidate-check`. Mutating-surface v2 wiring, live inbound `0x05` v2 wiring, and release-binary v2 evidence remain deferred.
+
+### What Run 132 wired
+
+- Run 132 wired v2 validation-only support for `reload-check` and local `peer-candidate-check`.
+- Run 132 added versioned sidecar dispatch via `VersionedRatificationSidecar::{V1, V2}` and `load_versioned_ratification_from_path()` in `crates/qbind-node/src/pqc_ratification_input.rs`.
+- Run 132 preserved existing v1 behavior: the existing `load_ratification_from_path` and `preflight_run_123_validation_only_marker_check` v1 path are unchanged. When the operator-supplied sidecar is v1, dispatch falls through to the v1 path unmodified.
+- Run 132 uses the Run 130 v2 verifier (`verify_bundle_signing_key_ratification_v2`) and Run 131 v2 marker comparison (`derive_authority_state_v2_from_ratification` + `compare_authority_marker_v2`).
+
+### v2 compatibility/downgrade policy enforced on validation-only surfaces
+
+- v1-after-v2 rejects (typed `V1AfterV2Rejected`).
+- lower v2 sequence rejects (typed `LowerV2SequenceRefused`).
+- same-sequence/different-digest rejects (typed `SameSequenceDifferentDigestRefused`).
+- same-sequence/same-digest is idempotent (typed `Idempotent`).
+- higher v2 sequence is upgrade-compatible (typed `UpgradeCompatible`).
+- v2-after-v1 is accepted only as an explicit migration candidate (typed `V2AfterV1MigrationCandidate`).
+- unknown/malformed sidecar schema fails closed (typed `VersionedRatificationInputError`).
+
+### Persistence invariant
+
+Validation-only surfaces never persist marker state. This is enforced structurally (no `persist_authority_state_atomic` call on any validation-only path) and verified by 9 dedicated unit tests including `run132_v2_no_marker_write_occurs_in_any_case`.
+
+### Deferred / future scope
+
+- Live inbound `0x05` v2 wiring remains deferred.
+- Mutating-surface v2 wiring (startup `--p2p-trust-bundle`, process-start reload-apply, SIGHUP live reload) remains deferred.
+- Release-binary v2 evidence remains open until Run 133.
+- Rotation lifecycle, revocation lifecycle, KMS/HSM custody, MainNet governance artifact support, peer-driven live apply, full C4 and C5 closure remain future work.
+
+### Run 132 explicit non-changes
+
+- No v2 wiring into any mutating surface.
+- No v2 marker persistence from validation-only checks.
+- No live inbound `0x05` v2 wiring.
+- No trust-bundle wire-format change.
+- No peer-candidate wire-format change.
+- No reset CLI behavior change.
+- No KMS/HSM, MainNet governance artifact, or peer-driven live apply implementation.
+- No rotation or revocation lifecycle implementation.
+- No full C4 or C5 closure claim.
+
+Static production source-code anchors remain rejected. Local config alone is still not enough for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.
