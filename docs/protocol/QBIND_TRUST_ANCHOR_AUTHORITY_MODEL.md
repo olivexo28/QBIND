@@ -2354,3 +2354,69 @@ same accept-and-persist shape as the process-start reload-apply
 surface**. The remaining open mutating surfaces are SIGHUP live reload
 and snapshot/restore. All other open Run 135 items remain open. No
 Run 050–135 invariant was changed.
+## Run 137 update — release-binary evidence for the Run 136 startup `--p2p-trust-bundle` v2 wiring
+
+Run 137 captures release-binary evidence for the Run 136 startup
+`--p2p-trust-bundle` v2 mutating-surface wiring. The harness
+`scripts/devnet/run_137_v2_startup_trust_bundle_release_binary.sh`
+exercises an 11-scenario matrix on DevNet against
+`target/release/qbind-node` using the mutating startup flag block
+(`--network-mode p2p --enable-p2p --p2p-listen-addr 127.0.0.1:<port>
+--p2p-trust-bundle <bundle> --p2p-trust-bundle-signing-key
+<ratified-spec> --p2p-trust-bundle-ratification <sidecar>
+--p2p-trust-bundle-ratification-enforcement-enabled --data-dir
+<data_dir>`) and reuses the Run 133 ephemeral fixture helper
+(`crates/qbind-node/examples/run_133_v2_validation_only_fixture_helper.rs`).
+No production runtime source changed.
+
+### Run 137 evidence shape
+
+- Acceptance scenarios (A1 v2-first-write, A2 v2-after-v1 migration,
+  A3 idempotent, A4 higher-sequence upgrade) bound the still-running
+  release binary with `timeout --signal=TERM --kill-after=5s` after
+  observing the `[run-136] v2 authority-marker persisted ...` /
+  `[run-136] v2 authority-marker unchanged ...` log line, and prove
+  the post-`commit_sequence` ordering on every accepted scenario:
+  the `[binary] Run 055: trust-bundle sequence persistence` log line
+  is **strictly earlier** in stderr than the corresponding
+  `[run-136] v2 authority-marker persisted` / `unchanged` line.
+- Acceptance scenarios prove the audit-tag invariant — the on-disk
+  marker after commit carries
+  `last_update_source = "startup-load"` (the
+  `AuthorityStateUpdateSource::StartupLoad` discriminator the
+  Run 136 preflight passes into `decide_marker_acceptance_v2`).
+- Rejection scenarios (R1 lower-sequence, R2 same-sequence different-
+  digest, R3a bad signature, R3b wrong environment, R4 wrong chain,
+  R5 wrong genesis) exit `rc=1` BEFORE the binary prints
+  `[binary] P2P transport up`, AND before any sequence-file or `.tmp`
+  marker sibling is written, AND with pre-seeded marker bytes byte-
+  identical post-run.
+- The v1 regression scenario (V1) exercises the unchanged Run 105/106
+  + Run 120 startup path with a valid v1 ratification sidecar and
+  proves no `[run-136]` log line is emitted.
+- The Run 134 §C.3 / Run 135 R4 / Run 136 §A.8 corner case (apply
+  failure between the v2 preflight and the Run 055 commit boundary)
+  is not feasible to trigger on a release binary with operator-
+  supplied flag inputs alone and remains test-only.
+
+### Run 137 explicit non-changes
+
+- No production runtime source changed; the `qbind-node` and
+  `qbind-ledger` `--lib` test counts and Run 134/Run 119/Run 112
+  regressions are bit-for-bit unchanged from Run 136.
+- No new CLI flag, no log-line change, no metric change, no trust-
+  bundle / ratification / peer-candidate wire format change.
+- No new mutating surface is wired for v2: SIGHUP live reload,
+  snapshot/restore, peer-driven live apply, live inbound `0x05`, and
+  the signing-key rotation/revocation lifecycle plumbing all remain
+  deferred.
+- No KMS/HSM custody, no MainNet governance artifact verification, no
+  validator-set rotation.
+
+### C4 status after Run 137
+
+**OPEN but further narrowed: the startup `--p2p-trust-bundle`
+mutating surface — already wired by Run 136 — is now release-binary-
+evidenced**. The remaining open mutating surfaces are SIGHUP live
+reload and snapshot/restore. All other Run 136 open items remain
+open. No Run 050–136 invariant was changed.

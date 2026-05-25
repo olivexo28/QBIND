@@ -1,0 +1,64 @@
+Run 137 v2 startup --p2p-trust-bundle release-binary evidence
+outdir: /tmp/qbind-run137-v2-startup
+repo: /home/runner/work/QBIND/QBIND
+git_commit: 456b3c821a0c5fbd262105e0050186199c8b54da
+rustc: rustc 1.95.0 (59807616e 2026-04-14)
+cargo: cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+qbind-node_sha256: 868de1c6e079ccd1f1f9174a717f8fa7ad41eba320a0bf6e30222d688d24bd46
+qbind-node_build_id: 62c339cec1401ee06962e5ad0c5f60e598d1593c
+fixture-helper_sha256: 888ac3a2b967a93ba1ac4c07b1d5a8febec75863f87fb97cbad391cc5a379ca6
+fixture-helper_build_id: 9fee794c6389f4af7dc99fc12261829a441d22a5
+
+commands run by this harness:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example run_133_v2_validation_only_fixture_helper
+  $FIXTURE_HELPER $OUTDIR/fixtures
+  per-scenario: timeout --signal=TERM --kill-after=5s <secs>s $NODE_BIN \
+      --network-mode p2p --enable-p2p --p2p-listen-addr 127.0.0.1:<port> \
+      --env devnet --genesis-path <DEV>/genesis.json \
+      --expect-genesis-hash <hash> \
+      --p2p-trust-bundle <bundle> \
+      --p2p-trust-bundle-signing-key <ratified-spec> \
+      --p2p-trust-bundle-ratification <sidecar> \
+      --p2p-trust-bundle-ratification-enforcement-enabled \
+      --data-dir <data_dir>
+
+scenario status:
+  scenario_A1_v2_first_write: rc=124 class=accept
+  scenario_A2_v2_after_v1_migration: rc=124 class=accept
+  scenario_A3_v2_idempotent: rc=124 class=accept
+  scenario_A4_v2_higher_sequence: rc=124 class=accept
+  scenario_R1_v2_lower_sequence: rc=1 class=reject
+  scenario_R2_v2_same_seq_different_digest: rc=1 class=reject
+  scenario_R3a_v2_bad_signature: rc=1 class=reject
+  scenario_R3b_v2_wrong_environment: rc=1 class=reject
+  scenario_R4_v2_wrong_chain: rc=1 class=reject
+  scenario_R5_v2_wrong_genesis: rc=1 class=reject
+  scenario_V1_v1_regression: rc=124 class=accept
+
+non-mutation checks: pass
+  no pqc_trust_bundle_sequence.json created under any refusal scenario data dir
+  no pqc_authority_state.json.tmp sibling left behind under any scenario
+  pre-seeded marker bytes preserved on every refusal path
+  no marker file created on refusal scenarios with no pre-seeded marker
+  no [binary] P2P transport up on any refusal scenario (rejection before P2P bind)
+post-commit persist checks: pass
+  v2 marker present with record_version=2 + expected sequence/action
+  + last_update_source=startup-load on every accepted v2 scenario (A1/A2/A4)
+  v2 marker bytes byte-identical across idempotent run (A3)
+  v1 marker present with record_version=1 on the V1 regression scenario
+ordering proof: pass
+  [binary] Run 055 sequence persistence line strictly precedes the
+  matching [run-136] v2 authority-marker persisted/unchanged line
+  on every accepted v2 scenario (A1/A2/A3/A4)
+wire-format checks: source-only; no trust-bundle, ratification, or
+  peer-candidate wire format changed by this evidence harness
+scope non-goal checks: no SIGHUP v2, no live 0x05 v2, no peer-driven
+  apply v2, no snapshot/restore v2, no KMS/HSM, no rotation/revocation
+  lifecycle observed in stderr of any scenario
+R4-analogue (apply failure after preflight, Run 135 R4 / Run 134 §C.3):
+  covered by Run 134 §C.3 test-only (FakeLiveTrustApplyContext); the
+  release binary cannot deterministically trigger a post-preflight,
+  pre-check_and_update_sequence apply failure on the startup surface
+  with operator-supplied flag inputs alone. Same partial-positive
+  treatment as Run 135 R4.

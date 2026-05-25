@@ -1,0 +1,16 @@
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run137-v2-startup/fixtures/devnet/genesis.json, canonical_hash=0xf6cd97282799dde8bc14c98c137c3c5e78595bb9330992db9863568404daa30e).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T175] Warning: P2P enabled in DevNet environment. DevNet v0 freeze recommends LocalMesh. Use --env testnet for P2P experimentation.
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[metrics] Metrics HTTP server disabled (set QBIND_METRICS_HTTP_ADDR=host:port to enable)
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[binary] Run 093 consensus storage: state=present-no-committed-epoch path=/tmp/qbind-run137-v2-startup/data/scenario_R2_v2_same_seq_different_digest/consensus
+[binary] P2P mode: starting transport + consensus loop. environment=DevNet profile=nonce-only
+[binary] B12: mutual_auth_mode=Disabled (source: default)
+[binary] Run 057: trust-bundle activation gate satisfied (required_height=None current_height=Some(0) required_epoch=None current_epoch=None)
+[run-106] startup ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[run-136] startup --p2p-trust-bundle v2 ratification path SELECTED (v2 sidecar present; v1 startup gate `apply_run_105_ratification_gate_at_startup` SKIPPED — v2 verifier runs inside the Run 136 preflight).
+[run-136] FATAL: startup --p2p-trust-bundle refused by v2 authority-marker preflight: Run 134: v2 authority-marker same-sequence equivocation rejected: authority_domain_sequence=1 persisted_digest=eee9913ac5e0fd3f50b71423520c18307b9f6bf1c6f1b2aa0b77adbc29f31e7e attempted_digest=81cf0f1343304b6754f4c73cd9e0eee3796faa17a5e714c25f0b4cbf23b76e54 (fail closed; two distinct v2 ratifications cannot share the same authority_domain_sequence). Path=/tmp/qbind-run137-v2-startup/fixtures/devnet/candidate-bundle.json. No Run 055 sequence write, no bundle-root merge, no live trust mutation, no P2P startup, no marker write. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_136.md, docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md §"Authority anti-rollback marker (Run 117–120, v2 Run 129–131, startup v2 Run 136)".
