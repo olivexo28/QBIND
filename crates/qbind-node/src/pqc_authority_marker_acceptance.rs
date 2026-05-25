@@ -3404,4 +3404,553 @@ mod tests {
             assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
         }
     }
+
+    // =========================================================================
+    // Run 136 — v2 startup --p2p-trust-bundle mutating-surface tests
+    // =========================================================================
+    //
+    // These tests exercise the v2 marker decide / persist composition with the
+    // `AuthorityStateUpdateSource::StartupLoad` audit tag, matching the binary
+    // surface the Run 136 wiring drives on startup. They mirror the Run 120
+    // v1 startup test matrix (`run_120_startup_*`) but on the v2 path: a v2
+    // first-write at startup persists exactly once, a v2-after-v1 migration
+    // is allowed, idempotent v2 is a strict no-op, lower-sequence and same-
+    // sequence/different-digest reject before mutation, a corrupt persisted
+    // marker fails closed, and a dropped decision never persists.
+    //
+    // The Run 134 reload-apply v2 integration tests
+    // (`tests/run_134_reload_apply_v2_authority_marker_tests.rs`) drive the
+    // full Run 070 callback ordering against `FakeLiveTrustApplyContext`;
+    // these Run 136 in-module tests focus on the marker decide/persist
+    // contract that the startup binary wiring depends on.
+    mod run136_v2_startup_tests {
+        use super::*;
+        use crate::pqc_authority_state::{
+            authority_state_file_path, derive_authority_state_v2_from_ratification,
+            load_authority_state_versioned, persist_authority_state_atomic,
+            AuthorityStateDerivationV2Inputs, AuthorityStateUpdateSource,
+            PersistentAuthorityStateRecord, PersistentAuthorityStateRecordVersioned,
+        };
+        use crate::pqc_trust_bundle::TrustBundleEnvironment;
+        use qbind_crypto::MlDsa44Backend;
+        use qbind_ledger::bundle_signing_ratification::v2_test_helpers;
+        use qbind_ledger::genesis::{
+            compute_canonical_genesis_hash, GenesisAllocation, GenesisAuthorityConfig,
+            GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig,
+            GenesisValidator,
+        };
+        use qbind_ledger::{
+            BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+            RatificationEnvironment, RatifiedBundleSigningKeyV2,
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+        };
+
+        fn full_pk_hex(pk: &[u8]) -> String {
+            let mut s = String::with_capacity(pk.len() * 2);
+            for b in pk {
+                use std::fmt::Write;
+                let _ = write!(&mut s, "{:02x}", b);
+            }
+            s
+        }
+
+        fn gh_hex(gh: &qbind_ledger::GenesisHash) -> String {
+            let mut s = String::with_capacity(64);
+            for b in gh {
+                use std::fmt::Write;
+                let _ = write!(&mut s, "{:02x}", b);
+            }
+            s
+        }
+
+        /// Fixture mirroring `V2TestFixture` but isolated so this test
+        /// module is self-contained.
+        struct Fixture {
+            authority_pk: Vec<u8>,
+            authority_sk: Vec<u8>,
+            bsk_pk: Vec<u8>,
+            authority: GenesisAuthorityConfig,
+            canonical_hash: qbind_ledger::GenesisHash,
+            canonical_hash_hex: String,
+            chain_id_hex: String,
+            runtime_chain_id: ChainId,
+        }
+
+        impl Fixture {
+            fn new() -> Self {
+                let (auth_pk, auth_sk) = MlDsa44Backend::generate_keypair().unwrap();
+                let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
+                let runtime_chain_id = ChainId::new(1);
+                let chain_id_hex_str = format!("{:016x}", runtime_chain_id.as_u64());
+                let auth_pk_hex = full_pk_hex(&auth_pk);
+                let mut cfg = GenesisConfig::new(
+                    &chain_id_hex_str,
+                    1_738_000_000_000,
+                    vec![GenesisAllocation::new(
+                        format!("0x{}", "11".repeat(32)),
+                        100,
+                    )],
+                    vec![GenesisValidator::new(
+                        format!("0x{}", "22".repeat(32)),
+                        "ab".repeat(32),
+                        100,
+                    )],
+                    GenesisCouncilConfig::new(
+                        vec![
+                            format!("0x{}", "33".repeat(32)),
+                            format!("0x{}", "44".repeat(32)),
+                            format!("0x{}", "55".repeat(32)),
+                        ],
+                        2,
+                    ),
+                    GenesisMonetaryConfig::mainnet_default(),
+                );
+                let root = GenesisAuthorityRoot::new(
+                    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+                    &auth_pk_hex,
+                    "foundation-bundle-signing-1",
+                );
+                cfg.authority = Some(GenesisAuthorityConfig::new(vec![root]));
+                let gh = compute_canonical_genesis_hash(
+                    &cfg,
+                    qbind_ledger::NetworkEnvironmentPolicy::Mainnet,
+                );
+                let authority = cfg.authority.clone().unwrap();
+                let gh_hex_str = gh_hex(&gh);
+                Fixture {
+                    authority_pk: auth_pk,
+                    authority_sk: auth_sk,
+                    bsk_pk,
+                    authority,
+                    canonical_hash: gh,
+                    canonical_hash_hex: gh_hex_str,
+                    chain_id_hex: chain_id_hex_str,
+                    runtime_chain_id,
+                }
+            }
+
+            fn build_v2_ratification(
+                &self,
+                sequence: u64,
+                action: BundleSigningRatificationV2Action,
+            ) -> BundleSigningRatificationV2 {
+                v2_test_helpers::build_signed_ratification_v2(
+                    &self.chain_id_hex,
+                    RatificationEnvironment::Mainnet,
+                    self.canonical_hash,
+                    1,
+                    &full_pk_hex(&self.authority_pk),
+                    &self.authority_sk,
+                    &self.bsk_pk,
+                    sequence,
+                    action,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            }
+
+            fn verify_v2(
+                &self,
+                ratification: &BundleSigningRatificationV2,
+            ) -> RatifiedBundleSigningKeyV2 {
+                qbind_ledger::verify_bundle_signing_key_ratification_v2(
+                    qbind_ledger::RatificationV2VerifierInputs {
+                        ratification,
+                        authority: &self.authority,
+                        expected_chain_id: &self.chain_id_hex,
+                        expected_environment: qbind_ledger::NetworkEnvironmentPolicy::Mainnet,
+                        expected_genesis_hash: &self.canonical_hash,
+                    },
+                )
+                .expect("v2 verification must succeed in fixture")
+            }
+
+            /// Build a `MarkerAcceptanceV2Inputs` tagged with the
+            /// `StartupLoad` audit source so persisted records reflect
+            /// the actual Run 136 startup surface.
+            fn startup_inputs<'a>(
+                &'a self,
+                marker_path: &'a Path,
+                ratification: &'a BundleSigningRatificationV2,
+                ratified: &'a RatifiedBundleSigningKeyV2,
+            ) -> MarkerAcceptanceV2Inputs<'a> {
+                MarkerAcceptanceV2Inputs {
+                    marker_path,
+                    runtime_env: NetworkEnvironment::Mainnet,
+                    runtime_chain_id: self.runtime_chain_id,
+                    runtime_genesis_hash_hex: &self.canonical_hash_hex,
+                    ratification,
+                    ratified,
+                    update_source: AuthorityStateUpdateSource::StartupLoad,
+                    updated_at_unix_secs: 1_738_001_000,
+                }
+            }
+        }
+
+        /// Run 136 §A.1 — first accepted v2 startup ratification produces a
+        /// `FirstV2Write` decision, persists exactly once after the
+        /// simulated Run 055 commit boundary, with the `StartupLoad`
+        /// audit tag.
+        #[test]
+        fn run136_first_v2_startup_accepted_persists_marker() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+
+            let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
+            let ratified = fix.verify_v2(&rat);
+
+            let decision = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ))
+            .expect("first v2 startup accepts");
+            assert!(matches!(decision.kind(), MarkerAcceptKindV2::FirstV2Write));
+            // No file written by decide alone — proves compare happens
+            // before any startup mutation/persistence.
+            assert!(!marker_path.exists());
+
+            persist_accepted_v2_marker_after_commit_boundary(&decision).expect("persist ok");
+
+            let loaded = load_authority_state_versioned(&marker_path)
+                .expect("load ok")
+                .expect("file present");
+            match loaded {
+                PersistentAuthorityStateRecordVersioned::V2(v2) => {
+                    assert_eq!(
+                        v2.last_update_source,
+                        AuthorityStateUpdateSource::StartupLoad,
+                        "Run 136 startup persists with StartupLoad audit tag"
+                    );
+                    assert_eq!(v2.latest_authority_domain_sequence, 1);
+                }
+                other => panic!("expected V2 record on disk, got {:?}", other),
+            }
+        }
+
+        /// Run 136 §A.2 — same v2 marker is idempotent across a simulated
+        /// restart; the on-disk bytes are NOT rewritten.
+        #[test]
+        fn run136_same_v2_marker_is_idempotent() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+
+            let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
+            let ratified = fix.verify_v2(&rat);
+
+            let d1 = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ))
+            .expect("first v2 startup accepts");
+            persist_accepted_v2_marker_after_commit_boundary(&d1).expect("persist ok");
+            let before = std::fs::read(&marker_path).unwrap();
+
+            let d2 = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ))
+            .expect("idempotent v2 startup accepts");
+            assert!(matches!(d2.kind(), MarkerAcceptKindV2::Idempotent));
+            assert!(!d2.should_persist());
+            persist_accepted_v2_marker_after_commit_boundary(&d2)
+                .expect("idempotent persist no-op");
+
+            let after = std::fs::read(&marker_path).unwrap();
+            assert_eq!(before, after, "idempotent v2 startup must NOT rewrite the file");
+        }
+
+        /// Run 136 §A.3 — higher v2 sequence at startup is an `UpgradeV2`
+        /// accept; the persisted marker advances. Mirrors Run 120 §A.6.
+        #[test]
+        fn run136_upgrade_v2_accepts_strictly_higher_sequence() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+
+            // Persist a v2 marker at sequence=1 first.
+            let rat_low = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
+            let ratified_low = fix.verify_v2(&rat_low);
+            let d1 = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat_low,
+                &ratified_low,
+            ))
+            .expect("first v2 startup accepts");
+            persist_accepted_v2_marker_after_commit_boundary(&d1).expect("persist ok");
+
+            // Restart with sequence=5.
+            let rat_high =
+                fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
+            let ratified_high = fix.verify_v2(&rat_high);
+            let d2 = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat_high,
+                &ratified_high,
+            ))
+            .expect("upgrade v2 startup accepts");
+            match d2.kind() {
+                MarkerAcceptKindV2::UpgradeV2 {
+                    previous_sequence,
+                    new_sequence,
+                } => {
+                    assert_eq!(*previous_sequence, 1);
+                    assert_eq!(*new_sequence, 5);
+                }
+                other => panic!("expected UpgradeV2, got {:?}", other),
+            }
+            assert!(d2.should_persist());
+            persist_accepted_v2_marker_after_commit_boundary(&d2).expect("persist ok");
+
+            let loaded = load_authority_state_versioned(&marker_path)
+                .expect("load ok")
+                .expect("file present");
+            match loaded {
+                PersistentAuthorityStateRecordVersioned::V2(v2) => {
+                    assert_eq!(v2.latest_authority_domain_sequence, 5);
+                    assert_eq!(
+                        v2.last_update_source,
+                        AuthorityStateUpdateSource::StartupLoad
+                    );
+                }
+                other => panic!("expected V2 record, got {:?}", other),
+            }
+        }
+
+        /// Run 136 §A.4 — rollback to a lower v2 sequence rejects BEFORE
+        /// any startup mutation; the on-disk marker is unchanged.
+        #[test]
+        fn run136_lower_v2_sequence_rejects_before_mutation() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+
+            // Persist a v2 marker at sequence=7.
+            let rat_high =
+                fix.build_v2_ratification(7, BundleSigningRatificationV2Action::Ratify);
+            let ratified_high = fix.verify_v2(&rat_high);
+            let d_high = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat_high,
+                &ratified_high,
+            ))
+            .expect("first v2 startup accepts");
+            persist_accepted_v2_marker_after_commit_boundary(&d_high).expect("persist ok");
+            let before = std::fs::read(&marker_path).unwrap();
+
+            // Attempt to lower sequence at the next startup.
+            let rat_low = fix.build_v2_ratification(3, BundleSigningRatificationV2Action::Ratify);
+            let ratified_low = fix.verify_v2(&rat_low);
+            let err = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat_low,
+                &ratified_low,
+            ))
+            .expect_err("rollback must reject before mutation");
+            match err {
+                MutatingSurfaceMarkerV2Error::LowerV2SequenceRefused {
+                    persisted_sequence,
+                    attempted_sequence,
+                } => {
+                    assert_eq!(persisted_sequence, 7);
+                    assert_eq!(attempted_sequence, 3);
+                }
+                other => panic!("expected LowerV2SequenceRefused, got {:?}", other),
+            }
+            let after = std::fs::read(&marker_path).unwrap();
+            assert_eq!(
+                before, after,
+                "rejected v2 startup must not mutate marker"
+            );
+        }
+
+        /// Run 136 §A.5 — same v2 sequence, different ratification digest
+        /// rejects (equivocation) BEFORE any startup mutation.
+        #[test]
+        fn run136_same_v2_sequence_conflicting_digest_rejects() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+
+            // Persist a v2 marker at sequence=5 with action=Ratify.
+            let rat_a = fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
+            let ratified_a = fix.verify_v2(&rat_a);
+            let d_a = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat_a,
+                &ratified_a,
+            ))
+            .expect("first v2 startup accepts");
+            persist_accepted_v2_marker_after_commit_boundary(&d_a).expect("persist ok");
+            let before = std::fs::read(&marker_path).unwrap();
+
+            // Attempt a different ratification at the same sequence by
+            // changing the active key — produces a different
+            // ratification digest at the same sequence number.
+            let (bsk_pk_b, _) = MlDsa44Backend::generate_keypair().unwrap();
+            let rat_b = v2_test_helpers::build_signed_ratification_v2(
+                &fix.chain_id_hex,
+                RatificationEnvironment::Mainnet,
+                fix.canonical_hash,
+                1,
+                &full_pk_hex(&fix.authority_pk),
+                &fix.authority_sk,
+                &bsk_pk_b,
+                5,
+                BundleSigningRatificationV2Action::Ratify,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+            let ratified_b = fix.verify_v2(&rat_b);
+
+            let err = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat_b,
+                &ratified_b,
+            ))
+            .expect_err("same-sequence different-digest must reject");
+            // Allowed: SameSequenceConflictingDigest OR
+            // SameSequenceConflictingKeyOrAction depending on which
+            // mismatch the compare path surfaces first.
+            assert!(
+                matches!(
+                    err,
+                    MutatingSurfaceMarkerV2Error::SameSequenceConflictingDigest { .. }
+                        | MutatingSurfaceMarkerV2Error::SameSequenceConflictingKeyOrAction { .. }
+                ),
+                "got {:?}",
+                err
+            );
+            let after = std::fs::read(&marker_path).unwrap();
+            assert_eq!(before, after, "rejected v2 startup must not mutate marker");
+        }
+
+        /// Run 136 §A.6 — corrupt persisted marker fails closed BEFORE any
+        /// startup mutation; the garbage on disk is NOT auto-overwritten.
+        #[test]
+        fn run136_corrupt_marker_fails_closed() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+            std::fs::create_dir_all(marker_path.parent().unwrap()).unwrap();
+            std::fs::write(&marker_path, b"{ not valid json").unwrap();
+            let original_bytes = std::fs::read(&marker_path).unwrap();
+
+            let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
+            let ratified = fix.verify_v2(&rat);
+
+            let err = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ))
+            .expect_err("corrupt marker must reject before mutation");
+            assert!(
+                matches!(err, MutatingSurfaceMarkerV2Error::LoadOrCorruption(_)),
+                "got {:?}",
+                err
+            );
+            // Garbage is NOT auto-overwritten.
+            assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
+        }
+
+        /// Run 136 §A.7 — pre-persisted v1 marker → v2 startup ratification
+        /// is an explicit `V2AfterV1Migration` accept; persisting the v2
+        /// decision replaces the v1 record with a v2 record. Mirrors the
+        /// Run 134 reload-apply §C.5 case for the startup surface.
+        #[test]
+        fn run136_v2_after_v1_migration_accepts_and_persists_v2() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+
+            // Pre-persist a v1 marker (matching domain triple).
+            let v1_record = PersistentAuthorityStateRecord::new(
+                fix.chain_id_hex.clone(),
+                TrustBundleEnvironment::Mainnet,
+                fix.canonical_hash_hex.clone(),
+                1,
+                1,
+                None,
+                full_pk_hex(&fix.authority_pk),
+                full_pk_hex(&fix.bsk_pk)[..64].to_string(),
+                "aa".repeat(32),
+                AuthorityStateUpdateSource::StartupLoad,
+                1_000,
+            );
+            persist_authority_state_atomic(&marker_path, &v1_record).unwrap();
+
+            // Now arrive at startup with a v2 sidecar at a higher sequence.
+            let rat = fix.build_v2_ratification(2, BundleSigningRatificationV2Action::Ratify);
+            let ratified = fix.verify_v2(&rat);
+            let decision = decide_marker_acceptance_v2(fix.startup_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ))
+            .expect("v2-after-v1 migration accepts at startup");
+            assert!(matches!(
+                decision.kind(),
+                MarkerAcceptKindV2::V2AfterV1Migration
+            ));
+            assert!(decision.should_persist());
+            persist_accepted_v2_marker_after_commit_boundary(&decision).expect("persist ok");
+
+            // On-disk record is now V2 with the StartupLoad audit tag.
+            let loaded = load_authority_state_versioned(&marker_path)
+                .expect("load ok")
+                .expect("file present");
+            assert!(matches!(
+                loaded,
+                PersistentAuthorityStateRecordVersioned::V2(_)
+            ));
+            if let PersistentAuthorityStateRecordVersioned::V2(v2) = loaded {
+                assert_eq!(v2.latest_authority_domain_sequence, 2);
+                assert_eq!(
+                    v2.last_update_source,
+                    AuthorityStateUpdateSource::StartupLoad
+                );
+            }
+        }
+
+        /// Run 136 §A.8 — a dropped v2 decision (apply-failure simulation)
+        /// must NOT persist the v2 marker, just like Run 120 §A.9 for v1.
+        #[test]
+        fn run136_dropped_decision_does_not_persist_v2_marker() {
+            let fix = Fixture::new();
+            let dir = tempfile::tempdir().unwrap();
+            let marker_path = authority_state_file_path(dir.path());
+            assert!(!marker_path.exists());
+
+            let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
+            let ratified = fix.verify_v2(&rat);
+            {
+                let _decision = decide_marker_acceptance_v2(fix.startup_inputs(
+                    &marker_path,
+                    &rat,
+                    &ratified,
+                ))
+                .expect("first v2 startup accepts");
+                // Drop without calling persist (simulates the Err arm of
+                // the Run 055 sequence write killing the process before
+                // the v2 persist step is reached).
+            }
+            assert!(
+                !marker_path.exists(),
+                "dropped Run 136 v2 decision must NOT persist the marker"
+            );
+        }
+    }
 }

@@ -1,0 +1,268 @@
+Task: Run 137 — Release-Binary Evidence for Startup --p2p-trust-bundle v2 Mutating Surface
+
+Context:
+Run 136 is accepted as strongest-positive source/test wiring for v2 ratification on the startup --p2p-trust-bundle mutating surface.
+
+Accepted current state:
+- Run 133: strongest-positive release-binary evidence for v2 validation-only reload-check and local peer-candidate-check.
+- Run 134: strongest-positive source/test wiring for v2 process-start reload-apply.
+- Run 135: strongest-positive release-binary evidence for v2 process-start reload-apply.
+- Run 136: strongest-positive source/test wiring for startup --p2p-trust-bundle v2 marker support.
+- Run 136 startup v2 dispatch:
+  - detects Run105ReloadCheckContextData::ratification_v2;
+  - emits the [run-136] startup --p2p-trust-bundle v2 ratification path SELECTED marker;
+  - skips the v1-only apply_run_105_ratification_gate_at_startup only on the v2 branch;
+  - verifies the v2 sidecar through the Run 130 verifier;
+  - runs Run 134 decide_marker_acceptance_v2 with AuthorityStateUpdateSource::StartupLoad;
+  - performs v2 marker compare before startup mutation;
+  - persists the v2 marker strictly after Run 055 check_and_update_sequence succeeds;
+  - preserves the v1/no-sidecar startup path unchanged.
+
+Objective:
+Produce Run 137 release-binary evidence for the Run 136 startup --p2p-trust-bundle v2 mutating surface using the real target/release/qbind-node binary.
+
+This is an evidence-only run. Do not change production runtime behavior unless the harness exposes a genuine bug that prevents evidence from being collected. If any production behavior change is required, stop and report it as a Run 137 blocker instead of silently broadening scope.
+
+Required deliverables:
+1. Add a release-binary evidence harness, preferably:
+   scripts/devnet/run_137_v2_startup_trust_bundle_release_binary.sh
+
+2. Add an evidence archive directory, preferably:
+   docs/devnet/run_137_v2_startup_trust_bundle_release_binary/
+
+3. Add a canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_137.md
+
+4. Update docs/whitepaper/contradiction.md with a Run 137 C4 update.
+
+5. If docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md or docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md currently says release-binary startup v2 evidence remains open, update that prose narrowly to say Run 137 captured it. Do not claim any other closure.
+
+6. Crosscheck every new or modified file against the existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Strict scope:
+- Evidence-only.
+- Use real target/release/qbind-node.
+- Use real release-built helper binaries where helpers are needed.
+- Do not implement SIGHUP v2.
+- Do not implement live inbound 0x05 v2.
+- Do not implement snapshot/restore v2.
+- Do not implement signing-key rotation or revocation lifecycle.
+- Do not implement KMS/HSM custody.
+- Do not implement MainNet governance artifact verification.
+- Do not add new CLI flags.
+- Do not add new metrics.
+- Do not change trust-bundle, peer-candidate, ratification, or marker wire/on-disk schemas.
+- Do not weaken v1 behavior.
+- Do not claim full C4 or C5 closure.
+
+Required release-binary scenario matrix:
+
+A1. v2 no-marker first write
+- Start qbind-node with --p2p-trust-bundle and a valid v2 ratification sidecar on a fresh --data-dir.
+- Expected:
+  - release binary exits through the intended bounded startup/evidence path used by the harness, or starts far enough to prove trust-bundle startup acceptance before harness shutdown;
+  - log contains [run-136] startup --p2p-trust-bundle v2 ratification path SELECTED;
+  - Run 055 sequence persistence succeeds before v2 marker persistence;
+  - log contains [run-136] v2 authority-marker persisted;
+  - <data_dir>/pqc_authority_state.json exists;
+  - marker record_version is v2;
+  - latest_authority_domain_sequence equals the v2 sidecar sequence;
+  - last_update_source is StartupLoad / startup-load, matching the serialized spelling used by the implementation;
+  - <data_dir>/pqc_trust_bundle_sequence.json exists;
+  - no v1 marker persist log fires for the v2 scenario;
+  - no DummySig / DummyKem / DummyAead active path appears.
+
+A2. v1-to-v2 migration
+- Seed an accepted v1 startup marker or use the existing v1 startup path to create one.
+- Restart with a valid higher-sequence v2 startup bundle/sidecar.
+- Expected:
+  - v2 path selected;
+  - migration accepted;
+  - Run 055 sequence commit precedes v2 marker persistence;
+  - marker becomes v2 on disk;
+  - previous v1 marker bytes differ from final v2 marker bytes;
+  - last_update_source is StartupLoad;
+  - no v1-after-v2 downgrade is introduced.
+
+A3. idempotent same-digest v2 startup
+- Seed or first accept a v2 startup marker.
+- Restart with the same v2 bundle/sidecar and same authority-domain sequence/digest.
+- Expected:
+  - v2 path selected;
+  - startup succeeds/accepts;
+  - marker compare returns idempotent behavior;
+  - marker file bytes are byte-for-byte unchanged before vs after;
+  - marker mtime should not be treated as authoritative, but capture it if useful;
+  - no sequence rollback/equivocation error;
+  - no unnecessary marker rewrite.
+
+A4. higher-sequence v2 startup upgrade, if feasible
+- Seed v2 seq=N.
+- Restart with valid v2 seq=N+1 and corresponding bundle/sidecar.
+- Expected:
+  - v2 path selected;
+  - higher sequence accepted;
+  - Run 055 sequence commit precedes marker persistence;
+  - marker advances to N+1;
+  - last_update_source is StartupLoad.
+- If this cannot be produced honestly with available fixture helpers, document why and keep the run partial-positive rather than fabricating the case.
+
+R1. lower-sequence rejection
+- Seed v2 seq=N.
+- Attempt startup with valid v2 sidecar seq<N.
+- Expected:
+  - binary exits non-zero;
+  - log contains [run-136] FATAL or equivalent v2 startup preflight refusal;
+  - error names lower-sequence / rollback rejection;
+  - no Run 055 sequence write for the rejected candidate;
+  - existing marker bytes unchanged;
+  - existing sequence file bytes unchanged;
+  - no bundle-root merge;
+  - no P2P/network startup;
+  - no marker write;
+  - no .tmp marker/sequence residue.
+
+R2. same-sequence different-digest rejection
+- Seed v2 seq=N with key/action/digest A.
+- Attempt startup with v2 seq=N but different key/action/digest B.
+- Expected:
+  - binary exits non-zero;
+  - same-sequence conflict/equivocation is logged;
+  - marker bytes unchanged;
+  - sequence bytes unchanged;
+  - no Run 055 sequence write for rejected candidate;
+  - no P2P/network startup;
+  - no marker write.
+
+R3. bad-signature rejection
+- Attempt startup with a v2 sidecar whose signature or signed preimage has been tampered.
+- Expected:
+  - binary exits non-zero;
+  - Run 130/v2 verifier failure is surfaced through Run 136 startup refusal;
+  - no Run 055 sequence write;
+  - no marker write;
+  - no bundle-root merge;
+  - no P2P/network startup.
+
+R4. wrong-domain rejection
+- Attempt startup with a v2 sidecar whose chain_id, environment, genesis hash, authority root, or equivalent domain-binding field does not match the runtime domain.
+- Expected:
+  - binary exits non-zero;
+  - wrong-domain reason is visible in logs;
+  - no Run 055 sequence write;
+  - no marker write;
+  - no bundle-root merge;
+  - no P2P/network startup.
+
+R5. v1 startup regression
+- Run a valid v1 startup scenario or no-sidecar legacy DevNet startup scenario that previously worked.
+- Expected:
+  - v1/no-sidecar path does not select [run-136] v2 path;
+  - existing Run 105/Run 120 behavior remains intact for v1;
+  - v1 marker behavior remains v1;
+  - no v2 marker is written;
+  - no regression in startup acceptance/refusal semantics.
+
+R6. no marker write on rejection
+- This can be asserted as a shared invariant across R1-R4, but the harness must explicitly inventory marker path before and after each rejection.
+- Expected:
+  - missing marker remains missing, or existing marker SHA remains unchanged;
+  - no marker temp file remains;
+  - no accidental first-write on rejected candidates.
+
+R7. no P2P/network startup on rejected startup candidate
+- For R1-R4, prove the node exits before P2P/network startup.
+- Use stable log markers already present in the binary, port-binding checks, metrics absence, or process lifetime evidence.
+- Expected:
+  - rejection occurs before P2P listener bind / peer dial / consensus startup;
+  - no network side effect is required to observe the refusal;
+  - no live trust mutation occurs.
+
+Harness requirements:
+- Build release artifacts explicitly:
+  cargo build --release -p qbind-node
+  cargo build --release -p qbind-node --example <needed helper(s)>
+- Capture:
+  - qbind-node sha256;
+  - qbind-node ELF BuildID if available;
+  - helper sha256 and BuildID if available;
+  - rustc/cargo version if easy;
+  - git commit hash;
+  - exact commands used;
+  - per-scenario stdout/stderr;
+  - per-scenario exit code;
+  - per-scenario marker JSON before/after;
+  - per-scenario marker sha256 before/after;
+  - per-scenario sequence JSON before/after;
+  - per-scenario sequence sha256 before/after;
+  - directory inventory for marker/sequence .tmp files;
+  - grep summaries for [run-136], [run-120], Run 055, FATAL, DummySig, DummyKem, DummyAead, P2P/listener startup markers.
+
+Ordering proof:
+For every accepted v2 startup scenario, prove that the Run 055 sequence persistence log occurs before the [run-136] v2 authority-marker persisted log. Use line numbers from stderr/stdout or an equivalent deterministic ordering witness.
+
+Negative invariant checks:
+For every rejected v2 startup candidate:
+- qbind-node exit code is non-zero.
+- No Run 055 sequence write for that rejected candidate.
+- No marker write.
+- Existing marker bytes unchanged, if marker existed.
+- Existing sequence bytes unchanged, if sequence existed.
+- No bundle-root merge into live trust set.
+- No P2P/network startup.
+- No DummySig/DummyKem/DummyAead active path.
+- No fallback to --p2p-trusted-root.
+- No .tmp residue.
+
+Documentation requirements for QBIND_DEVNET_EVIDENCE_RUN_137.md:
+- Verdict must be honest:
+  - strongest-positive only if all required scenarios pass on the release binary;
+  - partial-positive if any scenario is infeasible or blocked, with exact blocker and no fabricated evidence.
+- Include:
+  - Scope summary.
+  - Exact release binary identity.
+  - Scenario table with PASS/FAIL/PARTIAL.
+  - Evidence archive paths.
+  - Commands run.
+  - Per-scenario expected vs observed.
+  - Ordering proof.
+  - Negative invariant proof.
+  - What Run 137 does not change.
+  - C4/C5 status after Run 137.
+- Explicitly state:
+  - Run 137 is evidence-only.
+  - No production runtime code behavior changed.
+  - No CLI flags changed.
+  - No metrics changed.
+  - SIGHUP v2 remains open.
+  - Live inbound 0x05 v2 remains open.
+  - Snapshot/restore v2 remains open.
+  - Signing-key rotation/revocation remains open.
+  - KMS/HSM remains open.
+  - MainNet governance artifact verification remains open.
+  - Full C4 remains open.
+  - C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node
+- cargo build --release -p qbind-node --example run_133_v2_validation_only_fixture_helper
+  or the correct existing/helper binary needed for v2 fixtures
+- bash scripts/devnet/run_137_v2_startup_trust_bundle_release_binary.sh
+- cargo test -p qbind-node --lib pqc_authority_marker_acceptance::
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_105_ratification_enforcement_tests --test run_106_ratification_policy_tests --test run_119_authority_marker_acceptance_tests
+- cargo test -p qbind-node --lib
+
+If some tests are too broad for CI/runtime, run the narrowest equivalent set and document exactly what was and was not run.
+
+Acceptance criteria:
+Run 137 is acceptable only if:
+1. The real target/release/qbind-node binary is used.
+2. Accepted v2 startup scenarios prove sequence commit before v2 marker persist.
+3. Rejected v2 startup scenarios prove no sequence write, no marker write, no root merge, no P2P startup.
+4. v1 startup regression proves the v1/no-sidecar path is unchanged.
+5. Evidence artifacts are archived under docs/devnet/run_137_v2_startup_trust_bundle_release_binary/.
+6. docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_137.md is precise and does not overclaim.
+7. contradiction.md is updated with the Run 137 C4 status.
+8. No full C4 or C5 closure is claimed.

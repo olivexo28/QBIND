@@ -2291,3 +2291,66 @@ artifact verification, validator-set rotation, full C4 closure, C5
 closure. Static production source-code anchors remain rejected. Local
 config alone remains insufficient for MainNet bundle-signing
 authority. No Run 050–134 invariant was changed.
+
+## Run 136 update — v2 mutating-surface accept-and-persist on the startup `--p2p-trust-bundle` path
+
+Run 136 ports the Run 134 v2 mutating-surface composition onto the
+**startup `--p2p-trust-bundle`** binary surface (the same code path that
+the Run 105/106 startup gate and the Run 120 v1 marker preflight guard).
+The wiring is a thin dispatcher in `crates/qbind-node/src/main.rs` that
+inspects `Run105ReloadCheckContextData::ratification_v2` and:
+
+- When the operator supplied a v2 sidecar (schema_version=2), SKIPS the
+  v1-only `apply_run_105_ratification_gate_at_startup` (which cannot
+  parse v2) and runs a new
+  `preflight_run_136_v2_marker_decision_for_startup` helper that
+  composes the Run 130 v2 verifier with the Run 134
+  `decide_marker_acceptance_v2` helper. The persisted-record audit tag
+  is `AuthorityStateUpdateSource::StartupLoad`.
+- When the operator supplied a v1 sidecar or no sidecar, the v1 startup
+  flow (Run 105 gate + Run 120 preflight) runs bit-for-bit unchanged.
+
+The v2 marker is persisted via the existing
+`persist_accepted_v2_marker_after_commit_boundary` helper AFTER the
+Run 055 `check_and_update_sequence` write succeeds — exactly the same
+ordering the Run 120 v1 path uses. The two persist blocks (v1 vs v2)
+are mutually exclusive by construction; exactly one fires per startup.
+
+### Run 136 preserved invariants
+
+- The v1 startup gate / Run 120 v1 marker preflight are untouched
+  for v1 sidecars and the no-sidecar legacy DevNet path.
+- The Run 134 reload-apply v2 wiring is untouched (Run 136 reuses the
+  same `decide_marker_acceptance_v2` / `persist_accepted_v2_marker_after_commit_boundary`
+  helpers; only the audit-tag value differs).
+- The Run 055 trust-bundle sequence persistence ordering is untouched
+  (preflight decide before the write; persist v2 after the write).
+- A v2 verifier failure / lower-sequence rollback / same-sequence
+  equivocation / wrong-domain / corrupt persisted marker on the
+  startup path FATAL-exits before any Run 055 sequence write, before
+  any bundle-root merge into the live trust set, before any P2P
+  startup, and without rewriting the marker file.
+
+### Run 136 explicit non-changes
+
+- No new CLI flags. No changes to existing flags.
+- No new /metrics counters; the new path emits operator-log lines
+  only.
+- No on-disk schema changes (the v2 marker schema is the same one
+  Run 131 introduced and Run 134/135 already write on the
+  reload-apply path).
+- No change to MainNet behaviour beyond what the Run 130 v2 verifier
+  + Run 131 monotonic comparison already enforce.
+- Snapshot/restore (Run 124), SIGHUP live reload (Run 074/121),
+  peer-driven live apply (Run 109/114), signing-key rotation/
+  revocation lifecycle, KMS/HSM custody, MainNet governance artifact
+  verification, validator-set rotation — still deferred.
+
+### C4 status after Run 136
+
+**OPEN but further narrowed: the startup `--p2p-trust-bundle` mutating
+surface now accepts v2 ratifications and persists v2 markers in the
+same accept-and-persist shape as the process-start reload-apply
+surface**. The remaining open mutating surfaces are SIGHUP live reload
+and snapshot/restore. All other open Run 135 items remain open. No
+Run 050–135 invariant was changed.

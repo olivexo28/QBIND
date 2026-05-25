@@ -759,6 +759,139 @@ fn preflight_run_134_v2_marker_decision(
     Ok(Some(decision))
 }
 
+/// Run 136 — pre-mutation v2 authority-marker accept-and-persist preflight
+/// for the **startup `--p2p-trust-bundle`** acceptance path.
+///
+/// Mirrors [`preflight_run_134_v2_marker_decision`] but tags the
+/// persisted-record audit field with
+/// [`AuthorityStateUpdateSource::StartupLoad`] (the startup-path twin of
+/// [`preflight_run_120_marker_decision_for_startup`] is the v1 path; this
+/// helper is its v2 twin). Composes:
+///
+/// 1. Run 130 [`qbind_ledger::verify_bundle_signing_key_ratification_v2`]
+///    so the verified [`qbind_ledger::RatifiedBundleSigningKeyV2`] is in
+///    hand for the v2 marker derivation step. v2 verification happens
+///    here because the v1 startup gate
+///    ([`apply_run_105_ratification_gate_at_startup`]) cannot parse a
+///    v2 sidecar; the binary dispatch on the v2 sidecar SKIPS that v1
+///    gate and runs the v2 verifier directly in this preflight.
+/// 2. [`qbind_node::pqc_authority_marker_acceptance::decide_marker_acceptance_v2`]
+///    so the on-disk versioned authority marker is compared against the
+///    v2 candidate BEFORE the Run 055 trust-bundle sequence write and
+///    BEFORE bundle roots are merged into the live `trusted_roots`
+///    set / P2P startup begins.
+///
+/// # Returns
+///
+/// * `Ok(None)` — preflight not applicable:
+///     * `data_dir` is unset (DevNet-only convenience; MainNet/TestNet
+///       FATAL-exit earlier when `--data-dir` is unset on the startup
+///       `--p2p-trust-bundle` path for Run 055 sequence persistence);
+///     * `ctx_data.ratification_v2` is `None` (caller must only call this
+///       helper when a v2 sidecar is present — the dispatcher in
+///       `main()` enforces this).
+/// * `Ok(Some(decision))` — preflight accepted; the caller MUST call
+///   [`qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary`]
+///   AFTER the Run 055 `check_and_update_sequence` write succeeds.
+/// * `Err(reason)` — preflight refused; the caller MUST NOT write the
+///   Run 055 sequence record, MUST NOT merge any new bundle root into
+///   the live trust set, MUST NOT start P2P, and MUST surface the
+///   typed reason operatorially.
+///
+/// # Scope
+///
+/// This helper is the startup-path twin of
+/// [`preflight_run_134_v2_marker_decision`]. It reuses the SAME
+/// `pqc_authority_marker_acceptance` module and the SAME Run 130/131
+/// verifier/derivation/compare/persist primitives — no parallel v2
+/// stack. The only difference from the Run 134 helper is the
+/// `AuthorityStateUpdateSource::StartupLoad` audit-only tag.
+fn preflight_run_136_v2_marker_decision_for_startup(
+    runtime_env: qbind_types::NetworkEnvironment,
+    runtime_chain_id: qbind_types::ChainId,
+    ctx_data: &Run105ReloadCheckContextData,
+    data_dir: Option<&std::path::Path>,
+    updated_at_unix_secs: u64,
+) -> Result<
+    Option<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2>,
+    qbind_node::pqc_authority_marker_acceptance::MutatingSurfaceMarkerV2Error,
+> {
+    use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
+    use qbind_node::pqc_authority_marker_acceptance::{
+        decide_marker_acceptance_v2, MarkerAcceptanceV2Inputs,
+        MutatingSurfaceMarkerV2Error,
+    };
+    use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
+
+    let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
+        // Caller bug: this helper is only meaningful when the operator
+        // supplied a v2 sidecar. The dispatcher in `main()` enforces
+        // this; return None defensively rather than panicking.
+        return Ok(None);
+    };
+
+    let Some(data_dir) = data_dir else {
+        eprintln!(
+            "[run-136] v2 authority-marker startup preflight skipped: --data-dir is unset \
+             (DevNet convenience only; the startup `--p2p-trust-bundle` path already \
+             FATAL-rejects TestNet/MainNet without --data-dir for Run 055 sequence \
+             persistence)."
+        );
+        return Ok(None);
+    };
+
+    // Step 1: Run 130 v2 verifier. This SUBSTITUTES for the v1 startup
+    // gate (`apply_run_105_ratification_gate_at_startup`) that the
+    // dispatcher in `main()` skips on the v2 path.
+    let ratified_v2 = verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
+        ratification: ratification_v2,
+        authority: &ctx_data.authority,
+        expected_chain_id: &ctx_data.chain_id_str,
+        expected_environment: ctx_data.env_policy,
+        expected_genesis_hash: &ctx_data.canonical_hash,
+    })
+    .map_err(|e| {
+        // The v2 verifier already produced the precise typed failure;
+        // the Run 131 derivation step does not have a v2-verifier-
+        // failure variant, so we map verifier failures into the
+        // conflict bucket for operator visibility. The post-commit
+        // persist call will not run because we exit before that point.
+        MutatingSurfaceMarkerV2Error::Conflict(
+            qbind_node::pqc_authority_state::AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+                reason: format!("v2 ratification verifier failure: {}", e),
+            },
+        )
+    })?;
+
+    // Step 2: compute runtime genesis hash hex (Run 117 format — 64
+    // lowercase hex chars).
+    let mut runtime_genesis_hash_hex = String::with_capacity(64);
+    for b in ctx_data.canonical_hash {
+        use std::fmt::Write;
+        let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+    }
+
+    let marker_path = authority_state_file_path(data_dir);
+
+    let decision = decide_marker_acceptance_v2(MarkerAcceptanceV2Inputs {
+        marker_path: &marker_path,
+        runtime_env,
+        runtime_chain_id,
+        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+        ratification: ratification_v2,
+        ratified: &ratified_v2,
+        update_source: AuthorityStateUpdateSource::StartupLoad,
+        updated_at_unix_secs,
+    })?;
+
+    // Keep `MutatingSurfaceMarkerV2Error` re-export in scope for the
+    // explicit Result type without triggering an unused-import warning
+    // (mirrors the Run 134 reload-apply preflight).
+    let _ = std::marker::PhantomData::<MutatingSurfaceMarkerV2Error>;
+
+    Ok(Some(decision))
+}
+
 /// Run 120 — pre-mutation authority-marker accept-and-persist preflight
 /// for the **startup `--p2p-trust-bundle`** acceptance path.
 ///
@@ -4035,6 +4168,17 @@ async fn run_p2p_node(
                     let mut startup_marker_decision:
                         Option<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecision> =
                         None;
+                    // Run 136 — v2 startup marker decision, populated when
+                    // the operator-supplied sidecar is schema_version=2.
+                    // Persisted later (after the Run 055 sequence write
+                    // succeeds) so the v2 marker never advances ahead of
+                    // the trust-bundle sequence record on this surface.
+                    // Mutually exclusive with `startup_marker_decision`:
+                    // exactly one of the two carries a decision after the
+                    // gate body, based on the sidecar schema_version.
+                    let mut startup_marker_decision_v2:
+                        Option<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2> =
+                        None;
                     if startup_gate_decision.should_invoke() {
                         eprintln!(
                             "[run-106] startup ratification gate INVOKED (policy={}, env={:?}).",
@@ -4043,8 +4187,12 @@ async fn run_p2p_node(
                         );
                         // Build the Run 105 enforcement context once
                         // so it can be reused by the Run 120 marker
-                        // preflight without re-loading the operator-
-                        // supplied genesis / ratification files.
+                        // preflight (v1) or the Run 136 marker preflight
+                        // (v2) without re-loading the operator-supplied
+                        // genesis / ratification files. Run 132's
+                        // versioned dispatcher inside the context builder
+                        // populates either `ratification` (v1) or
+                        // `ratification_v2` (v2), never both.
                         let startup_ctx_data = match build_run_105_reload_check_context(&args, &config) {
                             Ok(ctx) => Some(ctx),
                             Err(reason) => {
@@ -4053,8 +4201,9 @@ async fn run_p2p_node(
                                 // would also surface there. We log and
                                 // let the gate body produce the
                                 // operator-facing fatal message; the
-                                // Run 120 preflight is skipped on this
-                                // branch (no marker write either way).
+                                // Run 120/136 preflight is skipped on
+                                // this branch (no marker write either
+                                // way).
                                 eprintln!(
                                     "[run-120] authority-marker startup preflight skipped: \
                                      could not build Run 105 ratification context: {} \
@@ -4065,76 +4214,159 @@ async fn run_p2p_node(
                                 None
                             }
                         };
-                        if let Err(reason) =
-                            apply_run_105_ratification_gate_at_startup(&args, &config, &loaded, &bundle_signing_keys)
-                        {
+
+                        // Run 136 — versioned-sidecar dispatch on the
+                        // startup mutating surface. When the operator
+                        // supplied a v2 ratification sidecar, take the
+                        // v2 path (Run 130 verifier inside the Run 136
+                        // preflight + Run 131 v2 marker compare). The
+                        // v1 startup gate
+                        // (`apply_run_105_ratification_gate_at_startup`)
+                        // cannot parse a v2 sidecar and is therefore
+                        // SKIPPED on this branch — the v2 verifier
+                        // already runs inside
+                        // `preflight_run_136_v2_marker_decision_for_startup`.
+                        // This mirrors the Run 134 reload-apply v2
+                        // dispatch shape and preserves all v1 startup
+                        // behaviour bit-for-bit when the sidecar is
+                        // v1 or absent.
+                        let dispatch_v2 = startup_ctx_data
+                            .as_ref()
+                            .map(|c| c.ratification_v2.is_some())
+                            .unwrap_or(false);
+
+                        if dispatch_v2 {
+                            // ---- Run 136 v2 startup path ----
                             eprintln!(
-                                "[run-105] FATAL: bundle-signing-key ratification refused at \
-                                 startup; sequence record NOT written, bundle roots NOT merged \
-                                 into the live PQC trust set, no live trust mutation \
-                                 occurred. Reason: {}",
-                                reason
+                                "[run-136] startup --p2p-trust-bundle v2 ratification path \
+                                 SELECTED (v2 sidecar present; v1 startup gate \
+                                 `apply_run_105_ratification_gate_at_startup` SKIPPED — v2 \
+                                 verifier runs inside the Run 136 preflight)."
                             );
-                            eprintln!(
-                                "[run-105] qbind-node refuses to start. See \
-                                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md, \
-                                 docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md \
-                                 §\"Run 105 ratification enforcement\"."
-                            );
-                            std::process::exit(1);
-                        }
-                        // Run 120 — authority-marker startup preflight.
-                        // Runs ONLY after the Run 105/106 gate accepts
-                        // the bundle, BEFORE the Run 055 sequence
-                        // anti-rollback write, BEFORE bundle roots are
-                        // merged into `trusted_roots`, and BEFORE any
-                        // P2P / network startup. A rollback / same-
-                        // sequence-equivocation / wrong-domain /
-                        // corrupt marker fail-closes the operation
-                        // without writing the Run 055 sequence record
-                        // and without merging any new trust anchor.
-                        //
-                        // No-op when:
-                        //   * `--data-dir` is unset (DevNet
-                        //     convenience; TestNet/MainNet are already
-                        //     FATAL-rejected below if --data-dir is
-                        //     missing on this surface);
-                        //   * the candidate is `BundleSignatureStatus::
-                        //     Unsigned` (DevNet unsigned bundle — no
-                        //     ratified key to anchor a marker on);
-                        //   * the per-environment policy is
-                        //     `AllowLegacyUnratified` with no
-                        //     ratification supplied (DevNet/TestNet
-                        //     legacy ergonomics — Run 105 already
-                        //     logged `LegacyUnratifiedAccepted`).
-                        //
-                        // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_120.md.
-                        if let Some(ctx_data) = startup_ctx_data.as_ref() {
-                            match preflight_run_120_marker_decision_for_startup(
-                                &loaded,
+                            // SAFE: `dispatch_v2` is true only when
+                            // `startup_ctx_data` is Some.
+                            let ctx_data = startup_ctx_data.as_ref().unwrap();
+                            // Run 136 — v2 authority-marker startup
+                            // preflight. Runs BEFORE the Run 055
+                            // sequence anti-rollback write, BEFORE
+                            // bundle roots are merged into
+                            // `trusted_roots`, and BEFORE any P2P /
+                            // network startup. A v2 verifier failure
+                            // / v1-after-v2 rollback / lower v2
+                            // sequence / same-sequence-equivocation /
+                            // wrong-domain / corrupt marker
+                            // fail-closes the operation without
+                            // writing the Run 055 sequence record,
+                            // without merging any new trust anchor,
+                            // and without starting P2P.
+                            //
+                            // No-op when:
+                            //   * `--data-dir` is unset (DevNet
+                            //     convenience; TestNet/MainNet are
+                            //     already FATAL-rejected below if
+                            //     --data-dir is missing on this
+                            //     surface).
+                            //
+                            // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_136.md.
+                            match preflight_run_136_v2_marker_decision_for_startup(
                                 config.environment,
                                 config.chain_id(),
-                                &bundle_signing_keys,
                                 ctx_data,
                                 config.data_dir.as_deref(),
                                 now_secs,
                             ) {
                                 Ok(opt) => {
-                                    startup_marker_decision = opt;
+                                    startup_marker_decision_v2 = opt;
                                 }
                                 Err(reason) => {
                                     eprintln!(
-                                        "[run-120] FATAL: startup --p2p-trust-bundle refused by \
-                                         authority-marker preflight: {}. Path={}. No Run 055 \
+                                        "[run-136] FATAL: startup --p2p-trust-bundle refused by \
+                                         v2 authority-marker preflight: {}. Path={}. No Run 055 \
                                          sequence write, no bundle-root merge, no live trust \
                                          mutation, no P2P startup, no marker write. See \
-                                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_120.md, \
+                                         docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_136.md, \
                                          docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md \
-                                         §\"Authority anti-rollback marker (Run 117–120)\".",
+                                         §\"Authority anti-rollback marker (Run 117–120, v2 Run \
+                                         129–131, startup v2 Run 136)\".",
                                         reason,
                                         path.display()
                                     );
                                     std::process::exit(1);
+                                }
+                            }
+                        } else {
+                            // ---- v1 startup path (unchanged) ----
+                            if let Err(reason) =
+                                apply_run_105_ratification_gate_at_startup(&args, &config, &loaded, &bundle_signing_keys)
+                            {
+                                eprintln!(
+                                    "[run-105] FATAL: bundle-signing-key ratification refused at \
+                                     startup; sequence record NOT written, bundle roots NOT merged \
+                                     into the live PQC trust set, no live trust mutation \
+                                     occurred. Reason: {}",
+                                    reason
+                                );
+                                eprintln!(
+                                    "[run-105] qbind-node refuses to start. See \
+                                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_105.md, \
+                                     docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md \
+                                     §\"Run 105 ratification enforcement\"."
+                                );
+                                std::process::exit(1);
+                            }
+                            // Run 120 — authority-marker startup preflight.
+                            // Runs ONLY after the Run 105/106 gate accepts
+                            // the bundle, BEFORE the Run 055 sequence
+                            // anti-rollback write, BEFORE bundle roots are
+                            // merged into `trusted_roots`, and BEFORE any
+                            // P2P / network startup. A rollback / same-
+                            // sequence-equivocation / wrong-domain /
+                            // corrupt marker fail-closes the operation
+                            // without writing the Run 055 sequence record
+                            // and without merging any new trust anchor.
+                            //
+                            // No-op when:
+                            //   * `--data-dir` is unset (DevNet
+                            //     convenience; TestNet/MainNet are already
+                            //     FATAL-rejected below if --data-dir is
+                            //     missing on this surface);
+                            //   * the candidate is `BundleSignatureStatus::
+                            //     Unsigned` (DevNet unsigned bundle — no
+                            //     ratified key to anchor a marker on);
+                            //   * the per-environment policy is
+                            //     `AllowLegacyUnratified` with no
+                            //     ratification supplied (DevNet/TestNet
+                            //     legacy ergonomics — Run 105 already
+                            //     logged `LegacyUnratifiedAccepted`).
+                            //
+                            // See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_120.md.
+                            if let Some(ctx_data) = startup_ctx_data.as_ref() {
+                                match preflight_run_120_marker_decision_for_startup(
+                                    &loaded,
+                                    config.environment,
+                                    config.chain_id(),
+                                    &bundle_signing_keys,
+                                    ctx_data,
+                                    config.data_dir.as_deref(),
+                                    now_secs,
+                                ) {
+                                    Ok(opt) => {
+                                        startup_marker_decision = opt;
+                                    }
+                                    Err(reason) => {
+                                        eprintln!(
+                                            "[run-120] FATAL: startup --p2p-trust-bundle refused by \
+                                             authority-marker preflight: {}. Path={}. No Run 055 \
+                                             sequence write, no bundle-root merge, no live trust \
+                                             mutation, no P2P startup, no marker write. See \
+                                             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_120.md, \
+                                             docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md \
+                                             §\"Authority anti-rollback marker (Run 117–120)\".",
+                                            reason,
+                                            path.display()
+                                        );
+                                        std::process::exit(1);
+                                    }
                                 }
                             }
                         }
@@ -4282,6 +4514,74 @@ async fn run_p2p_node(
                                                  118 §D crash-window rule). Candidate path={}. \
                                                  No bundle-root merge, no P2P startup. See \
                                                  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_120.md.",
+                                                e,
+                                                path.display()
+                                            );
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+
+                                // Run 136 — persist the previously-
+                                // accepted v2 authority marker AFTER the
+                                // Run 055 `check_and_update_sequence`
+                                // commit boundary. Mutually exclusive
+                                // with the v1 persist block above (the
+                                // dispatcher populates exactly one of
+                                // `startup_marker_decision` /
+                                // `startup_marker_decision_v2`). No-op
+                                // when:
+                                //   * no decision was produced (no v2
+                                //     sidecar / --data-dir absent — both
+                                //     of which were logged at the
+                                //     preflight skip site above);
+                                //   * the decision is v2 `Idempotent`
+                                //     (the on-disk marker is bit-for-bit
+                                //     identical; rewriting would only
+                                //     bump the audit-only
+                                //     `updated_at_unix_secs`).
+                                //
+                                // Persist failure here means the Run 055
+                                // sequence already advanced and the on-
+                                // disk v2 authority marker is stale-by-
+                                // one. This is intentionally safe per
+                                // Run 118 §D / Run 131 (the next
+                                // accepted v2 mutation replays it as a
+                                // `UpgradeV2`), but the operator MUST be
+                                // told, so we exit non-zero and surface
+                                // the precise reason. See
+                                // docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_136.md.
+                                if let Some(decision) = startup_marker_decision_v2.as_ref() {
+                                    match qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(decision) {
+                                        Ok(()) => {
+                                            if decision.should_persist() {
+                                                eprintln!(
+                                                    "[run-136] v2 authority-marker persisted at {} \
+                                                     ({}; candidate \
+                                                     latest_authority_domain_sequence={}).",
+                                                    decision.marker_path().display(),
+                                                    decision.kind(),
+                                                    decision.candidate().latest_authority_domain_sequence
+                                                );
+                                            } else {
+                                                eprintln!(
+                                                    "[run-136] v2 authority-marker unchanged at {} \
+                                                     (idempotent; no rewrite).",
+                                                    decision.marker_path().display()
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            eprintln!(
+                                                "[run-136] FATAL: v2 authority-marker persist \
+                                                 failure AFTER successful Run 055 sequence \
+                                                 write at startup: {}. The trust-bundle \
+                                                 sequence already committed; the on-disk v2 \
+                                                 authority marker is stale-by-one and will be \
+                                                 re-derived on the next accepted mutation (Run \
+                                                 118 §D / Run 131 crash-window rule). Candidate \
+                                                 path={}. No bundle-root merge, no P2P startup. \
+                                                 See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_136.md.",
                                                 e,
                                                 path.display()
                                             );

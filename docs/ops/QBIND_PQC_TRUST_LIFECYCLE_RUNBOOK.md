@@ -4484,3 +4484,92 @@ Run 135 confirmed deferrals (no operator-visible change yet):
 For these surfaces, the v1 enforcement paths (Run 074 / Run 120 /
 Run 124 / Run 105 / Run 088) remain the authoritative behaviour
 until a follow-on run lands their v2 wiring.
+
+## Run 136 — v2 ratification wired into the startup `--p2p-trust-bundle` mutating surface
+
+Run 136 narrows the "v2 wiring remains open for startup `--p2p-trust-bundle`"
+statement above: as of Run 136, **the startup `--p2p-trust-bundle` mutating
+surface** (the Run 105/106 startup gate + Run 120 marker preflight + Run 055
+sequence write block that runs when the operator passes `--p2p-trust-bundle`
+on the `qbind-node` binary) now accepts v2 sidecars and persists the v2
+authority marker after `commit_sequence`. SIGHUP live reload and snapshot/
+restore remain v1-only until follow-on runs land their v2 wiring on the
+same pattern.
+
+### What Run 136 wired
+
+- A new binary preflight
+  `preflight_run_136_v2_marker_decision_for_startup` in
+  `crates/qbind-node/src/main.rs` that composes the Run 130 v2 verifier
+  with the Run 134 `decide_marker_acceptance_v2` helper. The audit-only
+  `last_update_source` field of the resulting persisted record is
+  tagged `StartupLoad` (the startup-surface analogue of Run 134's
+  `ReloadApply`).
+- A versioned-sidecar dispatcher inside the existing startup gate body:
+  when `Run105ReloadCheckContextData::ratification_v2.is_some()`, the
+  binary SKIPS the v1-only `apply_run_105_ratification_gate_at_startup`
+  (it cannot parse v2 sidecars) and runs the Run 136 preflight in its
+  place. When the sidecar is v1 or absent, the existing v1 path (Run
+  105 gate + Run 120 preflight) runs bit-for-bit unchanged.
+- A v2 post-commit persist block parallel to the existing Run 120 v1
+  persist, calling `persist_accepted_v2_marker_after_commit_boundary`
+  strictly AFTER the Run 055 `check_and_update_sequence` write
+  succeeds. The two persist blocks are mutually exclusive by
+  construction; exactly one fires per startup.
+
+Operator-visible ordering on the v2 path:
+
+| Step | Effect |
+|------|--------|
+| `[run-106] startup ratification gate INVOKED ...` | gate body entered |
+| `[run-136] startup --p2p-trust-bundle v2 ratification path SELECTED ...` | v2 dispatch chosen; v1 gate skipped |
+| Run 055 `check_and_update_sequence` | sequence file written (or rejected) |
+| `[run-136] v2 authority-marker persisted at <data_dir>/pqc_authority_state.json (...; candidate latest_authority_domain_sequence=N)` | v2 marker persist, **strictly after** sequence commit |
+
+On reject the binary emits one operator-actionable
+`[run-136] FATAL: startup --p2p-trust-bundle refused by v2
+authority-marker preflight: ...` line and exits non-zero, with no
+Run 055 sequence write, no bundle-root merge into the live PQC trust
+set, no live trust mutation, no P2P startup, and no marker write. On
+persist-after-commit failure the binary emits
+`[run-136] FATAL: v2 authority-marker persist failure AFTER successful
+Run 055 sequence write at startup: ...` and exits non-zero; the
+trust-bundle sequence has already advanced and the on-disk v2 marker
+is stale-by-one (safely replayable as `UpgradeV2` on the next
+accepted mutation per Run 118 §D / Run 131). Operators MUST investigate
+that scenario via the Run 131 / Run 134 stale-by-one recovery guidance
+already captured above; do not hand-edit the marker file.
+
+### Run 136 explicit non-changes
+
+- SIGHUP live reload (Run 074 / Run 121) — still v1-only.
+- Snapshot/restore (Run 088 / Run 124) — still v1-only.
+- Run 132 validation-only surfaces (reload-check, peer-candidate-check)
+  — unchanged; only the mutating startup surface is touched.
+- Run 134 reload-apply v2 wiring — unchanged; Run 136 reuses the same
+  helpers with the `StartupLoad` audit tag and a separate dispatcher.
+- Run 055 trust-bundle sequence persistence — unchanged.
+- Run 105/106 v1 startup gate — unchanged structurally; it still runs
+  verbatim for v1 sidecars and the no-sidecar legacy DevNet path.
+- CLI flag surface — unchanged.
+- /metrics families — unchanged.
+- Signing-key rotation/revocation lifecycle, peer-driven live apply,
+  KMS/HSM custody, MainNet governance artifact verification — still
+  deferred.
+
+### Mutating-surface v2 coverage matrix after Run 136
+
+| Mutating surface | v1 path | v2 path |
+|------------------|---------|---------|
+| `--p2p-trust-bundle` (startup, this run) | Run 105/106 + Run 120 | **Run 136 (wired)** |
+| `--p2p-trust-bundle-reload-apply-path`   | Run 112/119           | Run 134 (wired)      |
+| SIGHUP live reload                        | Run 074/121           | OPEN — deferred       |
+| snapshot/restore                          | Run 088/124           | OPEN — deferred       |
+
+Release-binary evidence for the Run 136 wiring is **not** included in
+this run; a follow-on run mirroring Run 133's / Run 135's
+`scripts/devnet/run_*_release_binary.sh` shape is required to capture
+the startup-surface release-binary scenario matrix. Operators running
+DevNet preview builds today can grep for `[run-136]` to identify the
+v2 startup path and `[run-120]` for the v1 startup path; the two are
+mutually exclusive per startup.
