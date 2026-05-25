@@ -1,0 +1,8 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run133-final/fixtures/devnet/genesis.json, canonical_hash=0x7daa5a97783c11d0316dcdbe146b2d0a0250d4f5854aafca994ff662c9a838d5).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-107] peer-candidate-check ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[binary] Run 076: peer-supplied trust-bundle candidate validated; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched (peer_id=run133-active candidate_fp=2605c801.. env=devnet chain_id=51424e4444455600 sequence=2 signature_verified=true active_roots=1 active_revoked_roots=0 active_revoked_leaves=0)
+[run-132] peer-candidate-check v2 authority-marker check passed: no-persisted-marker-yet (v2 first-seen pass; no marker persistence) (validation-only; no marker persistence; no trust mutation).
+[binary] Run 077: VERDICT=validated (peer-candidate validation-only; NOT applied; not propagated; sequence not persisted; live trust state unchanged; sessions untouched). Envelope path=/tmp/qbind-run133-final/fixtures/devnet/peer-candidate.json. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md.

@@ -1,0 +1,6 @@
+[run-102] OK: canonical Run 101 genesis verification passed (env=Devnet, genesis=/tmp/qbind-run133-final/fixtures/devnet/genesis.json, canonical_hash=0x7daa5a97783c11d0316dcdbe146b2d0a0250d4f5854aafca994ff662c9a838d5).
+[restore] no --restore-from-snapshot requested; normal startup.
+[T104] No schema version found in storage - treating as legacy v0 (compatible)
+[M16] Epoch consistency check passed: current_epoch=None
+[run-106] reload-check ratification gate INVOKED (policy=devnet-operator-opt-in, env=Devnet).
+[binary] Run 132: VERDICT=invalid (reload-check v2 authority-marker conflict; no live trust apply; no sequence persistence write; no marker persistence; no peer/session mutation; no /metrics mutation). Candidate path=/tmp/qbind-run133-final/fixtures/devnet/candidate-bundle.json. Reason: Run 132: v2 same-sequence different-digest refused: seq=1 persisted_digest=c607a0dc79ca9093455f3e132115587595682f0fd1fe9f4e3e098da31dfcca34 candidate_digest=bcfade18d555a7d9f526ed2abfccc3a2d3bdb9376339182ae6f372e3956fc7cc; fail closed; no marker persistence.

@@ -4321,3 +4321,35 @@ Validation-only surfaces never persist marker state. Enforced structurally (no `
 - No full C4 or C5 closure claim.
 
 Static production source-code anchors remain rejected. Local config alone remains insufficient for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.
+
+## Run 133 — release-binary v2 validation-only evidence (operator-facing)
+
+Run 133 is the release-binary evidence run for the Run 132 v2 validation-only wiring on the two operator surfaces below. It does not introduce any new CLI flag and does not change any operator workflow vs Run 132.
+
+**Operator surfaces exercised**
+
+| CLI surface                                  | Sidecar version routed by | Run 132 dispatch | Persists marker? |
+|----------------------------------------------|---------------------------|------------------|------------------|
+| `--p2p-trust-bundle-reload-check <FILE>`     | sidecar file content      | v1 → Run 123; v2 → Run 132 | **NO** (validation-only) |
+| `--p2p-trust-bundle-peer-candidate-check <FILE>` | sidecar file content  | v1 → Run 123; v2 → Run 132 | **NO** (validation-only) |
+
+Operators continue to pass the same `--p2p-trust-bundle-ratification <FILE>` flag; the binary detects v1 vs v2 from the file's `schema_version` / `version` field via the Run 132 versioned loader and dispatches accordingly. v1 sidecars take the unchanged Run 123 path. v2 sidecars take the new Run 132 v2 path and emit one of the typed accept reasons listed in the Run 132 section above, or a typed refusal followed by `Run 132: VERDICT=invalid` and non-zero exit.
+
+**DevNet operator-opt-in note for pure-v2 sidecars.** Because the Run 105 v1 enforcer is reached first by the reload-check pipeline and a pure-v2 sidecar carries no v1 fields, DevNet/TestNet operators MUST add `--p2p-trust-bundle-allow-unratified-testnet-devnet` alongside `--p2p-trust-bundle-ratification-enforcement-enabled` when supplying a v2-only sidecar. This is the same DevNet/TestNet escape hatch documented in the Run 105 / Run 107 sections; MainNet does not honor it (MainNet always invokes the v1 enforcer with Strict policy).
+
+**Release-binary evidence**
+
+The harness `scripts/devnet/run_133_v2_validation_only_release_binary.sh` runs a 16-scenario matrix against `target/release/qbind-node`, archived under `docs/devnet/run_133_v2_validation_only_release_binary/`:
+
+* **v1 regression (1 scenario):** v1 valid sidecar with no marker → Run 123 first-seen pass, `VERDICT=valid`.
+* **v2 acceptance (6 scenarios):** v2 first-seen (no marker), v2 idempotent (same seq same digest), v2 ratify upgrade 1→2, v2 rotate upgrade 1→2, v2 revoke upgrade 1→2, v2-after-v1 migration candidate (v1 marker + v2 ratify@seq=2).
+* **v2 rejection (7 scenarios):** same-sequence different-digest equivocation, lower sequence (1 vs marker 2), seq=0 (malformed), tampered signature, wrong chain, wrong environment, wrong genesis.
+* **Peer-candidate-check spot-check (2 scenarios):** v2 first-seen pass, v2 bad-signature refusal.
+
+All 16 scenarios produce the expected exit code, the expected typed accept/refusal reason verbatim on stderr, and satisfy the four-part non-mutation invariant (no `pqc_authority_state.json` created/rewritten/left as `.tmp`, no `pqc_trust_bundle_sequence.json` written, no apply / propagate / session-eviction / SIGHUP / KMS marker observed). Per-scenario stderr logs and exit codes are archived under `docs/devnet/run_133_v2_validation_only_release_binary/logs/`.
+
+**Build hygiene**
+
+Run 133 also fixes three pre-existing release-build warnings on `qbind-node` so that `cargo build --release -p qbind-node --bin qbind-node` is warning-free: the deprecated `bincode::config()` call is replaced by `bincode::options()` at two sites in `crates/qbind-node/src/binary_consensus_loop.rs` (wire-compatible — the binary-consensus framing tests pass unchanged), and the release-build unused `worker_id` parameter in `crates/qbind-node/src/verify_pool.rs::worker_loop` is gated by `cfg(not(debug_assertions))` so the debug-build self-check is preserved.
+
+**Operator change required: none.** Run 133 is evidence-only; the production runbook for v2 sidecars on validation-only surfaces is unchanged from Run 132. Mutating-surface v2 wiring (startup `--p2p-trust-bundle`, process-start reload-apply, SIGHUP live reload) remains v1-only until a future Run designs and tests v2 persistence atomicity, v1→v2 marker migration, and sequence-after-marker ordering. Operators with a v2 sidecar today MUST continue to apply trust via a v1 sidecar on any mutating surface; the v2 sidecar is currently only accepted on the two validation-only surfaces listed above.
