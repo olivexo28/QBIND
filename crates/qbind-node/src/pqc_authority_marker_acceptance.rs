@@ -3426,9 +3426,8 @@ mod tests {
     mod run136_v2_startup_tests {
         use super::*;
         use crate::pqc_authority_state::{
-            authority_state_file_path, derive_authority_state_v2_from_ratification,
-            load_authority_state_versioned, persist_authority_state_atomic,
-            AuthorityStateDerivationV2Inputs, AuthorityStateUpdateSource,
+            authority_state_file_path, load_authority_state_versioned,
+            persist_authority_state_atomic, AuthorityStateUpdateSource,
             PersistentAuthorityStateRecord, PersistentAuthorityStateRecordVersioned,
         };
         use crate::pqc_trust_bundle::TrustBundleEnvironment;
