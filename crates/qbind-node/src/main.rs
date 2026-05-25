@@ -363,6 +363,9 @@ struct Run105ReloadCheckContextData {
     chain_id_str: String,
     ratification: Option<qbind_ledger::BundleSigningRatification>,
     policy: qbind_ledger::RatificationEnforcementPolicy,
+    /// Run 132: optional v2 ratification sidecar. Present when the
+    /// operator-supplied sidecar is schema_version=2.
+    ratification_v2: Option<qbind_ledger::BundleSigningRatificationV2>,
 }
 
 /// Run 105 — build the owned context the reload-check / peer-candidate-
@@ -382,7 +385,9 @@ fn build_run_105_reload_check_context(
     config: &qbind_node::node_config::NodeConfig,
 ) -> Result<Run105ReloadCheckContextData, String> {
     use qbind_node::pqc_boot_genesis::{load_external_genesis, map_environment};
-    use qbind_node::pqc_ratification_input::load_ratification_from_path;
+    use qbind_node::pqc_ratification_input::{
+        load_versioned_ratification_from_path, VersionedRatificationSidecar,
+    };
     use qbind_types::NetworkEnvironment;
 
     let genesis_path = config.genesis_source.genesis_path.as_ref().ok_or_else(|| {
@@ -410,12 +415,14 @@ fn build_run_105_reload_check_context(
         qbind_ledger::compute_canonical_genesis_hash(&genesis_cfg, env_policy);
     let chain_id_str =
         qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
-    let ratification = match args.p2p_trust_bundle_ratification.as_ref() {
-        Some(path) => Some(
-            load_ratification_from_path(path)
-                .map_err(|e| format!("{}", e))?,
-        ),
-        None => None,
+    // Run 132: load with versioned dispatcher to support v1 and v2 sidecars.
+    let (ratification, ratification_v2) = match args.p2p_trust_bundle_ratification.as_ref() {
+        Some(path) => match load_versioned_ratification_from_path(path) {
+            Ok(VersionedRatificationSidecar::V1(v1)) => (Some(v1), None),
+            Ok(VersionedRatificationSidecar::V2(v2)) => (None, Some(v2)),
+            Err(e) => return Err(format!("{}", e)),
+        },
+        None => (None, None),
     };
     let policy = match config.environment {
         NetworkEnvironment::Mainnet => qbind_ledger::RatificationEnforcementPolicy::Strict,
@@ -434,6 +441,7 @@ fn build_run_105_reload_check_context(
         chain_id_str,
         ratification,
         policy,
+        ratification_v2,
     })
 }
 
@@ -1063,6 +1071,78 @@ fn preflight_run_123_validation_only_marker_check(
     Ok(Some(accept_reason))
 }
 
+/// Run 132 — validation-only v2 authority marker conflict check for
+/// validation-only surfaces (reload-check, peer-candidate-check).
+///
+/// This function:
+/// 1. Verifies the v2 ratification sidecar using the Run 130 verifier.
+/// 2. Derives a v2 marker candidate from the verified ratification.
+/// 3. Compares the candidate against any persisted versioned marker.
+/// 4. Returns typed accept/reject without persisting.
+///
+/// # Critical guarantee: never persists marker.
+#[allow(clippy::too_many_arguments)]
+fn preflight_run_132_validation_only_v2_marker_check(
+    runtime_env: qbind_types::NetworkEnvironment,
+    runtime_chain_id: qbind_types::ChainId,
+    ctx_data: &Run105ReloadCheckContextData,
+    data_dir: Option<&std::path::Path>,
+) -> Result<
+    Option<qbind_node::pqc_authority_marker_acceptance::ValidationOnlyMarkerV2AcceptReason>,
+    qbind_node::pqc_authority_marker_acceptance::ValidationOnlyMarkerV2Error,
+> {
+    use qbind_node::pqc_authority_marker_acceptance::{
+        verify_marker_for_validation_only_v2, ValidationOnlyMarkerV2Error,
+        ValidationOnlyMarkerV2Inputs,
+    };
+    use qbind_node::pqc_authority_state::authority_state_file_path;
+
+    let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
+        // No v2 sidecar — this function should only be called when v2 is present.
+        return Ok(None);
+    };
+
+    let Some(data_dir) = data_dir else {
+        eprintln!(
+            "[run-132] validation-only v2 authority-marker check skipped: --data-dir is unset \
+             (DevNet convenience only; MainNet/TestNet already require --data-dir)."
+        );
+        return Ok(None);
+    };
+
+    // Step 1: verify the v2 ratification using the Run 130 verifier.
+    let ratified_v2 = qbind_ledger::verify_bundle_signing_key_ratification_v2(
+        qbind_ledger::RatificationV2VerifierInputs {
+            ratification: ratification_v2,
+            authority: &ctx_data.authority,
+            expected_chain_id: &ctx_data.chain_id_str,
+            expected_environment: ctx_data.env_policy,
+            expected_genesis_hash: &ctx_data.canonical_hash,
+        },
+    )
+    .map_err(ValidationOnlyMarkerV2Error::V2VerifierFailure)?;
+
+    // Compute genesis hash hex for marker derivation.
+    let mut runtime_genesis_hash_hex = String::with_capacity(64);
+    for b in ctx_data.canonical_hash {
+        use std::fmt::Write;
+        let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+    }
+
+    let marker_path = authority_state_file_path(data_dir);
+
+    let accept_reason = verify_marker_for_validation_only_v2(ValidationOnlyMarkerV2Inputs {
+        marker_path: &marker_path,
+        runtime_env,
+        runtime_chain_id,
+        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+        ratification: ratification_v2,
+        ratified: &ratified_v2,
+    })?;
+
+    Ok(Some(accept_reason))
+}
+
 /// Main entry point for qbind-node binary.
 #[tokio::main]
 async fn main() {
@@ -1602,35 +1682,69 @@ async fn main() {
                 // Runs AFTER ratification succeeds, BEFORE success exit.
                 // Never persists marker. Rejects conflict/corruption/wrong-domain.
                 if let Some(ref ctx_data) = reload_check_ctx_data {
-                    match preflight_run_123_validation_only_marker_check(
-                        candidate_path,
-                        config.environment,
-                        config.chain_id(),
-                        now_secs,
-                        &bundle_signing_keys,
-                        ctx_data,
-                        config.data_dir.as_deref(),
-                    ) {
-                        Ok(Some(reason)) => {
-                            eprintln!(
-                                "[run-123] reload-check authority-marker check passed: {} \
-                                 (validation-only; no marker persistence; no trust mutation).",
-                                reason
-                            );
+                    // Run 132 — v2 sidecar dispatch. If a v2 sidecar is present,
+                    // run the v2 marker check; otherwise preserve v1 path unchanged.
+                    if ctx_data.ratification_v2.is_some() {
+                        match preflight_run_132_validation_only_v2_marker_check(
+                            config.environment,
+                            config.chain_id(),
+                            ctx_data,
+                            config.data_dir.as_deref(),
+                        ) {
+                            Ok(Some(reason)) => {
+                                eprintln!(
+                                    "[run-132] reload-check v2 authority-marker check passed: {} \
+                                     (validation-only; no marker persistence; no trust mutation).",
+                                    reason
+                                );
+                            }
+                            Ok(None) => {
+                                // Check not applicable (no data-dir, etc.)
+                            }
+                            Err(marker_err) => {
+                                eprintln!(
+                                    "[binary] Run 132: VERDICT=invalid (reload-check v2 authority-marker \
+                                     conflict; no live trust apply; no sequence persistence write; \
+                                     no marker persistence; no peer/session mutation; no /metrics \
+                                     mutation). Candidate path={}. Reason: {}.",
+                                    candidate_path.display(),
+                                    marker_err
+                                );
+                                std::process::exit(1);
+                            }
                         }
-                        Ok(None) => {
-                            // Check not applicable (DevNet-unsigned, etc.)
-                        }
-                        Err(marker_err) => {
-                            eprintln!(
-                                "[binary] Run 123: VERDICT=invalid (reload-check authority-marker \
-                                 conflict; no live trust apply; no sequence persistence write; \
-                                 no marker persistence; no peer/session mutation; no /metrics \
-                                 mutation). Candidate path={}. Reason: {}.",
-                                candidate_path.display(),
-                                marker_err
-                            );
-                            std::process::exit(1);
+                    } else {
+                        // v1 path — unchanged.
+                        match preflight_run_123_validation_only_marker_check(
+                            candidate_path,
+                            config.environment,
+                            config.chain_id(),
+                            now_secs,
+                            &bundle_signing_keys,
+                            ctx_data,
+                            config.data_dir.as_deref(),
+                        ) {
+                            Ok(Some(reason)) => {
+                                eprintln!(
+                                    "[run-123] reload-check authority-marker check passed: {} \
+                                     (validation-only; no marker persistence; no trust mutation).",
+                                    reason
+                                );
+                            }
+                            Ok(None) => {
+                                // Check not applicable (DevNet-unsigned, etc.)
+                            }
+                            Err(marker_err) => {
+                                eprintln!(
+                                    "[binary] Run 123: VERDICT=invalid (reload-check authority-marker \
+                                     conflict; no live trust apply; no sequence persistence write; \
+                                     no marker persistence; no peer/session mutation; no /metrics \
+                                     mutation). Candidate path={}. Reason: {}.",
+                                    candidate_path.display(),
+                                    marker_err
+                                );
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
@@ -1977,7 +2091,7 @@ async fn main() {
                 if let Some(line) = observed_log_line {
                     eprintln!("{}", line);
                 }
-                // Run 123 — validation-only authority marker conflict check
+                // Run 123/132 — validation-only authority marker conflict check
                 // for peer-candidate-check. Fires only on Validated outcome
                 // (ratification already passed). Never persists marker.
                 if matches!(
@@ -1985,36 +2099,70 @@ async fn main() {
                     qbind_node::pqc_trust_peer_candidate::PeerCandidateOutcome::Validated(_)
                 ) {
                     if let Some(ref ctx_data) = peer_check_ctx_data {
-                        match preflight_run_123_validation_only_marker_check(
-                            envelope_path,
-                            config.environment,
-                            config.chain_id(),
-                            now_secs,
-                            &bundle_signing_keys,
-                            ctx_data,
-                            config.data_dir.as_deref(),
-                        ) {
-                            Ok(Some(reason)) => {
-                                eprintln!(
-                                    "[run-123] peer-candidate-check authority-marker check \
-                                     passed: {} (validation-only; no marker persistence; \
-                                     no trust mutation).",
-                                    reason
-                                );
+                        // Run 132 — v2 sidecar dispatch for peer-candidate-check.
+                        if ctx_data.ratification_v2.is_some() {
+                            match preflight_run_132_validation_only_v2_marker_check(
+                                config.environment,
+                                config.chain_id(),
+                                ctx_data,
+                                config.data_dir.as_deref(),
+                            ) {
+                                Ok(Some(reason)) => {
+                                    eprintln!(
+                                        "[run-132] peer-candidate-check v2 authority-marker check \
+                                         passed: {} (validation-only; no marker persistence; \
+                                         no trust mutation).",
+                                        reason
+                                    );
+                                }
+                                Ok(None) => {
+                                    // Check not applicable
+                                }
+                                Err(marker_err) => {
+                                    eprintln!(
+                                        "[binary] Run 132: VERDICT=invalid (peer-candidate-check \
+                                         v2 authority-marker conflict; no live trust apply; no \
+                                         sequence persistence write; no marker persistence; no \
+                                         peer/session mutation). Envelope path={}. Reason: {}.",
+                                        envelope_path.display(),
+                                        marker_err
+                                    );
+                                    std::process::exit(1);
+                                }
                             }
-                            Ok(None) => {
-                                // Check not applicable
-                            }
-                            Err(marker_err) => {
-                                eprintln!(
-                                    "[binary] Run 123: VERDICT=invalid (peer-candidate-check \
-                                     authority-marker conflict; no live trust apply; no sequence \
-                                     persistence write; no marker persistence; no peer/session \
-                                     mutation). Envelope path={}. Reason: {}.",
-                                    envelope_path.display(),
-                                    marker_err
-                                );
-                                std::process::exit(1);
+                        } else {
+                            // v1 path — unchanged.
+                            match preflight_run_123_validation_only_marker_check(
+                                envelope_path,
+                                config.environment,
+                                config.chain_id(),
+                                now_secs,
+                                &bundle_signing_keys,
+                                ctx_data,
+                                config.data_dir.as_deref(),
+                            ) {
+                                Ok(Some(reason)) => {
+                                    eprintln!(
+                                        "[run-123] peer-candidate-check authority-marker check \
+                                         passed: {} (validation-only; no marker persistence; \
+                                         no trust mutation).",
+                                        reason
+                                    );
+                                }
+                                Ok(None) => {
+                                    // Check not applicable
+                                }
+                                Err(marker_err) => {
+                                    eprintln!(
+                                        "[binary] Run 123: VERDICT=invalid (peer-candidate-check \
+                                         authority-marker conflict; no live trust apply; no sequence \
+                                         persistence write; no marker persistence; no peer/session \
+                                         mutation). Envelope path={}. Reason: {}.",
+                                        envelope_path.display(),
+                                        marker_err
+                                    );
+                                    std::process::exit(1);
+                                }
                             }
                         }
                     }
