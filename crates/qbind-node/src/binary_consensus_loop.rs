@@ -83,6 +83,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
+use bincode::Options;
 use qbind_consensus::basic_hotstuff_engine::{
     BasicHotStuffEngine, RestoreCatchupBlock as EngineRestoreCatchupBlock,
 };
@@ -2786,7 +2787,7 @@ pub(crate) fn handle_inbound_consensus_msg(
             // the engine surface (`on_timeout_msg` doc) explicitly
             // defers to its caller.
             // Defense-in-depth: bound bincode's allocation budget via
-            // `bincode::config().limit(N)` and additionally short-circuit
+            // `bincode::options().with_limit(N)` and additionally short-circuit
             // any frame whose byte length already exceeds the cap, so a
             // hostile peer cannot drive memory exhaustion via an
             // oversized length prefix or oversized payload. The cap is
@@ -2805,8 +2806,9 @@ pub(crate) fn handle_inbound_consensus_msg(
                 update_binary_view_timeout_metrics(metrics, stats);
                 return;
             }
-            match bincode::config()
-                .limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES as u64)
+            match bincode::options()
+                .with_limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES as u64)
+                .with_fixint_encoding()
                 .deserialize::<TimeoutMsg<[u8; 32]>>(&bytes)
             {
                 Ok(timeout) => {
@@ -2934,8 +2936,9 @@ pub(crate) fn handle_inbound_consensus_msg(
                 update_binary_view_timeout_metrics(metrics, stats);
                 return;
             }
-            match bincode::config()
-                .limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES as u64)
+            match bincode::options()
+                .with_limit(MAX_INBOUND_TIMEOUT_FRAME_BYTES as u64)
+                .with_fixint_encoding()
                 .deserialize::<TimeoutCertificate<[u8; 32]>>(&bytes)
             {
                 Ok(tc) => {

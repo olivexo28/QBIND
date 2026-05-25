@@ -1,0 +1,33 @@
+Run 133 v2 validation-only release-binary evidence
+outdir: /tmp/qbind-run133-final
+repo: /home/runner/work/QBIND/QBIND
+git_commit: 10a24612c1f6f60585f56201ef27aca9b51bf81a
+qbind-node_sha256: 62fa0ee2ada1999cefdcff8b70f66aacbf247551ed4eeafd45e8d4d51fdd9786
+qbind-node_build_id: b82ddbe1e3ee6a8be676328c5dc8aa39384929da
+fixture-helper_sha256: 1cd7f40fa27d1c3ec818ec1856f70f47e31457ab7f6ab80055788abfc54577fb
+fixture-helper_build_id: f25d813ae0d3fa81d9314153f11d26da4b67c7ec
+
+scenario status:
+  scenario_01_v1_first_seen: rc=0
+  scenario_02_v2_first_seen: rc=0
+  scenario_03_v2_idempotent: rc=0
+  scenario_04_v2_upgrade_ratify: rc=0
+  scenario_05_v2_upgrade_rotate: rc=0
+  scenario_06_v2_upgrade_revoke: rc=0
+  scenario_07_v2_after_v1_migration: rc=0
+  scenario_08_v2_equivocation: rc=1
+  scenario_09_v2_lower_sequence: rc=1
+  scenario_10_v2_sequence_zero: rc=1
+  scenario_11_v2_bad_signature: rc=1
+  scenario_12_v2_wrong_chain: rc=1
+  scenario_13_v2_wrong_environment: rc=1
+  scenario_14_v2_wrong_genesis: rc=1
+  scenario_15_peer_check_v2_pass: rc=0
+  scenario_16_peer_check_v2_bad: rc=1
+
+non-mutation checks: pass
+  no pqc_trust_bundle_sequence.json files were created under scenario data dirs
+  no pqc_authority_state.json was advanced or rewritten under any scenario data dir
+  no pqc_authority_state.json.tmp sibling was left behind under any scenario data dir
+  no apply / propagate / session-eviction / SIGHUP / KMS markers were observed
+wire format checks: source-only, no trust-bundle, peer-candidate, or ratification wire format changed by this script

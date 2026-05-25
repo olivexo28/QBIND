@@ -2043,3 +2043,101 @@ Run 130 does NOT implement:
 Static production source-code anchors remain rejected. Local config alone is still not enough for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.
 
 C4 status after Run 130: **OPEN but narrowed** — ratification v2 schema/types/preimage/verifier primitive are now implemented and tested. Remaining open pieces: production v2 enforcement wiring (Run 132), marker v2 migration (Run 131), signing-key rotation/revocation lifecycle (Run 134+), peer-driven live apply, KMS/HSM custody, MainNet governance artifact verification, validator-set rotation, full C4 closure, C5 closure.
+## Run 131 update — authority marker v2 primitive
+
+**Type:** Implementation (additive marker types + comparison helpers; no production surface wiring).
+**Date:** 2026-05-24.
+
+Run 131 implements the authority marker v2 primitive needed to compose the Run 130 v2 verifier into validation-only surfaces in Run 132. No production v2 surface is wired in Run 131.
+
+### New types and functions
+
+All v2 marker additions live alongside the existing Run 117/118 authority marker code:
+
+- `PersistentAuthorityStateRecordVersioned::{V1, V2}` — versioned record dispatch.
+- `PersistentAuthorityStateRecordV2` — versioned record schema carrying `schema_version=2`, latest accepted `authority_domain_sequence`, latest `key_lifecycle_action`, latest active/previous key fingerprints, and latest accepted v2 ratification digest.
+- `derive_authority_state_v2_from_ratification(...)` — derives a v2 marker candidate from a verified `RatifiedBundleSigningKeyV2` (Run 130) under an explicit `AuthorityStateUpdateSource`.
+- `compare_authority_marker_v2(...)` — typed comparison helper that distinguishes idempotent (same sequence + same digest), upgrade-compatible (higher sequence), lower-sequence-refused, same-sequence-different-digest-refused, and v1-after-v2-refused outcomes.
+- `migrate_authority_marker_v1_to_v2(...)` — one-way migration helper used by Run 132 validation-only surfaces to assemble a v2 marker candidate from an existing v1 marker on disk.
+- `prepare_v2_marker_for_acceptance(...)` — validation-only assembly entry point that does not persist.
+
+### Security invariants
+
+- v2 marker comparison NEVER persists; persistence is the caller's responsibility on mutating surfaces.
+- v1 marker on-disk format is preserved bit-for-bit; the versioned dispatch is the only consumer of the new variant.
+- Migration from v1 to v2 marker state is one-way and explicit; downgrade is not modeled.
+- v2 marker comparison is fail-closed on corrupt records, unknown schema versions, and bound-domain mismatches.
+
+### Run 131 explicit non-changes
+
+- No production v2 surface wiring (deferred to Run 132).
+- No release-binary v2 evidence (deferred to Run 133).
+- No CLI flag changes.
+- No trust-bundle or peer-candidate wire format changes.
+- No automatic v1→v2 marker migration on production surfaces.
+- No rotation or revocation lifecycle implementation.
+- No KMS/HSM, MainNet governance artifact, or peer-driven live apply.
+- No full C4 or C5 closure claim.
+
+## Run 132 update — v2 validation-only surface wiring
+
+**Type:** Implementation (validation-only surface wiring; no mutating-surface wiring; no persistence).
+**Date:** 2026-05-24.
+
+Run 132 wires v2 ratification and v2 marker compatibility into the two validation-only binary surfaces: `--p2p-trust-bundle-reload-check` and the local `--p2p-peer-candidate-check`. Mutating-surface v2 wiring, live inbound `0x05` v2 wiring, and release-binary v2 evidence remain deferred.
+
+### What Run 132 wired
+
+- Run 132 wired v2 validation-only support for `reload-check` and local `peer-candidate-check`.
+- Run 132 added versioned sidecar dispatch via `VersionedRatificationSidecar::{V1, V2}` and `load_versioned_ratification_from_path()` in `crates/qbind-node/src/pqc_ratification_input.rs`.
+- Run 132 preserved existing v1 behavior: the existing `load_ratification_from_path` and `preflight_run_123_validation_only_marker_check` v1 path are unchanged. When the operator-supplied sidecar is v1, dispatch falls through to the v1 path unmodified.
+- Run 132 uses the Run 130 v2 verifier (`verify_bundle_signing_key_ratification_v2`) and Run 131 v2 marker comparison (`derive_authority_state_v2_from_ratification` + `compare_authority_marker_v2`).
+
+### v2 compatibility/downgrade policy enforced on validation-only surfaces
+
+- v1-after-v2 rejects (typed `V1AfterV2Rejected`).
+- lower v2 sequence rejects (typed `LowerV2SequenceRefused`).
+- same-sequence/different-digest rejects (typed `SameSequenceDifferentDigestRefused`).
+- same-sequence/same-digest is idempotent (typed `Idempotent`).
+- higher v2 sequence is upgrade-compatible (typed `UpgradeCompatible`).
+- v2-after-v1 is accepted only as an explicit migration candidate (typed `V2AfterV1MigrationCandidate`).
+- unknown/malformed sidecar schema fails closed (typed `VersionedRatificationInputError`).
+
+### Persistence invariant
+
+Validation-only surfaces never persist marker state. This is enforced structurally (no `persist_authority_state_atomic` call on any validation-only path) and verified by 9 dedicated unit tests including `run132_v2_no_marker_write_occurs_in_any_case`.
+
+### Deferred / future scope
+
+- Live inbound `0x05` v2 wiring remains deferred.
+- Mutating-surface v2 wiring (startup `--p2p-trust-bundle`, process-start reload-apply, SIGHUP live reload) remains deferred.
+- Release-binary v2 evidence remains open until Run 133.
+- Rotation lifecycle, revocation lifecycle, KMS/HSM custody, MainNet governance artifact support, peer-driven live apply, full C4 and C5 closure remain future work.
+
+### Run 132 explicit non-changes
+
+- No v2 wiring into any mutating surface.
+- No v2 marker persistence from validation-only checks.
+- No live inbound `0x05` v2 wiring.
+- No trust-bundle wire-format change.
+- No peer-candidate wire-format change.
+- No reset CLI behavior change.
+- No KMS/HSM, MainNet governance artifact, or peer-driven live apply implementation.
+- No rotation or revocation lifecycle implementation.
+- No full C4 or C5 closure claim.
+
+Static production source-code anchors remain rejected. Local config alone is still not enough for MainNet bundle-signing authority. v1 verifier behavior is preserved bit-for-bit.
+
+## Run 133 update — release-binary v2 validation-only evidence
+
+Run 133 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_133.md`) is the **release-binary evidence run** for the Run 132 v2 validation-only wiring on the `--p2p-trust-bundle-reload-check` and `--p2p-trust-bundle-peer-candidate-check` surfaces. This is evidence-only — no production runtime code path is changed by Run 133.
+
+A new ephemeral fixture helper (`crates/qbind-node/examples/run_133_v2_validation_only_fixture_helper.rs`) mints ML-DSA-44 authority and bundle-signing key material, a Run 101 genesis with the authority root bound in, a signed baseline trust bundle, a signed candidate trust bundle, a v1 ratification sidecar (for the v1 fall-through regression), the full Run 132 acceptance/rejection matrix of v2 ratification sidecars (`ratify@seq=1`, `ratify@seq=2`, `rotate@seq=2`, `revoke@seq=2`, `equivocation@seq=1`, `lower@seq=1`, `bad-signature`, `wrong-chain`, `wrong-environment`, `wrong-genesis`, `sequence-zero`), and two pre-seeded markers (`seed-marker.v1.json` and `seed-marker.v2.seq1.json`, plus `seed-marker.v2.seq2.json`) so the harness can drive every typed accept reason and every typed refusal path against `target/release/qbind-node`.
+
+A new harness (`scripts/devnet/run_133_v2_validation_only_release_binary.sh`) builds the release binary, mints the fixtures, and runs the 16-scenario matrix asserting exit code, expected typed log line, and the four-part non-mutation invariant (no `pqc_authority_state.json` is created/rewritten/left as `.tmp`, no `pqc_trust_bundle_sequence.json` is written, no apply / propagate / session-eviction / SIGHUP / KMS markers appear in stderr). All 16 scenarios pass.
+
+Run 133 also fixes three pre-existing release-build warnings on `qbind-node` so the harness can build warning-free: the deprecated `bincode::config()` call at two sites in `crates/qbind-node/src/binary_consensus_loop.rs` is replaced by `bincode::options()` (wire-compatible; 63 binary-consensus tests pass), and the release-build unused `worker_id` parameter in `crates/qbind-node/src/verify_pool.rs::worker_loop` is silenced under `cfg(not(debug_assertions))` while the debug-build self-check remains verbatim.
+
+Run 133 confirms the Run 132 trust-anchor model invariants on the binary path: (1) validation-only surfaces never persist marker state, regardless of acceptance/refusal outcome or sidecar version; (2) the v1 path is unchanged when the sidecar is v1; (3) the v2 path emits its typed accept reason verbatim on success and its typed refusal verbatim on failure, with `Run 132: VERDICT=invalid` on every refusal; (4) the v2-after-v1 case yields `V2AfterV1MigrationCandidate` (not a refusal) on the validation-only surface, leaving explicit migration to a future Run on the mutating surface; (5) the same-sequence-different-digest case fail-closes the binary at runtime with the typed `V2SameSequenceDifferentDigestRefused`, demonstrating per-authority-domain monotonicity from Run 129 / Run 131 is honored end-to-end.
+
+Run 133 does NOT change any wire format, does NOT wire v2 into any mutating surface, does NOT persist v2 markers from the release binary on any path, does NOT introduce KMS/HSM custody, does NOT add MainNet governance artifact verification, does NOT implement signing-key rotation or revocation, does NOT change the v1 marker on-disk format, and does NOT auto-migrate existing v1 markers on production. Trust-anchor model invariants from Run 050–132 are preserved verbatim.
