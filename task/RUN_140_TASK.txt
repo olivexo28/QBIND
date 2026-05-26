@@ -1,0 +1,199 @@
+Task: Run 140 — Source/Test Wiring for Snapshot/Restore v2 Authority-Marker Parity
+
+Current accepted state:
+- Run 133: strongest-positive release-binary evidence for v2 validation-only reload-check and local peer-candidate-check.
+- Run 134: strongest-positive source/test wiring for v2 process-start reload-apply.
+- Run 135: strongest-positive release-binary evidence for v2 process-start reload-apply.
+- Run 136: strongest-positive source/test wiring for startup --p2p-trust-bundle v2 marker support.
+- Run 137: strongest-positive release-binary evidence for startup --p2p-trust-bundle v2 marker support.
+- Run 138: source/test wiring for SIGHUP live-reload v2 marker support.
+- Run 139: strongest-positive release-binary evidence for SIGHUP live-reload v2 marker support, with R5 release-binary-infeasible but covered by Run 138 source/test.
+
+Objective:
+Wire v2 authority-marker snapshot/restore parity so restored nodes preserve and validate v2 authority-marker state across snapshot restore, without weakening existing v1 restore behavior or any Run 055 trust-bundle sequence anti-rollback invariant.
+
+This is source/test wiring only. Release-binary snapshot/restore evidence is deferred to Run 141.
+
+Strict scope:
+- Source/test wiring only.
+- No release-binary harness in this run.
+- No live inbound 0x05 v2 apply.
+- No peer-driven live apply.
+- No signing-key rotation/revocation lifecycle.
+- No KMS/HSM implementation.
+- No MainNet governance implementation.
+- No CLI flag changes unless already required by existing snapshot/restore surfaces.
+- No metric changes unless an existing restore metric is already designed to cover this path.
+- No trust-bundle schema changes.
+- No ratification sidecar schema changes.
+- No peer-candidate wire changes.
+- Do not weaken v1 snapshot/restore marker behavior.
+- Do not claim full C4 or C5 closure.
+
+Background:
+The existing v1 authority-marker restore path was already established in prior runs. Runs 131/134/136/138 added v2 marker primitives and v2 mutating-surface wiring for reload-apply, startup, and SIGHUP. Run 140 must extend restore parity to v2 using the existing versioned authority-marker record loader, not by creating a parallel marker format.
+
+Implementation requirements:
+1. Locate the existing snapshot/restore authority-marker v1 wiring:
+   - restore marker copy/validation path;
+   - any Run 122 / Run 124-style marker restore helper;
+   - snapshot metadata and restore audit marker interactions;
+   - current behavior for missing marker, v1 marker, corrupted marker, and mismatched domain.
+
+2. Add v2 support using the existing versioned marker record type:
+   - PersistentAuthorityStateRecordVersioned::V2 or the exact existing enum/type name;
+   - existing v2 marker validation / load helpers;
+   - existing domain tuple fields: environment, chain_id, genesis_hash, authority-domain sequence, marker digest/action fields.
+
+3. Restore behavior must be fail-closed:
+   - corrupted marker refuses restore or preserves existing fail-closed behavior;
+   - wrong environment refuses;
+   - wrong chain_id refuses;
+   - wrong genesis hash refuses;
+   - lower restored v2 authority-domain sequence than existing local marker refuses unless existing v1 semantics explicitly allow a documented restore case;
+   - same-sequence different digest refuses;
+   - v1-after-v2 downgrade refuses;
+   - v2-after-v1 restore migration is allowed only if existing v2 marker rules allow it and sequence/domain checks pass.
+
+4. Restore ordering:
+   - Do not apply restored authority marker before snapshot validation succeeds.
+   - Do not silently overwrite a newer local marker with an older restored marker.
+   - Do not allow marker restore to bypass Run 055 trust-bundle sequence anti-rollback.
+   - Do not treat marker restore as proof of trust-bundle validity by itself.
+   - Snapshot marker restore must remain a metadata/state parity operation, not a new trust authorization path.
+
+5. Crash-window discipline:
+   - If VM/state snapshot restore succeeds but marker restore fails, the failure must be explicit and non-silent.
+   - If existing v1 restore behavior already has a precise atomicity rule, mirror it for v2.
+   - Do not delete or truncate existing marker files on failure.
+   - Do not leave partially-written marker files or `.tmp` residue.
+
+6. Audit/source tag:
+   - Use the existing snapshot/restore authority update source variant if present.
+   - Do not add a new AuthorityStateUpdateSource variant unless absolutely necessary.
+   - If a new variant is necessary, explain why existing variants are insufficient and add tests proving serialization compatibility expectations.
+
+Required test matrix:
+
+A1. restore snapshot with v2 marker into empty data-dir
+- Snapshot carries valid v2 marker.
+- Restore succeeds.
+- Restored marker is V2.
+- latest_authority_domain_sequence matches snapshot marker.
+- domain fields match runtime.
+- audit/source field is restore-specific if the implementation records one.
+
+A2. restore snapshot with v2 marker over same v2 marker
+- Existing local marker and snapshot marker are identical.
+- Restore succeeds/idempotent.
+- Marker bytes unchanged or deterministically equivalent according to existing restore semantics.
+
+A3. restore snapshot with higher-sequence v2 marker over older local v2 marker
+- Existing marker seq=N.
+- Snapshot marker seq=N+1.
+- Restore succeeds only if this is consistent with existing restore anti-rollback policy.
+- Marker advances to N+1.
+- Document why this is safe under snapshot restore.
+
+A4. restore v2 marker over v1 marker
+- Existing v1 marker.
+- Snapshot carries valid higher-sequence v2 marker.
+- Restore succeeds as v2-after-v1 migration if existing marker rules allow it.
+- Marker becomes V2.
+- No downgrade path introduced.
+
+R1. lower-sequence v2 restore rejected
+- Existing local v2 marker seq=N.
+- Snapshot marker seq<N.
+- Restore fails closed.
+- Existing marker bytes unchanged.
+- No partial marker write.
+
+R2. same-sequence different-digest v2 restore rejected
+- Existing local v2 marker seq=N digest A.
+- Snapshot marker seq=N digest B.
+- Restore fails closed.
+- Existing marker bytes unchanged.
+- No partial marker write.
+
+R3. wrong-environment v2 snapshot marker rejected
+- Restore fails closed.
+- Existing marker unchanged.
+- No partial marker write.
+
+R4. wrong-chain v2 snapshot marker rejected
+- Restore fails closed.
+- Existing marker unchanged.
+- No partial marker write.
+
+R5. wrong-genesis v2 snapshot marker rejected
+- Restore fails closed.
+- Existing marker unchanged.
+- No partial marker write.
+
+R6. corrupted v2 snapshot marker rejected
+- Restore fails closed.
+- Existing marker unchanged.
+- Corrupted marker is not silently ignored or rewritten.
+
+R7. v1 restore regression
+- Existing v1 snapshot/restore marker behavior remains unchanged.
+- No v2 path selected for v1 marker.
+- v1 marker restored exactly as before.
+
+R8. no-marker snapshot regression
+- Snapshot without authority marker preserves existing behavior.
+- No v2 marker fabricated.
+- Restore behavior remains unchanged.
+
+R9. v1-after-v2 downgrade refused
+- Existing local marker is v2.
+- Snapshot carries v1 marker.
+- Restore refuses downgrade unless an existing, explicitly documented recovery rule already permits it.
+- If refused, existing v2 marker bytes unchanged.
+
+Required documentation:
+Add:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_140.md
+
+Update:
+- docs/whitepaper/contradiction.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+Documentation must state:
+- Run 140 is source/test wiring only.
+- Snapshot/restore v2 authority-marker parity is now source/test covered if tests pass.
+- Release-binary snapshot/restore v2 evidence remains open for Run 141.
+- live inbound 0x05 v2 remains open.
+- peer-driven live apply remains open.
+- signing-key rotation/revocation remains open.
+- KMS/HSM remains open.
+- MainNet governance remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build -p qbind-node --lib
+- cargo test -p qbind-node --lib pqc_authority_marker_acceptance::
+- cargo test -p qbind-node --test <existing snapshot/restore authority marker tests>
+- cargo test -p qbind-node --test <new run_140_snapshot_restore_v2_authority_marker_tests>
+- cargo test -p qbind-node --test run_119_authority_marker_acceptance_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib
+
+If exact existing test target names differ, locate the relevant Run 122/124 snapshot/restore marker tests and run them. Document exact commands and results.
+
+Acceptance criteria:
+Run 140 is acceptable only if:
+1. v2 snapshot/restore marker parity is implemented through existing versioned marker primitives.
+2. restore accepts valid v2 marker state only when domain and anti-rollback checks pass.
+3. restore rejects lower-sequence, same-sequence conflicting digest, wrong-domain, corrupted, and downgrade cases.
+4. v1 restore behavior is unchanged.
+5. no marker is fabricated when snapshot has no marker.
+6. no production schema/wire/CLI/metric drift occurs.
+7. docs clearly defer release-binary snapshot/restore evidence to Run 141.
+8. contradiction.md is updated.
+9. no full C4 or C5 closure is claimed.
