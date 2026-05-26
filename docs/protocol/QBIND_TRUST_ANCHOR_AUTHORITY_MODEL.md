@@ -2543,3 +2543,70 @@ evidence is **deferred to Run 141**. Live inbound `0x05` v2 wiring,
 peer-driven live apply, signing-key rotation/revocation lifecycle,
 KMS / HSM custody, MainNet governance artifact verification, full C4
 closure, and C5 closure all remain out of scope.
+## Run 141 — release-binary evidence for snapshot/restore v2 authority-marker parity (evidence only)
+
+Run 141 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_141.md`) supplies the
+release-binary observation evidence that Run 140 explicitly deferred
+for the snapshot/restore v2 authority-marker surface. No protocol or
+runtime invariant is changed; the protocol surface is unchanged from
+Run 140. The deliverables are an opt-in `cargo --example` fixture
+helper (`crates/qbind-node/examples/run_141_v2_snapshot_restore_fixture_helper.rs`),
+a release-binary harness
+(`scripts/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary.sh`),
+and the captured artifacts committed under
+`docs/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary/`
+(`summary.txt`, per-scenario stdout/stderr/exit-code, pre/post local
+marker sha256, pre/post data-directory inventories, snapshot
+`meta.json`s, snapshot state inventories, in-scope and out-of-scope
+grep summaries). The release `qbind-node` binary is exercised through
+its pre-existing CLI surface
+(`qbind-node --env devnet --data-dir <D> --genesis-path <G>
+--expect-genesis-hash <H> --restore-from-snapshot <S>`) across the 11
+task-mandated scenarios: A1–A4 v2 accepts (empty data dir, matching
+local v2 marker, higher v2 sequence, local v1 marker with matching
+authority root via the Run 140 `V2AfterV1ExplicitMigrationAllowed`
+path), R1–R9 v2 rejects (every Run 140 reject variant), and R10–R11
+v1/legacy regression accepts.
+
+**Authority-model invariants reconfirmed at the release-binary level
+in Run 141:**
+
+* The snapshot/restore dispatch routes v2-bearing snapshots through
+  the Run 140 v2 entry point and v1-bearing / legacy snapshots through
+  the Run 124 v1 entry point with no regression — confirmed by the
+  observed `[restore] Run 140 v2 authority-marker check` vs
+  `[restore] Run 124 authority-marker check` dispatch labels.
+* The Run 140 ambiguity guard (a single snapshot must not advertise
+  both an `authority_state` (v1) block and an `authority_state_v2`
+  block) fires fail-closed at the release-binary level
+  (`RejectAmbiguousSnapshotMarkers` observed in R8).
+* The v2 marker trust-domain check (`environment`, `chain_id_hex`,
+  `genesis_hash_hex`) is enforced **before** any sequence comparison
+  on the v2 path — observed in R4/R5/R6 with the precise diff between
+  snapshot-advertised and runtime values logged.
+* The Run 130 `compare_authority_marker_v2` rejects
+  (`LowerSequenceRejected`, `SameSequenceDifferentDigestRejected`,
+  `WrongAuthorityRootRejected`) are all reachable from the real CLI
+  surface (R2, R3, R9).
+* The restore surface is observably pure with respect to the local
+  marker file: `sha256` of the local marker is byte-identical before
+  and after invocation across every accept and every reject path
+  where a local marker was seeded.
+* The on-disk v1 → v2 marker swap (A4) and the higher-sequence v2
+  persistence (A3) are **explicitly NOT** performed by the restore
+  surface. The authority-model invariant that the restore surface
+  never persists a v2 marker (the only v2 marker writers remain the
+  existing Run 134 reload-apply, Run 136 startup-apply, and Run 138
+  SIGHUP-apply surfaces) is reconfirmed at the release-binary level.
+* No out-of-scope surface is reached: zero matches for
+  `falling back to --p2p-trusted-root`, `\bDummySig\b`, `\bDummyKem\b`,
+  `\bDummyAead\b`, `live inbound 0x05`, `peer-driven live apply`,
+  `signing-key (rotation|revocation) lifecycle`, `\bKMS\b`, `\bHSM\b`
+  across the entire captured stderr corpus.
+
+Run 141 is release-binary evidence only for the snapshot/restore v2
+surface. Live inbound `0x05` v2 wiring, peer-driven live apply,
+signing-key rotation/revocation lifecycle, KMS / HSM custody, MainNet
+governance artifact verification, validator-set rotation, the on-disk
+v1→v2 marker swap surface, the higher-sequence v2 persistence
+surface, full C4 closure, and C5 closure all remain out of scope.

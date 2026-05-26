@@ -1,0 +1,15 @@
+./RESTORED_FROM_SNAPSHOT.json
+./consensus
+./consensus/000004.log
+./consensus/CURRENT
+./consensus/IDENTITY
+./consensus/LOCK
+./consensus/LOG
+./consensus/MANIFEST-000005
+./consensus/OPTIONS-000007
+./pqc_authority_state.json
+./state_vm_v0
+./state_vm_v0/000009.sst
+./state_vm_v0/CURRENT
+./state_vm_v0/MANIFEST-000005
+./state_vm_v0/OPTIONS-000007

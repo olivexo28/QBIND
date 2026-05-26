@@ -1,0 +1,17 @@
+{
+  "height": 210,
+  "block_hash": "d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2",
+  "created_at_unix_ms": 1700000000000,
+  "chain_id": 5855328520645203456,
+  "authority_state": {
+    "chain_id_hex": "51424e4444455600",
+    "environment": "devnet",
+    "genesis_hash_hex": "43c999096611f8c9b032a28f9f9cfbaaf75a9941979d4a790973f7f52908ff44",
+    "authority_policy_version": 1,
+    "authority_sequence": 7,
+    "authority_epoch": 3,
+    "authority_root_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "ratified_bundle_signing_key_fingerprint": "8888888888888888888888888888888888888888",
+    "ratification_object_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

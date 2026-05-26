@@ -4789,3 +4789,85 @@ snapshot/restore v2 evidence is **deferred to Run 141**. Live inbound
 `0x05` v2 wiring, peer-driven live apply, signing-key
 rotation/revocation lifecycle, KMS / HSM custody, MainNet governance
 attestation, full C4 closure, and C5 closure all remain out of scope.
+## Run 141 — release-binary evidence for snapshot/restore v2 authority-marker parity (evidence only)
+
+Run 141 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_141.md`) produces the
+release-binary evidence that Run 140 explicitly deferred for the
+snapshot/restore v2 authority-marker surface. **No production runtime
+source code is modified.** The new artifacts are:
+
+* `crates/qbind-node/examples/run_141_v2_snapshot_restore_fixture_helper.rs`
+  (`cargo --example` only) — mints an ephemeral DevNet genesis at the
+  canonical Run 101 verification path, 11 ephemeral snapshot
+  directories covering every Run 140 acceptance/rejection variant
+  (A1–A4 + R1–R9 + R10–R11), and three local marker fixtures (matching
+  v2, matching v1 with `authority_root_fingerprint` aligned for the
+  Run 140 `V2AfterV1ExplicitMigrationAllowed` path, and a deliberately
+  corrupt blob for the `RejectLocalMarkerCorrupt` fail-closed path).
+  The helper is opt-in via `cargo --example`; it is **not** linked
+  into the `qbind-node` release binary itself.
+* `scripts/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary.sh`
+  — builds the real release `qbind-node` and the fixture helper,
+  records build provenance (`sha256`, `build-id`, `git_commit`,
+  `rustc`, `cargo`), and for each of the 11 task-mandated scenarios
+  invokes the real CLI surface
+  (`qbind-node --env devnet --data-dir <D> --genesis-path <G>
+  --expect-genesis-hash <H> --restore-from-snapshot <S>`), captures
+  stdout/stderr/exit-code, computes pre/post sha256 of the local
+  marker file and pre/post inventories of the data directory, asserts
+  the strict ordering of the dispatch label vs the success log line on
+  every accept, asserts the expected outcome substring on every reject,
+  and greps the full corpus for an explicit out-of-scope denylist.
+* `docs/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary/`
+  — the committed captured artifacts: `summary.txt`, per-scenario
+  stdout/stderr/exit-code logs, pre/post local-marker hashes, pre/post
+  data-directory inventories, snapshot `meta.json`s, snapshot state
+  inventories, in-scope and out-of-scope grep summaries.
+
+**Operational outcomes captured for the release binary (see the table
+in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_141.md`):**
+
+* v2-dispatch accepts (A1 empty-data-dir + v2 snapshot, A2 matching
+  local v2 + v2 snapshot, A3 higher v2 sequence + v2 snapshot, A4
+  matching local v1 + v2 snapshot via the explicit migration path)
+  all reach `[restore] OK: restored from snapshot height=…` strictly
+  **after** logging `[restore] Run 140 v2 authority-marker check: …`.
+* v2-dispatch rejects (R2 lower sequence, R3 same sequence different
+  digest, R4 wrong `genesis_hash_hex`, R5 wrong `environment`, R6 wrong
+  `chain_id_hex`, R7 corrupt local marker, R8 ambiguous snapshot
+  carrying both v1 and v2 blocks, R9 different `authority_root_fingerprint`)
+  all log `[restore] FATAL: refused by Run 140 v2 authority-marker
+  check: …` with the expected outcome substring, exit `1`, and
+  preserve the local marker bytes verbatim.
+* v1/legacy regression scenarios (R1 legacy snapshot vs local v2
+  marker → falls through to Run 124 v1 path and fails closed because
+  the v1 verifier cannot parse the v2-schema marker; R10 matching v1
+  snapshot vs matching v1 local marker → Run 124 v1 path accepts; R11
+  legacy snapshot vs empty data dir → Run 124 v1 path accepts on the
+  no-marker-either-side branch) all behave as before. No v1 regression.
+* The restore surface is verified to be pure with respect to the local
+  marker file: `sha256` of the local marker is byte-identical before
+  and after invocation in every scenario where a local marker was
+  seeded.
+* The on-disk v1 → v2 marker swap (A4) and the higher-sequence v2
+  persistence (A3) are **explicitly NOT** performed by the restore
+  surface in Run 141 — both mutations remain the responsibility of
+  the existing Run 134 reload-apply path on next process start, which
+  is not exercised in Run 141.
+
+**Operator implications:** when restoring from a v2-bearing snapshot
+on a node that already carries a v1 local marker (A4 case) or a v2
+local marker with a strictly lower sequence (A3 case), the restore
+itself succeeds without rewriting the local marker. The on-disk
+v1→v2 swap and the higher-sequence persistence will occur on the
+subsequent process start via the existing Run 134 reload-apply path
+(see the Run 134/135 sections). Operators must therefore **not** treat
+A3/A4 acceptance as evidence that the local marker has been advanced.
+
+**Scope notice:** Run 141 is release-binary evidence only for the
+snapshot/restore v2 surface. Live inbound `0x05` v2 PQC trust-bundle
+frame validation, peer-driven live trust-bundle apply, signing-key
+rotation/revocation lifecycle, KMS/HSM authority-key custody, MainNet
+governance attestation, validator-set rotation, the on-disk v1→v2
+marker swap surface, the higher-sequence v2 persistence surface, full
+C4 closure, and C5 closure all remain out of scope.
