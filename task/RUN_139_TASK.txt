@@ -1,0 +1,285 @@
+Task: Run 139 — Release-Binary Evidence for SIGHUP Live-Reload v2 Mutating Surface
+
+Current accepted state:
+- Run 133: strongest-positive release-binary evidence for v2 validation-only reload-check and local peer-candidate-check.
+- Run 134: strongest-positive source/test wiring for v2 process-start reload-apply.
+- Run 135: strongest-positive release-binary evidence for v2 process-start reload-apply.
+- Run 136: strongest-positive source/test wiring for startup --p2p-trust-bundle v2 marker support.
+- Run 137: strongest-positive release-binary evidence for startup --p2p-trust-bundle v2 marker support.
+- Run 138: source/test wiring for SIGHUP live-reload v2 marker support.
+
+Objective:
+Produce release-binary evidence for the Run 138 SIGHUP live-reload v2 mutating surface using the real target/release/qbind-node binary, a real long-running process, real disk trust-bundle/ratification sidecar files, a real authority-state marker file, and real kill -HUP <pid> signal delivery.
+
+This is evidence-only. Do not change production runtime behavior unless the harness exposes a genuine blocker. If a code change is required, stop and report it as a Run 139 blocker instead of silently broadening scope.
+
+Strict scope:
+- Evidence-only.
+- Use real target/release/qbind-node.
+- Use real release-built helper binaries where helpers are needed.
+- Drive SIGHUP through a real OS signal: kill -HUP <pid>.
+- No source/test wiring beyond harness/docs unless a blocker is found.
+- No snapshot/restore v2 marker wiring.
+- No live inbound 0x05 v2 apply.
+- No peer-driven live apply.
+- No signing-key rotation/revocation lifecycle.
+- No KMS/HSM implementation.
+- No MainNet governance artifact implementation.
+- No CLI flag changes.
+- No metric-family changes.
+- No trust-bundle, sidecar, peer-candidate, marker, or wire-format schema changes.
+- Do not weaken v1 SIGHUP behavior.
+- Do not claim full C4 or C5 closure.
+
+Required deliverables:
+1. Add release-binary evidence harness:
+   scripts/devnet/run_139_sighup_v2_live_reload_release_binary.sh
+
+2. Add evidence archive:
+   docs/devnet/run_139_sighup_v2_live_reload_release_binary/
+
+3. Add canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_139.md
+
+4. Update:
+   - docs/whitepaper/contradiction.md
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+5. Crosscheck all new/modified docs against existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Harness shape:
+- Build:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example <needed fixture helper>
+
+- Start a real long-running qbind-node with:
+  - --p2p-trust-bundle <baseline bundle>
+  - --p2p-trust-bundle-live-reload-enabled
+  - --p2p-trust-bundle-live-reload-path <candidate bundle path>
+  - --p2p-trust-bundle-ratification <sidecar path>
+  - --authority-state-file <marker path>, or the exact current flag/config that populates LiveReloadAuthorityMarkerConfig
+  - required PQC/static-root/leaf/cert/signing-key inputs
+  - DevNet environment unless a stronger TestNet/MainNet fixture already exists
+  - a bounded p2p listen addr on localhost
+  - metrics enabled if useful for session/live-reload counters
+
+- Wait until the daemon is actually running and SIGHUP handler is active.
+- Modify candidate bundle/sidecar files on disk as needed per scenario.
+- Send:
+  kill -HUP <pid>
+- Wait for logs/marker/sequence outcomes.
+- Terminate/cleanup cleanly.
+- Capture per-scenario stdout/stderr, exit status, marker JSON/SHA pre/post, sequence JSON/SHA pre/post, process lifetime, PID, signal timestamps, and any relevant metrics scrape.
+
+Required release-binary scenario matrix:
+
+A1. first accepted v2 SIGHUP live reload
+- Start node with baseline trust bundle.
+- Candidate bundle + v2 sidecar are valid and higher/effective.
+- Send real SIGHUP.
+- Expected:
+  - SIGHUP trigger observed.
+  - v2 path selected.
+  - Run 130 v2 verifier succeeds.
+  - v2 marker decision accepts first write.
+  - live apply succeeds.
+  - session eviction path is invoked according to existing Run 074 semantics, even if zero sessions.
+  - Run 055 sequence commit succeeds before v2 marker persist.
+  - marker file exists as V2.
+  - last_update_source is sighup-reload, or exact serialized spelling used by implementation.
+  - node remains running unless existing successful SIGHUP semantics intentionally exit; document actual behavior.
+  - no v1 marker persist fires.
+
+A2. idempotent v2 SIGHUP
+- Existing v2 marker matches candidate sequence/digest.
+- Send real SIGHUP with same candidate/sidecar.
+- Expected:
+  - v2 path selected.
+  - accepted/idempotent behavior.
+  - marker bytes unchanged.
+  - no unnecessary marker rewrite.
+  - no rollback/equivocation error.
+
+A3. higher-sequence v2 SIGHUP upgrade
+- Existing v2 marker seq=N.
+- Candidate v2 sidecar seq=N+1.
+- Send real SIGHUP.
+- Expected:
+  - accepted.
+  - sequence commit precedes marker persist.
+  - marker advances to N+1.
+  - audit source remains sighup-reload.
+
+A4. v1-to-v2 SIGHUP migration
+- Seed an existing v1 marker or perform a valid v1 SIGHUP first.
+- Then place a valid higher-sequence v2 candidate/sidecar.
+- Send real SIGHUP.
+- Expected:
+  - v2 path selected.
+  - v2-after-v1 migration accepted.
+  - marker becomes V2.
+  - audit source is sighup-reload.
+  - no v1-after-v2 downgrade path introduced.
+
+R1. lower-sequence v2 SIGHUP rejection
+- Existing v2 marker seq=N.
+- Candidate sidecar seq<N.
+- Send real SIGHUP.
+- Expected:
+  - rejection before live mutation.
+  - LiveReloadOutcome::MarkerRejectedV2 or equivalent log evidence.
+  - no sequence write.
+  - no marker write.
+  - marker bytes unchanged.
+  - node remains running, because this is a non-fatal pre-mutation refusal.
+
+R2. same-sequence different-digest v2 SIGHUP rejection
+- Existing v2 marker seq=N digest A.
+- Candidate seq=N digest B.
+- Send real SIGHUP.
+- Expected:
+  - rejection before live mutation.
+  - no live trust swap.
+  - no session eviction.
+  - no sequence write.
+  - no marker write.
+  - marker bytes unchanged.
+  - node remains running.
+
+R3. bad-signature v2 sidecar rejection
+- Candidate sidecar is tampered after signing.
+- Send real SIGHUP.
+- Expected:
+  - Run 130 verifier failure visible.
+  - no live mutation.
+  - no eviction.
+  - no sequence write.
+  - no marker write.
+  - node remains running.
+
+R4. wrong-domain v2 sidecar rejection
+- Use wrong environment, wrong chain_id, wrong genesis hash, or equivalent v2 domain-binding mismatch.
+- Send real SIGHUP.
+- Expected:
+  - wrong-domain reason visible.
+  - no mutation.
+  - no eviction.
+  - no sequence write.
+  - no marker write.
+  - node remains running.
+
+R5. marker-persist failure after successful sequence commit, if feasible
+- If an honest release-binary filesystem setup can make marker persistence fail after sequence commit, exercise it.
+- Expected:
+  - live apply succeeded.
+  - sequence commit succeeded.
+  - marker persist failed.
+  - process initiates graceful shutdown / fatal path through MarkerPersistFailureAfterCommitV2.
+  - evidence documents stale-by-one replay discipline.
+- If not feasible without source modification or unsafe filesystem tricks, document as release-binary-infeasible and cite Run 138 source/test coverage.
+
+R6. v1 SIGHUP regression
+- Use valid v1 sidecar on SIGHUP.
+- Expected:
+  - existing v1 path selected.
+  - no v2 path selected.
+  - v1 marker behavior unchanged.
+  - no v2 marker written.
+
+R7. no-sidecar / legacy DevNet SIGHUP regression
+- Run existing no-sidecar behavior.
+- Expected:
+  - pre-Run-114/pre-v2 SIGHUP semantics preserved.
+  - no v2 marker written.
+
+R8. repeated SIGHUP serialization
+- Send multiple SIGHUPs quickly against one long-running PID.
+- Expected:
+  - existing Run 074 in-progress guard remains effective.
+  - no concurrent marker corruption.
+  - no partial writes.
+  - no duplicate sequence commit for same candidate.
+  - existing already-in-progress behavior remains unchanged.
+
+Required ordering proof:
+For every accepted v2 SIGHUP scenario, prove log ordering:
+1. SIGHUP trigger received.
+2. v2 sidecar/path selected.
+3. v2 preflight/marker decision completed.
+4. live apply/sequence commit succeeds.
+5. v2 marker persisted or unchanged after commit boundary.
+
+Use log line numbers or an equivalent deterministic timestamp witness.
+
+Required negative invariant proof:
+For every rejected v2 SIGHUP candidate:
+- node does not crash unless fatal path is expected;
+- no live trust mutation;
+- no session eviction;
+- no sequence write;
+- no marker write;
+- marker SHA unchanged if marker existed;
+- no .tmp residue;
+- no fallback to --p2p-trusted-root;
+- no DummySig/DummyKem/DummyAead active path;
+- no peer-driven apply;
+- no live inbound 0x05 apply.
+
+Required captured metadata:
+- qbind-node SHA-256.
+- qbind-node ELF Build ID if available.
+- helper SHA-256 and Build ID if available.
+- git commit hash.
+- rustc/cargo versions.
+- exact command lines.
+- PID for each daemon scenario.
+- signal timestamps.
+- stdout/stderr logs.
+- marker and sequence file inventories before/after.
+- marker and sequence SHA-256 before/after.
+- metrics scrape if used.
+- final process exit status.
+
+Documentation requirements for QBIND_DEVNET_EVIDENCE_RUN_139.md:
+- Verdict must be honest:
+  - strongest-positive only if the release-binary SIGHUP v2 matrix passes;
+  - partial-positive if a scenario is infeasible or blocked, with exact blocker and no fabricated evidence.
+- State clearly:
+  - Run 139 is release-binary evidence only.
+  - No production runtime source changed.
+  - No CLI flag changed.
+  - No metric changed.
+  - No schema/wire format changed.
+  - SIGHUP live-reload v2 is now release-binary-evidenced if matrix passes.
+  - Snapshot/restore v2 remains open.
+  - live inbound 0x05 v2 remains open.
+  - peer-driven live apply remains open.
+  - signing-key rotation/revocation remains open.
+  - KMS/HSM remains open.
+  - MainNet governance remains open.
+  - full C4 remains open.
+  - C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example <needed fixture helper>
+- bash scripts/devnet/run_139_sighup_v2_live_reload_release_binary.sh
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_121_sighup_authority_marker_tests
+- cargo test -p qbind-node --test run_074_pqc_trust_bundle_live_reload_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority_marker_acceptance::
+- cargo test -p qbind-node --lib
+
+Acceptance criteria:
+Run 139 is acceptable only if:
+1. real target/release/qbind-node is used;
+2. a real long-running daemon receives real kill -HUP signals;
+3. accepted v2 SIGHUP scenarios prove sequence commit before v2 marker persist;
+4. rejected v2 SIGHUP scenarios prove no live mutation, no eviction, no sequence write, and no marker write;
+5. v1/no-sidecar SIGHUP regressions remain unchanged;
+6. evidence artifacts are archived under docs/devnet/run_139_sighup_v2_live_reload_release_binary/;
+7. contradiction.md and operator/protocol docs are narrowly updated;
+8. no full C4 or C5 closure is claimed.
