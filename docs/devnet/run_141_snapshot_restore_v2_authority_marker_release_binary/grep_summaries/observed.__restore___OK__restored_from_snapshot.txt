@@ -1,0 +1,6 @@
+/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/logs/A1_v2_snapshot_empty_data_dir.stderr.log:6:[restore] OK: restored from snapshot height=201 chain_id=0x51424e4444455600
+/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/logs/R11_legacy_snapshot_empty_data_dir.stderr.log:6:[restore] OK: restored from snapshot height=211 chain_id=0x51424e4444455600
+/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/logs/A2_v2_snapshot_matching_local_v2_marker.stderr.log:6:[restore] OK: restored from snapshot height=201 chain_id=0x51424e4444455600
+/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/logs/A4_v2_snapshot_over_local_v1_marker.stderr.log:6:[restore] OK: restored from snapshot height=201 chain_id=0x51424e4444455600
+/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/logs/R10_v1_only_snapshot_matching_v1_local.stderr.log:6:[restore] OK: restored from snapshot height=210 chain_id=0x51424e4444455600
+/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/logs/A3_v2_snapshot_higher_sequence_over_local_v2.stderr.log:6:[restore] OK: restored from snapshot height=202 chain_id=0x51424e4444455600

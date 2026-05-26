@@ -1,0 +1,88 @@
+Run 141 snapshot/restore v2 authority-marker release-binary evidence
+outdir: /tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary
+repo: /tmp/workspace/olivexo28/QBIND
+git_commit: 40ad9e4075d1ab492bb9db9b35d9ae36ca9f08bf
+rustc_version: rustc 1.95.0 (59807616e 2026-04-14)
+cargo_version: cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+qbind-node_path: /tmp/workspace/olivexo28/QBIND/target/release/qbind-node
+qbind-node_sha256: 75129bd63d9a5c92949ec25dbdda04b3ed907c8ac0e905e092b9e5de299de748
+qbind-node_build_id: 591bae399b17d84dbacc2df2ccf374c0051436d3
+fixture-helper_path: /tmp/workspace/olivexo28/QBIND/target/release/examples/run_141_v2_snapshot_restore_fixture_helper
+fixture-helper_sha256: 259015f7f002729736c8fb61dcb38988b51f392974a357b92b869b5539b8e836
+fixture-helper_build_id: 2dc12da656f8ccd8f616a35f1c18bb7cd5b493f2
+accept_timeout_secs: 6
+
+scenario status:
+manifest:
+  # Run 141 fixture helper manifest (shell-sourceable).
+  RUN_141_GENESIS_PATH=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/genesis.json
+  RUN_141_GENESIS_HASH=0x43c999096611f8c9b032a28f9f9cfbaaf75a9941979d4a790973f7f52908ff44
+  RUN_141_GENESIS_HASH_NO_PREFIX=43c999096611f8c9b032a28f9f9cfbaaf75a9941979d4a790973f7f52908ff44
+  RUN_141_CHAIN_ID_HEX=51424e4444455600
+  RUN_141_V2_LOCAL_SEQUENCE=5
+  RUN_141_V2_HIGHER_SEQUENCE=10
+  RUN_141_V2_LOWER_SEQUENCE=2
+  RUN_141_SNAP_V2_ONLY=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-only
+  RUN_141_SNAP_V2_HIGHER_SEQ=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-higher-seq
+  RUN_141_SNAP_V2_LOWER_SEQ=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-lower-seq
+  RUN_141_SNAP_V2_SAME_SEQ_DIFF_DIGEST=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-same-seq-diff-digest
+  RUN_141_SNAP_V2_WRONG_GENESIS=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-wrong-genesis
+  RUN_141_SNAP_V2_WRONG_ENVIRONMENT=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-wrong-environment
+  RUN_141_SNAP_V2_WRONG_CHAIN=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-wrong-chain
+  RUN_141_SNAP_V2_WRONG_AUTHORITY_ROOT=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-wrong-authority-root
+  RUN_141_SNAP_V2_AND_V1_AMBIGUOUS=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v2-and-v1-ambiguous
+  RUN_141_SNAP_V1_ONLY=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-v1-only
+  RUN_141_SNAP_LEGACY_NO_MARKER=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/snapshots/snap-legacy-no-marker
+  RUN_141_LOCAL_MARKER_MATCHING_V2=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/markers/matching-v2.json
+  RUN_141_LOCAL_MARKER_MATCHING_V1=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/markers/matching-v1.json
+  RUN_141_LOCAL_MARKER_CORRUPT=/tmp/qbind-run141-snapshot-restore-v2-authority-marker-release-binary/fixtures/markers/corrupt.bin
+
+fixture sha256:
+  matching-v2-marker-fixture: 1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7
+  matching-v1-marker-fixture: 42ed603fd7936d2301928bfeee4f0445ca52b2d72862161090518e6ee9e7fd60
+  corrupt-marker-fixture:     237a54ed3aaf3737eea1469af3eea74b3886143b800237182d552987b6e463e7
+  snap-v2-only/meta.json sha256: e3e7c86f38bdd08d53ca952c2b9700609b3a6d927bee4b0411abb8372b9328d6
+  snap-v2-higher-seq/meta.json sha256: c945095b38aecb9c804898cf15cdc767cab91cea0084edbc95727a2d6da9b3bf
+  snap-v2-lower-seq/meta.json sha256: 972ef504beea22a5509d91081752b0d1451bab5669b3142b618568368ab82aa8
+  snap-v2-same-seq-diff-digest/meta.json sha256: 33f2252165246721478433fa35ce02d021683b9a661be5f7f65c66dd24b71dfb
+  snap-v2-wrong-genesis/meta.json sha256: 564f332bea2ec395f93765bb470310e1de7bdb4fd71e9443c2a4ac79df0246f2
+  snap-v2-wrong-environment/meta.json sha256: 1b23f3504fc4e760f0c31d5cf09103a989d93cd9ce9b48bc49b459a0bea507ab
+  snap-v2-wrong-chain/meta.json sha256: 652b643e005bcef168b201e263d26cf36cf562de24c7b2cfd81cf4f6282d0671
+  snap-v2-wrong-authority-root/meta.json sha256: fbb895bc4bc82cfca441ac1fbf3d85f33d5e9e32e8220a41a82c63cc33cbd3c1
+  snap-v2-and-v1-ambiguous/meta.json sha256: 0d7a1ee8d52de238f8d3228d9b6977f155c21dd8b07150a1757a59de4ac1b830
+  snap-v1-only/meta.json sha256: 14e95556d1f25c6d833542e48c0e166638d1a3bb499a78c244541d4c107dbcd6
+  snap-legacy-no-marker/meta.json sha256: 5d630da4f74e4852e6087dbecdb8d21b2d89cbf2cfae3f7d06a5b460eb68c7ed
+
+  A1_v2_snapshot_empty_data_dir: rc=137 sha_before=<none> sha_after=<none> expect_v2_check=yes
+  A2_v2_snapshot_matching_local_v2_marker: rc=137 sha_before=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 sha_after=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 expect_v2_check=yes
+  A3_v2_snapshot_higher_sequence_over_local_v2: rc=137 sha_before=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 sha_after=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 expect_v2_check=yes
+  A4_v2_snapshot_over_local_v1_marker: rc=137 sha_before=42ed603fd7936d2301928bfeee4f0445ca52b2d72862161090518e6ee9e7fd60 sha_after=42ed603fd7936d2301928bfeee4f0445ca52b2d72862161090518e6ee9e7fd60 expect_v2_check=yes
+  R1_legacy_snapshot_local_v2_marker: rc=1 sha_before=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 sha_after=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 reject_pattern=snapshot\ carries\ no\ authority\ metadata\|RejectMissingSnapshotMarker\|Run\ 124\ authority-marker\ check
+  R2_v2_lower_sequence_rejected: rc=1 sha_before=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 sha_after=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 reject_pattern=LowerSequenceRejected\|Run\ 140\ v2\ authority-marker\ check
+  R3_v2_same_sequence_different_digest_rejected: rc=1 sha_before=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 sha_after=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 reject_pattern=SameSequenceDifferentDigestRejected\|equivocation\|Run\ 140\ v2\ authority-marker\ check
+  R4_v2_wrong_genesis_rejected: rc=1 sha_before=<none> sha_after=<none> reject_pattern=RejectSnapshotMarkerWrongDomain\|wrong\[-\ \]domain\|genesis_hash
+  R5_v2_wrong_environment_rejected: rc=1 sha_before=<none> sha_after=<none> reject_pattern=RejectSnapshotMarkerWrongDomain\|wrong\[-\ \]domain\|environment
+  R6_v2_wrong_chain_rejected: rc=1 sha_before=<none> sha_after=<none> reject_pattern=RejectSnapshotMarkerWrongDomain\|wrong\[-\ \]domain\|chain_id
+  R7_corrupt_local_marker_v2_snapshot: rc=1 sha_before=237a54ed3aaf3737eea1469af3eea74b3886143b800237182d552987b6e463e7 sha_after=237a54ed3aaf3737eea1469af3eea74b3886143b800237182d552987b6e463e7 reject_pattern=RejectLocalMarkerCorrupt\|malformed\|corrupt\|fail\ closed
+  R8_ambiguous_snapshot_v1_and_v2_blocks: rc=1 sha_before=<none> sha_after=<none> reject_pattern=RejectAmbiguousSnapshotMarkers\|ambiguous\|both\ .\*authority_state\|both\ v1\ and\ v2
+  R9_v2_different_authority_root_rejected: rc=1 sha_before=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 sha_after=1345bb013ca7a8fc391868c701b7751440e93193e439b77058ede48654a972a7 reject_pattern=WrongAuthorityRootRejected\|authority\[-\ _\]root\|Run\ 140\ v2\ authority-marker\ check
+  R10_v1_only_snapshot_matching_v1_local: rc=137 sha_before=42ed603fd7936d2301928bfeee4f0445ca52b2d72862161090518e6ee9e7fd60 sha_after=42ed603fd7936d2301928bfeee4f0445ca52b2d72862161090518e6ee9e7fd60 expect_v2_check=no
+  R11_legacy_snapshot_empty_data_dir: rc=137 sha_before=<none> sha_after=<none> expect_v2_check=no
+
+out-of-scope grep summaries (must be empty):
+  PATTERN=falling\ back\ to\ --p2p-trusted-root matches=0
+  PATTERN=\\bDummySig\\b matches=0
+  PATTERN=\\bDummyKem\\b matches=0
+  PATTERN=\\bDummyAead\\b matches=0
+  PATTERN=live\ inbound\ 0x05 matches=0
+  PATTERN=peer-driven\ live\ apply matches=0
+  PATTERN=signing-key\ \(rotation\|revocation\)\ lifecycle matches=0
+  PATTERN=\\bKMS\\b matches=0
+  PATTERN=\\bHSM\\b matches=0
+
+in-scope grep summaries (informational):
+  PATTERN=\\\[restore\\\]\ Run\ 140\ v2\ authority-marker\ check total_matches=4
+  PATTERN=\\\[restore\\\]\ Run\ 124\ authority-marker\ check total_matches=2
+  PATTERN=\\\[restore\\\]\ OK:\ restored\ from\ snapshot total_matches=6
+  PATTERN=\\\[restore\\\]\ ERROR: total_matches=9
+  PATTERN=\\\[restore\\\]\ FATAL: total_matches=9
