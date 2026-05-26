@@ -165,6 +165,87 @@ pub struct StateSnapshotMeta {
     /// height, wall-clock time, snapshot height, or directory name.
     /// Each field must come from a canonical authority-marker source.
     pub authority_state: Option<AuthorityStateSnapshotMeta>,
+
+    /// Run 140: optional **additive** v2 authority-state metadata block.
+    ///
+    /// Mirrors the Run 117 [`Self::authority_state`] additive pattern but
+    /// carries the v2 marker fields ([`AuthorityStateSnapshotMetaV2`])
+    /// required by Run 140 snapshot/restore v2 authority-marker parity.
+    /// `None` for snapshots whose authority marker is v1 (or whose source
+    /// node never observed a v2 marker). Old snapshots predating Run 140
+    /// do not carry this field and parse as `authority_state_v2: None`.
+    ///
+    /// When `Some(state_v2)`, the v1 [`Self::authority_state`] field MAY
+    /// be `None` (a v2-only marker source) — Run 140 restore wiring
+    /// dispatches on the v2 carrier first.
+    ///
+    /// When `None`, the `"authority_state_v2"` key is omitted entirely
+    /// from the JSON output (backward compatible). Missing v2 marker
+    /// state MUST NOT be silently coerced to a synthetic v2 state.
+    pub authority_state_v2: Option<AuthorityStateSnapshotMetaV2>,
+}
+
+/// Run 140: additive v2-marker snapshot metadata carried in
+/// [`StateSnapshotMeta`].
+///
+/// Mirrors the security-relevant fields of
+/// `pqc_authority_state::PersistentAuthorityStateRecordV2` living in
+/// `qbind-node`, but is defined here in `qbind-ledger` because
+/// `qbind-ledger` cannot depend on `qbind-node`. Run 140 restore wiring
+/// reconstructs a `PersistentAuthorityStateRecordV2` from this carrier
+/// and routes it through the existing `compare_authority_marker_v2`
+/// comparison surface (Run 131).
+///
+/// All hex / sequence fields use the same lowercase-ASCII canonical
+/// form as the v1 carrier so on-disk JSON is stable across platforms.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorityStateSnapshotMetaV2 {
+    /// 16 lowercase hex chars of the chain id (no `0x` prefix).
+    pub chain_id_hex: String,
+
+    /// Canonical lowercase-ascii environment tag
+    /// (`"devnet"` / `"testnet"` / `"mainnet"`).
+    pub environment: String,
+
+    /// 64 lowercase hex chars of the canonical genesis hash this v2
+    /// authority state is bound to.
+    pub genesis_hash_hex: String,
+
+    /// Lowercase-hex fingerprint of the authority root.
+    pub authority_root_fingerprint: String,
+
+    /// Authority-root signature suite id (Run 131).
+    pub authority_root_suite_id: u8,
+
+    /// Lowercase-hex fingerprint of the currently active bundle-signing
+    /// key (NOT the private key, NOT the full public key — fingerprint
+    /// only).
+    pub active_bundle_signing_key_fingerprint: String,
+
+    /// Active bundle-signing key signature suite id (Run 131).
+    pub active_bundle_signing_key_suite_id: u8,
+
+    /// Strictly monotonic v2 authority-domain sequence
+    /// (Run 130 `latest_authority_domain_sequence`).
+    pub latest_authority_domain_sequence: u64,
+
+    /// Latest lifecycle action one-byte encoding
+    /// (`Ratify = 0`, `Rotate = 1`, `Revoke = 2` — fixed by Run 130).
+    pub latest_lifecycle_action_byte: u8,
+
+    /// Optional lowercase-hex previous bundle-signing key fingerprint
+    /// (present iff `Rotate`).
+    pub previous_bundle_signing_key_fingerprint: Option<String>,
+
+    /// 64 lowercase hex chars of the SHA3-256
+    /// `canonical_ratification_v2_digest` of the
+    /// `BundleSigningRatificationV2` object whose acceptance produced
+    /// this v2 authority state.
+    pub latest_ratification_v2_digest: String,
+
+    /// Optional lowercase-hex revoked-key metadata placeholder
+    /// (present iff `Revoke`).
+    pub revoked_key_metadata: Option<String>,
 }
 
 /// Run 117: additive authority-state metadata carried in
@@ -238,6 +319,7 @@ impl StateSnapshotMeta {
             chain_id,
             epoch: None,
             authority_state: None,
+            authority_state_v2: None,
         }
     }
 
@@ -262,6 +344,26 @@ impl StateSnapshotMeta {
         authority_state: Option<AuthorityStateSnapshotMeta>,
     ) -> Self {
         self.authority_state = authority_state;
+        self
+    }
+
+    /// Run 140: builder-style setter for the optional **v2** authority-state
+    /// metadata field. Pass `Some(state)` only when each field was sourced
+    /// from the canonical persisted v2 authority marker
+    /// (`<data_dir>/pqc_authority_state.json` parsed as
+    /// `PersistentAuthorityStateRecordVersioned::V2`). Pass `None` to keep
+    /// absence explicit — missing v2 authority state MUST NOT be silently
+    /// coerced to a synthetic empty/permissive state.
+    ///
+    /// Run 140 restore wiring (source/test only) dispatches the v2 marker
+    /// comparison through the existing `compare_authority_marker_v2`
+    /// primitive in `qbind-node::pqc_authority_state`. Release-binary
+    /// snapshot/restore v2 evidence is deferred to Run 141.
+    pub fn with_authority_state_v2(
+        mut self,
+        authority_state_v2: Option<AuthorityStateSnapshotMetaV2>,
+    ) -> Self {
+        self.authority_state_v2 = authority_state_v2;
         self
     }
 
@@ -329,14 +431,51 @@ impl StateSnapshotMeta {
             }
             None => String::new(),
         };
+        // Run 140: additive v2 authority-state block. When `None`, the
+        // entire `"authority_state_v2"` key is omitted so pre-Run-140
+        // parsers continue to see backward-compatible JSON. Field
+        // ordering is deterministic so the serialised output is
+        // byte-stable across runs.
+        let authority_state_v2_field = match &self.authority_state_v2 {
+            Some(a) => {
+                let prev_field = match &a.previous_bundle_signing_key_fingerprint {
+                    Some(p) => format!(
+                        ",\n    \"previous_bundle_signing_key_fingerprint\": \"{}\"",
+                        p
+                    ),
+                    None => String::new(),
+                };
+                let revoked_field = match &a.revoked_key_metadata {
+                    Some(r) => format!(",\n    \"revoked_key_metadata\": \"{}\"", r),
+                    None => String::new(),
+                };
+                format!(
+                    ",\n  \"authority_state_v2\": {{\n    \"chain_id_hex\": \"{}\",\n    \"environment\": \"{}\",\n    \"genesis_hash_hex\": \"{}\",\n    \"authority_root_fingerprint\": \"{}\",\n    \"authority_root_suite_id\": {},\n    \"active_bundle_signing_key_fingerprint\": \"{}\",\n    \"active_bundle_signing_key_suite_id\": {},\n    \"latest_authority_domain_sequence\": {},\n    \"latest_lifecycle_action_byte\": {},\n    \"latest_ratification_v2_digest\": \"{}\"{}{}\n  }}",
+                    a.chain_id_hex,
+                    a.environment,
+                    a.genesis_hash_hex,
+                    a.authority_root_fingerprint,
+                    a.authority_root_suite_id,
+                    a.active_bundle_signing_key_fingerprint,
+                    a.active_bundle_signing_key_suite_id,
+                    a.latest_authority_domain_sequence,
+                    a.latest_lifecycle_action_byte,
+                    a.latest_ratification_v2_digest,
+                    prev_field,
+                    revoked_field,
+                )
+            }
+            None => String::new(),
+        };
         format!(
-            "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}{}{}\n}}",
+            "{{\n  \"height\": {},\n  \"block_hash\": \"{}\",\n  \"created_at_unix_ms\": {},\n  \"chain_id\": {}{}{}{}\n}}",
             self.height,
             block_hash_hex,
             self.created_at_unix_ms,
             self.chain_id,
             epoch_field,
             authority_state_field,
+            authority_state_v2_field,
         )
         .into_bytes()
     }
@@ -379,6 +518,14 @@ impl StateSnapshotMeta {
             Ok(opt) => opt,
             Err(_) => return None,
         };
+        // Run 140: additive v2 authority-state block. Absent → `None`
+        // (pre-Run-140 snapshot). Present but malformed → `None`
+        // returned from this function (fail-closed on the parse path so
+        // `validate_snapshot_dir` surfaces `MissingMetadata`).
+        let authority_state_v2 = match Self::extract_optional_authority_state_v2(s) {
+            Ok(opt) => opt,
+            Err(_) => return None,
+        };
 
         // Parse block hash from hex
         if block_hash_hex.len() != 64 {
@@ -397,6 +544,7 @@ impl StateSnapshotMeta {
             chain_id,
             epoch,
             authority_state,
+            authority_state_v2,
         })
     }
 
@@ -514,6 +662,145 @@ impl StateSnapshotMeta {
             authority_root_fingerprint,
             ratified_bundle_signing_key_fingerprint,
             ratification_object_hash,
+        }))
+    }
+
+    /// Run 140: extract the optional additive `"authority_state_v2"`
+    /// JSON object.
+    ///
+    /// Returns:
+    /// - `Ok(None)` when the key is absent (pre-Run-140 snapshot;
+    ///   additive backward compatibility).
+    /// - `Ok(Some(meta))` when the key is present and every required
+    ///   sub-field parses cleanly.
+    /// - `Err(())` when the key is present but the value is not a
+    ///   structurally valid v2 authority-state object. The caller MUST
+    ///   fail closed — Run 140 does not silently downgrade a malformed
+    ///   v2 authority-state block to `None`.
+    fn extract_optional_authority_state_v2(
+        s: &str,
+    ) -> Result<Option<AuthorityStateSnapshotMetaV2>, ()> {
+        let key_pattern = "\"authority_state_v2\":";
+        let Some(start) = s.find(key_pattern) else {
+            return Ok(None);
+        };
+        let after_key = &s[start + key_pattern.len()..];
+        let after_key = after_key.trim_start();
+        if after_key.starts_with("null") {
+            return Ok(None);
+        }
+        if !after_key.starts_with('{') {
+            return Err(());
+        }
+        let bytes = after_key.as_bytes();
+        let mut depth: i32 = 0;
+        let mut end_idx: Option<usize> = None;
+        for (i, &b) in bytes.iter().enumerate() {
+            match b {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end_idx = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = end_idx.ok_or(())?;
+        let block = &after_key[..=end];
+
+        let chain_id_hex = Self::extract_string(block, "chain_id_hex").ok_or(())?;
+        let environment = Self::extract_string(block, "environment").ok_or(())?;
+        let genesis_hash_hex = Self::extract_string(block, "genesis_hash_hex").ok_or(())?;
+        let authority_root_fingerprint =
+            Self::extract_string(block, "authority_root_fingerprint").ok_or(())?;
+        let authority_root_suite_id =
+            Self::extract_u64(block, "authority_root_suite_id").ok_or(())?;
+        if authority_root_suite_id > u8::MAX as u64 {
+            return Err(());
+        }
+        let authority_root_suite_id = authority_root_suite_id as u8;
+        let active_bundle_signing_key_fingerprint =
+            Self::extract_string(block, "active_bundle_signing_key_fingerprint").ok_or(())?;
+        let active_bundle_signing_key_suite_id =
+            Self::extract_u64(block, "active_bundle_signing_key_suite_id").ok_or(())?;
+        if active_bundle_signing_key_suite_id > u8::MAX as u64 {
+            return Err(());
+        }
+        let active_bundle_signing_key_suite_id = active_bundle_signing_key_suite_id as u8;
+        let latest_authority_domain_sequence =
+            Self::extract_u64(block, "latest_authority_domain_sequence").ok_or(())?;
+        let latest_lifecycle_action_byte =
+            Self::extract_u64(block, "latest_lifecycle_action_byte").ok_or(())?;
+        if latest_lifecycle_action_byte > u8::MAX as u64 {
+            return Err(());
+        }
+        let latest_lifecycle_action_byte = latest_lifecycle_action_byte as u8;
+        let latest_ratification_v2_digest =
+            Self::extract_string(block, "latest_ratification_v2_digest").ok_or(())?;
+        let previous_bundle_signing_key_fingerprint =
+            Self::extract_string(block, "previous_bundle_signing_key_fingerprint");
+        let revoked_key_metadata = Self::extract_string(block, "revoked_key_metadata");
+
+        // Structural sanity (defence-in-depth; the qbind-node side will
+        // also run `PersistentAuthorityStateRecordV2::validate_structure`
+        // before any restore decision is taken).
+        if chain_id_hex.len() != 16 || !Self::is_lower_hex_ascii(&chain_id_hex) {
+            return Err(());
+        }
+        if genesis_hash_hex.len() != 64 || !Self::is_lower_hex_ascii(&genesis_hash_hex) {
+            return Err(());
+        }
+        if !matches!(environment.as_str(), "devnet" | "testnet" | "mainnet") {
+            return Err(());
+        }
+        if authority_root_fingerprint.is_empty()
+            || !Self::is_lower_hex_ascii(&authority_root_fingerprint)
+        {
+            return Err(());
+        }
+        if active_bundle_signing_key_fingerprint.is_empty()
+            || !Self::is_lower_hex_ascii(&active_bundle_signing_key_fingerprint)
+        {
+            return Err(());
+        }
+        if latest_authority_domain_sequence == 0 {
+            return Err(());
+        }
+        if latest_ratification_v2_digest.len() != 64
+            || !Self::is_lower_hex_ascii(&latest_ratification_v2_digest)
+        {
+            return Err(());
+        }
+        if latest_lifecycle_action_byte > 2 {
+            return Err(());
+        }
+        if let Some(prev) = previous_bundle_signing_key_fingerprint.as_ref() {
+            if prev.is_empty() || !Self::is_lower_hex_ascii(prev) {
+                return Err(());
+            }
+        }
+        if let Some(rev) = revoked_key_metadata.as_ref() {
+            if rev.is_empty() || !Self::is_lower_hex_ascii(rev) {
+                return Err(());
+            }
+        }
+
+        Ok(Some(AuthorityStateSnapshotMetaV2 {
+            chain_id_hex,
+            environment,
+            genesis_hash_hex,
+            authority_root_fingerprint,
+            authority_root_suite_id,
+            active_bundle_signing_key_fingerprint,
+            active_bundle_signing_key_suite_id,
+            latest_authority_domain_sequence,
+            latest_lifecycle_action_byte,
+            previous_bundle_signing_key_fingerprint,
+            latest_ratification_v2_digest,
+            revoked_key_metadata,
         }))
     }
 
@@ -988,6 +1275,7 @@ mod tests {
             chain_id: 0x51424E444D41494E,
             epoch: None,
             authority_state: None,
+            authority_state_v2: None,
         };
 
         let json = meta.to_json();

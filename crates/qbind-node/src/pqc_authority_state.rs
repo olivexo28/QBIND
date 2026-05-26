@@ -162,8 +162,8 @@ use serde::{Deserialize, Serialize};
 
 use qbind_ledger::{
     canonical_ratification_digest, canonical_ratification_v2_digest, AuthorityStateSnapshotMeta,
-    BundleSigningRatification, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
-    RatifiedBundleSigningKey, RatifiedBundleSigningKeyV2,
+    AuthorityStateSnapshotMetaV2, BundleSigningRatification, BundleSigningRatificationV2,
+    BundleSigningRatificationV2Action, RatifiedBundleSigningKey, RatifiedBundleSigningKeyV2,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
@@ -2775,6 +2775,476 @@ fn snapshot_meta_to_record(
         snap.authority_root_fingerprint.clone(),
         snap.ratified_bundle_signing_key_fingerprint.clone(),
         snap.ratification_object_hash.clone(),
+        AuthorityStateUpdateSource::TestOrFixture,
+        0,
+    );
+    record.validate_structure()?;
+    Ok(record)
+}
+
+// ===========================================================================
+// Run 140 — snapshot/restore parity for v2 authority markers
+// ===========================================================================
+//
+// Source/test wiring only — release-binary harness is deferred to Run 141.
+// This block extends the Run 124 v1 restore-side check
+// (`verify_snapshot_authority_state_for_restore`) with an additive v2
+// counterpart that loads the local marker via `load_authority_state_versioned`
+// and routes through the existing `compare_authority_marker_v2` primitive.
+//
+// Strict scope (Run 140):
+//   * No CLI / wire / metric drift.
+//   * No release-binary path is taken on this surface; release-binary
+//     reload-apply remains the Run 134 path and reload entry is gated by
+//     the Run 138 SIGHUP feature flag.
+//   * No v1 regression: when a snapshot's `authority_state_v2` is absent
+//     (legacy snapshots and v1-only snapshots), the Run 124 v1 check is
+//     used verbatim by the caller.
+//   * No fabrication: when a v2 snapshot block is parsed and the snapshot
+//     also carries a v1 block, the v2 path is fail-closed (`RejectAmbiguous`)
+//     because a single snapshot must not advertise two simultaneously valid
+//     authority markers.
+
+/// Run 140: inputs to [`verify_snapshot_authority_state_for_restore_v2`].
+///
+/// Mirrors [`SnapshotRestoreAuthorityCheckInputs`] but consumes a parsed
+/// [`AuthorityStateSnapshotMetaV2`] block from the snapshot's `meta.json`
+/// rather than a v1 block. The caller is responsible for choosing the v1
+/// vs v2 entry point based on which block the snapshot meta carries.
+#[derive(Debug, Clone)]
+pub struct SnapshotRestoreAuthorityCheckV2Inputs<'a> {
+    /// Canonical marker file path under the operator-supplied `--data-dir`.
+    pub marker_path: &'a Path,
+    /// Snapshot v2 authority-state metadata if the snapshot carries it.
+    /// `None` means the snapshot does not advertise a v2 authority marker
+    /// (e.g. legacy / v1-only snapshot); the caller must dispatch to the
+    /// v1 check in that case.
+    pub snapshot_meta_v2: Option<&'a AuthorityStateSnapshotMetaV2>,
+    /// True iff the snapshot meta also carries a v1
+    /// `authority_state` block. When both blocks are present the v2 path
+    /// fails closed with [`SnapshotRestoreAuthorityCheckV2Outcome::RejectAmbiguousSnapshotMarkers`]
+    /// because a single snapshot must not advertise two simultaneously
+    /// valid authority markers.
+    pub snapshot_also_carries_v1_block: bool,
+    /// Runtime network environment.
+    pub runtime_env: NetworkEnvironment,
+    /// Runtime chain id.
+    pub runtime_chain_id: ChainId,
+    /// 64 lowercase hex chars of the canonical genesis hash this node
+    /// booted against.
+    pub runtime_genesis_hash_hex: &'a str,
+}
+
+/// Run 140: typed outcome of [`verify_snapshot_authority_state_for_restore_v2`].
+///
+/// Every variant is a single deterministic decision suitable for a restore
+/// surface to branch on. Reject variants carry the information necessary
+/// to emit a precise operator log line without re-inspecting either marker.
+///
+/// Accept variants explicitly mean **restore may proceed and the local
+/// marker file MUST NOT be mutated or deleted**. Run 140 never synthesises
+/// a local marker from a snapshot block (mirrors Run 124).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotRestoreAuthorityCheckV2Outcome {
+    /// No local marker and no v2 snapshot marker. (The v1 dispatcher
+    /// handles the (no-local, no-v1-snapshot) case; this variant is
+    /// surfaced when the v2 entry was selected explicitly but the v2
+    /// block was absent — defensive: callers should normally dispatch
+    /// to the v1 check when `snapshot_meta_v2` is `None`.)
+    NoMarkerEitherSide,
+
+    /// No local marker; snapshot v2 marker matches the runtime trust
+    /// domain. Restore may proceed; the local marker is **not** synthesised
+    /// from snapshot bytes.
+    AcceptSnapshotV2MarkerNoLocal,
+
+    /// Local v2 marker and snapshot v2 marker agree on every
+    /// security-relevant field, including
+    /// `latest_authority_domain_sequence` and
+    /// `latest_ratification_v2_digest`. Restore may proceed; the local
+    /// marker file MUST NOT be rewritten.
+    AcceptMatchingV2Marker,
+
+    /// Local v2 marker present and snapshot v2 marker advertises a
+    /// strictly higher `latest_authority_domain_sequence` (with matching
+    /// trust domain + authority root). Restore may proceed; the local
+    /// marker file MUST NOT be rewritten by the restore surface — the
+    /// next mutating surface (release-binary reload-apply, Run 134) will
+    /// persist the new sequence atomically. Run 140 stops at the
+    /// pure-check boundary.
+    AcceptHigherV2Sequence {
+        persisted_sequence: u64,
+        candidate_sequence: u64,
+    },
+
+    /// Local v1 marker present and snapshot v2 marker matches the v1
+    /// trust domain + authority root. Restore may proceed under the
+    /// explicit v1→v2 migration semantics of
+    /// [`migrate_authority_marker_v1_to_v2`]. The local marker file MUST
+    /// NOT be rewritten by the restore surface; the v1 → v2 swap on
+    /// disk is a separate release-binary step.
+    AcceptV2AfterV1Migration,
+
+    /// Local v2 marker present but the snapshot does not carry a v2
+    /// authority block (and the caller selected the v2 entry point
+    /// because no v1 block was present either). Restore is rejected
+    /// fail-closed: accepting would silently erase or roll back the
+    /// local persisted v2 marker.
+    RejectMissingSnapshotMarker,
+
+    /// On-disk local marker file is structurally invalid or its
+    /// `record_version` is not supported by this binary. Restore is
+    /// rejected fail-closed; the marker bytes on disk are preserved
+    /// verbatim (Run 140 never silently overwrites a corrupt marker).
+    RejectLocalMarkerCorrupt(AuthorityStateError),
+
+    /// Local marker is structurally valid but belongs to a different
+    /// `(environment, chain_id, genesis_hash)` trust domain than the
+    /// running runtime. Restore is rejected before any further
+    /// comparison so the operator log line is precise.
+    RejectLocalMarkerWrongDomain { reason: String },
+
+    /// Snapshot v2 authority block has the wrong `chain_id_hex`,
+    /// `environment`, or `genesis_hash_hex` for the runtime trust
+    /// domain. Restore is rejected fail-closed.
+    RejectSnapshotMarkerWrongDomain { reason: String },
+
+    /// Snapshot meta advertised both a v1 (`authority_state`) and a v2
+    /// (`authority_state_v2`) authority block. A single snapshot must
+    /// not carry two simultaneously valid authority markers; the
+    /// restore surface fails closed without consulting either block.
+    RejectAmbiguousSnapshotMarkers,
+
+    /// The snapshot v2 marker was rejected by `compare_authority_marker_v2`
+    /// against the local marker for a v2-specific reason: lower sequence,
+    /// same sequence but different ratification digest, wrong authority
+    /// root, wrong key/action linkage, v1-after-v2, or malformed bytes.
+    RejectV2Comparison(AuthorityMarkerV2ComparisonOutcome),
+}
+
+impl SnapshotRestoreAuthorityCheckV2Outcome {
+    /// True iff this outcome means restore may proceed.
+    pub fn is_accept(&self) -> bool {
+        matches!(
+            self,
+            Self::NoMarkerEitherSide
+                | Self::AcceptSnapshotV2MarkerNoLocal
+                | Self::AcceptMatchingV2Marker
+                | Self::AcceptHigherV2Sequence { .. }
+                | Self::AcceptV2AfterV1Migration
+        )
+    }
+
+    /// True iff this outcome is a rejection.
+    pub fn is_reject(&self) -> bool {
+        !self.is_accept()
+    }
+}
+
+impl std::fmt::Display for SnapshotRestoreAuthorityCheckV2Outcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoMarkerEitherSide => write!(
+                f,
+                "no local v2 authority marker and no snapshot v2 authority metadata (restore may proceed without v2 enforcement on this surface)"
+            ),
+            Self::AcceptSnapshotV2MarkerNoLocal => write!(
+                f,
+                "no local v2 authority marker; snapshot v2 authority metadata matches the runtime trust domain (restore may proceed; local marker is NOT synthesised from snapshot bytes)"
+            ),
+            Self::AcceptMatchingV2Marker => write!(
+                f,
+                "local v2 authority marker matches snapshot v2 authority metadata bit-for-bit (restore may proceed; local marker NOT rewritten)"
+            ),
+            Self::AcceptHigherV2Sequence { persisted_sequence, candidate_sequence } => write!(
+                f,
+                "snapshot v2 authority metadata advertises a strictly higher latest_authority_domain_sequence ({} → {}) and matches the local v2 trust domain (restore may proceed; release-binary reload-apply will persist the new sequence atomically)",
+                persisted_sequence, candidate_sequence
+            ),
+            Self::AcceptV2AfterV1Migration => write!(
+                f,
+                "local v1 authority marker matches snapshot v2 authority metadata under the explicit v1→v2 migration semantics (restore may proceed; the v1 → v2 marker swap on disk is a separate release-binary step)"
+            ),
+            Self::RejectMissingSnapshotMarker => write!(
+                f,
+                "snapshot restore rejected: local v2 authority marker exists but snapshot carries no v2 authority metadata (fail closed; accepting would silently erase or roll back the local persisted v2 authority state)"
+            ),
+            Self::RejectLocalMarkerCorrupt(e) => write!(
+                f,
+                "snapshot restore rejected: local authority marker is structurally invalid or its record_version is not supported by this binary (fail closed; marker bytes preserved verbatim) — {}",
+                e
+            ),
+            Self::RejectLocalMarkerWrongDomain { reason } => write!(
+                f,
+                "snapshot restore rejected: local authority marker belongs to a different (environment, chain_id, genesis_hash) trust domain than the running runtime — {}",
+                reason
+            ),
+            Self::RejectSnapshotMarkerWrongDomain { reason } => write!(
+                f,
+                "snapshot restore rejected: snapshot v2 authority metadata advertises a different (environment, chain_id, genesis_hash) trust domain than the running runtime — {}",
+                reason
+            ),
+            Self::RejectAmbiguousSnapshotMarkers => write!(
+                f,
+                "snapshot restore rejected: snapshot meta carries both a v1 (authority_state) and a v2 (authority_state_v2) authority block; a single snapshot must not advertise two simultaneously valid authority markers (fail closed)"
+            ),
+            Self::RejectV2Comparison(o) => write!(
+                f,
+                "snapshot restore rejected by Run 130 v2 marker comparison: {:?}",
+                o
+            ),
+        }
+    }
+}
+
+/// Run 140: compare a snapshot's optional [`AuthorityStateSnapshotMetaV2`]
+/// against the locally persisted versioned authority marker (if any) and
+/// decide, fail-closed, whether a snapshot restore may proceed without
+/// silently downgrading or erasing the local marker.
+///
+/// This function is **pure**: it reads the local marker file via
+/// [`load_authority_state_versioned`] and never writes, deletes, or
+/// otherwise mutates any on-disk state.
+///
+/// Dispatch order (first match wins):
+///
+/// 1. `snapshot_also_carries_v1_block == true` → `RejectAmbiguousSnapshotMarkers`.
+/// 2. [`load_authority_state_versioned`] returns a fatal error →
+///    `RejectLocalMarkerCorrupt`.
+/// 3. A persisted local marker exists but its
+///    `(env, chain_id, genesis_hash)` does not match the runtime
+///    → `RejectLocalMarkerWrongDomain`.
+/// 4. `snapshot_meta_v2 == None`:
+///    - local absent → `NoMarkerEitherSide` (defensive: callers should
+///      route to the v1 check instead);
+///    - local present → `RejectMissingSnapshotMarker`.
+/// 5. `snapshot_meta_v2` present but its domain mismatches the runtime
+///    → `RejectSnapshotMarkerWrongDomain`.
+/// 6. Reconstruct a candidate [`PersistentAuthorityStateRecordV2`] from
+///    the snapshot block and route through [`compare_authority_marker_v2`]:
+///    - `FirstV2MarkerAccepted` → `AcceptSnapshotV2MarkerNoLocal`;
+///    - `SameV2MarkerIdempotent` → `AcceptMatchingV2Marker`;
+///    - `HigherSequenceAccepted` → `AcceptHigherV2Sequence`;
+///    - `V2AfterV1ExplicitMigrationAllowed` → `AcceptV2AfterV1Migration`;
+///    - any other variant → `RejectV2Comparison(...)`.
+pub fn verify_snapshot_authority_state_for_restore_v2(
+    inputs: SnapshotRestoreAuthorityCheckV2Inputs<'_>,
+) -> SnapshotRestoreAuthorityCheckV2Outcome {
+    // Step 1: ambiguity guard — a snapshot must not advertise both blocks.
+    if inputs.snapshot_also_carries_v1_block {
+        return SnapshotRestoreAuthorityCheckV2Outcome::RejectAmbiguousSnapshotMarkers;
+    }
+
+    // Step 2: load + structurally validate the persisted local marker.
+    let persisted = match load_authority_state_versioned(inputs.marker_path) {
+        Ok(p) => p,
+        Err(e) => return SnapshotRestoreAuthorityCheckV2Outcome::RejectLocalMarkerCorrupt(e),
+    };
+
+    // Step 3: if a local marker exists, it must belong to the runtime
+    // trust domain BEFORE we look at the snapshot block.
+    if let Some(prev) = persisted.as_ref() {
+        if let Err(reason) = check_versioned_record_for_domain(
+            prev,
+            inputs.runtime_env,
+            inputs.runtime_chain_id,
+            inputs.runtime_genesis_hash_hex,
+        ) {
+            return SnapshotRestoreAuthorityCheckV2Outcome::RejectLocalMarkerWrongDomain { reason };
+        }
+    }
+
+    // Step 4: branch on (local, snapshot-v2) presence.
+    let snap = match (persisted.as_ref(), inputs.snapshot_meta_v2) {
+        (None, None) => return SnapshotRestoreAuthorityCheckV2Outcome::NoMarkerEitherSide,
+        (Some(_), None) => {
+            return SnapshotRestoreAuthorityCheckV2Outcome::RejectMissingSnapshotMarker
+        }
+        (_, Some(s)) => s,
+    };
+
+    // Step 5: snapshot v2 trust-domain check.
+    if let Err(reason) = check_snapshot_meta_v2_domain(
+        snap,
+        inputs.runtime_env,
+        inputs.runtime_chain_id,
+        inputs.runtime_genesis_hash_hex,
+    ) {
+        return SnapshotRestoreAuthorityCheckV2Outcome::RejectSnapshotMarkerWrongDomain { reason };
+    }
+
+    // Step 6: reconstruct a comparable v2 record from the snapshot block
+    // and route through compare_authority_marker_v2. last_update_source
+    // and updated_at_unix_secs are intentionally filled with neutral
+    // values because neither participates in
+    // canonical_authority_state_v2_digest nor in
+    // compare_authority_marker_v2's equality rules.
+    let candidate = match snapshot_meta_v2_to_record(snap) {
+        Ok(c) => c,
+        Err(e) => {
+            return SnapshotRestoreAuthorityCheckV2Outcome::RejectSnapshotMarkerWrongDomain {
+                reason: format!(
+                    "snapshot v2 authority block could not be reconstructed as a PersistentAuthorityStateRecordV2: {}",
+                    e
+                ),
+            };
+        }
+    };
+
+    let cmp = compare_authority_marker_v2(persisted.as_ref(), &candidate);
+    match cmp {
+        AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted => {
+            SnapshotRestoreAuthorityCheckV2Outcome::AcceptSnapshotV2MarkerNoLocal
+        }
+        AuthorityMarkerV2ComparisonOutcome::SameV2MarkerIdempotent => {
+            SnapshotRestoreAuthorityCheckV2Outcome::AcceptMatchingV2Marker
+        }
+        AuthorityMarkerV2ComparisonOutcome::HigherSequenceAccepted {
+            persisted_sequence,
+            candidate_sequence,
+        } => SnapshotRestoreAuthorityCheckV2Outcome::AcceptHigherV2Sequence {
+            persisted_sequence,
+            candidate_sequence,
+        },
+        AuthorityMarkerV2ComparisonOutcome::V2AfterV1ExplicitMigrationAllowed => {
+            SnapshotRestoreAuthorityCheckV2Outcome::AcceptV2AfterV1Migration
+        }
+        other => SnapshotRestoreAuthorityCheckV2Outcome::RejectV2Comparison(other),
+    }
+}
+
+/// Run 140: trust-domain check for a snapshot v2 authority block. Returns
+/// the precise reason on mismatch.
+fn check_snapshot_meta_v2_domain(
+    snap: &AuthorityStateSnapshotMetaV2,
+    runtime_env: NetworkEnvironment,
+    runtime_chain_id: ChainId,
+    runtime_genesis_hash_hex: &str,
+) -> Result<(), String> {
+    let expected_env_tag = match runtime_env {
+        NetworkEnvironment::Devnet => "devnet",
+        NetworkEnvironment::Testnet => "testnet",
+        NetworkEnvironment::Mainnet => "mainnet",
+    };
+    if snap.environment != expected_env_tag {
+        return Err(format!(
+            "snapshot.environment={} runtime.environment={}",
+            snap.environment, expected_env_tag
+        ));
+    }
+    let expected_chain_hex = chain_id_hex(runtime_chain_id);
+    if snap.chain_id_hex != expected_chain_hex {
+        return Err(format!(
+            "snapshot.chain_id_hex={} runtime.chain_id_hex={}",
+            snap.chain_id_hex, expected_chain_hex
+        ));
+    }
+    if snap.genesis_hash_hex != runtime_genesis_hash_hex {
+        return Err(format!(
+            "snapshot.genesis_hash_hex={} runtime.genesis_hash_hex={}",
+            snap.genesis_hash_hex, runtime_genesis_hash_hex
+        ));
+    }
+    Ok(())
+}
+
+/// Run 140: trust-domain check for a versioned local marker.
+fn check_versioned_record_for_domain(
+    record: &PersistentAuthorityStateRecordVersioned,
+    runtime_env: NetworkEnvironment,
+    runtime_chain_id: ChainId,
+    runtime_genesis_hash_hex: &str,
+) -> Result<(), String> {
+    let expected_env_bundle = TrustBundleEnvironment::from_runtime(runtime_env);
+    let expected_chain_hex = chain_id_hex(runtime_chain_id);
+    match record {
+        PersistentAuthorityStateRecordVersioned::V1(v1) => {
+            if v1.environment != expected_env_bundle {
+                return Err(format!(
+                    "local.environment={:?} runtime.environment={:?}",
+                    v1.environment, expected_env_bundle
+                ));
+            }
+            if v1.chain_id != expected_chain_hex {
+                return Err(format!(
+                    "local.chain_id={} runtime.chain_id={}",
+                    v1.chain_id, expected_chain_hex
+                ));
+            }
+            if v1.genesis_hash != runtime_genesis_hash_hex {
+                return Err(format!(
+                    "local.genesis_hash={} runtime.genesis_hash={}",
+                    v1.genesis_hash, runtime_genesis_hash_hex
+                ));
+            }
+        }
+        PersistentAuthorityStateRecordVersioned::V2(v2) => {
+            if v2.environment != expected_env_bundle {
+                return Err(format!(
+                    "local.environment={:?} runtime.environment={:?}",
+                    v2.environment, expected_env_bundle
+                ));
+            }
+            if v2.chain_id != expected_chain_hex {
+                return Err(format!(
+                    "local.chain_id={} runtime.chain_id={}",
+                    v2.chain_id, expected_chain_hex
+                ));
+            }
+            if v2.genesis_hash != runtime_genesis_hash_hex {
+                return Err(format!(
+                    "local.genesis_hash={} runtime.genesis_hash={}",
+                    v2.genesis_hash, runtime_genesis_hash_hex
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Run 140: reconstruct a [`PersistentAuthorityStateRecordV2`] from a
+/// snapshot [`AuthorityStateSnapshotMetaV2`] block so the comparison can
+/// flow through [`compare_authority_marker_v2`]. The two
+/// informational-only audit fields (`last_update_source`,
+/// `updated_at_unix_secs`) are intentionally filled with neutral values.
+fn snapshot_meta_v2_to_record(
+    snap: &AuthorityStateSnapshotMetaV2,
+) -> Result<PersistentAuthorityStateRecordV2, AuthorityStateError> {
+    let environment = match snap.environment.as_str() {
+        "devnet" => TrustBundleEnvironment::Devnet,
+        "testnet" => TrustBundleEnvironment::Testnet,
+        "mainnet" => TrustBundleEnvironment::Mainnet,
+        other => {
+            return Err(AuthorityStateError::Malformed(format!(
+                "snapshot v2 authority block has unknown environment tag {}",
+                other
+            )));
+        }
+    };
+    let lifecycle = match snap.latest_lifecycle_action_byte {
+        0 => BundleSigningRatificationV2Action::Ratify,
+        1 => BundleSigningRatificationV2Action::Rotate,
+        2 => BundleSigningRatificationV2Action::Revoke,
+        other => {
+            return Err(AuthorityStateError::Malformed(format!(
+                "snapshot v2 authority block has unknown latest_lifecycle_action_byte={}",
+                other
+            )));
+        }
+    };
+    let record = PersistentAuthorityStateRecordV2::new(
+        snap.chain_id_hex.clone(),
+        environment,
+        snap.genesis_hash_hex.clone(),
+        snap.authority_root_fingerprint.clone(),
+        snap.authority_root_suite_id,
+        snap.active_bundle_signing_key_fingerprint.clone(),
+        snap.active_bundle_signing_key_suite_id,
+        snap.latest_authority_domain_sequence,
+        lifecycle,
+        snap.previous_bundle_signing_key_fingerprint.clone(),
+        snap.latest_ratification_v2_digest.clone(),
+        snap.revoked_key_metadata.clone(),
         AuthorityStateUpdateSource::TestOrFixture,
         0,
     );

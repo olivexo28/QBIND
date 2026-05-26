@@ -61,7 +61,9 @@ use qbind_types::{ChainId, NetworkEnvironment};
 use crate::node_config::NodeConfig;
 use crate::pqc_authority_state::{
     authority_state_file_path, verify_snapshot_authority_state_for_restore,
-    SnapshotRestoreAuthorityCheckInputs, SnapshotRestoreAuthorityCheckOutcome,
+    verify_snapshot_authority_state_for_restore_v2, SnapshotRestoreAuthorityCheckInputs,
+    SnapshotRestoreAuthorityCheckOutcome, SnapshotRestoreAuthorityCheckV2Inputs,
+    SnapshotRestoreAuthorityCheckV2Outcome,
 };
 
 /// Subdirectory within `data_dir` where the VM-v0 RocksDB state lives.
@@ -114,6 +116,22 @@ pub enum RestoreError {
     /// or deleted by the restore surface).
     AuthorityMarkerConflict(SnapshotRestoreAuthorityCheckOutcome),
 
+    /// **Run 140.** The snapshot's v2 authority-state metadata
+    /// (`authority_state_v2`) conflicts with the locally persisted
+    /// versioned authority marker (lower v2 sequence, same v2 sequence
+    /// with different ratification digest, wrong authority root, wrong
+    /// key/action linkage, v1-after-v2, malformed bytes,
+    /// wrong-domain, ambiguous snapshot carrying both v1+v2 blocks,
+    /// etc.), or one side is present while the other is missing in a
+    /// way that would silently downgrade or erase the local v2 marker.
+    /// The embedded outcome captures the precise reject reason.
+    /// Fail-closed: the restore is refused BEFORE any state
+    /// materialization or audit-marker write; on-disk state under
+    /// `<data_dir>` is byte-identical to its pre-restore form
+    /// (including the local authority marker file, which is never
+    /// mutated or deleted by the restore surface).
+    AuthorityMarkerConflictV2(SnapshotRestoreAuthorityCheckV2Outcome),
+
     /// **Run 124.** The restore surface was invoked without the runtime
     /// authority context (`NetworkEnvironment` + canonical genesis hash)
     /// needed to honestly evaluate the snapshot vs. local-marker
@@ -150,6 +168,11 @@ impl fmt::Display for RestoreError {
             RestoreError::AuthorityMarkerConflict(o) => write!(
                 f,
                 "restore-from-snapshot refused by authority-marker check: {} (no state mutation, no audit-marker write; local pqc_authority_state.json bytes preserved verbatim)",
+                o
+            ),
+            RestoreError::AuthorityMarkerConflictV2(o) => write!(
+                f,
+                "restore-from-snapshot refused by Run 140 v2 authority-marker check: {} (no state mutation, no audit-marker write; local pqc_authority_state.json bytes preserved verbatim)",
                 o
             ),
             RestoreError::AuthorityContextMissing => write!(
@@ -357,32 +380,65 @@ pub fn restore_from_snapshot_with_authority_marker_check(
     //    check failure).
     let meta = validate_snapshot_for_restore(snapshot_dir, expected_chain_id)?;
 
-    // 2. Compute the local marker path and run the Run 124 pure check
-    //    against the snapshot's (optional) AuthorityStateSnapshotMeta.
+    // 2. Compute the local marker path.
     let marker_path = authority_state_file_path(data_dir);
-    let check_outcome =
-        verify_snapshot_authority_state_for_restore(SnapshotRestoreAuthorityCheckInputs {
-            marker_path: &marker_path,
-            snapshot_meta: meta.authority_state.as_ref(),
-            runtime_env: authority_ctx.runtime_env,
-            runtime_chain_id: authority_ctx.runtime_chain_id,
-            runtime_genesis_hash_hex: authority_ctx.runtime_genesis_hash_hex,
-        });
 
-    if check_outcome.is_reject() {
+    // 3. Dispatch on the snapshot meta's authority block(s):
+    //    - Run 140: if the snapshot carries a v2 block, route the pure
+    //      check through `verify_snapshot_authority_state_for_restore_v2`,
+    //      passing `snapshot_also_carries_v1_block` so an ambiguous
+    //      snapshot (both v1 + v2 blocks present) is rejected fail-closed
+    //      without consulting either block.
+    //    - Otherwise: Run 124 v1 path verbatim (no v1 regression).
+    if meta.authority_state_v2.is_some() {
+        let check_outcome_v2 = verify_snapshot_authority_state_for_restore_v2(
+            SnapshotRestoreAuthorityCheckV2Inputs {
+                marker_path: &marker_path,
+                snapshot_meta_v2: meta.authority_state_v2.as_ref(),
+                snapshot_also_carries_v1_block: meta.authority_state.is_some(),
+                runtime_env: authority_ctx.runtime_env,
+                runtime_chain_id: authority_ctx.runtime_chain_id,
+                runtime_genesis_hash_hex: authority_ctx.runtime_genesis_hash_hex,
+            },
+        );
+
+        if check_outcome_v2.is_reject() {
+            eprintln!(
+                "[restore] FATAL: refused by Run 140 v2 authority-marker check: {}",
+                check_outcome_v2
+            );
+            return Err(RestoreError::AuthorityMarkerConflictV2(check_outcome_v2));
+        }
+
         eprintln!(
-            "[restore] FATAL: refused by Run 124 authority-marker check: {}",
+            "[restore] Run 140 v2 authority-marker check: {} (proceeding with materialization)",
+            check_outcome_v2
+        );
+    } else {
+        let check_outcome =
+            verify_snapshot_authority_state_for_restore(SnapshotRestoreAuthorityCheckInputs {
+                marker_path: &marker_path,
+                snapshot_meta: meta.authority_state.as_ref(),
+                runtime_env: authority_ctx.runtime_env,
+                runtime_chain_id: authority_ctx.runtime_chain_id,
+                runtime_genesis_hash_hex: authority_ctx.runtime_genesis_hash_hex,
+            });
+
+        if check_outcome.is_reject() {
+            eprintln!(
+                "[restore] FATAL: refused by Run 124 authority-marker check: {}",
+                check_outcome
+            );
+            return Err(RestoreError::AuthorityMarkerConflict(check_outcome));
+        }
+
+        eprintln!(
+            "[restore] Run 124 authority-marker check: {} (proceeding with materialization)",
             check_outcome
         );
-        return Err(RestoreError::AuthorityMarkerConflict(check_outcome));
     }
 
-    eprintln!(
-        "[restore] Run 124 authority-marker check: {} (proceeding with materialization)",
-        check_outcome
-    );
-
-    // 3. Materialize. The marker file under <data_dir> is NEVER written,
+    // 4. Materialize. The marker file under <data_dir> is NEVER written,
     //    rewritten, or deleted by the restore surface — only the audit
     //    marker (RESTORED_FROM_SNAPSHOT.json) plus the state checkpoint.
     materialize_validated_snapshot(snapshot_dir, data_dir, meta)

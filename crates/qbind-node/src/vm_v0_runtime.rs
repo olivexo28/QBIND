@@ -136,6 +136,7 @@ impl VmV0RuntimeState {
             chain_id,
             epoch,
             authority_state: None,
+            authority_state_v2: None,
         };
 
         eprintln!(
@@ -468,6 +469,7 @@ mod tests {
                     chain_id: 1337,
                     epoch: None,
                     authority_state: None,
+                    authority_state_v2: None,
                 },
                 &source.path().join("snapshot"),
             )
