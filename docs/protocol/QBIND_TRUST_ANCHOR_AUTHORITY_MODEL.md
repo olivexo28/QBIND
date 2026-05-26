@@ -2470,3 +2470,27 @@ marker wiring, live inbound `0x05` v2 wiring, peer-driven live apply,
 signing-key rotation/revocation lifecycle, KMS/HSM custody, MainNet
 governance artifact verification, and full C4 / C5 closure all remain
 out of scope.
+
+## Run 139 — SIGHUP live-reload v2 mutating surface release-binary evidence
+
+Run 139 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_139.md`) exercises the
+Run 138 source/test wiring end-to-end on a real
+`target/release/qbind-node` daemon driven by a real `kill -HUP <pid>`
+against ephemeral DevNet fixtures. The harness
+`scripts/devnet/run_139_sighup_v2_live_reload_release_binary.sh` runs
+the eleven acceptance / rejection / regression scenarios A1–A4, R1–R4,
+R6–R8 on the release binary (R5 — post-commit marker-persist failure —
+is release-binary-infeasible without source modification or racy
+filesystem tricks and is documented as partial-positive, inheriting
+coverage from the Run 138 source-level orchestration shape and the
+`run138_r6_v2_marker_persist_failure_after_commit_is_fatal` integration
+test). Per-scenario evidence (stdout / stderr, daemon exit code,
+captured PID, signal timestamps, pre / post SHA-256 of
+`pqc_authority_state.json` and `pqc_trust_bundle_sequence.json`, and a
+full data-dir inventory) lands under
+`docs/devnet/run_139_sighup_v2_live_reload_release_binary/`. Run 139
+introduces no production runtime source changes, no test changes, no
+CLI flag changes, no metric changes, and no wire-format / schema
+changes; it reuses the existing
+`run_133_v2_validation_only_fixture_helper` release example for
+fixture minting.

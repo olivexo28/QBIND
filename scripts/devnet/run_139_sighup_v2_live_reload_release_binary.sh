@@ -147,10 +147,7 @@ assert_no_mutation_between_markers() {
   local stderr="$1" sighup_line="$2" verdict_line="$3"
   local section="${stderr}.trigger-section.tmp"
   sed -n "${sighup_line},${verdict_line}p" "$stderr" > "$section"
-  if grep -qE '\[binary\] Run 055: trust-bundle sequence persistence' "$section"; then
-    fail "Run 055 sequence persistence line emitted by a rejected SIGHUP trigger in ${stderr}"
-  fi
-  if grep -qE 'VERDICT=applied' "$section"; then
+  if grep -qE '\[binary\] Run 074: VERDICT=applied' "$section"; then
     fail "VERDICT=applied emitted by a rejected SIGHUP trigger in ${stderr}"
   fi
   if grep -qE 'falling back to --p2p-trusted-root|trusted-root fallback' "$section"; then
@@ -395,21 +392,30 @@ assert_v2_accept_invariants() {
   local data_dir="$OUTDIR/data/${name}"
   local marker="$data_dir/pqc_authority_state.json"
 
-  # Ordering proof: SIGHUP-received line precedes Run 055 sequence
-  # persistence line, which precedes the Run 074 VERDICT=applied line.
-  local sighup_line seq_line verdict_line
+  # Ordering proof for the SIGHUP-driven v2 apply: the canonical Run
+  # 074 SIGHUP-received log line strictly precedes the Run 074
+  # VERDICT=applied log line on the same stderr stream, and the
+  # VERDICT line itself carries `sequence_commit=ok` (the in-log
+  # confirmation that the existing Run 070 `commit_sequence` boundary
+  # returned `Ok` BEFORE the v2 marker post-commit persist ran — the
+  # Run 138 wiring keys the post-commit persist exclusively off the
+  # `Ok(applied)` return of `apply_validated_candidate_with_previous`,
+  # so a marker with `last_update_source="sighup-reload"` cannot exist
+  # without an Ok commit). The Run 055 trust-bundle sequence
+  # persistence log line is emitted ONCE at startup (first-load) and
+  # is NOT re-emitted per SIGHUP — proof of the SIGHUP commit lives
+  # in the VERDICT line and the on-disk marker bytes.
+  local sighup_line verdict_line
   sighup_line="$(last_line "$stderr" 'Run 074: SIGHUP received')"
-  seq_line="$(last_line "$stderr" 'Run 055: trust-bundle sequence persistence')"
   verdict_line="$(last_line "$stderr" 'Run 074: VERDICT=applied')"
-  [ -n "$sighup_line" ] || fail "[$name] no Run 074 SIGHUP received line"
-  [ -n "$seq_line" ]    || fail "[$name] no Run 055 sequence persistence line"
-  [ -n "$verdict_line" ]|| fail "[$name] no Run 074 VERDICT=applied line"
-  if [ "$sighup_line" -ge "$seq_line" ]; then
-    fail "[$name] ordering: SIGHUP-received line=${sighup_line} not strictly before Run 055 line=${seq_line}"
+  [ -n "$sighup_line" ]  || fail "[$name] no Run 074 SIGHUP received line"
+  [ -n "$verdict_line" ] || fail "[$name] no Run 074 VERDICT=applied line"
+  if [ "$sighup_line" -ge "$verdict_line" ]; then
+    fail "[$name] ordering: SIGHUP-received line=${sighup_line} not strictly before VERDICT=applied line=${verdict_line}"
   fi
-  if [ "$seq_line" -ge "$verdict_line" ]; then
-    fail "[$name] ordering: Run 055 line=${seq_line} not strictly before VERDICT=applied line=${verdict_line}"
-  fi
+  # VERDICT must explicitly carry the sequence_commit=ok marker.
+  sed -n "${verdict_line}p" "$stderr" | grep -qE 'sequence_commit=ok' \
+    || fail "[$name] VERDICT=applied line missing sequence_commit=ok"
 
   # Marker file is v2 + has the expected authority domain sequence +
   # last_update_source=sighup-reload.
@@ -421,8 +427,7 @@ assert_v2_accept_invariants() {
   # No v2 marker-rejected outcome was emitted by the accepted trigger.
   assert_not_grep "$stderr" 'Run 138: VERDICT=marker-rejected-v2'
   assert_not_grep "$stderr" 'Run 138: VERDICT=FATAL-marker-persist-v2'
-  # No v1 SIGHUP marker-rejected / FATAL marker-persist for the accepted
-  # trigger either.
+  # No v1 SIGHUP FATAL marker-persist for the accepted trigger either.
   assert_not_grep "$stderr" 'Run 121: VERDICT=FATAL-marker-persist'
 }
 
@@ -966,9 +971,19 @@ main() {
     echo "  v1 marker preserved (record_version=1) across the R6 v1 regression"
     echo "  no marker file written under the R7 no-sidecar regression"
     echo "ordering proof: pass"
-    echo "  per accepted v2 scenario: SIGHUP-received line < Run 055 sequence"
-    echo "  persistence line < Run 074 VERDICT=applied line (strict line-number"
-    echo "  ordering across the same stderr stream)"
+    echo "  per accepted v2 scenario: Run 074 SIGHUP-received line < Run 074"
+    echo "  VERDICT=applied line (strict line-number ordering on the same"
+    echo "  stderr stream); the VERDICT line itself carries"
+    echo "  sequence_commit=ok (the in-log confirmation that the existing"
+    echo "  Run 070 commit_sequence boundary returned Ok before the v2"
+    echo "  marker post-commit persist ran — the Run 138 wiring keys"
+    echo "  the post-commit persist exclusively off the Ok(applied) return"
+    echo "  of apply_validated_candidate_with_previous, so a marker with"
+    echo "  last_update_source=\"sighup-reload\" cannot exist without an"
+    echo "  Ok commit). The Run 055 trust-bundle sequence persistence log"
+    echo "  line is emitted ONCE at startup (first-load) and is NOT"
+    echo "  re-emitted per SIGHUP — proof of the SIGHUP commit lives in"
+    echo "  the VERDICT line and the on-disk marker bytes."
     echo "wire-format checks: source-only; no trust-bundle, ratification, or"
     echo "  peer-candidate wire format changed by this evidence harness"
     echo "scope non-goal checks: no SIGHUP v2 snapshot/restore, no live 0x05 v2,"
