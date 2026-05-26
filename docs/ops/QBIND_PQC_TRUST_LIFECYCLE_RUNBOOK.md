@@ -4724,3 +4724,68 @@ in the evidence MD with citations back to the Run 138 source/test
 coverage. Run 139 introduces no production runtime source
 changes, no test changes, no CLI flag changes, no metric changes,
 and no wire-format / schema changes.
+
+## Run 140 — snapshot/restore v2 authority-marker parity (source/test only)
+
+Run 140 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_140.md`) wires
+source/test-level parity for the v2 authority anti-rollback marker on
+the snapshot/restore surface, on top of the existing versioned marker
+primitives (Run 130 `compare_authority_marker_v2`, Run 131
+`load_authority_state_versioned` / `persist_authority_state_v2_atomic`)
+and the existing Run 117 / 124 snapshot/restore authority-check
+surface. The `StateSnapshotMeta` carrier in `qbind-ledger` is extended
+additively with `authority_state_v2: Option<AuthorityStateSnapshotMetaV2>`
+(JSON key omitted when `None`, so pre-Run-140 snapshots round-trip
+byte-identically). `qbind-node` gains a pure
+`verify_snapshot_authority_state_for_restore_v2(...)` entry point that
+routes the accept/reject decision through `compare_authority_marker_v2`
+and is dispatched from
+`restore_from_snapshot_with_authority_marker_check` whenever the
+snapshot meta carries a v2 block; otherwise the Run 124 v1 path runs
+verbatim and v1 restore behavior is preserved.
+
+**Restore-surface dispatch outcomes operators may see on the v2 path**
+(typed `SnapshotRestoreAuthorityCheckV2Outcome`):
+
+* **Accept** — `NoMarkerEitherSide`, `AcceptSnapshotV2MarkerNoLocal`,
+  `AcceptMatchingV2Marker`, `AcceptHigherV2Sequence{
+  persisted_sequence, candidate_sequence }`,
+  `AcceptV2AfterV1Migration`.
+* **Reject (fail-closed)** — `RejectMissingSnapshotMarker`,
+  `RejectLocalMarkerCorrupt(_)`,
+  `RejectLocalMarkerWrongDomain`, `RejectSnapshotMarkerWrongDomain`,
+  `RejectAmbiguousSnapshotMarkers` (snapshot advertises both `v1` and
+  `v2` blocks — refused without consulting either),
+  `RejectV2Comparison(_)` (wraps the Run 130 comparison outcome:
+  lower sequence, same-sequence-different-digest, wrong authority
+  root, wrong active key, sequence overflow, etc.).
+
+**Fail-closed invariants enforced by Run 140 (source/test):**
+
+* The restore-surface check is **pure** with respect to disk: accept
+  and reject paths both preserve the local marker file bytes
+  verbatim. The on-disk state under `<data_dir>` is byte-identical to
+  its pre-restore form on every reject path (authority check runs
+  before any state checkpoint copy or `RESTORED_FROM_SNAPSHOT.json`
+  audit-marker write).
+* A snapshot that advertises both `authority_state` and
+  `authority_state_v2` blocks is **always refused without consulting
+  either block** — a single snapshot cannot advertise two
+  simultaneously valid authority markers.
+* A snapshot with no authority block at all against a local v2 marker
+  is **refused** by the dispatched v1 path (Run 124 behavior preserved
+  verbatim). A v2 marker is never fabricated when the snapshot has no
+  marker.
+* The local-marker domain check (`environment`, `chain_id`,
+  `genesis_hash`) runs **before** any snapshot inspection on the v2
+  path, so the operator log line is precise about the source of a
+  reject when both sides are wrong.
+* The restore surface never invokes `persist_authority_state_v2_atomic`
+  — the only v2 marker writer remains the existing Run 134 / 136 / 138
+  surfaces.
+
+**Scope notice:** Run 140 is source/test wiring only. Release-binary
+snapshot/restore v2 evidence is **deferred to Run 141**. Live inbound
+`0x05` v2 wiring, peer-driven live apply, signing-key
+rotation/revocation lifecycle, KMS / HSM custody, MainNet governance
+attestation, full C4 closure, and C5 closure all remain out of scope.

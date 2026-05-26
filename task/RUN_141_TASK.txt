@@ -1,0 +1,287 @@
+Task: Run 141 — Release-Binary Evidence for Snapshot/Restore v2 Authority-Marker Parity
+
+Current accepted state:
+- Run 133: strongest-positive release-binary evidence for v2 validation-only reload-check and local peer-candidate-check.
+- Run 134: strongest-positive source/test wiring for v2 process-start reload-apply.
+- Run 135: strongest-positive release-binary evidence for v2 process-start reload-apply.
+- Run 136: strongest-positive source/test wiring for startup --p2p-trust-bundle v2 marker support.
+- Run 137: strongest-positive release-binary evidence for startup --p2p-trust-bundle v2 marker support.
+- Run 138: source/test wiring for SIGHUP live-reload v2 marker support.
+- Run 139: strongest-positive release-binary evidence for SIGHUP live-reload v2 marker support.
+- Run 140: source/test wiring for snapshot/restore v2 authority-marker parity.
+
+Objective:
+Produce release-binary evidence for the Run 140 snapshot/restore v2 authority-marker parity surface using the real target/release/qbind-node binary and real snapshot directories.
+
+This is evidence-only. Do not change production runtime behavior unless the harness exposes a genuine blocker. If source changes are required, stop and report a Run 141 blocker instead of silently broadening scope.
+
+Strict scope:
+- Evidence-only.
+- Use real target/release/qbind-node.
+- Use real release-built helper binaries where helpers are needed.
+- Exercise real --restore-from-snapshot behavior.
+- Use real snapshot meta.json/state layout.
+- No source/test wiring beyond harness/docs unless a genuine blocker is found.
+- No live inbound 0x05 v2 apply.
+- No peer-driven live apply.
+- No signing-key rotation/revocation lifecycle.
+- No KMS/HSM implementation.
+- No MainNet governance implementation.
+- No CLI flag changes.
+- No metric-family changes.
+- No trust-bundle, sidecar, peer-candidate, marker, or wire-format schema changes.
+- Do not weaken v1 snapshot/restore behavior.
+- Do not claim full C4 or C5 closure.
+
+Required deliverables:
+1. Add release-binary evidence harness:
+   scripts/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary.sh
+
+2. Add evidence archive:
+   docs/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary/
+
+3. Add canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_141.md
+
+4. Update:
+   - docs/whitepaper/contradiction.md
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+5. Crosscheck all new/modified docs against existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Harness requirements:
+- Build:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example <needed snapshot/helper binaries>
+  cargo build --release -p qbind-node --example run_133_v2_validation_only_fixture_helper
+  or the correct existing helper used to mint v2 authority marker / trust material.
+
+- Capture:
+  - qbind-node SHA-256;
+  - qbind-node ELF Build ID if available;
+  - helper SHA-256 and Build ID if available;
+  - git commit hash;
+  - rustc/cargo versions;
+  - exact commands;
+  - per-scenario stdout/stderr;
+  - per-scenario exit code;
+  - pre/post data-dir inventory;
+  - pre/post pqc_authority_state.json JSON and SHA-256, if present;
+  - snapshot meta.json;
+  - snapshot state inventory;
+  - RESTORED_FROM_SNAPSHOT.json presence/absence;
+  - checks for .tmp residue;
+  - grep summaries for restore, Run 140, authority-marker, FATAL, fallback, DummySig/DummyKem/DummyAead.
+
+Required scenario matrix:
+
+A1. restore snapshot with valid v2 authority_state_v2 into empty data-dir
+- Prepare a valid snapshot directory whose meta.json carries only authority_state_v2.
+- Restore with real target/release/qbind-node using --restore-from-snapshot.
+- Expected:
+  - restore succeeds;
+  - Run 140 v2 authority-marker check path is selected;
+  - no v1 ambiguity;
+  - VM/state materialization occurs only after authority check accepts;
+  - RESTORED_FROM_SNAPSHOT.json is written;
+  - no pqc_authority_state.json is fabricated if Run 140 design is pure/no-write;
+  - no .tmp residue;
+  - no fallback to --p2p-trusted-root;
+  - no DummySig/DummyKem/DummyAead active path.
+
+A2. restore snapshot with matching local v2 marker
+- Existing data-dir has local v2 marker matching snapshot authority_state_v2.
+- Restore snapshot.
+- Expected:
+  - restore succeeds;
+  - marker bytes preserved if Run 140 restore check is pure;
+  - state materialization/audit marker occurs;
+  - no marker rewrite;
+  - no unexpected downgrade.
+
+A3. restore snapshot with higher-sequence v2 authority_state_v2 over older local v2 marker
+- Existing local v2 marker seq=N.
+- Snapshot authority_state_v2 seq=N+1.
+- Restore snapshot.
+- Expected:
+  - restore succeeds only if Run 140 policy accepts higher snapshot sequence;
+  - existing local marker bytes preserved if pure restore design intentionally does not write marker;
+  - state materialization occurs;
+  - evidence doc must state clearly that Run 140 restore check accepts but does not persist the higher marker, by design.
+
+A4. restore snapshot with v2 authority_state_v2 over local v1 marker
+- Existing local v1 marker matches the trust domain/root.
+- Snapshot carries valid v2 marker block.
+- Restore snapshot.
+- Expected:
+  - v2-after-v1 migration check accepts;
+  - local v1 marker bytes preserved if restore is pure/no-write;
+  - no downgrade path introduced;
+  - state materialization occurs.
+
+R1. restore legacy/no-marker snapshot while local v2 marker exists
+- Existing local v2 marker.
+- Snapshot has no authority_state_v2 and no v1 authority_state.
+- Restore snapshot.
+- Expected:
+  - restore rejected according to Run 124/Run 140 dispatcher policy;
+  - existing local v2 marker bytes unchanged;
+  - no state materialization;
+  - no RESTORED_FROM_SNAPSHOT.json;
+  - no .tmp residue.
+
+R2. lower-sequence v2 snapshot rejected
+- Existing local v2 marker seq=N.
+- Snapshot authority_state_v2 seq<N.
+- Expected:
+  - restore exits non-zero;
+  - Run 140 v2 comparison lower-sequence rejection visible;
+  - existing local marker unchanged;
+  - no state materialization;
+  - no audit restore marker.
+
+R3. same-sequence different-digest v2 snapshot rejected
+- Existing local v2 marker seq=N digest A.
+- Snapshot authority_state_v2 seq=N digest B.
+- Expected:
+  - restore exits non-zero;
+  - same-sequence conflict/equivocation reason visible;
+  - existing marker unchanged;
+  - no state materialization.
+
+R4. wrong-genesis v2 snapshot rejected
+- Snapshot authority_state_v2 genesis_hash does not match runtime.
+- Expected:
+  - restore exits non-zero;
+  - wrong-domain/wrong-genesis reason visible;
+  - no state materialization;
+  - existing marker unchanged.
+
+R5. wrong-environment v2 snapshot rejected
+- Snapshot authority_state_v2 environment does not match runtime.
+- Expected:
+  - restore exits non-zero;
+  - wrong-domain/wrong-environment reason visible;
+  - no state materialization.
+
+R6. wrong-chain v2 snapshot rejected, if separately representable
+- Snapshot authority_state_v2 chain_id does not match runtime.
+- Expected:
+  - restore exits non-zero;
+  - wrong-chain reason visible;
+  - no state materialization.
+- If chain_id is difficult to vary independently in current fixtures, document exact limitation and rely on Run 140 source/test coverage for the independent unit case.
+
+R7. corrupted local marker rejected
+- Existing local marker file contains invalid JSON or malformed marker.
+- Snapshot carries valid v2 authority_state_v2.
+- Expected:
+  - restore exits non-zero;
+  - local-marker-corrupt reason visible;
+  - corrupted local marker bytes preserved;
+  - no state materialization.
+
+R8. ambiguous snapshot with both v1 and v2 marker blocks rejected
+- Snapshot meta.json carries both authority_state and authority_state_v2.
+- Expected:
+  - restore exits non-zero;
+  - ambiguity guard reason visible;
+  - no state materialization;
+  - existing marker unchanged.
+
+R9. different authority-root v2 snapshot rejected
+- Snapshot authority_state_v2 same domain but different authority root.
+- Expected:
+  - restore exits non-zero;
+  - wrong-authority-root reason visible;
+  - no state materialization.
+
+R10. v1 restore regression
+- Use an existing valid v1 authority_state snapshot case.
+- Expected:
+  - existing v1 restore behavior remains unchanged;
+  - no v2 path selected;
+  - no v2 marker fabricated.
+
+R11. pre-Run-140 snapshot/no-v2 regression
+- Use snapshot meta without authority_state_v2.
+- Expected:
+  - existing restore behavior preserved;
+  - no v2 marker fabricated;
+  - restore succeeds or fails according to pre-existing Run 124 semantics, not new v2 semantics.
+
+Required negative invariants:
+For every rejected scenario:
+- qbind-node exits non-zero;
+- existing marker bytes unchanged;
+- no state checkpoint materialization into target data-dir, unless pre-existing restore semantics explicitly materialize before marker check; if so, report as blocker/contradiction because Run 140 says authority check precedes materialization;
+- no RESTORED_FROM_SNAPSHOT.json;
+- no marker write;
+- no .tmp residue;
+- no fallback to --p2p-trusted-root;
+- no DummySig/DummyKem/DummyAead active path;
+- no P2P/network startup if restore failure happens before network dispatch.
+
+Required positive invariants:
+For every accepted scenario:
+- qbind-node exits through expected bounded path or starts successfully after restore;
+- restore check accepts before materialization;
+- state checkpoint materializes;
+- RESTORED_FROM_SNAPSHOT.json is written;
+- v2 restore check is visibly selected for v2 snapshot meta;
+- no marker rewrite occurs if Run 140 restore design is pure/no-write;
+- v1 path remains unmodified for v1 snapshots.
+
+Ordering proof:
+For accepted v2 scenarios, prove:
+1. snapshot validation occurs;
+2. Run 140 v2 authority-marker check accepts;
+3. state checkpoint materialization occurs;
+4. RESTORED_FROM_SNAPSHOT.json is written;
+5. network/consensus startup occurs only after successful restore, if the harness lets the node continue.
+
+Use log line numbers, ordered grep output, or deterministic archive evidence.
+
+Documentation requirements for QBIND_DEVNET_EVIDENCE_RUN_141.md:
+- Verdict must be honest:
+  - strongest-positive only if all feasible release-binary scenarios pass;
+  - partial-positive if any scenario is infeasible or blocked, with exact blocker.
+- State clearly:
+  - Run 141 is release-binary evidence only.
+  - No production runtime source changed.
+  - No CLI flag changed.
+  - No metric changed.
+  - No schema/wire format changed.
+  - Snapshot/restore v2 authority-marker parity is now release-binary-evidenced if matrix passes.
+  - live inbound 0x05 v2 remains open.
+  - peer-driven live apply remains open.
+  - signing-key rotation/revocation remains open.
+  - KMS/HSM remains open.
+  - MainNet governance remains open.
+  - full C4 remains open.
+  - C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example <needed helpers>
+- bash scripts/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary.sh
+- cargo test -p qbind-node --test run_140_snapshot_restore_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_124_snapshot_restore_authority_marker_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-ledger --test t215_state_snapshot_tests
+- cargo test -p qbind-node --lib
+
+Acceptance criteria:
+Run 141 is acceptable only if:
+1. real target/release/qbind-node is used;
+2. real --restore-from-snapshot is exercised;
+3. accepted v2 snapshot/restore cases prove check-before-materialization ordering;
+4. rejected v2 snapshot/restore cases prove no state materialization and no marker mutation;
+5. v1/no-v2 snapshot restore regressions remain unchanged;
+6. evidence artifacts are archived under docs/devnet/run_141_snapshot_restore_v2_authority_marker_release_binary/;
+7. contradiction.md and operator/protocol docs are narrowly updated;
+8. no full C4 or C5 closure is claimed.
