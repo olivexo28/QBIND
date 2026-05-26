@@ -1,0 +1,249 @@
+Task: Run 142 — Source/Test Wiring for Live Inbound 0x05 v2 Validation-Only Path
+
+Current accepted state:
+- Run 132: source/test wiring for v2 validation-only reload-check and local peer-candidate-check.
+- Run 133: strongest-positive release-binary evidence for v2 validation-only reload-check and local peer-candidate-check.
+- Run 134: source/test wiring for v2 process-start reload-apply.
+- Run 135: strongest-positive release-binary evidence for v2 process-start reload-apply.
+- Run 136: source/test wiring for startup --p2p-trust-bundle v2 marker support.
+- Run 137: strongest-positive release-binary evidence for startup --p2p-trust-bundle v2 marker support.
+- Run 138: source/test wiring for SIGHUP live-reload v2 marker support.
+- Run 139: strongest-positive release-binary evidence for SIGHUP live-reload v2 marker support.
+- Run 140: source/test wiring for snapshot/restore v2 authority-marker parity.
+- Run 141: release-binary evidence for snapshot/restore v2 authority-marker parity.
+
+Objective:
+Wire v2 ratification / v2 authority-marker validation into the live inbound P2P peer-candidate `0x05` validation-only receive path.
+
+This run must make a running node that receives a peer-candidate `0x05` frame validate v2 material with the same v2 verifier / marker-decision discipline already used by the local peer-candidate-check surface from Runs 132/133.
+
+This is source/test wiring only. Release-binary live inbound `0x05` v2 evidence is deferred to Run 143.
+
+Strict scope:
+- Source/test wiring only.
+- Validation-only receive path.
+- No live apply.
+- No peer-driven trust-state mutation.
+- No sequence write.
+- No authority-marker write.
+- No session eviction.
+- No propagation behavior change unless the existing propagation-only path already rebroadcasts only after validation; if v2 propagation is touched, it must remain validation-before-rebroadcast and non-applying.
+- No signing-key rotation/revocation lifecycle.
+- No KMS/HSM.
+- No MainNet governance.
+- No CLI flag changes unless an existing hidden `0x05` validation flag already gates this path.
+- No metric-family changes unless existing peer-candidate validation metrics already cover versioned outcomes.
+- No trust-bundle schema changes.
+- No ratification sidecar schema changes.
+- No peer-candidate wire-format change unless the current envelope already has a versioned payload carrier and only dispatch logic is missing.
+- Do not weaken v1 live inbound `0x05` behavior.
+- Do not claim full C4 or C5 closure.
+
+Implementation requirements:
+1. Locate the existing live inbound `0x05` peer-candidate receive-loop dispatch:
+   - Run 079 live P2P receive-loop dispatch;
+   - Run 084/085 release-binary `0x05` validation evidence path;
+   - Run 088/089 propagation-only path if validation-before-rebroadcast shares this code.
+
+2. Add v2 dispatch:
+   - If the received candidate carries a v2 ratification sidecar / v2 authority metadata, route to the Run 130 v2 verifier and existing v2 marker compare helpers.
+   - If the received candidate is v1 or no-v2, preserve the existing v1/pre-v2 path.
+   - If both v1 and v2 authority claims are present in one candidate/envelope, reject fail-closed as ambiguous.
+   - If the v2 sidecar is malformed, bad-signature, wrong-domain, lower-sequence, or same-sequence conflicting digest, reject before any mutation.
+
+3. Validation-only invariant:
+   The live inbound `0x05` v2 path MUST NOT:
+   - mutate `LivePqcTrustState`;
+   - write `pqc_trust_bundle_sequence.json`;
+   - write `pqc_authority_state.json`;
+   - evict sessions;
+   - call reload-apply;
+   - trigger SIGHUP logic;
+   - fabricate a marker;
+   - start any peer-driven apply flow.
+
+4. Existing local peer-candidate-check parity:
+   The live inbound `0x05` v2 validation result must match the local peer-candidate-check v2 decision for the same candidate:
+   - same accept/reject class;
+   - same typed error category where practical;
+   - same non-mutation behavior;
+   - same wrong-domain / anti-rollback / equivocation semantics.
+
+5. Propagation-only interaction:
+   If the existing Run 088 propagation-only code consumes the same validation result:
+   - valid v2 candidates may be eligible for rebroadcast only if that exactly matches the existing propagation-only rules;
+   - invalid v2 candidates must never rebroadcast;
+   - duplicate v2 candidates must not create a propagation loop;
+   - propagation must remain disabled-by-default if it already is;
+   - still no apply, no sequence write, no marker write, no session eviction.
+
+Required tests:
+Add a new integration test file, preferably:
+crates/qbind-node/tests/run_142_live_inbound_0x05_v2_validation_tests.rs
+
+Minimum matrix:
+
+A1. live inbound `0x05` valid v2 candidate accepted validation-only
+- Candidate is valid v2.
+- Expected:
+  - v2 path selected;
+  - Run 130 verifier passes;
+  - v2 marker compare accepts;
+  - validation outcome accepted/staged;
+  - no sequence write;
+  - no marker write;
+  - no live trust mutation;
+  - no session eviction.
+
+A2. live inbound `0x05` valid v2 candidate with idempotent marker relation
+- Existing local marker is same v2 sequence/digest.
+- Expected:
+  - accepted/idempotent validation-only;
+  - no marker rewrite;
+  - no sequence write;
+  - no mutation.
+
+A3. live inbound `0x05` valid higher-sequence v2 candidate
+- Existing local v2 marker seq=N.
+- Candidate v2 seq=N+1.
+- Expected:
+  - accepted as validation-only;
+  - no marker persist;
+  - no sequence persist;
+  - no live trust mutation.
+
+A4. live inbound `0x05` v2-after-v1 migration candidate
+- Existing local v1 marker.
+- Candidate valid v2 higher sequence.
+- Expected:
+  - accepted as validation-only migration candidate;
+  - existing v1 marker bytes preserved;
+  - no v2 marker write.
+
+R1. lower-sequence v2 candidate rejected
+- Existing local v2 marker seq=N.
+- Candidate seq<N.
+- Expected:
+  - rejected before any mutation;
+  - no sequence write;
+  - no marker write;
+  - no propagation if propagation is enabled.
+
+R2. same-sequence different-digest v2 candidate rejected
+- Expected:
+  - rejected as equivocation/conflict;
+  - no mutation;
+  - no propagation.
+
+R3. bad-signature v2 candidate rejected
+- Expected:
+  - Run 130 verifier failure;
+  - no mutation;
+  - no propagation.
+
+R4. wrong-environment v2 candidate rejected
+- Expected:
+  - wrong-domain rejection;
+  - no mutation.
+
+R5. wrong-chain v2 candidate rejected
+- Expected:
+  - wrong-domain rejection;
+  - no mutation.
+
+R6. wrong-genesis v2 candidate rejected
+- Expected:
+  - wrong-domain rejection;
+  - no mutation.
+
+R7. ambiguous v1+v2 authority material rejected
+- Expected:
+  - fail-closed ambiguity error;
+  - no mutation;
+  - no propagation.
+
+R8. corrupted local marker rejected/fail-closed
+- Existing marker file is corrupt.
+- Candidate otherwise valid v2.
+- Expected:
+  - fail-closed;
+  - corrupt bytes preserved;
+  - no mutation.
+
+R9. v1 live inbound `0x05` regression
+- Existing valid v1 candidate.
+- Expected:
+  - existing v1 path unchanged;
+  - no v2 path selected;
+  - v1 validation metrics/outcome unchanged.
+
+R10. no-sidecar / legacy live inbound `0x05` regression
+- Existing legacy behavior unchanged.
+- No v2 marker fabricated.
+
+R11. propagation-only v2 interaction, if propagation path shares validation
+- With propagation disabled: no rebroadcast.
+- With propagation enabled: valid v2 rebroadcasts only after validation; invalid v2 never rebroadcasts.
+- No apply, no sequence write, no marker write in either mode.
+
+Required negative assertions in every test:
+- `pqc_trust_bundle_sequence.json` absent or byte-identical pre/post.
+- `pqc_authority_state.json` absent or byte-identical pre/post.
+- no `LivePqcTrustState` swap.
+- no session eviction.
+- no reload-apply outcome.
+- no SIGHUP outcome.
+- no peer-driven apply metric/log line.
+- no fallback to `--p2p-trusted-root`.
+
+Required documentation:
+Add:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_142.md
+
+Update:
+- docs/whitepaper/contradiction.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+Documentation must state:
+- Run 142 is source/test wiring only.
+- Live inbound `0x05` v2 validation-only support is now source/test covered.
+- Release-binary live inbound `0x05` v2 evidence remains open for Run 143.
+- Peer-driven live apply remains open.
+- Signing-key rotation/revocation remains open.
+- KMS/HSM remains open.
+- MainNet governance remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build -p qbind-node --lib
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_132_v2_validation_only_tests
+  or the exact existing Run 132 v2 validation-only test target
+- cargo test -p qbind-node --test run_076_peer_candidate_validator_tests
+  or the current peer-candidate validation test target
+- cargo test -p qbind-node --test run_079_peer_candidate_wire_tests
+  or the current live inbound `0x05` dispatcher test target
+- cargo test -p qbind-node --test run_088_peer_candidate_propagation_tests
+  if propagation-only code is touched
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+If exact target names differ, locate the nearest existing Run 076/079/088 and Run 132 tests and document exact commands/results.
+
+Acceptance criteria:
+Run 142 is acceptable only if:
+1. live inbound `0x05` v2 candidates are validated with the same v2 verifier / marker-compare discipline as local peer-candidate-check;
+2. valid v2 candidates are accepted validation-only;
+3. invalid v2 candidates are rejected fail-closed;
+4. no live trust mutation, sequence write, marker write, or session eviction occurs on any v2 `0x05` validation path;
+5. v1 and legacy `0x05` behavior remains unchanged;
+6. propagation-only behavior, if touched, remains validation-before-rebroadcast and non-applying;
+7. no CLI/wire/schema/metric drift occurs unless explicitly justified as impossible to avoid;
+8. docs clearly defer release-binary `0x05` v2 evidence to Run 143;
+9. contradiction.md is updated;
+10. no full C4 or C5 closure is claimed.
