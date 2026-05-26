@@ -2494,3 +2494,52 @@ CLI flag changes, no metric changes, and no wire-format / schema
 changes; it reuses the existing
 `run_133_v2_validation_only_fixture_helper` release example for
 fixture minting.
+
+## Run 140 — snapshot/restore v2 authority-marker parity (source/test only)
+
+Run 140 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_140.md`) extends the
+authority model's snapshot/restore surface to recognize the v2 authority
+anti-rollback marker (Run 130 `PersistentAuthorityStateRecordV2`) at
+parity with the existing v1 marker (Run 117 / 122 / 124). The
+`StateSnapshotMeta` in `qbind-ledger` is extended additively with an
+`authority_state_v2: Option<AuthorityStateSnapshotMetaV2>` carrier that
+mirrors the security-relevant fields of
+`PersistentAuthorityStateRecordV2` (`chain_id_hex`, `environment`,
+`genesis_hash_hex`, `authority_root_fingerprint` /
+`authority_root_suite_id`, `active_bundle_signing_key_fingerprint` /
+`active_bundle_signing_key_suite_id`,
+`latest_authority_domain_sequence`, `latest_lifecycle_action_byte`,
+`previous_bundle_signing_key_fingerprint`,
+`latest_ratification_v2_digest`, `revoked_key_metadata`). The JSON key
+is omitted entirely when `None`, so the on-wire and on-disk snapshot
+meta schema does not drift for any snapshot that does not advertise a
+v2 marker.
+
+On restore, when `meta.authority_state_v2.is_some()`, the new
+`verify_snapshot_authority_state_for_restore_v2(...)` entry point
+reconstructs a `PersistentAuthorityStateRecordV2` from the snapshot
+carrier and routes the accept/reject decision through the **existing**
+Run 130 `compare_authority_marker_v2(persisted, candidate)`; the v2
+restore accept set is therefore exactly the v2 comparison accept set
+(`FirstV2MarkerAccepted`, `SameV2MarkerIdempotent`,
+`HigherSequenceAccepted`, `V2AfterV1ExplicitMigrationAllowed`) under
+the additional restore-surface preconditions that (a) both the local
+marker (when present) and the snapshot v2 block validate against the
+runtime trust domain `(environment, chain_id, genesis_hash)` and
+(b) the snapshot does not simultaneously advertise both a v1 and a v2
+authority block (such a snapshot is rejected as
+`RejectAmbiguousSnapshotMarkers` without consulting either side).
+A snapshot with no `authority_state_v2` block is dispatched to the
+Run 124 v1 path verbatim, so v1 restore behavior is preserved
+bit-for-bit; a v2 marker is never fabricated when the snapshot does
+not carry one. The restore-surface check is pure with respect to disk:
+accept and reject paths both preserve the local marker file bytes
+verbatim, and the existing materialization order (authority check →
+state checkpoint copy → audit marker) is preserved so a reject leaves
+the on-disk state byte-identical to its pre-restore form.
+
+Run 140 is source/test wiring only. Release-binary snapshot/restore v2
+evidence is **deferred to Run 141**. Live inbound `0x05` v2 wiring,
+peer-driven live apply, signing-key rotation/revocation lifecycle,
+KMS / HSM custody, MainNet governance artifact verification, full C4
+closure, and C5 closure all remain out of scope.
