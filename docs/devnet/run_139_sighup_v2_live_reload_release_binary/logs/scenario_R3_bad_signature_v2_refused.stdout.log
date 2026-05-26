@@ -1,0 +1,3 @@
+qbind-node[validator=none]: starting in environment=DevNet chain_id=0x51424e4444455600 scope=DEV profile=nonce-only network=p2p p2p=enabled listen=127.0.0.1:38146 peers=0 gas=off fee-priority=off fee_distribution=burn-only mempool=fifo dag_availability=disabled dag_coupling=off stage_b=disabled diversity=off(prefix24=2,prefix16=8,buckets>=4)
+[P2P] Listening on 127.0.0.1:38146 (node_id=NodeId(4bd96f97b1aaec9d))
+[T175] P2P node builder: validator=ValidatorId(0) node_id=NodeId(4bd96f97b1aaec9d) num_validators=1 peer_kem_overrides=0 mutual_auth=Disabled

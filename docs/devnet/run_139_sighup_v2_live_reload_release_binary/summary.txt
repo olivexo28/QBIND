@@ -1,0 +1,82 @@
+Run 139 v2 SIGHUP live-reload release-binary evidence
+outdir: /tmp/workspace/olivexo28/QBIND/docs/devnet/run_139_sighup_v2_live_reload_release_binary
+repo: /tmp/workspace/olivexo28/QBIND
+git_commit: bafa1801374b0893bf723469085df52e74a336a1
+rustc: rustc 1.95.0 (59807616e 2026-04-14)
+cargo: cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+qbind-node_sha256: c6d04091d3304c4dfaf3f72918f6a974c6057dbb9cc733524af280f46077e585
+qbind-node_build_id: 78ae22c60b02a1d3815531662a02654f2fef1574
+fixture-helper_sha256: e5034626ed308816a9ca42199092dc26def69a63c1e20a2936c3dbf6b034fbd8
+fixture-helper_build_id: d23622aa4729339f34693f914cc0a2ee401cb1cc
+
+commands run by this harness:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example run_133_v2_validation_only_fixture_helper
+  $FIXTURE_HELPER $OUTDIR/fixtures
+  per-scenario: $NODE_BIN --network-mode p2p --enable-p2p \
+      --env devnet --genesis-path <DEV>/genesis.json \
+      --expect-genesis-hash <hash> \
+      --p2p-trust-bundle <baseline-bundle> \
+      --p2p-trust-bundle-signing-key <ratified-spec> \
+      --p2p-trust-bundle-live-reload-enabled \
+      --p2p-trust-bundle-live-reload-path <reload-bundle> \
+      [--p2p-trust-bundle-ratification <sidecar>] \
+      [--p2p-trust-bundle-ratification-enforcement-enabled] \
+      --data-dir <data_dir> --p2p-listen-addr 127.0.0.1:<port> &
+  per-scenario signal: kill -HUP $PID
+
+scenario status:
+  scenario_A1_first_accepted_v2_sighup: rc=0 class=accept-v2 pid=10343
+  scenario_A2_idempotent_v2_sighup: rc=0 class=accept-v2 pid=10411
+  scenario_A3_higher_sequence_v2_sighup: rc=0 class=accept-v2 pid=10463
+  scenario_A4_v1_to_v2_migration: rc=0 class=accept-v2 pid=10531
+  scenario_R1_lower_sequence_v2_refused: rc=0 class=reject-v2 pid=10599
+  scenario_R2_same_seq_different_digest_v2_refused: rc=0 class=reject-v2 pid=10673
+  scenario_R3_bad_signature_v2_refused: rc=0 class=reject-v2 pid=10746
+  scenario_R4_wrong_chain_v2_refused: rc=0 class=reject-v2 pid=10819
+  scenario_R6_v1_sighup_regression: rc=0 class=accept-v1 pid=10892
+  scenario_R7_no_sidecar_regression: rc=0 class=accept-v1 pid=10947
+  scenario_R8_repeated_sighup_serialization: rc=0 class=accept-v2 pid=10993
+
+non-mutation checks (rejected v2 SIGHUP scenarios): pass
+  marker SHA-256 byte-identical pre/post SIGHUP across the trigger window
+  sequence SHA-256 byte-identical pre/post SIGHUP across the trigger window
+  no .tmp marker sibling left behind under any scenario data dir
+  no Run 055 sequence persistence line emitted within the trigger window
+  no VERDICT=applied line emitted within the trigger window
+  no fallback to --p2p-trusted-root
+  no live inbound 0x05 / peer-driven live apply / snapshot-restore v2
+    / KMS / HSM / signing-key rotation-revocation lifecycle markers
+post-commit persist checks (accepted v2 SIGHUP scenarios): pass
+  v2 marker present with record_version=2 + expected latest_authority_domain_sequence
+  + last_update_source="sighup-reload" on every accepted v2 scenario (A1/A3/A4/R8)
+  v2 marker bytes byte-identical across the idempotent A2 scenario
+  v1 marker preserved (record_version=1) across the R6 v1 regression
+  no marker file written under the R7 no-sidecar regression
+ordering proof: pass
+  per accepted v2 scenario: Run 074 SIGHUP-received line < Run 074
+  VERDICT=applied line (strict line-number ordering on the same
+  stderr stream); the VERDICT line itself carries
+  sequence_commit=ok (the in-log confirmation that the existing
+  Run 070 commit_sequence boundary returned Ok before the v2
+  marker post-commit persist ran — the Run 138 wiring keys
+  the post-commit persist exclusively off the Ok(applied) return
+  of apply_validated_candidate_with_previous, so a marker with
+  last_update_source="sighup-reload" cannot exist without an
+  Ok commit). The Run 055 trust-bundle sequence persistence log
+  line is emitted ONCE at startup (first-load) and is NOT
+  re-emitted per SIGHUP — proof of the SIGHUP commit lives in
+  the VERDICT line and the on-disk marker bytes.
+wire-format checks: source-only; no trust-bundle, ratification, or
+  peer-candidate wire format changed by this evidence harness
+scope non-goal checks: no SIGHUP v2 snapshot/restore, no live 0x05 v2,
+  no peer-driven apply v2, no KMS/HSM, no rotation/revocation lifecycle
+R5 (marker-persist failure after sequence commit):
+  release-binary-infeasible without source modification or unsafe
+  filesystem tricks; identical partial-positive treatment to Run 135 R4
+  / Run 137 R-low-block. Covered by Run 138 source/test orchestration
+  shape (post-commit persist runs only on Ok(applied) of
+  apply_validated_candidate_with_previous and surfaces as the new
+  LiveReloadOutcome::MarkerPersistFailureAfterCommitV2 variant with
+  is_fatal()==true; see crates/qbind-node/src/pqc_live_trust_reload.rs
+  and crates/qbind-node/tests/run_138_sighup_v2_authority_marker_tests.rs).

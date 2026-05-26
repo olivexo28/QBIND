@@ -4692,3 +4692,35 @@ To switch a deployment from v1 to v2 SIGHUP:
   format.
 * No change to the on-disk format of the v1 authority-state marker.
 * No change to v1 SIGHUP behaviour when the sidecar is v1 or absent.
+
+## Run 139 — SIGHUP live-reload v2 release-binary evidence harness
+
+Run 139 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_139.md`) is the
+release-binary closure of the Run 138 source/test wiring. Operators
+can re-run the evidence harness against any built
+`target/release/qbind-node` to re-attest the SIGHUP v2 mutating-
+surface invariants on their own build:
+
+```
+bash scripts/devnet/run_139_sighup_v2_live_reload_release_binary.sh \
+     docs/devnet/run_139_sighup_v2_live_reload_release_binary
+```
+
+The harness builds the release binary plus the Run 133 fixture-
+helper release example, mints ephemeral DevNet fixtures, drives
+eleven SIGHUP scenarios (A1 first accepted v2 SIGHUP, A2
+idempotent re-trigger, A3 higher-sequence upgrade, A4 v1→v2
+migration, R1 lower-sequence refusal, R2 same-sequence different-
+digest refusal, R3 bad-signature refusal, R4 wrong-domain refusal,
+R6 v1 SIGHUP regression, R7 no-sidecar legacy DevNet regression,
+R8 repeated SIGHUP serialization) against a long-running daemon
+with a real `kill -HUP <pid>`, captures stdout / stderr / exit
+codes / PIDs / signal timestamps / pre- and post-trigger SHA-256
+hashes of the on-disk `pqc_authority_state.json` and
+`pqc_trust_bundle_sequence.json`, and asserts the per-class
+invariants in-line. R5 (post-commit marker-persist failure) is
+release-binary-infeasible and is documented as partial-positive
+in the evidence MD with citations back to the Run 138 source/test
+coverage. Run 139 introduces no production runtime source
+changes, no test changes, no CLI flag changes, no metric changes,
+and no wire-format / schema changes.
