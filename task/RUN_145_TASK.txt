@@ -1,0 +1,223 @@
+Task: Run 145 — Source/Test Scaffold for Staged Peer-Driven Apply Candidate Queue
+
+Current accepted state:
+- Run 142/143: live inbound 0x05 v2 validation-only path is source/test wired and release-binary evidenced.
+- Run 144: docs-only peer-driven live apply safety specification landed.
+- Current live inbound 0x05 behavior remains validation-only / propagation-only.
+- No peer-driven live apply exists.
+- No peer candidate may mutate LivePqcTrustState, write sequence, write authority marker, or evict sessions.
+
+Objective:
+Implement the first non-mutating source/test scaffold for peer-driven staged apply candidates.
+
+This run must create a bounded, disabled-by-default, non-applying staging layer that can receive already-validated peer candidates from the live inbound 0x05 path and record them as locally staged candidates for future operator/governance decision.
+
+This run MUST NOT apply staged candidates.
+
+Strict scope:
+- Source/test scaffold only.
+- No release-binary evidence in this run.
+- No live apply.
+- No LivePqcTrustState mutation.
+- No sequence write.
+- No authority-marker write.
+- No session eviction.
+- No Run 070 apply invocation.
+- No SIGHUP/reload-apply invocation.
+- No new wire format.
+- No trust-bundle schema change.
+- No ratification sidecar schema change.
+- No marker schema change.
+- No MainNet enablement.
+- No KMS/HSM.
+- No governance implementation.
+- No signing-key rotation/revocation lifecycle.
+- Do not weaken existing validation-only or propagation-only behavior.
+- Do not claim full C4 or C5 closure.
+
+Implementation target:
+Add a new internal staging component, preferably under:
+
+crates/qbind-node/src/pqc_peer_candidate_staging.rs
+
+The component should be independent from live apply. It should store only metadata and candidate references needed for later operator/governance decision.
+
+Required behavior:
+1. Candidate enters staging only after existing validation-only acceptance.
+2. Invalid candidates never enter staging.
+3. Lower-sequence candidates never enter staging.
+4. Same-sequence different-digest/equivocation candidates never enter staging.
+5. Wrong-domain candidates never enter staging.
+6. Ambiguous v1+v2 candidates never enter staging.
+7. Candidate staging is bounded:
+   - max staged candidates;
+   - max per-peer candidates;
+   - max candidate age or explicit TTL;
+   - duplicate suppression by candidate fingerprint / sequence / authority digest.
+8. Candidate staging is disabled by default.
+9. MainNet staging is refused unless future governance policy exists.
+10. Staging must be non-authoritative: a staged candidate is not trusted, not applied, and not persisted as accepted authority.
+11. Staging must not write `pqc_trust_bundle_sequence.json`.
+12. Staging must not write `pqc_authority_state.json`.
+13. Staging must not mutate `LivePqcTrustState`.
+14. Staging must not evict sessions.
+15. Staging must not call `apply_validated_candidate` or `apply_validated_candidate_with_previous`.
+
+Policy model:
+Create a clear policy type, for example:
+
+PeerDrivenStagingPolicy {
+    enabled: bool,
+    environment: Environment,
+    allow_devnet: bool,
+    allow_testnet: bool,
+    allow_mainnet: bool,
+    max_staged_candidates: usize,
+    max_candidates_per_peer: usize,
+    ttl_secs: u64,
+}
+
+Required policy semantics:
+- DevNet: may stage only when explicitly enabled.
+- TestNet: may stage only when explicitly enabled and v2 ratification validation passes.
+- MainNet: refused for now, even if enabled, unless a future governance proof type exists.
+- Default: disabled everywhere.
+
+Integration point:
+Wire the staging layer behind the existing live inbound 0x05 validation-only path, but only after successful validation.
+
+If the existing code has no natural call site without runtime flag plumbing, keep the staging component library-level only in Run 145 and document the exact future binary hook for Run 146. Do not add a CLI flag unless absolutely necessary.
+
+Tests:
+Add a focused integration/unit test suite, preferably:
+
+crates/qbind-node/tests/run_145_peer_candidate_staging_tests.rs
+
+Minimum test matrix:
+
+A1. valid v2 candidate stages when policy enabled on DevNet
+- candidate passes existing validation-only result;
+- staging accepts metadata;
+- no apply;
+- no sequence write;
+- no marker write;
+- no live trust mutation.
+
+A2. valid idempotent v2 candidate stages/dedupes
+- same sequence/digest candidate submitted twice;
+- second submission is deduped or returns already-staged;
+- no unbounded growth.
+
+A3. higher-sequence v2 candidate stages
+- local marker seq=N;
+- candidate seq=N+1;
+- staging records as newer candidate;
+- no mutation.
+
+A4. v2-after-v1 migration candidate stages
+- local v1 marker exists;
+- valid v2 migration candidate accepted by validation-only;
+- staging records migration candidate;
+- local v1 marker bytes unchanged.
+
+R1. disabled policy refuses staging
+- validation may pass;
+- staging refuses because policy disabled;
+- no mutation.
+
+R2. MainNet policy refuses staging
+- even with enabled=true;
+- staging refuses because governance proof does not exist yet;
+- no mutation.
+
+R3. lower-sequence v2 candidate does not stage
+- validation result rejected;
+- staging not called or refuses rejected result.
+
+R4. same-sequence different-digest candidate does not stage
+- no staging.
+
+R5. bad-signature candidate does not stage
+- no staging.
+
+R6. wrong-domain candidate does not stage
+- no staging.
+
+R7. ambiguous v1+v2 candidate does not stage
+- no staging.
+
+R8. duplicate candidate does not grow queue
+- bounded/deduped behavior.
+
+R9. per-peer bound enforced
+- one peer cannot fill the queue beyond configured cap.
+
+R10. global bound enforced
+- queue rejects or evicts according to deterministic policy when full.
+- Eviction policy must be specified: reject-new is safer than silent eviction for now.
+
+R11. TTL/expiry removes stale staged candidate
+- expired candidate cannot be applied later.
+- Since apply does not exist yet, assert it is removed/unavailable.
+
+R12. v1 live inbound behavior unchanged
+- v1 validation-only path remains unchanged.
+- no v2 staging unless explicitly valid and policy permits.
+
+R13. propagation-only behavior unchanged
+- staging does not imply propagation.
+- propagation remains governed by existing Run 088/143 rules.
+
+Required negative assertions in every test:
+- no call to Run 070 apply;
+- no LivePqcTrustState swap;
+- no sequence write;
+- no marker write;
+- no session eviction;
+- no SIGHUP outcome;
+- no reload-apply outcome;
+- no peer-driven apply metric/log.
+
+Documentation:
+Add:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_145.md
+
+Update:
+- docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+- docs/whitepaper/contradiction.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+Documentation must state:
+- Run 145 is source/test scaffold only.
+- Staging is non-applying.
+- Release-binary staging evidence is deferred to Run 146.
+- Peer-driven live apply remains unimplemented.
+- DevNet/TestNet/MainNet policy remains fail-closed.
+- MainNet peer-driven staging/apply remains blocked without governance/ratification/KMS-HSM policy.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build -p qbind-node --lib
+- cargo test -p qbind-node --test run_145_peer_candidate_staging_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_088_pqc_peer_candidate_propagation_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+Acceptance criteria:
+Run 145 is acceptable only if:
+1. staged peer-candidate queue exists or is fully specified in source-level scaffold;
+2. only validation-accepted candidates can stage;
+3. staging is disabled by default;
+4. MainNet staging is refused for now;
+5. staging is bounded and deduped;
+6. staging does not apply, mutate live trust, write sequence, write marker, or evict sessions;
+7. validation-only and propagation-only behavior remain unchanged;
+8. docs defer release-binary staging evidence to Run 146;
+9. contradiction.md is updated;
+10. no full C4 or C5 closure is claimed.
