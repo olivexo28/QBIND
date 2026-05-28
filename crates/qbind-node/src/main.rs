@@ -5410,6 +5410,7 @@ async fn run_p2p_node(
                                 None
                             }
                         },
+                        staging_queue: None,
                     };
                     eprintln!(
                         "[binary] Run 088: installing live peer-candidate wire \

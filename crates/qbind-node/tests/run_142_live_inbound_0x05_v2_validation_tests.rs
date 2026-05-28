@@ -485,6 +485,7 @@ fn dispatcher(
             propagation_sender,
             live_ratification,
             authority_marker_path: marker_path,
+            staging_queue: None,
         },
         metrics,
     )

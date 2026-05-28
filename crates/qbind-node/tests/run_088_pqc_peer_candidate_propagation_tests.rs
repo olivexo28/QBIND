@@ -223,6 +223,7 @@ fn dispatcher(
             propagation_sender: Some(sender_trait),
             live_ratification: None,
             authority_marker_path: None,
+            staging_queue: None,
         },
         metrics,
     )

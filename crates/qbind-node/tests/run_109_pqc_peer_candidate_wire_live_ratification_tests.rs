@@ -372,6 +372,7 @@ fn dispatcher(
             propagation_sender,
             live_ratification,
             authority_marker_path: None,
+            staging_queue: None,
         },
         metrics,
     )
