@@ -423,3 +423,57 @@ Run 144 is acceptable only if:
 6. `contradiction.md` and the operator / protocol docs are **updated**;
 7. **no runtime behavior changes** are introduced;
 8. **no full C4 or C5 closure** is claimed.
+## 11. Run 145 progress entry — Phase 2 staging-queue source/test scaffold
+
+Run 145 lands the first concrete artefact of the **Phase 2
+("eligibility to stage")** layer of this specification as a new
+library-level Rust module:
+
+* `crates/qbind-node/src/pqc_peer_candidate_staging.rs` —
+  `PeerCandidateStagingQueue`, `PeerDrivenStagingPolicy`,
+  `StagedPeerCandidate`, `StagingOutcome`.
+
+The queue:
+
+* is **disabled by default** on every environment;
+* **refuses MainNet unconditionally** (the Phase 3 local authorization
+  gate's MainNet branch is fail-closed in Run 145; only governance /
+  ratification / KMS-HSM authority can ever flip this, and none of
+  those exist yet);
+* is **bounded** (`max_staged_candidates`, default 16) with explicit
+  **reject-new** eviction at capacity;
+* is **per-peer bounded** (`max_candidates_per_peer`, default 4) with
+  reject-new at the per-peer cap;
+* is **TTL-bounded** (`ttl_secs`, default 300) with a lazy sweep on
+  every insert/read (no background timer/task);
+* **deduplicates** by `(fingerprint_prefix, sequence,
+  authority_marker_digest)`;
+* only accepts already-validated candidates (the
+  `try_stage_outcome` wrapper refuses anything except
+  `PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::
+  Validated(_))`);
+* is **non-applying**: the module exposes no `apply` /
+  `apply_validated_candidate` / `apply_validated_candidate_with_previous`
+  entry point and calls no Run 070 apply path.
+
+Run 145 is **source / test scaffold only**: no release-binary evidence
+is claimed, and the queue is **not** wired to the production binary's
+live inbound `0x05` dispatcher in this run. The future Run 146
+release-binary hook is documented in the module-level Rust docs of
+`pqc_peer_candidate_staging.rs`.
+
+Remaining open phases of this specification after Run 145:
+
+* **Run 146** — release-binary staging evidence (hidden DevNet-only
+  flag; real `0x05` frames; no mutation; documented operator log lines).
+* **Run 147** — source/test DevNet-only peer-driven apply behind a
+  hidden DevNet-only CLI flag using the existing Run 070 apply
+  contract; MainNet refused at flag-bind.
+* **Run 148** — release-binary DevNet-only peer-driven apply evidence
+  proving apply, post-commit marker persistence, session-eviction
+  ordering, and Run 070 rollback behaviour.
+* **Run 149+** — governance / ratification / KMS / HSM hardening
+  before any TestNet / MainNet claim.
+
+Run 145 does not change any invariant from §3, §4, or §7 of this
+document. Full C4 remains OPEN. C5 remains OPEN.
