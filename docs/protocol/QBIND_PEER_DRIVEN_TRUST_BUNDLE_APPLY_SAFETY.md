@@ -786,3 +786,124 @@ Invariants preserved by Run 148:
 * MainNet remains refused at every layer.
 * No new wire format, no new on-disk schema, no new metric
   family, no new operator CLI flag.
+## Run 149 progress entry — release-binary evidence for DevNet/TestNet peer-driven apply arming surface (minimal source wiring + release-binary evidence; partial-positive)
+
+Run 149 produces the release-binary evidence that Run 148
+explicitly deferred for the DevNet/TestNet peer-driven apply
+controller. The Run 149 feasibility gate ("can a real
+`target/release/qbind-node` arm and invoke the Run 148 peer-driven
+apply controller through an existing runtime path?") returned
+**NO** against the Run 148 state (the Run 148 controller was
+library-only with no operator surface in `main.rs`); per
+`task/RUN_149_TASK.txt`'s "preferred path if a flag is necessary"
+allowance the smallest hidden, disabled-by-default DevNet/TestNet-only
+arming flag was added:
+
+```
+--p2p-trust-bundle-peer-candidate-apply-enabled
+```
+
+with `clap hide = true`, `default = false`, refused on MainNet
+unconditionally (early gate + defensive duplicate inside the
+co-requisites block + the controller-layer banner's match arm),
+refused without `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`,
+refused without `--p2p-trust-bundle-peer-candidate-staging-enabled`,
+does NOT imply propagation, does NOT introduce a new apply
+algorithm, does NOT bypass staging / validation / v2 marker /
+Run 055 anti-rollback / activation gates. When the gates pass,
+two operator-visible log lines fire on DevNet/TestNet:
+
+* `[binary] Run 149: peer-candidate apply arming flag accepted (env=...)` — operator acceptance line, mirroring the Run 147 acceptance line shape;
+* `[run-149] live peer-driven apply policy ARMED (env=..., enabled=true, allow_devnet=..., allow_testnet=..., allow_mainnet=...)` — controller-layer banner that exercises the Run 148 `PeerDrivenApplyPolicy::devnet_enabled()` / `PeerDrivenApplyPolicy::testnet_enabled()` constructor at startup and surfaces the policy matrix to the operator.
+
+**Partial-positive disclosure (mandatory).** Run 149 does not
+wire a queue-to-controller drain task in the node binary. Wiring
+such a drain would be a **new apply-triggering algorithm**, which
+is explicitly out of scope per `task/RUN_149_TASK.txt` §20 and
+§70. End-to-end release-binary apply of an already-staged
+validated peer candidate through the Run 070 contract (matrix
+rows A1–A4 in the Run 149 task) therefore remains under Run 148
+source/test coverage; Run 149 captures release-binary evidence
+for the new arming-surface refusal scenarios (C1 missing
+wire-validation, C2/R2 MainNet refused, C3 missing staging) and
+the new arming-surface acceptance log evidence on DevNet/TestNet,
+plus the Run 147 release-binary non-mutation invariants under
+the new flag.
+
+A new release-binary harness
+`scripts/devnet/run_149_peer_driven_apply_release_binary.sh`
+builds the real release `qbind-node`, records build provenance
+(`sha256`, `build-id`, `git_commit`, `rustc --version`,
+`cargo --version`), exercises the Run 149 refusal surface (C1
+apply-enabled without `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+— refused with exit code 1 and the Run 149 FATAL line; C2/R2
+apply-enabled on `--env mainnet` — refused with exit code 1 and
+the Run 149 FATAL line; C3 apply-enabled without
+`--p2p-trust-bundle-peer-candidate-staging-enabled` — refused
+with exit code 1 and the Run 149 FATAL line; C4 flag recognised
+by parser — confirmed by C1/C2/C3 firing the Run 149 FATAL line
+rather than the clap "unrecognized argument" error), reuses the
+Run 143 / Run 147 N=3 DevNet topology bit-for-bit for the C5/C6
+acceptance scenarios (cluster delta vs. Run 147: V1's extra-args
+list receives `--p2p-trust-bundle-peer-candidate-apply-enabled`),
+captures per-node stdout / stderr / exit codes, computes pre/post
+`sha256` of every node's `pqc_trust_bundle_sequence.json` and
+`pqc_authority_state.json` (asserted byte-identical pre/post on
+every scenario), asserts (i) the `[binary] Run 149: peer-candidate
+apply arming flag accepted` log line appears exactly once on V1
+when the flag is supplied with valid co-requisites on
+DevNet/TestNet and never on V0/V2, (ii) the `[run-149] live
+peer-driven apply policy ARMED` controller-layer banner appears
+exactly once on V1 and never on V0/V2, (iii) the Run 147 banners
+continue to fire on V1, (iv) the Run 149 denylist (Run 147 denylist
++ `\bKMS\b`/`\bHSM\b`/`signing-key (rotation|revocation)`/`MainNet governance`)
+sees **zero matches** across the entire captured corpus, and
+(v) the V1 receiver remains running across reject scenarios (the
+Run 146 / Run 147 hooks do not crash on rejection).
+
+The captured artifacts (`summary.txt`, per-scenario stdout/stderr
+logs, pre/post sequence hashes, pre/post marker hashes, in-scope /
+out-of-scope grep summaries, C1/C2/C3 refusal exit codes) are
+committed under `docs/devnet/run_149_peer_driven_apply_release_binary/`;
+the verdict is recorded in
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md`.
+
+Invariants preserved by Run 149:
+
+* When the new flag is absent the binary is bit-for-bit identical
+  to Run 147 (the entire Run 149 source delta is gated by the new
+  flag).
+* The Run 070 apply contract is reused unchanged. The Run 148
+  controller is the only path to apply; the controller calls
+  `apply_validated_candidate_with_previous(...)`; it does not
+  duplicate validation, snapshot, swap, eviction, commit, or
+  rollback logic.
+* The v2 authority marker continues to be persisted only after
+  the Run 070 sequence commit succeeds via the Run 148
+  `V2MarkerCoordinator` post-commit boundary.
+* Pre-apply marker conflicts (lower sequence,
+  same-sequence-different-digest, v1-after-v2 downgrade,
+  wrong-domain) refuse before any state mutation per the Run 148
+  controller's existing gate order.
+* The Run 144 invariants 1–18, the Run 145 staging-queue
+  non-application property, the Run 146 dispatcher-hook ordering,
+  the Run 147 hidden-arming-flag semantics, and the Run 148
+  controller's 13-variant `PeerDrivenApplyOutcome` fail-closed
+  taxonomy are all unchanged.
+* MainNet remains refused at every layer (CLI early gate,
+  defensive duplicate inside the co-requisites block, controller-
+  layer banner's match arm, controller's runtime
+  `RefusedMainNet` outcome).
+* No new metric family, no new wire format, no new on-disk
+  schema, no new fixture helper. The only new operator-visible
+  surface is the single hidden disabled-by-default
+  `--p2p-trust-bundle-peer-candidate-apply-enabled` flag and its
+  two new log lines.
+
+Run 149 is **not pure evidence-only**; it is **minimal source
+wiring + release-binary evidence** under the §6 "Local
+authorization gate" allowance. The §7 future-run decomposition
+remains in force: governance / ratification / KMS / HSM hardening
+(future Run 150+), signing-key rotation/revocation lifecycle, and
+validator-set rotation remain pre-requisites for any TestNet /
+MainNet peer-driven apply closure claim.
