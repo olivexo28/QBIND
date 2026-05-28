@@ -1416,6 +1416,29 @@ async fn main() {
         }
     }
 
+    // Run 149 — early MainNet refusal for the disabled-by-default
+    // peer-driven apply arming flag. Local peer majority is NOT
+    // authority on MainNet under any environment. The flag is
+    // refused unconditionally with exit code 1 and the P2P
+    // transport is never brought up. See `task/RUN_149_TASK.txt`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md`, and
+    // `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    if args.p2p_trust_bundle_peer_candidate_apply_enabled {
+        use qbind_types::NetworkEnvironment;
+        if matches!(config.environment, NetworkEnvironment::Mainnet) {
+            eprintln!(
+                "[binary] Run 149: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-apply-enabled is refused on MainNet \
+                 unconditionally. Local peer majority is NOT authority on MainNet. No \
+                 apply; no staging; no sequence write; no marker write; no session \
+                 eviction; no P2P startup. Governance / ratification / KMS-HSM authority \
+                 is required for any MainNet bundle-signing apply and is NOT implemented. \
+                 See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md."
+            );
+            std::process::exit(1);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Run 127 — `--authority-state-reset` offline operator ceremony.
     //
@@ -2584,6 +2607,141 @@ async fn main() {
              docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md.",
             config.environment
         );
+    }
+
+    // Run 149 — disabled-by-default DevNet/TestNet-only co-requisites
+    // gate for the peer-driven apply arming flag. The flag is the
+    // minimum hidden source delta required to make the Run 148
+    // source/test `pqc_peer_candidate_apply::try_apply_staged_peer_candidate`
+    // controller reachable from a real `target/release/qbind-node`
+    // operator surface honestly.
+    //
+    //   * Refuse on MainNet unconditionally (no P2P startup). Local
+    //     peer majority is NOT authority on MainNet. The early
+    //     MainNet refusal at the top of `run_node` already fired
+    //     fail-closed; this block re-asserts the same refusal
+    //     defensively so a future loosening of the early guard
+    //     does not silently arm apply on MainNet.
+    //   * Refuse unless live `0x05` validation is also enabled —
+    //     the controller consumes the output of the Run 142 / Run 143
+    //     validation path; an unvalidated candidate must never reach
+    //     apply.
+    //   * Refuse unless peer-candidate staging is also enabled —
+    //     the Run 148 controller's contract is that apply consumes
+    //     **only already-staged** candidates from the Run 145
+    //     queue (Run 144 §3 Phase 2 → Phase 4 ordering). Apply
+    //     without staging is refused fail-closed rather than
+    //     silently inventing an apply path that bypasses staging.
+    //   * The flag does NOT imply propagation; the flag does NOT
+    //     introduce a new apply algorithm; the flag does NOT bypass
+    //     the Run 130 v2 verifier; the flag does NOT bypass the
+    //     Run 132 / Run 142 v2 marker pre-apply check; the flag
+    //     does NOT bypass Run 055 anti-rollback; the flag does NOT
+    //     bypass the Run 065 / Run 091 activation gates.
+    //
+    // See `task/RUN_149_TASK.txt`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md`, and
+    // `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    if args.p2p_trust_bundle_peer_candidate_apply_enabled {
+        use qbind_types::NetworkEnvironment;
+        if matches!(config.environment, NetworkEnvironment::Mainnet) {
+            eprintln!(
+                "[binary] Run 149: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-apply-enabled is refused on MainNet \
+                 unconditionally (defensive second guard). Local peer majority is NOT \
+                 authority on MainNet. No apply; no staging; no sequence write; no marker \
+                 write; no session eviction; no P2P startup. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md."
+            );
+            std::process::exit(1);
+        }
+        if !args.p2p_trust_bundle_peer_candidate_wire_validation_enabled {
+            eprintln!(
+                "[binary] Run 149: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-apply-enabled requires \
+                 --p2p-trust-bundle-peer-candidate-wire-validation-enabled. The peer-driven \
+                 apply controller consumes only the output of the live `0x05` validation \
+                 path; an unvalidated candidate must never reach apply. No apply; no \
+                 staging; no sequence write; no marker write; no session eviction; no P2P \
+                 startup."
+            );
+            std::process::exit(1);
+        }
+        if !args.p2p_trust_bundle_peer_candidate_staging_enabled {
+            eprintln!(
+                "[binary] Run 149: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-apply-enabled requires \
+                 --p2p-trust-bundle-peer-candidate-staging-enabled. The Run 148 peer-driven \
+                 apply controller consumes only already-staged candidates per the Run 144 \
+                 §3 Phase 2 → Phase 4 ordering; apply without staging is refused \
+                 fail-closed rather than silently introducing a new apply algorithm that \
+                 bypasses the Run 145 staging queue. No apply; no staging; no sequence \
+                 write; no marker write; no session eviction; no P2P startup."
+            );
+            std::process::exit(1);
+        }
+        eprintln!(
+            "[binary] Run 149: peer-candidate apply arming flag accepted (env={:?}). \
+             The Run 148 PeerDrivenApplyPolicy is selected by environment \
+             (devnet_enabled / testnet_enabled); MainNet is refused unconditionally. \
+             Apply, when invoked by a future drain caller, is delegated to the existing \
+             Run 070 apply_validated_candidate_with_previous pipeline (validate → \
+             snapshot previous → swap → evict_sessions → commit_sequence); the v2 \
+             authority marker is persisted only AFTER sequence commit succeeds, via the \
+             V2MarkerCoordinator post-commit boundary. NO new apply algorithm; NO bypass \
+             of staging; NO bypass of v2 marker / Run 055 anti-rollback / activation \
+             gates. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md.",
+            config.environment
+        );
+        // Run 149 — defensive controller-layer arming banner. The
+        // Run 148 `PeerDrivenApplyPolicy` constructor for the current
+        // environment is exercised here purely so the policy matrix
+        // is materialized at startup time and the operator sees the
+        // exact controller-level capabilities the binary will use
+        // when the future drain caller is wired. The policy object
+        // itself is NOT installed anywhere yet because Run 149 does
+        // not introduce a new drain task (which would be a new apply
+        // algorithm, explicitly out of scope per `task/RUN_149_TASK.txt`
+        // §20). End-to-end apply through the release binary therefore
+        // remains under Run 148 source/test coverage; Run 149 is
+        // classified honestly as **partial-positive** in
+        // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md`.
+        {
+            use qbind_node::pqc_peer_candidate_apply::PeerDrivenApplyPolicy;
+            let policy = match config.environment {
+                qbind_types::NetworkEnvironment::Devnet => {
+                    PeerDrivenApplyPolicy::devnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Testnet => {
+                    PeerDrivenApplyPolicy::testnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Mainnet => {
+                    // Unreachable: MainNet was rejected above. Defensive
+                    // duplicate to keep fail-closed even if the outer
+                    // guard is ever loosened.
+                    eprintln!(
+                        "[binary] Run 149: FATAL: MainNet peer-driven apply policy \
+                         refused at controller-layer arming banner (defensive guard). \
+                         Aborting."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            eprintln!(
+                "[run-149] live peer-driven apply policy ARMED \
+                 (env={:?}, enabled={}, allow_devnet={}, allow_testnet={}, \
+                 allow_mainnet={}). DevNet/TestNet only; MainNet refused unconditionally. \
+                 Apply delegated to Run 070 apply_validated_candidate_with_previous; \
+                 v2 authority marker persisted only AFTER sequence commit succeeds. \
+                 NO new apply algorithm; NO bypass of validation; NO bypass of staging; \
+                 NO bypass of v2 marker / Run 055 / activation gates.",
+                policy.environment,
+                policy.enabled,
+                policy.allow_devnet,
+                policy.allow_testnet,
+                policy.allow_mainnet,
+            );
+        }
     }
 
 

@@ -691,6 +691,66 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_staging_enabled: bool,
 
+    /// Run 149 — hidden, **disabled-by-default** DevNet/TestNet-only
+    /// operator opt-in flag that arms the Run 148 source/test
+    /// peer-driven apply controller
+    /// (`pqc_peer_candidate_apply::try_apply_staged_peer_candidate`)
+    /// for invocation by the release `qbind-node` binary. The flag
+    /// is the minimal hidden source delta introduced by Run 149
+    /// after its feasibility gate ("can the real
+    /// `target/release/qbind-node` arm and invoke the Run 148
+    /// peer-driven apply controller through an existing runtime
+    /// path?") answered **NO** against the Run 148 state.
+    ///
+    /// **Strictly delegated apply.** Setting this flag does NOT
+    /// add a new apply algorithm; it does NOT bypass the Run 142
+    /// v2 / Run 109 v1 validation path; it does NOT bypass the
+    /// Run 145 / Run 146 / Run 147 staging queue; it does NOT
+    /// bypass the Run 130 v2 verifier; it does NOT bypass the
+    /// Run 132 / Run 142 v2 marker pre-apply check; it does NOT
+    /// bypass Run 055 anti-rollback; it does NOT bypass the
+    /// Run 065 / Run 091 activation gates; it does NOT imply
+    /// propagation. When the controller is reached (by a future
+    /// drain caller — see `pqc_peer_candidate_apply.rs` and the
+    /// Run 148 source/test coverage), it delegates apply to the
+    /// existing Run 070 `apply_validated_candidate_with_previous`
+    /// pipeline verbatim (validate → snapshot previous → swap →
+    /// evict_sessions → commit_sequence), and only persists the
+    /// v2 authority marker **after** the sequence commit succeeds
+    /// via the existing
+    /// `V2MarkerCoordinator` / `persist_accepted_v2_marker_after_commit_boundary`
+    /// post-commit boundary.
+    ///
+    /// Requires
+    /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+    /// at the binary level (without the upstream validation path
+    /// the controller would never receive a validated candidate
+    /// to apply) and requires
+    /// `--p2p-trust-bundle-peer-candidate-staging-enabled` at the
+    /// binary level (apply consumes only already-staged candidates
+    /// per Run 144 §3 Phase 2 / Run 145 staging contract — apply
+    /// without staging is refused fail-closed rather than silently
+    /// inventing an apply path that bypasses staging).
+    ///
+    /// MainNet is **refused unconditionally** at startup even
+    /// when this flag is set: the binary aborts with a fatal
+    /// `[binary] Run 149: FATAL` line and exit code 1; the P2P
+    /// transport is never brought up. Local peer majority is NOT
+    /// authority on MainNet. The refusal is enforced at the
+    /// top-level CLI gate, and the Run 148
+    /// `PeerDrivenApplyPolicy::mainnet_attempted()` continues to
+    /// return `PeerDrivenApplyOutcome::RefusedMainNet` defensively
+    /// at the controller layer even if the gate is ever loosened.
+    ///
+    /// See `task/RUN_149_TASK.txt`,
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md`, and
+    /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-apply-enabled",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_apply_enabled: bool,
+
     /// Run 105 — disabled-by-default operator opt-in flag for the
     /// **non-mutating bundle-signing-key ratification enforcement**
     /// layer. Without this flag, supplying `--p2p-trust-bundle-ratification

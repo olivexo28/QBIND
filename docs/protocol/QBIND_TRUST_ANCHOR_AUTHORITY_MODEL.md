@@ -3089,3 +3089,81 @@ Open items unchanged:
 * Release-binary peer-driven apply evidence (deferred to Run 149).
 * Full C4 closure.
 * C5 closure.
+## Run 149 progress entry — DevNet/TestNet peer-driven apply arming surface (release-binary evidence; partial-positive)
+
+Run 149 layers the **first operator-visible release-binary arming
+surface** on top of the Run 148 source/test peer-driven apply
+controller. The smallest hidden, disabled-by-default DevNet/TestNet-only
+arming flag was added (`--p2p-trust-bundle-peer-candidate-apply-enabled`)
+with the matching MainNet refusal + co-requisites gate and a
+controller-layer `PeerDrivenApplyPolicy` arming banner. No
+queue-to-controller drain caller is wired in this run (forbidden
+by `task/RUN_149_TASK.txt` §20 — "must not create a new apply
+algorithm"); release-binary end-to-end apply is therefore cited
+honestly as Run 148 source/test coverage per the partial-positive
+verdict.
+
+Authority model invariants reaffirmed by Run 149:
+
+* **MainNet bundle-signing authority remains NOT
+  local-config-driven.** The Run 149 flag is refused on MainNet
+  at three independent layers: (i) the early CLI gate at the
+  top of `run_node`, (ii) a defensive duplicate refusal inside
+  the co-requisites block, and (iii) the controller-layer
+  arming-banner match arm. The Run 148 controller's runtime
+  `PeerDrivenApplyOutcome::RefusedMainNet` continues to be the
+  final defensive layer at the controller call site itself. Local
+  DevNet/TestNet peer majority does **not** confer MainNet
+  authority.
+* **Local peer majority is NOT authority on any environment for
+  bundle signing.** The Run 149 flag does not change the
+  authority basis on DevNet/TestNet either — apply still requires
+  validation acceptance through the Run 130 v2 verifier and the
+  Run 132 / Run 142 v2 marker validation-only check; the flag
+  only arms the policy that the Run 148 controller would consult
+  when a future drain caller invokes it.
+* **The v2 authority anti-rollback marker is persisted only after
+  the Run 070 sequence commit succeeds** — Run 148's
+  `V2MarkerCoordinator` post-commit boundary is unchanged.
+  Pre-apply marker conflicts (lower sequence, same-sequence
+  different digest, v1-after-v2 downgrade, wrong domain) continue
+  to refuse before any state mutation per the Run 148 controller's
+  gate order.
+* **The Run 070 apply contract is reused verbatim.** Apply is
+  delegated through the Run 148 controller's call to
+  `apply_validated_candidate_with_previous(...)`. Run 149 adds
+  no new path into trust state, no new validation surface, no
+  new apply algorithm, and no new marker / sequence / activation
+  bypass.
+* **Validation-only, staging-only, and propagation-only surfaces
+  are unchanged.** When the new Run 149 flag is absent, the
+  binary behaves bit-for-bit identically to Run 147 (the entire
+  Run 149 source delta is gated by the new flag); Run 142 /
+  Run 088 / Run 145 / Run 146 / Run 147 behaviour is preserved
+  verbatim.
+* **The Run 144 §6 "Local authorization gate" allowance is
+  honoured.** Run 149 is the minimum hidden DevNet/TestNet-only
+  arming surface required to make the Run 148 controller
+  reachable from a real release binary; it does NOT lift the
+  Run 144 MainNet refusal under any circumstance, and it does
+  NOT introduce a governance / ratification / KMS-HSM authority
+  claim.
+
+Open items unchanged:
+
+* Governance / ratification authority for any future MainNet
+  peer-driven apply enablement.
+* KMS / HSM authority-key custody.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance artifact verification.
+* Validator-set rotation.
+* The queue-to-controller drain caller surface (deferred to a
+  future run under a strictly specified ordering contract that
+  is not a new apply algorithm).
+* Full C4 closure.
+* C5 closure.
+
+**Local config alone remains insufficient for MainNet bundle-signing
+authority.** **Local peer majority alone is insufficient for
+MainNet bundle-signing authority (formalized by Run 144;
+reaffirmed by Runs 145, 146, 147, 148, and 149).**

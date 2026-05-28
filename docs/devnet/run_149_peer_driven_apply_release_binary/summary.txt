@@ -1,0 +1,80 @@
+Run 149 DevNet/TestNet peer-driven trust-bundle apply release-binary evidence
+============================================================================
+
+Verdict: minimal source wiring + release-binary evidence (partial-positive).
+         (NOT pure evidence-only — Run 149 added the hidden
+          --p2p-trust-bundle-peer-candidate-apply-enabled flag, the early
+          MainNet refusal, the co-requisites gate, and the controller-layer
+          PeerDrivenApplyPolicy arming banner. See
+          docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md.)
+
+Feasibility gate result: NO existing release-binary arming path before
+                         Run 149; the preferred minimal hidden flag was
+                         added (refused on MainNet; requires
+                         --p2p-trust-bundle-peer-candidate-wire-validation-enabled;
+                         requires --p2p-trust-bundle-peer-candidate-staging-enabled;
+                         does NOT imply propagation; does NOT introduce a
+                         new apply algorithm; does NOT bypass staging or
+                         validation or marker or Run 055 anti-rollback or
+                         activation gates).
+
+Harness:
+  scripts/devnet/run_149_peer_driven_apply_release_binary.sh
+
+This file is the persistent placeholder for the harness `summary.txt`.
+It is overwritten in-place by the harness on every release-binary run
+of Run 149, with the per-run provenance:
+
+  - git_commit at the time of the run
+  - rustc / cargo versions
+  - per-binary sha256 + ELF BuildID for:
+      target/release/qbind-node
+      target/release/examples/devnet_pqc_trust_bundle_helper
+      target/release/examples/devnet_pqc_root_helper
+      target/release/examples/devnet_consensus_signer_keystore_helper
+      target/release/examples/run_133_v2_validation_only_fixture_helper
+  - per-scenario verdict for the C1 / C2 / C3 / C4 / C5 / C6 / R1 / R11 /
+    R12 / D1 release-binary matrix, with A1–A4 and R3–R10 cited honestly
+    as Run 148 source/test coverage per the partial-positive verdict
+  - non-mutation invariant checks (sequence + marker + .tmp + metric
+    + log denylist) confirming that the Run 149 source delta is
+    arming-only and does not itself introduce any mutation surface
+  - wire / schema / CLI-surface drift checks (Run 149 only adds the
+    single hidden disabled-by-default flag described above; no other
+    surface changed)
+
+The canonical evidence report
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_149.md restates the verdict and
+records the explicit out-of-scope deferral list:
+
+  * peer-driven live apply MainNet enablement   — REFUSED unconditionally
+  * governance / ratification authority          — remains OPEN
+  * KMS / HSM authority custody                  — remains OPEN
+  * signing-key rotation/revocation lifecycle    — remains OPEN
+  * validator-set rotation                       — remains OPEN
+  * full C4 closure                              — remains OPEN
+  * C5 closure                                   — remains OPEN
+
+scenario status (filled in by the harness on each run):
+  C1_apply_enabled_without_wire_validation_enabled
+  C2_R2_mainnet_refused
+  C3_apply_enabled_without_staging_enabled
+  C4_flag_recognised_by_parser
+  C5_devnet_co_requisites_accepted        (cluster harness)
+  C6_testnet_co_requisites_accepted       (cluster harness)
+  R1_apply_flag_absent_preserves_run147
+  R3_unstaged_candidate_cannot_apply      (cited: Run 148 source/test)
+  R4_expired_staged_candidate_cannot_apply (cited: Run 148 source/test)
+  R5_lower_sequence_candidate_cannot_apply (cited: Run 148 source/test)
+  R6_same_sequence_diff_digest_cannot_apply (cited: Run 148 source/test)
+  R7_bad_signature_candidate_cannot_apply (cited: Run 148 source/test)
+  R8_wrong_domain_candidate_cannot_apply  (cited: Run 148 source/test)
+  R9_apply_validation_failure_before_swap (cited: Run 148 source/test;
+                                           release-binary fault injection
+                                           infeasible without source mod)
+  R10_eviction_commit_rollback_failure_paths (cited: Run 148 source/test;
+                                              release-binary fault injection
+                                              infeasible without source mod)
+  R11_propagation_only_unchanged
+  R12_validation_only_unchanged
+  D1_denylist_grep

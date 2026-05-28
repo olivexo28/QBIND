@@ -5413,3 +5413,75 @@ Out of scope (unchanged from Run 147):
 * Validator-set rotation.
 * Full C4 closure.
 * C5 closure.
+## Run 149 — peer-driven apply arming surface (release-binary evidence; partial-positive)
+
+Run 149 introduces the **first operator-visible release-binary
+arming surface** for the Run 148 peer-driven apply controller. A
+single new hidden, disabled-by-default DevNet/TestNet-only flag
+is added:
+
+```
+--p2p-trust-bundle-peer-candidate-apply-enabled
+```
+
+Operator-actionable status:
+
+* **MainNet:** the flag is **refused unconditionally** with
+  `[binary] Run 149: FATAL ...` and exit code 1; the P2P
+  transport never comes up. Local peer majority is NOT authority
+  on MainNet. Governance / ratification / KMS-HSM authority is
+  required for any MainNet bundle-signing apply and is NOT
+  implemented in this run.
+* **DevNet / TestNet:** the flag is accepted only when
+  `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+  AND `--p2p-trust-bundle-peer-candidate-staging-enabled` are
+  also set. Any other combination is refused with
+  `[binary] Run 149: FATAL ...` and exit code 1.
+* **Acceptance log evidence:** when the flag is accepted, the
+  binary emits exactly two new operator-visible log lines:
+  * `[binary] Run 149: peer-candidate apply arming flag accepted (env=...)`
+  * `[run-149] live peer-driven apply policy ARMED (env=..., enabled=true, allow_devnet=..., allow_testnet=..., allow_mainnet=...)`
+* **Partial-positive disclosure:** Run 149 does NOT wire a
+  queue-to-controller drain task in the node binary. Wiring such
+  a drain would be a new apply-triggering algorithm, explicitly
+  out of scope per `task/RUN_149_TASK.txt` §20 ("must not create
+  a new apply algorithm"). End-to-end apply through the release
+  binary therefore remains under **Run 148 source/test coverage**
+  (`crates/qbind-node/tests/run_148_peer_driven_apply_devnet_tests.rs`,
+  20/20 green); the release-binary arming surface itself is
+  evidenced under Run 149.
+
+Invariants preserved (operator-relevant):
+
+* When `--p2p-trust-bundle-peer-candidate-apply-enabled` is
+  **absent**, the binary behaves bit-for-bit identically to
+  Run 147; the entire Run 149 source delta is gated by the new
+  flag.
+* The Run 070 apply contract is reused verbatim (validate →
+  snapshot active → swap → evict_sessions → commit_sequence);
+  apply is delegated through the Run 148
+  `try_apply_staged_peer_candidate` controller, not invented
+  anew.
+* The v2 authority marker is persisted **only after** the
+  Run 070 sequence commit succeeds, via the existing Run 148
+  `V2MarkerCoordinator` post-commit boundary.
+* No new wire format; no new CLI flag beyond the single hidden
+  arming flag above; no metric family added, renamed, or removed;
+  no KMS / HSM introduced; no MainNet governance artifact
+  verified; no signing-key rotation or revocation lifecycle
+  implemented.
+
+Out of scope (operator-relevant; unchanged from Run 148):
+
+* Governance / ratification authority.
+* KMS / HSM authority-key custody.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Queue-to-controller drain caller (deferred to a future run
+  under a strictly specified ordering contract that is not a new
+  apply algorithm — e.g. an existing SIGHUP / reload-apply
+  trigger that calls the Run 148 controller with the next
+  eligible staged candidate).
+* Full C4 closure.
+* C5 closure.
