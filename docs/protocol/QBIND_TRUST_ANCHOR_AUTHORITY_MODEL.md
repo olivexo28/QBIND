@@ -2610,3 +2610,74 @@ signing-key rotation/revocation lifecycle, KMS / HSM custody, MainNet
 governance artifact verification, validator-set rotation, the on-disk
 v1→v2 marker swap surface, the higher-sequence v2 persistence
 surface, full C4 closure, and C5 closure all remain out of scope.
+
+## Run 142 — live inbound `0x05` v2 validation-only (source/test only)
+
+Run 142 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_142.md`) extends the
+authority-marker validation surface coverage to the **live inbound P2P
+peer-candidate `0x05` validation-only receive path**, mirroring the
+Run 132 local peer-candidate-check binary surface.
+
+A running node that receives a peer-candidate `0x05` frame from a peer
+now validates v2 material with the **same Run 130 v2 verifier and
+Run 132 marker-compare discipline** that the local peer-candidate-check
+surface already enforces. The dispatcher carries the operator's owned
+v2 ratification sidecar as an optional `LiveRatificationConfig::
+ratification_v2` slot, plumbed from the existing
+`Run105ReloadCheckContextData::ratification_v2` field. Per-frame
+routing:
+
+* **Ambiguous v1+v2 in the installed `LiveRatificationConfig`** →
+  fail-closed before any inner validation; no marker write; no
+  rebroadcast. A single configuration cannot advertise two
+  simultaneously valid authority claims to the live receive path.
+* **v2-only routing** → the dispatcher bypasses the Run 109 v1
+  `try_handle_frame_with_ratification` path (the v1 enforcer cannot
+  consume a v2 sidecar), runs every Run 069 / Run 076 inner
+  structural / signing / sequence check via `try_handle_frame`, then
+  runs the Run 130 verifier and the Run 132
+  `verify_marker_for_validation_only_v2` helper on validated outcomes.
+* **v1-only routing** → identical to pre-Run-142 behaviour. The new
+  v2 helper no-ops because `ratification_v2.is_none()`.
+* **No sidecar / Skip gate** → pre-Run-109 legacy unguarded path is
+  preserved verbatim.
+
+**Validation-only guarantee on the live `0x05` receive path:**
+
+* `pqc_authority_state.json` is **never** written by this surface.
+* `pqc_trust_bundle_sequence.json` is **never** written by this
+  surface.
+* `LivePqcTrustState` is **never** swapped by this surface.
+* Sessions are **never** evicted by this surface.
+* Reload-apply, SIGHUP, snapshot/restore are **never** invoked by this
+  surface.
+* Peer-driven live apply remains out of scope and is not implemented.
+
+**Parity with the local peer-candidate-check surface:** the live
+`0x05` v2 validation outcome matches the
+`verify_marker_for_validation_only_v2` outcome for the same candidate
+— same accept/reject class, same typed error category, same
+non-mutation behaviour, same wrong-domain / anti-rollback /
+equivocation semantics. Both surfaces fail closed on:
+
+* Run 130 verifier failure (bad signature, wrong environment,
+  wrong chain, wrong genesis, missing/wrong authority root, schema
+  version != 2).
+* Run 132 marker-compare failure (lower sequence, same sequence
+  different digest, v1-after-v2 downgrade, corrupt local marker,
+  unsupported persisted marker version, wrong-domain on persisted
+  marker).
+
+**Propagation interaction:** unchanged from Run 088. Valid v2
+candidates may be eligible for rebroadcast only when propagation is
+already enabled by operator configuration; the v2 verifier and v2
+marker compare run **before** the propagation step, so invalid v2
+candidates never rebroadcast. Propagation remains disabled by default
+and never causes any apply, sequence write, or marker write under
+Run 142.
+
+Run 142 is source/test wiring only. Release-binary live inbound `0x05`
+v2 evidence is **deferred to Run 143**. Peer-driven live apply,
+signing-key rotation/revocation lifecycle, KMS / HSM custody, MainNet
+governance artifact verification, validator-set rotation, full C4
+closure, and C5 closure all remain out of scope.

@@ -5342,6 +5342,14 @@ async fn run_p2p_node(
                                             expected_environment_policy: ctx_data.env_policy,
                                             expected_chain_id_str: ctx_data.chain_id_str,
                                             ratification: ctx_data.ratification,
+                                            // Run 142 — plumb the optional v2
+                                            // ratification sidecar into the live
+                                            // wire dispatcher. The versioned
+                                            // sidecar loader produces exactly
+                                            // one of v1 or v2; the dispatcher
+                                            // routes accordingly and rejects
+                                            // ambiguous v1+v2 fail-closed.
+                                            ratification_v2: ctx_data.ratification_v2,
                                             policy: ctx_data.policy,
                                             gate_decision,
                                         })

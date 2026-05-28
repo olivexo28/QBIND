@@ -119,8 +119,8 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use qbind_ledger::{
-    BundleSigningRatification, GenesisAuthorityConfig, GenesisHash, NetworkEnvironmentPolicy,
-    RatificationEnforcementPolicy,
+    BundleSigningRatification, BundleSigningRatificationV2, GenesisAuthorityConfig, GenesisHash,
+    NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
@@ -1162,6 +1162,24 @@ pub struct LiveRatificationConfig {
     /// `RatificationEnforcementPolicy::Strict` (Run 106 default),
     /// `Missing` is fail-closed.
     pub ratification: Option<BundleSigningRatification>,
+    /// Run 142 — optional owned **v2** ratification sidecar.
+    ///
+    /// When the operator-supplied sidecar is schema_version=2, the
+    /// versioned dispatcher (`load_versioned_ratification_from_path`)
+    /// produces a [`BundleSigningRatificationV2`] which is plumbed
+    /// here. At most one of [`Self::ratification`] (v1) and
+    /// [`Self::ratification_v2`] may be `Some` — both being `Some`
+    /// is treated as ambiguous v1+v2 authority material and is
+    /// fail-closed by the dispatcher on every frame.
+    ///
+    /// When `Some`, the dispatcher routes Validated outcomes through
+    /// the Run 130 v2 verifier and the Run 132
+    /// `verify_marker_for_validation_only_v2` helper, mirroring the
+    /// local peer-candidate-check v2 surface bit-for-bit. The
+    /// validation-only invariants (no marker write, no sequence
+    /// write, no live trust mutation, no session eviction, no
+    /// reload-apply, no SIGHUP) are preserved.
+    pub ratification_v2: Option<BundleSigningRatificationV2>,
     /// Per-surface enforcement policy. MainNet is always
     /// [`RatificationEnforcementPolicy::Strict`]; TestNet/DevNet
     /// may be `AllowLegacyUnratified` only when the operator
@@ -1331,7 +1349,45 @@ impl LivePeerCandidateWireDispatcher {
             now_ms,
         };
         let mut receiver = self.receiver.lock();
-        // Run 109: route through the ratification-aware receiver path
+        // Run 142 — fail-closed when both v1 and v2 ratification
+        // material are installed simultaneously. The
+        // `LiveRatificationConfig` invariant is that AT MOST ONE of
+        // `ratification` (v1) and `ratification_v2` is `Some`. Any
+        // simultaneous presence is ambiguous v1+v2 authority claim
+        // and is rejected before the inner validator runs. No
+        // mutation, no propagation, no marker write.
+        let ambiguous_v1_v2 = self
+            .live_ratification
+            .as_ref()
+            .map(|rc| {
+                rc.gate_decision.should_invoke()
+                    && rc.ratification.is_some()
+                    && rc.ratification_v2.is_some()
+            })
+            .unwrap_or(false);
+        if ambiguous_v1_v2 {
+            drop(receiver);
+            eprintln!(
+                "[run-142] live 0x05 v2 dispatch refused: ambiguous v1+v2 \
+                 authority material present in LiveRatificationConfig; \
+                 fail-closed (no validation, no marker write, no propagation, \
+                 no live trust mutation, no session eviction)."
+            );
+            self.metrics.record_peer_candidate_rejected();
+            let outcome = PeerCandidateWireOutcome::ValidatorRan(
+                PeerCandidateOutcome::Rejected(
+                    crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                        crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(
+                            "Run 142: ambiguous v1+v2 authority material; fail-closed"
+                                .to_string(),
+                        ),
+                    ),
+                ),
+            );
+            self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
+            return outcome;
+        }
+        // Run 109/142: route through the ratification-aware receiver path
         // when the owned ratification context is installed AND the
         // Run 106 gate decision says invoke. Otherwise preserve the
         // pre-Run-109 unguarded path (used by DevNet without operator
@@ -1340,7 +1396,20 @@ impl LivePeerCandidateWireDispatcher {
         // either way, so an unratified candidate (which produces a
         // `Rejected(RatificationRefused)` outcome under the
         // ratification-aware path) is NEVER rebroadcast.
+        //
+        // Run 142: when the operator-supplied sidecar is v2
+        // (`ratification_v2.is_some()`), the v1 ratification-aware path
+        // is bypassed (the v1 verifier cannot consume v2 material). The
+        // inner unguarded validator still runs every Run 069 / Run 076
+        // check on the bundle bytes; the v2 verifier + v2 marker
+        // compare are run AFTER inner validation by
+        // [`Self::maybe_reject_on_v2_marker_conflict`]. This mirrors
+        // the local Run 132 peer-candidate-check binary path's v2
+        // dispatch.
         let outcome = match self.live_ratification.as_ref() {
+            Some(rc) if rc.gate_decision.should_invoke() && rc.ratification_v2.is_some() => {
+                receiver.try_handle_frame(frame, &ctx, self.metrics.as_ref())
+            }
             Some(rc) if rc.gate_decision.should_invoke() => {
                 let rctx = RatificationEnforcementContext {
                     authority: &rc.authority,
@@ -1361,6 +1430,17 @@ impl LivePeerCandidateWireDispatcher {
         };
         drop(receiver);
 
+        // Run 142 — validation-only v2 ratification + v2 authority-marker
+        // conflict check for live inbound `0x05` frames carrying v2
+        // material. Runs AFTER inner validation succeeds, BEFORE
+        // propagation eligibility. On v2 verifier failure / v2 marker
+        // conflict / corruption / wrong-domain, changes the outcome to
+        // `Rejected` so `maybe_propagate_after_validation` observes a
+        // non-Validated outcome and suppresses rebroadcast. Never
+        // writes the marker, never mutates live trust state, never
+        // evicts sessions, never calls reload-apply.
+        let outcome = self.maybe_reject_on_v2_marker_conflict(outcome);
+
         // Run 123 — validation-only authority marker conflict check for live
         // inbound `0x05` frames. Runs AFTER ratification-aware validation
         // succeeds, BEFORE propagation eligibility. On marker conflict/
@@ -1371,6 +1451,161 @@ impl LivePeerCandidateWireDispatcher {
 
         self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
         outcome
+    }
+
+    /// Run 142 — validation-only v2 ratification + v2 authority-marker
+    /// conflict check for live inbound `0x05` frames when the
+    /// operator-supplied sidecar is schema_version=2.
+    ///
+    /// Pipeline (mirrors the local Run 132 peer-candidate-check binary
+    /// path bit-for-bit):
+    ///
+    /// 1. If the inner outcome is not `Validated`, return unchanged.
+    /// 2. If no v2 ratification context is installed, return unchanged
+    ///    (v1 path / legacy path takes over).
+    /// 3. Run the Run 130 v2 verifier
+    ///    ([`qbind_ledger::verify_bundle_signing_key_ratification_v2`])
+    ///    against the operator's owned v2 sidecar.
+    /// 4. Run [`crate::pqc_authority_marker_acceptance::verify_marker_for_validation_only_v2`]
+    ///    against the on-disk marker (if any).
+    /// 5. On any failure, change the outcome to `Rejected` with a
+    ///    synthetic [`crate::pqc_trust_reload::ReloadCheckError::MarkerConflict`]
+    ///    so the downstream propagation gate suppresses rebroadcast
+    ///    automatically.
+    ///
+    /// # Critical guarantees
+    ///
+    /// * **Never writes the marker file.** All I/O is read-only.
+    /// * **Never mutates [`crate::pqc_live_trust::LivePqcTrustState`].**
+    /// * **Never writes `pqc_trust_bundle_sequence.json`.**
+    /// * **Never evicts sessions.**
+    /// * **Never calls reload-apply or SIGHUP logic.**
+    /// * **Never starts a peer-driven apply flow.**
+    fn maybe_reject_on_v2_marker_conflict(
+        &self,
+        outcome: PeerCandidateWireOutcome,
+    ) -> PeerCandidateWireOutcome {
+        // Step 1: only relevant if the validation produced a Validated result.
+        let is_validated = matches!(
+            &outcome,
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Validated(_))
+        );
+        if !is_validated {
+            return outcome;
+        }
+
+        // Step 2: must have an installed ratification context with v2
+        // material AND the gate decision must say invoke.
+        let rc = match self.live_ratification.as_ref() {
+            Some(rc) if rc.gate_decision.should_invoke() => rc,
+            _ => return outcome,
+        };
+        let ratification_v2 = match rc.ratification_v2.as_ref() {
+            Some(r) => r,
+            None => return outcome,
+        };
+
+        // Step 3: run the Run 130 v2 verifier.
+        use crate::pqc_authority_marker_acceptance::{
+            verify_marker_for_validation_only_v2, ValidationOnlyMarkerV2Error,
+            ValidationOnlyMarkerV2Inputs,
+        };
+        let ratified_v2 = match qbind_ledger::verify_bundle_signing_key_ratification_v2(
+            qbind_ledger::RatificationV2VerifierInputs {
+                ratification: ratification_v2,
+                authority: &rc.authority,
+                expected_chain_id: rc.expected_chain_id_str.as_str(),
+                expected_environment: rc.expected_environment_policy,
+                expected_genesis_hash: &rc.expected_genesis_hash,
+            },
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                let marker_err = ValidationOnlyMarkerV2Error::V2VerifierFailure(e);
+                eprintln!(
+                    "[run-142] live 0x05 v2 verifier rejected sidecar: {} \
+                     (validation-only; no marker persistence; no trust mutation; \
+                     propagation suppressed; NOT applied; sessions untouched).",
+                    marker_err
+                );
+                self.metrics.record_peer_candidate_rejected();
+                return PeerCandidateWireOutcome::ValidatorRan(
+                    PeerCandidateOutcome::Rejected(
+                        crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                            crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
+                                "{}",
+                                marker_err
+                            )),
+                        ),
+                    ),
+                );
+            }
+        };
+
+        // Step 4: marker conflict check against persisted marker (if any).
+        // If `--data-dir` was not supplied, the dispatcher's
+        // `authority_marker_path` is `None` and we skip the on-disk
+        // compare (DevNet convenience only; matches Run 132 main.rs
+        // behaviour at line 1339). The v2 verifier above already
+        // ratified the candidate against the authority block.
+        let marker_path = match self.authority_marker_path.as_ref() {
+            Some(p) => p,
+            None => {
+                eprintln!(
+                    "[run-142] live 0x05 v2 verifier passed; on-disk v2 marker \
+                     compare skipped (no --data-dir configured). Validation-only; \
+                     no marker write; no trust mutation."
+                );
+                return outcome;
+            }
+        };
+
+        // Compute genesis hash hex from the owned ratification context.
+        let mut runtime_genesis_hash_hex = String::with_capacity(64);
+        for b in rc.expected_genesis_hash {
+            use std::fmt::Write;
+            let _ = write!(runtime_genesis_hash_hex, "{:02x}", b);
+        }
+
+        let marker_result = verify_marker_for_validation_only_v2(ValidationOnlyMarkerV2Inputs {
+            marker_path,
+            runtime_env: self.expected_environment,
+            runtime_chain_id: self.expected_chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            ratification: ratification_v2,
+            ratified: &ratified_v2,
+        });
+
+        match marker_result {
+            Ok(reason) => {
+                eprintln!(
+                    "[run-142] live 0x05 v2 authority-marker check passed: {} \
+                     (validation-only; no marker persistence; no trust mutation; \
+                     propagation eligibility preserved).",
+                    reason
+                );
+                outcome
+            }
+            Err(marker_err) => {
+                eprintln!(
+                    "[run-142] live 0x05 v2 authority-marker conflict rejected: {} \
+                     (validation-only; no marker persistence; no trust mutation; \
+                     propagation suppressed; NOT applied; sessions untouched).",
+                    marker_err
+                );
+                self.metrics.record_peer_candidate_rejected();
+                PeerCandidateWireOutcome::ValidatorRan(
+                    PeerCandidateOutcome::Rejected(
+                        crate::pqc_trust_peer_candidate::PeerCandidateRejection::ValidationFailed(
+                            crate::pqc_trust_reload::ReloadCheckError::MarkerConflict(format!(
+                                "{}",
+                                marker_err
+                            )),
+                        ),
+                    ),
+                )
+            }
+        }
     }
 
     /// Run 123 — if the inner validation returned `Validated` and we have

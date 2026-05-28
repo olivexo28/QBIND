@@ -286,6 +286,7 @@ fn live_rat_config(
         expected_environment_policy: env_policy(h.env),
         expected_chain_id_str: h.chain_id_str.clone(),
         ratification: ratification.cloned(),
+        ratification_v2: None,
         policy,
         gate_decision,
     }

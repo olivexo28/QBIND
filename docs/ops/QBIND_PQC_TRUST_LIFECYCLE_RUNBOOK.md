@@ -4871,3 +4871,81 @@ rotation/revocation lifecycle, KMS/HSM authority-key custody, MainNet
 governance attestation, validator-set rotation, the on-disk v1→v2
 marker swap surface, the higher-sequence v2 persistence surface, full
 C4 closure, and C5 closure all remain out of scope.
+
+## Run 142 — live inbound `0x05` v2 validation-only (source/test only)
+
+Run 142 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_142.md`) wires v2
+ratification + v2 authority-marker validation into the **live inbound
+P2P peer-candidate `0x05` validation-only receive path** so a running
+node that receives a peer-candidate `0x05` frame validates v2 material
+with the same Run 130 verifier + Run 132 marker-compare discipline that
+the local peer-candidate-check binary surface (Runs 132/133) already
+uses.
+
+The wiring is additive on the `LiveRatificationConfig` already installed
+in the dispatcher by Run 109/123: an optional `ratification_v2:
+Option<BundleSigningRatificationV2>` slot is plumbed from
+`Run105ReloadCheckContextData::ratification_v2` (the existing Run 132 v2
+sidecar field) through `main.rs::run_p2p_node` into the live `0x05`
+dispatcher. The versioned sidecar loader
+(`load_versioned_ratification_from_path`) produces exactly one of v1 or
+v2; the dispatcher routes accordingly. When **both** slots are
+simultaneously `Some` (ambiguous v1+v2 authority material), the
+dispatcher fails closed **before** the inner validator runs and
+suppresses any rebroadcast.
+
+**Operator behaviour:**
+
+* Operators who supply a v2 ratification sidecar via
+  `--p2p-trust-bundle-ratification <path>` get **live inbound `0x05` v2
+  validation** automatically. The existing Run 106 ratification gate
+  policy decides whether the gate is invoked
+  (MainNet/TestNet default-strict; DevNet only with operator opt-in).
+* When the gate is invoked **and** `ratification_v2` is present, every
+  inbound `0x05` peer-candidate frame whose inner validation succeeds
+  is then run through the Run 130 v2 verifier and the Run 132
+  `verify_marker_for_validation_only_v2` helper, exactly as the local
+  Run 132 peer-candidate-check binary path does.
+* When `--data-dir` is unset, the v2 verifier still runs (no marker
+  needed for the verifier) and on-disk marker compare is skipped with
+  the log line `[run-142] live 0x05 v2 verifier passed; on-disk v2
+  marker compare skipped (no --data-dir configured)`. This matches the
+  Run 132 `main.rs` behaviour bit-for-bit.
+
+**Fail-closed invariants enforced by Run 142 (source/test):**
+
+* Ambiguous v1+v2 authority material → frame rejected before inner
+  validator runs; no marker write; no propagation.
+* Bad-signature v2 ratification → Run 130 verifier failure;
+  `[run-142] live 0x05 v2 verifier rejected sidecar:` log; no mutation.
+* Wrong-environment / wrong-chain / wrong-genesis v2 ratification →
+  Run 130 verifier domain rejection; no mutation.
+* Lower-sequence / same-sequence-different-digest / v1-after-v2
+  downgrade v2 candidate → Run 132 marker-compare rejection;
+  `[run-142] live 0x05 v2 authority-marker conflict rejected:` log; no
+  marker write; no propagation.
+* Corrupt local `pqc_authority_state.json` → fail-closed; corrupt bytes
+  preserved verbatim; no mutation.
+* Validated v2 candidate → `[run-142] live 0x05 v2 authority-marker
+  check passed:` log; **no marker write**, no sequence write, no live
+  trust mutation, no session eviction, no reload-apply, no SIGHUP. The
+  candidate is eligible for Run 088 propagation only if propagation was
+  already enabled by operator configuration; invalid v2 candidates are
+  never rebroadcast.
+
+**v1 / legacy regression preservation:**
+
+* When the operator-supplied sidecar is v1, the dispatcher takes the
+  existing Run 109/123 v1 path verbatim. The new v2 helper no-ops
+  (because `ratification_v2.is_none()`) and the existing Run 123 v1
+  marker check runs as before.
+* When no sidecar is supplied **and** the ratification gate is
+  `Skip(DevnetNoOperatorOptIn)`, the pre-Run-109 legacy unguarded path
+  is preserved; no v2 helper fires; no marker is fabricated.
+
+**Scope notice:** Run 142 is source/test wiring only. Release-binary
+live inbound `0x05` v2 evidence is **deferred to Run 143**.
+Peer-driven live trust-bundle apply, signing-key rotation/revocation
+lifecycle, KMS/HSM authority-key custody, MainNet governance
+attestation, validator-set rotation, full C4 closure, and C5 closure
+all remain out of scope.
