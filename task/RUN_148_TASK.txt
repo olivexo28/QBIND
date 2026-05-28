@@ -1,0 +1,337 @@
+Task: Run 148 — Source/Test DevNet-Only Peer-Driven Apply Using Existing Run 070 Contract
+
+Current accepted state:
+- Run 144: peer-driven trust-bundle apply safety specification landed.
+- Run 145: non-applying PeerCandidateStagingQueue scaffold landed.
+- Run 146: staging queue hook wired into live inbound 0x05 dispatcher after validation acceptance.
+- Run 147: hidden disabled-by-default DevNet/TestNet-only staging arming flag added and release-binary evidence captured.
+- Current peer-candidate staging is non-authoritative and non-applying.
+- MainNet staging remains refused.
+- Peer-driven live apply remains unimplemented.
+
+Objective:
+Implement the first source/test-only peer-driven live apply path, limited to DevNet/TestNet, disabled by default, local-policy gated, and strictly reusing the existing Run 070 apply contract.
+
+This run must allow an already-staged, already-validated peer candidate to be applied only when an explicit local peer-driven apply policy is enabled. It must not introduce a new apply algorithm. It must reuse the existing validation → snapshot previous → swap LivePqcTrustState → evict sessions → commit_sequence ordering and the existing v2 post-commit marker persistence discipline.
+
+Strict scope:
+- Source/test wiring only.
+- No release-binary evidence in this run.
+- DevNet/TestNet only.
+- MainNet refused unconditionally.
+- Disabled by default.
+- No governance implementation.
+- No KMS/HSM implementation.
+- No signing-key rotation/revocation lifecycle.
+- No new wire format.
+- No trust-bundle schema change.
+- No ratification sidecar schema change.
+- No marker schema change.
+- No sequence-file schema change.
+- No automatic apply on validation alone.
+- No apply of unstaged candidates.
+- No apply of invalid candidates.
+- No apply of expired staged candidates.
+- Do not weaken existing local reload-apply, SIGHUP, startup, snapshot/restore, validation-only, staging, or propagation behavior.
+- Do not claim MainNet readiness.
+- Do not claim full C4 or C5 closure.
+
+Design requirement:
+Peer-driven apply must be a separate local decision after staging.
+
+Required pipeline:
+1. live inbound 0x05 candidate received;
+2. existing validation-only path accepts;
+3. Run 146 staging hook stages candidate;
+4. explicit local peer-driven apply policy is evaluated;
+5. staged candidate is revalidated or validated candidate material is proven fresh;
+6. existing Run 070 apply contract is invoked;
+7. v2 authority marker is persisted only after commit_sequence succeeds;
+8. failure semantics mirror Run 070 / Run 134 / Run 138.
+
+Implementation requirements:
+
+1. Add explicit apply policy type.
+
+Prefer a new internal config type:
+
+PeerDrivenApplyPolicy {
+    enabled: bool,
+    environment: Environment,
+    allow_devnet: bool,
+    allow_testnet: bool,
+    allow_mainnet: bool,
+    require_staged_candidate: bool,
+    require_v2_ratification: bool,
+    max_candidate_age_secs: u64,
+}
+
+Required defaults:
+- enabled=false;
+- allow_devnet=false unless explicitly set by tests/config;
+- allow_testnet=false unless explicitly set by tests/config;
+- allow_mainnet=false always;
+- require_staged_candidate=true;
+- require_v2_ratification=true.
+
+2. Add an apply controller.
+
+Prefer a small module:
+
+crates/qbind-node/src/pqc_peer_candidate_apply.rs
+
+It should expose a narrow API such as:
+
+try_apply_staged_peer_candidate(
+    staged_candidate_id,
+    staging_queue,
+    apply_context,
+    marker_config,
+    policy,
+    runtime_domain,
+    now
+) -> PeerDrivenApplyOutcome
+
+Outcome variants should distinguish:
+- Disabled;
+- RefusedMainNet;
+- CandidateNotFound;
+- CandidateExpired;
+- CandidateNotValidated;
+- CandidateWrongDomain;
+- CandidateMarkerConflict;
+- ApplySucceeded;
+- ApplyRejected;
+- ApplyRollbackSucceeded;
+- ApplyFatalRollbackFailed;
+- MarkerPersistedAfterCommit;
+- MarkerPersistFailedAfterCommit.
+
+3. Reuse Run 070 apply contract.
+
+The implementation must call the existing apply path, not duplicate logic:
+- `apply_validated_candidate_with_previous` or exact existing production apply helper;
+- existing `LiveTrustApplyContext`;
+- existing session eviction path;
+- existing sequence commit path.
+
+The future peer-driven apply controller must not directly mutate:
+- `LivePqcTrustState`;
+- sequence file;
+- authority marker file;
+except through the existing apply and marker persistence helpers.
+
+4. Reuse v2 marker post-commit discipline.
+
+For v2 candidates:
+- marker decision/check occurs before apply;
+- no marker write before apply;
+- marker persist occurs only after sequence commit succeeds;
+- marker persist failure after successful sequence commit must be fatal/operator-actionable, following Run 134/138 discipline.
+
+5. MainNet refusal.
+
+MainNet must refuse peer-driven apply even if policy enabled. The refusal must be typed and tested. Do not add a MainNet bypass flag.
+
+6. Candidate freshness.
+
+Expired staged candidates must not apply. TTL must be enforced at apply time, not only staging time.
+
+7. Authorization boundary.
+
+DevNet/TestNet local policy may authorize apply for this run. MainNet must require future governance/ratification/KMS-HSM policy and remain blocked.
+
+Required tests:
+
+Add:
+
+crates/qbind-node/tests/run_148_peer_driven_apply_devnet_tests.rs
+
+Minimum matrix:
+
+A1. DevNet staged valid v2 candidate applies through Run 070
+- Candidate is already staged and valid.
+- Apply policy enabled for DevNet.
+- Expected:
+  - Run 070 ordering observed through mock context:
+    validate → snapshot previous → swap → evict_sessions → commit_sequence;
+  - v2 marker persisted only after commit_sequence succeeds;
+  - outcome ApplySucceeded / MarkerPersistedAfterCommit.
+
+A2. TestNet staged valid v2 candidate applies only when explicit policy allows TestNet
+- Policy enabled for TestNet.
+- Candidate valid and staged.
+- Expected:
+  - apply succeeds through same Run 070 path;
+  - no TestNet default auto-enable.
+
+A3. disabled policy refuses
+- Candidate staged and valid.
+- Policy disabled.
+- Expected:
+  - no apply;
+  - no live trust mutation;
+  - no sequence write;
+  - no marker write;
+  - no session eviction.
+
+A4. MainNet refuses unconditionally
+- Candidate staged and valid.
+- Policy enabled.
+- Environment MainNet.
+- Expected:
+  - refused before apply;
+  - no mutation;
+  - no sequence write;
+  - no marker write;
+  - no eviction.
+
+R1. unstaged candidate cannot apply
+- Candidate material exists but is not in staging queue.
+- Expected:
+  - CandidateNotFound / NotStaged;
+  - no mutation.
+
+R2. expired staged candidate cannot apply
+- Candidate was staged but TTL expired.
+- Expected:
+  - CandidateExpired;
+  - no mutation.
+
+R3. lower-sequence staged candidate cannot apply
+- Force or simulate a stale staged candidate where local marker has advanced after staging.
+- Expected:
+  - recheck refuses lower sequence;
+  - no apply;
+  - no marker write.
+
+R4. same-sequence different-digest staged candidate cannot apply
+- Local marker changed after staging.
+- Expected:
+  - equivocation/conflict refusal;
+  - no apply.
+
+R5. wrong-domain staged candidate cannot apply
+- Expected:
+  - domain refusal;
+  - no apply.
+
+R6. bad-signature candidate cannot apply
+- Expected:
+  - verifier failure;
+  - no apply.
+
+R7. apply validation failure before swap
+- Existing apply validator rejects candidate.
+- Expected:
+  - no snapshot/swap/evict/commit;
+  - no marker write.
+
+R8. swap failure rollback semantics
+- Use mock apply context to force swap failure.
+- Expected:
+  - no eviction;
+  - no sequence commit;
+  - no marker write.
+
+R9. eviction failure rollback succeeds
+- Expected:
+  - live state rolled back;
+  - no sequence commit;
+  - no marker write;
+  - non-fatal rejection if existing Run 070 semantics say non-fatal.
+
+R10. sequence commit failure rollback succeeds
+- Expected:
+  - live state rolled back;
+  - no marker write;
+  - no silent success.
+
+R11. sequence commit failure rollback also fails
+- Expected:
+  - fatal outcome matching Run 070 fatal discipline;
+  - no marker write.
+
+R12. marker persist failure after successful commit is fatal/operator-actionable
+- Expected:
+  - apply succeeded;
+  - sequence commit succeeded;
+  - marker persist failed;
+  - fatal/operator-actionable outcome;
+  - no silent continuation.
+
+R13. idempotent staged v2 candidate apply behavior
+- If already-applied marker/sequence state is identical, behavior must be explicit:
+  - either no-op success with no rewrite;
+  - or refused as already-applied.
+- Document and test chosen behavior.
+
+R14. v2-after-v1 migration candidate applies only under enabled policy
+- Existing local v1 marker.
+- Staged v2 migration candidate.
+- Expected:
+  - apply succeeds under DevNet policy;
+  - marker becomes v2 only after sequence commit.
+
+R15. propagation-only behavior unchanged
+- Staging/apply policy does not alter propagation-only validation-before-rebroadcast rules.
+
+R16. validation-only behavior unchanged
+- Existing live inbound 0x05 validation-only still works with apply disabled.
+
+Required negative assertions:
+For every refusal:
+- no Run 070 apply invocation unless refusal occurs inside Run 070 validation;
+- no LivePqcTrustState swap;
+- no sequence write;
+- no authority-marker write;
+- no session eviction;
+- staged queue remains consistent;
+- no SIGHUP/reload-apply path invoked.
+
+Required docs:
+Add:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_148.md
+
+Update:
+- docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+- docs/whitepaper/contradiction.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+Docs must state:
+- Run 148 is source/test only.
+- Peer-driven apply is now source/test wired only for DevNet/TestNet local policy.
+- MainNet remains refused.
+- Release-binary DevNet/TestNet peer-driven apply evidence is deferred to Run 149.
+- Governance/KMS-HSM/signing-key lifecycle remain open.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build -p qbind-node --lib
+- cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+- cargo test -p qbind-node --test run_147_live_0x05_peer_candidate_staging_release_binary_regression_tests
+  or the closest available Run 147 regression if added
+- cargo test -p qbind-node --test run_146_live_inbound_0x05_staging_hook_tests
+- cargo test -p qbind-node --test run_145_peer_candidate_staging_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_088_pqc_peer_candidate_propagation_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+Acceptance criteria:
+Run 148 is acceptable only if:
+1. peer-driven apply exists only behind explicit local DevNet/TestNet policy;
+2. MainNet refuses unconditionally;
+3. only staged, fresh, validation-accepted candidates can reach apply;
+4. apply reuses existing Run 070 contract;
+5. v2 marker persistence occurs only after sequence commit;
+6. all rollback/fatal paths are tested;
+7. validation-only, staging, and propagation-only behavior remain unchanged;
+8. no release-binary claim is made;
+9. docs defer release-binary apply evidence to Run 149;
+10. no full C4 or C5 closure is claimed.
