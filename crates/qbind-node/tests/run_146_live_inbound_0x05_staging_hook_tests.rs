@@ -1,48 +1,49 @@
-//! Run 142 — integration tests for **v2 ratification + v2
-//! authority-marker** wiring on the **live inbound `0x05`
-//! peer-candidate validation-only** receive path.
+//! Run 146 — integration tests for the **non-applying peer-candidate
+//! staging hook** wired into the **live inbound `0x05`** validation-only
+//! path.
 //!
-//! These tests exercise the
-//! [`qbind_node::pqc_peer_candidate_wire::LivePeerCandidateWireDispatcher`]
-//! Run 079 entry point with the Run 142 owned **v2** ratification
-//! context installed (`LiveRatificationConfig::ratification_v2`) and
-//! assert that the dispatcher routes Validated outcomes through the
-//! Run 130 v2 verifier and the Run 132
-//! [`qbind_node::pqc_authority_marker_acceptance::verify_marker_for_validation_only_v2`]
-//! helper, mirroring the local Run 132 peer-candidate-check binary
-//! path bit-for-bit. **No mutation** of any kind occurs on this surface
-//! under Run 142 — no live trust swap, no sequence write, no marker
-//! write, no session eviction, no reload-apply, no SIGHUP.
+//! These tests exercise the [`LivePeerCandidateWireDispatcher`] with a
+//! [`PeerCandidateStagingQueue`] installed via
+//! [`LivePeerCandidateWireDispatcherConfig::staging_queue`] and assert
+//! the full Run 146 acceptance / rejection matrix from
+//! `task/RUN_146_TASK.txt`:
 //!
-//! Acceptance scenarios (A1–A4) and rejection scenarios (R1–R11) per
-//! `task/RUN_142_TASK.txt`:
+//! * **A1** accepted v2 candidate stages when policy enabled
+//! * **A2** accepted idempotent v2 candidate dedupes in runtime hook
+//! * **A3** higher-sequence v2 candidate stages
+//! * **A4** v2-after-v1 migration candidate stages, v1 marker untouched
+//! * **R1** staging disabled preserves Run 143 behavior
+//! * **R2** MainNet refuses staging
+//! * **R3** lower-sequence v2 candidate does not stage
+//! * **R4** same-sequence different-digest candidate does not stage
+//! * **R5** bad-signature candidate does not stage
+//! * **R6** wrong-domain (wrong-chain) candidate does not stage
+//! * **R7** ambiguous v1+v2 candidate does not stage
+//! * **R8** propagation disabled + staging enabled
+//! * **R9** propagation enabled + staging disabled
+//! * **R10** propagation enabled + staging enabled
+//! * **R11** queue bounds enforced through live hook
+//! * **R12** TTL expiry through live hook
+//! * **R13** v1 live inbound regression
+//! * **R14** legacy/no-sidecar regression
 //!
-//!   * **A1** valid v2 candidate accepted validation-only
-//!   * **A2** idempotent v2 marker accepted, no rewrite
-//!   * **A3** higher-sequence v2 accepted, no persistence
-//!   * **A4** v2-after-v1 migration accepted, v1 marker preserved
-//!   * **R1** lower-sequence v2 rejected
-//!   * **R2** same-sequence different-digest v2 rejected
-//!   * **R3** bad-signature v2 rejected (Run 130 verifier failure)
-//!   * **R4** wrong-environment v2 rejected
-//!   * **R5** wrong-chain v2 rejected
-//!   * **R6** wrong-genesis v2 rejected
-//!   * **R7** ambiguous v1+v2 fail-closed
-//!   * **R8** corrupted local marker fail-closed
-//!   * **R9** v1 live inbound `0x05` regression
-//!   * **R10** no-sidecar / legacy live inbound `0x05` regression
-//!   * **R11** propagation-only v2 interaction
+//! # Strict scope (Run 146)
 //!
-//! Strict scope (matches `task/RUN_142_TASK.txt`):
+//! * Source/test wiring only. Release-binary staging evidence is
+//!   deferred to Run 147.
+//! * Validation-only receive path. **No live apply.**
+//! * No peer-driven trust-state mutation. No sequence write. No
+//!   authority-marker write. No session eviction. No SIGHUP /
+//!   reload-apply. No Run 070 apply invocation. No new wire format.
+//! * MainNet refuses staging unconditionally.
 //!
-//!   * Source/test wiring only. Release-binary live inbound `0x05` v2
-//!     evidence is deferred to Run 143.
-//!   * Validation-only receive path. No live apply.
-//!   * No peer-driven trust-state mutation.
-//!   * No sequence write. No authority-marker write. No session
-//!     eviction.
-//!   * No CLI / wire / schema / metric drift.
-//!   * Does not weaken v1 live inbound `0x05` behaviour.
+//! Each test, in addition to the per-scenario assertions, performs the
+//! Run 146 negative invariants:
+//!
+//! * `pqc_trust_bundle_sequence.json` is byte-identical pre/post.
+//! * `pqc_authority_state.json` is byte-identical pre/post.
+//! * If a `RecordingSender` is supplied, its sent count is asserted
+//!   appropriately for the propagation flag under test.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -55,25 +56,22 @@ use qbind_ledger::{
     compute_canonical_genesis_hash, BundleSigningRatification, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
     GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
-    RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
+    RatificationEnforcementPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::p2p::NodeId;
-use qbind_node::pqc_authority_marker_acceptance::{
-    verify_marker_for_validation_only_v2, ValidationOnlyMarkerV2Inputs,
-};
-use qbind_node::pqc_authority_state::{
-    authority_state_file_path, persist_authority_state_atomic,
-    persist_authority_state_v2_atomic, AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
-};
+use qbind_node::pqc_authority_state::authority_state_file_path;
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
+use qbind_node::pqc_peer_candidate_staging::{
+    PeerCandidateStagingQueue, PeerDrivenStagingPolicy,
+};
 use qbind_node::pqc_peer_candidate_wire::{
     encode_peer_candidate_wire_frame, LivePeerCandidateWireDispatcher,
     LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig,
     PeerCandidatePropagationConfig, PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender,
-    PeerCandidateWireOutcome, PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome,
-    RawFrameSendReport, PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
+    PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome, RawFrameSendReport,
+    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_ratification_policy::ratification_gate_decision;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
@@ -82,17 +80,13 @@ use qbind_node::pqc_trust_bundle::{
     derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey, BundleSigningKeySet,
     RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
 };
-use qbind_node::pqc_trust_peer_candidate::{
-    PeerCandidateConfig, PeerCandidateOutcome, PeerCandidateRejection,
-};
-use qbind_node::pqc_trust_reload::{
-    validate_candidate_bundle, ReloadCheckError, ReloadCheckInputs,
-};
+use qbind_node::pqc_trust_peer_candidate::PeerCandidateConfig;
+use qbind_node::pqc_trust_reload::{validate_candidate_bundle, ReloadCheckInputs};
 use qbind_node::pqc_trust_sequence::{chain_id_hex, sequence_file_path};
 use qbind_types::NetworkEnvironment;
 
 // =====================================================================
-// Helpers
+// Harness (adapted from run_142 / run_145 tests)
 // =====================================================================
 
 fn hex_lower(b: &[u8]) -> String {
@@ -106,7 +100,7 @@ fn hex_lower(b: &[u8]) -> String {
 
 fn tmpdir(tag: &str) -> PathBuf {
     let p = std::env::temp_dir().join(format!(
-        "qbind-run142-{}-{}-{}",
+        "qbind-run146-{}-{}-{}",
         tag,
         std::process::id(),
         std::time::SystemTime::now()
@@ -192,7 +186,7 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let auth_root = GenesisAuthorityRoot::with_public_key_bytes(
         GENESIS_AUTHORITY_SUITE_ML_DSA_44,
         &authority_pk,
-        "run142-bundle-signing-authority",
+        "run146-bundle-signing-authority",
     );
     genesis_cfg.authority = Some(GenesisAuthorityConfig::new(vec![auth_root]));
     let canonical_hash = compute_canonical_genesis_hash(&genesis_cfg, env_policy(env));
@@ -274,7 +268,7 @@ fn wire_envelope(
     PeerCandidateWireEnvelopeV1 {
         envelope_version: PEER_CANDIDATE_WIRE_VERSION,
         domain_tag: PEER_CANDIDATE_WIRE_DOMAIN_TAG.to_string(),
-        peer_id: Some("run142-peer".to_string()),
+        peer_id: Some("run146-peer".to_string()),
         environment: bundle_env(h.env),
         chain_id_hex: h.chain_id_str.clone(),
         declared_sequence,
@@ -330,8 +324,6 @@ fn v2_ratification_for(h: &Harness, sequence: u64) -> BundleSigningRatificationV
     )
 }
 
-/// Build a [`LiveRatificationConfig`] carrying a v2 sidecar. `ratification`
-/// (v1) is left `None`; gate decision/policy default to MainNet strict.
 fn live_v2_rat_config(
     h: &Harness,
     ratification_v2: Option<BundleSigningRatificationV2>,
@@ -344,11 +336,10 @@ fn live_v2_rat_config(
         ratification: None,
         ratification_v2,
         policy: RatificationEnforcementPolicy::Strict,
-        gate_decision: ratification_gate_decision(h.env, false),
+        gate_decision: ratification_gate_decision(h.env, true),
     }
 }
 
-/// Build a [`LiveRatificationConfig`] carrying a v1 sidecar (regression).
 fn live_v1_rat_config(
     h: &Harness,
     ratification: Option<&BundleSigningRatification>,
@@ -361,12 +352,10 @@ fn live_v1_rat_config(
         ratification: ratification.cloned(),
         ratification_v2: None,
         policy: RatificationEnforcementPolicy::Strict,
-        gate_decision: ratification_gate_decision(h.env, false),
+        gate_decision: ratification_gate_decision(h.env, true),
     }
 }
 
-/// Build a [`LiveRatificationConfig`] carrying BOTH v1 AND v2 — used to
-/// exercise the Run 142 fail-closed ambiguity rejection (R7).
 fn live_v1_plus_v2_rat_config(
     h: &Harness,
     ratification: BundleSigningRatification,
@@ -380,7 +369,7 @@ fn live_v1_plus_v2_rat_config(
         ratification: Some(ratification),
         ratification_v2: Some(ratification_v2),
         policy: RatificationEnforcementPolicy::Strict,
-        gate_decision: ratification_gate_decision(h.env, false),
+        gate_decision: ratification_gate_decision(h.env, true),
     }
 }
 
@@ -435,6 +424,8 @@ fn marker_snapshot(path: &Path) -> Option<Vec<u8>> {
     path.exists().then(|| std::fs::read(path).expect("read marker"))
 }
 
+/// Run 146 negative invariants: trust-state-related files must be
+/// byte-identical pre/post regardless of whether staging happened.
 fn assert_no_mutation(
     seq_path: &Path,
     seq_before: Option<Vec<u8>>,
@@ -444,13 +435,63 @@ fn assert_no_mutation(
     assert_eq!(
         sequence_snapshot(seq_path),
         seq_before,
-        "Run 142 invariant: pqc_trust_bundle_sequence.json must be byte-identical pre/post"
+        "Run 146 invariant: pqc_trust_bundle_sequence.json must be byte-identical pre/post"
     );
     assert_eq!(
         marker_snapshot(marker_path),
         marker_before,
-        "Run 142 invariant: pqc_authority_state.json must be byte-identical pre/post"
+        "Run 146 invariant: pqc_authority_state.json must be byte-identical pre/post"
     );
+}
+
+/// Pre-seed a persisted v2 marker on disk.
+fn preseed_v2_marker(h: &Harness, marker_path: &Path, ratification: &BundleSigningRatificationV2) {
+    use qbind_node::pqc_authority_state::{
+        derive_authority_state_v2_from_ratification, persist_authority_state_v2_atomic,
+        AuthorityStateDerivationV2Inputs, AuthorityStateUpdateSource,
+    };
+    let ratified = qbind_ledger::verify_bundle_signing_key_ratification_v2(
+        qbind_ledger::RatificationV2VerifierInputs {
+            ratification,
+            authority: h.genesis_cfg.authority.as_ref().expect("authority"),
+            expected_chain_id: &h.chain_id_str,
+            expected_environment: env_policy(h.env),
+            expected_genesis_hash: &h.canonical_hash,
+        },
+    )
+    .expect("preseed v2 verify");
+    let record = derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+        runtime_env: h.env,
+        runtime_chain_id: h.env.chain_id(),
+        runtime_genesis_hash_hex: &hex_lower(&h.canonical_hash),
+        ratification,
+        ratified: &ratified,
+        update_source: AuthorityStateUpdateSource::TestOrFixture,
+        updated_at_unix_secs: 1_000,
+    })
+    .expect("derive v2 marker");
+    persist_authority_state_v2_atomic(marker_path, &record).expect("persist v2 marker");
+}
+
+fn preseed_v1_marker(h: &Harness, marker_path: &Path, sequence: u64) {
+    use qbind_node::pqc_authority_state::{
+        persist_authority_state_atomic, AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
+    };
+    let authority = h.genesis_cfg.authority.as_ref().expect("authority");
+    let record = PersistentAuthorityStateRecord::new(
+        h.chain_id_str.clone(),
+        bundle_env(h.env),
+        hex_lower(&h.canonical_hash),
+        authority.authority_policy_version,
+        sequence,
+        None,
+        hex_lower(&h.authority_pk),
+        hex_lower(&h.signing_pk)[..64].to_string(),
+        "aa".repeat(32),
+        AuthorityStateUpdateSource::ReloadApply,
+        1_000,
+    );
+    persist_authority_state_atomic(marker_path, &record).expect("persist v1 marker");
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -462,6 +503,7 @@ fn dispatcher(
     sequence_path: Option<PathBuf>,
     marker_path: Option<PathBuf>,
     live_ratification: Option<LiveRatificationConfig>,
+    staging_queue: Option<Arc<Mutex<PeerCandidateStagingQueue>>>,
 ) -> LivePeerCandidateWireDispatcher {
     let scratch = tmpdir("scratch");
     let propagation_sender: Option<Arc<dyn PeerCandidateWireFrameSender>> =
@@ -485,72 +527,14 @@ fn dispatcher(
             propagation_sender,
             live_ratification,
             authority_marker_path: marker_path,
-            staging_queue: None,
+            staging_queue,
         },
         metrics,
     )
 }
 
-/// Pre-seed a persisted v2 marker on disk by re-running the production
-/// derivation primitive against a verified v2 ratification.
-fn preseed_v2_marker(h: &Harness, marker_path: &Path, ratification: &BundleSigningRatificationV2) {
-    use qbind_node::pqc_authority_state::{
-        derive_authority_state_v2_from_ratification, AuthorityStateDerivationV2Inputs,
-    };
-    let ratified = qbind_ledger::verify_bundle_signing_key_ratification_v2(
-        qbind_ledger::RatificationV2VerifierInputs {
-            ratification,
-            authority: h.genesis_cfg.authority.as_ref().expect("authority"),
-            expected_chain_id: &h.chain_id_str,
-            expected_environment: env_policy(h.env),
-            expected_genesis_hash: &h.canonical_hash,
-        },
-    )
-    .expect("preseed: v2 verifier must succeed");
-    let mut hash_hex = String::with_capacity(64);
-    for b in h.canonical_hash {
-        use std::fmt::Write;
-        let _ = write!(hash_hex, "{:02x}", b);
-    }
-    let record = derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
-        runtime_env: h.env,
-        runtime_chain_id: h.env.chain_id(),
-        runtime_genesis_hash_hex: &hash_hex,
-        ratification,
-        ratified: &ratified,
-        update_source: AuthorityStateUpdateSource::TestOrFixture,
-        updated_at_unix_secs: 1_000,
-    })
-    .expect("preseed: derive v2 marker");
-    persist_authority_state_v2_atomic(marker_path, &record).expect("preseed: persist v2 marker");
-}
-
-/// Pre-seed a persisted v1 marker (for R8 corrupt + A4 v2-after-v1 setup).
-fn preseed_v1_marker(h: &Harness, marker_path: &Path, sequence: u64) {
-    let authority = h.genesis_cfg.authority.as_ref().expect("authority");
-    let record = PersistentAuthorityStateRecord::new(
-        h.chain_id_str.clone(),
-        bundle_env(h.env),
-        hex_lower(&h.canonical_hash),
-        authority.authority_policy_version,
-        sequence,
-        None,
-        hex_lower(&h.authority_pk),
-        hex_lower(&h.signing_pk)[..64].to_string(),
-        "aa".repeat(32),
-        AuthorityStateUpdateSource::ReloadApply,
-        1000,
-    );
-    persist_authority_state_atomic(marker_path, &record).expect("preseed: persist v1 marker");
-}
-
-fn marker_conflict_message(outcome: &PeerCandidateWireOutcome) -> &str {
-    match outcome {
-        PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Rejected(
-            PeerCandidateRejection::ValidationFailed(ReloadCheckError::MarkerConflict(s)),
-        )) => s.as_str(),
-        other => panic!("expected MarkerConflict rejection, got {:?}", other),
-    }
+fn new_queue(policy: PeerDrivenStagingPolicy) -> Arc<Mutex<PeerCandidateStagingQueue>> {
+    Arc::new(Mutex::new(PeerCandidateStagingQueue::new(policy)))
 }
 
 // =====================================================================
@@ -558,8 +542,8 @@ fn marker_conflict_message(outcome: &PeerCandidateWireOutcome) -> &str {
 // =====================================================================
 
 #[test]
-fn run142_a1_valid_v2_candidate_accepted_validation_only() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_a1_accepted_v2_candidate_stages_when_policy_enabled() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("a1");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
@@ -567,6 +551,7 @@ fn run142_a1_valid_v2_candidate_accepted_validation_only() {
     let marker_before = marker_snapshot(&marker_path);
 
     let rat_v2 = v2_ratification_for(&h, 1);
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -576,30 +561,36 @@ fn run142_a1_valid_v2_candidate_accepted_validation_only() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
-    assert!(disp.ratification_gate_is_invoked());
+    assert!(disp.staging_hook_is_armed(), "A1: hook must be armed");
+
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(
-        out.is_validated(),
-        "A1: valid v2 candidate must validate (validation-only), got {:?}",
-        out
-    );
+    assert!(out.is_validated(), "A1: validation must accept, got {:?}", out);
+
+    let q = queue.lock();
+    assert_eq!(q.len(), 1, "A1: queue must contain exactly one entry");
+    let entries = q.entries();
+    assert_eq!(entries[0].sequence, 1);
+    assert_eq!(entries[0].environment, bundle_env(h.env));
+    assert_eq!(entries[0].chain_id_hex, h.chain_id_str);
+    assert!(entries[0].signature_verified);
+    assert!(entries[0].authority_marker_digest.is_some());
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_a2_idempotent_v2_marker_accepted_no_rewrite() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_a2_idempotent_v2_candidate_dedupes_in_runtime_hook() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("a2");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
-
-    let rat_v2 = v2_ratification_for(&h, 3);
-    preseed_v2_marker(&h, &marker_path, &rat_v2);
     let seq_before = sequence_snapshot(&seq_path);
     let marker_before = marker_snapshot(&marker_path);
-    assert!(marker_before.is_some(), "preseed must write marker");
 
+    let rat_v2 = v2_ratification_for(&h, 1);
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -609,15 +600,31 @@ fn run142_a2_idempotent_v2_marker_accepted_no_rewrite() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
-    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(out.is_validated(), "A2: idempotent v2 marker must accept");
+
+    let frame = valid_frame(&h, 1);
+    // First dispatch stages.
+    let o1 = disp.dispatch_frame_for_test(&frame);
+    assert!(o1.is_validated(), "A2: first frame must validate");
+    // Second dispatch: same frame. The Run 088 dedup will short-circuit
+    // to DuplicateSuppressed, so try_stage_outcome returns
+    // RefusedNotValidated and the queue does NOT grow.
+    let _o2 = disp.dispatch_frame_for_test(&frame);
+
+    let q = queue.lock();
+    assert_eq!(
+        q.len(),
+        1,
+        "A2: queue must not grow on byte-identical resubmission"
+    );
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_a3_higher_sequence_v2_accepted_no_persist() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_a3_higher_sequence_v2_candidate_stages() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("a3");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
@@ -629,6 +636,7 @@ fn run142_a3_higher_sequence_v2_accepted_no_persist() {
     let marker_before = marker_snapshot(&marker_path);
 
     let rat_v2_candidate = v2_ratification_for(&h, 4);
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -638,27 +646,33 @@ fn run142_a3_higher_sequence_v2_accepted_no_persist() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2_candidate))),
+        Some(Arc::clone(&queue)),
     );
-    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(out.is_validated(), "A3: higher-sequence v2 must accept");
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 4));
+    assert!(out.is_validated(), "A3: higher-seq must accept, got {:?}", out);
+
+    let q = queue.lock();
+    assert_eq!(q.len(), 1, "A3: queue must contain the newer candidate");
+    assert_eq!(q.entries()[0].sequence, 4);
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_a4_v2_after_v1_migration_candidate_accepted() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_a4_v2_after_v1_migration_candidate_stages_v1_marker_unchanged() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("a4");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
 
-    // Pre-existing v1 marker (legacy).
+    // Pre-existing v1 marker.
     preseed_v1_marker(&h, &marker_path, 1);
     let seq_before = sequence_snapshot(&seq_path);
     let v1_marker_before = marker_snapshot(&marker_path);
     assert!(v1_marker_before.is_some());
 
-    // Candidate is v2 with a higher sequence.
     let rat_v2 = v2_ratification_for(&h, 2);
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -668,21 +682,98 @@ fn run142_a4_v2_after_v1_migration_candidate_accepted() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(out.is_validated(), "A4: v2-after-v1 migration must accept");
-    // CRITICAL: the v1 marker bytes are preserved untouched.
+    assert!(out.is_validated(), "A4: v2-after-v1 must accept");
+    let q = queue.lock();
+    assert_eq!(q.len(), 1, "A4: candidate must stage");
+    drop(q);
+    // CRITICAL: v1 marker bytes preserved.
     assert_no_mutation(&seq_path, seq_before, &marker_path, v1_marker_before);
 }
 
 // =====================================================================
-// Rejection scenarios (R1–R11)
+// Rejection scenarios (R1–R14)
 // =====================================================================
 
 #[test]
-fn run142_r1_lower_sequence_v2_rejected() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_r1_staging_disabled_preserves_run143_behavior() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("r1");
+    let marker_path = authority_state_file_path(&dir);
+    let seq_path = sequence_file_path(&dir);
+    let seq_before = sequence_snapshot(&seq_path);
+    let marker_before = marker_snapshot(&marker_path);
+
+    let rat_v2 = v2_ratification_for(&h, 1);
+    // Disabled-by-default policy on DevNet.
+    let queue = new_queue(PeerDrivenStagingPolicy::default());
+    let metrics = Arc::new(P2pMetrics::default());
+    let disp = dispatcher(
+        &h,
+        Arc::clone(&metrics),
+        None,
+        PeerCandidatePropagationConfig::default(),
+        Some(seq_path.clone()),
+        Some(marker_path.clone()),
+        Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
+    );
+    assert!(
+        !disp.staging_hook_is_armed(),
+        "R1: hook must NOT be armed under default disabled policy"
+    );
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+    assert!(out.is_validated(), "R1: validation-only outcome unchanged");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R1: disabled policy must not stage");
+    drop(q);
+    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+}
+
+#[test]
+fn run146_r2_mainnet_refuses_staging() {
+    let h = harness(NetworkEnvironment::Mainnet);
+    let dir = tmpdir("r2");
+    let marker_path = authority_state_file_path(&dir);
+    let seq_path = sequence_file_path(&dir);
+    let seq_before = sequence_snapshot(&seq_path);
+    let marker_before = marker_snapshot(&marker_path);
+
+    let rat_v2 = v2_ratification_for(&h, 1);
+    // Policy explicitly attempts to enable MainNet; the queue refuses
+    // unconditionally.
+    let queue = new_queue(PeerDrivenStagingPolicy::mainnet_attempted());
+    let metrics = Arc::new(P2pMetrics::default());
+    let disp = dispatcher(
+        &h,
+        Arc::clone(&metrics),
+        None,
+        PeerCandidatePropagationConfig::default(),
+        Some(seq_path.clone()),
+        Some(marker_path.clone()),
+        Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
+    );
+    assert!(
+        !disp.staging_hook_is_armed(),
+        "R2: MainNet must never arm the hook"
+    );
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+    assert!(out.is_validated(), "R2: validation must remain unaffected");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R2: MainNet staging must remain empty");
+    drop(q);
+    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+}
+
+#[test]
+fn run146_r3_lower_sequence_v2_candidate_does_not_stage() {
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r3");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
 
@@ -691,47 +782,40 @@ fn run142_r1_lower_sequence_v2_rejected() {
     let seq_before = sequence_snapshot(&seq_path);
     let marker_before = marker_snapshot(&marker_path);
 
-    let rat_v2_candidate = v2_ratification_for(&h, 2); // lower
+    let rat_v2_candidate = v2_ratification_for(&h, 2);
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
-    let sender = RecordingSender::with_peers(vec![NodeId::from([7u8; 32])]);
     let disp = dispatcher(
         &h,
         Arc::clone(&metrics),
-        Some(Arc::clone(&sender)),
-        PeerCandidatePropagationConfig {
-            enabled: true,
-            ..PeerCandidatePropagationConfig::default()
-        },
+        None,
+        PeerCandidatePropagationConfig::default(),
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2_candidate))),
+        Some(Arc::clone(&queue)),
     );
-    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    let msg = marker_conflict_message(&out);
-    assert!(
-        msg.contains("lower sequence") || msg.contains("Run 132"),
-        "R1: expected v2 lower-sequence refusal, got: {}",
-        msg
-    );
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 2));
+    assert!(!out.is_validated(), "R3: lower-seq must reject");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R3: rejected candidate must NOT stage");
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-    assert_eq!(sender.sent_count(), 0, "R1: must not propagate");
 }
 
 #[test]
-fn run142_r2_same_sequence_different_digest_v2_rejected() {
-    let h = harness(NetworkEnvironment::Mainnet);
-    let dir = tmpdir("r2");
+fn run146_r4_same_sequence_different_digest_candidate_does_not_stage() {
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r4");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
 
-    // Persist a v2 marker at seq=3.
     let rat_v2_persisted = v2_ratification_for(&h, 3);
     preseed_v2_marker(&h, &marker_path, &rat_v2_persisted);
     let seq_before = sequence_snapshot(&seq_path);
     let marker_before = marker_snapshot(&marker_path);
 
-    // Candidate at the SAME seq=3 but with a different target signing key
-    // → different digest (different `target_bundle_signing_public_key`).
     let (other_pk, _other_sk) =
         MlDsa44Backend::generate_keypair().expect("ML-DSA-44 conflicting signing key");
     let authority = h.genesis_cfg.authority.as_ref().expect("authority");
@@ -752,91 +836,30 @@ fn run142_r2_same_sequence_different_digest_v2_rejected() {
         None,
         None,
     );
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
-    let sender = RecordingSender::with_peers(vec![NodeId::from([8u8; 32])]);
     let disp = dispatcher(
         &h,
         Arc::clone(&metrics),
-        Some(Arc::clone(&sender)),
-        PeerCandidatePropagationConfig {
-            enabled: true,
-            ..PeerCandidatePropagationConfig::default()
-        },
+        None,
+        PeerCandidatePropagationConfig::default(),
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2_conflict))),
+        Some(Arc::clone(&queue)),
     );
-    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    // Could be rejected at inner sig check (different signing key) or at
-    // v2 marker compare. Either way, no mutation, no propagation.
-    assert!(!out.is_validated(), "R2: equivocation must reject");
-    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-    assert_eq!(sender.sent_count(), 0, "R2: must not propagate");
-}
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 3));
+    assert!(!out.is_validated(), "R4: equivocation must reject");
 
-#[test]
-fn run142_r3_bad_signature_v2_rejected() {
-    let h = harness(NetworkEnvironment::Mainnet);
-    let dir = tmpdir("r3");
-    let marker_path = authority_state_file_path(&dir);
-    let seq_path = sequence_file_path(&dir);
-    let seq_before = sequence_snapshot(&seq_path);
-    let marker_before = marker_snapshot(&marker_path);
-
-    let mut rat_v2 = v2_ratification_for(&h, 1);
-    rat_v2.signature[0] ^= 0xFF;
-
-    let metrics = Arc::new(P2pMetrics::default());
-    let disp = dispatcher(
-        &h,
-        Arc::clone(&metrics),
-        None,
-        PeerCandidatePropagationConfig::default(),
-        Some(seq_path.clone()),
-        Some(marker_path.clone()),
-        Some(live_v2_rat_config(&h, Some(rat_v2))),
-    );
-    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    let msg = marker_conflict_message(&out);
-    assert!(
-        msg.contains("v2 ratification verifier failure")
-            || msg.contains("Run 132"),
-        "R3: expected Run 130 v2 verifier failure, got: {}",
-        msg
-    );
+    let q = queue.lock();
+    assert!(q.is_empty(), "R4: rejected candidate must NOT stage");
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_r4_wrong_environment_v2_rejected() {
-    let h = harness(NetworkEnvironment::Mainnet);
-    let dir = tmpdir("r4");
-    let marker_path = authority_state_file_path(&dir);
-    let seq_path = sequence_file_path(&dir);
-    let seq_before = sequence_snapshot(&seq_path);
-    let marker_before = marker_snapshot(&marker_path);
-
-    let mut rat_v2 = v2_ratification_for(&h, 1);
-    rat_v2.environment = RatificationEnvironment::Devnet;
-
-    let metrics = Arc::new(P2pMetrics::default());
-    let disp = dispatcher(
-        &h,
-        Arc::clone(&metrics),
-        None,
-        PeerCandidatePropagationConfig::default(),
-        Some(seq_path.clone()),
-        Some(marker_path.clone()),
-        Some(live_v2_rat_config(&h, Some(rat_v2))),
-    );
-    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(!out.is_validated(), "R4: wrong-environment must reject");
-    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-}
-
-#[test]
-fn run142_r5_wrong_chain_v2_rejected() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_r5_bad_signature_candidate_does_not_stage() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("r5");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
@@ -844,8 +867,8 @@ fn run142_r5_wrong_chain_v2_rejected() {
     let marker_before = marker_snapshot(&marker_path);
 
     let mut rat_v2 = v2_ratification_for(&h, 1);
-    rat_v2.chain_id = "0000000000000000".to_string();
-
+    rat_v2.signature[0] ^= 0xFF;
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -855,15 +878,24 @@ fn run142_r5_wrong_chain_v2_rejected() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(!out.is_validated(), "R5: wrong-chain must reject");
+    assert!(!out.is_validated(), "R5: bad signature must reject");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R5: bad-signature candidate must NOT stage");
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_r6_wrong_genesis_v2_rejected() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_r6_wrong_chain_candidate_does_not_stage() {
+    // Run 146 §R6 — "wrong-domain" maps to the broader Run 142 family
+    // of wrong-env/wrong-chain/wrong-genesis ratification rejections.
+    // The validator rejects under the v2 verifier before staging is
+    // ever consulted.
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("r6");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
@@ -871,8 +903,8 @@ fn run142_r6_wrong_genesis_v2_rejected() {
     let marker_before = marker_snapshot(&marker_path);
 
     let mut rat_v2 = v2_ratification_for(&h, 1);
-    rat_v2.genesis_hash = [0xAAu8; 32];
-
+    rat_v2.chain_id = "0000000000000000".to_string();
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -882,15 +914,20 @@ fn run142_r6_wrong_genesis_v2_rejected() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(!out.is_validated(), "R6: wrong-genesis must reject");
+    assert!(!out.is_validated(), "R6: wrong-chain must reject");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R6: rejected candidate must NOT stage");
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_r7_ambiguous_v1_plus_v2_fail_closed() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_r7_ambiguous_v1_plus_v2_candidate_does_not_stage() {
+    let h = harness(NetworkEnvironment::Devnet);
     let dir = tmpdir("r7");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
@@ -899,9 +936,78 @@ fn run142_r7_ambiguous_v1_plus_v2_fail_closed() {
 
     let rat_v1 = v1_ratification_for(&h);
     let rat_v2 = v2_ratification_for(&h, 1);
-
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
     let metrics = Arc::new(P2pMetrics::default());
-    let sender = RecordingSender::with_peers(vec![NodeId::from([9u8; 32])]);
+    let disp = dispatcher(
+        &h,
+        Arc::clone(&metrics),
+        None,
+        PeerCandidatePropagationConfig::default(),
+        Some(seq_path.clone()),
+        Some(marker_path.clone()),
+        Some(live_v1_plus_v2_rat_config(&h, rat_v1, rat_v2)),
+        Some(Arc::clone(&queue)),
+    );
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+    assert!(!out.is_validated(), "R7: ambiguous v1+v2 must reject");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R7: ambiguous candidate must NOT stage");
+    drop(q);
+    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+}
+
+#[test]
+fn run146_r8_propagation_disabled_and_staging_enabled() {
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r8");
+    let marker_path = authority_state_file_path(&dir);
+    let seq_path = sequence_file_path(&dir);
+    let seq_before = sequence_snapshot(&seq_path);
+    let marker_before = marker_snapshot(&marker_path);
+
+    let rat_v2 = v2_ratification_for(&h, 1);
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
+    let sender = RecordingSender::with_peers(vec![NodeId::from([42u8; 32])]);
+    let metrics = Arc::new(P2pMetrics::default());
+    let disp = dispatcher(
+        &h,
+        Arc::clone(&metrics),
+        Some(Arc::clone(&sender)),
+        PeerCandidatePropagationConfig {
+            enabled: false,
+            ..PeerCandidatePropagationConfig::default()
+        },
+        Some(seq_path.clone()),
+        Some(marker_path.clone()),
+        Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
+    );
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+    assert!(out.is_validated(), "R8: validation must accept");
+
+    let q = queue.lock();
+    assert_eq!(q.len(), 1, "R8: candidate must stage");
+    drop(q);
+    assert_eq!(sender.sent_count(), 0, "R8: must NOT propagate");
+    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+}
+
+#[test]
+fn run146_r9_propagation_enabled_and_staging_disabled() {
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r9");
+    let marker_path = authority_state_file_path(&dir);
+    let seq_path = sequence_file_path(&dir);
+    let seq_before = sequence_snapshot(&seq_path);
+    let marker_before = marker_snapshot(&marker_path);
+
+    let rat_v2 = v2_ratification_for(&h, 1);
+    // Disabled queue: validation passes & propagation occurs; queue
+    // remains empty.
+    let queue = new_queue(PeerDrivenStagingPolicy::default());
+    let sender = RecordingSender::with_peers(vec![NodeId::from([55u8; 32])]);
+    let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
         Arc::clone(&metrics),
@@ -912,31 +1018,161 @@ fn run142_r7_ambiguous_v1_plus_v2_fail_closed() {
         },
         Some(seq_path.clone()),
         Some(marker_path.clone()),
-        Some(live_v1_plus_v2_rat_config(&h, rat_v1, rat_v2)),
+        Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    let msg = marker_conflict_message(&out);
-    assert!(
-        msg.contains("ambiguous v1+v2"),
-        "R7: expected ambiguous v1+v2 fail-closed, got: {}",
-        msg
+    assert!(out.is_validated(), "R9: validation must accept");
+
+    let q = queue.lock();
+    assert!(q.is_empty(), "R9: disabled queue must NOT stage");
+    drop(q);
+    assert_eq!(
+        sender.sent_count(),
+        1,
+        "R9: propagation must proceed independent of staging"
     );
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-    assert_eq!(sender.sent_count(), 0, "R7: must not propagate");
 }
 
 #[test]
-fn run142_r8_corrupted_local_marker_fail_closed() {
-    let h = harness(NetworkEnvironment::Mainnet);
-    let dir = tmpdir("r8");
+fn run146_r10_propagation_enabled_and_staging_enabled() {
+    let h = harness(NetworkEnvironment::Devnet);
+
+    // Sub-case 10a — valid candidate: both stage and propagate.
+    {
+        let dir = tmpdir("r10a");
+        let marker_path = authority_state_file_path(&dir);
+        let seq_path = sequence_file_path(&dir);
+        let seq_before = sequence_snapshot(&seq_path);
+        let marker_before = marker_snapshot(&marker_path);
+
+        let rat_v2 = v2_ratification_for(&h, 1);
+        let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
+        let sender = RecordingSender::with_peers(vec![NodeId::from([77u8; 32])]);
+        let metrics = Arc::new(P2pMetrics::default());
+        let disp = dispatcher(
+            &h,
+            Arc::clone(&metrics),
+            Some(Arc::clone(&sender)),
+            PeerCandidatePropagationConfig {
+                enabled: true,
+                ..PeerCandidatePropagationConfig::default()
+            },
+            Some(seq_path.clone()),
+            Some(marker_path.clone()),
+            Some(live_v2_rat_config(&h, Some(rat_v2))),
+            Some(Arc::clone(&queue)),
+        );
+        let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+        assert!(out.is_validated(), "R10a: validation must accept");
+        let q = queue.lock();
+        assert_eq!(q.len(), 1, "R10a: candidate must stage");
+        drop(q);
+        assert_eq!(sender.sent_count(), 1, "R10a: must propagate");
+        assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+    }
+
+    // Sub-case 10b — invalid candidate (bad sig): neither stages nor
+    // propagates.
+    {
+        let dir = tmpdir("r10b");
+        let marker_path = authority_state_file_path(&dir);
+        let seq_path = sequence_file_path(&dir);
+        let seq_before = sequence_snapshot(&seq_path);
+        let marker_before = marker_snapshot(&marker_path);
+
+        let mut rat_v2 = v2_ratification_for(&h, 1);
+        rat_v2.signature[0] ^= 0xFF;
+        let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
+        let sender = RecordingSender::with_peers(vec![NodeId::from([88u8; 32])]);
+        let metrics = Arc::new(P2pMetrics::default());
+        let disp = dispatcher(
+            &h,
+            Arc::clone(&metrics),
+            Some(Arc::clone(&sender)),
+            PeerCandidatePropagationConfig {
+                enabled: true,
+                ..PeerCandidatePropagationConfig::default()
+            },
+            Some(seq_path.clone()),
+            Some(marker_path.clone()),
+            Some(live_v2_rat_config(&h, Some(rat_v2))),
+            Some(Arc::clone(&queue)),
+        );
+        let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+        assert!(!out.is_validated(), "R10b: invalid candidate must reject");
+        let q = queue.lock();
+        assert!(q.is_empty(), "R10b: invalid candidate must NOT stage");
+        drop(q);
+        assert_eq!(sender.sent_count(), 0, "R10b: must NOT propagate");
+        assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+    }
+}
+
+#[test]
+fn run146_r11_queue_bounds_enforced_through_live_hook() {
+    // Tight global cap. Verifies the hook enforces capacity end-to-end.
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r11");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
-
-    // Write corrupt JSON bytes that the loader cannot parse.
-    std::fs::write(&marker_path, b"not-valid-json{").expect("write corrupt");
     let seq_before = sequence_snapshot(&seq_path);
     let marker_before = marker_snapshot(&marker_path);
-    assert!(marker_before.is_some());
+
+    let mut policy = PeerDrivenStagingPolicy::devnet_enabled();
+    policy.max_staged_candidates = 2;
+    policy.max_candidates_per_peer = 2;
+    let queue = new_queue(policy);
+
+    // Dispatch three distinct candidates (sequences 1, 2, 3). Each
+    // requires its own ratification + a fresh dispatcher build because
+    // the live ratification context is per-dispatcher.
+    let mut staged_count = 0usize;
+    for seq in [1u64, 2, 3] {
+        let rat_v2 = v2_ratification_for(&h, seq);
+        let metrics = Arc::new(P2pMetrics::default());
+        let disp = dispatcher(
+            &h,
+            Arc::clone(&metrics),
+            None,
+            PeerCandidatePropagationConfig::default(),
+            Some(seq_path.clone()),
+            Some(marker_path.clone()),
+            Some(live_v2_rat_config(&h, Some(rat_v2))),
+            Some(Arc::clone(&queue)),
+        );
+        let out = disp.dispatch_frame_for_test(&valid_frame(&h, seq));
+        if out.is_validated() {
+            staged_count += 1;
+        }
+    }
+    assert!(staged_count >= 2, "R11: at least 2 frames must validate");
+
+    let q = queue.lock();
+    assert!(
+        q.len() <= 2,
+        "R11: queue length must respect cap=2, got {}",
+        q.len()
+    );
+    drop(q);
+    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
+}
+
+#[test]
+fn run146_r12_ttl_expiry_through_live_hook() {
+    // Stage one candidate, advance "now" past TTL via purge_expired,
+    // confirm the staged entry is unavailable.
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r12");
+    let marker_path = authority_state_file_path(&dir);
+    let seq_path = sequence_file_path(&dir);
+    let seq_before = sequence_snapshot(&seq_path);
+    let marker_before = marker_snapshot(&marker_path);
+
+    let mut policy = PeerDrivenStagingPolicy::devnet_enabled();
+    policy.ttl_secs = 60;
+    let queue = new_queue(policy);
 
     let rat_v2 = v2_ratification_for(&h, 1);
     let metrics = Arc::new(P2pMetrics::default());
@@ -948,25 +1184,40 @@ fn run142_r8_corrupted_local_marker_fail_closed() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v2_rat_config(&h, Some(rat_v2))),
+        Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(!out.is_validated(), "R8: corrupt marker must fail-closed");
-    // Corrupt bytes preserved verbatim.
+    assert!(out.is_validated(), "R12: must validate before TTL");
+    {
+        let q = queue.lock();
+        assert_eq!(q.len(), 1, "R12: candidate is staged");
+    }
+
+    // Advance well past TTL and sweep.
+    let mut q = queue.lock();
+    let staged_at = q.entries()[0].staged_at_unix_secs;
+    let purged = q.purge_expired(staged_at + 10_000);
+    assert_eq!(purged, 1, "R12: expired entry must be swept");
+    assert!(q.is_empty(), "R12: queue empty after TTL sweep");
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_r9_v1_live_inbound_regression_unchanged() {
-    let h = harness(NetworkEnvironment::Mainnet);
-    let dir = tmpdir("r9");
+fn run146_r13_v1_live_inbound_regression_unchanged() {
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("r13");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
     let seq_before = sequence_snapshot(&seq_path);
     let marker_before = marker_snapshot(&marker_path);
 
-    // v1 sidecar, no v2. Should take the existing Run 109 v1 path and
-    // pass validation exactly as before Run 142.
+    // v1 sidecar, no v2. The Run 109 v1 path validates; the dispatcher's
+    // marker-conflict derivation runs the v1 enforcer. We confirm that
+    // when staging is disabled (default policy), v1 behavior is exactly
+    // unchanged.
     let rat_v1 = v1_ratification_for(&h);
+    let queue = new_queue(PeerDrivenStagingPolicy::default());
     let metrics = Arc::new(P2pMetrics::default());
     let disp = dispatcher(
         &h,
@@ -976,23 +1227,26 @@ fn run142_r9_v1_live_inbound_regression_unchanged() {
         Some(seq_path.clone()),
         Some(marker_path.clone()),
         Some(live_v1_rat_config(&h, Some(&rat_v1))),
+        Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
     assert!(
         out.is_validated(),
-        "R9: v1 live inbound regression must remain unchanged, got {:?}",
+        "R13: v1 live inbound regression must remain unchanged, got {:?}",
         out
     );
+    let q = queue.lock();
+    assert!(q.is_empty(), "R13: disabled policy does not stage v1");
+    drop(q);
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
 #[test]
-fn run142_r10_no_sidecar_legacy_live_inbound_regression_unchanged() {
-    // DevNet without operator opt-in → ratification gate is SKIP →
-    // pre-Run-109 legacy unguarded path. Run 142 must not fabricate a
-    // v2 marker, must not invoke v2 helpers, and must not mutate.
+fn run146_r14_legacy_no_sidecar_regression_unchanged() {
+    // No ratification context, no staging queue → exactly the
+    // pre-Run-146 legacy unguarded path.
     let h = harness(NetworkEnvironment::Devnet);
-    let dir = tmpdir("r10");
+    let dir = tmpdir("r14");
     let marker_path = authority_state_file_path(&dir);
     let seq_path = sequence_file_path(&dir);
     let seq_before = sequence_snapshot(&seq_path);
@@ -1006,226 +1260,61 @@ fn run142_r10_no_sidecar_legacy_live_inbound_regression_unchanged() {
         PeerCandidatePropagationConfig::default(),
         Some(seq_path.clone()),
         Some(marker_path.clone()),
-        None, // no live ratification context at all
+        None, // no ratification context
+        None, // no staging queue
     );
     assert!(!disp.ratification_gate_is_invoked());
+    assert!(!disp.staging_hook_is_armed());
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
     assert!(
         out.is_validated(),
-        "R10: legacy unguarded path must remain unchanged"
+        "R14: legacy unguarded path must remain unchanged"
     );
     assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }
 
-#[test]
-fn run142_r11_propagation_only_v2_interaction() {
-    let h = harness(NetworkEnvironment::Mainnet);
-
-    // Sub-case 11a: propagation disabled, valid v2 candidate → no rebroadcast.
-    {
-        let dir = tmpdir("r11a");
-        let marker_path = authority_state_file_path(&dir);
-        let seq_path = sequence_file_path(&dir);
-        let seq_before = sequence_snapshot(&seq_path);
-        let marker_before = marker_snapshot(&marker_path);
-        let rat_v2 = v2_ratification_for(&h, 1);
-        let metrics = Arc::new(P2pMetrics::default());
-        let sender = RecordingSender::with_peers(vec![NodeId::from([10u8; 32])]);
-        let disp = dispatcher(
-            &h,
-            Arc::clone(&metrics),
-            Some(Arc::clone(&sender)),
-            PeerCandidatePropagationConfig {
-                enabled: false,
-                ..PeerCandidatePropagationConfig::default()
-            },
-            Some(seq_path.clone()),
-            Some(marker_path.clone()),
-            Some(live_v2_rat_config(&h, Some(rat_v2))),
-        );
-        let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-        assert!(out.is_validated(), "R11a: valid v2 must validate");
-        assert_eq!(sender.sent_count(), 0, "R11a: propagation disabled");
-        assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-    }
-
-    // Sub-case 11b: propagation enabled, valid v2 candidate → rebroadcasts
-    // ONLY after validation passes. No apply, no marker write, no
-    // sequence write either way.
-    {
-        let dir = tmpdir("r11b");
-        let marker_path = authority_state_file_path(&dir);
-        let seq_path = sequence_file_path(&dir);
-        let seq_before = sequence_snapshot(&seq_path);
-        let marker_before = marker_snapshot(&marker_path);
-        let rat_v2 = v2_ratification_for(&h, 1);
-        let metrics = Arc::new(P2pMetrics::default());
-        let sender = RecordingSender::with_peers(vec![NodeId::from([11u8; 32])]);
-        let disp = dispatcher(
-            &h,
-            Arc::clone(&metrics),
-            Some(Arc::clone(&sender)),
-            PeerCandidatePropagationConfig {
-                enabled: true,
-                ..PeerCandidatePropagationConfig::default()
-            },
-            Some(seq_path.clone()),
-            Some(marker_path.clone()),
-            Some(live_v2_rat_config(&h, Some(rat_v2))),
-        );
-        let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-        assert!(out.is_validated(), "R11b: valid v2 must validate");
-        assert_eq!(
-            sender.sent_count(),
-            1,
-            "R11b: valid v2 rebroadcasts exactly once"
-        );
-        assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-    }
-
-    // Sub-case 11c: propagation enabled, INVALID v2 candidate (bad sig) →
-    // never rebroadcasts. No apply, no mutation.
-    {
-        let dir = tmpdir("r11c");
-        let marker_path = authority_state_file_path(&dir);
-        let seq_path = sequence_file_path(&dir);
-        let seq_before = sequence_snapshot(&seq_path);
-        let marker_before = marker_snapshot(&marker_path);
-        let mut rat_v2 = v2_ratification_for(&h, 1);
-        rat_v2.signature[0] ^= 0xFF;
-        let metrics = Arc::new(P2pMetrics::default());
-        let sender = RecordingSender::with_peers(vec![NodeId::from([12u8; 32])]);
-        let disp = dispatcher(
-            &h,
-            Arc::clone(&metrics),
-            Some(Arc::clone(&sender)),
-            PeerCandidatePropagationConfig {
-                enabled: true,
-                ..PeerCandidatePropagationConfig::default()
-            },
-            Some(seq_path.clone()),
-            Some(marker_path.clone()),
-            Some(live_v2_rat_config(&h, Some(rat_v2))),
-        );
-        let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-        assert!(!out.is_validated(), "R11c: invalid v2 must reject");
-        assert_eq!(
-            sender.sent_count(),
-            0,
-            "R11c: invalid v2 must NEVER rebroadcast"
-        );
-        assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
-    }
-}
-
 // =====================================================================
-// Local peer-candidate-check parity — Run 142 §4
+// Late-install via set_staging_queue — the Run 147 production wiring
+// path will install the queue after dispatcher construction (e.g. once
+// CLI flags are resolved). Verify this path is observable and behaves
+// identically to constructor-installation.
 // =====================================================================
-//
-// The live inbound `0x05` v2 validation outcome must match the local
-// peer-candidate-check v2 decision (the
-// `verify_marker_for_validation_only_v2` helper) for the same candidate.
-// This test asserts both surfaces agree on accept and reject for the
-// same fixture.
 
 #[test]
-fn run142_local_peer_candidate_check_parity_accepts_and_rejects_match() {
-    let h = harness(NetworkEnvironment::Mainnet);
+fn run146_late_install_set_staging_queue_arms_hook() {
+    let h = harness(NetworkEnvironment::Devnet);
+    let dir = tmpdir("late");
+    let marker_path = authority_state_file_path(&dir);
+    let seq_path = sequence_file_path(&dir);
+    let seq_before = sequence_snapshot(&seq_path);
+    let marker_before = marker_snapshot(&marker_path);
 
-    // Accept case parity.
-    {
-        let dir = tmpdir("parity-accept");
-        let marker_path = authority_state_file_path(&dir);
-        let rat_v2 = v2_ratification_for(&h, 1);
-        let ratified = qbind_ledger::verify_bundle_signing_key_ratification_v2(
-            qbind_ledger::RatificationV2VerifierInputs {
-                ratification: &rat_v2,
-                authority: h.genesis_cfg.authority.as_ref().expect("authority"),
-                expected_chain_id: &h.chain_id_str,
-                expected_environment: env_policy(h.env),
-                expected_genesis_hash: &h.canonical_hash,
-            },
-        )
-        .expect("local v2 verifier must accept");
+    let rat_v2 = v2_ratification_for(&h, 1);
+    let metrics = Arc::new(P2pMetrics::default());
+    let mut disp = dispatcher(
+        &h,
+        Arc::clone(&metrics),
+        None,
+        PeerCandidatePropagationConfig::default(),
+        Some(seq_path.clone()),
+        Some(marker_path.clone()),
+        Some(live_v2_rat_config(&h, Some(rat_v2))),
+        None, // no queue at construction time
+    );
+    assert!(!disp.staging_hook_is_armed(), "no queue installed yet");
 
-        let mut hash_hex = String::with_capacity(64);
-        for b in h.canonical_hash {
-            use std::fmt::Write;
-            let _ = write!(hash_hex, "{:02x}", b);
-        }
-        let local = verify_marker_for_validation_only_v2(ValidationOnlyMarkerV2Inputs {
-            marker_path: &marker_path,
-            runtime_env: h.env,
-            runtime_chain_id: h.env.chain_id(),
-            runtime_genesis_hash_hex: &hash_hex,
-            ratification: &rat_v2,
-            ratified: &ratified,
-        });
-        assert!(local.is_ok(), "local Run 132 surface accepts");
+    // Late install — the Run 147 production wiring path.
+    let queue = new_queue(PeerDrivenStagingPolicy::devnet_enabled());
+    disp.set_staging_queue(Arc::clone(&queue));
+    assert!(
+        disp.staging_hook_is_armed(),
+        "late install must arm the hook"
+    );
 
-        let metrics = Arc::new(P2pMetrics::default());
-        let disp = dispatcher(
-            &h,
-            metrics,
-            None,
-            PeerCandidatePropagationConfig::default(),
-            None,
-            Some(marker_path),
-            Some(live_v2_rat_config(&h, Some(rat_v2))),
-        );
-        let wire_out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-        assert!(
-            wire_out.is_validated(),
-            "live `0x05` v2 surface accepts same candidate"
-        );
-    }
-
-    // Reject case parity: lower-sequence v2 candidate.
-    {
-        let dir = tmpdir("parity-reject");
-        let marker_path = authority_state_file_path(&dir);
-        preseed_v2_marker(&h, &marker_path, &v2_ratification_for(&h, 5));
-
-        let rat_v2_low = v2_ratification_for(&h, 2);
-        let ratified = qbind_ledger::verify_bundle_signing_key_ratification_v2(
-            qbind_ledger::RatificationV2VerifierInputs {
-                ratification: &rat_v2_low,
-                authority: h.genesis_cfg.authority.as_ref().expect("authority"),
-                expected_chain_id: &h.chain_id_str,
-                expected_environment: env_policy(h.env),
-                expected_genesis_hash: &h.canonical_hash,
-            },
-        )
-        .expect("verifier accepts (it's the marker compare that rejects)");
-        let mut hash_hex = String::with_capacity(64);
-        for b in h.canonical_hash {
-            use std::fmt::Write;
-            let _ = write!(hash_hex, "{:02x}", b);
-        }
-        let local = verify_marker_for_validation_only_v2(ValidationOnlyMarkerV2Inputs {
-            marker_path: &marker_path,
-            runtime_env: h.env,
-            runtime_chain_id: h.env.chain_id(),
-            runtime_genesis_hash_hex: &hash_hex,
-            ratification: &rat_v2_low,
-            ratified: &ratified,
-        });
-        assert!(local.is_err(), "local Run 132 surface rejects");
-
-        let metrics = Arc::new(P2pMetrics::default());
-        let disp = dispatcher(
-            &h,
-            metrics,
-            None,
-            PeerCandidatePropagationConfig::default(),
-            None,
-            Some(marker_path),
-            Some(live_v2_rat_config(&h, Some(rat_v2_low))),
-        );
-        let wire_out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-        assert!(
-            !wire_out.is_validated(),
-            "live `0x05` v2 surface rejects same candidate"
-        );
-    }
+    let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
+    assert!(out.is_validated(), "late install: validation must accept");
+    let q = queue.lock();
+    assert_eq!(q.len(), 1, "late install: candidate must stage");
+    drop(q);
+    assert_no_mutation(&seq_path, seq_before, &marker_path, marker_before);
 }

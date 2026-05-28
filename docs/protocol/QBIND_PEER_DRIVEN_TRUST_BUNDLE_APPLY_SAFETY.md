@@ -477,3 +477,92 @@ Remaining open phases of this specification after Run 145:
 
 Run 145 does not change any invariant from §3, §4, or §7 of this
 document. Full C4 remains OPEN. C5 remains OPEN.
+## 12. Run 146 progress entry — Phase 2 staging-queue wired into live inbound `0x05` (source/test wiring only)
+
+Run 146 wires the Run 145 `PeerCandidateStagingQueue` into the
+**live inbound P2P `0x05` validation-only receive path** behind an
+explicit **disabled-by-default** local policy gate, and adds a
+focused acceptance suite (`run_146_live_inbound_0x05_staging_hook_tests.rs`,
+19 tests, A1–A4 + R1–R14) that proves staging never mutates live
+trust state under any code path.
+
+What Run 146 lands:
+
+* `LivePeerCandidateWireDispatcher` and
+  `LivePeerCandidateWireDispatcherConfig` gain an optional
+  `staging_queue: Option<Arc<Mutex<PeerCandidateStagingQueue>>>`
+  field, defaulting to `None`. When `None`, the dispatcher is
+  bit-for-bit Run 143.
+* New runtime accessors `set_staging_queue`, `staging_queue`, and
+  `staging_hook_is_armed` provide a late-install path for the
+  future Run 147 production wiring.
+* A new private helper `maybe_stage_after_validation` is invoked
+  inside `dispatch_frame_from_peer_for_test` **after** the Run 142
+  v2-marker conflict check and the Run 123 v1-marker conflict check,
+  and **before** `maybe_propagate_after_validation`. It forwards
+  only `PeerCandidateOutcome::Validated(_)` outcomes to
+  `PeerCandidateStagingQueue::try_stage_outcome`.
+* The Run 145 queue's `PeerDrivenStagingPolicy` continues to enforce
+  disabled-by-default semantics, **MainNet refusal even when
+  `enabled = true` and `allow_mainnet = true`**, per-peer and global
+  capacity bounds with reject-new eviction, deduplication, and TTL
+  expiry. Run 146 adds no enforcement at the dispatcher layer.
+
+Phase 2 status after Run 146:
+
+* §6 Phase 2 (validation-only staging without apply) — **landed in
+  source and reachable from the live inbound `0x05` receive path
+  when an operator installs a staging queue with `enabled = true`.**
+  The release-binary default behaviour is unchanged (no queue is
+  installed by default; dispatcher behaves identically to Run 143).
+* §6 Phase 3 (DevNet peer-driven apply behind a hidden flag) —
+  deferred to Run 147+.
+* §6 Phase 4 (TestNet / MainNet hardening) — out of scope of
+  Runs 145, 146.
+
+What Run 146 explicitly **does not** do:
+
+* Run 146 does **not** call Run 070 apply from the staging hook
+  under any condition.
+* Run 146 does **not** mutate `LivePqcTrustState`, the trust-bundle
+  sequence file, the authority-marker file, sessions, reload-apply
+  state, or SIGHUP state.
+* Run 146 does **not** add a CLI flag. A future Run 147 entry point
+  may parse a hidden `--p2p-trust-bundle-peer-candidate-staging-*`
+  family and call `set_staging_queue` at startup.
+* Run 146 does **not** add, rename, or remove any metric family.
+* Run 146 does **not** weaken any §3 / §4 / §7 invariant.
+* Run 146 does **not** weaken Run 109/123/142 validation,
+  Run 088 propagation, or Run 070 apply ordering.
+* Run 146 does **not** produce release-binary staging evidence.
+  Release-binary staging evidence is deferred to Run 147.
+
+Acceptance evidence:
+
+* `crates/qbind-node/tests/run_146_live_inbound_0x05_staging_hook_tests.rs`
+  — 19 tests covering A1–A4, R1–R14, plus a late-install regression.
+  All green.
+* Regression suites verified green after Run 146: `run_145` (20),
+  `run_142` (16), `run_088` (5), `run_079`, `run_109`, `run_134` (5),
+  `run_138` (11), `qbind-node --lib pqc_authority` (148).
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_146.md` records the
+  source/test wiring evidence and the documented honest Run 147
+  release-binary trigger plan.
+
+Remaining open phases of this specification after Run 146:
+
+* **Run 147** — release-binary staging evidence (hidden DevNet-only
+  flag installs the queue at startup; real `0x05` frames; no
+  mutation; documented operator log lines) **and / or** source/test
+  DevNet-only peer-driven apply behind a hidden DevNet-only CLI
+  flag using the existing Run 070 apply contract (MainNet refused at
+  flag-bind).
+* **Run 148** — release-binary DevNet-only peer-driven apply evidence
+  proving apply, post-commit marker persistence, session-eviction
+  ordering, and Run 070 rollback behaviour.
+* **Run 149+** — governance / ratification / KMS / HSM hardening
+  before any TestNet / MainNet claim.
+
+Run 146 does not change any invariant from §3, §4, or §7 of this
+specification, and does not change any invariant from Run 145's §11
+progress entry.

@@ -126,6 +126,7 @@ use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p::NodeId;
+use crate::pqc_peer_candidate_staging::{PeerCandidateStagingQueue, StagingOutcome};
 use crate::pqc_ratification_policy::RatificationGateDecision;
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
@@ -994,6 +995,29 @@ pub struct LivePeerCandidateWireDispatcher {
     /// Run 123 — optional authority-marker file path for validation-only
     /// conflict checks. See [`LivePeerCandidateWireDispatcherConfig::authority_marker_path`].
     authority_marker_path: Option<PathBuf>,
+    /// Run 146 — optional non-applying peer-candidate staging queue.
+    /// When `Some`, validated outcomes (after the v2/v1 marker
+    /// conflict checks) are forwarded to the queue's
+    /// `try_stage_validated` for **non-authoritative** recording.
+    /// When `None`, behavior is identical to the Run 143
+    /// validation-only / propagation-only path.
+    ///
+    /// **Invariants (Run 146):**
+    ///
+    /// * The hook never calls Run 070 apply.
+    /// * The hook never mutates [`crate::pqc_live_trust::LivePqcTrustState`].
+    /// * The hook never writes the sequence file.
+    /// * The hook never writes the authority-marker file.
+    /// * The hook never evicts P2P / KEMTLS sessions.
+    /// * The hook never invokes SIGHUP / reload-apply.
+    /// * The hook never causes propagation; propagation is independently
+    ///   gated by [`PeerCandidatePropagationConfig`].
+    /// * Invalid / rejected / rate-limited / oversize / disabled /
+    ///   duplicate-suppressed outcomes never reach
+    ///   `try_stage_validated` — only `Validated(_)` is forwarded.
+    /// * The queue's own `PeerDrivenStagingPolicy` enforces
+    ///   MainNet refusal and disabled-by-default semantics.
+    staging_queue: Option<Arc<Mutex<PeerCandidateStagingQueue>>>,
 }
 
 impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
@@ -1024,6 +1048,10 @@ impl std::fmt::Debug for LivePeerCandidateWireDispatcher {
             .field(
                 "authority_marker_path",
                 &self.authority_marker_path,
+            )
+            .field(
+                "staging_queue_installed",
+                &self.staging_queue.is_some(),
             )
             .finish()
     }
@@ -1108,6 +1136,17 @@ pub struct LivePeerCandidateWireDispatcherConfig {
     /// **never** written by the dispatcher (validation-only contract).
     /// When `None`, no marker check is performed (pre-Run-123 behavior).
     pub authority_marker_path: Option<PathBuf>,
+    /// Run 146 — optional non-applying peer-candidate staging queue
+    /// handle. When `Some`, validation-accepted candidates (after the
+    /// v2/v1 marker conflict checks) are forwarded to
+    /// [`PeerCandidateStagingQueue::try_stage_validated`] for
+    /// **non-authoritative** recording. When `None`, behavior remains
+    /// bit-for-bit Run 143 validation-only / propagation-only. The
+    /// queue's own [`crate::pqc_peer_candidate_staging::PeerDrivenStagingPolicy`]
+    /// is disabled by default and refuses MainNet unconditionally. The
+    /// dispatcher does **not** itself apply, propagate, persist, or
+    /// mutate any trust state as a result of staging.
+    pub staging_queue: Option<Arc<Mutex<PeerCandidateStagingQueue>>>,
 }
 
 /// Run 109 — owned ratification context for live inbound
@@ -1242,6 +1281,7 @@ impl LivePeerCandidateWireDispatcher {
             clock_ms_fn,
             live_ratification: config.live_ratification,
             authority_marker_path: config.authority_marker_path,
+            staging_queue: config.staging_queue,
         }
     }
     pub fn is_enabled(&self) -> bool {
@@ -1273,6 +1313,52 @@ impl LivePeerCandidateWireDispatcher {
     /// master switch.
     pub fn set_propagation_sender(&self, sender: Arc<dyn PeerCandidateWireFrameSender>) {
         *self.propagation_sender.lock() = Some(sender);
+    }
+
+    /// Run 146 — install or replace the non-applying peer-candidate
+    /// staging queue handle after dispatcher construction. The queue
+    /// remains disabled-by-default unless the operator constructs it
+    /// with an explicit
+    /// [`crate::pqc_peer_candidate_staging::PeerDrivenStagingPolicy`]
+    /// that has `enabled = true` AND the matching environment
+    /// `allow_*` switch set. MainNet is refused unconditionally by
+    /// the queue itself even with `allow_mainnet = true`.
+    ///
+    /// Installing a staging queue does **not** change validation,
+    /// propagation, or apply behavior. The hook is end-of-line for
+    /// staging: it records non-authoritative metadata only.
+    pub fn set_staging_queue(&mut self, queue: Arc<Mutex<PeerCandidateStagingQueue>>) {
+        self.staging_queue = Some(queue);
+    }
+
+    /// Run 146 — borrow the installed staging queue handle, if any.
+    /// Tests use this to inspect the queue contents after dispatch.
+    pub fn staging_queue(&self) -> Option<&Arc<Mutex<PeerCandidateStagingQueue>>> {
+        self.staging_queue.as_ref()
+    }
+
+    /// Run 146 — `true` iff a staging queue has been installed AND its
+    /// own policy currently accepts new candidates (master enable
+    /// switch is on and the runtime environment is permitted). When
+    /// `false`, [`Self::dispatch_frame_for_test`] never calls
+    /// [`PeerCandidateStagingQueue::try_stage_validated`].
+    pub fn staging_hook_is_armed(&self) -> bool {
+        self.staging_queue
+            .as_ref()
+            .map(|q| {
+                let queue = q.lock();
+                let policy = queue.policy();
+                if !policy.enabled {
+                    return false;
+                }
+                match policy.environment {
+                    qbind_types::NetworkEnvironment::Devnet => policy.allow_devnet,
+                    qbind_types::NetworkEnvironment::Testnet => policy.allow_testnet,
+                    // MainNet is refused unconditionally by the queue.
+                    qbind_types::NetworkEnvironment::Mainnet => false,
+                }
+            })
+            .unwrap_or(false)
     }
 
     /// Test-grade synchronous dispatch entry point. Returns the
@@ -1448,6 +1534,19 @@ impl LivePeerCandidateWireDispatcher {
         // `maybe_propagate_after_validation` observes a non-Validated outcome
         // and suppresses rebroadcast. The marker file is NEVER written.
         let outcome = self.maybe_reject_on_marker_conflict(outcome);
+
+        // Run 146 — non-applying peer-candidate staging hook. Runs AFTER
+        // validation acceptance, AFTER v2/v1 authority-marker conflict
+        // checks, and BEFORE propagation eligibility. Forwards ONLY
+        // `Validated(_)` outcomes; rejected / oversize / rate-limited /
+        // duplicate-suppressed / disabled outcomes are filtered upstream
+        // by `try_stage_outcome`. The staging queue itself enforces
+        // disabled-by-default semantics, MainNet refusal, capacity
+        // bounds, deduplication, and TTL. This call is non-mutating w.r.t.
+        // live trust state, the sequence file, the authority marker, P2P
+        // sessions, and reload-apply/SIGHUP — it only records
+        // non-authoritative metadata in an in-memory queue.
+        self.maybe_stage_after_validation(now_ms, &outcome);
 
         self.maybe_propagate_after_validation(frame, source_peer, now_ms, &outcome);
         outcome
@@ -1740,6 +1839,146 @@ impl LivePeerCandidateWireDispatcher {
                         ),
                     ),
                 )
+            }
+        }
+    }
+
+    /// Run 146 — non-applying peer-candidate staging hook. Invoked once
+    /// per `dispatch_frame_from_peer_for_test` call, AFTER validation
+    /// acceptance and AFTER the v2/v1 authority-marker conflict checks,
+    /// and BEFORE [`Self::maybe_propagate_after_validation`].
+    ///
+    /// Strict contract:
+    ///
+    /// * **No staging if no queue is installed.** When
+    ///   `self.staging_queue.is_none()`, this is a zero-cost early
+    ///   return that preserves bit-for-bit Run 143 validation-only /
+    ///   propagation-only behavior.
+    /// * **No staging on non-`Validated` outcomes.** Invalid /
+    ///   rejected / rate-limited / oversize / disabled /
+    ///   duplicate-suppressed outcomes are filtered out by
+    ///   [`PeerCandidateStagingQueue::try_stage_outcome`], so they
+    ///   never reach `try_stage_validated`.
+    /// * **No staging when policy is disabled or environment refused.**
+    ///   The queue's own `PeerDrivenStagingPolicy` enforces this.
+    ///   MainNet is refused unconditionally.
+    /// * **No apply.** The hook does not call Run 070
+    ///   `apply_validated_candidate*`.
+    /// * **No mutation of `LivePqcTrustState`.**
+    /// * **No write to `pqc_trust_bundle_sequence.json`.**
+    /// * **No write to `pqc_authority_state.json`.**
+    /// * **No session eviction.**
+    /// * **No SIGHUP / reload-apply invocation.**
+    /// * **No propagation.** The propagation eligibility decision is
+    ///   independently gated by
+    ///   [`PeerCandidatePropagationConfig::enabled`] and is unaffected
+    ///   by the staging hook.
+    ///
+    /// The `authority_marker_digest` slot in the staged record is
+    /// derived from the validated outcome's authority-marker digest
+    /// field when present; the staging queue contributes this digest
+    /// to its dedup key so byte-identical resubmissions return
+    /// `AlreadyStaged` rather than growing the queue.
+    fn maybe_stage_after_validation(
+        &self,
+        now_ms: u64,
+        outcome: &PeerCandidateWireOutcome,
+    ) {
+        let queue = match self.staging_queue.as_ref() {
+            Some(q) => q,
+            None => return,
+        };
+        // Wall-clock seconds for the staging TTL. Derived from the
+        // dispatcher's monotonic-millisecond clock so deterministic
+        // test clocks remain deterministic.
+        let now_unix_secs = now_ms / 1_000;
+        // Derive an authority-marker digest fingerprint from the
+        // validated outcome, if any. Currently we fingerprint the
+        // validated bundle's `fingerprint_hex` plus its declared
+        // sequence — this is the same dedup signal the validation
+        // path produces, and it is stable across byte-identical
+        // resubmissions. A future Run 147 production wiring may
+        // substitute the persisted authority-marker file digest here
+        // without changing the staging-queue API.
+        let marker_digest: Option<String> = match outcome {
+            PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::Validated(v)) => {
+                Some(format!(
+                    "fp={};seq={}",
+                    v.validated.fingerprint_hex, v.validated.sequence
+                ))
+            }
+            _ => None,
+        };
+        let mut q = queue.lock();
+        let staging_outcome = q.try_stage_outcome(outcome, marker_digest, now_unix_secs);
+        // Operator-log line. Single source of truth for the Run 146
+        // "staged / already-staged / refused" boundary, mirroring the
+        // Run 088 propagation log line style.
+        match staging_outcome {
+            StagingOutcome::Staged {
+                ref fingerprint_prefix,
+                sequence,
+            } => {
+                eprintln!(
+                    "[binary] Run 146: peer-candidate validated and STAGED \
+                     (non-applying, non-authoritative); NOT applied; sequence \
+                     not persisted; live trust unchanged; sessions untouched; \
+                     authority marker NOT written; candidate_fp={}.. sequence={}",
+                    fingerprint_prefix, sequence
+                );
+            }
+            StagingOutcome::AlreadyStaged {
+                ref fingerprint_prefix,
+                sequence,
+            } => {
+                eprintln!(
+                    "[binary] Run 146: peer-candidate validated but already \
+                     staged (dedup hit); NOT applied; sequence not persisted; \
+                     live trust unchanged; sessions untouched; authority \
+                     marker NOT written; candidate_fp={}.. sequence={}",
+                    fingerprint_prefix, sequence
+                );
+            }
+            StagingOutcome::RefusedDisabled => {
+                // Disabled-by-default is the normal case — log only at
+                // verbose level to avoid log noise. Run 146 keeps it
+                // observable for evidence harnesses.
+                eprintln!(
+                    "[binary] Run 146: peer-candidate validated; staging \
+                     hook refused (policy disabled); NOT applied; sequence \
+                     not persisted; live trust unchanged; sessions untouched."
+                );
+            }
+            StagingOutcome::RefusedEnvironmentPolicy => {
+                eprintln!(
+                    "[binary] Run 146: peer-candidate validated; staging \
+                     hook refused (environment policy: MainNet refused / \
+                     allow_* flag false); NOT applied; sequence not \
+                     persisted; live trust unchanged; sessions untouched."
+                );
+            }
+            StagingOutcome::RefusedNotValidated => {
+                // Not a Validated outcome — staging hook is end-of-line
+                // for non-validated material. No log line (the
+                // upstream validator already logged the rejection).
+            }
+            StagingOutcome::RefusedGlobalCapacity { cap } => {
+                eprintln!(
+                    "[binary] Run 146: peer-candidate validated; staging \
+                     hook refused (global queue cap={} reached, reject-new); \
+                     NOT applied; sequence not persisted; live trust \
+                     unchanged; sessions untouched.",
+                    cap
+                );
+            }
+            StagingOutcome::RefusedPerPeerCapacity { cap } => {
+                eprintln!(
+                    "[binary] Run 146: peer-candidate validated; staging \
+                     hook refused (per-peer cap={} reached, reject-new); \
+                     NOT applied; sequence not persisted; live trust \
+                     unchanged; sessions untouched.",
+                    cap
+                );
             }
         }
     }
@@ -2709,6 +2948,7 @@ mod tests {
             propagation_sender: None,
             live_ratification: None,
             authority_marker_path: None,
+            staging_queue: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(!disp.is_enabled());
@@ -2751,6 +2991,7 @@ mod tests {
             propagation_sender: None,
             live_ratification: None,
             authority_marker_path: None,
+            staging_queue: None,
         };
         let disp = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
         assert!(disp.is_enabled());
@@ -2802,6 +3043,7 @@ mod tests {
             propagation_sender: None,
             live_ratification: None,
             authority_marker_path: None,
+            staging_queue: None,
         };
         let disp = LivePeerCandidateWireDispatcher::with_clock(
             cfg,

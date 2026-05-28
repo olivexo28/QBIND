@@ -2910,3 +2910,62 @@ Run 144; reaffirmed by Run 145).** Peer-driven live trust-bundle
 apply, signing-key rotation / revocation lifecycle, KMS / HSM
 authority-key custody, MainNet governance attestation, validator-set
 rotation, full C4 closure, and C5 closure all remain out of scope.
+## Run 146 — Peer-driven trust-bundle apply: Phase 2 staging queue wired into live inbound `0x05` (source/test wiring only)
+
+Run 146 wires the Run 145 non-applying `PeerCandidateStagingQueue`
+into the **live inbound `0x05` validation-only receive path** behind
+an explicit **disabled-by-default** local policy gate. A running node
+can now stage already-validated peer candidates in memory without
+applying them, observed via the queue's `entries()` accessor.
+
+The Run 146 wiring does not change any existing authority-model
+invariant. In particular:
+
+* The dispatcher's optional `staging_queue` field defaults to `None`;
+  when `None`, behaviour is bit-for-bit identical to Run 143.
+* The new `maybe_stage_after_validation` hook runs **after** both
+  v2 (Run 142) and v1 (Run 123) marker conflict checks and **before**
+  Run 088 propagation, so only fully-accepted `Validated(_)` outcomes
+  ever reach the queue. Invalid candidates are filtered to
+  `RefusedNotValidated` by `try_stage_outcome` itself.
+* Staging performs no Run 070 apply call, no `LivePqcTrustState`
+  swap, no sequence-file write, no authority-marker write, no
+  session eviction, no SIGHUP, no reload-apply, and no propagation
+  side effect.
+
+The authority bar for each environment is unchanged from Run 145:
+
+* **DevNet / TestNet** — peer-driven staging may be **enabled by
+  operator policy** (`PeerDrivenStagingPolicy.enabled = true`); even
+  then, **no apply** occurs — the queue is observation only.
+* **MainNet** — **REFUSED unconditionally** by the Run 145 queue,
+  irrespective of the local policy's `enabled` / `allow_mainnet`
+  flags. Run 146 does not weaken this barrier in any path.
+
+Run 146 introduces no new wire format, no new on-disk schema, no new
+metric family, and no CLI flag. The dispatcher's
+`LivePeerCandidateWireDispatcherConfig::staging_queue` field is
+additive (`Option<_>`); all pre-Run-146 dispatcher initializers
+construct `staging_queue: None` and exercise the Run 143
+validation-only / propagation-only path verbatim.
+
+Crosscheck performed against Runs 050–145 invariants: Run 146
+introduces no contradictions because the staging hook is dead code
+when `staging_queue = None` (the default for the release binary in
+Run 146), and even when armed it performs no mutation. Every
+Run 050–145 invariant remains intact, including Run 055
+anti-rollback, Run 065/091 activation gates, Run 070 apply ordering,
+Run 076/079/088 envelope/propagation discipline, Run 109/123 v1
+enforcement, Run 130/131 v2 verifier and marker primitives,
+Run 132/142 validation-only paths, Run 134/136/138 post-commit marker
+discipline, Run 140/141 snapshot/restore parity, the Run 144
+six-phase fail-closed pipeline, and the Run 145 staging-queue
+non-application property. **Static production source-code anchors
+remain rejected.** **Local config alone remains insufficient for
+MainNet bundle-signing authority.** **Local peer majority alone is
+insufficient for MainNet bundle-signing authority (formalized by
+Run 144; reaffirmed by Runs 145 and 146).** Peer-driven live
+trust-bundle apply, MainNet staging enablement, signing-key
+rotation / revocation lifecycle, KMS / HSM authority-key custody,
+MainNet governance attestation, validator-set rotation, full C4
+closure, and C5 closure all remain out of scope.
