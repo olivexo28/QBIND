@@ -5267,3 +5267,107 @@ Peer-driven live trust-bundle apply, MainNet staging enablement
 Run 146), signing-key rotation / revocation lifecycle, KMS / HSM
 authority-key custody, MainNet governance attestation, validator-set
 rotation, full C4 closure, and C5 closure all remain out of scope.
+## Run 147 — Peer-driven trust-bundle apply: release-binary evidence for the live `0x05` peer-candidate staging hook (hidden opt-in arming flag)
+
+Run 147 produces the release-binary evidence that Run 146 explicitly
+deferred for the Run 145 / Run 146 non-applying
+`PeerCandidateStagingQueue`. The Run 147 feasibility gate ("can a
+real `target/release/qbind-node` binary arm
+`LivePeerCandidateWireDispatcher::staging_queue` through an existing
+runtime config path?") returned **NO** against the Run 146 state
+(`main.rs` constructed `dispatcher_cfg.staging_queue = None`; the
+`set_staging_queue` late-install surface was source/test only). Per
+`task/RUN_147_TASK.txt`'s "preferred path if a flag is necessary"
+allowance, Run 147 adds the smallest hidden, disabled-by-default
+DevNet/TestNet-only arming flag:
+
+```
+--p2p-trust-bundle-peer-candidate-staging-enabled
+```
+
+* clap `hide = true` (hidden from `--help`);
+* default `false`;
+* **refused on MainNet unconditionally** at the top-level
+  partial-config gate with exit code `1` and a `[binary] Run 147:
+  FATAL ...` stderr line; the P2P transport is never brought up;
+* **refused** without
+  `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+  (same exit code, same FATAL line shape);
+* does **NOT** imply propagation
+  (`--p2p-trust-bundle-peer-candidate-propagation-enabled` remains
+  orthogonal);
+* does **NOT** imply apply;
+* does **NOT** add any metric family;
+* does **NOT** change any wire format / on-disk schema.
+
+### Operator runbook delta
+
+When the flag is supplied with valid co-requisites on
+DevNet/TestNet, the operator audit trail for the run includes
+exactly two new stable log lines on the receiving node:
+
+* `[binary] Run 147: peer-candidate staging hook arming flag accepted (env={Devnet|Testnet}). A bounded, non-applying PeerCandidateStagingQueue will be installed when the live 0x05 dispatcher is constructed. Staging is non-authoritative: NO apply; NO sequence write; NO marker write; NO LivePqcTrustState mutation; NO session eviction; NO SIGHUP / reload-apply. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md.`
+* `[run-147] live peer-candidate staging hook ARMED (env=Devnet|Testnet, enabled=true, allow_devnet=..., allow_testnet=..., max_global=..., max_per_peer=..., ttl_secs=...). Non-applying; non-authoritative; no sequence write; no marker write; no session eviction; no SIGHUP / reload-apply.`
+
+Existing Run 143 / Run 146 log lines and metric counters continue
+to fire exactly as before. The Run 146 `[binary] Run 146:
+...STAGED ...` / `... already staged ...` / `... refused ...`
+hook line fires on V1 for every Validated outcome that reaches the
+hook, exactly as the Run 146 source/test wiring documented.
+
+### Refusal scenarios (Run 147 fail-closed top-level gate)
+
+| Scenario | Operator action | Outcome |
+|---|---|---|
+| `--p2p-trust-bundle-peer-candidate-staging-enabled` with `--env mainnet` | Refused | exit code 1; `[binary] Run 147: FATAL: ... refused on MainNet unconditionally`; transport not up. |
+| `--p2p-trust-bundle-peer-candidate-staging-enabled` without `--p2p-trust-bundle-peer-candidate-wire-validation-enabled` | Refused | exit code 1; `[binary] Run 147: FATAL: ... requires --p2p-trust-bundle-peer-candidate-wire-validation-enabled`; transport not up. |
+
+### Out-of-scope invariants preserved by Run 147
+
+Operators can rely on the following Run 147-mandated invariants
+holding on every run, asserted by the harness
+`scripts/devnet/run_147_live_0x05_peer_candidate_staging_release_binary.sh`:
+
+* `pqc_trust_bundle_sequence.json` byte-identical pre/post on every
+  scenario (no sequence write from the staging hook);
+* `pqc_authority_state.json` byte-identical pre/post on every
+  scenario (no marker write from the staging hook);
+* no `pqc_authority_state.json.tmp` sibling on any node;
+* no `qbind_p2p_pqc_trust_bundle_peer_candidate_applied_total`
+  metric family appears (Run 088 / Run 144 contract);
+* no `qbind_p2p_trust_bundle_live_reload_apply*` counter advances;
+* no `qbind_p2p_session_eviction_total` counter advances;
+* no `[run-070] apply` log line fires;
+* no `SIGHUP ... reload-apply` log line fires;
+* no `--p2p-trusted-root` fallback log line fires;
+* no `DummySig` / `DummyKem` / `DummyAead` log line fires;
+* invalid candidates never stage.
+
+Operator action required by Run 147: **none** unless the operator
+wants to explicitly opt in to staging on DevNet/TestNet for
+evidence purposes. In that case the operator supplies the new
+flag alongside the existing
+`--p2p-trust-bundle-peer-candidate-wire-validation-enabled` and
+verifies the two Run 147 log lines above appear on the receiver.
+MainNet operators must NOT supply the flag — startup refuses
+fail-closed.
+
+**Scope notice:** Run 147 is **source/test + release-binary evidence
+for hidden opt-in staging arming.** It is NOT pure evidence-only;
+the source delta is the single new hidden CLI flag, the top-level
+partial-config refusal gate, and the dispatcher-construction install
+branch described above. No peer-driven live apply is implemented;
+no SIGHUP / reload-apply / process-start apply / snapshot/restore /
+startup mutating behaviour beyond the existing Runs 134 / 136 / 138 /
+140 / 142 wiring is touched; no v2 marker is persisted from any new
+code path; no trust-bundle / peer-candidate / ratification /
+authority-marker / sequence-file / ratification-sidecar / snapshot-
+meta wire format or schema is changed; no new metric family is
+added, renamed, or removed; no KMS / HSM is introduced; no MainNet
+governance artifact is verified; no signing-key rotation or
+revocation lifecycle is implemented. Peer-driven live trust-bundle
+apply (governed by the Run 144 specification), MainNet staging
+enablement (refused unconditionally), signing-key rotation /
+revocation lifecycle, KMS / HSM authority-key custody, MainNet
+governance attestation, validator-set rotation, full C4 closure, and
+C5 closure all remain out of scope.

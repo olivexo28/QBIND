@@ -1391,6 +1391,31 @@ async fn main() {
         }
     };
 
+    // Run 147 — early MainNet refusal for the disabled-by-default
+    // peer-candidate staging arming flag. Positioned BEFORE the
+    // Run 102 MainNet genesis-path requirement check so the operator
+    // sees the precise Run 147 FATAL reason rather than a generic
+    // MainNet startup error. Local peer majority is NOT authority on
+    // MainNet; the flag is refused unconditionally with exit code 1
+    // and the P2P transport is never brought up. See
+    // `task/RUN_147_TASK.txt`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`, and
+    // `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    if args.p2p_trust_bundle_peer_candidate_staging_enabled {
+        use qbind_types::NetworkEnvironment;
+        if matches!(config.environment, NetworkEnvironment::Mainnet) {
+            eprintln!(
+                "[binary] Run 147: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-staging-enabled is refused on MainNet \
+                 unconditionally. Local peer majority is NOT authority on MainNet. No \
+                 staging; no apply; no sequence write; no marker write; no session \
+                 eviction; no P2P startup. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md."
+            );
+            std::process::exit(1);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Run 127 — `--authority-state-reset` offline operator ceremony.
     //
@@ -2509,6 +2534,56 @@ async fn main() {
              --p2p-trust-bundle-peer-candidate-wire-publish-enabled."
         );
         std::process::exit(1);
+    }
+
+    // Run 147 — top-level partial-config refusal for the
+    // disabled-by-default peer-candidate staging arming flag.
+    //
+    //   * Refuse on MainNet unconditionally (no staging; no P2P
+    //     startup). Local peer majority is NOT authority on MainNet.
+    //   * Refuse unless live `0x05` validation is also enabled —
+    //     a queue without an upstream validation pipeline would
+    //     never receive a candidate, so the operator's request is
+    //     refused fail-closed rather than silently dropped.
+    //   * The flag does NOT imply propagation; the flag does NOT
+    //     imply apply. Both remain orthogonal.
+    //
+    // See `task/RUN_147_TASK.txt`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`, and
+    // `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    if args.p2p_trust_bundle_peer_candidate_staging_enabled {
+        use qbind_types::NetworkEnvironment;
+        if matches!(config.environment, NetworkEnvironment::Mainnet) {
+            eprintln!(
+                "[binary] Run 147: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-staging-enabled is refused on MainNet \
+                 unconditionally. Local peer majority is NOT authority on MainNet. No \
+                 staging; no apply; no sequence write; no marker write; no session \
+                 eviction; no P2P startup. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md."
+            );
+            std::process::exit(1);
+        }
+        if !args.p2p_trust_bundle_peer_candidate_wire_validation_enabled {
+            eprintln!(
+                "[binary] Run 147: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-staging-enabled requires \
+                 --p2p-trust-bundle-peer-candidate-wire-validation-enabled. The staging \
+                 queue is a downstream hook of the live `0x05` validation path and is \
+                 meaningless without it. No staging; no apply; no sequence write; no \
+                 marker write; no session eviction; no P2P startup."
+            );
+            std::process::exit(1);
+        }
+        eprintln!(
+            "[binary] Run 147: peer-candidate staging hook arming flag accepted (env={:?}). \
+             A bounded, non-applying PeerCandidateStagingQueue will be installed when the \
+             live `0x05` dispatcher is constructed. Staging is non-authoritative: NO apply; \
+             NO sequence write; NO marker write; NO LivePqcTrustState mutation; NO session \
+             eviction; NO SIGHUP / reload-apply. See \
+             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md.",
+            config.environment
+        );
     }
 
 
@@ -5410,7 +5485,83 @@ async fn run_p2p_node(
                                 None
                             }
                         },
-                        staging_queue: None,
+                        // Run 147 — hidden, disabled-by-default operator
+                        // opt-in to arm the Run 146 non-applying
+                        // `PeerCandidateStagingQueue` hook on the live
+                        // inbound `0x05` validation-only path. Default
+                        // behaviour is bit-for-bit Run 143 (queue stays
+                        // `None`). When the flag is supplied, MainNet
+                        // refuses startup unconditionally; DevNet/TestNet
+                        // install a bounded queue with the Run 145
+                        // conservative defaults. The queue NEVER applies,
+                        // NEVER persists sequence, NEVER writes the
+                        // authority marker, NEVER mutates LivePqcTrustState,
+                        // NEVER evicts sessions, and NEVER invokes SIGHUP /
+                        // reload-apply. See `task/RUN_147_TASK.txt`,
+                        // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`,
+                        // and `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+                        staging_queue: if args
+                            .p2p_trust_bundle_peer_candidate_staging_enabled
+                        {
+                            use qbind_node::pqc_peer_candidate_staging::{
+                                PeerCandidateStagingQueue, PeerDrivenStagingPolicy,
+                            };
+                            use parking_lot::Mutex;
+                            if matches!(
+                                config.environment,
+                                qbind_types::NetworkEnvironment::Mainnet
+                            ) {
+                                eprintln!(
+                                    "[binary] Run 147: FATAL: \
+                                     --p2p-trust-bundle-peer-candidate-staging-enabled \
+                                     is refused on MainNet unconditionally. Local peer \
+                                     majority is NOT authority on MainNet. No staging; \
+                                     no apply; no sequence write; no marker write; no \
+                                     session eviction; no P2P startup. See \
+                                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md."
+                                );
+                                std::process::exit(1);
+                            }
+                            let policy = match config.environment {
+                                qbind_types::NetworkEnvironment::Devnet => {
+                                    PeerDrivenStagingPolicy::devnet_enabled()
+                                }
+                                qbind_types::NetworkEnvironment::Testnet => {
+                                    PeerDrivenStagingPolicy::testnet_enabled()
+                                }
+                                qbind_types::NetworkEnvironment::Mainnet => {
+                                    // Unreachable: MainNet was rejected
+                                    // above. Defensive duplicate to keep
+                                    // fail-closed even if the outer guard
+                                    // is ever loosened.
+                                    eprintln!(
+                                        "[binary] Run 147: FATAL: MainNet staging \
+                                         policy refused at queue construction \
+                                         (defensive guard). Aborting."
+                                    );
+                                    std::process::exit(1);
+                                }
+                            };
+                            eprintln!(
+                                "[run-147] live peer-candidate staging hook ARMED \
+                                 (env={:?}, enabled={}, allow_devnet={}, allow_testnet={}, \
+                                 max_global={}, max_per_peer={}, ttl_secs={}). Non-applying; \
+                                 non-authoritative; no sequence write; no marker write; no \
+                                 session eviction; no SIGHUP / reload-apply.",
+                                policy.environment,
+                                policy.enabled,
+                                policy.allow_devnet,
+                                policy.allow_testnet,
+                                policy.max_staged_candidates,
+                                policy.max_candidates_per_peer,
+                                policy.ttl_secs
+                            );
+                            Some(std::sync::Arc::new(Mutex::new(
+                                PeerCandidateStagingQueue::new(policy),
+                            )))
+                        } else {
+                            None
+                        },
                     };
                     eprintln!(
                         "[binary] Run 088: installing live peer-candidate wire \
