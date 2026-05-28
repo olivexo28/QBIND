@@ -5096,3 +5096,90 @@ implemented. Peer-driven live trust-bundle apply, signing-key
 rotation/revocation lifecycle, KMS/HSM authority-key custody, MainNet
 governance attestation, validator-set rotation, full C4 closure, and
 C5 closure all remain out of scope.
+## Run 145 — Peer-driven trust-bundle apply: staged candidate queue
+source/test scaffold (no live apply, no release-binary evidence)
+
+**Run 145 is source / test scaffold only.** It lands a new
+library-level, **non-applying**, disabled-by-default, environment-gated,
+bounded, deduplicated, TTL-bounded, per-peer-bounded, in-memory queue
+for peer-supplied trust-bundle candidates that have already passed the
+existing Run 142/143 live inbound `0x05` validation-only path. The
+queue does **not** apply, propagate, mutate `LivePqcTrustState`, write
+`pqc_trust_bundle_sequence.json`, write `pqc_authority_state.json`, or
+evict P2P / KEMTLS sessions. **No release-binary evidence is claimed
+in Run 145.** Release-binary staging evidence is deferred to Run 146.
+
+The new source is:
+
+* `crates/qbind-node/src/pqc_peer_candidate_staging.rs` —
+  `PeerCandidateStagingQueue`, `PeerDrivenStagingPolicy`,
+  `StagedPeerCandidate`, `StagingOutcome`.
+
+The new tests are:
+
+* `crates/qbind-node/tests/run_145_peer_candidate_staging_tests.rs` —
+  A1–A4 and R1–R13 from `task/RUN_145_TASK.txt`.
+
+Operator-visible facts:
+
+* The live inbound peer-candidate `0x05` path **remains
+  validation-only / propagation-only** on every environment
+  (DevNet/TestNet/MainNet), exactly as Runs 142/143 already evidence.
+  Receiving a peer-candidate frame still does **not** mutate
+  `LivePqcTrustState`, **does not** write the trust-bundle sequence
+  file, **does not** write the authority marker, and **does not**
+  evict sessions.
+* **Peer-driven live trust-bundle apply remains unimplemented and
+  disabled by default on every environment.** No CLI flag exists
+  today that enables apply.
+* The new staging queue is **library-level only** in Run 145. It is
+  **not** wired to the production binary's live inbound `0x05`
+  dispatcher in this run. The future Run 146 binary hook will
+  introduce a hidden DevNet-only flag (refusing to bind on
+  TestNet/MainNet at the flag-bind step), produce release-binary
+  evidence that the queue accepts validated candidates without any
+  mutation, and document the operator-visible log lines.
+* MainNet peer-driven staging is **refused unconditionally** by the
+  Run 145 queue, even when `enabled = true` and `allow_mainnet =
+  true`. The refusal is fail-closed and intentional: MainNet
+  peer-driven trust-bundle apply requires a future governance /
+  ratification / KMS-HSM authority that does not yet exist. **Local
+  peer majority alone is insufficient.**
+* TestNet peer-driven staging is **refused** by the queue unless
+  `enabled = true` AND `allow_testnet = true` AND the upstream
+  Run 130 v2 verifier and Run 132/142 v2 marker validation-only check
+  accepted the candidate.
+* Default policy bounds: `max_staged_candidates = 16`,
+  `max_candidates_per_peer = 4`, `ttl_secs = 300`. Eviction policy at
+  either cap is **reject-new**.
+
+Operator action required by Run 145: **none.** Run 145 changes no
+runtime behaviour because the new module is dead code in the release
+binary. Operators should however be aware that:
+
+* No future build will silently enable peer-driven apply. Any future
+  enablement requires an explicit per-environment hidden flag and,
+  on TestNet, the upstream v2 ratification check; MainNet remains
+  blocked.
+* Operator-pinned authority state (the pinned `(environment,
+  chain_id, genesis_hash, authority_root)` tuple and pinned minimum
+  `latest_authority_domain_sequence`) remains the source of truth
+  for authority on the operator's node. A staged peer candidate is
+  **non-authoritative** and is recorded purely as metadata for future
+  operator / governance decision.
+
+**Scope notice:** Run 145 is **source / test scaffold only**. No
+release-binary staging evidence is produced (deferred to Run 146); no
+peer-driven live apply is implemented; no SIGHUP / reload-apply /
+process-start apply / snapshot/restore / startup / live-inbound-`0x05`
+mutating behaviour beyond Runs 134/136/138/140/142 existing wiring is
+touched; no v2 marker is persisted from any new code path; no
+trust-bundle / peer-candidate / ratification / authority-marker /
+sequence-file / ratification-sidecar wire format or schema is changed;
+no CLI flag is added; no metric family is added, renamed, or removed;
+no KMS / HSM is introduced; no MainNet governance artifact is verified;
+and no signing-key rotation or revocation lifecycle is implemented.
+Peer-driven live trust-bundle apply, signing-key rotation / revocation
+lifecycle, KMS / HSM authority-key custody, MainNet governance
+attestation, validator-set rotation, full C4 closure, and C5 closure
+all remain out of scope.

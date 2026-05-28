@@ -2837,3 +2837,76 @@ majority alone is insufficient for MainNet bundle-signing authority
 signing-key rotation / revocation lifecycle, KMS / HSM authority-key
 custody, MainNet governance attestation, validator-set rotation,
 full C4 closure, and C5 closure all remain out of scope.
+## Run 145 — Peer-driven trust-bundle apply: non-authoritative staged
+candidate queue source/test scaffold
+
+Run 145 lands the first source-level scaffold of the **Phase 2
+("eligibility to stage")** layer described by
+`QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md` (Run 144). The new
+component is `crates/qbind-node/src/pqc_peer_candidate_staging.rs`'s
+`PeerCandidateStagingQueue` — a bounded, deduplicated, TTL-bounded,
+per-peer-bounded, disabled-by-default, environment-gated, in-memory
+queue of log-safe `StagedPeerCandidate` metadata records.
+
+A staged candidate is **non-authoritative**. Holding a
+`StagedPeerCandidate` does **NOT**:
+
+* mean the candidate has been applied;
+* mean the candidate has been propagated;
+* mean the candidate has been persisted as accepted authority;
+* mutate `LivePqcTrustState`;
+* write `pqc_trust_bundle_sequence.json`;
+* write `pqc_authority_state.json`;
+* evict P2P / KEMTLS sessions;
+* invoke Run 070 apply / SIGHUP reload-apply / process-start apply.
+
+The Run 145 queue does not change any existing authority-model
+invariant:
+
+* The trust anchor remains the genesis-pinned authority root for the
+  resolved `(environment, chain_id, genesis_hash)`.
+* The bundle-signing key set is still authoritative only when it is
+  ratified by the genesis-pinned authority via either the v1
+  ratification or, on environments running v2 ratification, the
+  Run 130 v2 verifier.
+* `LivePqcTrustState` is still swapped only by the existing Run 070
+  apply contract.
+* Peer-driven live trust-bundle apply remains **unimplemented and
+  disabled by default** on every environment.
+
+Environment matrix for the new staging queue:
+
+* **DevNet** — MAY stage when `enabled && allow_devnet`. Default:
+  disabled.
+* **TestNet** — MAY stage when `enabled && allow_testnet` AND the
+  upstream Run 130 v2 verifier and Run 132/142 v2 marker
+  validation-only check accepted the candidate. Default: disabled.
+* **MainNet** — **REFUSED unconditionally** by the Run 145 queue,
+  regardless of `enabled`/`allow_mainnet`. The refusal is fail-closed
+  and intentional. **Local peer majority remains insufficient for
+  MainNet bundle-signing authority** (formalized by Run 144,
+  reaffirmed by Run 145).
+
+Run 145 introduces no new wire format, no new schema, no new metric
+family, and no new operator log line. The new module is **library-level
+only** in this run: no production caller invokes it. The future Run
+146 release-binary hook will introduce a hidden DevNet-only CLI flag
+that refuses to bind on TestNet / MainNet at the flag-bind step.
+
+Crosscheck performed against Runs 050–144 invariants: Run 145
+introduces no contradictions because the new module is dead code in
+the release binary and the staging queue itself performs no mutation.
+Every Run 050–144 invariant remains intact, including Run 055
+anti-rollback, Run 065/091 activation gates, Run 070 apply ordering,
+Run 076/079/088 envelope/propagation discipline, Run 109/123 v1
+enforcement, Run 130/131 v2 verifier and marker primitives,
+Run 132/142 validation-only paths, Run 134/136/138 post-commit marker
+discipline, Run 140/141 snapshot/restore parity, and the Run 144
+six-phase fail-closed pipeline. **Static production source-code
+anchors remain rejected.** **Local config alone remains insufficient
+for MainNet bundle-signing authority.** **Local peer majority alone
+is insufficient for MainNet bundle-signing authority (formalized by
+Run 144; reaffirmed by Run 145).** Peer-driven live trust-bundle
+apply, signing-key rotation / revocation lifecycle, KMS / HSM
+authority-key custody, MainNet governance attestation, validator-set
+rotation, full C4 closure, and C5 closure all remain out of scope.

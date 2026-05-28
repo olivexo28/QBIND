@@ -272,6 +272,27 @@ pub mod pqc_peer_candidate_binary;
 // See module docs and `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_peer_candidate_wire;
 
+// Run 145 (C4 piece: peer-driven trust-bundle apply, staged candidate
+// queue — source/test scaffold only, NON-applying). Bounded,
+// deduplicated, TTL-bounded, disabled-by-default, environment-gated,
+// per-peer-bounded, in-memory queue of `StagedPeerCandidate` entries
+// derived from the upstream Run 142/143 live inbound `0x05`
+// validation-only path. The module exposes **no** `apply` /
+// `apply_validated_candidate` / `apply_validated_candidate_with_previous`
+// entry point, never mutates `LivePqcTrustState`, never writes
+// `pqc_trust_bundle_sequence.json`, never writes
+// `pqc_authority_state.json`, never evicts P2P / KEMTLS sessions, and
+// never invokes Run 070 apply / SIGHUP reload-apply / process-start
+// apply. MainNet staging is refused unconditionally for now —
+// peer-driven trust-bundle apply on MainNet requires a future
+// governance / ratification / KMS-HSM authority that does not yet
+// exist. Disabled by default on every environment; not wired to the
+// live inbound dispatcher in Run 145 (the future Run 146 binary hook
+// is documented in the module docs). See module docs,
+// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_145.md`, and
+// `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_peer_candidate_staging;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;
