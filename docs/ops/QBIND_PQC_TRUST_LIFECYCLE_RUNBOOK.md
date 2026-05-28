@@ -5371,3 +5371,45 @@ enablement (refused unconditionally), signing-key rotation /
 revocation lifecycle, KMS / HSM authority-key custody, MainNet
 governance attestation, validator-set rotation, full C4 closure, and
 C5 closure all remain out of scope.
+
+## Run 148 — peer-driven apply controller (source/test only)
+
+Run 148 adds a library-only peer-driven apply controller in
+`crates/qbind-node/src/pqc_peer_candidate_apply.rs`. Operators
+have **no new CLI surface, no new on-disk surface, and no new
+runtime behaviour** in Run 148: the controller is not wired into
+the node binary's reload-apply or SIGHUP path. The node binary's
+behaviour is identical to Run 147.
+
+The controller, when invoked by a library caller, picks an
+already-staged candidate out of the Run 145 `PeerCandidateStagingQueue`,
+re-checks freshness, the validation-accepted flag, environment,
+and chain-id, runs the v2 marker pre-apply decision, and only
+then delegates to the existing Run 070
+`apply_validated_candidate_with_previous` apply pipeline. The
+v2 authority marker is persisted by a `V2MarkerCoordinator` only
+after the Run 070 sequence commit succeeds.
+
+Operator-actionable status:
+
+* **MainNet:** unchanged — peer-driven apply is refused
+  unconditionally
+  (`PeerDrivenApplyOutcome::RefusedMainNet`), regardless of
+  `allow_mainnet`. Local config alone remains insufficient for
+  MainNet bundle-signing authority.
+* **DevNet / TestNet:** the controller is reachable only behind
+  an explicit local `PeerDrivenApplyPolicy::devnet_enabled()` or
+  `PeerDrivenApplyPolicy::testnet_enabled()`. No CLI flag is
+  exposed in Run 148; operator wiring is deferred to Run 149.
+* **Release binary:** Run 148 produces **no** release-binary
+  evidence. Release-binary DevNet/TestNet peer-driven apply
+  evidence is deferred to Run 149.
+
+Out of scope (unchanged from Run 147):
+
+* Governance / KMS / HSM / signing-key rotation / revocation
+  lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Full C4 closure.
+* C5 closure.

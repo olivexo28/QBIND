@@ -293,6 +293,18 @@ pub mod pqc_peer_candidate_wire;
 // `docs/whitepaper/contradiction.md` C4.
 pub mod pqc_peer_candidate_staging;
 
+// Run 148 — peer-driven trust-bundle apply controller (source/test-only,
+// DevNet/TestNet only, disabled-by-default, local-policy gated). Strictly
+// reuses the existing Run 070 apply contract
+// (`apply_validated_candidate_with_previous`) and the existing Run 134/138
+// v2 authority marker post-commit persistence discipline; introduces no
+// new apply algorithm, no MainNet bypass, no governance/KMS-HSM/signing-
+// key lifecycle, no new wire format, and no schema change. See module
+// docs, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_148.md`, and
+// `docs/whitepaper/contradiction.md` C4. Release-binary DevNet/TestNet
+// peer-driven apply evidence is deferred to Run 149.
+pub mod pqc_peer_candidate_apply;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;

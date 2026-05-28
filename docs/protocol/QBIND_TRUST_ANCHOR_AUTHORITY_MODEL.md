@@ -3047,3 +3047,45 @@ MainNet staging enablement (refused fail-closed by Run 147),
 signing-key rotation / revocation lifecycle, KMS / HSM
 authority-key custody, MainNet governance attestation, validator-set
 rotation, full C4 closure, and C5 closure all remain out of scope.
+
+## Run 148 progress entry — peer-driven apply controller (source/test only)
+
+Run 148 introduces a source-and-test peer-driven apply controller
+that consumes staged peer candidates (Run 145 queue, Run 146
+dispatcher hook, Run 147 hidden arming flag) and applies them
+through the existing Run 070 apply contract. It is library-only
+and reachable only behind an explicit local
+`PeerDrivenApplyPolicy::devnet_enabled()` or
+`PeerDrivenApplyPolicy::testnet_enabled()`. The node binary's
+reload-apply and SIGHUP surfaces are not modified.
+
+Authority model invariants reaffirmed by Run 148:
+
+* **MainNet bundle-signing authority is not local-config-driven.**
+  Peer-driven apply refuses MainNet unconditionally
+  (`PeerDrivenApplyOutcome::RefusedMainNet`) regardless of any
+  policy field, including `allow_mainnet`. A local DevNet/TestNet
+  peer majority does **not** confer MainNet authority.
+* **The v2 authority anti-rollback marker is persisted only after
+  the Run 070 sequence commit succeeds**, by delegating to a
+  `V2MarkerCoordinator` whose production implementation wraps
+  `persist_accepted_v2_marker_after_commit_boundary`. Pre-apply
+  marker conflicts (lower sequence, same-sequence different
+  digest) refuse **before** any state mutation.
+* **The Run 070 apply contract is reused verbatim**: validate →
+  snapshot active → swap trust state → evict sessions →
+  commit sequence, with the same rollback semantics. Run 148 adds
+  no new privileged path into trust state.
+* **Validation-only, staging-only, and propagation-only surfaces
+  are unchanged.** Run 142 / Run 088 / Run 145 / Run 146 / Run 147
+  behaviour is preserved.
+
+Open items unchanged:
+
+* Governance / KMS / HSM / signing-key rotation / revocation
+  lifecycle.
+* MainNet governance artifact verification.
+* Validator-set rotation.
+* Release-binary peer-driven apply evidence (deferred to Run 149).
+* Full C4 closure.
+* C5 closure.
