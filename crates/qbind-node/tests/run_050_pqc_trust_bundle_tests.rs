@@ -15,7 +15,9 @@
 //! `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_050.md`.
 
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
-use qbind_node::pqc_root_config::{PqcRootMode, PqcStaticRootConfig, PQC_TRANSPORT_SUITE_ML_DSA_44};
+use qbind_node::pqc_root_config::{
+    PqcRootMode, PqcStaticRootConfig, PQC_TRANSPORT_SUITE_ML_DSA_44,
+};
 use qbind_node::pqc_trust_bundle::{
     build_helper_bundle, HelperBundleMode, TrustBundle, TrustBundleEnvironment, TrustBundleError,
 };
@@ -37,7 +39,9 @@ fn fresh_root_pair() -> (String, String) {
 
 /// Build a PqcStaticRootConfig by merging the bundle's active roots
 /// into an (initially empty) trust set, mirroring the main.rs wiring.
-fn config_from_loaded_bundle(loaded: &qbind_node::pqc_trust_bundle::LoadedTrustBundle) -> PqcStaticRootConfig {
+fn config_from_loaded_bundle(
+    loaded: &qbind_node::pqc_trust_bundle::LoadedTrustBundle,
+) -> PqcStaticRootConfig {
     PqcStaticRootConfig {
         mode: PqcRootMode::PqcStaticRoot,
         trusted_roots: loaded.active_roots.clone(),
@@ -196,8 +200,8 @@ fn unsupported_suite_is_rejected_fail_closed() {
 
 #[test]
 fn malformed_bundle_bytes_is_rejected_fail_closed() {
-    let err = TrustBundle::load_from_bytes(b"{garbage}", NetworkEnvironment::Devnet, 100)
-        .unwrap_err();
+    let err =
+        TrustBundle::load_from_bytes(b"{garbage}", NetworkEnvironment::Devnet, 100).unwrap_err();
     assert!(matches!(err, TrustBundleError::Malformed(_)));
 }
 
@@ -212,7 +216,10 @@ fn testnet_runtime_refuses_unsigned_bundle_fail_closed() {
         TrustBundleError::UnsignedBundleNotAllowed(env) => {
             assert_eq!(env, TrustBundleEnvironment::Testnet)
         }
-        other => panic!("expected UnsignedBundleNotAllowed(Testnet), got {:?}", other),
+        other => panic!(
+            "expected UnsignedBundleNotAllowed(Testnet), got {:?}",
+            other
+        ),
     }
 }
 
@@ -227,7 +234,10 @@ fn mainnet_runtime_refuses_unsigned_bundle_fail_closed() {
         TrustBundleError::UnsignedBundleNotAllowed(env) => {
             assert_eq!(env, TrustBundleEnvironment::Mainnet)
         }
-        other => panic!("expected UnsignedBundleNotAllowed(Mainnet), got {:?}", other),
+        other => panic!(
+            "expected UnsignedBundleNotAllowed(Mainnet), got {:?}",
+            other
+        ),
     }
 }
 

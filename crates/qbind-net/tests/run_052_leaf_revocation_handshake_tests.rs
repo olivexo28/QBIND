@@ -154,12 +154,7 @@ impl SignatureSuite for AlwaysOkSig {
     fn signature_len(&self) -> usize {
         64
     }
-    fn verify(
-        &self,
-        _pk: &[u8],
-        _msg_digest: &[u8; 32],
-        _sig: &[u8],
-    ) -> Result<(), CryptoError> {
+    fn verify(&self, _pk: &[u8], _msg_digest: &[u8; 32], _sig: &[u8]) -> Result<(), CryptoError> {
         Ok(())
     }
 }
@@ -217,11 +212,15 @@ const SIG_SUITE: u8 = 3;
 fn provider_ok_sig() -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(DummyKem { suite_id: KEM_SUITE }))
+            .with_kem_suite(Arc::new(DummyKem {
+                suite_id: KEM_SUITE,
+            }))
             .with_aead_suite(Arc::new(DummyAead {
                 suite_id: AEAD_SUITE,
             }))
-            .with_signature_suite(Arc::new(AlwaysOkSig { suite_id: SIG_SUITE })),
+            .with_signature_suite(Arc::new(AlwaysOkSig {
+                suite_id: SIG_SUITE,
+            })),
     )
 }
 
@@ -294,7 +293,9 @@ fn run_listener(
     crypto: Arc<StaticCryptoProvider>,
 ) -> Result<(), NetError> {
     let mut server = ServerHandshake::new(cfg, [1u8; 32]);
-    server.handle_client_init(crypto.as_ref(), &init).map(|_| ())
+    server
+        .handle_client_init(crypto.as_ref(), &init)
+        .map(|_| ())
 }
 
 // ============================================================================
@@ -316,7 +317,8 @@ fn listener_revoked_leaf_fails_closed_and_bumps_revoked_once() {
     // Configure a revocation list that contains exactly this cert's
     // canonical fingerprint.
     let revoked_fp_for_closure = revoked_fp;
-    let rev_list = LeafCertRevocationList::new(1, move |fp: &[u8; 32]| *fp == revoked_fp_for_closure);
+    let rev_list =
+        LeafCertRevocationList::new(1, move |fp: &[u8; 32]| *fp == revoked_fp_for_closure);
     let cfg = server_cfg(
         provider.clone(),
         validator_id,
@@ -329,7 +331,10 @@ fn listener_revoked_leaf_fails_closed_and_bumps_revoked_once() {
     let result = run_listener(cfg, init, provider);
     match result {
         Err(NetError::ClientCertInvalid("cert revoked")) => {}
-        other => panic!("expected ClientCertInvalid(\"cert revoked\"), got {:?}", other),
+        other => panic!(
+            "expected ClientCertInvalid(\"cert revoked\"), got {:?}",
+            other
+        ),
     }
 
     let (accepted, ur, ws, bs, vm, m, e, revoked) = sink.snapshot();
@@ -486,7 +491,8 @@ fn dialer_revoked_leaf_fails_closed_and_bumps_revoked_once() {
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
     let revoked_fp_for_closure = revoked_fp;
-    let rev_list = LeafCertRevocationList::new(1, move |fp: &[u8; 32]| *fp == revoked_fp_for_closure);
+    let rev_list =
+        LeafCertRevocationList::new(1, move |fp: &[u8; 32]| *fp == revoked_fp_for_closure);
 
     let cfg = dialer_cfg(provider.clone(), Some(dyn_sink), Some(rev_list));
 
@@ -578,9 +584,7 @@ fn leaf_revocation_list_is_clone_and_send_sync() {
 fn leaf_revocation_list_active_count_is_observable() {
     let revoked_fp = [0xAAu8; 32];
     let revoked_fp_for_closure = revoked_fp;
-    let rev = LeafCertRevocationList::new(7, move |fp: &[u8; 32]| {
-        *fp == revoked_fp_for_closure
-    });
+    let rev = LeafCertRevocationList::new(7, move |fp: &[u8; 32]| *fp == revoked_fp_for_closure);
     assert_eq!(rev.active_count(), 7);
     assert!(rev.is_revoked(&revoked_fp));
     assert!(!rev.is_revoked(&[0u8; 32]));

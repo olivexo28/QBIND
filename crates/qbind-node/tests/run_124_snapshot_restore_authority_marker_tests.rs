@@ -36,6 +36,7 @@ use qbind_ledger::{
     StateSnapshotMeta, StateSnapshotter,
 };
 use qbind_node::node_config::NodeConfig;
+use qbind_node::pqc_authority_state::SnapshotRestoreAuthorityCheckOutcome;
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, persist_authority_state_atomic, AuthorityStateUpdateSource,
     PersistentAuthorityStateRecord,
@@ -44,7 +45,6 @@ use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 use qbind_node::snapshot_restore::{
     restore_from_snapshot_with_authority_marker_check, RestoreAuthorityContext, RestoreError,
 };
-use qbind_node::pqc_authority_state::SnapshotRestoreAuthorityCheckOutcome;
 
 use qbind_types::{ChainId, NetworkEnvironment};
 
@@ -190,12 +190,10 @@ fn run124_legacy_snapshot_into_data_dir_with_local_marker_is_rejected() {
     }
     // Local marker bytes preserved; no state materialization audit marker.
     assert_eq!(std::fs::read(&marker_path).unwrap(), bytes_before);
-    assert!(
-        !data_dir
-            .path()
-            .join(qbind_node::snapshot_restore::RESTORE_MARKER_FILENAME)
-            .exists()
-    );
+    assert!(!data_dir
+        .path()
+        .join(qbind_node::snapshot_restore::RESTORE_MARKER_FILENAME)
+        .exists());
     assert!(
         !data_dir
             .path()

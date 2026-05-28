@@ -11,8 +11,8 @@ use qbind_node::pqc_peer_candidate_wire::{
     LivePeerCandidateWireDispatcherConfig, PeerCandidatePropagationConfig,
     PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender, PeerCandidateWireOutcome,
     PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome, RawFrameSendReport,
-    MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES, PEER_CANDIDATE_WIRE_DOMAIN_TAG,
-    PEER_CANDIDATE_WIRE_VERSION, DISCRIMINATOR_PEER_CANDIDATE_WIRE,
+    DISCRIMINATOR_PEER_CANDIDATE_WIRE, MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES,
+    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_activation::ActivationContext;
@@ -188,7 +188,8 @@ impl PeerCandidateWireFrameSender for RecordingSender {
 }
 
 fn sequence_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read seq"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read seq"))
 }
 
 fn assert_sequence_unchanged(path: &Path, before: Option<Vec<u8>>) {
@@ -224,6 +225,7 @@ fn dispatcher(
             live_ratification: None,
             authority_marker_path: None,
             staging_queue: None,
+            peer_apply: None,
         },
         metrics,
     )

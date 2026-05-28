@@ -418,9 +418,7 @@ impl<'a> ForgedFrameBuilder<'a> {
                     .expect("forged-injection: bincode encode of unknown-validator TimeoutMsg");
                 ConsensusNetMsg::Timeout(bytes)
             }
-            ForgedInjectionCase::MalformedNewView => {
-                ConsensusNetMsg::NewView(vec![0xff; 32])
-            }
+            ForgedInjectionCase::MalformedNewView => ConsensusNetMsg::NewView(vec![0xff; 32]),
             ForgedInjectionCase::MissingEvidenceNewView => {
                 let tc = TimeoutCertificate::<[u8; 32]>::new(
                     self.view,
@@ -438,8 +436,7 @@ impl<'a> ForgedFrameBuilder<'a> {
                     self.signed_timeout(ValidatorId(1)),
                 ];
                 let signers: Vec<_> = signed.iter().map(|t| t.validator_id).collect();
-                let tc =
-                    TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
+                let tc = TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
                 let bytes = bincode::serialize(&tc)
                     .expect("forged-injection: bincode encode of duplicate-signer TC");
                 ConsensusNetMsg::NewView(bytes)
@@ -449,8 +446,7 @@ impl<'a> ForgedFrameBuilder<'a> {
                     .map(|i| self.signed_timeout(ValidatorId(i)))
                     .collect();
                 let signers: Vec<_> = signed.iter().map(|t| t.validator_id).collect();
-                let tc =
-                    TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
+                let tc = TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
                 let bytes = bincode::serialize(&tc)
                     .expect("forged-injection: bincode encode of insufficient-quorum TC");
                 ConsensusNetMsg::NewView(bytes)
@@ -462,8 +458,7 @@ impl<'a> ForgedFrameBuilder<'a> {
                     self.signed_timeout_at(self.view.saturating_add(7), ValidatorId(2)),
                 ];
                 let signers: Vec<_> = signed.iter().map(|t| t.validator_id).collect();
-                let tc =
-                    TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
+                let tc = TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
                 let bytes = bincode::serialize(&tc)
                     .expect("forged-injection: bincode encode of mixed-view TC");
                 ConsensusNetMsg::NewView(bytes)
@@ -474,8 +469,7 @@ impl<'a> ForgedFrameBuilder<'a> {
                     .collect();
                 signed[1].signature[0] ^= 0xff;
                 let signers: Vec<_> = signed.iter().map(|t| t.validator_id).collect();
-                let tc =
-                    TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
+                let tc = TimeoutCertificate::new_with_evidence(self.view, None, signers, signed);
                 let bytes = bincode::serialize(&tc)
                     .expect("forged-injection: bincode encode of bad-signature TC");
                 ConsensusNetMsg::NewView(bytes)
@@ -573,7 +567,11 @@ pub fn spawn_runtime_injection_task(
         eprintln!(
             "[forged-injection] Run 035: runtime activation; cases={:?} (env=devnet, \
              {}=1)",
-            harness.cases().iter().map(|c| c.label()).collect::<Vec<_>>(),
+            harness
+                .cases()
+                .iter()
+                .map(|c| c.label())
+                .collect::<Vec<_>>(),
             FORGED_INJECTION_ENV_VAR
         );
         for case in harness.cases().iter().copied() {
@@ -656,10 +654,7 @@ mod tests {
         keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)>,
     }
     impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
-        fn get_suite_and_key(
-            &self,
-            id: ValidatorId,
-        ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+        fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
             self.keys.get(&id).cloned()
         }
     }
@@ -686,9 +681,7 @@ mod tests {
             })
             .collect();
         Fixture {
-            validators: Arc::new(
-                ConsensusValidatorSet::new(entries).expect("valid validator set"),
-            ),
+            validators: Arc::new(ConsensusValidatorSet::new(entries).expect("valid validator set")),
             kp: Arc::new(TestKeyProvider { keys }),
             br: Arc::new(SimpleBackendRegistry::with_backend(
                 TEST_SUITE,
@@ -765,11 +758,7 @@ mod tests {
     #[test]
     fn run035_harness_disabled_by_default_no_cli_cases() {
         // Empty `cases` list => Disabled, regardless of env / env var.
-        let r = ForgedInjectionHarness::try_activate(
-            NetworkEnvironment::Devnet,
-            vec![],
-            Some("1"),
-        );
+        let r = ForgedInjectionHarness::try_activate(NetworkEnvironment::Devnet, vec![], Some("1"));
         assert!(matches!(r, Err(ForgedInjectionGateError::Disabled)));
     }
 
@@ -900,8 +889,7 @@ mod tests {
     #[test]
     fn run035_unknown_validator_timeout_rejected_before_engine() {
         let f = make_fixture(4);
-        let (s, before, after) =
-            drive_case(&f, ForgedInjectionCase::UnknownValidatorTimeout);
+        let (s, before, after) = drive_case(&f, ForgedInjectionCase::UnknownValidatorTimeout);
         assert_eq!(s.inbound_timeout_verify_rejected_total, 1);
         assert_eq!(s.inbound_timeout_rejected_unknown_validator, 1);
         assert_eq!(s.inbound_timeout_engine_accepted, 0);
@@ -921,8 +909,7 @@ mod tests {
     #[test]
     fn run035_missing_evidence_newview_rejected_before_engine() {
         let f = make_fixture(4);
-        let (s, before, after) =
-            drive_case(&f, ForgedInjectionCase::MissingEvidenceNewView);
+        let (s, before, after) = drive_case(&f, ForgedInjectionCase::MissingEvidenceNewView);
         assert_eq!(s.inbound_newview_verify_rejected_total, 1);
         assert_eq!(s.inbound_newview_rejected_missing_evidence, 1);
         assert_eq!(s.inbound_newview_engine_accepted, 0);
@@ -932,8 +919,7 @@ mod tests {
     #[test]
     fn run035_duplicate_signer_newview_rejected_before_engine() {
         let f = make_fixture(4);
-        let (s, before, after) =
-            drive_case(&f, ForgedInjectionCase::DuplicateSignerNewView);
+        let (s, before, after) = drive_case(&f, ForgedInjectionCase::DuplicateSignerNewView);
         assert_eq!(s.inbound_newview_verify_rejected_total, 1);
         assert_eq!(s.inbound_newview_rejected_duplicate_signer, 1);
         assert_eq!(s.inbound_newview_engine_accepted, 0);
@@ -943,8 +929,7 @@ mod tests {
     #[test]
     fn run035_insufficient_quorum_newview_rejected_before_engine() {
         let f = make_fixture(4);
-        let (s, before, after) =
-            drive_case(&f, ForgedInjectionCase::InsufficientQuorumNewView);
+        let (s, before, after) = drive_case(&f, ForgedInjectionCase::InsufficientQuorumNewView);
         assert_eq!(s.inbound_newview_verify_rejected_total, 1);
         assert_eq!(s.inbound_newview_rejected_insufficient_quorum, 1);
         assert_eq!(s.inbound_newview_engine_accepted, 0);
@@ -974,8 +959,7 @@ mod tests {
     #[test]
     fn run035_high_qc_mismatch_newview_rejected_before_engine() {
         let f = make_fixture(4);
-        let (s, before, after) =
-            drive_case(&f, ForgedInjectionCase::HighQcMismatchNewView);
+        let (s, before, after) = drive_case(&f, ForgedInjectionCase::HighQcMismatchNewView);
         assert_eq!(s.inbound_newview_verify_rejected_total, 1);
         assert_eq!(s.inbound_newview_rejected_high_qc_mismatch, 1);
         assert_eq!(s.inbound_newview_engine_accepted, 0);
@@ -993,12 +977,14 @@ mod tests {
         for case in ForgedInjectionCase::ALL.iter().copied() {
             let (s, before, after) = drive_case(&f, case);
             assert_eq!(
-                s.inbound_timeout_engine_accepted, 0,
+                s.inbound_timeout_engine_accepted,
+                0,
                 "case {} unexpectedly reached engine.on_timeout_msg",
                 case.label()
             );
             assert_eq!(
-                s.inbound_newview_engine_accepted, 0,
+                s.inbound_newview_engine_accepted,
+                0,
                 "case {} unexpectedly reached engine.on_timeout_certificate",
                 case.label()
             );
@@ -1047,8 +1033,7 @@ mod tests {
 
         // Now deliver an HONEST signed TimeoutMsg from the same
         // validator id. Verify path must accept and engine must ingest.
-        let mut t =
-            TimeoutMsg::<[u8; 32]>::new(0, None, ValidatorId(1));
+        let mut t = TimeoutMsg::<[u8; 32]>::new(0, None, ValidatorId(1));
         let preimage = t.signing_bytes_with_chain_id(QBIND_DEVNET_CHAIN_ID);
         let sk = f.sks.get(&ValidatorId(1)).unwrap();
         let sig = MlDsa44Backend::sign(sk, &preimage).expect("sign");
@@ -1088,7 +1073,7 @@ mod tests {
         // `rx` here; we just hand it to the same delivery helper.
         let received = rx.recv().await.expect("rx");
         let f2 = make_fixture(4); // independent fixture for ctx
-        // (we just care that the message kind matches what we sent)
+                                  // (we just care that the message kind matches what we sent)
         assert!(matches!(received, ConsensusNetMsg::Timeout(_)));
         let ctx = make_ctx(&f2);
         let mut engine = make_engine(ValidatorId(0), 4);

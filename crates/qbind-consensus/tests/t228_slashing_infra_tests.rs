@@ -754,7 +754,10 @@ fn test_evidence_id_deterministic() {
     let id1 = e1.evidence_id();
     let id2 = e2.evidence_id();
 
-    assert_eq!(id1, id2, "evidence_id should be deterministic for identical evidence");
+    assert_eq!(
+        id1, id2,
+        "evidence_id should be deterministic for identical evidence"
+    );
 }
 
 #[test]
@@ -768,9 +771,18 @@ fn test_evidence_id_unique_for_different_evidence() {
     let id2 = e2.evidence_id();
     let id3 = e3.evidence_id();
 
-    assert_ne!(id1, id2, "Different views should have different evidence IDs");
-    assert_ne!(id1, id3, "Different validators should have different evidence IDs");
-    assert_ne!(id2, id3, "Different views and validators should have different evidence IDs");
+    assert_ne!(
+        id1, id2,
+        "Different views should have different evidence IDs"
+    );
+    assert_ne!(
+        id1, id3,
+        "Different validators should have different evidence IDs"
+    );
+    assert_ne!(
+        id2, id3,
+        "Different views and validators should have different evidence IDs"
+    );
 }
 
 #[test]
@@ -876,7 +888,10 @@ fn test_evidence_id_all_offense_types() {
     ];
     for i in 0..ids.len() {
         for j in (i + 1)..ids.len() {
-            assert_ne!(ids[i], ids[j], "Different evidence should have different IDs");
+            assert_ne!(
+                ids[i], ids[j],
+                "Different evidence should have different IDs"
+            );
         }
     }
 }

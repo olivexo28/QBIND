@@ -232,7 +232,7 @@ fn client_init_encoded_length() {
         validator_id: [0xDD; 32],
         cookie: vec![0x01, 0x02, 0x03],       // 3 bytes
         kem_ct: vec![0x11, 0x22, 0x33, 0x44], // 4 bytes
-        client_cert: Vec::new(), // M8: v1 protocol has no client cert
+        client_cert: Vec::new(),              // M8: v1 protocol has no client cert
     };
 
     let mut encoded = Vec::new();

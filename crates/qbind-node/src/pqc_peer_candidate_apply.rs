@@ -92,12 +92,10 @@ use std::time::Duration;
 
 use qbind_types::NetworkEnvironment;
 
-use crate::pqc_peer_candidate_staging::{
-    PeerCandidateStagingQueue, StagedPeerCandidate,
-};
+use crate::pqc_peer_candidate_staging::{PeerCandidateStagingQueue, StagedPeerCandidate};
 use crate::pqc_trust_bundle::TrustBundleEnvironment;
 use crate::pqc_trust_reload::{
-    apply_validated_candidate_with_previous, ApplyMode, AppliedCandidate, LiveTrustApplyContext,
+    apply_validated_candidate_with_previous, AppliedCandidate, ApplyMode, LiveTrustApplyContext,
     ReloadApplyError, ReloadCheckInputs,
 };
 
@@ -382,44 +380,32 @@ pub enum PeerDrivenApplyOutcome {
     /// sequence, same-sequence different digest, wrong domain on the
     /// marker, etc.). No apply call, no marker write, no live state
     /// mutation.
-    CandidateMarkerConflict {
-        reason: String,
-    },
+    CandidateMarkerConflict { reason: String },
     /// Run 070 apply pipeline succeeded. **No marker persist required**
     /// (policy `require_v2_ratification = false`, or coordinator
     /// reported the no-op idempotent case). Returned together with the
     /// [`AppliedCandidate`] for operator-log purposes.
-    ApplySucceeded {
-        applied: AppliedCandidate,
-    },
+    ApplySucceeded { applied: AppliedCandidate },
     /// Run 070 apply pipeline refused the candidate during validation
     /// or during a non-fatal failure branch. Live trust state is
     /// unchanged (or has been rolled back). The inner
     /// [`ReloadApplyError`] preserves the exact Run 070 reason.
-    ApplyRejected {
-        error: ReloadApplyError,
-    },
+    ApplyRejected { error: ReloadApplyError },
     /// Run 070 apply pipeline ran into a swap / eviction / commit
     /// failure AFTER a successful state swap, and the rollback
     /// succeeded. Live state is back on the previous snapshot;
     /// sequence file is unchanged; marker file is unchanged. Mirrors
     /// `task/RUN_070_TASK.txt` rollback semantics.
-    ApplyRollbackSucceeded {
-        error: ReloadApplyError,
-    },
+    ApplyRollbackSucceeded { error: ReloadApplyError },
     /// FATAL: Run 070 apply pipeline ran into a commit failure AFTER
     /// state swap and session eviction succeeded, AND the rollback
     /// itself failed. Live trust state may now be ahead of the on-disk
     /// sequence record. Operator MUST stop the node and recover
     /// offline.
-    ApplyFatalRollbackFailed {
-        error: ReloadApplyError,
-    },
+    ApplyFatalRollbackFailed { error: ReloadApplyError },
     /// Run 070 apply pipeline succeeded AND the v2 marker was persisted
     /// after `commit_sequence` per Run 134/138 discipline.
-    MarkerPersistedAfterCommit {
-        applied: AppliedCandidate,
-    },
+    MarkerPersistedAfterCommit { applied: AppliedCandidate },
     /// Run 070 apply pipeline succeeded — the trust-bundle sequence
     /// has advanced — BUT the post-commit v2 marker persist failed.
     /// **Fatal / operator-actionable.** On-disk marker is stale-by-one;
@@ -499,10 +485,7 @@ fn find_staged_candidate(
     now_unix_secs: u64,
 ) -> Option<StagedPeerCandidate> {
     queue.purge_expired(now_unix_secs);
-    queue
-        .entries()
-        .into_iter()
-        .find(|entry| id.matches(entry))
+    queue.entries().into_iter().find(|entry| id.matches(entry))
 }
 
 /// Run 148 peer-driven apply controller entry point. **Narrow,
@@ -699,10 +682,7 @@ pub fn try_apply_staged_peer_candidate(
 /// Helper: human-readable age duration of a staged candidate for
 /// operator logs. Not used by the policy decision (the policy uses
 /// raw seconds) but useful for callers that surface refusals.
-pub fn staged_candidate_age(
-    staged_at_unix_secs: u64,
-    now_unix_secs: u64,
-) -> Duration {
+pub fn staged_candidate_age(staged_at_unix_secs: u64, now_unix_secs: u64) -> Duration {
     Duration::from_secs(now_unix_secs.saturating_sub(staged_at_unix_secs))
 }
 

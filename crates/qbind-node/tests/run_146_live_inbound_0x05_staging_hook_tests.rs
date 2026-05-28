@@ -55,23 +55,21 @@ use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
     compute_canonical_genesis_hash, BundleSigningRatification, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
-    RatificationEnforcementPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
+    RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::p2p::NodeId;
 use qbind_node::pqc_authority_state::authority_state_file_path;
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
-use qbind_node::pqc_peer_candidate_staging::{
-    PeerCandidateStagingQueue, PeerDrivenStagingPolicy,
-};
+use qbind_node::pqc_peer_candidate_staging::{PeerCandidateStagingQueue, PeerDrivenStagingPolicy};
 use qbind_node::pqc_peer_candidate_wire::{
     encode_peer_candidate_wire_frame, LivePeerCandidateWireDispatcher,
-    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig,
-    PeerCandidatePropagationConfig, PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender,
-    PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome, RawFrameSendReport,
-    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
+    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig, PeerCandidatePropagationConfig,
+    PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender, PeerCandidateWireReceiverConfig,
+    RawFramePeerSendOutcome, RawFrameSendReport, PEER_CANDIDATE_WIRE_DOMAIN_TAG,
+    PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_ratification_policy::ratification_gate_decision;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
@@ -167,7 +165,10 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -417,11 +418,13 @@ impl PeerCandidateWireFrameSender for RecordingSender {
 }
 
 fn sequence_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read seq"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read seq"))
 }
 
 fn marker_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read marker"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read marker"))
 }
 
 /// Run 146 negative invariants: trust-state-related files must be
@@ -528,6 +531,7 @@ fn dispatcher(
             live_ratification,
             authority_marker_path: marker_path,
             staging_queue,
+            peer_apply: None,
         },
         metrics,
     )
@@ -566,7 +570,11 @@ fn run146_a1_accepted_v2_candidate_stages_when_policy_enabled() {
     assert!(disp.staging_hook_is_armed(), "A1: hook must be armed");
 
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
-    assert!(out.is_validated(), "A1: validation must accept, got {:?}", out);
+    assert!(
+        out.is_validated(),
+        "A1: validation must accept, got {:?}",
+        out
+    );
 
     let q = queue.lock();
     assert_eq!(q.len(), 1, "A1: queue must contain exactly one entry");
@@ -649,7 +657,11 @@ fn run146_a3_higher_sequence_v2_candidate_stages() {
         Some(Arc::clone(&queue)),
     );
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 4));
-    assert!(out.is_validated(), "A3: higher-seq must accept, got {:?}", out);
+    assert!(
+        out.is_validated(),
+        "A3: higher-seq must accept, got {:?}",
+        out
+    );
 
     let q = queue.lock();
     assert_eq!(q.len(), 1, "A3: queue must contain the newer candidate");

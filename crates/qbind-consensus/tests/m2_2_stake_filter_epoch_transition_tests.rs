@@ -64,7 +64,10 @@ fn m2_2_stake_filtering_provider_excludes_low_stake_validators() {
 
     // Get filtered epoch state
     let filtered_state = provider.get_epoch_state(EpochId::GENESIS);
-    assert!(filtered_state.is_some(), "should return filtered epoch state");
+    assert!(
+        filtered_state.is_some(),
+        "should return filtered epoch state"
+    );
 
     let state = filtered_state.unwrap();
 
@@ -91,11 +94,8 @@ fn m2_2_stake_filtering_provider_excludes_low_stake_validators() {
 #[test]
 fn m2_2_stake_filtering_provider_includes_all_when_above_threshold() {
     // All validators above threshold
-    let validators = make_validator_set_with_stakes(&[
-        (1, 2_000_000),
-        (2, 3_000_000),
-        (3, 5_000_000),
-    ]);
+    let validators =
+        make_validator_set_with_stakes(&[(1, 2_000_000), (2, 3_000_000), (3, 5_000_000)]);
 
     let epoch_state = EpochState::genesis(validators);
     let inner_provider = StaticEpochStateProvider::new().with_epoch(epoch_state);
@@ -132,7 +132,11 @@ fn m2_2_stake_filtering_provider_zero_min_stake_passes_through() {
     assert!(filtered_state.is_some());
 
     let state = filtered_state.unwrap();
-    assert_eq!(state.len(), 3, "all validators should pass through with min_stake=0");
+    assert_eq!(
+        state.len(),
+        3,
+        "all validators should pass through with min_stake=0"
+    );
 }
 
 // ============================================================================
@@ -142,11 +146,7 @@ fn m2_2_stake_filtering_provider_zero_min_stake_passes_through() {
 #[test]
 fn m2_2_stake_filtering_fails_closed_when_all_excluded() {
     // All validators below threshold
-    let validators = make_validator_set_with_stakes(&[
-        (1, 500_000),
-        (2, 600_000),
-        (3, 700_000),
-    ]);
+    let validators = make_validator_set_with_stakes(&[(1, 500_000), (2, 600_000), (3, 700_000)]);
 
     let epoch_state = EpochState::genesis(validators);
     let inner_provider = StaticEpochStateProvider::new().with_epoch(epoch_state);
@@ -330,20 +330,17 @@ fn m2_2_quorum_threshold_reflects_filtered_set() {
 #[test]
 fn m2_2_stake_filtering_is_deterministic() {
     // Create same validators in different input orders
-    let validators_order1 = make_validator_set_with_stakes(&[
-        (1, 500_000),
-        (2, 1_000_000),
-        (3, 2_000_000),
-    ]);
+    let validators_order1 =
+        make_validator_set_with_stakes(&[(1, 500_000), (2, 1_000_000), (3, 2_000_000)]);
 
     // Note: ConsensusValidatorSet sorts internally, so we test
     // that the provider produces same results regardless of which
     // epoch state it's given
 
-    let inner1 = StaticEpochStateProvider::new()
-        .with_epoch(EpochState::genesis(validators_order1.clone()));
-    let inner2 = StaticEpochStateProvider::new()
-        .with_epoch(EpochState::genesis(validators_order1.clone()));
+    let inner1 =
+        StaticEpochStateProvider::new().with_epoch(EpochState::genesis(validators_order1.clone()));
+    let inner2 =
+        StaticEpochStateProvider::new().with_epoch(EpochState::genesis(validators_order1.clone()));
 
     let min_stake = 1_000_000;
     let provider1 = StakeFilteringEpochStateProvider::new(inner1, min_stake);
@@ -372,25 +369,16 @@ fn m2_2_stake_filtering_is_deterministic() {
 #[test]
 fn m2_2_stake_filtering_works_across_multiple_epochs() {
     // Epoch 0: validators 1,2,3 - validator 1 low stake
-    let validators0 = make_validator_set_with_stakes(&[
-        (1, 500_000),
-        (2, 1_000_000),
-        (3, 2_000_000),
-    ]);
+    let validators0 =
+        make_validator_set_with_stakes(&[(1, 500_000), (2, 1_000_000), (3, 2_000_000)]);
 
     // Epoch 1: validators 2,3,4 - all above threshold
-    let validators1 = make_validator_set_with_stakes(&[
-        (2, 1_500_000),
-        (3, 2_500_000),
-        (4, 3_000_000),
-    ]);
+    let validators1 =
+        make_validator_set_with_stakes(&[(2, 1_500_000), (3, 2_500_000), (4, 3_000_000)]);
 
     // Epoch 2: validators 3,4,5 - validator 5 low stake
-    let validators2 = make_validator_set_with_stakes(&[
-        (3, 2_000_000),
-        (4, 2_500_000),
-        (5, 800_000),
-    ]);
+    let validators2 =
+        make_validator_set_with_stakes(&[(3, 2_000_000), (4, 2_500_000), (5, 800_000)]);
 
     let inner = StaticEpochStateProvider::new()
         .with_epoch(EpochState::genesis(validators0))
@@ -429,8 +417,7 @@ fn m2_2_stake_filtering_works_across_multiple_epochs() {
 #[test]
 fn m2_2_provider_reports_min_stake_threshold() {
     let validators = make_simple_validator_set(&[1, 2, 3]);
-    let inner = StaticEpochStateProvider::new()
-        .with_epoch(EpochState::genesis(validators));
+    let inner = StaticEpochStateProvider::new().with_epoch(EpochState::genesis(validators));
 
     let min_stake = 5_000_000;
     let provider = StakeFilteringEpochStateProvider::new(inner, min_stake);
@@ -441,8 +428,7 @@ fn m2_2_provider_reports_min_stake_threshold() {
 #[test]
 fn m2_2_provider_returns_none_for_unknown_epoch() {
     let validators = make_simple_validator_set(&[1, 2, 3]);
-    let inner = StaticEpochStateProvider::new()
-        .with_epoch(EpochState::genesis(validators));
+    let inner = StaticEpochStateProvider::new().with_epoch(EpochState::genesis(validators));
 
     let min_stake = 0; // No filtering to isolate inner provider behavior
     let provider = StakeFilteringEpochStateProvider::new(inner, min_stake);

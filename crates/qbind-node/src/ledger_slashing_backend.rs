@@ -339,22 +339,22 @@ impl AtomicSlashingLedger for qbind_ledger::InMemorySlashingLedger {
         batch: SlashingUpdateBatch,
     ) -> Result<(), SlashingLedgerError> {
         // In-memory ledger: apply operations sequentially (naturally atomic for single-threaded use)
-        
+
         // 1. Update validator state if present
         if let Some((validator_id, state)) = batch.validator_state {
             self.set_validator_state(validator_id, state);
         }
-        
+
         // 2. Mark evidence as seen if present
         if let Some(evidence_id) = batch.evidence_id {
             self.mark_evidence_seen(evidence_id);
         }
-        
+
         // 3. Store slashing record if present
         if let Some(record) = batch.slashing_record {
             self.store_slashing_record(record)?;
         }
-        
+
         Ok(())
     }
 

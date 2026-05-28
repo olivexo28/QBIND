@@ -1252,10 +1252,7 @@ impl<P: EpochStateProvider> EpochStateProvider for StakeFilteringEpochStateProvi
                     total_candidates,
                     min_stake: self.min_validator_stake,
                 };
-                eprintln!(
-                    "[M2.2] FAIL CLOSED: {}",
-                    error
-                );
+                eprintln!("[M2.2] FAIL CLOSED: {}", error);
                 *self.last_filter_error.lock().unwrap() = Some(error);
                 None
             }

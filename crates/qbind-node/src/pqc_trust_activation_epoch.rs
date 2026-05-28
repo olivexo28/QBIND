@@ -59,8 +59,8 @@ use std::sync::Arc;
 
 use crate::node_config::NodeConfig;
 use crate::production_consensus_storage::{
-    OpenedProductionConsensusStorage, ProductionConsensusStorageError,
-    open_production_consensus_storage,
+    open_production_consensus_storage, OpenedProductionConsensusStorage,
+    ProductionConsensusStorageError,
 };
 use crate::storage::{ConsensusStorage, RocksDbConsensusStorage, StorageError};
 
@@ -209,8 +209,10 @@ pub fn activation_epoch_source_from_storage(
 /// `Ok((UnavailableNoCommittedEpoch, no_storage()))`.
 pub fn load_activation_current_epoch_for_cli(
     config: &NodeConfig,
-) -> Result<(ActivationEpochSource, OpenedProductionConsensusStorage), ProductionConsensusStorageError>
-{
+) -> Result<
+    (ActivationEpochSource, OpenedProductionConsensusStorage),
+    ProductionConsensusStorageError,
+> {
     let opened = open_production_consensus_storage(config)?;
     let source = activation_epoch_source_from_lifecycle(&opened);
     Ok((source, opened))

@@ -369,9 +369,7 @@ fn make_test_crypto_provider(
 /// signed root-distribution lifecycle is solved; those remain operator-
 /// out-of-band and are tracked under C4 in
 /// `docs/whitepaper/contradiction.md`.
-fn make_pqc_static_root_crypto_provider(
-    sig_suite_id: u8,
-) -> Arc<StaticCryptoProvider> {
+fn make_pqc_static_root_crypto_provider(sig_suite_id: u8) -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
             .with_kem_suite(Arc::new(MlKem768Backend::new()))
@@ -1575,11 +1573,9 @@ impl P2pNodeBuilder {
             self.pqc_root_config.as_ref(),
             self.p2p_metrics.as_ref(),
         ) {
-            (
-                MutualAuthMode::Required | MutualAuthMode::Optional,
-                Some(cfg),
-                Some(p2p_metrics),
-            ) if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) => {
+            (MutualAuthMode::Required | MutualAuthMode::Optional, Some(cfg), Some(p2p_metrics))
+                if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) =>
+            {
                 let arc_metrics: Arc<dyn qbind_net::CertVerifyMetricsSink> = p2p_metrics.clone();
                 Some(arc_metrics)
             }
@@ -1614,12 +1610,9 @@ impl P2pNodeBuilder {
             // poisoning (a poisoned lock is treated as "revoked"
             // rather than "not revoked", which is the safe direction
             // for a defence-in-depth check).
-            (
-                MutualAuthMode::Required | MutualAuthMode::Optional,
-                Some(cfg),
-                Some(live),
-                _,
-            ) if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) => {
+            (MutualAuthMode::Required | MutualAuthMode::Optional, Some(cfg), Some(live), _)
+                if matches!(cfg.mode, PqcRootMode::PqcStaticRoot) =>
+            {
                 let active_count = live.active_leaf_revocation_count().unwrap_or(0);
                 if active_count == 0 {
                     // Preserve the pre-Run-052 zero-cost no-op path

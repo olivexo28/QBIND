@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::validator_config::inject_kem_metrics_into_configs;
 use qbind_node::NodeMetrics;

@@ -169,7 +169,7 @@ fn test_slashing_config_is_enforcing() {
 
     let enforce_critical = SlashingConfig::devnet_default();
     assert!(enforce_critical.is_enforcing());
-    
+
     // RecordOnly is not enforcing
     let record_only = SlashingConfig {
         mode: NodeSlashingMode::RecordOnly,

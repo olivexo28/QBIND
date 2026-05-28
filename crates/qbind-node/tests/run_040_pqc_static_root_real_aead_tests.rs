@@ -232,8 +232,16 @@ fn r040_a_pqc_static_root_provider_registers_real_chacha20_poly1305() {
 
     assert_eq!(real.suite_id(), AEAD_SUITE_CHACHA20_POLY1305);
     assert_eq!(real.suite_id(), 101);
-    assert_eq!(real.key_len(), 32, "ChaCha20-Poly1305 key length is 32 bytes");
-    assert_eq!(real.nonce_len(), 12, "ChaCha20-Poly1305 nonce length is 12 bytes");
+    assert_eq!(
+        real.key_len(),
+        32,
+        "ChaCha20-Poly1305 key length is 32 bytes"
+    );
+    assert_eq!(
+        real.nonce_len(),
+        12,
+        "ChaCha20-Poly1305 nonce length is 12 bytes"
+    );
     assert_eq!(real.tag_len(), 16, "Poly1305 tag length is 16 bytes");
 }
 
@@ -259,7 +267,9 @@ fn r040_a_pqc_static_root_provider_keeps_ml_kem_768_and_ml_dsa_44() {
         "ML-KEM-768 must remain registered (Run 039 invariant)"
     );
     assert!(
-        provider.signature_suite(PQC_TRANSPORT_SUITE_ML_DSA_44).is_some(),
+        provider
+            .signature_suite(PQC_TRANSPORT_SUITE_ML_DSA_44)
+            .is_some(),
         "ML-DSA-44 must remain registered (Run 037 invariant)"
     );
     // Test-grade DummyKem suite id `1` and DummySig suite id `3` must

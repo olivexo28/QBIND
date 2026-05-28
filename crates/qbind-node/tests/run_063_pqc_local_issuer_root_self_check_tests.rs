@@ -33,15 +33,13 @@
 
 use qbind_crypto::MlDsa44Backend;
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
-use qbind_node::pqc_root_config::{
-    decode_network_delegation_cert, PQC_TRANSPORT_SUITE_ML_DSA_44,
-};
+use qbind_node::pqc_root_config::{decode_network_delegation_cert, PQC_TRANSPORT_SUITE_ML_DSA_44};
 use qbind_node::pqc_trust_bundle::{
     build_helper_bundle, cert_leaf_fingerprint, cert_leaf_fingerprint_hex,
-    check_local_leaf_issuer_root_not_revoked, check_local_leaf_not_revoked,
-    derive_signing_key_id, sign_bundle_devnet_helper, BundleSignatureStatus,
-    BundleSigningKeySet, HelperBundleMode, LocalLeafIssuerRootSelfCheckError,
-    LocalLeafSelfCheckError, TrustBundle, TrustBundleEnvironment, TrustBundleRevocation,
+    check_local_leaf_issuer_root_not_revoked, check_local_leaf_not_revoked, derive_signing_key_id,
+    sign_bundle_devnet_helper, BundleSignatureStatus, BundleSigningKeySet, HelperBundleMode,
+    LocalLeafIssuerRootSelfCheckError, LocalLeafSelfCheckError, TrustBundle,
+    TrustBundleEnvironment, TrustBundleRevocation,
 };
 use qbind_types::NetworkEnvironment;
 use qbind_wire::io::WireEncode;
@@ -174,8 +172,7 @@ fn run063_signed_devnet_bundle_with_non_revoked_local_issuer_root_passes_self_ch
 #[test]
 fn run063_signed_devnet_bundle_with_active_revoked_local_issuer_root_fails_closed() {
     let (root_id, id_hex, pk_hex) = fresh_root_pair();
-    let loaded =
-        signed_devnet_bundle_with_root_revocation(&id_hex, &pk_hex, true, None);
+    let loaded = signed_devnet_bundle_with_root_revocation(&id_hex, &pk_hex, true, None);
     assert_eq!(loaded.revoked_root_count(), 1);
     assert!(loaded.revoked_root_ids.contains(&root_id));
 
@@ -222,8 +219,7 @@ fn run063_signed_devnet_bundle_with_pending_revoked_local_issuer_root_passes_sel
     // `revoked_root_ids`). The Run 063 self-check consults the
     // ACTIVE set only, so the local cert must start cleanly.
     let (root_id, id_hex, pk_hex) = fresh_root_pair();
-    let loaded =
-        signed_devnet_bundle_with_root_revocation(&id_hex, &pk_hex, true, Some(u64::MAX));
+    let loaded = signed_devnet_bundle_with_root_revocation(&id_hex, &pk_hex, true, Some(u64::MAX));
     // The bundle has a configured revocation, but it is pending.
     assert_eq!(loaded.configured_revocations_total(), 1);
     assert_eq!(loaded.revoked_root_count(), 0, "pending must not be active");
@@ -261,22 +257,23 @@ fn run063_signed_devnet_bundle_with_unrelated_active_revoked_root_passes_self_ch
     // UnknownRevocationRootId`). To express "an unrelated active
     // root revocation" we therefore use a *two-root* bundle: roots
     // = [local, other], and revoke `other` only.
-    let mut bundle =
-        build_helper_bundle(HelperBundleMode::Valid, &local_id_hex, &local_pk_hex, 0);
+    let mut bundle = build_helper_bundle(HelperBundleMode::Valid, &local_id_hex, &local_pk_hex, 0);
     bundle.environment = TrustBundleEnvironment::Devnet;
     let (_other_root_id, other_id_hex, other_pk_hex) = fresh_root_pair();
     // Append the other root as a second entry so the bundle parser
     // accepts the revocation reference.
-    bundle.roots.push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
-        root_id: other_id_hex.clone(),
-        suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
-        root_pk: other_pk_hex,
-        not_before: 0,
-        not_after: u64::MAX,
-        status: qbind_node::pqc_trust_bundle::RootStatus::Active,
-        activation_epoch: None,
-        activation_height: None,
-    });
+    bundle
+        .roots
+        .push(qbind_node::pqc_trust_bundle::TrustBundleRoot {
+            root_id: other_id_hex.clone(),
+            suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
+            root_pk: other_pk_hex,
+            not_before: 0,
+            not_after: u64::MAX,
+            status: qbind_node::pqc_trust_bundle::RootStatus::Active,
+            activation_epoch: None,
+            activation_height: None,
+        });
     bundle.revocations.push(TrustBundleRevocation {
         root_id: other_id_hex.clone(),
         leaf_cert_fingerprint: None,
@@ -438,8 +435,7 @@ fn run063_pending_revoked_root_never_bleeds_into_active_set_used_by_helper() {
     // test pins the boundary specifically at the call site of the
     // Run 063 helper.
     let (root_id, id_hex, pk_hex) = fresh_root_pair();
-    let loaded =
-        signed_devnet_bundle_with_root_revocation(&id_hex, &pk_hex, true, Some(u64::MAX));
+    let loaded = signed_devnet_bundle_with_root_revocation(&id_hex, &pk_hex, true, Some(u64::MAX));
     for id in loaded.revoked_root_ids.iter() {
         assert!(
             !loaded.pending_revoked_root_ids.contains(id),

@@ -53,7 +53,11 @@ fn make_validator_set(num: u64) -> ConsensusValidatorSet {
     ConsensusValidatorSet::new(entries).expect("valid set")
 }
 
-fn make_qc(block_id: [u8; 32], view: u64, signers: Vec<ValidatorId>) -> QuorumCertificate<[u8; 32]> {
+fn make_qc(
+    block_id: [u8; 32],
+    view: u64,
+    signers: Vec<ValidatorId>,
+) -> QuorumCertificate<[u8; 32]> {
     QuorumCertificate::new(block_id, view, signers)
 }
 
@@ -227,7 +231,11 @@ fn m5_safety_preserved_across_view_changes() {
         BasicHotStuffEngine::new(ValidatorId(1), validators.clone());
 
     // Create a QC for view 5 (simulating some progress)
-    let qc_v5 = make_qc([1u8; 32], 5, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v5 = make_qc(
+        [1u8; 32],
+        5,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
 
     // Set locked_qc manually for testing
     engine.state_mut().set_locked_qc(qc_v5.clone());
@@ -276,12 +284,20 @@ fn m5_tc_updates_locked_qc_when_higher() {
         BasicHotStuffEngine::new(ValidatorId(1), validators.clone());
 
     // Set initial locked_qc at view 3
-    let qc_v3 = make_qc([1u8; 32], 3, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v3 = make_qc(
+        [1u8; 32],
+        3,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     engine.state_mut().set_locked_qc(qc_v3);
     engine.set_view(4);
 
     // Create timeout messages with high_qc at view 5 (higher than locked_qc)
-    let qc_v5 = make_qc([2u8; 32], 5, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v5 = make_qc(
+        [2u8; 32],
+        5,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     let timeout_view = 4;
 
     for i in 1..=3 {
@@ -504,7 +520,10 @@ fn m5_double_vote_protection_during_view_change() {
         BasicHotStuffEngine::new(ValidatorId(1), validators.clone());
 
     // Vote in view 0
-    assert!(!engine.state().equivocating_validators().contains(&ValidatorId(1)));
+    assert!(!engine
+        .state()
+        .equivocating_validators()
+        .contains(&ValidatorId(1)));
 
     // Register a block and vote for it
     let block_id = [1u8; 32];
@@ -524,9 +543,7 @@ fn m5_double_vote_protection_during_view_change() {
     // Try to vote for a different block in the same old view (view 0)
     // This should be detected as equivocation
     let block_id_2 = [2u8; 32];
-    engine
-        .state_mut()
-        .register_block(block_id_2, 0, None, None);
+    engine.state_mut().register_block(block_id_2, 0, None, None);
     let result2 = engine.state_mut().on_vote(ValidatorId(1), 0, &block_id_2);
 
     // The vote should succeed but equivocation should be detected
@@ -552,7 +569,11 @@ fn m5_no_vote_below_locked_height() {
         BasicHotStuffEngine::new(ValidatorId(1), validators);
 
     // Set locked_qc at view 10
-    let qc_v10 = make_qc([1u8; 32], 10, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v10 = make_qc(
+        [1u8; 32],
+        10,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     engine.state_mut().set_locked_qc(qc_v10);
     engine.set_view(11);
 
@@ -582,12 +603,20 @@ fn m5_vote_allowed_with_sufficient_justify_qc() {
         BasicHotStuffEngine::new(ValidatorId(1), validators);
 
     // Set locked_qc at view 10
-    let qc_v10 = make_qc([1u8; 32], 10, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v10 = make_qc(
+        [1u8; 32],
+        10,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     engine.state_mut().set_locked_qc(qc_v10);
     engine.set_view(12);
 
     // Register a block at view 11 with justify_qc at view 10 (equals locked view)
-    let justify_qc = make_qc([1u8; 32], 10, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let justify_qc = make_qc(
+        [1u8; 32],
+        10,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     let block_id = [2u8; 32];
     engine
         .state_mut()
@@ -715,7 +744,10 @@ fn m5_leader_changes_after_tc() {
 
     // At view 0, leader is validator 1
     assert_eq!(engine.current_view(), 0);
-    assert_eq!(engine.leader_for_view(engine.current_view()), ValidatorId(1));
+    assert_eq!(
+        engine.leader_for_view(engine.current_view()),
+        ValidatorId(1)
+    );
 
     // Apply TC to advance to view 1
     let tc = TimeoutCertificate::new(
@@ -727,7 +759,10 @@ fn m5_leader_changes_after_tc() {
 
     // At view 1, leader should be validator 2
     assert_eq!(engine.current_view(), 1);
-    assert_eq!(engine.leader_for_view(engine.current_view()), ValidatorId(2));
+    assert_eq!(
+        engine.leader_for_view(engine.current_view()),
+        ValidatorId(2)
+    );
 }
 
 // ============================================================================
@@ -749,7 +784,11 @@ fn m5_select_max_high_qc() {
     let max_qc = select_max_high_qc(timeouts.iter());
 
     assert!(max_qc.is_some());
-    assert_eq!(max_qc.unwrap().view, 10, "should select QC with highest view");
+    assert_eq!(
+        max_qc.unwrap().view,
+        10,
+        "should select QC with highest view"
+    );
 }
 
 /// Test that TC properly aggregates high_qc from timeout messages
@@ -909,19 +948,32 @@ fn m5_try_advance_to_view_fail_closed() {
     assert_eq!(engine.current_view(), 0);
 
     // Advance to view 5 (valid forward movement)
-    assert!(engine.try_advance_to_view(5), "should succeed for forward movement");
+    assert!(
+        engine.try_advance_to_view(5),
+        "should succeed for forward movement"
+    );
     assert_eq!(engine.current_view(), 5);
 
     // Try to advance to view 3 (backward movement, should fail)
-    assert!(!engine.try_advance_to_view(3), "should fail for backward movement");
-    assert_eq!(engine.current_view(), 5, "view should not change on failed advance");
+    assert!(
+        !engine.try_advance_to_view(3),
+        "should fail for backward movement"
+    );
+    assert_eq!(
+        engine.current_view(),
+        5,
+        "view should not change on failed advance"
+    );
 
     // Try to advance to view 5 (same view, should fail)
     assert!(!engine.try_advance_to_view(5), "should fail for same view");
     assert_eq!(engine.current_view(), 5);
 
     // Advance to view 10 (valid forward movement)
-    assert!(engine.try_advance_to_view(10), "should succeed for forward movement");
+    assert!(
+        engine.try_advance_to_view(10),
+        "should succeed for forward movement"
+    );
     assert_eq!(engine.current_view(), 10);
 }
 
@@ -936,14 +988,22 @@ fn m5_locked_height() {
     assert!(engine.locked_height().is_none());
 
     // Set locked_qc at view 5
-    let qc_v5 = make_qc([1u8; 32], 5, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v5 = make_qc(
+        [1u8; 32],
+        5,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     engine.state_mut().set_locked_qc(qc_v5);
 
     // Should return view 5
     assert_eq!(engine.locked_height(), Some(5));
 
     // Update locked_qc to view 10
-    let qc_v10 = make_qc([2u8; 32], 10, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v10 = make_qc(
+        [2u8; 32],
+        10,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     engine.state_mut().set_locked_qc(qc_v10);
 
     // Should return view 10
@@ -963,20 +1023,45 @@ fn m5_is_safe_to_vote_at_height() {
     assert!(engine.is_safe_to_vote_at_height(Some(100)));
 
     // Set locked_qc at view 10
-    let qc_v10 = make_qc([1u8; 32], 10, vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)]);
+    let qc_v10 = make_qc(
+        [1u8; 32],
+        10,
+        vec![ValidatorId(1), ValidatorId(2), ValidatorId(3)],
+    );
     engine.state_mut().set_locked_qc(qc_v10);
 
     // With lock at view 10:
     // - justify_qc at view 10 or higher should be safe
-    assert!(engine.is_safe_to_vote_at_height(Some(10)), "equal to lock should be safe");
-    assert!(engine.is_safe_to_vote_at_height(Some(11)), "above lock should be safe");
-    assert!(engine.is_safe_to_vote_at_height(Some(100)), "way above lock should be safe");
+    assert!(
+        engine.is_safe_to_vote_at_height(Some(10)),
+        "equal to lock should be safe"
+    );
+    assert!(
+        engine.is_safe_to_vote_at_height(Some(11)),
+        "above lock should be safe"
+    );
+    assert!(
+        engine.is_safe_to_vote_at_height(Some(100)),
+        "way above lock should be safe"
+    );
 
     // - justify_qc below view 10 should not be safe (fail-closed)
-    assert!(!engine.is_safe_to_vote_at_height(Some(9)), "below lock should not be safe");
-    assert!(!engine.is_safe_to_vote_at_height(Some(5)), "well below lock should not be safe");
-    assert!(!engine.is_safe_to_vote_at_height(Some(0)), "genesis justify_qc should not be safe when locked");
-    assert!(!engine.is_safe_to_vote_at_height(None), "no justify_qc should not be safe when locked");
+    assert!(
+        !engine.is_safe_to_vote_at_height(Some(9)),
+        "below lock should not be safe"
+    );
+    assert!(
+        !engine.is_safe_to_vote_at_height(Some(5)),
+        "well below lock should not be safe"
+    );
+    assert!(
+        !engine.is_safe_to_vote_at_height(Some(0)),
+        "genesis justify_qc should not be safe when locked"
+    );
+    assert!(
+        !engine.is_safe_to_vote_at_height(None),
+        "no justify_qc should not be safe when locked"
+    );
 }
 
 /// Test that view flags are reset on try_advance_to_view
@@ -994,5 +1079,8 @@ fn m5_try_advance_resets_flags() {
     assert!(engine.try_advance_to_view(1));
 
     // Flags should be reset
-    assert!(!engine.timeout_emitted_in_view(), "timeout flag should be reset");
+    assert!(
+        !engine.timeout_emitted_in_view(),
+        "timeout flag should be reset"
+    );
 }

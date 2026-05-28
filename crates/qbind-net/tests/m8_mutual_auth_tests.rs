@@ -12,8 +12,8 @@ use std::sync::Arc;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_hash::net::derive_node_id_from_cert;
 use qbind_net::{
-    CookieConfig, ClientHandshake, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, 
-    NetError, ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse, TrustedClientRoots,
+    ClientHandshake, ClientHandshakeConfig, CookieConfig, KemPrivateKey, MutualAuthMode, NetError,
+    ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse, TrustedClientRoots,
 };
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::{ClientInit, NetworkDelegationCert, PROTOCOL_VERSION_1, PROTOCOL_VERSION_2};
@@ -229,7 +229,11 @@ fn test_missing_client_cert_in_required_mode_fails() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -300,7 +304,7 @@ fn test_missing_client_cert_in_required_mode_fails() {
     // Server should reject because mutual auth is required but no cert provided
     let result = server.handle_client_init(&*provider, &client_init);
     assert!(result.is_err());
-    
+
     match result {
         Err(NetError::UnsupportedProtocolVersion(1)) => {
             // Expected: v1 protocol not allowed in Required mode
@@ -308,7 +312,10 @@ fn test_missing_client_cert_in_required_mode_fails() {
         Err(NetError::ClientCertRequired) => {
             // Also acceptable
         }
-        other => panic!("Expected UnsupportedProtocolVersion or ClientCertRequired, got {:?}", other),
+        other => panic!(
+            "Expected UnsupportedProtocolVersion or ClientCertRequired, got {:?}",
+            other
+        ),
     }
 }
 
@@ -322,7 +329,11 @@ fn test_empty_client_cert_v2_in_required_mode_fails() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -382,7 +393,7 @@ fn test_empty_client_cert_v2_in_required_mode_fails() {
     // Server should reject because client_cert is empty
     let result = server.handle_client_init(&*provider, &client_init);
     assert!(result.is_err());
-    
+
     match result {
         Err(NetError::ClientCertRequired) => {
             // Expected
@@ -401,7 +412,11 @@ fn test_invalid_client_cert_parse_error_fails() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -460,10 +475,14 @@ fn test_invalid_client_cert_parse_error_fails() {
     // Server should reject because cert parsing fails
     let result = server.handle_client_init(&*provider, &client_init);
     assert!(result.is_err());
-    
+
     match result {
         Err(NetError::ClientCertInvalid(msg)) => {
-            assert!(msg.contains("parse"), "Expected parse error message, got: {}", msg);
+            assert!(
+                msg.contains("parse"),
+                "Expected parse error message, got: {}",
+                msg
+            );
         }
         other => panic!("Expected ClientCertInvalid(parse error), got {:?}", other),
     }
@@ -479,7 +498,11 @@ fn test_invalid_client_cert_signature_fails() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -557,12 +580,15 @@ fn test_invalid_client_cert_signature_fails() {
     // Server should reject because signature verification fails
     let result = server.handle_client_init(&*provider, &client_init);
     assert!(result.is_err());
-    
+
     match result {
         Err(NetError::KeySchedule(msg)) => {
             // Expected: signature verify error comes through as KeySchedule
-            assert!(msg.contains("signature") || msg.contains("verify"), 
-                "Expected signature error, got: {}", msg);
+            assert!(
+                msg.contains("signature") || msg.contains("verify"),
+                "Expected signature error, got: {}",
+                msg
+            );
         }
         other => panic!("Expected KeySchedule(signature error), got {:?}", other),
     }
@@ -578,7 +604,11 @@ fn test_cookie_blocks_before_client_cert_parsing() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -653,8 +683,9 @@ fn test_cookie_blocks_before_client_cert_parsing() {
     // Server should return cookie challenge, NOT try to parse client cert
     let client_ip = b"127.0.0.1";
     let current_time = 1000u64;
-    let result = server.handle_client_init_with_cookie(&*provider, &client_init, client_ip, current_time);
-    
+    let result =
+        server.handle_client_init_with_cookie(&*provider, &client_init, client_ip, current_time);
+
     match result {
         Ok(ServerHandshakeResponse::CookieChallenge(cookie)) => {
             // Expected: cookie challenge returned before any cert parsing
@@ -679,7 +710,11 @@ fn test_successful_mutual_auth_returns_client_node_id() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -765,11 +800,17 @@ fn test_successful_mutual_auth_returns_client_node_id() {
         .expect("Server handshake should succeed");
 
     // Verify mutual auth completed
-    assert!(server_result.mutual_auth_complete, "Mutual auth should be complete");
-    
+    assert!(
+        server_result.mutual_auth_complete,
+        "Mutual auth should be complete"
+    );
+
     // Verify client_node_id is set
-    assert!(server_result.client_node_id.is_some(), "client_node_id should be set");
-    
+    assert!(
+        server_result.client_node_id.is_some(),
+        "client_node_id should be set"
+    );
+
     // Verify client_node_id matches derive_node_id_from_cert
     let expected_node_id = derive_node_id_from_cert(&client_cert);
     assert_eq!(
@@ -784,10 +825,16 @@ fn test_successful_mutual_auth_returns_client_node_id() {
         .expect("Client handshake should succeed");
 
     // Client-side mutual_auth_complete should also be true
-    assert!(client_result.mutual_auth_complete, "Client should report mutual auth complete");
-    
+    assert!(
+        client_result.mutual_auth_complete,
+        "Client should report mutual auth complete"
+    );
+
     // Client doesn't have its own NodeId from handshake
-    assert!(client_result.client_node_id.is_none(), "Client shouldn't have client_node_id");
+    assert!(
+        client_result.client_node_id.is_none(),
+        "Client shouldn't have client_node_id"
+    );
 }
 
 // ============================================================================
@@ -800,7 +847,11 @@ fn test_optional_mode_accepts_v1_protocol() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -870,15 +921,24 @@ fn test_optional_mode_accepts_v1_protocol() {
         .expect("Server should accept v1 in Optional mode");
 
     // Mutual auth should NOT be complete (no client cert provided)
-    assert!(!server_result.mutual_auth_complete, "Mutual auth should not be complete without cert");
-    assert!(server_result.client_node_id.is_none(), "client_node_id should be None");
+    assert!(
+        !server_result.mutual_auth_complete,
+        "Mutual auth should not be complete without cert"
+    );
+    assert!(
+        server_result.client_node_id.is_none(),
+        "client_node_id should be None"
+    );
 
     // Client completes handshake
     let client_result = client
         .handle_server_accept(&*provider, &client_init, &server_accept)
         .expect("Client handshake should succeed");
 
-    assert!(!client_result.mutual_auth_complete, "Client should report no mutual auth");
+    assert!(
+        !client_result.mutual_auth_complete,
+        "Client should report no mutual auth"
+    );
 }
 
 // ============================================================================
@@ -891,7 +951,11 @@ fn test_disabled_mode_ignores_client_cert() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -973,8 +1037,14 @@ fn test_disabled_mode_ignores_client_cert() {
         .expect("Server should accept in Disabled mode");
 
     // Mutual auth should NOT be complete (disabled)
-    assert!(!server_result.mutual_auth_complete, "Mutual auth should not be complete in Disabled mode");
-    assert!(server_result.client_node_id.is_none(), "client_node_id should be None in Disabled mode");
+    assert!(
+        !server_result.mutual_auth_complete,
+        "Mutual auth should not be complete in Disabled mode"
+    );
+    assert!(
+        server_result.client_node_id.is_none(),
+        "client_node_id should be None in Disabled mode"
+    );
 }
 
 // ============================================================================
@@ -987,7 +1057,11 @@ fn test_transcript_binding_includes_client_cert() {
     let aead_suite_id: u8 = 2;
     let sig_suite_id: u8 = 3;
 
-    let provider = Arc::new(make_test_provider(kem_suite_id, aead_suite_id, sig_suite_id));
+    let provider = Arc::new(make_test_provider(
+        kem_suite_id,
+        aead_suite_id,
+        sig_suite_id,
+    ));
 
     let mut validator_id = [0u8; 32];
     validator_id[0..6].copy_from_slice(b"val-42");
@@ -1059,8 +1133,12 @@ fn test_transcript_binding_includes_client_cert() {
     let mut server_v2 = ServerHandshake::new(server_cfg.clone(), server_random);
 
     let client_init_v2 = client_v2.start(validator_id, &server_kem_pk).unwrap();
-    let (server_accept_v2, server_result_v2) = server_v2.handle_client_init(&*provider, &client_init_v2).unwrap();
-    let _client_result_v2 = client_v2.handle_server_accept(&*provider, &client_init_v2, &server_accept_v2).unwrap();
+    let (server_accept_v2, server_result_v2) = server_v2
+        .handle_client_init(&*provider, &client_init_v2)
+        .unwrap();
+    let _client_result_v2 = client_v2
+        .handle_server_accept(&*provider, &client_init_v2, &server_accept_v2)
+        .unwrap();
 
     // Second handshake: v1 without client cert
     let client_cfg_v1 = ClientHandshakeConfig {
@@ -1078,15 +1156,19 @@ fn test_transcript_binding_includes_client_cert() {
     let mut server_v1 = ServerHandshake::new(server_cfg, server_random);
 
     let client_init_v1 = client_v1.start(validator_id, &server_kem_pk).unwrap();
-    let (server_accept_v1, server_result_v1) = server_v1.handle_client_init(&*provider, &client_init_v1).unwrap();
-    let _client_result_v1 = client_v1.handle_server_accept(&*provider, &client_init_v1, &server_accept_v1).unwrap();
+    let (server_accept_v1, server_result_v1) = server_v1
+        .handle_client_init(&*provider, &client_init_v1)
+        .unwrap();
+    let _client_result_v1 = client_v1
+        .handle_server_accept(&*provider, &client_init_v1, &server_accept_v1)
+        .unwrap();
 
     // The sessions should have DIFFERENT keys because the transcript differs
     // (v2 includes client_cert in transcript, v1 does not)
     // We can't directly compare session keys, but we can verify mutual auth differs
     assert!(server_result_v2.mutual_auth_complete);
     assert!(!server_result_v1.mutual_auth_complete);
-    
+
     // Different client_node_id outcomes
     assert!(server_result_v2.client_node_id.is_some());
     assert!(server_result_v1.client_node_id.is_none());

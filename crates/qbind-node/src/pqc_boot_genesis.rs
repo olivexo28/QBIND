@@ -88,9 +88,7 @@ pub enum BootGenesisOutcome {
     /// genesis path). Skipped intentionally — never reachable on MainNet
     /// because the MainNet preset / T185 shield refuse the absence of
     /// `genesis_source.genesis_path`.
-    SkippedNoExternalGenesis {
-        env: NetworkEnvironmentPolicy,
-    },
+    SkippedNoExternalGenesis { env: NetworkEnvironmentPolicy },
 }
 
 impl BootGenesisOutcome {
@@ -183,11 +181,12 @@ pub fn load_external_genesis(path: &Path) -> Result<GenesisConfig, BootGenesisEr
         path: path.to_path_buf(),
         error,
     })?;
-    let cfg: GenesisConfig =
-        serde_json::from_slice(&bytes).map_err(|error| BootGenesisError::GenesisFileParseError {
+    let cfg: GenesisConfig = serde_json::from_slice(&bytes).map_err(|error| {
+        BootGenesisError::GenesisFileParseError {
             path: path.to_path_buf(),
             error,
-        })?;
+        }
+    })?;
     Ok(cfg)
 }
 
@@ -334,13 +333,12 @@ mod tests {
         // ML-DSA-44 public-key material. Transport roots remain
         // fingerprint-only (transport consumption is a separate
         // post-Run-104 topic).
-        let mut auth = GenesisAuthorityConfig::new(vec![
-            GenesisAuthorityRoot::with_public_key_bytes(
+        let mut auth =
+            GenesisAuthorityConfig::new(vec![GenesisAuthorityRoot::with_public_key_bytes(
                 GENESIS_AUTHORITY_SUITE_ML_DSA_44,
                 &synthetic_ml_dsa_44_pk(0xab),
                 "foundation-bundle-signer-1",
-            ),
-        ]);
+            )]);
         auth.pqc_transport_roots = vec![GenesisAuthorityRoot::new(
             GENESIS_AUTHORITY_SUITE_ML_DSA_44,
             fingerprint(0xcd),
@@ -352,7 +350,11 @@ mod tests {
 
     fn write_genesis_to_tmp(cfg: &GenesisConfig, name: &str) -> PathBuf {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("qbind-run-102-{}-{}.json", name, std::process::id()));
+        let path = dir.join(format!(
+            "qbind-run-102-{}-{}.json",
+            name,
+            std::process::id()
+        ));
         let mut f = std::fs::File::create(&path).expect("create tmp");
         let json = serde_json::to_string_pretty(cfg).expect("serialize");
         f.write_all(json.as_bytes()).expect("write");
@@ -410,7 +412,10 @@ mod tests {
         let err = compute_print_genesis_hash(&path, NetworkEnvironmentPolicy::Mainnet).unwrap_err();
         match err {
             BootGenesisError::GenesisFileParseError { .. } => {}
-            other => panic!("expected GenesisFileParseError, got {:?}", other.to_string()),
+            other => panic!(
+                "expected GenesisFileParseError, got {:?}",
+                other.to_string()
+            ),
         }
         let _ = std::fs::remove_file(path);
     }
@@ -482,14 +487,8 @@ mod tests {
         // file-byte hash would differ.
         let cfg = mainnet_genesis();
         let dir = std::env::temp_dir();
-        let p_compact = dir.join(format!(
-            "qbind-run-102-compact-{}.json",
-            std::process::id()
-        ));
-        let p_pretty = dir.join(format!(
-            "qbind-run-102-pretty-{}.json",
-            std::process::id()
-        ));
+        let p_compact = dir.join(format!("qbind-run-102-compact-{}.json", std::process::id()));
+        let p_pretty = dir.join(format!("qbind-run-102-pretty-{}.json", std::process::id()));
         std::fs::write(&p_compact, serde_json::to_string(&cfg).unwrap()).unwrap();
         std::fs::write(&p_pretty, serde_json::to_string_pretty(&cfg).unwrap()).unwrap();
         let h_compact =
@@ -500,12 +499,10 @@ mod tests {
             h_compact, h_pretty,
             "canonical (parsed) hash must ignore JSON formatting"
         );
-        let raw_compact = qbind_ledger::compute_genesis_hash_bytes(
-            &std::fs::read(&p_compact).unwrap(),
-        );
-        let raw_pretty = qbind_ledger::compute_genesis_hash_bytes(
-            &std::fs::read(&p_pretty).unwrap(),
-        );
+        let raw_compact =
+            qbind_ledger::compute_genesis_hash_bytes(&std::fs::read(&p_compact).unwrap());
+        let raw_pretty =
+            qbind_ledger::compute_genesis_hash_bytes(&std::fs::read(&p_pretty).unwrap());
         assert_ne!(
             raw_compact, raw_pretty,
             "raw file-byte hash differs across formattings — proves Run 102 is canonical"

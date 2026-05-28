@@ -175,11 +175,11 @@ fn test_a1_duplicate_evidence_rejected_before_verify() {
 
     let ctx = HardenedEvidenceContext::new(
         &vs,
-        1000, // current_height
-        10,   // current_view
-        5,    // current_epoch
+        1000,                 // current_height
+        10,                   // current_view
+        5,                    // current_epoch
         Some(ValidatorId(1)), // reporter
-        0,    // block_evidence_count
+        0,                    // block_evidence_count
     );
 
     let evidence = make_o1_evidence(1, 100, 0);
@@ -199,7 +199,9 @@ fn test_a1_duplicate_evidence_rejected_before_verify() {
 
     // Verify metrics
     assert_eq!(
-        engine.metrics().rejected_by_reason(EvidenceRejectionReason::Duplicate),
+        engine
+            .metrics()
+            .rejected_by_reason(EvidenceRejectionReason::Duplicate),
         1
     );
 }
@@ -208,14 +210,7 @@ fn test_a1_duplicate_evidence_rejected_before_verify() {
 fn test_a2_duplicate_uses_content_addressed_id() {
     let (mut engine, vs) = create_engine_and_context(false, None, None);
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        0,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 1000, 10, 5, Some(ValidatorId(1)), 0);
 
     // Create two different evidence with same content
     let evidence1 = make_o1_evidence(1, 100, 0);
@@ -246,14 +241,7 @@ fn test_a2_duplicate_uses_content_addressed_id() {
 fn test_b1_oversized_evidence_rejected() {
     let (mut engine, vs) = create_engine_and_context(false, None, None);
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        0,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 1000, 10, 5, Some(ValidatorId(1)), 0);
 
     // Create evidence that exceeds 64KB limit
     let evidence = make_oversized_o1_evidence(1, 100, 0);
@@ -274,7 +262,9 @@ fn test_b1_oversized_evidence_rejected() {
 
     // Verify metrics
     assert_eq!(
-        engine.metrics().rejected_by_reason(EvidenceRejectionReason::OversizedPayload),
+        engine
+            .metrics()
+            .rejected_by_reason(EvidenceRejectionReason::OversizedPayload),
         1
     );
 }
@@ -283,14 +273,7 @@ fn test_b1_oversized_evidence_rejected() {
 fn test_b2_within_size_limit_accepted() {
     let (mut engine, vs) = create_engine_and_context(false, None, None);
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        0,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 1000, 10, 5, Some(ValidatorId(1)), 0);
 
     // Normal sized evidence
     let evidence = make_o1_evidence(1, 100, 0);
@@ -327,11 +310,7 @@ fn test_c1_non_validator_reporter_rejected_when_required() {
 
     // Context with no reporter_id
     let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        None, // No reporter
+        &vs, 1000, 10, 5, None, // No reporter
         0,
     );
 
@@ -346,7 +325,9 @@ fn test_c1_non_validator_reporter_rejected_when_required() {
     }
 
     assert_eq!(
-        engine.metrics().rejected_by_reason(EvidenceRejectionReason::NonValidatorReporter),
+        engine
+            .metrics()
+            .rejected_by_reason(EvidenceRejectionReason::NonValidatorReporter),
         1
     );
 }
@@ -414,11 +395,7 @@ fn test_c4_non_validator_reporter_allowed_when_not_required() {
 
     // Context with no reporter_id should be allowed
     let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        None, // No reporter
+        &vs, 1000, 10, 5, None, // No reporter
         0,
     );
 
@@ -497,7 +474,9 @@ fn test_d1_per_block_cap_enforced() {
     }
 
     assert_eq!(
-        engine.metrics().rejected_by_reason(EvidenceRejectionReason::PerBlockCapExceeded),
+        engine
+            .metrics()
+            .rejected_by_reason(EvidenceRejectionReason::PerBlockCapExceeded),
         1
     );
 }
@@ -540,14 +519,7 @@ fn test_e1_oversized_rejected_before_verify() {
     // Create engine with strict reporter requirement
     let (mut engine, vs) = create_engine_and_context(true, None, None);
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        0,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 1000, 10, 5, Some(ValidatorId(1)), 0);
 
     // Create oversized evidence
     let evidence = make_oversized_o1_evidence(1, 100, 0);
@@ -577,11 +549,7 @@ fn test_e2_reporter_check_before_size_check() {
 
     // Non-validator reporter
     let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        None, // No reporter
+        &vs, 1000, 10, 5, None, // No reporter
         0,
     );
 
@@ -657,13 +625,18 @@ fn test_f1_valid_evidence_leads_to_penalty() {
             // Note: May be EvidenceOnly or PenaltyApplied depending on mode and verification
             // The key is that it was NOT rejected by hardening
             match record.penalty_decision {
-                PenaltyDecision::PenaltyApplied { slashed_amount, jailed_until_epoch } => {
+                PenaltyDecision::PenaltyApplied {
+                    slashed_amount,
+                    jailed_until_epoch,
+                } => {
                     // Penalty was applied - expected for EnforceCritical mode
                     // slashed_amount should be non-zero for a fresh validator with stake
                     // jailed_until_epoch should be Some for O1 (critical offense)
                     // Note: Could be 0 if validator has no stake, but that's acceptable
-                    assert!(jailed_until_epoch.is_some() || slashed_amount == 0,
-                        "O1 should jail the validator or have no stake to slash");
+                    assert!(
+                        jailed_until_epoch.is_some() || slashed_amount == 0,
+                        "O1 should jail the validator or have no stake to slash"
+                    );
                 }
                 PenaltyDecision::EvidenceOnly => {
                     // Also acceptable for mode RecordOnly
@@ -756,7 +729,9 @@ fn test_g1_too_old_evidence_rejected() {
     }
 
     assert_eq!(
-        engine.metrics().rejected_by_reason(EvidenceRejectionReason::TooOld),
+        engine
+            .metrics()
+            .rejected_by_reason(EvidenceRejectionReason::TooOld),
         1
     );
 }
@@ -765,14 +740,7 @@ fn test_g1_too_old_evidence_rejected() {
 fn test_g2_within_age_limit_accepted() {
     let (mut engine, vs) = create_engine_and_context(false, None, Some(1000));
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        10000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        0,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 10000, 10, 5, Some(ValidatorId(1)), 0);
 
     // Evidence from height 9500 is within limit (10000 - 1000 = 9000 minimum)
     let evidence = make_o1_evidence(1, 9500, 0);
@@ -821,7 +789,9 @@ fn test_h1_future_height_rejected() {
     }
 
     assert_eq!(
-        engine.metrics().rejected_by_reason(EvidenceRejectionReason::FutureHeight),
+        engine
+            .metrics()
+            .rejected_by_reason(EvidenceRejectionReason::FutureHeight),
         1
     );
 }
@@ -830,14 +800,7 @@ fn test_h1_future_height_rejected() {
 fn test_h2_near_future_accepted() {
     let (mut engine, vs) = create_engine_and_context(false, None, None);
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        0,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 1000, 10, 5, Some(ValidatorId(1)), 0);
 
     // Evidence from height 1050 is within lookahead (1000 + 100 = 1100)
     let evidence = make_o1_evidence(1, 1050, 0);
@@ -910,21 +873,17 @@ fn test_i5_estimated_size_calculation() {
     // Should be reasonable for a normal O1 evidence
     // Base (26) + 2 * (56 + 64 + 100) = 26 + 440 = 466 approx
     assert!(size > 200, "Size should be at least 200 bytes");
-    assert!(size < 10000, "Size should be under 10KB for normal evidence");
+    assert!(
+        size < 10000,
+        "Size should be under 10KB for normal evidence"
+    );
 }
 
 #[test]
 fn test_i6_helper_methods() {
     let (engine, vs) = create_engine_and_context(true, Some(5), None);
 
-    let ctx = HardenedEvidenceContext::new(
-        &vs,
-        1000,
-        10,
-        5,
-        Some(ValidatorId(1)),
-        3,
-    );
+    let ctx = HardenedEvidenceContext::new(&vs, 1000, 10, 5, Some(ValidatorId(1)), 3);
 
     // Test would_accept_reporter
     assert!(engine.would_accept_reporter(&ctx, Some(ValidatorId(1))));

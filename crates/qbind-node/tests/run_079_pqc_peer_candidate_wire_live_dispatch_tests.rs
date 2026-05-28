@@ -69,9 +69,9 @@ use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_peer_candidate_wire::{
     encode_peer_candidate_wire_frame, read_loop_dispatch_peer_candidate_wire_frame,
     DiscardPeerCandidateWireSink, LivePeerCandidateWireDispatcher,
-    LivePeerCandidateWireDispatcherConfig, PeerCandidateWireEnvelopeV1,
-    PeerCandidateWireFrameSink, PeerCandidateWireOutcome, PeerCandidateWireReceiverConfig,
-    PeerCandidatePropagationConfig, ReadLoopFrameDecision, DISCRIMINATOR_PEER_CANDIDATE_WIRE,
+    LivePeerCandidateWireDispatcherConfig, PeerCandidatePropagationConfig,
+    PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSink, PeerCandidateWireOutcome,
+    PeerCandidateWireReceiverConfig, ReadLoopFrameDecision, DISCRIMINATOR_PEER_CANDIDATE_WIRE,
     MAX_PEER_CANDIDATE_WIRE_FRAME_BYTES, PEER_CANDIDATE_WIRE_DOMAIN_TAG,
     PEER_CANDIDATE_WIRE_VERSION,
 };
@@ -235,6 +235,7 @@ fn live_dispatcher_for_devnet(
         live_ratification: None,
         authority_marker_path: None,
         staging_queue: None,
+        peer_apply: None,
     };
     LivePeerCandidateWireDispatcher::new(cfg, metrics)
 }
@@ -294,8 +295,7 @@ fn run079_read_loop_helper_routes_only_0x05_to_sink() {
     // Existing transport discriminators must fall through.
     for d in [0x00u8, 0x01, 0x02, 0x03, 0x04, 0x06, 0xff] {
         let frame = vec![d, 0, 0, 0, 0];
-        let decision =
-            read_loop_dispatch_peer_candidate_wire_frame(&frame, Some(&sink_arc));
+        let decision = read_loop_dispatch_peer_candidate_wire_frame(&frame, Some(&sink_arc));
         assert_eq!(decision, ReadLoopFrameDecision::PassThrough);
     }
     assert_eq!(sink.received.load(std::sync::atomic::Ordering::Relaxed), 0);
@@ -350,12 +350,8 @@ fn run079_live_dispatcher_validates_without_applying_or_persisting() {
     let frame = encode_peer_candidate_wire_frame(&env).expect("encode");
 
     let metrics = Arc::new(P2pMetrics::default());
-    let dispatcher = live_dispatcher_for_devnet(
-        &scratch,
-        h.signing_keys.clone(),
-        true,
-        Arc::clone(&metrics),
-    );
+    let dispatcher =
+        live_dispatcher_for_devnet(&scratch, h.signing_keys.clone(), true, Arc::clone(&metrics));
     assert!(dispatcher.is_enabled());
 
     // Drive through the trait method so we exercise the same
@@ -416,12 +412,8 @@ fn run079_live_dispatcher_rejects_tampered_signature() {
     let frame = encode_peer_candidate_wire_frame(&env).expect("encode");
 
     let metrics = Arc::new(P2pMetrics::default());
-    let dispatcher = live_dispatcher_for_devnet(
-        &scratch,
-        h.signing_keys.clone(),
-        true,
-        Arc::clone(&metrics),
-    );
+    let dispatcher =
+        live_dispatcher_for_devnet(&scratch, h.signing_keys.clone(), true, Arc::clone(&metrics));
     dispatcher.handle_frame(&frame);
 
     assert_eq!(metrics.peer_candidate_received_total(), 1);
@@ -500,6 +492,7 @@ fn run079_live_dispatcher_rate_limit_kicks_in() {
         live_ratification: None,
         authority_marker_path: None,
         staging_queue: None,
+        peer_apply: None,
     };
     let dispatcher = LivePeerCandidateWireDispatcher::new(cfg, Arc::clone(&metrics));
     // First admit: passes rate-limit; subsequent identical frames
@@ -558,12 +551,8 @@ fn run079_dispatcher_composes_with_reload_check_no_cross_mutation() {
     let env = wire_envelope(bytes.clone(), 21, fp_prefix.clone());
     let frame = encode_peer_candidate_wire_frame(&env).expect("encode");
     let metrics = Arc::new(P2pMetrics::default());
-    let dispatcher = live_dispatcher_for_devnet(
-        &scratch,
-        h.signing_keys.clone(),
-        true,
-        Arc::clone(&metrics),
-    );
+    let dispatcher =
+        live_dispatcher_for_devnet(&scratch, h.signing_keys.clone(), true, Arc::clone(&metrics));
     dispatcher.handle_frame(&frame);
 
     // Local Run 069 reload-check on the very same bytes — must

@@ -1,7 +1,7 @@
 use crate::error::StateError;
 use crate::io::{
-    get_bytes, get_u16, get_u32, get_u64, get_u8, len_to_u16, put_bytes, put_u16, put_u32,
-    put_u64, put_u8, StateDecode, StateEncode,
+    get_bytes, get_u16, get_u32, get_u64, get_u8, len_to_u16, put_bytes, put_u16, put_u32, put_u64,
+    put_u8, StateDecode, StateEncode,
 };
 use qbind_types::{
     Hash32, LaunchChecklist, MainnetStatus, ParamRegistry, SafetyCouncilKeyAccount,

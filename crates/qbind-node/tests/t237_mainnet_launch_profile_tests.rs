@@ -87,9 +87,18 @@ fn test_mainnet_preset_has_correct_defaults() {
 
     // Core execution
     assert!(config.gas_enabled, "gas_enabled should be true");
-    assert!(config.enable_fee_priority, "enable_fee_priority should be true");
-    assert!(config.dag_availability_enabled, "dag_availability_enabled should be true");
-    assert!(config.stage_b_enabled, "stage_b_enabled should be true for MainNet");
+    assert!(
+        config.enable_fee_priority,
+        "enable_fee_priority should be true"
+    );
+    assert!(
+        config.dag_availability_enabled,
+        "dag_availability_enabled should be true"
+    );
+    assert!(
+        config.stage_b_enabled,
+        "stage_b_enabled should be true for MainNet"
+    );
 
     // DAG coupling
     assert_eq!(
@@ -103,7 +112,10 @@ fn test_mainnet_preset_has_correct_defaults() {
         config.state_retention.is_enabled(),
         "state_retention should be enabled"
     );
-    assert!(config.snapshot_config.enabled, "snapshots should be enabled");
+    assert!(
+        config.snapshot_config.enabled,
+        "snapshots should be enabled"
+    );
 
     // Slashing (RecordOnly is the default for MainNet v0)
     assert!(
@@ -390,7 +402,10 @@ fn test_mainnet_rejects_missing_expected_genesis_hash() {
 
     let result = config.validate_mainnet_invariants();
 
-    assert!(result.is_err(), "Should reject missing expected_genesis_hash");
+    assert!(
+        result.is_err(),
+        "Should reject missing expected_genesis_hash"
+    );
     match result {
         Err(MainnetConfigError::ExpectedGenesisHashMissing) => (),
         Err(e) => panic!("Expected ExpectedGenesisHashMissing, got: {:?}", e),
@@ -636,7 +651,9 @@ fn test_mainnet_accepts_valid_slashing_modes() {
         .with_signer_keystore_path("/data/qbind/keystore")
         .with_slashing_mode(SlashingMode::EnforceCritical);
     assert!(
-        config_enforce_critical.validate_mainnet_invariants().is_ok(),
+        config_enforce_critical
+            .validate_mainnet_invariants()
+            .is_ok(),
         "EnforceCritical should be accepted"
     );
 

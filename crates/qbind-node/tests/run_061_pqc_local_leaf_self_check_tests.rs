@@ -134,9 +134,13 @@ fn signed_devnet_bundle_revoking(
     let set = signing_set_with(signing_id, &signing_pk);
 
     let json = serde_json::to_vec(&bundle).unwrap();
-    let loaded =
-        TrustBundle::load_from_bytes_with_signing_keys(&json, NetworkEnvironment::Devnet, 100, &set)
-            .expect("signed devnet bundle loads + verifies");
+    let loaded = TrustBundle::load_from_bytes_with_signing_keys(
+        &json,
+        NetworkEnvironment::Devnet,
+        100,
+        &set,
+    )
+    .expect("signed devnet bundle loads + verifies");
     assert!(matches!(
         loaded.signature_status,
         BundleSignatureStatus::Verified { .. }
@@ -256,12 +260,9 @@ fn run_061_self_check_fingerprint_matches_run_052_peer_handshake_fingerprint() {
     assert_eq!(node_fp, net_fp, "Run 052 cross-crate parity");
 
     let local_bytes = encode_cert_bytes(&cert);
-    let returned = check_local_leaf_not_revoked(
-        &local_bytes,
-        &std::collections::HashSet::new(),
-        &[0u8; 32],
-    )
-    .expect("clean revocation set passes");
+    let returned =
+        check_local_leaf_not_revoked(&local_bytes, &std::collections::HashSet::new(), &[0u8; 32])
+            .expect("clean revocation set passes");
     assert_eq!(
         returned, net_fp,
         "Run 061 self-check fingerprint must equal Run 052 handshake fingerprint"
@@ -289,9 +290,13 @@ fn run_061_self_check_does_not_react_to_root_level_revocation_only() {
     bundle.signature = Some(sig);
     let set = signing_set_with(signing_id, &signing_pk);
     let json = serde_json::to_vec(&bundle).unwrap();
-    let loaded =
-        TrustBundle::load_from_bytes_with_signing_keys(&json, NetworkEnvironment::Devnet, 100, &set)
-            .expect("loads");
+    let loaded = TrustBundle::load_from_bytes_with_signing_keys(
+        &json,
+        NetworkEnvironment::Devnet,
+        100,
+        &set,
+    )
+    .expect("loads");
     assert_eq!(
         loaded.revoked_leaf_fingerprint_count(),
         0,

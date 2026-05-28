@@ -37,12 +37,11 @@ use qbind_ledger::{
     BundleSigningRatification, GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot,
     GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig, GenesisValidator,
     NetworkEnvironmentPolicy, RatificationEnforcementInputs, RatificationEnforcementOutcome,
-    RatificationEnforcementPolicy, RatificationEnvironment,
-    GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    RatificationEnforcementPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_marker_acceptance::{
-    decide_marker_acceptance, persist_accepted_marker_after_commit_boundary,
-    MarkerAcceptKind, MarkerAcceptanceInputs, MutatingSurfaceMarkerError,
+    decide_marker_acceptance, persist_accepted_marker_after_commit_boundary, MarkerAcceptKind,
+    MarkerAcceptanceInputs, MutatingSurfaceMarkerError,
 };
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, load_authority_state, AuthorityStateUpdateSource,
@@ -122,7 +121,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -436,7 +438,10 @@ fn run119_clean_first_write_decide_then_apply_then_persist() {
     assert_eq!(loaded.environment, TrustBundleEnvironment::Devnet);
     assert_eq!(loaded.chain_id, h.chain_id_str);
     assert_eq!(loaded.genesis_hash, gh_hex);
-    assert_eq!(loaded.ratified_bundle_signing_key_fingerprint, ratified.fingerprint);
+    assert_eq!(
+        loaded.ratified_bundle_signing_key_fingerprint,
+        ratified.fingerprint
+    );
 }
 
 /// §C.2 — decide rejects pre-existing rollback marker BEFORE any apply
@@ -457,8 +462,7 @@ fn run119_pre_persisted_marker_rollback_rejects_before_apply() {
     // than what the genesis-authority block produces. The candidate
     // will derive at the genesis-authority sequence, which is lower,
     // and the compare step refuses the rollback.
-    let mut high_inputs =
-        build_marker_inputs(&marker_path, &gh_hex, &h, &ratification, &ratified);
+    let mut high_inputs = build_marker_inputs(&marker_path, &gh_hex, &h, &ratification, &ratified);
     high_inputs.authority_sequence = high_inputs.authority_sequence.saturating_add(1);
     let high_decision = decide_marker_acceptance(high_inputs).expect("first-write at higher seq");
     persist_accepted_marker_after_commit_boundary(&high_decision)
@@ -476,7 +480,10 @@ fn run119_pre_persisted_marker_rollback_rejects_before_apply() {
     ))
     .expect_err("rollback must reject");
     assert!(
-        matches!(err, MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }),
+        matches!(
+            err,
+            MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }
+        ),
         "got {:?}",
         err
     );
@@ -633,8 +640,7 @@ fn run119_idempotent_re_apply_does_not_rewrite_marker() {
         Some(2),
     );
 
-    persist_accepted_marker_after_commit_boundary(&d2)
-        .expect("idempotent persist Ok (no-op)");
+    persist_accepted_marker_after_commit_boundary(&d2).expect("idempotent persist Ok (no-op)");
     let marker_bytes_after_second = std::fs::read(&marker_path).unwrap();
     assert_eq!(
         marker_bytes_after_first, marker_bytes_after_second,

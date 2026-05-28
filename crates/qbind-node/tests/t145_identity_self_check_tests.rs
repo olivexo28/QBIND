@@ -19,8 +19,8 @@ use qbind_crypto::ml_dsa44::MlDsa44Backend;
 use qbind_crypto::{ConsensusSigSuiteId, ValidatorSigningKey};
 
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
 use qbind_node::keystore::{FsValidatorKeystore, KeystoreBackend, KeystoreConfig};

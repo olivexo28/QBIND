@@ -39,8 +39,8 @@ use qbind_crypto::CryptoProvider;
 use qbind_hash::net::{derive_node_id_from_cert, network_delegation_cert_digest};
 use qbind_wire::io::{WireDecode, WireEncode};
 use qbind_wire::net::{
-    ClientInit, NetworkDelegationCert, ServerAccept, ServerCookie,
-    PROTOCOL_VERSION_1, PROTOCOL_VERSION_2,
+    ClientInit, NetworkDelegationCert, ServerAccept, ServerCookie, PROTOCOL_VERSION_1,
+    PROTOCOL_VERSION_2,
 };
 use sha3::{Digest, Sha3_256};
 use zeroize::Zeroize;
@@ -228,8 +228,7 @@ fn current_unix_secs() -> u64 {
 /// `qbind_node::pqc_trust_bundle`; a regression test in `qbind-node`
 /// asserts that the two helpers produce identical bytes for a fixed
 /// cert fixture.
-pub const LEAF_CERT_FINGERPRINT_DOMAIN_SEPARATOR: &[u8] =
-    b"QBIND:pqc-trust-bundle-leaf-fp:v1";
+pub const LEAF_CERT_FINGERPRINT_DOMAIN_SEPARATOR: &[u8] = b"QBIND:pqc-trust-bundle-leaf-fp:v1";
 
 /// Run 052: canonical 32-byte fingerprint of a validator's leaf
 /// `NetworkDelegationCert`. The handshake engine computes this
@@ -292,7 +291,10 @@ impl std::fmt::Debug for ClientHandshakeConfig {
             .field("kem_suite_id", &self.kem_suite_id)
             .field("aead_suite_id", &self.aead_suite_id)
             .field("peer_root_network_pk", &self.peer_root_network_pk)
-            .field("local_delegation_cert", &self.local_delegation_cert.as_ref().map(|c| c.len()))
+            .field(
+                "local_delegation_cert",
+                &self.local_delegation_cert.as_ref().map(|c| c.len()),
+            )
             .finish_non_exhaustive()
     }
 }
@@ -445,9 +447,7 @@ impl ClientHandshake {
                     // fall back to bad_signature rather than
                     // mis-classify as expired.
                     NetError::ClientCertInvalid(
-                        "cert expired"
-                        | "cert not yet valid"
-                        | "cert invalid validity window",
+                        "cert expired" | "cert not yet valid" | "cert invalid validity window",
                     ) => s.inc_rejected_expired(),
                     NetError::KeySchedule(_) => s.inc_rejected_bad_signature(),
                     _ => s.inc_rejected_bad_signature(),
@@ -525,8 +525,8 @@ impl ClientHandshake {
 
         // M8: Client side doesn't have client_node_id (that's server's view of client)
         // Mutual auth is considered complete if we sent a client cert (v2 protocol)
-        let mutual_auth_complete = client_init.version >= PROTOCOL_VERSION_2 
-            && !client_init.client_cert.is_empty();
+        let mutual_auth_complete =
+            client_init.version >= PROTOCOL_VERSION_2 && !client_init.client_cert.is_empty();
 
         Ok(HandshakeResult {
             session,
@@ -758,10 +758,16 @@ impl std::fmt::Debug for ServerHandshakeConfig {
             .field("local_root_network_pk", &self.local_root_network_pk)
             .field("local_delegation_cert", &self.local_delegation_cert.len())
             .field("local_kem_sk", &"<redacted>")
-            .field("cookie_config", &self.cookie_config.as_ref().map(|_| "<present>"))
+            .field(
+                "cookie_config",
+                &self.cookie_config.as_ref().map(|_| "<present>"),
+            )
             .field("local_validator_id", &self.local_validator_id)
             .field("mutual_auth_mode", &self.mutual_auth_mode)
-            .field("trusted_client_roots", &self.trusted_client_roots.as_ref().map(|_| "<present>"))
+            .field(
+                "trusted_client_roots",
+                &self.trusted_client_roots.as_ref().map(|_| "<present>"),
+            )
             .finish()
     }
 }
@@ -847,12 +853,7 @@ impl ServerHandshake {
 
         // 3) If cookie enforcement is enabled, validate the cookie BEFORE KEM decapsulation
         if let Some(ref cookie_cfg) = self.cfg.cookie_config {
-            let validation = self.validate_cookie(
-                cookie_cfg,
-                init,
-                client_ip,
-                current_time_secs,
-            );
+            let validation = self.validate_cookie(cookie_cfg, init, client_ip, current_time_secs);
 
             match validation {
                 CookieValidation::Valid => {
@@ -908,7 +909,10 @@ impl ServerHandshake {
         client_ip: &[u8],
         current_time_secs: u64,
     ) -> Result<ServerHandshakeResponse<'static>, NetError> {
-        let cookie_cfg = self.cfg.cookie_config.as_ref()
+        let cookie_cfg = self
+            .cfg
+            .cookie_config
+            .as_ref()
             .expect("generate_cookie_challenge called without cookie_config; this is a bug");
 
         let cookie = cookie_cfg.generate(
@@ -951,7 +955,7 @@ impl ServerHandshake {
         // M8: Verify client certificate based on mutual_auth_mode
         // This happens AFTER cookie validation (in handle_client_init_with_cookie)
         // but BEFORE KEM decapsulation to fail closed on invalid cert
-        let (client_node_id, mutual_auth_complete, verified_client_cert) = 
+        let (client_node_id, mutual_auth_complete, verified_client_cert) =
             self.verify_client_cert_if_required(init)?;
 
         // KEM decapsulation using local secret key.
@@ -1151,18 +1155,14 @@ impl ServerHandshake {
 
         // 3) Verify the certificate signature
         if !root_pk.is_empty() {
-            if let Err(e) =
-                verify_delegation_cert(self.cfg.crypto.as_ref(), &cert, &root_pk)
-            {
+            if let Err(e) = verify_delegation_cert(self.cfg.crypto.as_ref(), &cert, &root_pk) {
                 if let Some(s) = sink {
                     match &e {
                         NetError::UnsupportedSuite(_) => s.inc_rejected_wrong_suite(),
                         // Run 045: validity-window failures map to the
                         // already-wired `inc_rejected_expired` boundary.
                         NetError::ClientCertInvalid(
-                            "cert expired"
-                            | "cert not yet valid"
-                            | "cert invalid validity window",
+                            "cert expired" | "cert not yet valid" | "cert invalid validity window",
                         ) => s.inc_rejected_expired(),
                         NetError::KeySchedule(_) => s.inc_rejected_bad_signature(),
                         _ => s.inc_rejected_bad_signature(),

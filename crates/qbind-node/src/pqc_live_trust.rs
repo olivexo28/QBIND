@@ -120,9 +120,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use crate::pqc_root_config::PqcTrustedRoot;
-use crate::pqc_trust_bundle::{
-    BundleSignatureStatus, LoadedTrustBundle, TrustBundleEnvironment,
-};
+use crate::pqc_trust_bundle::{BundleSignatureStatus, LoadedTrustBundle, TrustBundleEnvironment};
 
 /// Error returned by [`LivePqcTrustState`] read operations when the
 /// underlying lock cannot produce a consistent snapshot (e.g. a
@@ -200,9 +198,7 @@ impl LivePqcTrustSnapshot {
             revoked_root_ids: loaded.revoked_root_ids.clone(),
             revoked_leaf_fingerprints: loaded.revoked_leaf_fingerprints.clone(),
             pending_revoked_root_ids: loaded.pending_revoked_root_ids.clone(),
-            pending_revoked_leaf_fingerprints: loaded
-                .pending_revoked_leaf_fingerprints
-                .clone(),
+            pending_revoked_leaf_fingerprints: loaded.pending_revoked_leaf_fingerprints.clone(),
         }
     }
 
@@ -420,10 +416,7 @@ impl LivePqcTrustState {
     /// `is_revoked = true` (fail closed — a revoked-looking leaf is
     /// safer than an accepted-looking leaf under a poisoned trust
     /// state).
-    pub fn is_leaf_revoked(
-        &self,
-        fingerprint: &[u8; 32],
-    ) -> Result<bool, LivePqcTrustError> {
+    pub fn is_leaf_revoked(&self, fingerprint: &[u8; 32]) -> Result<bool, LivePqcTrustError> {
         let snap = self.snapshot()?;
         Ok(snap.is_leaf_revoked(fingerprint))
     }
@@ -493,8 +486,7 @@ mod tests {
         let pk_hex = hex_lower(&root.root_pk);
         let bundle = build_helper_bundle(HelperBundleMode::Valid, &id_hex, &pk_hex, 100);
         let bytes = serde_json::to_vec(&bundle).expect("serialize");
-        TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 200)
-            .expect("loads")
+        TrustBundle::load_from_bytes(&bytes, NetworkEnvironment::Devnet, 200).expect("loads")
     }
 
     #[test]
@@ -518,7 +510,10 @@ mod tests {
         assert_eq!(snap.sequence(), expected_seq);
         assert_eq!(snap.active_roots()[0].root_key_id, expected_id);
         assert_eq!(snap.active_roots()[0].root_pk, expected_pk);
-        assert_eq!(snap.active_roots()[0].suite_id, PQC_TRANSPORT_SUITE_ML_DSA_44);
+        assert_eq!(
+            snap.active_roots()[0].suite_id,
+            PQC_TRANSPORT_SUITE_ML_DSA_44
+        );
     }
 
     #[test]
@@ -684,7 +679,10 @@ mod tests {
         let snap = live.snapshot().expect("snap");
         // The exposed root_pk is the same public bytes the loaded
         // bundle already exposes, not a secret.
-        assert_eq!(snap.active_roots()[0].root_pk, loaded.active_roots[0].root_pk);
+        assert_eq!(
+            snap.active_roots()[0].root_pk,
+            loaded.active_roots[0].root_pk
+        );
     }
 
     #[test]

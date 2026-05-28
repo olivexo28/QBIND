@@ -2413,18 +2413,21 @@ impl VmV0ExecutionEngine {
         };
 
         // Calculate final proposer balance (only if proposer is different from sender and recipient)
-        let update_proposer_separately = proposer_id_opt.map_or(false, |p| {
-            p != &tx.sender && p != &recipient
-        }) && fee_to_proposer > 0;
+        let update_proposer_separately = proposer_id_opt
+            .map_or(false, |p| p != &tx.sender && p != &recipient)
+            && fee_to_proposer > 0;
 
         let separate_proposer_state = if update_proposer_separately {
             let proposer_id = proposer_id_opt.unwrap(); // Safe: we checked it's Some above
             let proposer_state = state.get_account_state(proposer_id);
             match proposer_state.balance.checked_add(fee_to_proposer) {
-                Some(b) => Some((proposer_id, AccountState {
-                    nonce: proposer_state.nonce,
-                    balance: b,
-                })),
+                Some(b) => Some((
+                    proposer_id,
+                    AccountState {
+                        nonce: proposer_state.nonce,
+                        balance: b,
+                    },
+                )),
                 None => {
                     return VmV0TxResult::failure_with_gas(
                         VmV0Error::ArithmeticOverflow {
@@ -2451,7 +2454,8 @@ impl VmV0ExecutionEngine {
 
         // Step 9: Update recipient (if different from sender)
         if let Some(recipient_state) = recipient_state {
-            let final_recipient_balance = final_recipient_balance.unwrap_or(recipient_state.balance);
+            let final_recipient_balance =
+                final_recipient_balance.unwrap_or(recipient_state.balance);
             let new_recipient_state = AccountState {
                 nonce: recipient_state.nonce,
                 balance: final_recipient_balance,
@@ -2744,7 +2748,8 @@ impl VmV0BlockStats {
     ///
     /// M18: Uses checked arithmetic to prevent overflow. Returns None on overflow.
     pub fn total_fees(&self) -> Option<u128> {
-        self.total_fees_burned.checked_add(self.total_fees_to_proposer)
+        self.total_fees_burned
+            .checked_add(self.total_fees_to_proposer)
     }
 
     /// Get the total fees charged (burned + proposer), saturating on overflow.

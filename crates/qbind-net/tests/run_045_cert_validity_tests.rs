@@ -212,22 +212,30 @@ const SIG_SUITE: u8 = 3;
 fn provider_ok_sig() -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(DummyKem { suite_id: KEM_SUITE }))
+            .with_kem_suite(Arc::new(DummyKem {
+                suite_id: KEM_SUITE,
+            }))
             .with_aead_suite(Arc::new(DummyAead {
                 suite_id: AEAD_SUITE,
             }))
-            .with_signature_suite(Arc::new(AlwaysOkSig { suite_id: SIG_SUITE })),
+            .with_signature_suite(Arc::new(AlwaysOkSig {
+                suite_id: SIG_SUITE,
+            })),
     )
 }
 
 fn provider_fail_sig() -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(DummyKem { suite_id: KEM_SUITE }))
+            .with_kem_suite(Arc::new(DummyKem {
+                suite_id: KEM_SUITE,
+            }))
             .with_aead_suite(Arc::new(DummyAead {
                 suite_id: AEAD_SUITE,
             }))
-            .with_signature_suite(Arc::new(AlwaysFailSig { suite_id: SIG_SUITE })),
+            .with_signature_suite(Arc::new(AlwaysFailSig {
+                suite_id: SIG_SUITE,
+            })),
     )
 }
 
@@ -300,7 +308,10 @@ fn inverted_window_rejected_with_distinguishable_error() {
     let cert = make_cert([1u8; 32], [9u8; 32], 200, 100);
     let err = verify_delegation_cert_at(provider.as_ref(), &cert, &[0u8; 32], 150).unwrap_err();
     assert!(
-        matches!(err, NetError::ClientCertInvalid("cert invalid validity window")),
+        matches!(
+            err,
+            NetError::ClientCertInvalid("cert invalid validity window")
+        ),
         "wrong error: {:?}",
         err
     );
@@ -338,8 +349,8 @@ fn signature_verify_runs_before_validity_check() {
 
     // Same with an expired cert: signature error MUST surface first.
     let cert_expired = make_cert([1u8; 32], [9u8; 32], 1, 2);
-    let err = verify_delegation_cert_at(provider.as_ref(), &cert_expired, &[0u8; 32], 1_000)
-        .unwrap_err();
+    let err =
+        verify_delegation_cert_at(provider.as_ref(), &cert_expired, &[0u8; 32], 1_000).unwrap_err();
     assert!(
         matches!(err, NetError::KeySchedule("signature verify error")),
         "tampered/bad-sig expired cert must surface as signature error first; got {:?}",
@@ -443,10 +454,7 @@ fn server_cfg_for_validity(
     }
 }
 
-fn client_init_with_cert(
-    validator_id: [u8; 32],
-    client_cert_bytes: Vec<u8>,
-) -> ClientInit {
+fn client_init_with_cert(validator_id: [u8; 32], client_cert_bytes: Vec<u8>) -> ClientInit {
     ClientInit {
         version: PROTOCOL_VERSION_2,
         kem_suite_id: KEM_SUITE,
@@ -465,7 +473,9 @@ fn run_listener(
     crypto: Arc<StaticCryptoProvider>,
 ) -> Result<(), NetError> {
     let mut server = ServerHandshake::new(cfg, [1u8; 32]);
-    server.handle_client_init(crypto.as_ref(), &init).map(|_| ())
+    server
+        .handle_client_init(crypto.as_ref(), &init)
+        .map(|_| ())
 }
 
 #[test]
@@ -532,7 +542,10 @@ fn listener_inverted_window_cert_increments_expired_once() {
 
     let err = run_listener(cfg, init, provider).expect_err("must fail closed");
     assert!(
-        matches!(err, NetError::ClientCertInvalid("cert invalid validity window")),
+        matches!(
+            err,
+            NetError::ClientCertInvalid("cert invalid validity window")
+        ),
         "wrong error variant: {:?}",
         err
     );
@@ -624,8 +637,7 @@ fn dialer_not_yet_valid_cert_increments_expired_once() {
     let validator_id = [b'p'; 32];
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let server_cert =
-        encode_cert(&make_cert(validator_id, [9u8; 32], u64::MAX - 1, u64::MAX));
+    let server_cert = encode_cert(&make_cert(validator_id, [9u8; 32], u64::MAX - 1, u64::MAX));
     let err = run_dialer(provider, Some(dyn_sink), server_cert, validator_id)
         .expect_err("must fail closed");
     assert!(
@@ -649,7 +661,10 @@ fn dialer_inverted_window_cert_increments_expired_once() {
     let err = run_dialer(provider, Some(dyn_sink), server_cert, validator_id)
         .expect_err("must fail closed");
     assert!(
-        matches!(err, NetError::ClientCertInvalid("cert invalid validity window")),
+        matches!(
+            err,
+            NetError::ClientCertInvalid("cert invalid validity window")
+        ),
         "wrong error variant: {:?}",
         err
     );
@@ -664,8 +679,7 @@ fn dialer_no_sink_validity_failure_preserves_error_shape() {
     let provider = provider_ok_sig();
     let validator_id = [b'p'; 32];
     let server_cert = encode_cert(&make_cert(validator_id, [9u8; 32], 0, 1));
-    let err = run_dialer(provider, None, server_cert, validator_id)
-        .expect_err("must fail closed");
+    let err = run_dialer(provider, None, server_cert, validator_id).expect_err("must fail closed");
     assert!(matches!(err, NetError::ClientCertInvalid("cert expired")));
 }
 

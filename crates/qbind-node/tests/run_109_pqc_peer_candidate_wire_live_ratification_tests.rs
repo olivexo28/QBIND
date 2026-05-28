@@ -36,10 +36,10 @@ use qbind_node::p2p::NodeId;
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_peer_candidate_wire::{
     encode_peer_candidate_wire_frame, LivePeerCandidateWireDispatcher,
-    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig,
-    PeerCandidatePropagationConfig, PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender,
-    PeerCandidateWireOutcome, PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome,
-    RawFrameSendReport, PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
+    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig, PeerCandidatePropagationConfig,
+    PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender, PeerCandidateWireOutcome,
+    PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome, RawFrameSendReport,
+    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_ratification_policy::{
     ratification_gate_decision, GateInvokeReason, GateSkipReason, RatificationGateDecision,
@@ -51,7 +51,9 @@ use qbind_node::pqc_trust_bundle::{
     RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
 };
 use qbind_node::pqc_trust_peer_candidate::{PeerCandidateConfig, PeerCandidateOutcome};
-use qbind_node::pqc_trust_reload::{validate_candidate_bundle, ReloadCheckError, ReloadCheckInputs};
+use qbind_node::pqc_trust_reload::{
+    validate_candidate_bundle, ReloadCheckError, ReloadCheckInputs,
+};
 use qbind_node::pqc_trust_sequence::{chain_id_hex, sequence_file_path};
 use qbind_types::NetworkEnvironment;
 
@@ -335,7 +337,8 @@ impl PeerCandidateWireFrameSender for RecordingSender {
 }
 
 fn sequence_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read seq"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read seq"))
 }
 
 fn assert_sequence_unchanged(path: &Path, before: Option<Vec<u8>>) {
@@ -351,8 +354,8 @@ fn dispatcher(
     live_ratification: Option<LiveRatificationConfig>,
 ) -> LivePeerCandidateWireDispatcher {
     let scratch = tmpdir("scratch");
-    let propagation_sender: Option<Arc<dyn PeerCandidateWireFrameSender>> = sender
-        .map(|s| -> Arc<dyn PeerCandidateWireFrameSender> { s });
+    let propagation_sender: Option<Arc<dyn PeerCandidateWireFrameSender>> =
+        sender.map(|s| -> Arc<dyn PeerCandidateWireFrameSender> { s });
     LivePeerCandidateWireDispatcher::new(
         LivePeerCandidateWireDispatcherConfig {
             inner: PeerCandidateWireReceiverConfig {
@@ -373,6 +376,7 @@ fn dispatcher(
             live_ratification,
             authority_marker_path: None,
             staging_queue: None,
+            peer_apply: None,
         },
         metrics,
     )

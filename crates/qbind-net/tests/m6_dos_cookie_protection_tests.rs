@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_net::{
-    ClientHandshake, ClientHandshakeConfig, CookieConfig, KemPrivateKey,
-    MutualAuthMode, ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse, COOKIE_SIZE,
+    ClientHandshake, ClientHandshakeConfig, CookieConfig, KemPrivateKey, MutualAuthMode,
+    ServerHandshake, ServerHandshakeConfig, ServerHandshakeResponse, COOKIE_SIZE,
 };
 use qbind_wire::io::WireEncode;
 use qbind_wire::net::NetworkDelegationCert;
@@ -30,7 +30,10 @@ struct CountingDummyKem {
 
 impl CountingDummyKem {
     fn new(suite_id: u8, decaps_count: Arc<AtomicU64>) -> Self {
-        CountingDummyKem { suite_id, decaps_count }
+        CountingDummyKem {
+            suite_id,
+            decaps_count,
+        }
     }
 }
 
@@ -295,7 +298,10 @@ fn create_test_context_with_cookie_config(cookie_config: Option<CookieConfig>) -
     // Server provider (counting KEM)
     let server_provider = Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(CountingDummyKem::new(kem_suite_id, decaps_count.clone())))
+            .with_kem_suite(Arc::new(CountingDummyKem::new(
+                kem_suite_id,
+                decaps_count.clone(),
+            )))
             .with_aead_suite(Arc::new(DummyAead::new(aead_suite_id)))
             .with_signature_suite(Arc::new(DummySig::new(sig_suite_id))),
     );
@@ -396,7 +402,10 @@ fn m6_no_cookie_init_returns_cookie_challenge() {
         .expect("client start should succeed");
 
     // Verify client_init has no cookie
-    assert!(client_init.cookie.is_empty(), "ClientInit should have no cookie initially");
+    assert!(
+        client_init.cookie.is_empty(),
+        "ClientInit should have no cookie initially"
+    );
 
     // Server handles ClientInit with cookie enforcement
     let response = server
@@ -521,8 +530,14 @@ fn m6_valid_cookie_handshake_succeeds() {
 
     match response {
         ServerHandshakeResponse::HandshakeComplete(server_accept, _result) => {
-            assert_eq!(server_accept.client_random, client_init_with_cookie.client_random);
-            assert_eq!(server_accept.kem_suite_id, client_init_with_cookie.kem_suite_id);
+            assert_eq!(
+                server_accept.client_random,
+                client_init_with_cookie.client_random
+            );
+            assert_eq!(
+                server_accept.kem_suite_id,
+                client_init_with_cookie.kem_suite_id
+            );
         }
         ServerHandshakeResponse::CookieChallenge(_) => {
             panic!("Expected HandshakeComplete with valid cookie");
@@ -617,7 +632,9 @@ fn m6_random_cookies_never_trigger_decapsulation() {
     for i in 0..100 {
         let mut client_init_random = client_init.clone();
         // Generate pseudo-random cookie bytes
-        client_init_random.cookie = (0..COOKIE_SIZE).map(|j| ((i + j) * 17 % 256) as u8).collect();
+        client_init_random.cookie = (0..COOKIE_SIZE)
+            .map(|j| ((i + j) * 17 % 256) as u8)
+            .collect();
 
         let response = server
             .handle_client_init_with_cookie(

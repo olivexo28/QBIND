@@ -74,8 +74,7 @@ fn main() {
     );
 
     for vid in 0..n {
-        let (pk, sk) =
-            MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen failed");
+        let (pk, sk) = MlDsa44Backend::generate_keypair().expect("ML-DSA-44 keygen failed");
         let vdir = outdir.join(format!("v{}", vid));
         fs::create_dir_all(&vdir).expect("create v{N} dir");
         let path = vdir.join(format!("validator-{}.json", vid));

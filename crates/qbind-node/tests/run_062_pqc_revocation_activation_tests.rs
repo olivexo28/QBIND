@@ -156,16 +156,15 @@ fn future_height_leaf_revocation_is_pending_not_active() {
     let path = write_bundle_json(&dir, &bundle);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert!(loaded.signature_status.is_verified());
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 0);
@@ -188,16 +187,15 @@ fn satisfied_height_leaf_revocation_is_active() {
     let path = write_bundle_json(&dir, &bundle);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
     assert_eq!(loaded.pending_revoked_leaf_fingerprint_count(), 0);
@@ -218,16 +216,15 @@ fn legacy_no_activation_height_leaf_revocation_is_active() {
     let path = write_bundle_json(&dir, &bundle);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
     assert_eq!(loaded.pending_revoked_leaf_fingerprint_count(), 0);
@@ -246,16 +243,15 @@ fn future_height_root_revocation_keeps_root_active() {
     let path = write_bundle_json(&dir, &bundle);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     // Root still active; revocation pending; no leaf entries.
     assert_eq!(loaded.active_root_count(), 1);
@@ -277,16 +273,15 @@ fn satisfied_height_root_revocation_excludes_root() {
     let path = write_bundle_json(&dir, &bundle);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert_eq!(loaded.active_root_count(), 0);
     assert_eq!(loaded.revoked_root_count(), 1);
@@ -304,8 +299,7 @@ fn tampering_revocation_activation_height_after_signing_fails_signature() {
     let dir = fresh_dir("tamper-revact");
     let h = harness();
     let leaf_fp = "77".repeat(32);
-    let mut bundle =
-        signed_devnet_bundle_with_revocation(&h, Some(&leaf_fp), Some(1_000_000));
+    let mut bundle = signed_devnet_bundle_with_revocation(&h, Some(&leaf_fp), Some(1_000_000));
     // Tamper AFTER signing: flip activation_height to a satisfied value.
     bundle.revocations[0].activation_height = Some(0);
     let path = write_bundle_json(&dir, &bundle);
@@ -345,16 +339,15 @@ fn missing_runtime_height_keeps_revocation_pending() {
     // declares NO bundle-level activation_height so the loader
     // accepts it under `unavailable()`.
     let ctx = ActivationContext::unavailable();
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 0);
     assert_eq!(loaded.pending_revoked_leaf_fingerprint_count(), 1);
@@ -374,16 +367,15 @@ fn inclusive_boundary_current_equals_required_activates() {
     let path = write_bundle_json(&dir, &bundle);
 
     let ctx = ActivationContext::height_only(42);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
     assert_eq!(loaded.pending_revoked_leaf_fingerprint_count(), 0);
@@ -401,13 +393,9 @@ fn legacy_json_without_activation_height_field_parses() {
     // (the helper above already passes `None`), then re-serialize the
     // raw JSON dropping the `activation_height` key entirely to mimic
     // a Run 050/052-era producer that never knew about the field.
-    let bundle =
-        signed_devnet_bundle_with_revocation(&h, Some(&"aa".repeat(32)), None);
+    let bundle = signed_devnet_bundle_with_revocation(&h, Some(&"aa".repeat(32)), None);
     let mut json: serde_json::Value = serde_json::to_value(&bundle).unwrap();
-    if let Some(revs) = json
-        .get_mut("revocations")
-        .and_then(|v| v.as_array_mut())
-    {
+    if let Some(revs) = json.get_mut("revocations").and_then(|v| v.as_array_mut()) {
         for r in revs {
             if let Some(obj) = r.as_object_mut() {
                 obj.remove("activation_height");
@@ -433,16 +421,15 @@ fn legacy_json_without_activation_height_field_parses() {
     std::fs::write(&path, serde_json::to_vec(&bundle).expect("ser")).expect("write");
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
     // Legacy: active immediately, none pending.
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
     assert_eq!(loaded.pending_revoked_leaf_fingerprint_count(), 0);
@@ -514,16 +501,15 @@ fn mixed_revocations_active_and_pending_counters() {
     let path = write_bundle_json(&dir, &b);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
 
     assert_eq!(loaded.configured_revocations_total(), 3);
     assert_eq!(loaded.revoked_leaf_fingerprint_count(), 1);
@@ -577,16 +563,15 @@ fn no_revocations_unchanged_baseline() {
     let path = write_bundle_json(&dir, &b);
 
     let ctx = ActivationContext::height_only(100);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("loads");
     assert_eq!(loaded.active_root_count(), 1);
     assert_eq!(loaded.configured_revocations_total(), 0);
     assert_eq!(loaded.active_revocations_total(), 0);

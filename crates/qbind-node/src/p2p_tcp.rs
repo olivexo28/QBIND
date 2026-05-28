@@ -218,8 +218,7 @@ fn decode_frame(frame: &[u8]) -> Result<P2pMessage, P2pTransportError> {
 /// self-asserted by the dialer under `MutualAuthMode::Disabled`. See
 /// `secure_channel::AcceptedPeerInit` and
 /// `p2p_node_builder::parse_test_validator_id_from_client_random`.
-pub type InboundIdentityResolver =
-    Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
+pub type InboundIdentityResolver = Arc<dyn Fn(&AcceptedPeerInit) -> Option<NodeId> + Send + Sync>;
 
 // ============================================================================
 // B8: Initial-dial retry policy
@@ -359,7 +358,6 @@ struct PeerConnection {
 /// silently absorbing the frame into a long queue.
 const RAW_FRAME_CHANNEL_CAPACITY: usize = 8;
 
-
 impl PeerConnection {
     /// Shutdown the peer connection gracefully.
     async fn shutdown(self) {
@@ -495,7 +493,8 @@ pub struct TcpKemTlsP2pService {
     /// production-binary path by `p2p_node_builder` when the
     /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
     /// flag is set.
-    peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+    peer_candidate_wire_sink:
+        Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
 }
 
 impl std::fmt::Debug for TcpKemTlsP2pService {
@@ -573,10 +572,7 @@ impl TcpKemTlsP2pService {
     /// dialer otherwise defaults to its own local validator id which
     /// would fail this check the moment two distinct binaries try to
     /// connect to each other.
-    pub fn set_peer_validator_id_overrides(
-        &mut self,
-        overrides: HashMap<String, [u8; 32]>,
-    ) {
+    pub fn set_peer_validator_id_overrides(&mut self, overrides: HashMap<String, [u8; 32]>) {
         let mut guard = self.peer_validator_id_overrides.write();
         *guard = overrides;
     }
@@ -714,8 +710,10 @@ impl TcpKemTlsP2pService {
                 .collect()
         };
 
-        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
-            Vec::with_capacity(peer_snapshot.len());
+        let mut per_peer: Vec<(
+            NodeId,
+            crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome,
+        )> = Vec::with_capacity(peer_snapshot.len());
         for (peer, tx) in peer_snapshot {
             let outcome = match tx.try_send(frame_bytes.clone()) {
                 Ok(()) => crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome::Enqueued,
@@ -747,8 +745,10 @@ impl TcpKemTlsP2pService {
                 .collect()
         };
 
-        let mut per_peer: Vec<(NodeId, crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome)> =
-            Vec::with_capacity(selected_peers.len());
+        let mut per_peer: Vec<(
+            NodeId,
+            crate::pqc_peer_candidate_wire::RawFramePeerSendOutcome,
+        )> = Vec::with_capacity(selected_peers.len());
         for selected in selected_peers {
             if !peer_snapshot.iter().any(|(peer, _)| peer == selected) {
                 per_peer.push((
@@ -1109,7 +1109,9 @@ impl TcpKemTlsP2pService {
         inbound_tx: mpsc::Sender<P2pMessage>,
         _connections_current: Arc<AtomicU64>,
         bytes_received: Arc<AtomicU64>,
-        peer_candidate_wire_sink: Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
+        peer_candidate_wire_sink: Arc<
+            RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
+        >,
     ) {
         // Create outbound channel for this peer
         let (peer_tx, peer_rx) = mpsc::channel::<P2pMessage>(64);
@@ -1119,8 +1121,7 @@ impl TcpKemTlsP2pService {
         // uses `try_send` and treats queue-full as a per-peer
         // failure rather than backpressure on the structured
         // consensus/DAG/control encoder path).
-        let (peer_raw_tx, peer_raw_rx) =
-            mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
+        let (peer_raw_tx, peer_raw_rx) = mpsc::channel::<Vec<u8>>(RAW_FRAME_CHANNEL_CAPACITY);
 
         // Spawn write loop
         let channel_write = channel.clone();
@@ -1594,9 +1595,8 @@ struct DialerHandle {
     /// into `spawn_peer_handlers` so retry-dialed peers' read loops
     /// see the same sink the accept-loop sees. Default `None` →
     /// cheap-drop behaviour preserved bit-for-bit.
-    peer_candidate_wire_sink: Arc<
-        RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>,
-    >,
+    peer_candidate_wire_sink:
+        Arc<RwLock<Option<Arc<dyn crate::pqc_peer_candidate_wire::PeerCandidateWireFrameSink>>>>,
 }
 
 impl DialerHandle {

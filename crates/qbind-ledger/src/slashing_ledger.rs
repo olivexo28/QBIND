@@ -924,7 +924,10 @@ impl RocksDbSlashingLedger {
     /// # Errors
     ///
     /// Returns `SlashingLedgerError::StorageError` on database errors.
-    pub fn mark_evidence_seen(&mut self, evidence_id: &[u8; 32]) -> Result<(), SlashingLedgerError> {
+    pub fn mark_evidence_seen(
+        &mut self,
+        evidence_id: &[u8; 32],
+    ) -> Result<(), SlashingLedgerError> {
         // Already seen? Skip
         if self.seen_evidence_cache.contains(evidence_id) {
             return Ok(());
@@ -945,7 +948,7 @@ impl RocksDbSlashingLedger {
     /// # Deprecated
     ///
     /// This method is deprecated in favor of using `evidence_id()` from
-    /// `SlashingEvidence` (in qbind-consensus crate) for content-addressed 
+    /// `SlashingEvidence` (in qbind-consensus crate) for content-addressed
     /// deduplication (M1.1 hardening).
     ///
     /// # Arguments
@@ -1385,15 +1388,16 @@ impl RocksDbSlashingLedger {
                     }
 
                     // Parse the validator state
-                    let state: ValidatorSlashingState = serde_json::from_slice(&value).map_err(
-                        |e| SlashingLedgerError::SlashingStateCorrupt {
-                            details: format!(
-                                "failed to parse validator state at key {:?}: {}",
-                                &key[..std::cmp::min(key.len(), 32)],
-                                e
-                            ),
-                        },
-                    )?;
+                    let state: ValidatorSlashingState =
+                        serde_json::from_slice(&value).map_err(|e| {
+                            SlashingLedgerError::SlashingStateCorrupt {
+                                details: format!(
+                                    "failed to parse validator state at key {:?}: {}",
+                                    &key[..std::cmp::min(key.len(), 32)],
+                                    e
+                                ),
+                            }
+                        })?;
 
                     // M19 Invariant: jail_count must be non-negative (u32 is always non-negative)
                     // This is implicitly satisfied by the type, but we verify for completeness
@@ -2098,7 +2102,7 @@ mod tests {
         // Build atomic batch with state update only
         let mut batch = SlashingUpdateBatch::new();
         let updated_state = ValidatorSlashingState {
-            stake: 925_000,           // Slashed 75K
+            stake: 925_000, // Slashed 75K
             jailed_until_epoch: Some(100),
             total_slashed: 75_000,
             jail_count: 1,
@@ -2261,14 +2265,14 @@ mod tests {
         // Second atomic update with same evidence ID (should skip the evidence marker)
         let mut batch2 = SlashingUpdateBatch::new();
         let state2 = ValidatorSlashingState {
-            stake: 900_000,  // Different state
+            stake: 900_000, // Different state
             jailed_until_epoch: Some(100),
             total_slashed: 100_000,
             jail_count: 1,
             last_offense_epoch: Some(10),
         };
         batch2.set_validator_state(1, state2);
-        batch2.set_evidence_id(evidence_id);  // Same evidence ID
+        batch2.set_evidence_id(evidence_id); // Same evidence ID
 
         // This should succeed (duplicate evidence is skipped, not rejected)
         ledger.apply_slashing_update_atomic(batch2).unwrap();
@@ -2406,7 +2410,7 @@ mod tests {
         assert!(!ledger.is_evidence_seen(&evidence_id));
 
         let updated_state = ValidatorSlashingState {
-            stake: 900_000,              // Post-slash stake
+            stake: 900_000, // Post-slash stake
             jailed_until_epoch: Some(100),
             total_slashed: 100_000,
             jail_count: 1,

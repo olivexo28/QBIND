@@ -83,8 +83,7 @@ impl SignatureSuite for MlDsa44SignatureSuite {
         // the input again (HashML-DSA mode is not used here — we use
         // raw ML-DSA over the canonical digest, identical to the
         // existing consensus-vote signing path).
-        MlDsa44Backend::verify(pk, msg_digest, sig)
-            .map_err(|_| CryptoError::InvalidSignature)
+        MlDsa44Backend::verify(pk, msg_digest, sig).map_err(|_| CryptoError::InvalidSignature)
     }
 }
 
@@ -147,7 +146,13 @@ mod tests {
     #[test]
     fn key_and_sig_lengths_match_backend() {
         let suite = MlDsa44SignatureSuite::new(100);
-        assert_eq!(suite.public_key_len(), crate::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE);
-        assert_eq!(suite.signature_len(), crate::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE);
+        assert_eq!(
+            suite.public_key_len(),
+            crate::ml_dsa44::ML_DSA_44_PUBLIC_KEY_SIZE
+        );
+        assert_eq!(
+            suite.signature_len(),
+            crate::ml_dsa44::ML_DSA_44_SIGNATURE_SIZE
+        );
     }
 }

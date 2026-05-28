@@ -563,9 +563,7 @@ impl StateSnapshotMeta {
     ///   malformed, non-object, etc.). The caller MUST fail closed —
     ///   Run 117 does not silently downgrade a malformed
     ///   authority-state block to `None`.
-    fn extract_optional_authority_state(
-        s: &str,
-    ) -> Result<Option<AuthorityStateSnapshotMeta>, ()> {
+    fn extract_optional_authority_state(s: &str) -> Result<Option<AuthorityStateSnapshotMeta>, ()> {
         let key_pattern = "\"authority_state\":";
         let Some(start) = s.find(key_pattern) else {
             return Ok(None);
@@ -603,22 +601,19 @@ impl StateSnapshotMeta {
 
         let chain_id_hex = Self::extract_string(block, "chain_id_hex").ok_or(())?;
         let environment = Self::extract_string(block, "environment").ok_or(())?;
-        let genesis_hash_hex =
-            Self::extract_string(block, "genesis_hash_hex").ok_or(())?;
+        let genesis_hash_hex = Self::extract_string(block, "genesis_hash_hex").ok_or(())?;
         let authority_policy_version =
             Self::extract_u64(block, "authority_policy_version").ok_or(())?;
         if authority_policy_version > u32::MAX as u64 {
             return Err(());
         }
         let authority_policy_version = authority_policy_version as u32;
-        let authority_sequence =
-            Self::extract_u64(block, "authority_sequence").ok_or(())?;
+        let authority_sequence = Self::extract_u64(block, "authority_sequence").ok_or(())?;
         let authority_epoch = Self::extract_optional_u64(block, "authority_epoch")?;
         let authority_root_fingerprint =
             Self::extract_string(block, "authority_root_fingerprint").ok_or(())?;
         let ratified_bundle_signing_key_fingerprint =
-            Self::extract_string(block, "ratified_bundle_signing_key_fingerprint")
-                .ok_or(())?;
+            Self::extract_string(block, "ratified_bundle_signing_key_fingerprint").ok_or(())?;
         let ratification_object_hash =
             Self::extract_string(block, "ratification_object_hash").ok_or(())?;
 
@@ -628,8 +623,7 @@ impl StateSnapshotMeta {
         if chain_id_hex.len() != 16 || !Self::is_lower_hex_ascii(&chain_id_hex) {
             return Err(());
         }
-        if genesis_hash_hex.len() != 64 || !Self::is_lower_hex_ascii(&genesis_hash_hex)
-        {
+        if genesis_hash_hex.len() != 64 || !Self::is_lower_hex_ascii(&genesis_hash_hex) {
             return Err(());
         }
         if ratification_object_hash.len() != 64
@@ -1382,8 +1376,7 @@ mod tests {
     /// field into JSON and round-trips losslessly.
     #[test]
     fn run097_epoch_some_serializes_and_round_trips() {
-        let meta = StateSnapshotMeta::new(100, [0x33; 32], 1700000000000, 0xC1)
-            .with_epoch(Some(7));
+        let meta = StateSnapshotMeta::new(100, [0x33; 32], 1700000000000, 0xC1).with_epoch(Some(7));
         let json = meta.to_json();
         let json_str = std::str::from_utf8(&json).unwrap();
         assert!(
@@ -1492,8 +1485,7 @@ mod tests {
     /// output.
     #[test]
     fn run097_serialization_is_deterministic() {
-        let meta = StateSnapshotMeta::new(7, [0x42; 32], 1700000000000, 0xA)
-            .with_epoch(Some(11));
+        let meta = StateSnapshotMeta::new(7, [0x42; 32], 1700000000000, 0xA).with_epoch(Some(11));
         let j1 = meta.to_json();
         let j2 = meta.to_json();
         assert_eq!(j1, j2);
@@ -1598,8 +1590,7 @@ mod tests {
             aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
             \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
             \n  \"epoch\": 11\n}";
-        let parsed =
-            StateSnapshotMeta::from_json(legacy).expect("run097 snapshot parses");
+        let parsed = StateSnapshotMeta::from_json(legacy).expect("run097 snapshot parses");
         assert_eq!(parsed.epoch, Some(11));
         assert_eq!(parsed.authority_state, None);
     }
@@ -1612,8 +1603,7 @@ mod tests {
             aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
             \",\n  \"created_at_unix_ms\": 1700000000000,\n  \"chain_id\": 99,\
             \n  \"authority_state\": null\n}";
-        let parsed = StateSnapshotMeta::from_json(payload)
-            .expect("null authority_state parses");
+        let parsed = StateSnapshotMeta::from_json(payload).expect("null authority_state parses");
         assert_eq!(parsed.authority_state, None);
     }
 
@@ -1688,7 +1678,10 @@ mod tests {
             .with_authority_state(Some(auth.clone()));
         let json = meta.to_json();
         let parsed = StateSnapshotMeta::from_json(&json).expect("parses");
-        assert_eq!(parsed.authority_state.as_ref().unwrap().authority_epoch, None);
+        assert_eq!(
+            parsed.authority_state.as_ref().unwrap().authority_epoch,
+            None
+        );
         assert_eq!(parsed.authority_state, Some(auth));
     }
 

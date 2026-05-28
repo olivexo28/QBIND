@@ -2236,10 +2236,8 @@ impl BinaryViewTimeoutMetrics {
             stats.inbound_newview_rejected_duplicate_signer,
             Ordering::Relaxed,
         );
-        self.inbound_newview_rejected_mixed_view.store(
-            stats.inbound_newview_rejected_mixed_view,
-            Ordering::Relaxed,
-        );
+        self.inbound_newview_rejected_mixed_view
+            .store(stats.inbound_newview_rejected_mixed_view, Ordering::Relaxed);
         self.inbound_newview_rejected_insufficient_quorum.store(
             stats.inbound_newview_rejected_insufficient_quorum,
             Ordering::Relaxed,
@@ -2395,7 +2393,8 @@ impl BinaryViewTimeoutMetrics {
         ));
         output.push_str(&format!(
             "qbind_consensus_inbound_timeout_rejected_duplicate_total {}\n",
-            self.inbound_timeout_rejected_duplicate.load(Ordering::Relaxed)
+            self.inbound_timeout_rejected_duplicate
+                .load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
             "qbind_consensus_inbound_timeout_engine_accepted_total {}\n",
@@ -2479,11 +2478,13 @@ impl BinaryViewTimeoutMetrics {
         ));
         output.push_str(&format!(
             "qbind_consensus_outbound_timeout_signing_success_total {}\n",
-            self.outbound_timeout_signing_success.load(Ordering::Relaxed)
+            self.outbound_timeout_signing_success
+                .load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
             "qbind_consensus_outbound_timeout_signing_failure_total {}\n",
-            self.outbound_timeout_signing_failure.load(Ordering::Relaxed)
+            self.outbound_timeout_signing_failure
+                .load(Ordering::Relaxed)
         ));
         output.push_str(&format!(
             "qbind_consensus_view_advances_due_to_verified_tc_total {}\n",
@@ -7116,19 +7117,22 @@ impl P2pMetrics {
         self.pqc_trust_bundle_environment.load(Ordering::Relaxed)
     }
     pub fn set_pqc_trust_bundle_environment(&self, v: u64) {
-        self.pqc_trust_bundle_environment.store(v, Ordering::Relaxed);
+        self.pqc_trust_bundle_environment
+            .store(v, Ordering::Relaxed);
     }
     pub fn pqc_trust_bundle_active_roots(&self) -> u64 {
         self.pqc_trust_bundle_active_roots.load(Ordering::Relaxed)
     }
     pub fn set_pqc_trust_bundle_active_roots(&self, v: u64) {
-        self.pqc_trust_bundle_active_roots.store(v, Ordering::Relaxed);
+        self.pqc_trust_bundle_active_roots
+            .store(v, Ordering::Relaxed);
     }
     pub fn pqc_trust_bundle_revoked_roots(&self) -> u64 {
         self.pqc_trust_bundle_revoked_roots.load(Ordering::Relaxed)
     }
     pub fn set_pqc_trust_bundle_revoked_roots(&self, v: u64) {
-        self.pqc_trust_bundle_revoked_roots.store(v, Ordering::Relaxed);
+        self.pqc_trust_bundle_revoked_roots
+            .store(v, Ordering::Relaxed);
     }
     // Run 062 revocation-activation gauges.
     pub fn pqc_trust_bundle_revocations_configured_total(&self) -> u64 {
@@ -11626,15 +11630,11 @@ mod tests {
             );
         }
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_highest 3"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total 1"));
         assert!(
-            out.contains("qbind_p2p_pqc_trust_bundle_sequence_rollback_rejected_total 1")
+            out.contains("qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total 0")
         );
-        assert!(out.contains(
-            "qbind_p2p_pqc_trust_bundle_sequence_equal_fingerprint_mismatch_total 0"
-        ));
-        assert!(
-            out.contains("qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total 0")
-        );
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence_persist_failures_total 0"));
         // Existing Run 050/051 metrics still present (no displacement).
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_sequence "));
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_signature_verified_total "));
@@ -12057,15 +12057,9 @@ mod tests {
             "Run 080 must NOT introduce a peer_candidate_wire_* metric family"
         );
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_sent_total 1"));
-        assert!(
-            out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total 1")
-        );
-        assert!(
-            out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total 1")
-        );
-        assert!(
-            out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total 1")
-        );
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_failure_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_no_peer_total 1"));
+        assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_send_oversize_total 1"));
         // Pre-Run-080 receive-side and pre-existing families still
         // render exactly once each.
         assert!(out.contains("qbind_p2p_pqc_trust_bundle_peer_candidate_received_total "));

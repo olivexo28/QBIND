@@ -78,7 +78,10 @@ fn parse_u64(s: &str) -> Result<u64, String> {
 }
 
 fn parse_hash32(s: &str) -> Result<[u8; 32], String> {
-    let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
+    let s = s
+        .strip_prefix("0x")
+        .or_else(|| s.strip_prefix("0X"))
+        .unwrap_or(s);
     if s.len() != 64 {
         return Err(format!("block-hash must be 64 hex chars, got {}", s.len()));
     }
@@ -106,19 +109,20 @@ fn parse_args() -> Result<Args, String> {
                 state_dir = Some(PathBuf::from(it.next().ok_or("--state-dir needs a value")?))
             }
             "--snapshot-dir" => {
-                snapshot_dir =
-                    Some(PathBuf::from(it.next().ok_or("--snapshot-dir needs a value")?))
+                snapshot_dir = Some(PathBuf::from(
+                    it.next().ok_or("--snapshot-dir needs a value")?,
+                ))
             }
             "--height" => height = Some(parse_u64(&it.next().ok_or("--height needs a value")?)?),
             "--block-hash-hex" => {
-                block_hash = Some(parse_hash32(&it.next().ok_or("--block-hash-hex needs a value")?)?)
+                block_hash = Some(parse_hash32(
+                    &it.next().ok_or("--block-hash-hex needs a value")?,
+                )?)
             }
             "--chain-id" => {
                 chain_id = Some(parse_u64(&it.next().ok_or("--chain-id needs a value")?)?)
             }
-            "--epoch" => {
-                epoch = Some(parse_u64(&it.next().ok_or("--epoch needs a value")?)?)
-            }
+            "--epoch" => epoch = Some(parse_u64(&it.next().ok_or("--epoch needs a value")?)?),
             "-h" | "--help" => {
                 eprintln!(
                     "{}",
@@ -163,9 +167,8 @@ fn run() -> Result<(), String> {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    let meta =
-        StateSnapshotMeta::new(args.height, args.block_hash, now_ms, args.chain_id)
-            .with_epoch(args.epoch);
+    let meta = StateSnapshotMeta::new(args.height, args.block_hash, now_ms, args.chain_id)
+        .with_epoch(args.epoch);
 
     eprintln!(
         "[qbind_state_snapshot] opening RocksDbAccountState at {}",

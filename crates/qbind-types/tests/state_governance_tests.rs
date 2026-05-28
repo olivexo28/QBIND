@@ -1,4 +1,6 @@
-use qbind_types::{LaunchChecklist, MainnetStatus, ParamRegistry, SafetyCouncilKeyset, SlashingPenaltySchedule};
+use qbind_types::{
+    LaunchChecklist, MainnetStatus, ParamRegistry, SafetyCouncilKeyset, SlashingPenaltySchedule,
+};
 
 #[test]
 fn test_safety_council_keyset_genesis() {
@@ -80,15 +82,15 @@ fn test_m14_slashing_penalty_schedule_default() {
 
     // Verify default penalty parameters
     assert_eq!(schedule.version, 1);
-    assert_eq!(schedule.slash_bps_o1, 750);   // 7.5%
+    assert_eq!(schedule.slash_bps_o1, 750); // 7.5%
     assert_eq!(schedule.jail_epochs_o1, 10);
-    assert_eq!(schedule.slash_bps_o2, 500);   // 5%
+    assert_eq!(schedule.slash_bps_o2, 500); // 5%
     assert_eq!(schedule.jail_epochs_o2, 5);
-    assert_eq!(schedule.slash_bps_o3, 300);   // 3%
+    assert_eq!(schedule.slash_bps_o3, 300); // 3%
     assert_eq!(schedule.jail_epochs_o3, 3);
-    assert_eq!(schedule.slash_bps_o4, 200);   // 2%
+    assert_eq!(schedule.slash_bps_o4, 200); // 2%
     assert_eq!(schedule.jail_epochs_o4, 2);
-    assert_eq!(schedule.slash_bps_o5, 100);   // 1%
+    assert_eq!(schedule.slash_bps_o5, 100); // 1%
     assert_eq!(schedule.jail_epochs_o5, 1);
     assert_eq!(schedule.activation_epoch, 0); // Active from genesis
 }

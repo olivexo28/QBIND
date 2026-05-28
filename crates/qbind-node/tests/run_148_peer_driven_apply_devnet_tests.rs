@@ -63,8 +63,8 @@ use qbind_node::pqc_trust_bundle::{
 };
 use qbind_node::pqc_trust_peer_candidate::ValidatedPeerCandidate;
 use qbind_node::pqc_trust_reload::{
-    validate_candidate_bundle, LiveTrustApplyContext, ReloadApplyError,
-    ReloadCheckInputs, ValidatedCandidate,
+    validate_candidate_bundle, LiveTrustApplyContext, ReloadApplyError, ReloadCheckInputs,
+    ValidatedCandidate,
 };
 use qbind_node::pqc_trust_sequence::{chain_id_hex, sequence_file_path};
 use qbind_types::NetworkEnvironment;
@@ -178,10 +178,7 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(
-    path: &Path,
-    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
-) {
+fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
     match (snapshot, path.exists()) {
         (None, false) => {}
         (None, true) => panic!(
@@ -265,15 +262,21 @@ impl FakeLiveTrustApplyContext {
 }
 
 impl LiveTrustApplyContext for FakeLiveTrustApplyContext {
-    fn snapshot_active(
-        &mut self,
-    ) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
-        self.log.lock().unwrap().events.push("snapshot_active".into());
+    fn snapshot_active(&mut self) -> Result<Box<dyn std::any::Any + Send + Sync>, String> {
+        self.log
+            .lock()
+            .unwrap()
+            .events
+            .push("snapshot_active".into());
         let prev: String = self.active_fingerprint.lock().unwrap().clone();
         Ok(Box::new(prev))
     }
     fn swap_trust_state(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String> {
-        self.log.lock().unwrap().events.push("swap_trust_state".into());
+        self.log
+            .lock()
+            .unwrap()
+            .events
+            .push("swap_trust_state".into());
         match &self.swap_action {
             ActionPlan::Err(m) => Err(m.clone()),
             ActionPlan::Ok => {
@@ -284,14 +287,22 @@ impl LiveTrustApplyContext for FakeLiveTrustApplyContext {
         }
     }
     fn evict_sessions(&mut self) -> Result<usize, String> {
-        self.log.lock().unwrap().events.push("evict_sessions".into());
+        self.log
+            .lock()
+            .unwrap()
+            .events
+            .push("evict_sessions".into());
         match &self.evict_action {
             ActionPlan::Err(m) => Err(m.clone()),
             ActionPlan::Ok => Ok(self.eviction_count),
         }
     }
     fn commit_sequence(&mut self, _candidate: &LoadedTrustBundle) -> Result<(), String> {
-        self.log.lock().unwrap().events.push("commit_sequence".into());
+        self.log
+            .lock()
+            .unwrap()
+            .events
+            .push("commit_sequence".into());
         match &self.commit_action {
             ActionPlan::Err(m) => Err(m.clone()),
             ActionPlan::Ok => Ok(()),
@@ -374,13 +385,9 @@ fn stage_candidate_from_bundle(
     staged_at: u64,
     authority_marker_digest: Option<String>,
 ) -> ValidatedCandidate {
-    let validated = validate_candidate_bundle(devnet_inputs(
-        candidate_path,
-        signing_keys,
-        seq_path,
-        0,
-    ))
-    .expect("baseline validation must succeed for staging");
+    let validated =
+        validate_candidate_bundle(devnet_inputs(candidate_path, signing_keys, seq_path, 0))
+            .expect("baseline validation must succeed for staging");
     let vpc = ValidatedPeerCandidate {
         validated: validated.clone(),
         peer_id: peer_id.map(|s| s.to_string()),
@@ -665,7 +672,10 @@ fn a3_disabled_policy_refuses_without_mutation() {
     );
     assert!(matches!(outcome, PeerDrivenApplyOutcome::Disabled));
     assert!(outcome.is_pre_apply_refusal());
-    assert!(ctx_log.lock().unwrap().events.is_empty(), "no apply ctx calls");
+    assert!(
+        ctx_log.lock().unwrap().events.is_empty(),
+        "no apply ctx calls"
+    );
     assert!(marker_log.lock().unwrap().is_empty(), "no marker calls");
     assert_seq_file_unchanged(&seq_path, snap);
 }
@@ -840,7 +850,10 @@ fn r2_expired_staged_candidate_cannot_apply() {
             assert_eq!(*age_secs, 4_000);
             assert_eq!(*max_age_secs, 10);
         }
-        other => panic!("expected CandidateExpired, got {:?}", std::mem::discriminant(other)),
+        other => panic!(
+            "expected CandidateExpired, got {:?}",
+            std::mem::discriminant(other)
+        ),
     }
     assert!(ctx_log.lock().unwrap().events.is_empty());
     assert!(marker_log.lock().unwrap().is_empty());
@@ -897,7 +910,10 @@ fn r3_lower_sequence_marker_conflict_refuses_before_apply() {
         PeerDrivenApplyOutcome::CandidateMarkerConflict { reason } => {
             assert!(reason.contains("lower-sequence"), "reason={}", reason);
         }
-        other => panic!("expected CandidateMarkerConflict, got {:?}", std::mem::discriminant(other)),
+        other => panic!(
+            "expected CandidateMarkerConflict, got {:?}",
+            std::mem::discriminant(other)
+        ),
     }
     assert!(ctx_log.lock().unwrap().events.is_empty(), "no apply call");
     let mevents = marker_log.lock().unwrap().clone();
@@ -1295,7 +1311,10 @@ fn r9_eviction_failure_rolls_back_and_does_not_commit_or_persist_marker() {
     );
     match &outcome {
         PeerDrivenApplyOutcome::ApplyRollbackSucceeded {
-            error: ReloadApplyError::SessionEvictionFailed { rollback_ok: true, .. },
+            error:
+                ReloadApplyError::SessionEvictionFailed {
+                    rollback_ok: true, ..
+                },
         } => {}
         other => panic!(
             "expected ApplyRollbackSucceeded(SessionEvictionFailed{{rollback_ok:true}}), got {:?}",
@@ -1478,8 +1497,7 @@ fn r12_marker_persist_failure_after_successful_commit_is_fatal_operator_actionab
 
     let mut ctx = FakeLiveTrustApplyContext::new("aaaaaaaa");
     let ctx_log = ctx.log();
-    let mut marker =
-        MockV2MarkerCoordinator::new().with_post_commit_err("marker write: disk full");
+    let mut marker = MockV2MarkerCoordinator::new().with_post_commit_err("marker write: disk full");
     let policy = PeerDrivenApplyPolicy::devnet_enabled();
     let id = StagedPeerCandidateId::new(&validated.fingerprint_prefix, validated.sequence);
     let outcome = try_apply_staged_peer_candidate(
@@ -1574,7 +1592,10 @@ fn r13_idempotent_staged_v2_candidate_is_refused_as_already_applied() {
         PeerDrivenApplyOutcome::CandidateMarkerConflict { reason } => {
             assert!(reason.contains("already-applied"));
         }
-        other => panic!("expected CandidateMarkerConflict, got {:?}", std::mem::discriminant(other)),
+        other => panic!(
+            "expected CandidateMarkerConflict, got {:?}",
+            std::mem::discriminant(other)
+        ),
     }
     // No Run 070 callbacks.
     assert!(ctx_log.lock().unwrap().events.is_empty());
@@ -1702,10 +1723,7 @@ fn r15_r16_staging_queue_is_not_mutated_by_a_pre_apply_refusal() {
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].fingerprint_prefix, before[0].fingerprint_prefix);
     assert_eq!(after[0].sequence, before[0].sequence);
-    assert_eq!(
-        after[0].staged_at_unix_secs,
-        before[0].staged_at_unix_secs
-    );
+    assert_eq!(after[0].staged_at_unix_secs, before[0].staged_at_unix_secs);
 }
 
 // =====================================================================

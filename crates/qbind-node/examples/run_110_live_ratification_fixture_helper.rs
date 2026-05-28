@@ -58,9 +58,9 @@ use std::path::{Path, PathBuf};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::bundle_signing_ratification::test_helpers as ratification_helpers;
 use qbind_ledger::{
-    compute_canonical_genesis_hash, format_genesis_hash, GenesisAllocation,
-    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
+    compute_canonical_genesis_hash, format_genesis_hash, GenesisAllocation, GenesisAuthorityConfig,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
@@ -249,8 +249,11 @@ fn main() {
         PQC_TRANSPORT_SUITE_ML_DSA_44,
         hex_lower(&u1_pk),
     );
-    fs::write(outdir.join("signing-key.unratified.spec"), format!("{}\n", u1_spec))
-        .expect("write unratified signing spec");
+    fs::write(
+        outdir.join("signing-key.unratified.spec"),
+        format!("{}\n", u1_spec),
+    )
+    .expect("write unratified signing spec");
     fs::write(
         outdir.join("signing-key.ratified.spec"),
         format!("{}:{}:{}\n", r1.key_id_hex, r1.suite_id, hex_lower(&r1.pk)),
@@ -258,8 +261,8 @@ fn main() {
     .expect("write ratified signing spec");
 
     // --- Load existing signed trust bundle (signed by R1) -------------------
-    let existing_bundle_bytes = fs::read(material_dir.join("trust-bundle.json"))
-        .expect("read material/trust-bundle.json");
+    let existing_bundle_bytes =
+        fs::read(material_dir.join("trust-bundle.json")).expect("read material/trust-bundle.json");
     let existing_bundle: TrustBundle =
         serde_json::from_slice(&existing_bundle_bytes).expect("parse trust-bundle.json");
 

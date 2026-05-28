@@ -545,7 +545,10 @@ pub struct CliArgs {
     /// the release `qbind-node` binary. See
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_077.md` and
     /// `docs/whitepaper/contradiction.md` C4.
-    #[arg(long = "p2p-trust-bundle-peer-candidate-validation-enabled", hide = true)]
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-validation-enabled",
+        hide = true
+    )]
     pub p2p_trust_bundle_peer_candidate_validation_enabled: bool,
 
     /// Run 077 — operator-supplied local file path of a
@@ -685,11 +688,24 @@ pub struct CliArgs {
     /// See `task/RUN_147_TASK.txt`,
     /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`, and
     /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
-    #[arg(
-        long = "p2p-trust-bundle-peer-candidate-staging-enabled",
-        hide = true
-    )]
+    #[arg(long = "p2p-trust-bundle-peer-candidate-staging-enabled", hide = true)]
     pub p2p_trust_bundle_peer_candidate_staging_enabled: bool,
+
+    /// Run 149 — hidden, disabled-by-default operator opt-in flag
+    /// that permits a DevNet/TestNet live inbound `0x05` candidate,
+    /// after validation and staging, to enter the Run 148
+    /// peer-driven apply controller.
+    ///
+    /// Requires both
+    /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+    /// and `--p2p-trust-bundle-peer-candidate-staging-enabled`.
+    /// MainNet is refused unconditionally. The flag does NOT imply
+    /// propagation, does NOT bypass staging, does NOT apply unstaged
+    /// candidates, and does NOT introduce a new apply algorithm: the
+    /// controller delegates to the existing Run 070
+    /// `apply_validated_candidate_with_previous` contract.
+    #[arg(long = "p2p-trust-bundle-peer-candidate-apply-enabled", hide = true)]
+    pub p2p_trust_bundle_peer_candidate_apply_enabled: bool,
 
     /// Run 105 — disabled-by-default operator opt-in flag for the
     /// **non-mutating bundle-signing-key ratification enforcement**
@@ -753,10 +769,7 @@ pub struct CliArgs {
     /// `RatificationEnforcementOutcome::LegacyUnratifiedAccepted`
     /// rather than failing — the verdict is logged loudly and is
     /// explicitly NOT a "passed" outcome.
-    #[arg(
-        long = "p2p-trust-bundle-allow-unratified-testnet-devnet",
-        hide = true
-    )]
+    #[arg(long = "p2p-trust-bundle-allow-unratified-testnet-devnet", hide = true)]
     pub p2p_trust_bundle_allow_unratified_testnet_devnet: bool,
 
     // ========================================================================

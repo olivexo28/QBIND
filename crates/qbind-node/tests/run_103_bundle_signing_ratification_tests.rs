@@ -18,8 +18,8 @@
 
 use qbind_ledger::bundle_signing_ratification::test_helpers::build_signed_ratification;
 use qbind_ledger::{
-    canonical_ratification_digest, canonical_ratification_preimage,
-    classify_authority_root_kind, compute_canonical_genesis_hash, pqc_public_key_fingerprint,
+    canonical_ratification_digest, canonical_ratification_preimage, classify_authority_root_kind,
+    compute_canonical_genesis_hash, pqc_public_key_fingerprint,
     verify_bundle_signing_key_ratification, BundleSigningRatification, GenesisAllocation,
     GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisAuthorityRootKind, GenesisConfig,
     GenesisCouncilConfig, GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
@@ -45,7 +45,10 @@ fn make_mainnet_genesis(chain_id: &str, authority_pk_hex: &str) -> GenesisConfig
     let mut cfg = GenesisConfig::new(
         chain_id,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -61,11 +64,13 @@ fn make_mainnet_genesis(chain_id: &str, authority_pk_hex: &str) -> GenesisConfig
         ),
         GenesisMonetaryConfig::mainnet_default(),
     );
-    cfg.authority = Some(GenesisAuthorityConfig::new(vec![GenesisAuthorityRoot::new(
-        GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-        authority_pk_hex,
-        "foundation-bundle-signing-1",
-    )]));
+    cfg.authority = Some(GenesisAuthorityConfig::new(vec![
+        GenesisAuthorityRoot::new(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            authority_pk_hex,
+            "foundation-bundle-signing-1",
+        ),
+    ]));
     cfg
 }
 
@@ -125,7 +130,10 @@ fn run_103_scenario_1_valid_ratification_accepted() {
     .expect("Run 103 Scenario 1: valid ratification must be accepted");
     assert_eq!(ratified.public_key, bsk_pk.to_vec());
     assert_eq!(ratified.fingerprint, pqc_public_key_fingerprint(&bsk_pk));
-    assert_eq!(ratified.signature_suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44);
+    assert_eq!(
+        ratified.signature_suite_id,
+        GENESIS_AUTHORITY_SUITE_ML_DSA_44
+    );
     assert_eq!(ratified.authority_root_fingerprint, auth_pk_hex);
 }
 
@@ -252,19 +260,11 @@ fn run_103_scenario_5_transport_root_rejected() {
 
     // Sanity: classifier correctly distinguishes the two sets.
     assert_eq!(
-        classify_authority_root_kind(
-            auth,
-            &hex_of(&auth_pk),
-            GENESIS_AUTHORITY_SUITE_ML_DSA_44
-        ),
+        classify_authority_root_kind(auth, &hex_of(&auth_pk), GENESIS_AUTHORITY_SUITE_ML_DSA_44),
         Some(GenesisAuthorityRootKind::Transport)
     );
     assert_eq!(
-        classify_authority_root_kind(
-            auth,
-            &hex_of(&other_pk),
-            GENESIS_AUTHORITY_SUITE_ML_DSA_44
-        ),
+        classify_authority_root_kind(auth, &hex_of(&other_pk), GENESIS_AUTHORITY_SUITE_ML_DSA_44),
         Some(GenesisAuthorityRootKind::BundleSigning)
     );
 

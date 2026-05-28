@@ -26,8 +26,8 @@ use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::{
     bundle_signing_ratification::test_helpers as ratification_helpers,
     compute_canonical_genesis_hash, BundleSigningRatification, GenesisAllocation,
-    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig,
-    GenesisHash, GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
+    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
+    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
     RatificationEnforcementFailure, RatificationEnforcementPolicy, RatificationEnvironment,
     RatificationFailure, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
@@ -105,7 +105,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -385,7 +388,10 @@ fn run112_missing_ratification_under_strict_refuses_before_any_mutation() {
         ReloadApplyError::ValidationFailed(ReloadCheckError::RatificationRefused(
             RatificationEnforcementFailure::Missing { .. },
         )) => {}
-        other => panic!("expected ValidationFailed(RatificationRefused(Missing)), got {:?}", other),
+        other => panic!(
+            "expected ValidationFailed(RatificationRefused(Missing)), got {:?}",
+            other
+        ),
     }
     assert_no_apply_callbacks(&log);
     assert_seq_file_absent(&seq_path);

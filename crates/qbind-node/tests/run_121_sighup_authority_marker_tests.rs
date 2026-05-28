@@ -159,7 +159,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -304,9 +307,8 @@ fn make_controller(
     } else {
         None
     };
-    let authority_marker = marker_path.map(|marker_path| LiveReloadAuthorityMarkerConfig {
-        marker_path,
-    });
+    let authority_marker =
+        marker_path.map(|marker_path| LiveReloadAuthorityMarkerConfig { marker_path });
     let cfg = LiveReloadConfig {
         candidate_path,
         environment: NetworkEnvironment::Devnet,
@@ -379,7 +381,10 @@ fn run121_first_write_creates_marker_with_sighup_audit_tag() {
     assert_eq!(mock.attempt_count(), 1);
 
     // Marker file created with SighupReload audit tag.
-    assert!(marker_path.exists(), "marker file must be created post-commit");
+    assert!(
+        marker_path.exists(),
+        "marker file must be created post-commit"
+    );
     let persisted = load_authority_state(&marker_path)
         .expect("load")
         .expect("marker present after first-write");
@@ -537,9 +542,16 @@ fn run121_pre_persisted_higher_sequence_refuses_before_any_mutation() {
     // No live trust mutation, no sequence write, no session
     // eviction, no marker rewrite — strict pre-mutation refusal.
     let post_fp = snapshot_state_fingerprint(&live);
-    assert_eq!(pre_fp, post_fp, "live state must not mutate on marker refusal");
+    assert_eq!(
+        pre_fp, post_fp,
+        "live state must not mutate on marker refusal"
+    );
     assert!(!seq_path.exists(), "sequence file must NOT be created");
-    assert_eq!(mock.attempt_count(), 0, "no session eviction on marker refusal");
+    assert_eq!(
+        mock.attempt_count(),
+        0,
+        "no session eviction on marker refusal"
+    );
     let marker_bytes_after = std::fs::read(&marker_path).expect("marker still exists");
     assert_eq!(
         marker_bytes_before, marker_bytes_after,
@@ -774,10 +786,7 @@ fn run121_persist_failure_after_commit_is_fatal_and_apply_did_succeed() {
         LiveReloadOutcome::MarkerPersistFailureAfterCommit { applied, .. } => {
             assert_eq!(applied.validated.sequence, 2);
         }
-        other => panic!(
-            "expected MarkerPersistFailureAfterCommit, got {:?}",
-            other
-        ),
+        other => panic!("expected MarkerPersistFailureAfterCommit, got {:?}", other),
     }
 
     // Run 121 contract: persist-failure must be is_fatal() == true
@@ -786,14 +795,20 @@ fn run121_persist_failure_after_commit_is_fatal_and_apply_did_succeed() {
     // The apply DID succeed (live state DID advance, sequence DID
     // write, eviction DID happen) — the operator log line records
     // this so it is not silently lost.
-    assert!(out.is_applied(), "apply DID succeed even on persist failure");
+    assert!(
+        out.is_applied(),
+        "apply DID succeed even on persist failure"
+    );
     let post_fp = snapshot_state_fingerprint(&live);
     assert_ne!(pre_fp, post_fp, "live state must advance");
     assert!(seq_path.exists(), "sequence file must be written");
     assert_eq!(mock.attempt_count(), 1, "eviction must have been called");
 
     // Marker file was NOT successfully persisted.
-    assert!(!marker_path.exists(), "marker file must not exist post-fail");
+    assert!(
+        !marker_path.exists(),
+        "marker file must not exist post-fail"
+    );
 
     // Metrics: success counted (apply DID complete); failure NOT
     // counted (the apply pipeline itself succeeded).

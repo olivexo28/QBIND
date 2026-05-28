@@ -492,7 +492,10 @@ where
             .field("equivocation_recorder", &self.equivocation_recorder)
             .field("timeout_accumulator", &self.timeout_accumulator)
             .field("timeout_emitted_in_view", &self.timeout_emitted_in_view)
-            .field("pending_reconfig_next_epoch", &self.pending_reconfig_next_epoch)
+            .field(
+                "pending_reconfig_next_epoch",
+                &self.pending_reconfig_next_epoch,
+            )
             .finish()
     }
 }
@@ -1332,18 +1335,17 @@ impl BasicHotStuffEngine<[u8; 32]> {
         // `BlockHeader`). No epoch is derived from wall-clock /
         // height / view / timer ticks — the value is exactly the
         // operator-supplied `target_epoch`.
-        let (payload_kind, next_epoch_for_header) =
-            match self.pending_reconfig_next_epoch.take() {
-                Some(target) if target > self.current_epoch => {
-                    (qbind_wire::PAYLOAD_KIND_RECONFIG, target)
-                }
-                Some(_) => {
-                    // Stale intent (engine already at/past target).
-                    // Drop it silently and emit a normal block.
-                    (qbind_wire::PAYLOAD_KIND_NORMAL, 0)
-                }
-                None => (qbind_wire::PAYLOAD_KIND_NORMAL, 0),
-            };
+        let (payload_kind, next_epoch_for_header) = match self.pending_reconfig_next_epoch.take() {
+            Some(target) if target > self.current_epoch => {
+                (qbind_wire::PAYLOAD_KIND_RECONFIG, target)
+            }
+            Some(_) => {
+                // Stale intent (engine already at/past target).
+                // Drop it silently and emit a normal block.
+                (qbind_wire::PAYLOAD_KIND_NORMAL, 0)
+            }
+            None => (qbind_wire::PAYLOAD_KIND_NORMAL, 0),
+        };
 
         let proposal = BlockProposal {
             header: BlockHeader {
@@ -2275,9 +2277,8 @@ mod tests {
         parent: [u8; 32],
     ) -> RestoreCatchupBlock<[u8; 32]> {
         let proposer = engine.leader_for_view(height);
-        let block_id = BasicHotStuffEngine::<[u8; 32]>::derive_block_id_from_header(
-            proposer, height, &parent,
-        );
+        let block_id =
+            BasicHotStuffEngine::<[u8; 32]>::derive_block_id_from_header(proposer, height, &parent);
         RestoreCatchupBlock {
             height,
             view: height,
@@ -2310,7 +2311,10 @@ mod tests {
             engine.committed_height().unwrap() > snapshot_height,
             "catchup must advance committed height above restored prefix"
         );
-        assert!(engine.commit_log().iter().all(|e| e.height > snapshot_height));
+        assert!(engine
+            .commit_log()
+            .iter()
+            .all(|e| e.height > snapshot_height));
     }
 
     #[test]
@@ -2327,10 +2331,7 @@ mod tests {
         let err = engine
             .apply_restore_catchup_blocks(&[bad])
             .expect_err("bad parent must be rejected");
-        assert!(matches!(
-            err,
-            RestoreCatchupError::AnchorMismatch { .. }
-        ));
+        assert!(matches!(err, RestoreCatchupError::AnchorMismatch { .. }));
         assert_eq!(engine.committed_height(), Some(snapshot_height));
         assert!(engine.commit_log().is_empty());
     }

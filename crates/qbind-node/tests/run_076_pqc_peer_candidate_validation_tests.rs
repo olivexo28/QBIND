@@ -177,10 +177,7 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(
-    path: &Path,
-    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
-) {
+fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
     match (snapshot, path.exists()) {
         (None, false) => {}
         (None, true) => panic!(
@@ -254,10 +251,7 @@ fn encode_cert_bytes(cert: &NetworkDelegationCert) -> Vec<u8> {
 
 /// Authoritative declared-fingerprint-prefix: parse the candidate via
 /// the same loader, read its fingerprint_hex, take the first 8 chars.
-fn loader_fingerprint_prefix(
-    bundle_bytes: &[u8],
-    keys: &BundleSigningKeySet,
-) -> String {
+fn loader_fingerprint_prefix(bundle_bytes: &[u8], keys: &BundleSigningKeySet) -> String {
     let dir = tmpdir("fpprobe");
     let path = dir.join("probe.json");
     std::fs::write(&path, bundle_bytes).expect("write probe");
@@ -655,7 +649,12 @@ fn run076_local_revoked_leaf_candidate_rejected() {
     let mut v = PeerCandidateValidator::new(enabled_config());
     let out = v.try_accept(
         env,
-        &ctx(&scratch, &h.signing_keys, Some(&seq_path), Some(&cert_bytes)),
+        &ctx(
+            &scratch,
+            &h.signing_keys,
+            Some(&seq_path),
+            Some(&cert_bytes),
+        ),
     );
     assert!(matches!(
         out,
@@ -697,7 +696,12 @@ fn run076_local_issuer_root_revoked_candidate_rejected() {
     let mut v = PeerCandidateValidator::new(enabled_config());
     let out = v.try_accept(
         env,
-        &ctx(&scratch, &h.signing_keys, Some(&seq_path), Some(&cert_bytes)),
+        &ctx(
+            &scratch,
+            &h.signing_keys,
+            Some(&seq_path),
+            Some(&cert_bytes),
+        ),
     );
     assert!(matches!(
         out,

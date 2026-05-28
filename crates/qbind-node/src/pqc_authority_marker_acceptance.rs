@@ -843,9 +843,7 @@ pub fn verify_marker_for_validation_only(
 
 /// Map a [`AuthorityStateComparison`] reject variant into the most
 /// precise [`ValidationOnlyMarkerError`] available.
-fn map_conflict_to_validation_only_error(
-    c: AuthorityStateComparison,
-) -> ValidationOnlyMarkerError {
+fn map_conflict_to_validation_only_error(c: AuthorityStateComparison) -> ValidationOnlyMarkerError {
     match c {
         AuthorityStateComparison::RollbackRefused {
             persisted_sequence,
@@ -896,15 +894,10 @@ fn map_conflict_to_validation_only_error(
 pub enum ValidationOnlyMarkerV2Error {
     /// The sidecar file has an unknown or unsupported ratification schema
     /// version (not 1 or 2).
-    UnknownRatificationSchema {
-        got: Option<String>,
-    },
+    UnknownRatificationSchema { got: Option<String> },
     /// The sidecar file is structurally malformed for its declared schema
     /// version.
-    MalformedSidecar {
-        schema_version: u32,
-        reason: String,
-    },
+    MalformedSidecar { schema_version: u32, reason: String },
     /// The v2 verifier (Run 130) rejected the ratification object.
     V2VerifierFailure(qbind_ledger::RatificationV2Failure),
     /// The v2 marker derivation (Run 131) failed.
@@ -929,9 +922,7 @@ pub enum ValidationOnlyMarkerV2Error {
         candidate_digest: String,
     },
     /// The local persisted marker is corrupt or an unsupported version.
-    UnsupportedMarkerVersion {
-        reason: String,
-    },
+    UnsupportedMarkerVersion { reason: String },
     /// The local persisted marker could not be loaded (I/O or parse).
     CorruptLocalMarker(crate::pqc_authority_state::AuthorityStateError),
 }
@@ -1042,10 +1033,7 @@ impl std::fmt::Display for ValidationOnlyMarkerV2AcceptReason {
                 f,
                 "no-persisted-marker-yet (v2 first-seen pass; no marker persistence)"
             ),
-            Self::Idempotent => write!(
-                f,
-                "v2 idempotent (same marker; no marker persistence)"
-            ),
+            Self::Idempotent => write!(f, "v2 idempotent (same marker; no marker persistence)"),
             Self::UpgradeCompatible {
                 previous_sequence,
                 new_sequence,
@@ -1100,24 +1088,22 @@ pub fn verify_marker_for_validation_only_v2(
     inputs: ValidationOnlyMarkerV2Inputs<'_>,
 ) -> Result<ValidationOnlyMarkerV2AcceptReason, ValidationOnlyMarkerV2Error> {
     use crate::pqc_authority_state::{
-        derive_authority_state_v2_from_ratification, load_authority_state_versioned,
-        AuthorityMarkerV2ComparisonOutcome, AuthorityStateDerivationV2Inputs,
-        AuthorityStateUpdateSource, compare_authority_marker_v2,
+        compare_authority_marker_v2, derive_authority_state_v2_from_ratification,
+        load_authority_state_versioned, AuthorityMarkerV2ComparisonOutcome,
+        AuthorityStateDerivationV2Inputs, AuthorityStateUpdateSource,
     };
 
     // Step 1: derive v2 candidate marker. Placeholder update_source and
     // timestamp — excluded from canonical digest and never persisted.
-    let candidate = derive_authority_state_v2_from_ratification(
-        AuthorityStateDerivationV2Inputs {
-            runtime_env: inputs.runtime_env,
-            runtime_chain_id: inputs.runtime_chain_id,
-            runtime_genesis_hash_hex: inputs.runtime_genesis_hash_hex,
-            ratification: inputs.ratification,
-            ratified: inputs.ratified,
-            update_source: AuthorityStateUpdateSource::TestOrFixture,
-            updated_at_unix_secs: 0,
-        },
-    )
+    let candidate = derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
+        runtime_env: inputs.runtime_env,
+        runtime_chain_id: inputs.runtime_chain_id,
+        runtime_genesis_hash_hex: inputs.runtime_genesis_hash_hex,
+        ratification: inputs.ratification,
+        ratified: inputs.ratified,
+        update_source: AuthorityStateUpdateSource::TestOrFixture,
+        updated_at_unix_secs: 0,
+    })
     .map_err(ValidationOnlyMarkerV2Error::V2MarkerDerivationFailure)?;
 
     // Step 2: load persisted versioned marker.
@@ -1157,11 +1143,13 @@ pub fn verify_marker_for_validation_only_v2(
             sequence,
             persisted_digest,
             candidate_digest,
-        } => Err(ValidationOnlyMarkerV2Error::SameSequenceDifferentDigestRefused {
-            sequence,
-            persisted_digest,
-            candidate_digest,
-        }),
+        } => Err(
+            ValidationOnlyMarkerV2Error::SameSequenceDifferentDigestRefused {
+                sequence,
+                persisted_digest,
+                candidate_digest,
+            },
+        ),
         AuthorityMarkerV2ComparisonOutcome::V1AfterV2Rejected => {
             Err(ValidationOnlyMarkerV2Error::V1AfterV2DowngradeRefused)
         }
@@ -1170,11 +1158,13 @@ pub fn verify_marker_for_validation_only_v2(
         }
         // Legacy v1 comparison outcome — should not occur in v2 path,
         // but map defensively.
-        AuthorityMarkerV2ComparisonOutcome::LegacyV1(_) => {
-            Err(ValidationOnlyMarkerV2Error::V2MarkerComparisonFailure(outcome))
-        }
+        AuthorityMarkerV2ComparisonOutcome::LegacyV1(_) => Err(
+            ValidationOnlyMarkerV2Error::V2MarkerComparisonFailure(outcome),
+        ),
         // Domain-mismatch rejects.
-        other => Err(ValidationOnlyMarkerV2Error::V2MarkerComparisonFailure(other)),
+        other => Err(ValidationOnlyMarkerV2Error::V2MarkerComparisonFailure(
+            other,
+        )),
     }
 }
 
@@ -1286,9 +1276,7 @@ pub enum MutatingSurfaceMarkerV2Error {
     /// Equal `authority_domain_sequence`, equal digest, but mismatching
     /// active-key / lifecycle-action linkage. Refuses the silent linkage
     /// swap.
-    SameSequenceConflictingKeyOrAction {
-        reason: String,
-    },
+    SameSequenceConflictingKeyOrAction { reason: String },
 
     /// A v1 ratification candidate landed on the v2 path. The dispatch
     /// SHOULD route v1 candidates to the v1 path; this variant exists
@@ -1299,9 +1287,7 @@ pub enum MutatingSurfaceMarkerV2Error {
     /// The persisted marker is structurally malformed or carries an
     /// unsupported `record_version`. Operator recovery is out of Run 134
     /// scope.
-    UnsupportedMarkerVersion {
-        reason: String,
-    },
+    UnsupportedMarkerVersion { reason: String },
 
     /// Catch-all for any other reject outcome from
     /// [`compare_authority_marker_v2`] that does not map to a more
@@ -1469,11 +1455,7 @@ impl std::fmt::Display for MarkerAcceptKindV2 {
             Self::UpgradeV2 {
                 previous_sequence,
                 new_sequence,
-            } => write!(
-                f,
-                "v2-upgrade {} -> {}",
-                previous_sequence, new_sequence
-            ),
+            } => write!(f, "v2-upgrade {} -> {}", previous_sequence, new_sequence),
             Self::V2AfterV1Migration => write!(f, "v2-after-v1-migration"),
         }
     }
@@ -1486,9 +1468,7 @@ impl MarkerAcceptDecisionV2 {
     }
 
     /// Derived v2 candidate marker.
-    pub fn candidate(
-        &self,
-    ) -> &crate::pqc_authority_state::PersistentAuthorityStateRecordV2 {
+    pub fn candidate(&self) -> &crate::pqc_authority_state::PersistentAuthorityStateRecordV2 {
         &self.candidate
     }
 
@@ -1621,14 +1601,16 @@ pub fn decide_marker_acceptance_v2(
             sequence,
             persisted_digest,
             candidate_digest,
-        } => Err(MutatingSurfaceMarkerV2Error::SameSequenceConflictingDigest {
-            sequence,
-            persisted_digest,
-            attempted_digest: candidate_digest,
-        }),
-        AuthorityMarkerV2ComparisonOutcome::WrongKeyActionLinkageRejected { reason } => Err(
-            MutatingSurfaceMarkerV2Error::SameSequenceConflictingKeyOrAction { reason },
+        } => Err(
+            MutatingSurfaceMarkerV2Error::SameSequenceConflictingDigest {
+                sequence,
+                persisted_digest,
+                attempted_digest: candidate_digest,
+            },
         ),
+        AuthorityMarkerV2ComparisonOutcome::WrongKeyActionLinkageRejected { reason } => {
+            Err(MutatingSurfaceMarkerV2Error::SameSequenceConflictingKeyOrAction { reason })
+        }
         AuthorityMarkerV2ComparisonOutcome::V1AfterV2Rejected => {
             Err(MutatingSurfaceMarkerV2Error::V1AfterV2Rejected)
         }
@@ -1772,8 +1754,7 @@ mod tests {
     // The runtime_genesis_hash_hex must equal `hex(genesis_hash)` of
     // the ratification for the inner derivation cross-checks. Helper
     // returns the matched pair.
-    fn matched_devnet_setup(
-    ) -> (
+    fn matched_devnet_setup() -> (
         TempDir,
         PathBuf,
         BundleSigningRatification,
@@ -1791,8 +1772,12 @@ mod tests {
             use std::fmt::Write;
             let _ = write!(gh_hex, "{:02x}", b);
         }
-        let ratification =
-            sample_ratification(RatificationEnvironment::Devnet, &chain_id_hex_42(), gh, 0x01);
+        let ratification = sample_ratification(
+            RatificationEnvironment::Devnet,
+            &chain_id_hex_42(),
+            gh,
+            0x01,
+        );
         let ratified = ratified_from(&ratification);
         (dir, marker_path, ratification, ratified, gh_hex)
     }
@@ -1844,13 +1829,9 @@ mod tests {
         // refused this; the derivation helper double-checks.
         ratification.chain_id = "00000000deadbeef".to_string();
         let ratified = ratified_from(&ratification);
-        let err = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect_err("chain mismatch must reject");
+        let err =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect_err("chain mismatch must reject");
         assert!(
             matches!(err, MutatingSurfaceMarkerError::DerivationFailed(_)),
             "got {:?}",
@@ -1866,13 +1847,9 @@ mod tests {
         // Runtime is DevNet but the ratification claims Mainnet.
         ratification.environment = RatificationEnvironment::Mainnet;
         let ratified = ratified_from(&ratification);
-        let err = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect_err("env mismatch must reject");
+        let err =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect_err("env mismatch must reject");
         assert!(
             matches!(err, MutatingSurfaceMarkerError::DerivationFailed(_)),
             "got {:?}",
@@ -1933,13 +1910,9 @@ mod tests {
         // produces both from the same source, so this is a fail-closed
         // verifier-output-inconsistency bug class.
         ratified.authority_root_fingerprint = fingerprint_b();
-        let err = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect_err("verifier-output inconsistency must reject");
+        let err =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect_err("verifier-output inconsistency must reject");
         assert!(
             matches!(err, MutatingSurfaceMarkerError::DerivationFailed(_)),
             "got {:?}",
@@ -2054,22 +2027,14 @@ mod tests {
     #[test]
     fn decide_idempotent_when_marker_matches_bitwise() {
         let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
-        let d1 = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect("first-write accepts");
+        let d1 =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
         persist_accepted_marker_after_commit_boundary(&d1).expect("persist ok");
 
-        let d2 = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect("idempotent accepts");
+        let d2 =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("idempotent accepts");
         assert!(matches!(d2.kind(), MarkerAcceptKind::Idempotent));
         assert!(!d2.should_persist());
 
@@ -2077,7 +2042,10 @@ mod tests {
         let before = std::fs::read(&marker_path).unwrap();
         persist_accepted_marker_after_commit_boundary(&d2).expect("idempotent persist no-op ok");
         let after = std::fs::read(&marker_path).unwrap();
-        assert_eq!(before, after, "idempotent persist must NOT rewrite the file");
+        assert_eq!(
+            before, after,
+            "idempotent persist must NOT rewrite the file"
+        );
     }
 
     // ----- Upgrade path -----
@@ -2092,13 +2060,9 @@ mod tests {
         persist_accepted_marker_after_commit_boundary(&d_low).expect("persist ok");
 
         // Now derive at authority_sequence = 5.
-        let d_high = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect("upgrade accepts");
+        let d_high =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("upgrade accepts");
         match d_high.kind() {
             MarkerAcceptKind::Upgrade {
                 previous_sequence,
@@ -2124,15 +2088,14 @@ mod tests {
         persist_accepted_marker_after_commit_boundary(&d_high).expect("persist ok");
 
         // Attempt to lower the authority_sequence.
-        let err = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect_err("rollback must reject");
+        let err =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect_err("rollback must reject");
         assert!(
-            matches!(err, MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }),
+            matches!(
+                err,
+                MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }
+            ),
             "got {:?}",
             err
         );
@@ -2144,13 +2107,9 @@ mod tests {
     fn decide_persisted_domain_mismatch_rejected() {
         let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
         // Manually persist a marker whose genesis_hash differs.
-        let mut foreign = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect("first-write accepts");
+        let mut foreign =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
         // Mutate the on-disk file to claim a different genesis_hash.
         let mut foreign_record = foreign.candidate.clone();
         foreign_record.genesis_hash = "b".repeat(64);
@@ -2166,13 +2125,9 @@ mod tests {
         // Touch `foreign` to keep the variable in scope across the
         // file IO.
         foreign.should_persist = false;
-        let err = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect_err("foreign-domain marker must reject");
+        let err =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect_err("foreign-domain marker must reject");
         assert!(
             matches!(err, MutatingSurfaceMarkerError::PersistedDomainMismatch(_)),
             "got {:?}",
@@ -2185,13 +2140,9 @@ mod tests {
     #[test]
     fn persist_writes_first_write_marker() {
         let (_dir, marker_path, ratification, ratified, gh_hex) = matched_devnet_setup();
-        let d = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect("first-write accepts");
+        let d =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect("first-write accepts");
         assert!(!marker_path.exists());
         persist_accepted_marker_after_commit_boundary(&d).expect("persist ok");
         let on_disk = load_authority_state(&marker_path)
@@ -2226,13 +2177,9 @@ mod tests {
         // First, build an accepting decision using a normal marker
         // path so decide_marker_acceptance returns Ok(FirstWrite).
         let scratch = dir.path().join("scratch_marker.json");
-        let d_ok = decide_marker_acceptance(make_inputs(
-            &scratch,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect("clean decision");
+        let d_ok =
+            decide_marker_acceptance(make_inputs(&scratch, &gh_hex, &ratification, &ratified))
+                .expect("clean decision");
         // Now rewrite the decision in-place so its persist target is
         // a directory we deliberately create. The persist step will
         // try to write `<dir>.tmp` (works) and rename it to `<dir>`
@@ -2262,13 +2209,9 @@ mod tests {
         let (_dir, marker_path, mut ratification, _ratified, gh_hex) = matched_devnet_setup();
         ratification.environment = RatificationEnvironment::Mainnet;
         let ratified = ratified_from(&ratification);
-        let _err = decide_marker_acceptance(make_inputs(
-            &marker_path,
-            &gh_hex,
-            &ratification,
-            &ratified,
-        ))
-        .expect_err("env mismatch must reject");
+        let _err =
+            decide_marker_acceptance(make_inputs(&marker_path, &gh_hex, &ratification, &ratified))
+                .expect_err("env mismatch must reject");
         assert!(!marker_path.exists());
     }
 
@@ -2372,10 +2315,12 @@ mod tests {
         // Attempt to lower the authority_sequence at the next startup.
         let mut low = make_startup_inputs(&marker_path, &gh_hex, &ratification, &ratified);
         low.authority_sequence = 4;
-        let err =
-            decide_marker_acceptance(low).expect_err("rollback must reject before mutation");
+        let err = decide_marker_acceptance(low).expect_err("rollback must reject before mutation");
         assert!(
-            matches!(err, MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }),
+            matches!(
+                err,
+                MutatingSurfaceMarkerError::AuthoritySequenceRollback { .. }
+            ),
             "got {:?}",
             err
         );
@@ -2405,7 +2350,10 @@ mod tests {
             err
         );
         let bytes = std::fs::read(&marker_path).unwrap();
-        assert_eq!(bytes, b"{ garbage", "Run 120 must NOT auto-overwrite corrupt marker");
+        assert_eq!(
+            bytes, b"{ garbage",
+            "Run 120 must NOT auto-overwrite corrupt marker"
+        );
     }
 
     /// Run 120 §A.5 — persisted-domain mismatch (wrong-data-dir /
@@ -2845,25 +2793,23 @@ mod tests {
     mod run132_v2_tests {
         use super::*;
         use crate::pqc_authority_state::{
-            authority_state_file_path, load_authority_state_versioned,
-            persist_authority_state_atomic, AuthorityStateUpdateSource,
-            PersistentAuthorityStateRecord,
-            PersistentAuthorityStateRecordVersioned,
-            derive_authority_state_v2_from_ratification, AuthorityStateDerivationV2Inputs,
+            authority_state_file_path, derive_authority_state_v2_from_ratification,
+            load_authority_state_versioned, persist_authority_state_atomic,
+            AuthorityStateDerivationV2Inputs, AuthorityStateUpdateSource,
+            PersistentAuthorityStateRecord, PersistentAuthorityStateRecordVersioned,
         };
         use crate::pqc_trust_bundle::TrustBundleEnvironment;
-        use qbind_ledger::{
-            BundleSigningRatificationV2, BundleSigningRatificationV2Action,
-            RatificationEnvironment, RatifiedBundleSigningKeyV2,
-            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-        };
+        use qbind_crypto::MlDsa44Backend;
         use qbind_ledger::bundle_signing_ratification::v2_test_helpers;
         use qbind_ledger::genesis::{
             compute_canonical_genesis_hash, GenesisAllocation, GenesisAuthorityConfig,
             GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig,
             GenesisValidator,
         };
-        use qbind_crypto::MlDsa44Backend;
+        use qbind_ledger::{
+            BundleSigningRatificationV2, BundleSigningRatificationV2Action,
+            RatificationEnvironment, RatifiedBundleSigningKeyV2, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+        };
 
         fn full_pk_hex(pk: &[u8]) -> String {
             let mut s = String::with_capacity(pk.len() * 2);
@@ -3019,9 +2965,11 @@ mod tests {
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
 
-            let result = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat, &ratified),
-            );
+            let result = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ));
             assert!(result.is_ok());
             assert!(matches!(
                 result.unwrap(),
@@ -3057,9 +3005,11 @@ mod tests {
             let rat = fix.build_v2_ratification(2, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
 
-            let result = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat, &ratified),
-            );
+            let result = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ));
             assert!(result.is_ok());
             assert!(matches!(
                 result.unwrap(),
@@ -3081,8 +3031,8 @@ mod tests {
             // Derive and write a v2 marker.
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
-            let v2_record = derive_authority_state_v2_from_ratification(
-                AuthorityStateDerivationV2Inputs {
+            let v2_record =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
                     runtime_env: NetworkEnvironment::Mainnet,
                     runtime_chain_id: fix.runtime_chain_id,
                     runtime_genesis_hash_hex: &fix.canonical_hash_hex.clone(),
@@ -3090,9 +3040,8 @@ mod tests {
                     ratified: &ratified,
                     update_source: AuthorityStateUpdateSource::ReloadApply,
                     updated_at_unix_secs: 1000,
-                },
-            )
-            .unwrap();
+                })
+                .unwrap();
 
             // Write v2 marker as JSON.
             let v2_json = serde_json::to_vec_pretty(&v2_record).unwrap();
@@ -3142,8 +3091,8 @@ mod tests {
             // Write a v2 marker with sequence=5.
             let rat_high = fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
             let ratified_high = fix.verify_v2(&rat_high);
-            let v2_high = derive_authority_state_v2_from_ratification(
-                AuthorityStateDerivationV2Inputs {
+            let v2_high =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
                     runtime_env: NetworkEnvironment::Mainnet,
                     runtime_chain_id: fix.runtime_chain_id,
                     runtime_genesis_hash_hex: &fix.canonical_hash_hex.clone(),
@@ -3151,9 +3100,8 @@ mod tests {
                     ratified: &ratified_high,
                     update_source: AuthorityStateUpdateSource::ReloadApply,
                     updated_at_unix_secs: 1000,
-                },
-            )
-            .unwrap();
+                })
+                .unwrap();
             let v2_json = serde_json::to_vec_pretty(&v2_high).unwrap();
             std::fs::create_dir_all(marker_path.parent().unwrap()).ok();
             std::fs::write(&marker_path, &v2_json).unwrap();
@@ -3162,9 +3110,11 @@ mod tests {
             let rat_low = fix.build_v2_ratification(3, BundleSigningRatificationV2Action::Ratify);
             let ratified_low = fix.verify_v2(&rat_low);
 
-            let result = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat_low, &ratified_low),
-            );
+            let result = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat_low,
+                &ratified_low,
+            ));
             assert!(result.is_err());
             assert!(matches!(
                 result.unwrap_err(),
@@ -3182,8 +3132,8 @@ mod tests {
             let ratified = fix.verify_v2(&rat);
 
             // Write v2 marker from same ratification.
-            let v2_record = derive_authority_state_v2_from_ratification(
-                AuthorityStateDerivationV2Inputs {
+            let v2_record =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
                     runtime_env: NetworkEnvironment::Mainnet,
                     runtime_chain_id: fix.runtime_chain_id,
                     runtime_genesis_hash_hex: &fix.canonical_hash_hex.clone(),
@@ -3191,17 +3141,18 @@ mod tests {
                     ratified: &ratified,
                     update_source: AuthorityStateUpdateSource::ReloadApply,
                     updated_at_unix_secs: 1000,
-                },
-            )
-            .unwrap();
+                })
+                .unwrap();
             let v2_json = serde_json::to_vec_pretty(&v2_record).unwrap();
             std::fs::create_dir_all(marker_path.parent().unwrap()).ok();
             std::fs::write(&marker_path, &v2_json).unwrap();
 
             // Same ratification as candidate — must pass as idempotent.
-            let result = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat, &ratified),
-            );
+            let result = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ));
             assert!(result.is_ok());
             assert!(matches!(
                 result.unwrap(),
@@ -3218,8 +3169,8 @@ mod tests {
             // Write v2 marker with sequence=3 from one ratification.
             let rat_a = fix.build_v2_ratification(3, BundleSigningRatificationV2Action::Ratify);
             let ratified_a = fix.verify_v2(&rat_a);
-            let v2_a = derive_authority_state_v2_from_ratification(
-                AuthorityStateDerivationV2Inputs {
+            let v2_a =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
                     runtime_env: NetworkEnvironment::Mainnet,
                     runtime_chain_id: fix.runtime_chain_id,
                     runtime_genesis_hash_hex: &fix.canonical_hash_hex.clone(),
@@ -3227,9 +3178,8 @@ mod tests {
                     ratified: &ratified_a,
                     update_source: AuthorityStateUpdateSource::ReloadApply,
                     updated_at_unix_secs: 1000,
-                },
-            )
-            .unwrap();
+                })
+                .unwrap();
             let v2_json = serde_json::to_vec_pretty(&v2_a).unwrap();
             std::fs::create_dir_all(marker_path.parent().unwrap()).ok();
             std::fs::write(&marker_path, &v2_json).unwrap();
@@ -3246,7 +3196,12 @@ mod tests {
                 &bsk2_pk,
                 3,
                 BundleSigningRatificationV2Action::Ratify,
-                None, None, None, None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             );
             let ratified_b = qbind_ledger::verify_bundle_signing_key_ratification_v2(
                 qbind_ledger::RatificationV2VerifierInputs {
@@ -3285,8 +3240,8 @@ mod tests {
             // Write v2 marker with sequence=1.
             let rat_low = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified_low = fix.verify_v2(&rat_low);
-            let v2_low = derive_authority_state_v2_from_ratification(
-                AuthorityStateDerivationV2Inputs {
+            let v2_low =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
                     runtime_env: NetworkEnvironment::Mainnet,
                     runtime_chain_id: fix.runtime_chain_id,
                     runtime_genesis_hash_hex: &fix.canonical_hash_hex.clone(),
@@ -3294,9 +3249,8 @@ mod tests {
                     ratified: &ratified_low,
                     update_source: AuthorityStateUpdateSource::ReloadApply,
                     updated_at_unix_secs: 1000,
-                },
-            )
-            .unwrap();
+                })
+                .unwrap();
             let v2_json = serde_json::to_vec_pretty(&v2_low).unwrap();
             std::fs::create_dir_all(marker_path.parent().unwrap()).ok();
             std::fs::write(&marker_path, &v2_json).unwrap();
@@ -3306,9 +3260,11 @@ mod tests {
             let rat_high = fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
             let ratified_high = fix.verify_v2(&rat_high);
 
-            let result = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat_high, &ratified_high),
-            );
+            let result = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat_high,
+                &ratified_high,
+            ));
             assert!(result.is_ok());
             match result.unwrap() {
                 super::super::ValidationOnlyMarkerV2AcceptReason::UpgradeCompatible {
@@ -3337,9 +3293,11 @@ mod tests {
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
 
-            let result = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat, &ratified),
-            );
+            let result = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ));
             assert!(result.is_err());
             assert!(matches!(
                 result.unwrap_err(),
@@ -3357,14 +3315,16 @@ mod tests {
             let ratified = fix.verify_v2(&rat);
 
             // First call: no marker exists.
-            let _ = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat, &ratified),
-            );
+            let _ = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ));
             assert!(!marker_path.exists(), "marker file must not be created");
 
             // Create a v2 marker, check idempotent doesn't modify.
-            let v2_record = derive_authority_state_v2_from_ratification(
-                AuthorityStateDerivationV2Inputs {
+            let v2_record =
+                derive_authority_state_v2_from_ratification(AuthorityStateDerivationV2Inputs {
                     runtime_env: NetworkEnvironment::Mainnet,
                     runtime_chain_id: fix.runtime_chain_id,
                     runtime_genesis_hash_hex: &fix.canonical_hash_hex.clone(),
@@ -3372,35 +3332,40 @@ mod tests {
                     ratified: &ratified,
                     update_source: AuthorityStateUpdateSource::ReloadApply,
                     updated_at_unix_secs: 1000,
-                },
-            )
-            .unwrap();
+                })
+                .unwrap();
             let v2_json = serde_json::to_vec_pretty(&v2_record).unwrap();
             std::fs::create_dir_all(marker_path.parent().unwrap()).ok();
             std::fs::write(&marker_path, &v2_json).unwrap();
             let original_bytes = std::fs::read(&marker_path).unwrap();
 
             // Idempotent check.
-            let _ = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat, &ratified),
-            );
+            let _ = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat,
+                &ratified,
+            ));
             assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
 
             // Upgrade check.
             let rat_up = fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
             let ratified_up = fix.verify_v2(&rat_up);
-            let _ = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat_up, &ratified_up),
-            );
+            let _ = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat_up,
+                &ratified_up,
+            ));
             assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
 
             // Rollback check.
             // Sequence 0 is invalid for v2 derivation. Use sequence 2 < 5.
             let rat_low = fix.build_v2_ratification(2, BundleSigningRatificationV2Action::Ratify);
             let ratified_low = fix.verify_v2(&rat_low);
-            let _ = super::super::verify_marker_for_validation_only_v2(
-                fix.v2_inputs(&marker_path, &rat_low, &ratified_low),
-            );
+            let _ = super::super::verify_marker_for_validation_only_v2(fix.v2_inputs(
+                &marker_path,
+                &rat_low,
+                &ratified_low,
+            ));
             assert_eq!(std::fs::read(&marker_path).unwrap(), original_bytes);
         }
     }
@@ -3440,8 +3405,7 @@ mod tests {
         };
         use qbind_ledger::{
             BundleSigningRatificationV2, BundleSigningRatificationV2Action,
-            RatificationEnvironment, RatifiedBundleSigningKeyV2,
-            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            RatificationEnvironment, RatifiedBundleSigningKeyV2, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
         };
 
         fn full_pk_hex(pk: &[u8]) -> String {
@@ -3603,12 +3567,9 @@ mod tests {
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
 
-            let decision = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat,
-                &ratified,
-            ))
-            .expect("first v2 startup accepts");
+            let decision =
+                decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat, &ratified))
+                    .expect("first v2 startup accepts");
             assert!(matches!(decision.kind(), MarkerAcceptKindV2::FirstV2Write));
             // No file written by decide alone — proves compare happens
             // before any startup mutation/persistence.
@@ -3643,28 +3604,23 @@ mod tests {
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
 
-            let d1 = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat,
-                &ratified,
-            ))
-            .expect("first v2 startup accepts");
+            let d1 = decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat, &ratified))
+                .expect("first v2 startup accepts");
             persist_accepted_v2_marker_after_commit_boundary(&d1).expect("persist ok");
             let before = std::fs::read(&marker_path).unwrap();
 
-            let d2 = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat,
-                &ratified,
-            ))
-            .expect("idempotent v2 startup accepts");
+            let d2 = decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat, &ratified))
+                .expect("idempotent v2 startup accepts");
             assert!(matches!(d2.kind(), MarkerAcceptKindV2::Idempotent));
             assert!(!d2.should_persist());
             persist_accepted_v2_marker_after_commit_boundary(&d2)
                 .expect("idempotent persist no-op");
 
             let after = std::fs::read(&marker_path).unwrap();
-            assert_eq!(before, after, "idempotent v2 startup must NOT rewrite the file");
+            assert_eq!(
+                before, after,
+                "idempotent v2 startup must NOT rewrite the file"
+            );
         }
 
         /// Run 136 §A.3 — higher v2 sequence at startup is an `UpgradeV2`
@@ -3687,8 +3643,7 @@ mod tests {
             persist_accepted_v2_marker_after_commit_boundary(&d1).expect("persist ok");
 
             // Restart with sequence=5.
-            let rat_high =
-                fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
+            let rat_high = fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
             let ratified_high = fix.verify_v2(&rat_high);
             let d2 = decide_marker_acceptance_v2(fix.startup_inputs(
                 &marker_path,
@@ -3733,8 +3688,7 @@ mod tests {
             let marker_path = authority_state_file_path(dir.path());
 
             // Persist a v2 marker at sequence=7.
-            let rat_high =
-                fix.build_v2_ratification(7, BundleSigningRatificationV2Action::Ratify);
+            let rat_high = fix.build_v2_ratification(7, BundleSigningRatificationV2Action::Ratify);
             let ratified_high = fix.verify_v2(&rat_high);
             let d_high = decide_marker_acceptance_v2(fix.startup_inputs(
                 &marker_path,
@@ -3765,10 +3719,7 @@ mod tests {
                 other => panic!("expected LowerV2SequenceRefused, got {:?}", other),
             }
             let after = std::fs::read(&marker_path).unwrap();
-            assert_eq!(
-                before, after,
-                "rejected v2 startup must not mutate marker"
-            );
+            assert_eq!(before, after, "rejected v2 startup must not mutate marker");
         }
 
         /// Run 136 §A.5 — same v2 sequence, different ratification digest
@@ -3782,12 +3733,9 @@ mod tests {
             // Persist a v2 marker at sequence=5 with action=Ratify.
             let rat_a = fix.build_v2_ratification(5, BundleSigningRatificationV2Action::Ratify);
             let ratified_a = fix.verify_v2(&rat_a);
-            let d_a = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat_a,
-                &ratified_a,
-            ))
-            .expect("first v2 startup accepts");
+            let d_a =
+                decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat_a, &ratified_a))
+                    .expect("first v2 startup accepts");
             persist_accepted_v2_marker_after_commit_boundary(&d_a).expect("persist ok");
             let before = std::fs::read(&marker_path).unwrap();
 
@@ -3814,12 +3762,9 @@ mod tests {
             );
             let ratified_b = fix.verify_v2(&rat_b);
 
-            let err = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat_b,
-                &ratified_b,
-            ))
-            .expect_err("same-sequence different-digest must reject");
+            let err =
+                decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat_b, &ratified_b))
+                    .expect_err("same-sequence different-digest must reject");
             // Allowed: SameSequenceConflictingDigest OR
             // SameSequenceConflictingKeyOrAction depending on which
             // mismatch the compare path surfaces first.
@@ -3850,12 +3795,9 @@ mod tests {
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
 
-            let err = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat,
-                &ratified,
-            ))
-            .expect_err("corrupt marker must reject before mutation");
+            let err =
+                decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat, &ratified))
+                    .expect_err("corrupt marker must reject before mutation");
             assert!(
                 matches!(err, MutatingSurfaceMarkerV2Error::LoadOrCorruption(_)),
                 "got {:?}",
@@ -3894,12 +3836,9 @@ mod tests {
             // Now arrive at startup with a v2 sidecar at a higher sequence.
             let rat = fix.build_v2_ratification(2, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
-            let decision = decide_marker_acceptance_v2(fix.startup_inputs(
-                &marker_path,
-                &rat,
-                &ratified,
-            ))
-            .expect("v2-after-v1 migration accepts at startup");
+            let decision =
+                decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat, &ratified))
+                    .expect("v2-after-v1 migration accepts at startup");
             assert!(matches!(
                 decision.kind(),
                 MarkerAcceptKindV2::V2AfterV1Migration
@@ -3936,12 +3875,9 @@ mod tests {
             let rat = fix.build_v2_ratification(1, BundleSigningRatificationV2Action::Ratify);
             let ratified = fix.verify_v2(&rat);
             {
-                let _decision = decide_marker_acceptance_v2(fix.startup_inputs(
-                    &marker_path,
-                    &rat,
-                    &ratified,
-                ))
-                .expect("first v2 startup accepts");
+                let _decision =
+                    decide_marker_acceptance_v2(fix.startup_inputs(&marker_path, &rat, &ratified))
+                        .expect("first v2 startup accepts");
                 // Drop without calling persist (simulates the Err arm of
                 // the Run 055 sequence write killing the process before
                 // the v2 persist step is reached).

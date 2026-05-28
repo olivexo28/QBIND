@@ -71,7 +71,10 @@ fn m2_3_stake_filtering_provider_wiring() {
 
     // Get the filtered epoch state from the provider
     let filtered_state = filtering_provider.get_epoch_state(EpochId::GENESIS);
-    assert!(filtered_state.is_some(), "should return filtered epoch state");
+    assert!(
+        filtered_state.is_some(),
+        "should return filtered epoch state"
+    );
 
     let state = filtered_state.unwrap();
 
@@ -176,7 +179,9 @@ fn m2_3_quorum_threshold_reflects_filtered_set() {
     let min_stake = 1_000_000;
     let filtering_provider = StakeFilteringEpochStateProvider::new(inner_provider, min_stake);
 
-    let filtered_state = filtering_provider.get_epoch_state(EpochId::GENESIS).unwrap();
+    let filtered_state = filtering_provider
+        .get_epoch_state(EpochId::GENESIS)
+        .unwrap();
     let filtered_set = &filtered_state.validator_set;
 
     // Quorum should require 2/3 of the filtered set (3 validators)
@@ -204,11 +209,7 @@ fn m2_3_quorum_threshold_reflects_filtered_set() {
 #[test]
 fn m2_3_fail_closed_when_all_validators_excluded() {
     // Setup: All validators below threshold
-    let validators = make_validator_set_with_stakes(&[
-        (1, 500_000),
-        (2, 600_000),
-        (3, 700_000),
-    ]);
+    let validators = make_validator_set_with_stakes(&[(1, 500_000), (2, 600_000), (3, 700_000)]);
 
     let epoch_state = EpochState::genesis(validators.clone());
     let inner_provider = StaticEpochStateProvider::new().with_epoch(epoch_state);
@@ -245,7 +246,7 @@ fn m2_3_excluded_validator_absent_post_transition() {
 
     // In epoch 1, validator 1's stake drops below threshold
     let validators_epoch1 = make_validator_set_with_stakes(&[
-        (1, 500_000),   // Below threshold in epoch 1
+        (1, 500_000), // Below threshold in epoch 1
         (2, 2_000_000),
         (3, 2_000_000),
     ]);
@@ -261,7 +262,9 @@ fn m2_3_excluded_validator_absent_post_transition() {
     let filtering_provider = StakeFilteringEpochStateProvider::new(inner_provider, min_stake);
 
     // Epoch 0: All validators included (all above threshold)
-    let state0 = filtering_provider.get_epoch_state(EpochId::GENESIS).unwrap();
+    let state0 = filtering_provider
+        .get_epoch_state(EpochId::GENESIS)
+        .unwrap();
     assert!(state0.contains(ValidatorId(1)));
     assert!(state0.contains(ValidatorId(2)));
     assert!(state0.contains(ValidatorId(3)));
@@ -281,11 +284,8 @@ fn m2_3_excluded_validator_absent_post_transition() {
 /// M2.3: Verify determinism of stake filtering across multiple calls.
 #[test]
 fn m2_3_stake_filtering_is_deterministic() {
-    let validators = make_validator_set_with_stakes(&[
-        (1, 500_000),
-        (2, 1_000_000),
-        (3, 2_000_000),
-    ]);
+    let validators =
+        make_validator_set_with_stakes(&[(1, 500_000), (2, 1_000_000), (3, 2_000_000)]);
 
     let epoch_state = EpochState::genesis(validators.clone());
 
@@ -327,9 +327,15 @@ fn m2_3_zero_min_stake_passes_through() {
     let min_stake = 0;
     let filtering_provider = StakeFilteringEpochStateProvider::new(inner_provider, min_stake);
 
-    let filtered_state = filtering_provider.get_epoch_state(EpochId::GENESIS).unwrap();
+    let filtered_state = filtering_provider
+        .get_epoch_state(EpochId::GENESIS)
+        .unwrap();
 
-    assert_eq!(filtered_state.len(), 3, "all validators should pass through with min_stake=0");
+    assert_eq!(
+        filtered_state.len(),
+        3,
+        "all validators should pass through with min_stake=0"
+    );
 }
 
 /// M2.3: Verify engine epoch transition with stake-filtered provider.

@@ -255,7 +255,10 @@ fn run_093_uses_existing_metastore_apis_only() {
 
 #[test]
 fn run_093_state_tag_stability() {
-    assert_eq!(ConsensusStorageState::NoConsensusStorage.tag(), "no-consensus-storage");
+    assert_eq!(
+        ConsensusStorageState::NoConsensusStorage.tag(),
+        "no-consensus-storage"
+    );
     assert_eq!(
         ConsensusStorageState::PresentNoCommittedEpoch.tag(),
         "present-no-committed-epoch"
@@ -327,9 +330,15 @@ fn run_093_does_not_expose_consensus_storage_state_to_activation_context() {
 
     let p = ConsensusStorageState::PresentNoCommittedEpoch;
     let e: Option<u64> = p.committed_epoch();
-    assert!(e.is_none(), "PresentNoCommittedEpoch must NOT collapse to Some(0)");
+    assert!(
+        e.is_none(),
+        "PresentNoCommittedEpoch must NOT collapse to Some(0)"
+    );
 
     let n = ConsensusStorageState::NoConsensusStorage;
     let e: Option<u64> = n.committed_epoch();
-    assert!(e.is_none(), "NoConsensusStorage must NOT collapse to Some(0)");
+    assert!(
+        e.is_none(),
+        "NoConsensusStorage must NOT collapse to Some(0)"
+    );
 }

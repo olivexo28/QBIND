@@ -102,15 +102,15 @@ impl Default for SlashingPenaltySchedule {
         Self {
             version: 1,
             reserved0: 0,
-            slash_bps_o1: 750,    // 7.5%
+            slash_bps_o1: 750, // 7.5%
             jail_epochs_o1: 10,
-            slash_bps_o2: 500,    // 5%
+            slash_bps_o2: 500, // 5%
             jail_epochs_o2: 5,
-            slash_bps_o3: 300,    // 3%
+            slash_bps_o3: 300, // 3%
             jail_epochs_o3: 3,
-            slash_bps_o4: 200,    // 2%
+            slash_bps_o4: 200, // 2%
             jail_epochs_o4: 2,
-            slash_bps_o5: 100,    // 1%
+            slash_bps_o5: 100, // 1%
             jail_epochs_o5: 1,
             activation_epoch: 0, // Active from genesis
         }

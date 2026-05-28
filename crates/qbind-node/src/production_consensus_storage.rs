@@ -157,37 +157,22 @@ impl ConsensusStorageState {
 #[derive(Debug)]
 pub enum ProductionConsensusStorageError {
     /// The configured `data_dir` does not exist and cannot be created.
-    DataDirUnavailable {
-        path: PathBuf,
-        details: String,
-    },
+    DataDirUnavailable { path: PathBuf, details: String },
     /// `RocksDbConsensusStorage::open` failed at the canonical path.
-    OpenFailed {
-        path: PathBuf,
-        source: StorageError,
-    },
+    OpenFailed { path: PathBuf, source: StorageError },
     /// `ensure_compatible_schema` (T104) reported an incompatible
     /// on-disk schema version. The binary refuses to run on a
     /// database written by a newer / unknown version.
-    SchemaIncompatible {
-        path: PathBuf,
-        source: StorageError,
-    },
+    SchemaIncompatible { path: PathBuf, source: StorageError },
     /// `verify_epoch_consistency_on_startup` (M16) detected an
     /// incomplete epoch transition. The binary must not continue
     /// with partially committed epoch boundary state.
-    IncompleteEpochTransition {
-        path: PathBuf,
-        source: StorageError,
-    },
+    IncompleteEpochTransition { path: PathBuf, source: StorageError },
     /// Reading `meta:current_epoch` failed (e.g. checksum mismatch,
     /// I/O error). Failing closed rather than treating as "no epoch"
     /// preserves the Run 091/092 invariant that a missing epoch is
     /// **not** silently `0`.
-    EpochProbeFailed {
-        path: PathBuf,
-        source: StorageError,
-    },
+    EpochProbeFailed { path: PathBuf, source: StorageError },
     /// Run 097: failure to persist a snapshot-supplied canonical
     /// committed epoch (`StateSnapshotMeta::epoch`) into the open
     /// production `ConsensusStorage`. Treated as fatal — the binary
@@ -613,7 +598,10 @@ mod tests {
         let opened = open_production_consensus_storage(&cfg).expect("open ok");
         assert_eq!(opened.state, ConsensusStorageState::PresentNoCommittedEpoch);
         assert!(opened.handle.is_some());
-        assert_eq!(opened.path.as_deref(), Some(tmp.path().join("consensus").as_path()));
+        assert_eq!(
+            opened.path.as_deref(),
+            Some(tmp.path().join("consensus").as_path())
+        );
         // Fresh-genesis MUST NOT silently look like current_epoch=0.
         assert!(opened.state.committed_epoch().is_none());
     }
@@ -674,7 +662,12 @@ mod tests {
         assert!(line.contains("state=present-no-committed-epoch"));
         assert!(line.contains("consensus"));
 
-        opened.handle.as_ref().unwrap().put_current_epoch(11).unwrap();
+        opened
+            .handle
+            .as_ref()
+            .unwrap()
+            .put_current_epoch(11)
+            .unwrap();
         // Re-probe by re-opening to get CommittedEpoch state.
         drop(opened);
         let opened2 = open_production_consensus_storage(&cfg).expect("ok");
@@ -795,12 +788,7 @@ mod tests {
         }
 
         // Confirm storage was NOT overwritten.
-        let got = opened
-            .handle
-            .as_ref()
-            .unwrap()
-            .get_current_epoch()
-            .unwrap();
+        let got = opened.handle.as_ref().unwrap().get_current_epoch().unwrap();
         assert_eq!(got, Some(9));
     }
 

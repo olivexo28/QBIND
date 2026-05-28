@@ -84,7 +84,11 @@ impl CookieConfig {
     }
 
     /// Create a new cookie configuration with custom parameters.
-    pub fn with_params(secret_key: Vec<u8>, bucket_duration_secs: u64, clock_skew_buckets: u64) -> Self {
+    pub fn with_params(
+        secret_key: Vec<u8>,
+        bucket_duration_secs: u64,
+        clock_skew_buckets: u64,
+    ) -> Self {
         Self {
             secret_key,
             bucket_duration_secs,
@@ -137,8 +141,8 @@ impl CookieConfig {
         bucket: u64,
     ) -> [u8; COOKIE_SIZE] {
         // HMAC-SHA3-256_k( domain_tag || client_ip || client_init_fields || bucket )
-        let mut mac = HmacSha3_256::new_from_slice(&self.secret_key)
-            .expect("HMAC key length is valid");
+        let mut mac =
+            HmacSha3_256::new_from_slice(&self.secret_key).expect("HMAC key length is valid");
 
         // Domain separation
         mac.update(COOKIE_DOMAIN_TAG.as_bytes());
@@ -361,7 +365,14 @@ mod tests {
         let validator_id = [2u8; 32];
         let time_secs = 1000u64;
 
-        let cookie = config.generate(&[127, 0, 0, 1], 1, 2, &client_random, &validator_id, time_secs);
+        let cookie = config.generate(
+            &[127, 0, 0, 1],
+            1,
+            2,
+            &client_random,
+            &validator_id,
+            time_secs,
+        );
 
         // Verify with different IP
         let result = config.verify(

@@ -38,8 +38,8 @@ use qbind_ledger::{
 };
 use qbind_node::node_config::{FastSyncConfig, NodeConfig};
 use qbind_node::production_consensus_storage::{
-    open_production_consensus_storage, persist_restored_snapshot_epoch,
-    ConsensusStorageState, ProductionConsensusStorageError,
+    open_production_consensus_storage, persist_restored_snapshot_epoch, ConsensusStorageState,
+    ProductionConsensusStorageError,
 };
 use qbind_node::snapshot_restore::apply_snapshot_restore_if_requested;
 use qbind_node::storage::{ConsensusStorage, RocksDbConsensusStorage};
@@ -171,8 +171,8 @@ fn run097_restore_persists_snapshot_epoch_into_canonical_consensus_storage() {
     // Step 3: Run 097 — persist the snapshot's canonical epoch into
     // the open storage. This is what main.rs does immediately after
     // open_production_consensus_storage when restore_outcome is Some.
-    let wrote = persist_restored_snapshot_epoch(&opened, outcome.meta.epoch)
-        .expect("persist epoch ok");
+    let wrote =
+        persist_restored_snapshot_epoch(&opened, outcome.meta.epoch).expect("persist epoch ok");
     assert!(wrote, "snapshot epoch must be persisted on fresh storage");
 
     // The persisted epoch must now be observable from a fresh re-open
@@ -203,15 +203,17 @@ fn run097_restore_with_pre_run097_snapshot_leaves_storage_at_no_committed_epoch(
     assert_eq!(outcome.meta.epoch, None);
 
     let opened = open_production_consensus_storage(&cfg).expect("open ok");
-    let wrote = persist_restored_snapshot_epoch(&opened, outcome.meta.epoch)
-        .expect("noop is ok");
+    let wrote = persist_restored_snapshot_epoch(&opened, outcome.meta.epoch).expect("noop is ok");
     assert!(!wrote);
 
     // CRITICAL Run 091/092 invariant: the absence of an epoch in
     // meta.json MUST NOT be silently coerced to CommittedEpoch(0).
     drop(opened);
     let opened2 = open_production_consensus_storage(&cfg).expect("reopen ok");
-    assert_eq!(opened2.state, ConsensusStorageState::PresentNoCommittedEpoch);
+    assert_eq!(
+        opened2.state,
+        ConsensusStorageState::PresentNoCommittedEpoch
+    );
     assert_eq!(opened2.state.committed_epoch(), None);
 }
 
@@ -251,13 +253,11 @@ fn run097_restore_inconsistent_snapshot_epoch_fails_closed() {
     let opened = open_production_consensus_storage(&cfg).expect("open ok");
     assert_eq!(opened.state, ConsensusStorageState::CommittedEpoch(42));
 
-    let err = persist_restored_snapshot_epoch(&opened, outcome.meta.epoch)
-        .expect_err("must fail closed");
+    let err =
+        persist_restored_snapshot_epoch(&opened, outcome.meta.epoch).expect_err("must fail closed");
     match err {
         ProductionConsensusStorageError::RestoreEpochInconsistent {
-            existing,
-            snapshot,
-            ..
+            existing, snapshot, ..
         } => {
             assert_eq!(existing, 42);
             assert_eq!(snapshot, 7);

@@ -54,8 +54,8 @@ use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
     compute_canonical_genesis_hash, BundleSigningRatification, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
     RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::metrics::P2pMetrics;
@@ -64,16 +64,16 @@ use qbind_node::pqc_authority_marker_acceptance::{
     verify_marker_for_validation_only_v2, ValidationOnlyMarkerV2Inputs,
 };
 use qbind_node::pqc_authority_state::{
-    authority_state_file_path, persist_authority_state_atomic,
-    persist_authority_state_v2_atomic, AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
+    authority_state_file_path, persist_authority_state_atomic, persist_authority_state_v2_atomic,
+    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
 };
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_peer_candidate_wire::{
     encode_peer_candidate_wire_frame, LivePeerCandidateWireDispatcher,
-    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig,
-    PeerCandidatePropagationConfig, PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender,
-    PeerCandidateWireOutcome, PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome,
-    RawFrameSendReport, PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
+    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig, PeerCandidatePropagationConfig,
+    PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender, PeerCandidateWireOutcome,
+    PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome, RawFrameSendReport,
+    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_ratification_policy::ratification_gate_decision;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
@@ -173,7 +173,10 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -428,11 +431,13 @@ impl PeerCandidateWireFrameSender for RecordingSender {
 }
 
 fn sequence_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read seq"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read seq"))
 }
 
 fn marker_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read marker"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read marker"))
 }
 
 fn assert_no_mutation(
@@ -486,6 +491,7 @@ fn dispatcher(
             live_ratification,
             authority_marker_path: marker_path,
             staging_queue: None,
+            peer_apply: None,
         },
         metrics,
     )
@@ -799,8 +805,7 @@ fn run142_r3_bad_signature_v2_rejected() {
     let out = disp.dispatch_frame_for_test(&valid_frame(&h, 1));
     let msg = marker_conflict_message(&out);
     assert!(
-        msg.contains("v2 ratification verifier failure")
-            || msg.contains("Run 132"),
+        msg.contains("v2 ratification verifier failure") || msg.contains("Run 132"),
         "R3: expected Run 130 v2 verifier failure, got: {}",
         msg
     );

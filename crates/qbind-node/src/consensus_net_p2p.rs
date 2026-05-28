@@ -129,9 +129,7 @@ impl SimpleValidatorNodeMapping {
         // listener for `index` uses (see `derive_test_kem_keypair_from_validator_id`)
         // and then derive the NodeId from it via the network nodeid
         // derivation rule.
-        let pk: Vec<u8> = (0u8..32u8)
-            .map(|i| i.wrapping_add(index as u8))
-            .collect();
+        let pk: Vec<u8> = (0u8..32u8).map(|i| i.wrapping_add(index as u8)).collect();
         NodeId::new(qbind_hash::derive_node_id_from_pubkey(&pk))
     }
 

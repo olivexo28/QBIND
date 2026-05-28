@@ -169,8 +169,8 @@ fn suite_policy_integrated_into_harness() -> Result<(), NodeHotstuffHarnessError
     // We'll use a simplified approach since we're not actually testing network
     use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
     use qbind_net::{
-        ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-        ServerHandshakeConfig,
+        ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+        ServerConnectionConfig, ServerHandshakeConfig,
     };
     use std::sync::Arc;
 

@@ -180,7 +180,9 @@ fn spawn_loop_for_test(
         verification_ctx: None,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let progress_for_task = progress.clone();
     let metrics = Arc::new(NodeMetrics::new());
     let handle = tokio::spawn(async move {
@@ -363,7 +365,9 @@ async fn b9_c_view_change_does_not_replay_stale_proposal_for_old_view() {
         verification_ctx: None,
     };
     let (shutdown_tx, shutdown_rx) = watch::channel(());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let progress_for_task = progress.clone();
     let metrics = Arc::new(NodeMetrics::new());
     let handle = tokio::spawn(async move {
@@ -450,16 +454,12 @@ async fn b9_d_peer_connected_before_first_proposal_is_bounded() {
         verification_ctx: None,
     };
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let metrics = Arc::new(NodeMetrics::new());
-    let final_progress = run_binary_consensus_loop_with_io(
-        cfg,
-        shutdown_rx,
-        progress,
-        metrics,
-        Some(io),
-    )
-    .await;
+    let final_progress =
+        run_binary_consensus_loop_with_io(cfg, shutdown_rx, progress, metrics, Some(io)).await;
 
     let _keep_inbound_alive = inbound_tx;
 
@@ -510,16 +510,12 @@ async fn b9_e_no_peer_connectivity_means_no_reemit_path_at_all() {
         verification_ctx: None,
     };
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let metrics = Arc::new(NodeMetrics::new());
-    let final_progress = run_binary_consensus_loop_with_io(
-        cfg,
-        shutdown_rx,
-        progress,
-        metrics,
-        Some(io),
-    )
-    .await;
+    let final_progress =
+        run_binary_consensus_loop_with_io(cfg, shutdown_rx, progress, metrics, Some(io)).await;
     let _keep_inbound_alive = inbound_tx;
 
     assert_eq!(
@@ -556,10 +552,15 @@ async fn b9_f_io_none_loop_unaffected_by_b9() {
         .with_max_ticks(40);
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let metrics = Arc::new(NodeMetrics::new());
     let final_progress = qbind_node::binary_consensus_loop::run_binary_consensus_loop(
-        cfg, shutdown_rx, progress, metrics,
+        cfg,
+        shutdown_rx,
+        progress,
+        metrics,
     )
     .await;
 

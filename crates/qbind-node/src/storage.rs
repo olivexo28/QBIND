@@ -1067,7 +1067,10 @@ impl ConsensusStorage for RocksDbConsensusStorage {
         marker: &EpochTransitionMarker,
     ) -> Result<(), StorageError> {
         let json = serde_json::to_vec(marker).map_err(|e| {
-            StorageError::Codec(format!("failed to serialize epoch transition marker: {}", e))
+            StorageError::Codec(format!(
+                "failed to serialize epoch transition marker: {}",
+                e
+            ))
         })?;
         let value = wrap_checksummed(&json);
         self.db
@@ -1091,14 +1094,13 @@ impl ConsensusStorage for RocksDbConsensusStorage {
             Ok(Some(value)) => {
                 // Unwrap checksummed envelope
                 let payload = unwrap_checksummed_or_legacy(&value, "epoch_transition_marker")?;
-                let marker: EpochTransitionMarker = serde_json::from_slice(&payload).map_err(
-                    |e| {
+                let marker: EpochTransitionMarker =
+                    serde_json::from_slice(&payload).map_err(|e| {
                         StorageError::Corruption(format!(
                             "failed to deserialize epoch transition marker: {}",
                             e
                         ))
-                    },
-                )?;
+                    })?;
 
                 eprintln!(
                     "[M16] WARNING: Found incomplete epoch transition marker: {} -> {} (block_id={:?})",

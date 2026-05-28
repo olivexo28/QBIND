@@ -310,20 +310,29 @@ impl SlashingEvidence {
                 bytes.extend_from_slice(&(block_b.signature.len() as u32).to_be_bytes());
                 bytes.extend_from_slice(&block_b.signature);
             }
-            EvidencePayloadV1::O2InvalidProposerSig { header, bad_signature } => {
+            EvidencePayloadV1::O2InvalidProposerSig {
+                header,
+                bad_signature,
+            } => {
                 // O2: header fields hash + bad_signature
                 // Use batch_commitment as header hash (32 bytes)
                 bytes.extend_from_slice(&header.batch_commitment);
                 bytes.extend_from_slice(&(bad_signature.len() as u32).to_be_bytes());
                 bytes.extend_from_slice(bad_signature);
             }
-            EvidencePayloadV1::O3LazyVote { vote, invalid_reason: _ } => {
+            EvidencePayloadV1::O3LazyVote {
+                vote,
+                invalid_reason: _,
+            } => {
                 // O3: vote block_id + signature
                 bytes.extend_from_slice(&vote.block_id);
                 bytes.extend_from_slice(&(vote.signature.len() as u32).to_be_bytes());
                 bytes.extend_from_slice(&vote.signature);
             }
-            EvidencePayloadV1::O4InvalidDagCert { cert, failure_reason: _ } => {
+            EvidencePayloadV1::O4InvalidDagCert {
+                cert,
+                failure_reason: _,
+            } => {
                 // O4: batch_commitment + dag_round + aggregated signatures
                 bytes.extend_from_slice(&cert.batch_commitment);
                 bytes.extend_from_slice(&cert.dag_round.to_be_bytes());
@@ -334,11 +343,16 @@ impl SlashingEvidence {
                     bytes.extend_from_slice(sig);
                 }
             }
-            EvidencePayloadV1::O5DagCouplingViolation { block, dag_state_proof } => {
+            EvidencePayloadV1::O5DagCouplingViolation {
+                block,
+                dag_state_proof,
+            } => {
                 // O5: block batch_commitment + dag_round + frontier hashes
                 bytes.extend_from_slice(&block.batch_commitment);
                 bytes.extend_from_slice(&dag_state_proof.dag_round.to_be_bytes());
-                bytes.extend_from_slice(&(dag_state_proof.frontier_commitments.len() as u32).to_be_bytes());
+                bytes.extend_from_slice(
+                    &(dag_state_proof.frontier_commitments.len() as u32).to_be_bytes(),
+                );
                 for commitment in &dag_state_proof.frontier_commitments {
                     bytes.extend_from_slice(commitment);
                 }
@@ -583,22 +597,20 @@ fn verify_ml_dsa_44_signature(
     signature: &[u8],
     validator_id: ValidatorId,
 ) -> Result<(), EvidenceVerificationError> {
-    MlDsa44Backend::verify(pk, preimage, signature).map_err(|e| {
-        match e {
-            qbind_crypto::ConsensusSigError::MalformedSignature => {
-                EvidenceVerificationError::MalformedSignature
-            }
-            qbind_crypto::ConsensusSigError::InvalidSignature => {
-                EvidenceVerificationError::InvalidSignature {
-                    validator_id,
-                    reason: "ML-DSA-44 signature verification failed",
-                }
-            }
-            _ => EvidenceVerificationError::InvalidSignature {
-                validator_id,
-                reason: "cryptographic verification error",
-            },
+    MlDsa44Backend::verify(pk, preimage, signature).map_err(|e| match e {
+        qbind_crypto::ConsensusSigError::MalformedSignature => {
+            EvidenceVerificationError::MalformedSignature
         }
+        qbind_crypto::ConsensusSigError::InvalidSignature => {
+            EvidenceVerificationError::InvalidSignature {
+                validator_id,
+                reason: "ML-DSA-44 signature verification failed",
+            }
+        }
+        _ => EvidenceVerificationError::InvalidSignature {
+            validator_id,
+            reason: "cryptographic verification error",
+        },
     })
 }
 
@@ -822,7 +834,11 @@ pub fn verify_o3_evidence(
     evidence: &SlashingEvidence,
     _metrics: Option<&SlashingMetrics>,
 ) -> Result<(), EvidenceVerificationError> {
-    let EvidencePayloadV1::O3LazyVote { vote, invalid_reason: _ } = &evidence.payload else {
+    let EvidencePayloadV1::O3LazyVote {
+        vote,
+        invalid_reason: _,
+    } = &evidence.payload
+    else {
         // Not O3 evidence, skip verification
         return Ok(());
     };
@@ -891,7 +907,11 @@ pub fn verify_o4_evidence(
     evidence: &SlashingEvidence,
     _metrics: Option<&SlashingMetrics>,
 ) -> Result<(), EvidenceVerificationError> {
-    let EvidencePayloadV1::O4InvalidDagCert { cert, failure_reason: _ } = &evidence.payload else {
+    let EvidencePayloadV1::O4InvalidDagCert {
+        cert,
+        failure_reason: _,
+    } = &evidence.payload
+    else {
         // Not O4 evidence, skip verification
         return Ok(());
     };
@@ -908,10 +928,7 @@ pub fn verify_o4_evidence(
     }
 
     // 3. Verify the offending validator is in the certificate's signers
-    let offender_in_cert = cert
-        .signers
-        .iter()
-        .any(|s| s.0 == validator_id.0);
+    let offender_in_cert = cert.signers.iter().any(|s| s.0 == validator_id.0);
 
     if !offender_in_cert {
         return Err(EvidenceVerificationError::InvalidSignature {
@@ -978,7 +995,10 @@ pub fn verify_o5_evidence(
     evidence: &SlashingEvidence,
     _metrics: Option<&SlashingMetrics>,
 ) -> Result<(), EvidenceVerificationError> {
-    let EvidencePayloadV1::O5DagCouplingViolation { block, dag_state_proof } = &evidence.payload
+    let EvidencePayloadV1::O5DagCouplingViolation {
+        block,
+        dag_state_proof,
+    } = &evidence.payload
     else {
         // Not O5 evidence, skip verification
         return Ok(());
@@ -2024,7 +2044,11 @@ impl AtomicSlashingBackend for InMemorySlashingBackend {
 
         // Calculate jail until epoch if jailing
         let jailed_until_epoch = if request.jail && request.jail_epochs > 0 {
-            Some(request.current_epoch.saturating_add(u64::from(request.jail_epochs)))
+            Some(
+                request
+                    .current_epoch
+                    .saturating_add(u64::from(request.jail_epochs)),
+            )
         } else {
             None
         };
@@ -2034,7 +2058,10 @@ impl AtomicSlashingBackend for InMemorySlashingBackend {
         self.stakes.insert(validator_id, remaining_stake);
 
         // 2. Update validator's total slashed
-        *self.validator_total_slashed.entry(validator_id).or_insert(0) += slash_amount;
+        *self
+            .validator_total_slashed
+            .entry(validator_id)
+            .or_insert(0) += slash_amount;
         self.total_slashed += slash_amount;
 
         // 3. Apply jail if needed
@@ -2282,7 +2309,10 @@ impl PenaltyEngineConfig {
     /// let schedule = SlashingPenaltySchedule::default();
     /// let config = PenaltyEngineConfig::from_governance_schedule(&schedule, SlashingMode::EnforceCritical);
     /// ```
-    pub fn from_governance_schedule(schedule: &GovernanceSlashingSchedule, mode: SlashingMode) -> Self {
+    pub fn from_governance_schedule(
+        schedule: &GovernanceSlashingSchedule,
+        mode: SlashingMode,
+    ) -> Self {
         Self {
             mode,
             slash_bps_o1: schedule.slash_bps_o1,
@@ -2353,15 +2383,15 @@ pub struct GovernanceSlashingSchedule {
 impl Default for GovernanceSlashingSchedule {
     fn default() -> Self {
         Self {
-            slash_bps_o1: 750,  // 7.5%
+            slash_bps_o1: 750, // 7.5%
             jail_epochs_o1: 10,
-            slash_bps_o2: 500,  // 5%
+            slash_bps_o2: 500, // 5%
             jail_epochs_o2: 5,
-            slash_bps_o3: 300,  // 3%
+            slash_bps_o3: 300, // 3%
             jail_epochs_o3: 3,
-            slash_bps_o4: 200,  // 2%
+            slash_bps_o4: 200, // 2%
             jail_epochs_o4: 2,
-            slash_bps_o5: 100,  // 1%
+            slash_bps_o5: 100, // 1%
             jail_epochs_o5: 1,
         }
     }
@@ -3278,7 +3308,9 @@ impl EvidenceIngestionMetrics {
             OffenseKind::O3aLazyVoteSingle => self.evidence_received_o3a.load(Ordering::Relaxed),
             OffenseKind::O3bLazyVoteRepeated => self.evidence_received_o3b.load(Ordering::Relaxed),
             OffenseKind::O4InvalidDagCert => self.evidence_received_o4.load(Ordering::Relaxed),
-            OffenseKind::O5DagCouplingViolation => self.evidence_received_o5.load(Ordering::Relaxed),
+            OffenseKind::O5DagCouplingViolation => {
+                self.evidence_received_o5.load(Ordering::Relaxed)
+            }
         }
     }
 
@@ -3492,9 +3524,7 @@ impl<B: SlashingBackend> HardenedEvidenceIngestionEngine<B> {
         // === 4. Deduplication check (before expensive verification) ===
         let evidence_id = evidence.evidence_id();
         if self.seen_evidence.contains(&evidence_id) {
-            eprintln!(
-                "[M15] Evidence rejected: duplicate (evidence_id already seen)"
-            );
+            eprintln!("[M15] Evidence rejected: duplicate (evidence_id already seen)");
             self.metrics
                 .inc_rejected(EvidenceRejectionReason::Duplicate);
             return HardenedEvidenceResult::Rejected {
@@ -3505,10 +3535,7 @@ impl<B: SlashingBackend> HardenedEvidenceIngestionEngine<B> {
 
         // === 5. Structure validation ===
         if let Err(reason) = evidence.validate_structure() {
-            eprintln!(
-                "[M15] Evidence rejected: invalid structure - {}",
-                reason
-            );
+            eprintln!("[M15] Evidence rejected: invalid structure - {}", reason);
             self.metrics
                 .inc_rejected(EvidenceRejectionReason::InvalidStructure);
             return HardenedEvidenceResult::Rejected {
@@ -4075,7 +4102,11 @@ mod tests {
         };
 
         let result = verify_o1_evidence(&ctx, &evidence, None);
-        assert!(result.is_ok(), "Valid O1 evidence should be accepted: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Valid O1 evidence should be accepted: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -4092,7 +4123,10 @@ mod tests {
         };
 
         let result = verify_o1_evidence(&ctx, &evidence, None);
-        assert!(result.is_err(), "O1 evidence with invalid signature should be rejected");
+        assert!(
+            result.is_err(),
+            "O1 evidence with invalid signature should be rejected"
+        );
 
         match result {
             Err(EvidenceVerificationError::InvalidSignature { .. }) => {}
@@ -4107,7 +4141,10 @@ mod tests {
 
         // Create evidence with mismatched heights
         let mut evidence = make_valid_o1_evidence_with_crypto(0, &sks[0], 100, 0);
-        if let EvidencePayloadV1::O1DoubleSign { ref mut block_b, .. } = evidence.payload {
+        if let EvidencePayloadV1::O1DoubleSign {
+            ref mut block_b, ..
+        } = evidence.payload
+        {
             block_b.height = 101; // Different height
         }
 
@@ -4145,7 +4182,10 @@ mod tests {
         };
 
         let result = verify_o1_evidence(&ctx, &evidence, None);
-        assert!(matches!(result, Err(EvidenceVerificationError::IdenticalBlocks)));
+        assert!(matches!(
+            result,
+            Err(EvidenceVerificationError::IdenticalBlocks)
+        ));
     }
 
     #[test]
@@ -4186,7 +4226,11 @@ mod tests {
         };
 
         let result = verify_o2_evidence(&ctx, &evidence, None);
-        assert!(result.is_ok(), "Valid O2 evidence should be accepted: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Valid O2 evidence should be accepted: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -4204,7 +4248,10 @@ mod tests {
         };
 
         let result = verify_o2_evidence(&ctx, &evidence, None);
-        assert!(result.is_err(), "O2 evidence with actually valid signature should be rejected");
+        assert!(
+            result.is_err(),
+            "O2 evidence with actually valid signature should be rejected"
+        );
 
         match result {
             Err(EvidenceVerificationError::InvalidSignature { reason, .. }) => {

@@ -355,14 +355,10 @@ pub enum StagingOutcome {
     RefusedNotValidated,
     /// The global staging cap has been reached. Eviction policy is
     /// **reject-new** in Run 145.
-    RefusedGlobalCapacity {
-        cap: usize,
-    },
+    RefusedGlobalCapacity { cap: usize },
     /// The per-peer staging cap has been reached for the originating
     /// peer. Eviction policy is **reject-new**.
-    RefusedPerPeerCapacity {
-        cap: usize,
-    },
+    RefusedPerPeerCapacity { cap: usize },
 }
 
 impl StagingOutcome {
@@ -549,8 +545,7 @@ impl PeerCandidateStagingQueue {
             };
         }
 
-        if self.count_for_peer(validated.peer_id.as_deref())
-            >= self.policy.max_candidates_per_peer
+        if self.count_for_peer(validated.peer_id.as_deref()) >= self.policy.max_candidates_per_peer
         {
             return StagingOutcome::RefusedPerPeerCapacity {
                 cap: self.policy.max_candidates_per_peer,

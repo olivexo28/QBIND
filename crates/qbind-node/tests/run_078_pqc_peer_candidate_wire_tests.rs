@@ -470,9 +470,10 @@ fn run078_truncated_frame_rejected_at_frame_layer() {
 
     let outcome = receiver.try_handle_frame(&frame, &ctx, &metrics);
     match outcome {
-        PeerCandidateWireOutcome::FrameRejected(
-            PeerCandidateWireFrameError::FrameTruncated { declared, observed },
-        ) => {
+        PeerCandidateWireOutcome::FrameRejected(PeerCandidateWireFrameError::FrameTruncated {
+            declared,
+            observed,
+        }) => {
             assert_eq!(declared, 50);
             assert_eq!(observed, 5);
         }
@@ -843,9 +844,9 @@ fn run078_duplicate_fingerprint_frame_short_circuits_via_lru() {
     // Second frame: SAME prefix → duplicate suppression.
     let o2 = receiver.try_handle_frame(&frame, &ctx, &metrics);
     match &o2 {
-        PeerCandidateWireOutcome::ValidatorRan(
-            PeerCandidateOutcome::DuplicateSuppressed { .. },
-        ) => {}
+        PeerCandidateWireOutcome::ValidatorRan(PeerCandidateOutcome::DuplicateSuppressed {
+            ..
+        }) => {}
         other => panic!("expected DuplicateSuppressed on 2nd call, got {:?}", other),
     }
     assert_eq!(metrics.peer_candidate_received_total(), 2);
@@ -1137,7 +1138,10 @@ fn run078_wire_envelope_bridge_to_run076_fixture_preserves_fields() {
     assert_eq!(wire.bundle_bytes, bundle);
 
     let back = wire.into_run076_envelope();
-    assert_eq!(back.envelope_version, PeerCandidateEnvelope::ENVELOPE_VERSION);
+    assert_eq!(
+        back.envelope_version,
+        PeerCandidateEnvelope::ENVELOPE_VERSION
+    );
     assert_eq!(back.domain_tag, PeerCandidateEnvelope::DOMAIN_TAG);
     assert_eq!(back.bundle_bytes, bundle);
     assert_eq!(back.declared_sequence, 11);

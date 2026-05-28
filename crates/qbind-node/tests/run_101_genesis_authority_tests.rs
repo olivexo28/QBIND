@@ -154,7 +154,10 @@ fn run_101_scenario_4_mainnet_missing_authority_rejects() {
                 env: NetworkEnvironmentPolicy::Mainnet,
             },
         ) => {}
-        other => panic!("expected AuthorityValidationFailed(Missing), got {:?}", other),
+        other => panic!(
+            "expected AuthorityValidationFailed(Missing), got {:?}",
+            other
+        ),
     }
 }
 
@@ -178,7 +181,10 @@ fn run_101_scenario_5_mainnet_valid_genesis_passes() {
 #[test]
 fn run_101_mainnet_rejects_empty_authority_roots() {
     let mut cfg = mainnet_genesis();
-    cfg.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![];
+    cfg.authority
+        .as_mut()
+        .unwrap()
+        .bundle_signing_authority_roots = vec![];
     let err = cfg
         .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
         .unwrap_err();
@@ -231,8 +237,11 @@ fn run_101_mainnet_rejects_duplicate_roots() {
 #[test]
 fn run_101_mainnet_rejects_malformed_root() {
     let mut cfg = mainnet_genesis();
-    cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].key_fingerprint =
-        "not-hex".into();
+    cfg.authority
+        .as_mut()
+        .unwrap()
+        .bundle_signing_authority_roots[0]
+        .key_fingerprint = "not-hex".into();
     let err = cfg
         .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
         .unwrap_err();

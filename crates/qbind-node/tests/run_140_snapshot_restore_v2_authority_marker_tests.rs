@@ -67,9 +67,8 @@ use qbind_ledger::{
 };
 use qbind_node::node_config::NodeConfig;
 use qbind_node::pqc_authority_state::{
-    authority_state_file_path, persist_authority_state_atomic,
-    persist_authority_state_v2_atomic, AuthorityMarkerV2ComparisonOutcome,
-    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
+    authority_state_file_path, persist_authority_state_atomic, persist_authority_state_v2_atomic,
+    AuthorityMarkerV2ComparisonOutcome, AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
     PersistentAuthorityStateRecordV2, SnapshotRestoreAuthorityCheckV2Outcome,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
@@ -449,7 +448,10 @@ fn run140_r3_same_sequence_different_digest_is_rejected() {
                 },
             ),
         ) => assert_eq!(sequence, 5),
-        other => panic!("expected SameSequenceDifferentDigestRejected, got {:?}", other),
+        other => panic!(
+            "expected SameSequenceDifferentDigestRejected, got {:?}",
+            other
+        ),
     }
     assert_eq!(std::fs::read(&marker_path).unwrap(), bytes_before);
     assert_no_materialization(data_dir.path());

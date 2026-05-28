@@ -153,16 +153,16 @@ impl ConsensusNetworkFacade for RecordingFacade {
     }
 
     fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
-        self.inner.lock().unwrap().broadcast_votes.push(vote.clone());
+        self.inner
+            .lock()
+            .unwrap()
+            .broadcast_votes
+            .push(vote.clone());
         Ok(())
     }
 
     fn broadcast_proposal(&self, proposal: &BlockProposal) -> Result<(), NetworkError> {
-        self.inner
-            .lock()
-            .unwrap()
-            .proposals
-            .push(proposal.clone());
+        self.inner.lock().unwrap().proposals.push(proposal.clone());
         Ok(())
     }
 
@@ -295,14 +295,8 @@ async fn b6_inbound_proposal_reaches_engine_and_emits_vote() {
     let loop_metrics = metrics.clone();
     let loop_progress = progress.clone();
     let handle = tokio::spawn(async move {
-        run_binary_consensus_loop_with_io(
-            cfg,
-            shutdown_rx,
-            loop_progress,
-            loop_metrics,
-            Some(io),
-        )
-        .await
+        run_binary_consensus_loop_with_io(cfg, shutdown_rx, loop_progress, loop_metrics, Some(io))
+            .await
     });
 
     // Wait until the loop has either delivered the proposal or run its

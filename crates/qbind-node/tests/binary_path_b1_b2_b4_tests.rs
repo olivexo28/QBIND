@@ -26,9 +26,7 @@ use tokio::sync::watch;
 use tokio::time::timeout;
 
 use qbind_consensus::ids::ValidatorId;
-use qbind_node::binary_consensus_loop::{
-    spawn_binary_consensus_loop, BinaryConsensusLoopConfig,
-};
+use qbind_node::binary_consensus_loop::{spawn_binary_consensus_loop, BinaryConsensusLoopConfig};
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::metrics_http::{
     spawn_metrics_http_server_with_addr, CryptoMetricsRefs, MetricsHttpConfig,
@@ -90,13 +88,9 @@ async fn b2_metrics_http_server_serves_when_enabled() {
     assert!(cfg.is_enabled());
 
     let (shutdown_tx, shutdown_rx) = watch::channel(());
-    let (handle, bound_addr) = spawn_metrics_http_server_with_addr(
-        metrics,
-        cfg,
-        CryptoMetricsRefs::new(),
-        shutdown_rx,
-    )
-    .await;
+    let (handle, bound_addr) =
+        spawn_metrics_http_server_with_addr(metrics, cfg, CryptoMetricsRefs::new(), shutdown_rx)
+            .await;
 
     let addr = bound_addr.expect("metrics server should bind when enabled");
 
@@ -134,13 +128,9 @@ async fn b2_metrics_http_server_disabled_by_default() {
     assert!(!cfg.is_enabled());
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
-    let (_handle, bound_addr) = spawn_metrics_http_server_with_addr(
-        metrics,
-        cfg,
-        CryptoMetricsRefs::new(),
-        shutdown_rx,
-    )
-    .await;
+    let (_handle, bound_addr) =
+        spawn_metrics_http_server_with_addr(metrics, cfg, CryptoMetricsRefs::new(), shutdown_rx)
+            .await;
 
     assert!(
         bound_addr.is_none(),

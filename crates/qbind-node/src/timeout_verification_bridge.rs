@@ -321,10 +321,9 @@ impl std::fmt::Debug for TimeoutVerificationActivation {
                 .debug_tuple("Active")
                 .field(&"<Arc<TimeoutVerificationContext>>")
                 .finish(),
-            Self::Disabled { reason } => f
-                .debug_struct("Disabled")
-                .field("reason", reason)
-                .finish(),
+            Self::Disabled { reason } => {
+                f.debug_struct("Disabled").field("reason", reason).finish()
+            }
         }
     }
 }
@@ -403,7 +402,11 @@ pub fn try_build_timeout_verification_context(
     }
 
     // 5. Backend registry has a backend for the local governed suite.
-    if inputs.backend_registry.get_backend(governance_suite).is_none() {
+    if inputs
+        .backend_registry
+        .get_backend(governance_suite)
+        .is_none()
+    {
         return TimeoutVerificationActivation::Disabled {
             reason: TimeoutVerificationDisabledReason::BackendRegistryMissingLocalSuite {
                 local_validator_id: inputs.local_validator_id,
@@ -511,9 +514,10 @@ pub fn enforce_policy(
         (TimeoutVerificationPolicy::OptionalActivate, TimeoutVerificationActivation::Active(c)) => {
             Ok(Some(c))
         }
-        (TimeoutVerificationPolicy::OptionalActivate, TimeoutVerificationActivation::Disabled { .. }) => {
-            Ok(None)
-        }
+        (
+            TimeoutVerificationPolicy::OptionalActivate,
+            TimeoutVerificationActivation::Disabled { .. },
+        ) => Ok(None),
         (TimeoutVerificationPolicy::RequireOrFail, TimeoutVerificationActivation::Active(c)) => {
             Ok(Some(c))
         }
@@ -544,8 +548,7 @@ pub fn enforce_policy(
 /// keeps the binary from silently activating verification on
 /// test-grade roots (the B12 mutual-auth stack itself documents
 /// this in `main.rs` lines 428-472 / `contradiction.md` C4).
-pub fn run_031_probe_production_pieces_for_run_p2p_node(
-) -> TimeoutVerificationActivation {
+pub fn run_031_probe_production_pieces_for_run_p2p_node() -> TimeoutVerificationActivation {
     TimeoutVerificationActivation::Disabled {
         reason: TimeoutVerificationDisabledReason::ProductionPiecesUnavailable {
             detail:
@@ -637,8 +640,7 @@ pub fn run_032_probe_with_signer(
         reason: TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable {
             local_validator_id,
             signer_suite_id: signer_suite,
-            detail:
-                "NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes); \
+            detail: "NodeConfig.network.static_peers carries no per-peer (suite_id, pk_bytes); \
                  a SuiteAwareValidatorKeyProvider over the active validator set cannot be \
                  honestly constructed from current config — see \
                  docs/whitepaper/contradiction.md C5",
@@ -673,10 +675,7 @@ mod tests {
     }
 
     impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
-        fn get_suite_and_key(
-            &self,
-            id: ValidatorId,
-        ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+        fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
             self.keys.get(&id).cloned()
         }
     }
@@ -706,7 +705,10 @@ mod tests {
         ))
     }
 
-    fn make_signer(vid: ValidatorId, signing_key: Arc<ValidatorSigningKey>) -> Arc<dyn ValidatorSigner> {
+    fn make_signer(
+        vid: ValidatorId,
+        signing_key: Arc<ValidatorSigningKey>,
+    ) -> Arc<dyn ValidatorSigner> {
         Arc::new(LocalKeySigner::new(vid, 100, signing_key))
     }
 
@@ -721,10 +723,7 @@ mod tests {
         let mut local_sk: Option<Arc<ValidatorSigningKey>> = None;
         for &i in all_ids {
             let (pk, sk) = make_keypair();
-            keys.insert(
-                ValidatorId::new(i),
-                (SUPPORTED_TIMEOUT_SUITE_ID, pk),
-            );
+            keys.insert(ValidatorId::new(i), (SUPPORTED_TIMEOUT_SUITE_ID, pk));
             if i == local {
                 local_sk = Some(Arc::new(sk));
             }
@@ -863,7 +862,10 @@ mod tests {
             fn suite_id(&self) -> u16 {
                 99
             }
-            fn sign_proposal(&self, p: &[u8]) -> Result<Vec<u8>, crate::validator_signer::SignError> {
+            fn sign_proposal(
+                &self,
+                p: &[u8],
+            ) -> Result<Vec<u8>, crate::validator_signer::SignError> {
                 self.sk
                     .sign(p)
                     .map_err(|_| crate::validator_signer::SignError::CryptoError)
@@ -921,8 +923,7 @@ mod tests {
     #[test]
     fn policy_optional_returns_none_when_disabled() {
         let disabled = run_031_probe_production_pieces_for_run_p2p_node();
-        let result =
-            enforce_policy(TimeoutVerificationPolicy::OptionalActivate, disabled).unwrap();
+        let result = enforce_policy(TimeoutVerificationPolicy::OptionalActivate, disabled).unwrap();
         assert!(result.is_none());
     }
 
@@ -984,16 +985,11 @@ mod tests {
     fn run_032_probe_with_no_signer_returns_run_031_disabled() {
         let outcome = run_032_probe_with_signer(None, ValidatorId::new(0));
         match outcome.disabled_reason() {
-            Some(TimeoutVerificationDisabledReason::ProductionPiecesUnavailable {
-                detail,
-            }) => {
+            Some(TimeoutVerificationDisabledReason::ProductionPiecesUnavailable { detail }) => {
                 assert!(detail.contains("signer_keystore_path"));
                 assert!(detail.contains("static_peers"));
             }
-            other => panic!(
-                "expected ProductionPiecesUnavailable, got {:?}",
-                other
-            ),
+            other => panic!("expected ProductionPiecesUnavailable, got {:?}", other),
         }
     }
 
@@ -1061,9 +1057,7 @@ mod tests {
         assert_eq!(err.policy, TimeoutVerificationPolicy::RequireOrFail);
         assert!(matches!(
             err.reason,
-            TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable {
-                ..
-            }
+            TimeoutVerificationDisabledReason::SignerPresentKeyProviderUnavailable { .. }
         ));
         // Display must mention the local validator id and signer
         // suite id but never any private key bytes.

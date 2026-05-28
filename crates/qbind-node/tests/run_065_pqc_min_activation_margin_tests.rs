@@ -161,16 +161,15 @@ fn run065_signed_devnet_activation_height_zero_loads() {
     );
     let path = write_bundle_json(&dir, &bundle);
     let ctx = ActivationContext::height_only(0);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("DevNet signed bundle with activation_height=0 loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("DevNet signed bundle with activation_height=0 loads");
     assert!(loaded.signature_status.is_verified());
     assert_eq!(loaded.bundle.activation_height, Some(0));
 }
@@ -263,7 +262,10 @@ fn run065_signed_testnet_at_margin_reaches_run057_boundary() {
                 ..
             },
         ) => assert_eq!(required_height, MIN_TESTNET_ACTIVATION_MARGIN),
-        other => panic!("expected Run 057 ActivationHeightNotYetReached, got {:?}", other),
+        other => panic!(
+            "expected Run 057 ActivationHeightNotYetReached, got {:?}",
+            other
+        ),
     }
 }
 
@@ -283,16 +285,15 @@ fn run065_signed_testnet_already_effective_loads() {
     );
     let path = write_bundle_json(&dir, &bundle);
     let ctx = ActivationContext::height_only(10);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Testnet,
-            NetworkEnvironment::Testnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("TestNet already-effective bundle loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Testnet,
+        NetworkEnvironment::Testnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("TestNet already-effective bundle loads");
     assert!(loaded.signature_status.is_verified());
     assert_eq!(loaded.bundle.activation_height, Some(5));
 }
@@ -379,7 +380,10 @@ fn run065_signed_mainnet_at_margin_reaches_run057_boundary() {
                 ..
             },
         ) => assert_eq!(required_height, MIN_MAINNET_ACTIVATION_MARGIN),
-        other => panic!("expected Run 057 ActivationHeightNotYetReached, got {:?}", other),
+        other => panic!(
+            "expected Run 057 ActivationHeightNotYetReached, got {:?}",
+            other
+        ),
     }
 }
 
@@ -396,16 +400,15 @@ fn run065_signed_mainnet_already_effective_loads() {
     );
     let path = write_bundle_json(&dir, &bundle);
     let ctx = ActivationContext::height_only(1000);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Mainnet,
-            NetworkEnvironment::Mainnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("MainNet already-effective bundle loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Mainnet,
+        NetworkEnvironment::Mainnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("MainNet already-effective bundle loads");
     assert!(loaded.signature_status.is_verified());
 }
 
@@ -439,16 +442,15 @@ fn run065_immediate_revocation_preserved_on_signed_mainnet() {
     );
     let path = write_bundle_json(&dir, &bundle);
     let ctx = ActivationContext::height_only(0);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Mainnet,
-            NetworkEnvironment::Mainnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("MainNet immediate emergency revocation must load");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Mainnet,
+        NetworkEnvironment::Mainnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("MainNet immediate emergency revocation must load");
     assert!(loaded.signature_status.is_verified());
     assert_eq!(loaded.active_revocations_total(), 1);
     assert_eq!(loaded.pending_revocations_total(), 0);
@@ -632,15 +634,14 @@ fn run065_signed_devnet_scheduled_revocation_zero_loads() {
     );
     let path = write_bundle_json(&dir, &bundle);
     let ctx = ActivationContext::height_only(0);
-    let (loaded, _act) =
-        TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
-            &path,
-            NetworkEnvironment::Devnet,
-            NetworkEnvironment::Devnet.chain_id(),
-            100,
-            &h.signing_keys,
-            ctx,
-        )
-        .expect("DevNet scheduled revocation at activation_height=0 loads");
+    let (loaded, _act) = TrustBundle::load_from_path_with_signing_keys_chain_id_and_activation(
+        &path,
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Devnet.chain_id(),
+        100,
+        &h.signing_keys,
+        ctx,
+    )
+    .expect("DevNet scheduled revocation at activation_height=0 loads");
     assert_eq!(loaded.active_revocations_total(), 1);
 }

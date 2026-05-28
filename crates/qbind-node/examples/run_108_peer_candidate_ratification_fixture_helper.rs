@@ -14,9 +14,9 @@ use std::path::{Path, PathBuf};
 use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::bundle_signing_ratification::test_helpers as ratification_helpers;
 use qbind_ledger::{
-    compute_canonical_genesis_hash, format_genesis_hash, GenesisAllocation,
-    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
+    compute_canonical_genesis_hash, format_genesis_hash, GenesisAllocation, GenesisAuthorityConfig,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnvironment,
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
@@ -71,7 +71,11 @@ fn genesis_chain_id(env: NetworkEnvironment) -> &'static str {
 }
 
 fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
-    fs::write(path, serde_json::to_vec_pretty(value).expect("serialize json")).expect("write json");
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(value).expect("serialize json"),
+    )
+    .expect("write json");
 }
 
 struct SigningMaterial {
@@ -90,7 +94,12 @@ fn signing_material() -> SigningMaterial {
         PQC_TRANSPORT_SUITE_ML_DSA_44,
         hex_lower(&pk)
     );
-    SigningMaterial { pk, sk, key_id, spec }
+    SigningMaterial {
+        pk,
+        sk,
+        key_id,
+        spec,
+    }
 }
 
 struct Harness {
@@ -118,7 +127,10 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis = GenesisConfig::new(
         genesis_chain_id(env),
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -154,7 +166,10 @@ fn signed_bundle(h: &Harness, signing: &SigningMaterial, sequence: u64) -> Trust
         suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
         pk_bytes: signing.pk.clone(),
     }]);
-    assert!(!signing_keys.is_empty(), "fixture signing key set must not be empty");
+    assert!(
+        !signing_keys.is_empty(),
+        "fixture signing key set must not be empty"
+    );
 
     let mut bundle = TrustBundle {
         bundle_version: TrustBundle::SUPPORTED_SCHEMA_VERSION,
@@ -184,7 +199,12 @@ fn signed_bundle(h: &Harness, signing: &SigningMaterial, sequence: u64) -> Trust
     bundle
 }
 
-fn envelope_for(h: &Harness, signing: &SigningMaterial, peer_id: &str, sequence: u64) -> PeerCandidateEnvelope {
+fn envelope_for(
+    h: &Harness,
+    signing: &SigningMaterial,
+    peer_id: &str,
+    sequence: u64,
+) -> PeerCandidateEnvelope {
     let bundle = signed_bundle(h, signing, sequence);
     let fp = hex_lower(&canonical_fingerprint(&bundle));
     let bytes = serde_json::to_vec_pretty(&bundle).expect("serialize bundle");
@@ -213,8 +233,11 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
         format!("{}\n", format_genesis_hash(&h.canonical_hash)),
     )
     .expect("write expected hash");
-    fs::write(base.join("signing-key.ratified.spec"), format!("{}\n", ratified.spec))
-        .expect("write ratified signing spec");
+    fs::write(
+        base.join("signing-key.ratified.spec"),
+        format!("{}\n", ratified.spec),
+    )
+    .expect("write ratified signing spec");
     fs::write(
         base.join("signing-key.unratified.spec"),
         format!("{}\n", unratified.spec),
@@ -233,7 +256,10 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
     bad_ratification.signature[0] ^= 0xff;
 
     write_json(&base.join("ratification.valid.json"), &valid_ratification);
-    write_json(&base.join("ratification.bad-signature.json"), &bad_ratification);
+    write_json(
+        &base.join("ratification.bad-signature.json"),
+        &bad_ratification,
+    );
     write_json(
         &base.join("peer-candidate.ratified.json"),
         &envelope_for(&h, &ratified, "run108-ratified", 1),

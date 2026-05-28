@@ -66,20 +66,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use qbind_crypto::MlDsa44Backend;
-use qbind_node::p2p_session_eviction::{
-    EvictionReason, MockP2pSessionEvictor, P2pSessionEvictor,
-};
+use qbind_node::p2p_session_eviction::{EvictionReason, MockP2pSessionEvictor, P2pSessionEvictor};
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_live_trust::LivePqcTrustState;
-use qbind_node::pqc_live_trust_apply::{
-    NoActiveSessionsEvictor, ProductionLiveTrustApplyContext,
-};
+use qbind_node::pqc_live_trust_apply::{NoActiveSessionsEvictor, ProductionLiveTrustApplyContext};
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_activation::ActivationContext;
 use qbind_node::pqc_trust_bundle::{
-    derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
-    BundleSigningKeySet, LoadedTrustBundle, RootStatus, TrustBundle,
-    TrustBundleEnvironment, TrustBundleRevocation, TrustBundleRoot,
+    derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey, BundleSigningKeySet,
+    LoadedTrustBundle, RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRevocation,
+    TrustBundleRoot,
 };
 use qbind_node::pqc_trust_reload::{
     apply_validated_candidate, apply_validated_candidate_with_previous, ApplyMode,
@@ -174,8 +170,7 @@ fn build_signed_devnet_bundle(
         activation_epoch: None,
         activation_height,
     };
-    let sig =
-        sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
+    let sig = sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
     bundle.signature = Some(sig);
     bundle
 }
@@ -235,10 +230,7 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(
-    path: &Path,
-    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
-) {
+fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
     match (snapshot, path.exists()) {
         (None, false) => {}
         (None, true) => panic!(
@@ -270,11 +262,7 @@ fn assert_seq_file_unchanged(
 /// Convenience: seed the persistence file by atomically committing a
 /// baseline sequence record (mirroring the startup binary's
 /// `check_and_update_sequence` first-load).
-fn seed_persisted_sequence(
-    seq_path: &Path,
-    baseline: &LoadedTrustBundle,
-    now_secs: u64,
-) {
+fn seed_persisted_sequence(seq_path: &Path, baseline: &LoadedTrustBundle, now_secs: u64) {
     check_and_update_sequence(
         seq_path,
         NetworkEnvironment::Devnet,
@@ -550,7 +538,10 @@ fn run073_session_eviction_partial_failure_rolls_back_live_state() {
             assert!(message.contains("attempted=5"), "{}", message);
             assert!(message.contains("evicted=3"), "{}", message);
             assert!(message.contains("failed=2"), "{}", message);
-            assert!(rollback_ok, "rollback must succeed on a healthy live handle");
+            assert!(
+                rollback_ok,
+                "rollback must succeed on a healthy live handle"
+            );
         }
         other => panic!("expected SessionEvictionFailed, got {:?}", other),
     }
@@ -691,9 +682,7 @@ fn run073_no_active_sessions_evictor_happy_path_advances_state_and_sequence() {
     assert_eq!(live_after.sequence(), 2);
 
     // Sequence file advanced to 2.
-    let rec = load_record(&seq_path)
-        .expect("load")
-        .expect("present");
+    let rec = load_record(&seq_path).expect("load").expect("present");
     assert_eq!(rec.highest_sequence, 2);
 }
 
@@ -733,9 +722,8 @@ fn run073_validate_only_mode_does_not_mutate_live_state_or_sequence_or_evict() {
     );
 
     let inputs = devnet_inputs(&candidate_path, &h.signing_keys, Some(&seq_path), 0);
-    let applied =
-        apply_validated_candidate(inputs, ApplyMode::ValidateOnly, Some(&mut ctx))
-            .expect("validate-only must succeed");
+    let applied = apply_validated_candidate(inputs, ApplyMode::ValidateOnly, Some(&mut ctx))
+        .expect("validate-only must succeed");
     assert_eq!(applied.validated.sequence, 2);
     assert_eq!(applied.session_evictions, 0);
 
@@ -773,8 +761,7 @@ fn run073_reapply_same_candidate_is_idempotent_at_persistence_layer() {
 
     // First apply — upgrades sequence 1 → 2.
     {
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(NoActiveSessionsEvictor::new());
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(NoActiveSessionsEvictor::new());
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live.clone(),
             evictor,
@@ -796,8 +783,7 @@ fn run073_reapply_same_candidate_is_idempotent_at_persistence_layer() {
 
     // Second apply of the SAME candidate — equal-seq-same-fp, no write.
     {
-        let evictor: Arc<dyn P2pSessionEvictor> =
-            Arc::new(NoActiveSessionsEvictor::new());
+        let evictor: Arc<dyn P2pSessionEvictor> = Arc::new(NoActiveSessionsEvictor::new());
         let mut ctx = ProductionLiveTrustApplyContext::new(
             live.clone(),
             evictor,
@@ -807,9 +793,8 @@ fn run073_reapply_same_candidate_is_idempotent_at_persistence_layer() {
             301,
         );
         let inputs = devnet_inputs(&candidate_path, &h.signing_keys, Some(&seq_path), 0);
-        let applied =
-            apply_validated_candidate(inputs, ApplyMode::ApplyLive, Some(&mut ctx))
-                .expect("second apply (idempotent)");
+        let applied = apply_validated_candidate(inputs, ApplyMode::ApplyLive, Some(&mut ctx))
+            .expect("second apply (idempotent)");
         assert_eq!(applied.validated.sequence, 2);
     }
     // Sequence file still at sequence=2; persistence write only ran the
@@ -864,8 +849,7 @@ fn run073_post_apply_live_handle_is_consistent_and_fresh_arc() {
         300,
     );
     let inputs = devnet_inputs(&candidate_path, &h.signing_keys, Some(&seq_path), 0);
-    apply_validated_candidate(inputs, ApplyMode::ApplyLive, Some(&mut ctx))
-        .expect("apply");
+    apply_validated_candidate(inputs, ApplyMode::ApplyLive, Some(&mut ctx)).expect("apply");
 
     let post = live.snapshot().expect("post-apply");
     assert!(

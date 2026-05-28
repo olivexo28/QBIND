@@ -269,16 +269,16 @@ where
     }
 
     // Step 4: Backend dispatch via the suite registry.
-    let backend: Arc<dyn ConsensusSigVerifier> = match backend_registry.get_backend(governance_suite)
-    {
-        Some(b) => b,
-        None => {
-            return Err(TimeoutVerifyError::UnsupportedSuite {
-                validator_id: timeout.validator_id,
-                governance_suite,
-            });
-        }
-    };
+    let backend: Arc<dyn ConsensusSigVerifier> =
+        match backend_registry.get_backend(governance_suite) {
+            Some(b) => b,
+            None => {
+                return Err(TimeoutVerifyError::UnsupportedSuite {
+                    validator_id: timeout.validator_id,
+                    governance_suite,
+                });
+            }
+        };
 
     // Step 5: Cryptographic verification over the canonical preimage.
     let preimage = timeout_signing_bytes_with_chain_id(
@@ -298,9 +298,9 @@ where
         Err(ConsensusSigError::InvalidSignature) => {
             Err(TimeoutVerifyError::InvalidSignature(timeout.validator_id))
         }
-        Err(ConsensusSigError::MalformedSignature) => Err(TimeoutVerifyError::MalformedSignature(
-            timeout.validator_id,
-        )),
+        Err(ConsensusSigError::MalformedSignature) => {
+            Err(TimeoutVerifyError::MalformedSignature(timeout.validator_id))
+        }
         Err(ConsensusSigError::MissingKey(_)) => {
             Err(TimeoutVerifyError::MissingKey(timeout.validator_id))
         }
@@ -468,10 +468,7 @@ mod tests {
     }
 
     impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
-        fn get_suite_and_key(
-            &self,
-            id: ValidatorId,
-        ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+        fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
             self.keys.get(&id).cloned()
         }
     }
@@ -488,7 +485,13 @@ mod tests {
 
     /// Build a fresh `(key_provider, backend_registry, signing_keys)` test
     /// fixture for `n` validators, all on `TEST_SUITE` (ML-DSA-44).
-    fn make_fixture(n: u64) -> (TestKeyProvider, SimpleBackendRegistry, HashMap<ValidatorId, Vec<u8>>) {
+    fn make_fixture(
+        n: u64,
+    ) -> (
+        TestKeyProvider,
+        SimpleBackendRegistry,
+        HashMap<ValidatorId, Vec<u8>>,
+    ) {
         let mut keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)> = HashMap::new();
         let mut signing_keys: HashMap<ValidatorId, Vec<u8>> = HashMap::new();
         for i in 1..=n {
@@ -559,10 +562,14 @@ mod tests {
         t.signature[mid] ^= 0xFF;
 
         let res = verify_timeout_msg(&t, &validators, &kp, &br, QBIND_DEVNET_CHAIN_ID);
-        assert!(matches!(
-            res,
-            Err(TimeoutVerifyError::InvalidSignature(v)) if v == ValidatorId(1)
-        ), "got {:?}", res);
+        assert!(
+            matches!(
+                res,
+                Err(TimeoutVerifyError::InvalidSignature(v)) if v == ValidatorId(1)
+            ),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -576,7 +583,11 @@ mod tests {
         t.suite_id = TIMEOUT_SUITE_ID.wrapping_add(1);
 
         let res = verify_timeout_msg(&t, &validators, &kp, &br, QBIND_DEVNET_CHAIN_ID);
-        assert!(matches!(res, Err(TimeoutVerifyError::SuiteMismatch { .. })), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::SuiteMismatch { .. })),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -595,10 +606,14 @@ mod tests {
 
         let t = signed_timeout(7, outside, &sks2);
         let res = verify_timeout_msg(&t, &validators, &kp2, &br, QBIND_DEVNET_CHAIN_ID);
-        assert!(matches!(
-            res,
-            Err(TimeoutVerifyError::UnknownValidator(v)) if v == outside
-        ), "got {:?}", res);
+        assert!(
+            matches!(
+                res,
+                Err(TimeoutVerifyError::UnknownValidator(v)) if v == outside
+            ),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -609,10 +624,14 @@ mod tests {
         kp.keys.remove(&ValidatorId(1));
         let t = signed_timeout(7, ValidatorId(1), &sks);
         let res = verify_timeout_msg(&t, &validators, &kp, &br, QBIND_DEVNET_CHAIN_ID);
-        assert!(matches!(
-            res,
-            Err(TimeoutVerifyError::MissingKey(v)) if v == ValidatorId(1)
-        ), "got {:?}", res);
+        assert!(
+            matches!(
+                res,
+                Err(TimeoutVerifyError::MissingKey(v)) if v == ValidatorId(1)
+            ),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -622,7 +641,11 @@ mod tests {
         // Reassign validator 1 to a suite for which no backend is registered.
         // Use a u8-fitting value because TimeoutMsg.suite_id is u8 on the wire.
         let unsupported = ConsensusSigSuiteId::new(0xCD);
-        let pk = kp.keys.get(&ValidatorId(1)).map(|(_, k)| k.clone()).unwrap();
+        let pk = kp
+            .keys
+            .get(&ValidatorId(1))
+            .map(|(_, k)| k.clone())
+            .unwrap();
         kp.keys.insert(ValidatorId(1), (unsupported, pk));
         // Build a timeout with the wire suite_id matching the unsupported one
         // so we exercise the unsupported-suite branch (not suite-mismatch).
@@ -631,10 +654,11 @@ mod tests {
         t.signature = vec![0u8; 64]; // structural placeholder; will not verify
 
         let res = verify_timeout_msg(&t, &validators, &kp, &br, QBIND_DEVNET_CHAIN_ID);
-        assert!(matches!(
-            res,
-            Err(TimeoutVerifyError::UnsupportedSuite { .. })
-        ), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::UnsupportedSuite { .. })),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -754,10 +778,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(
-            res,
-            Err(TimeoutVerifyError::InsufficientQuorum { .. })
-        ), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::InsufficientQuorum { .. })),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -781,7 +806,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::DuplicateSigner(_))), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::DuplicateSigner(_))),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -804,7 +833,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::MixedView { .. })), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::MixedView { .. })),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -828,7 +861,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::InvalidSignature(_))), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::InvalidSignature(_))),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -850,7 +887,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::SuiteMismatch { .. })), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::SuiteMismatch { .. })),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -883,7 +924,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::UnknownValidator(v)) if v == outside), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::UnknownValidator(v)) if v == outside),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -908,7 +953,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::EvidenceMismatch)), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::EvidenceMismatch)),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -926,7 +975,11 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::EvidenceMismatch)), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::EvidenceMismatch)),
+            "got {:?}",
+            res
+        );
     }
 
     #[test]
@@ -960,6 +1013,10 @@ mod tests {
             &br,
             QBIND_DEVNET_CHAIN_ID,
         );
-        assert!(matches!(res, Err(TimeoutVerifyError::HighQcMismatch)), "got {:?}", res);
+        assert!(
+            matches!(res, Err(TimeoutVerifyError::HighQcMismatch)),
+            "got {:?}",
+            res
+        );
     }
 }

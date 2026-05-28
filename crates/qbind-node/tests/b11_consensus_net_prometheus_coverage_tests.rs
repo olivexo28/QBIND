@@ -349,7 +349,9 @@ async fn b11_c_inbound_metrics_increment_on_every_inbound_frame() {
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let metrics = Arc::new(NodeMetrics::new());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
 
     let progress = run_binary_consensus_loop_with_io(
         cfg,
@@ -411,16 +413,12 @@ struct MetricsForwardingFacade {
 
 impl ConsensusNetworkFacade for MetricsForwardingFacade {
     fn send_vote_to(&self, _t: ValidatorId, vote: &Vote) -> Result<(), NetworkError> {
-        let _ = self
-            .inbound
-            .try_send(ConsensusNetMsg::Vote(encode(vote)));
+        let _ = self.inbound.try_send(ConsensusNetMsg::Vote(encode(vote)));
         self.metrics.network().inc_outbound_vote_send_to();
         Ok(())
     }
     fn broadcast_vote(&self, vote: &Vote) -> Result<(), NetworkError> {
-        let _ = self
-            .inbound
-            .try_send(ConsensusNetMsg::Vote(encode(vote)));
+        let _ = self.inbound.try_send(ConsensusNetMsg::Vote(encode(vote)));
         self.metrics.network().inc_outbound_vote_broadcast();
         Ok(())
     }
@@ -469,17 +467,12 @@ async fn b11_d_b9_late_peer_reemit_does_not_double_count() {
 
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
 
-    let (handle, _progress) = spawn_binary_consensus_loop_with_io(
-        cfg_v0,
-        shutdown_rx,
-        Arc::clone(&metrics_v0),
-        io_v0,
-    );
+    let (handle, _progress) =
+        spawn_binary_consensus_loop_with_io(cfg_v0, shutdown_rx, Arc::clone(&metrics_v0), io_v0);
 
     // Let V0 emit its first leader-step proposal+vote (no peer connected yet).
     tokio::time::sleep(Duration::from_millis(50)).await;
-    let proposals_after_initial =
-        metrics_v0.network().outbound_proposal_broadcast_total();
+    let proposals_after_initial = metrics_v0.network().outbound_proposal_broadcast_total();
     assert!(
         proposals_after_initial >= 1,
         "V0 must have emitted >=1 proposal in its first leader step; got {}",
@@ -537,16 +530,13 @@ async fn b11_e_localmesh_io_none_path_does_not_touch_consensus_net_counters() {
         .with_max_ticks(40);
     let (_shutdown_tx, shutdown_rx) = watch::channel(());
     let metrics = Arc::new(NodeMetrics::new());
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
 
-    let final_progress = run_binary_consensus_loop_with_io(
-        cfg,
-        shutdown_rx,
-        progress,
-        Arc::clone(&metrics),
-        None,
-    )
-    .await;
+    let final_progress =
+        run_binary_consensus_loop_with_io(cfg, shutdown_rx, progress, Arc::clone(&metrics), None)
+            .await;
 
     // Sanity: single-validator path still actually advances commits
     // (B1/B2 not regressed).

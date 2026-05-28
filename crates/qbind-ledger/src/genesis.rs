@@ -531,10 +531,7 @@ impl GenesisAuthorityRoot {
                 ),
             });
         }
-        if !hex
-            .bytes()
-            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
-        {
+        if !hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
             return Err(GenesisAuthorityValidationError::MalformedFingerprint {
                 kind,
                 label: self.label.clone(),
@@ -612,9 +609,7 @@ impl GenesisAuthorityRoot {
                         return Err(GenesisAuthorityValidationError::MalformedPublicKey {
                             kind,
                             label: self.label.clone(),
-                            reason:
-                                "public_key_hex must be lowercase hex without 0x prefix"
-                                    .into(),
+                            reason: "public_key_hex must be lowercase hex without 0x prefix".into(),
                         });
                     }
                 };
@@ -678,14 +673,12 @@ impl GenesisAuthorityRoot {
                 if matches!(env, NetworkEnvironmentPolicy::Mainnet)
                     && matches!(kind, GenesisAuthorityRootKind::BundleSigning)
                 {
-                    return Err(
-                        GenesisAuthorityValidationError::MissingPublicKeyMaterial {
-                            kind,
-                            label: self.label.clone(),
-                            env,
-                            suite_id: self.suite_id,
-                        },
-                    );
+                    return Err(GenesisAuthorityValidationError::MissingPublicKeyMaterial {
+                        kind,
+                        label: self.label.clone(),
+                        env,
+                        suite_id: self.suite_id,
+                    });
                 }
                 // TestNet / DevNet: legacy fingerprint-only roots remain
                 // tolerated, but the Run 103 verifier still fails closed
@@ -1663,10 +1656,7 @@ fn encode_authority_block(buf: &mut Vec<u8>, authority: Option<&GenesisAuthority
             for root in &authority.pqc_transport_roots {
                 encode_authority_root(buf, root);
             }
-            encode_u32_be(
-                buf,
-                authority.bundle_signing_authority_roots.len() as u32,
-            );
+            encode_u32_be(buf, authority.bundle_signing_authority_roots.len() as u32);
             for root in &authority.bundle_signing_authority_roots {
                 encode_authority_root(buf, root);
             }
@@ -1800,14 +1790,12 @@ pub fn verify_boot_time_genesis(
     expected_canonical_hash: Option<&GenesisHash>,
 ) -> Result<BootGenesisVerification, BootGenesisVerificationError> {
     // 1. Structural + per-env validation.
-    config
-        .validate_for_environment(env)
-        .map_err(|e| match e {
-            GenesisValidationError::AuthorityValidationFailed(a) => {
-                BootGenesisVerificationError::AuthorityValidationFailed(a)
-            }
-            other => BootGenesisVerificationError::GenesisValidationFailed(other),
-        })?;
+    config.validate_for_environment(env).map_err(|e| match e {
+        GenesisValidationError::AuthorityValidationFailed(a) => {
+            BootGenesisVerificationError::AuthorityValidationFailed(a)
+        }
+        other => BootGenesisVerificationError::GenesisValidationFailed(other),
+    })?;
 
     // 2. chain_id / environment binding check.
     if matches!(
@@ -2408,9 +2396,8 @@ mod tests {
     }
 
     fn mainnet_authority() -> GenesisAuthorityConfig {
-        let mut auth = GenesisAuthorityConfig::new(vec![
-            authority_root(0xab, "foundation-bundle-signer-1"),
-        ]);
+        let mut auth =
+            GenesisAuthorityConfig::new(vec![authority_root(0xab, "foundation-bundle-signer-1")]);
         auth.pqc_transport_roots = vec![authority_root(0xcd, "foundation-transport-1")];
         auth
     }
@@ -2449,7 +2436,10 @@ mod tests {
     #[test]
     fn test_authority_mainnet_rejects_empty_bundle_signing_roots() {
         let mut cfg = mainnet_genesis_config();
-        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![];
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots = vec![];
         let err = cfg
             .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
             .unwrap_err();
@@ -2464,7 +2454,11 @@ mod tests {
     #[test]
     fn test_authority_mainnet_rejects_unsupported_suite() {
         let mut cfg = mainnet_genesis_config();
-        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].suite_id = 1;
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .suite_id = 1;
         let err = cfg
             .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
             .unwrap_err();
@@ -2479,8 +2473,11 @@ mod tests {
     #[test]
     fn test_authority_mainnet_rejects_malformed_fingerprint_short() {
         let mut cfg = mainnet_genesis_config();
-        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].key_fingerprint =
-            "ab".repeat(8); // 16 hex chars
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .key_fingerprint = "ab".repeat(8); // 16 hex chars
         let err = cfg
             .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
             .unwrap_err();
@@ -2495,8 +2492,11 @@ mod tests {
     #[test]
     fn test_authority_mainnet_rejects_malformed_fingerprint_non_hex() {
         let mut cfg = mainnet_genesis_config();
-        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].key_fingerprint =
-            "zz".repeat(32);
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .key_fingerprint = "zz".repeat(32);
         let err = cfg
             .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
             .unwrap_err();
@@ -2511,7 +2511,11 @@ mod tests {
     #[test]
     fn test_authority_mainnet_rejects_empty_label() {
         let mut cfg = mainnet_genesis_config();
-        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots[0].label = String::new();
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .label = String::new();
         let err = cfg
             .validate_for_environment(NetworkEnvironmentPolicy::Mainnet)
             .unwrap_err();
@@ -2526,7 +2530,12 @@ mod tests {
     #[test]
     fn test_authority_mainnet_rejects_duplicate_roots() {
         let mut cfg = mainnet_genesis_config();
-        let dup = cfg.authority.as_ref().unwrap().bundle_signing_authority_roots[0].clone();
+        let dup = cfg
+            .authority
+            .as_ref()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
+            .clone();
         cfg.authority
             .as_mut()
             .unwrap()
@@ -2724,9 +2733,8 @@ mod tests {
     fn test_boot_mainnet_rejects_mismatched_hash() {
         let cfg = mainnet_genesis_config();
         let wrong = [0u8; 32];
-        let err =
-            verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, Some(&wrong))
-                .unwrap_err();
+        let err = verify_boot_time_genesis(NetworkEnvironmentPolicy::Mainnet, &cfg, Some(&wrong))
+            .unwrap_err();
         assert!(matches!(
             err,
             BootGenesisVerificationError::CanonicalHashMismatch { .. }
@@ -2789,8 +2797,8 @@ mod tests {
         let mut cfg = mainnet_genesis_config();
         cfg.chain_id = "qbind-testnet-beta".to_string();
         cfg.authority = None;
-        let err = verify_boot_time_genesis(NetworkEnvironmentPolicy::Testnet, &cfg, None)
-            .unwrap_err();
+        let err =
+            verify_boot_time_genesis(NetworkEnvironmentPolicy::Testnet, &cfg, None).unwrap_err();
         assert!(matches!(
             err,
             BootGenesisVerificationError::AuthorityValidationFailed(
@@ -2836,7 +2844,9 @@ mod tests {
         let pk = synthetic_ml_dsa_44_pk(0xab);
         let fp = authority_public_key_fingerprint(&pk);
         assert_eq!(fp.len(), GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN);
-        assert!(fp.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+        assert!(fp
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
         // Sanity: equal inputs produce equal fingerprints.
         assert_eq!(fp, authority_public_key_fingerprint(&pk));
     }
@@ -2904,7 +2914,8 @@ mod tests {
     fn run_104_mainnet_rejects_public_key_with_wrong_length() {
         let mut cfg = mainnet_genesis_config();
         // Truncate the PK hex by 2 chars (= 1 byte).
-        let root_mut = &mut cfg.authority
+        let root_mut = &mut cfg
+            .authority
             .as_mut()
             .unwrap()
             .bundle_signing_authority_roots[0];
@@ -2928,7 +2939,8 @@ mod tests {
     #[test]
     fn run_104_mainnet_rejects_public_key_with_non_hex_bytes() {
         let mut cfg = mainnet_genesis_config();
-        let root_mut = &mut cfg.authority
+        let root_mut = &mut cfg
+            .authority
             .as_mut()
             .unwrap()
             .bundle_signing_authority_roots[0];
@@ -2955,7 +2967,8 @@ mod tests {
         let mut cfg = mainnet_genesis_config();
         // Mutate one byte of the PK hex so the SHA3 fingerprint no
         // longer matches the declared `key_fingerprint`.
-        let root_mut = &mut cfg.authority
+        let root_mut = &mut cfg
+            .authority
             .as_mut()
             .unwrap()
             .bundle_signing_authority_roots[0];
@@ -2989,7 +3002,10 @@ mod tests {
         // PK-only collision by giving the second root a distinct
         // fingerprint via direct mutation, then re-aligning the
         // public_key_hex.
-        let pk = cfg.authority.as_ref().unwrap()
+        let pk = cfg
+            .authority
+            .as_ref()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex
             .clone()
@@ -3091,8 +3107,16 @@ mod tests {
             &pk_a,
             "foundation-bundle-signer-1",
         );
-        cfg_a.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![new_root_a];
-        cfg_b.authority.as_mut().unwrap().bundle_signing_authority_roots = vec![new_root_b];
+        cfg_a
+            .authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots = vec![new_root_a];
+        cfg_b
+            .authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots = vec![new_root_b];
 
         let ha = compute_canonical_genesis_hash(&cfg_a, NetworkEnvironmentPolicy::Mainnet);
         let hb = compute_canonical_genesis_hash(&cfg_b, NetworkEnvironmentPolicy::Mainnet);
@@ -3110,15 +3134,16 @@ mod tests {
         let mut cfg_with = cfg_without.clone();
         // Add public_key_hex of arbitrary content (validation is not
         // invoked here — this is a pure hash-framing test).
-        cfg_with.authority.as_mut().unwrap().bundle_signing_authority_roots[0]
+        cfg_with
+            .authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots[0]
             .public_key_hex = Some("ab".repeat(GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES));
 
-        let h_without = compute_canonical_genesis_hash(
-            &cfg_without,
-            NetworkEnvironmentPolicy::Devnet,
-        );
-        let h_with =
-            compute_canonical_genesis_hash(&cfg_with, NetworkEnvironmentPolicy::Devnet);
+        let h_without =
+            compute_canonical_genesis_hash(&cfg_without, NetworkEnvironmentPolicy::Devnet);
+        let h_with = compute_canonical_genesis_hash(&cfg_with, NetworkEnvironmentPolicy::Devnet);
         assert_ne!(
             h_without, h_with,
             "Run 104 public_key_hex must contribute to the canonical genesis hash"
@@ -3137,10 +3162,16 @@ mod tests {
         let h2 = compute_canonical_genesis_hash(&cfg_rt, NetworkEnvironmentPolicy::Mainnet);
         assert_eq!(h1, h2);
         // Also assert the new field round-trips structurally.
-        let pk_before = &cfg.authority.as_ref().unwrap()
+        let pk_before = &cfg
+            .authority
+            .as_ref()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex;
-        let pk_after = &cfg_rt.authority.as_ref().unwrap()
+        let pk_after = &cfg_rt
+            .authority
+            .as_ref()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex;
         assert_eq!(pk_before, pk_after);

@@ -199,7 +199,11 @@ fn test_a1_o3_penalty_applied_stake_reduced() {
 
     // Assert: stake was reduced in backend
     let remaining_stake = engine.backend().get_stake(ValidatorId(1));
-    assert_eq!(remaining_stake, Some(970_000), "remaining stake should be 970_000");
+    assert_eq!(
+        remaining_stake,
+        Some(970_000),
+        "remaining stake should be 970_000"
+    );
 }
 
 #[test]
@@ -547,7 +551,9 @@ fn test_f1_off_mode_rejects_o3_evidence() {
 
     // Off mode should reject evidence with Legacy(RejectedInvalid)
     match &record.penalty_decision {
-        PenaltyDecision::Legacy(qbind_consensus::slashing::SlashingDecisionKind::RejectedInvalid) => {
+        PenaltyDecision::Legacy(
+            qbind_consensus::slashing::SlashingDecisionKind::RejectedInvalid,
+        ) => {
             // Expected
         }
         other => panic!("Off mode should reject evidence, got {:?}", other),
@@ -574,7 +580,9 @@ fn test_f2_off_mode_rejects_o4_evidence() {
     let record = engine.handle_evidence(&ctx, evidence);
 
     match &record.penalty_decision {
-        PenaltyDecision::Legacy(qbind_consensus::slashing::SlashingDecisionKind::RejectedInvalid) => {
+        PenaltyDecision::Legacy(
+            qbind_consensus::slashing::SlashingDecisionKind::RejectedInvalid,
+        ) => {
             // Expected
         }
         other => panic!("Off mode should reject evidence, got {:?}", other),
@@ -601,7 +609,9 @@ fn test_f3_off_mode_rejects_o5_evidence() {
     let record = engine.handle_evidence(&ctx, evidence);
 
     match &record.penalty_decision {
-        PenaltyDecision::Legacy(qbind_consensus::slashing::SlashingDecisionKind::RejectedInvalid) => {
+        PenaltyDecision::Legacy(
+            qbind_consensus::slashing::SlashingDecisionKind::RejectedInvalid,
+        ) => {
             // Expected
         }
         other => panic!("Off mode should reject evidence, got {:?}", other),
@@ -622,7 +632,10 @@ fn test_g1_all_validators_jailed_fail_closed() {
 
     // All validators jailed at epoch 50 (before jail expiry at epoch 100)
     let result = build_validator_set_with_stake_and_jail_filter(candidates, 0, 50);
-    assert!(result.is_err(), "should fail when all validators are jailed");
+    assert!(
+        result.is_err(),
+        "should fail when all validators are jailed"
+    );
 }
 
 #[test]
@@ -630,12 +643,15 @@ fn test_g2_some_validators_jailed_still_works() {
     // Create candidates where only ONE validator is jailed
     let candidates = vec![
         ValidatorCandidateWithJailStatus::new(ValidatorId::new(1), 1_000_000, 1, Some(100)), // Jailed
-        ValidatorCandidateWithJailStatus::new(ValidatorId::new(2), 1_000_000, 1, None),       // Not jailed
+        ValidatorCandidateWithJailStatus::new(ValidatorId::new(2), 1_000_000, 1, None), // Not jailed
     ];
 
     // At epoch 50, validator 1 is jailed (50 < 100), validator 2 is not
     let result = build_validator_set_with_stake_and_jail_filter(candidates, 0, 50);
-    assert!(result.is_ok(), "should succeed when some validators are not jailed");
+    assert!(
+        result.is_ok(),
+        "should succeed when some validators are not jailed"
+    );
     assert_eq!(result.unwrap().validator_set.len(), 1);
 }
 
@@ -759,17 +775,26 @@ fn test_i1_enforce_all_mode_applies_o3_o4_o5() {
     // O3
     let o3 = make_o3_evidence(1, 100, 0);
     let r3 = engine.handle_evidence(&ctx, o3);
-    assert!(matches!(r3.penalty_decision, PenaltyDecision::PenaltyApplied { .. }));
+    assert!(matches!(
+        r3.penalty_decision,
+        PenaltyDecision::PenaltyApplied { .. }
+    ));
 
     // O4
     let o4 = make_o4_evidence(2, 101, 1);
     let r4 = engine.handle_evidence(&ctx, o4);
-    assert!(matches!(r4.penalty_decision, PenaltyDecision::PenaltyApplied { .. }));
+    assert!(matches!(
+        r4.penalty_decision,
+        PenaltyDecision::PenaltyApplied { .. }
+    ));
 
     // O5
     let o5 = make_o5_evidence(3, 102, 2);
     let r5 = engine.handle_evidence(&ctx, o5);
-    assert!(matches!(r5.penalty_decision, PenaltyDecision::PenaltyApplied { .. }));
+    assert!(matches!(
+        r5.penalty_decision,
+        PenaltyDecision::PenaltyApplied { .. }
+    ));
 }
 
 #[test]

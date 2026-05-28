@@ -88,9 +88,7 @@ use std::sync::Arc;
 
 use qbind_crypto::MlDsa44Backend;
 use qbind_node::metrics::P2pMetrics;
-use qbind_node::p2p_session_eviction::{
-    EvictionReason, MockP2pSessionEvictor, P2pSessionEvictor,
-};
+use qbind_node::p2p_session_eviction::{EvictionReason, MockP2pSessionEvictor, P2pSessionEvictor};
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_live_trust::LivePqcTrustState;
 use qbind_node::pqc_live_trust_reload::{
@@ -99,9 +97,9 @@ use qbind_node::pqc_live_trust_reload::{
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_activation::ActivationContext;
 use qbind_node::pqc_trust_bundle::{
-    derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
-    BundleSigningKeySet, LoadedTrustBundle, RootStatus, TrustBundle,
-    TrustBundleEnvironment, TrustBundleRevocation, TrustBundleRoot,
+    derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey, BundleSigningKeySet,
+    LoadedTrustBundle, RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRevocation,
+    TrustBundleRoot,
 };
 use qbind_node::pqc_trust_reload::ReloadApplyError;
 use qbind_node::pqc_trust_sequence::{
@@ -193,8 +191,7 @@ fn build_signed_devnet_bundle(
         activation_epoch: None,
         activation_height,
     };
-    let sig =
-        sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
+    let sig = sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
     bundle.signature = Some(sig);
     bundle
 }
@@ -233,10 +230,7 @@ fn snapshot_seq_file(path: &Path) -> Option<(Vec<u8>, std::time::SystemTime)> {
     Some((bytes, mtime))
 }
 
-fn assert_seq_file_unchanged(
-    path: &Path,
-    snapshot: Option<(Vec<u8>, std::time::SystemTime)>,
-) {
+fn assert_seq_file_unchanged(path: &Path, snapshot: Option<(Vec<u8>, std::time::SystemTime)>) {
     match (snapshot, path.exists()) {
         (None, false) => {}
         (None, true) => panic!(
@@ -265,11 +259,7 @@ fn assert_seq_file_unchanged(
     }
 }
 
-fn seed_persisted_sequence(
-    seq_path: &Path,
-    baseline: &LoadedTrustBundle,
-    now_secs: u64,
-) {
+fn seed_persisted_sequence(seq_path: &Path, baseline: &LoadedTrustBundle, now_secs: u64) {
     check_and_update_sequence(
         seq_path,
         NetworkEnvironment::Devnet,
@@ -558,7 +548,8 @@ fn run074_session_eviction_partial_failure_rolls_back_live_state() {
         }) => {
             assert!(rollback_ok, "rollback must succeed; msg={}", message);
             assert!(
-                message.contains("attempted=5") && message.contains("evicted=3")
+                message.contains("attempted=5")
+                    && message.contains("evicted=3")
                     && message.contains("failed=2"),
                 "Run 074 must surface the Run 072 invariant verbatim; got {}",
                 message
@@ -672,7 +663,11 @@ fn run074_sequence_commit_failure_rolls_back_live_state_and_preserves_seq_file()
     // acceptable; what matters is the live state and seq file
     // invariants, which are asserted above and below.
     let evictor_calls = mock.recorded_reports().len();
-    assert!(evictor_calls <= 1, "evictor called at most once; got {}", evictor_calls);
+    assert!(
+        evictor_calls <= 1,
+        "evictor called at most once; got {}",
+        evictor_calls
+    );
 
     // Seq file preserved at the pre-existing poison record.
     assert_seq_file_unchanged(&seq_path, seq_snap);
@@ -727,8 +722,7 @@ fn run074_already_in_progress_guard_rejects_concurrent_trigger_without_mutation(
     let worker = std::thread::spawn(move || {
         // Take the guard by CAS — same operation the real
         // try_trigger performs internally.
-        let prev = ctl_for_guard
-            .__test_in_progress_swap(true);
+        let prev = ctl_for_guard.__test_in_progress_swap(true);
         assert!(!prev, "guard must have been free");
         start_tx.send(()).unwrap();
         // Wait until main thread has fired its trigger.

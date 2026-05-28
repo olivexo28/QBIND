@@ -22,6 +22,7 @@
 //!
 //! Scope mirrors `task/RUN_104_TASK.txt` "Required tests" sections A–F.
 
+use qbind_crypto::MlDsa44Backend;
 use qbind_ledger::bundle_signing_ratification::test_helpers::build_signed_ratification;
 use qbind_ledger::{
     authority_public_key_fingerprint, compute_canonical_genesis_hash,
@@ -32,7 +33,6 @@ use qbind_ledger::{
     GENESIS_AUTHORITY_KEY_FINGERPRINT_HEX_LEN, GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES,
     GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_HEX_LEN, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
-use qbind_crypto::MlDsa44Backend;
 
 // ---------- helpers ----------
 
@@ -56,7 +56,10 @@ fn mainnet_genesis_with_clean_root(chain_id: &str, auth_pk: &[u8]) -> GenesisCon
     let mut cfg = GenesisConfig::new(
         chain_id,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(20)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(20)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(20)),
             "ab".repeat(32),
@@ -122,10 +125,8 @@ fn run_104_a_authority_public_key_fingerprint_helper_is_canonical() {
 
 #[test]
 fn run_104_b_mainnet_rejects_bundle_signing_root_missing_public_key_hex() {
-    let mut cfg = mainnet_genesis_with_clean_root(
-        "qbind-mainnet-v0",
-        &synthetic_ml_dsa_44_pk(0xab),
-    );
+    let mut cfg =
+        mainnet_genesis_with_clean_root("qbind-mainnet-v0", &synthetic_ml_dsa_44_pk(0xab));
     cfg.authority
         .as_mut()
         .unwrap()
@@ -148,10 +149,8 @@ fn run_104_b_mainnet_rejects_bundle_signing_root_missing_public_key_hex() {
 
 #[test]
 fn run_104_b_mainnet_rejects_malformed_public_key_length() {
-    let mut cfg = mainnet_genesis_with_clean_root(
-        "qbind-mainnet-v0",
-        &synthetic_ml_dsa_44_pk(0xab),
-    );
+    let mut cfg =
+        mainnet_genesis_with_clean_root("qbind-mainnet-v0", &synthetic_ml_dsa_44_pk(0xab));
     let pk = cfg
         .authority
         .as_mut()
@@ -178,10 +177,8 @@ fn run_104_b_mainnet_rejects_malformed_public_key_length() {
 
 #[test]
 fn run_104_b_mainnet_rejects_public_key_fingerprint_mismatch() {
-    let mut cfg = mainnet_genesis_with_clean_root(
-        "qbind-mainnet-v0",
-        &synthetic_ml_dsa_44_pk(0xab),
-    );
+    let mut cfg =
+        mainnet_genesis_with_clean_root("qbind-mainnet-v0", &synthetic_ml_dsa_44_pk(0xab));
     // Replace public_key_hex with an unrelated PK while keeping the
     // declared `key_fingerprint`.
     let unrelated = hex_of(&synthetic_ml_dsa_44_pk(0xcd));
@@ -211,10 +208,8 @@ fn run_104_b_mainnet_rejects_public_key_fingerprint_mismatch() {
 
 #[test]
 fn run_104_c_rejects_duplicate_root_pair() {
-    let mut cfg = mainnet_genesis_with_clean_root(
-        "qbind-mainnet-v0",
-        &synthetic_ml_dsa_44_pk(0xab),
-    );
+    let mut cfg =
+        mainnet_genesis_with_clean_root("qbind-mainnet-v0", &synthetic_ml_dsa_44_pk(0xab));
     let dup = cfg
         .authority
         .as_ref()
@@ -311,7 +306,10 @@ fn run_104_e_tampered_public_key_hex_fails_closed_in_verifier() {
     })
     .unwrap_err();
     assert!(
-        matches!(err, RatificationFailure::AuthorityKeyMaterialMalformed { .. }),
+        matches!(
+            err,
+            RatificationFailure::AuthorityKeyMaterialMalformed { .. }
+        ),
         "tampered public_key_hex must fail closed, got {:?}",
         err
     );
@@ -347,11 +345,13 @@ fn run_104_f_devnet_remains_permissive_for_legacy_short_fingerprint_roots() {
     );
     // DevNet legacy: only short fingerprint, no public_key_hex.
     let short_fp = format!("{:02x}", 0xab_u8).repeat(32);
-    cfg.authority = Some(GenesisAuthorityConfig::new(vec![GenesisAuthorityRoot::new(
-        GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-        short_fp,
-        "devnet-bundle-signer-1",
-    )]));
+    cfg.authority = Some(GenesisAuthorityConfig::new(vec![
+        GenesisAuthorityRoot::new(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            short_fp,
+            "devnet-bundle-signer-1",
+        ),
+    ]));
     cfg.validate_for_environment(NetworkEnvironmentPolicy::Devnet)
         .expect("DevNet legacy fingerprint-only authority must remain valid");
 }

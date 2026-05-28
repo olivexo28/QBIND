@@ -22,8 +22,8 @@ const EXPECTED_SUITE_ID: u8 = 100;
 /// Suite ID as u16 for comparing with wire types.
 const EXPECTED_SUITE_ID_U16: u16 = 100;
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
 use qbind_node::keystore::{

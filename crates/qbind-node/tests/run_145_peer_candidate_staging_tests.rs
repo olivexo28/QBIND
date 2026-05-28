@@ -32,9 +32,9 @@ use qbind_ledger::{
     bundle_signing_ratification::v2_test_helpers as ratification_v2_helpers,
     compute_canonical_genesis_hash, BundleSigningRatification, BundleSigningRatificationV2,
     BundleSigningRatificationV2Action, GenesisAllocation, GenesisAuthorityConfig,
-    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
-    RatificationEnforcementPolicy, RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+    GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig, GenesisHash, GenesisMonetaryConfig,
+    GenesisValidator, NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
+    RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::p2p::NodeId;
@@ -46,10 +46,10 @@ use qbind_node::pqc_peer_candidate_staging::{
 };
 use qbind_node::pqc_peer_candidate_wire::{
     encode_peer_candidate_wire_frame, LivePeerCandidateWireDispatcher,
-    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig,
-    PeerCandidatePropagationConfig, PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender,
-    PeerCandidateWireOutcome, PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome,
-    RawFrameSendReport, PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
+    LivePeerCandidateWireDispatcherConfig, LiveRatificationConfig, PeerCandidatePropagationConfig,
+    PeerCandidateWireEnvelopeV1, PeerCandidateWireFrameSender, PeerCandidateWireOutcome,
+    PeerCandidateWireReceiverConfig, RawFramePeerSendOutcome, RawFrameSendReport,
+    PEER_CANDIDATE_WIRE_DOMAIN_TAG, PEER_CANDIDATE_WIRE_VERSION,
 };
 use qbind_node::pqc_ratification_policy::ratification_gate_decision;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
@@ -61,9 +61,7 @@ use qbind_node::pqc_trust_bundle::{
 use qbind_node::pqc_trust_peer_candidate::{
     PeerCandidateConfig, PeerCandidateOutcome, ValidatedPeerCandidate,
 };
-use qbind_node::pqc_trust_reload::{
-    validate_candidate_bundle, ReloadCheckInputs,
-};
+use qbind_node::pqc_trust_reload::{validate_candidate_bundle, ReloadCheckInputs};
 use qbind_node::pqc_trust_sequence::{chain_id_hex, sequence_file_path};
 use qbind_types::NetworkEnvironment;
 
@@ -149,7 +147,10 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -401,11 +402,13 @@ impl PeerCandidateWireFrameSender for RecordingSender {
 }
 
 fn sequence_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read seq"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read seq"))
 }
 
 fn marker_snapshot(path: &Path) -> Option<Vec<u8>> {
-    path.exists().then(|| std::fs::read(path).expect("read marker"))
+    path.exists()
+        .then(|| std::fs::read(path).expect("read marker"))
 }
 
 fn assert_no_mutation(
@@ -459,6 +462,7 @@ fn dispatcher(
             live_ratification,
             authority_marker_path: marker_path,
             staging_queue: None,
+            peer_apply: None,
         },
         metrics,
     )
@@ -1065,11 +1069,8 @@ fn run145_r10_global_bound_enforced_reject_new() {
             &valid_frame(&h, seq, Some(peer)),
         );
         let validated = expect_validated(outcome);
-        let result = queue.try_stage_validated(
-            &validated,
-            Some(format!("dig-r10-{}", peer)),
-            100 + seq,
-        );
+        let result =
+            queue.try_stage_validated(&validated, Some(format!("dig-r10-{}", peer)), 100 + seq);
         if i < 2 {
             assert!(result.is_staged());
         } else {
@@ -1112,8 +1113,7 @@ fn run145_r11_ttl_expiry_removes_stale_staged_candidate() {
     let validated = expect_validated(outcome);
 
     let staged_at = 1_000u64;
-    let staged =
-        queue.try_stage_validated(&validated, Some("dig-r11".to_string()), staged_at);
+    let staged = queue.try_stage_validated(&validated, Some("dig-r11".to_string()), staged_at);
     assert!(staged.is_staged());
     assert_eq!(queue.len(), 1);
 
@@ -1198,7 +1198,10 @@ fn run145_r13_propagation_only_behavior_unchanged() {
 
     let mut queue = PeerCandidateStagingQueue::new(PeerDrivenStagingPolicy::devnet_enabled());
     let staged = queue.try_stage_validated(&validated, Some("dig-r13".to_string()), 100);
-    assert!(staged.is_staged(), "R13: staging is independent of propagation");
+    assert!(
+        staged.is_staged(),
+        "R13: staging is independent of propagation"
+    );
     assert_eq!(
         sender.sent_count(),
         0,

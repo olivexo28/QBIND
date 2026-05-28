@@ -36,26 +36,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use qbind_crypto::MlDsa44Backend;
-use qbind_ledger::bundle_signing_ratification::{
-    test_helpers as v1_helpers, v2_test_helpers,
-};
+use qbind_ledger::bundle_signing_ratification::{test_helpers as v1_helpers, v2_test_helpers};
 use qbind_ledger::{
-    compute_canonical_genesis_hash, format_genesis_hash,
-    BundleSigningRatificationV2Action, GenesisAllocation,
-    GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig, GenesisCouncilConfig,
-    GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
+    compute_canonical_genesis_hash, format_genesis_hash, BundleSigningRatificationV2Action,
+    GenesisAllocation, GenesisAuthorityConfig, GenesisAuthorityRoot, GenesisConfig,
+    GenesisCouncilConfig, GenesisMonetaryConfig, GenesisValidator, NetworkEnvironmentPolicy,
     RatificationEnvironment, GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_node::pqc_authority_state::{
-    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
-    PersistentAuthorityStateRecordV2,
+    AuthorityStateUpdateSource, PersistentAuthorityStateRecord, PersistentAuthorityStateRecordV2,
 };
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_bundle::{
     canonical_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
-    BundleSigningKeySet, RootStatus, TrustBundle, TrustBundleEnvironment,
-    TrustBundleRoot,
+    BundleSigningKeySet, RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
 };
 use qbind_node::pqc_trust_peer_candidate::PeerCandidateEnvelope;
 use qbind_node::pqc_trust_sequence::chain_id_hex;
@@ -107,8 +102,11 @@ fn v2_digest_hex(v: &qbind_ledger::BundleSigningRatificationV2) -> String {
 }
 
 fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
-    fs::write(path, serde_json::to_vec_pretty(value).expect("serialize json"))
-        .expect("write json");
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(value).expect("serialize json"),
+    )
+    .expect("write json");
 }
 
 struct Signing {
@@ -127,7 +125,12 @@ fn mint_signing() -> Signing {
         PQC_TRANSPORT_SUITE_ML_DSA_44,
         hex_lower(&pk)
     );
-    Signing { pk, sk, key_id, spec }
+    Signing {
+        pk,
+        sk,
+        key_id,
+        spec,
+    }
 }
 
 struct Harness {
@@ -157,7 +160,10 @@ fn harness(env: NetworkEnvironment) -> Harness {
     let mut genesis = GenesisConfig::new(
         genesis_chain_id(env),
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -197,7 +203,10 @@ fn signed_bundle(h: &Harness, signing: &Signing, sequence: u64) -> TrustBundle {
         suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
         pk_bytes: signing.pk.clone(),
     }]);
-    assert!(!signing_keys.is_empty(), "fixture signing key set must not be empty");
+    assert!(
+        !signing_keys.is_empty(),
+        "fixture signing key set must not be empty"
+    );
 
     let mut bundle = TrustBundle {
         bundle_version: TrustBundle::SUPPORTED_SCHEMA_VERSION,
@@ -222,8 +231,7 @@ fn signed_bundle(h: &Harness, signing: &Signing, sequence: u64) -> TrustBundle {
         activation_epoch: None,
         activation_height: None,
     };
-    let sig =
-        sign_bundle_devnet_helper(&bundle, signing.key_id, &signing.sk).expect("sign bundle");
+    let sig = sign_bundle_devnet_helper(&bundle, signing.key_id, &signing.sk).expect("sign bundle");
     bundle.signature = Some(sig);
     bundle
 }
@@ -334,7 +342,10 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
         None,
     );
     let v2_ratify_seq1_digest_hex = v2_digest_hex(&v2_ratify_seq1);
-    write_json(&base.join("ratification.v2.ratify.seq1.json"), &v2_ratify_seq1);
+    write_json(
+        &base.join("ratification.v2.ratify.seq1.json"),
+        &v2_ratify_seq1,
+    );
 
     // upgrade: seq=2 ratify (same active key as seq=1)
     let v2_ratify_seq2 = build_v2(
@@ -347,7 +358,10 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
         None,
         None,
     );
-    write_json(&base.join("ratification.v2.ratify.seq2.json"), &v2_ratify_seq2);
+    write_json(
+        &base.join("ratification.v2.ratify.seq2.json"),
+        &v2_ratify_seq2,
+    );
 
     // upgrade: seq=2 rotate (active -> rotated)
     let v2_rotate_seq2 = build_v2(
@@ -360,7 +374,10 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
         None,
         None,
     );
-    write_json(&base.join("ratification.v2.rotate.seq2.json"), &v2_rotate_seq2);
+    write_json(
+        &base.join("ratification.v2.rotate.seq2.json"),
+        &v2_rotate_seq2,
+    );
 
     // upgrade: seq=2 revoke (revoke active key)
     let v2_revoke_seq2 = build_v2(
@@ -373,7 +390,10 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
         Some("run133-evidence-only".to_string()),
         None,
     );
-    write_json(&base.join("ratification.v2.revoke.seq2.json"), &v2_revoke_seq2);
+    write_json(
+        &base.join("ratification.v2.revoke.seq2.json"),
+        &v2_revoke_seq2,
+    );
 
     // idempotent: same-sequence same-digest as seq1
     write_json(
@@ -408,7 +428,10 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
     if !v2_bad_sig.signature.is_empty() {
         v2_bad_sig.signature[0] ^= 0xff;
     }
-    write_json(&base.join("ratification.v2.bad-signature.json"), &v2_bad_sig);
+    write_json(
+        &base.join("ratification.v2.bad-signature.json"),
+        &v2_bad_sig,
+    );
 
     // wrong chain id
     let mut v2_wchain = v2_ratify_seq1.clone();
@@ -421,14 +444,20 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
         NetworkEnvironment::Devnet => RatificationEnvironment::Testnet,
         _ => RatificationEnvironment::Devnet,
     };
-    write_json(&base.join("ratification.v2.wrong-environment.json"), &v2_wenv);
+    write_json(
+        &base.join("ratification.v2.wrong-environment.json"),
+        &v2_wenv,
+    );
 
     // wrong genesis hash
     let mut v2_wgenesis = v2_ratify_seq1.clone();
     let mut bad = h.canonical_hash;
     bad[0] ^= 0xff;
     v2_wgenesis.genesis_hash = bad;
-    write_json(&base.join("ratification.v2.wrong-genesis.json"), &v2_wgenesis);
+    write_json(
+        &base.join("ratification.v2.wrong-genesis.json"),
+        &v2_wgenesis,
+    );
 
     // sequence zero
     let v2_seq0 = build_v2(

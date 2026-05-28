@@ -173,9 +173,9 @@ fn m2_1_validator_below_min_stake_excluded() {
     let min_stake: u64 = 1_000_000;
 
     let candidates = vec![
-        ValidatorCandidate::new(ValidatorId::new(1), 500_000, 1),    // Below threshold
-        ValidatorCandidate::new(ValidatorId::new(2), 1_000_000, 1),  // At threshold
-        ValidatorCandidate::new(ValidatorId::new(3), 2_000_000, 1),  // Above threshold
+        ValidatorCandidate::new(ValidatorId::new(1), 500_000, 1), // Below threshold
+        ValidatorCandidate::new(ValidatorId::new(2), 1_000_000, 1), // At threshold
+        ValidatorCandidate::new(ValidatorId::new(3), 2_000_000, 1), // Above threshold
     ];
 
     let result = build_validator_set_with_stake_filter(candidates, min_stake)
@@ -183,11 +183,11 @@ fn m2_1_validator_below_min_stake_excluded() {
 
     // Validator 1 should be excluded (500k < 1M)
     assert!(!result.validator_set.contains(ValidatorId::new(1)));
-    
+
     // Validators 2 and 3 should be included
     assert!(result.validator_set.contains(ValidatorId::new(2)));
     assert!(result.validator_set.contains(ValidatorId::new(3)));
-    
+
     // Check counts
     assert_eq!(result.validator_set.len(), 2);
     assert_eq!(result.excluded.len(), 1);
@@ -201,18 +201,18 @@ fn m2_1_validator_at_or_above_min_stake_included() {
     let min_stake: u64 = 1_000_000;
 
     let candidates = vec![
-        ValidatorCandidate::new(ValidatorId::new(1), 1_000_000, 1),   // Exactly at threshold
-        ValidatorCandidate::new(ValidatorId::new(2), 1_000_001, 1),   // One above threshold
-        ValidatorCandidate::new(ValidatorId::new(3), 10_000_000, 1),  // Well above threshold
+        ValidatorCandidate::new(ValidatorId::new(1), 1_000_000, 1), // Exactly at threshold
+        ValidatorCandidate::new(ValidatorId::new(2), 1_000_001, 1), // One above threshold
+        ValidatorCandidate::new(ValidatorId::new(3), 10_000_000, 1), // Well above threshold
     ];
 
-    let result = build_validator_set_with_stake_filter(candidates, min_stake)
-        .expect("should succeed");
+    let result =
+        build_validator_set_with_stake_filter(candidates, min_stake).expect("should succeed");
 
     // All validators should be included
     assert_eq!(result.validator_set.len(), 3);
     assert_eq!(result.excluded.len(), 0);
-    
+
     assert!(result.validator_set.contains(ValidatorId::new(1)));
     assert!(result.validator_set.contains(ValidatorId::new(2)));
     assert!(result.validator_set.contains(ValidatorId::new(3)));
@@ -254,7 +254,7 @@ fn m2_1_stake_filter_deterministic_ordering() {
     // All results should have the same validator IDs in the same order
     assert_eq!(result1.validator_set.len(), result2.validator_set.len());
     assert_eq!(result1.validator_set.len(), result3.validator_set.len());
-    
+
     // Check ordering by iterating - should be sorted by validator_id (1, 2, 3)
     let ids1: Vec<_> = result1.validator_set.iter().map(|v| v.id).collect();
     let ids2: Vec<_> = result2.validator_set.iter().map(|v| v.id).collect();
@@ -262,7 +262,7 @@ fn m2_1_stake_filter_deterministic_ordering() {
 
     assert_eq!(ids1, ids2);
     assert_eq!(ids2, ids3);
-    
+
     // Verify the expected deterministic ordering (sorted by validator_id)
     assert_eq!(ids1[0], ValidatorId::new(1));
     assert_eq!(ids1[1], ValidatorId::new(2));
@@ -297,13 +297,13 @@ fn m2_1_stake_filter_zero_min_stake_includes_all() {
     let min_stake: u64 = 0;
 
     let candidates = vec![
-        ValidatorCandidate::new(ValidatorId::new(1), 0, 1),       // Zero stake
-        ValidatorCandidate::new(ValidatorId::new(2), 1, 1),       // Minimal stake
+        ValidatorCandidate::new(ValidatorId::new(1), 0, 1), // Zero stake
+        ValidatorCandidate::new(ValidatorId::new(2), 1, 1), // Minimal stake
         ValidatorCandidate::new(ValidatorId::new(3), 1_000_000, 1),
     ];
 
-    let result = build_validator_set_with_stake_filter(candidates, min_stake)
-        .expect("should succeed");
+    let result =
+        build_validator_set_with_stake_filter(candidates, min_stake).expect("should succeed");
 
     // All validators should be included with min_stake = 0
     assert_eq!(result.validator_set.len(), 3);
@@ -317,9 +317,9 @@ fn m2_1_excluded_validators_sorted_by_id() {
 
     // Input order: 3, 1, 2
     let candidates = vec![
-        ValidatorCandidate::new(ValidatorId::new(3), 500_000, 1),  // Below threshold
-        ValidatorCandidate::new(ValidatorId::new(1), 400_000, 1),  // Below threshold
-        ValidatorCandidate::new(ValidatorId::new(2), 300_000, 1),  // Below threshold
+        ValidatorCandidate::new(ValidatorId::new(3), 500_000, 1), // Below threshold
+        ValidatorCandidate::new(ValidatorId::new(1), 400_000, 1), // Below threshold
+        ValidatorCandidate::new(ValidatorId::new(2), 300_000, 1), // Below threshold
         ValidatorCandidate::new(ValidatorId::new(4), 2_000_000, 1), // Above threshold
     ];
 
@@ -341,23 +341,29 @@ fn m2_1_voting_power_preserved_in_filtered_set() {
     let candidates = vec![
         ValidatorCandidate::new(ValidatorId::new(1), 2_000_000, 10),
         ValidatorCandidate::new(ValidatorId::new(2), 3_000_000, 20),
-        ValidatorCandidate::new(ValidatorId::new(3), 500_000, 5),  // Excluded
+        ValidatorCandidate::new(ValidatorId::new(3), 500_000, 5), // Excluded
     ];
 
-    let result = build_validator_set_with_stake_filter(candidates, min_stake)
-        .expect("should succeed");
+    let result =
+        build_validator_set_with_stake_filter(candidates, min_stake).expect("should succeed");
 
     // Check that voting power is preserved
     assert_eq!(result.validator_set.len(), 2);
-    
-    let v1 = result.validator_set.get(0).expect("should have validator at index 0");
-    let v2 = result.validator_set.get(1).expect("should have validator at index 1");
-    
+
+    let v1 = result
+        .validator_set
+        .get(0)
+        .expect("should have validator at index 0");
+    let v2 = result
+        .validator_set
+        .get(1)
+        .expect("should have validator at index 1");
+
     assert_eq!(v1.id, ValidatorId::new(1));
     assert_eq!(v1.voting_power, 10);
     assert_eq!(v2.id, ValidatorId::new(2));
     assert_eq!(v2.voting_power, 20);
-    
+
     // Total voting power should be sum of included validators
     assert_eq!(result.validator_set.total_voting_power(), 30);
 }

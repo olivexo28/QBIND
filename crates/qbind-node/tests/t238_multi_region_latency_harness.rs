@@ -70,8 +70,8 @@ use qbind_ledger::{
     QbindTransaction, RocksDbAccountState, TransferPayload,
 };
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::execution_adapter::{
     SingleThreadExecutionService, SingleThreadExecutionServiceConfig,
@@ -844,7 +844,14 @@ impl std::fmt::Debug for MultiRegionClusterHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MultiRegionClusterHandle")
             .field("num_nodes", &self.node_handles.len())
-            .field("regions", &self.node_handles.iter().map(|h| h.region).collect::<Vec<_>>())
+            .field(
+                "regions",
+                &self
+                    .node_handles
+                    .iter()
+                    .map(|h| h.region)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -877,7 +884,11 @@ impl MultiRegionClusterHandle {
 
         for i in 0..num_validators {
             let validator_id = ValidatorId::new(i as u64);
-            let region = config.region_for_validator.get(i).copied().unwrap_or(RegionId::RegionA);
+            let region = config
+                .region_for_validator
+                .get(i)
+                .copied()
+                .unwrap_or(RegionId::RegionA);
             let metrics = Arc::new(NodeMetrics::new());
 
             // Create per-validator data directory
@@ -980,9 +991,15 @@ impl MultiRegionClusterHandle {
             state_backends.push(state_backend);
         }
 
-        eprintln!("[T238] Cluster started with {} validators across {} regions",
-                  num_validators,
-                  config.region_for_validator.iter().collect::<std::collections::HashSet<_>>().len());
+        eprintln!(
+            "[T238] Cluster started with {} validators across {} regions",
+            num_validators,
+            config
+                .region_for_validator
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+        );
 
         Ok(MultiRegionClusterHandle {
             node_handles,
@@ -1005,7 +1022,10 @@ impl MultiRegionClusterHandle {
 
     /// Advance the deterministic RNG and return next value.
     fn next_rng(&mut self) -> u64 {
-        self.rng_state = self.rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+        self.rng_state = self
+            .rng_state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1);
         self.rng_state
     }
 
@@ -1060,12 +1080,15 @@ impl MultiRegionClusterHandle {
                 let mut skip_due_to_loss = false;
                 for other_region in RegionId::all() {
                     if *other_region != node_region {
-                        if let Some(profile) = self.config.region_matrix.get(&(*other_region, node_region)) {
+                        if let Some(profile) =
+                            self.config.region_matrix.get(&(*other_region, node_region))
+                        {
                             total_latency += profile.effective_latency(seed);
                             count += 1;
 
                             // Check for packet loss from any cross-region path
-                            if profile.should_drop(seed.wrapping_add(i as u64).wrapping_add(count)) {
+                            if profile.should_drop(seed.wrapping_add(i as u64).wrapping_add(count))
+                            {
                                 skip_due_to_loss = true;
                             }
                         }
@@ -1104,14 +1127,19 @@ impl MultiRegionClusterHandle {
         result.node_heights = heights.clone();
         result.min_committed_height = heights.iter().copied().min().unwrap_or(0);
         result.max_committed_height = heights.iter().copied().max().unwrap_or(0);
-        result.max_height_divergence = result.max_committed_height.saturating_sub(result.min_committed_height);
+        result.max_height_divergence = result
+            .max_committed_height
+            .saturating_sub(result.min_committed_height);
 
         // Calculate total committed blocks (simplified: use max height as proxy)
         result.total_committed_blocks = result.max_committed_height;
 
         // Collect per-region committed blocks
         for handle in &self.node_handles {
-            let entry = result.committed_per_region.entry(handle.region).or_insert(0);
+            let entry = result
+                .committed_per_region
+                .entry(handle.region)
+                .or_insert(0);
             *entry += handle.view_number();
         }
 
@@ -1126,9 +1154,11 @@ impl MultiRegionClusterHandle {
             // We approximate view changes as excess votes divided by (num_validators - 1).
             let proposals = h.proposals_accepted();
             let votes = h.votes_accepted();
-            let validators_excluding_proposer = (self.config.num_validators.saturating_sub(1)).max(1) as u64;
+            let validators_excluding_proposer =
+                (self.config.num_validators.saturating_sub(1)).max(1) as u64;
             if votes > proposals && proposals > 0 {
-                result.view_changes_total += votes.saturating_sub(proposals) / validators_excluding_proposer;
+                result.view_changes_total +=
+                    votes.saturating_sub(proposals) / validators_excluding_proposer;
             }
 
             eprintln!(
@@ -1170,7 +1200,10 @@ impl MultiRegionClusterHandle {
         }
         latencies.sort_by(|a, b| a.partial_cmp(b).unwrap());
         result.p50_latency_ms = latencies.get(latencies.len() / 2).copied().unwrap_or(0.0);
-        result.p90_latency_ms = latencies.get(latencies.len() * 9 / 10).copied().unwrap_or(0.0);
+        result.p90_latency_ms = latencies
+            .get(latencies.len() * 9 / 10)
+            .copied()
+            .unwrap_or(0.0);
 
         result
     }
@@ -1212,7 +1245,8 @@ fn run_multi_region_scenario(config: &MultiRegionClusterConfig) -> MultiRegionRe
         config.seed, config.duration_secs
     );
 
-    let mut cluster = MultiRegionClusterHandle::start(config.clone()).expect("cluster should start");
+    let mut cluster =
+        MultiRegionClusterHandle::start(config.clone()).expect("cluster should start");
 
     // Initialize test accounts
     let sender_ids: Vec<AccountId> = (0..4).map(|i| test_account_id(0xA0 + i as u8)).collect();
@@ -1253,7 +1287,10 @@ fn run_multi_region_scenario(config: &MultiRegionClusterConfig) -> MultiRegionRe
     }
 
     // Cooldown period
-    eprintln!("[T238] Starting cooldown period ({}s)", config.cooldown_secs);
+    eprintln!(
+        "[T238] Starting cooldown period ({}s)",
+        config.cooldown_secs
+    );
     let cooldown_end = Instant::now() + Duration::from_secs(config.cooldown_secs);
     while Instant::now() < cooldown_end {
         let ticks = cluster.step_with_latency(10);
@@ -1506,11 +1543,7 @@ fn test_t238_extended_7_validator_cluster() {
     );
 
     // Verify we actually used 7 validators
-    assert_eq!(
-        result.node_heights.len(),
-        7,
-        "Should have 7 validators"
-    );
+    assert_eq!(result.node_heights.len(), 7, "Should have 7 validators");
 }
 
 /// T238 Test 8: Stage B Parallel Execution Under Latency

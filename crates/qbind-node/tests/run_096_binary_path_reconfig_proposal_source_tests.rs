@@ -35,8 +35,8 @@ use tokio::time::timeout;
 
 use qbind_consensus::ids::ValidatorId;
 use qbind_node::binary_consensus_loop::{
-    derive_reconfig_proposal_from_cli_flag, spawn_binary_consensus_loop,
-    BinaryConsensusLoopConfig, BinaryReconfigProposalConfig, ReconfigProposalCliError,
+    derive_reconfig_proposal_from_cli_flag, spawn_binary_consensus_loop, BinaryConsensusLoopConfig,
+    BinaryReconfigProposalConfig, ReconfigProposalCliError,
 };
 use qbind_node::metrics::NodeMetrics;
 use qbind_node::storage::{ConsensusStorage, InMemoryConsensusStorage};
@@ -49,9 +49,8 @@ use qbind_node::storage::{ConsensusStorage, InMemoryConsensusStorage};
 /// invocation can install it on the engine.
 #[test]
 fn run_096_with_reconfig_proposal_records_intent() {
-    let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1).with_reconfig_proposal(
-        BinaryReconfigProposalConfig { target_epoch: 1 },
-    );
+    let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1)
+        .with_reconfig_proposal(BinaryReconfigProposalConfig { target_epoch: 1 });
     assert_eq!(
         cfg.reconfig_proposal,
         Some(BinaryReconfigProposalConfig { target_epoch: 1 })
@@ -217,8 +216,8 @@ fn run_096_cli_gate_default_is_none() {
 /// gate, before the engine ever sees it.
 #[test]
 fn run_096_cli_gate_refuses_zero() {
-    let err = derive_reconfig_proposal_from_cli_flag(Some(0), false)
-        .expect_err("0 must fail closed");
+    let err =
+        derive_reconfig_proposal_from_cli_flag(Some(0), false).expect_err("0 must fail closed");
     assert!(matches!(err, ReconfigProposalCliError::TargetEpochZero));
     // Display string must call out "fail-closed" so an operator can
     // grep the log line.

@@ -140,15 +140,21 @@ impl qbind_consensus::ConsensusProgressRecorder for NodeMetricsProgressRecorder 
     }
 
     fn record_qc_formed_with_latency(&self, latency: Duration) {
-        self.metrics.progress().record_qc_formed_with_latency(latency);
+        self.metrics
+            .progress()
+            .record_qc_formed_with_latency(latency);
     }
 
     fn record_vote_observed(&self, is_for_current_view: bool) {
-        self.metrics.progress().record_vote_observed(is_for_current_view);
+        self.metrics
+            .progress()
+            .record_vote_observed(is_for_current_view);
     }
 
     fn record_view_change(&self, from_view: u64, to_view: u64) {
-        self.metrics.progress().record_view_change(from_view, to_view);
+        self.metrics
+            .progress()
+            .record_view_change(from_view, to_view);
     }
 
     fn record_leader_change(&self) {
@@ -210,7 +216,6 @@ impl PeerConnectivitySource for P2pServicePeerConnectivity {
         self.inner.connected_peers()
     }
 }
-
 
 ///
 /// Matches `AsyncNodeRunner` defaults (100 ms). Long enough to keep CPU low
@@ -543,8 +548,7 @@ impl BinaryConsensusLoopConfig {
             max_ticks: None,
             restore_baseline: None,
             view_timeout_ticks: Some(DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_TICKS),
-            view_timeout_backoff_multiplier:
-                DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER,
+            view_timeout_backoff_multiplier: DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MULTIPLIER,
             view_timeout_max_ticks: DEFAULT_BINARY_CONSENSUS_VIEW_TIMEOUT_MAX_TICKS,
             periodic_snapshot: None,
             consensus_storage: None,
@@ -1301,11 +1305,7 @@ impl ViewTimeoutState {
     /// Pure function of `current_tick`, `last_progress_tick`, and
     /// `view_timeout_ticks`. Returns `false` when the primitive is
     /// disabled (`view_timeout_ticks = None`).
-    fn timeout_window_elapsed(
-        &self,
-        current_tick: u64,
-        view_timeout_ticks: Option<u64>,
-    ) -> bool {
+    fn timeout_window_elapsed(&self, current_tick: u64, view_timeout_ticks: Option<u64>) -> bool {
         match view_timeout_ticks {
             None => false,
             Some(n) => current_tick.saturating_sub(self.last_progress_tick) >= n,
@@ -1560,7 +1560,6 @@ impl ViewTimeoutBackoffState {
     }
 }
 
-
 ///
 /// Used directly by tests; the binary's `tokio::main` calls
 /// `spawn_binary_consensus_loop` which delegates here.
@@ -1723,9 +1722,20 @@ pub async fn run_binary_consensus_loop_with_io(
         cfg.num_validators,
         cfg.tick_interval.as_millis(),
         cfg.restore_baseline.is_some(),
-        if outbound_facade.is_some() { "p2p" } else { "none" },
-        if peer_connectivity.is_some() { "on" } else { "off" },
-        match (verification_ctx.as_ref(), verification_ctx.as_ref().and_then(|c| c.signer.as_ref())) {
+        if outbound_facade.is_some() {
+            "p2p"
+        } else {
+            "none"
+        },
+        if peer_connectivity.is_some() {
+            "on"
+        } else {
+            "off"
+        },
+        match (
+            verification_ctx.as_ref(),
+            verification_ctx.as_ref().and_then(|c| c.signer.as_ref())
+        ) {
             (Some(_), Some(_)) => "verify+sign",
             (Some(_), None) => "verify-only",
             (None, _) => "off",
@@ -1799,8 +1809,7 @@ pub async fn run_binary_consensus_loop_with_io(
     // pre-existing committed blocks (those are handled by Run 091/093
     // startup-validation, not Run 095).
     // ----------------------------------------------------------------------
-    let mut reconfig_detector =
-        BinaryReconfigDetector::new(engine.commit_log().len());
+    let mut reconfig_detector = BinaryReconfigDetector::new(engine.commit_log().len());
 
     // ----------------------------------------------------------------------
     // B9 + B10: late-peer-connect proposal/vote re-emission state.
@@ -1859,10 +1868,8 @@ pub async fn run_binary_consensus_loop_with_io(
     // current view (which already reflects any restore baseline) and
     // commit count so the very first tick after restore does not
     // trip the timeout window.
-    let mut view_timeout_state = ViewTimeoutState::new(
-        engine.current_view(),
-        engine.commit_log().len() as u64,
-    );
+    let mut view_timeout_state =
+        ViewTimeoutState::new(engine.current_view(), engine.commit_log().len() as u64);
     // Run 046: per-loop exponential-backoff pacer. Fail-closed on
     // invalid config: an operator who configures a multiplier of 0
     // or a max below base does NOT get silent fallback to the fixed
@@ -2458,8 +2465,10 @@ fn maybe_reemit_on_late_peer_connect(
     // the same view does not reset our notion of "newly connected" on
     // subsequent ticks.
     let current: HashSet<NodeId> = peer_connectivity.connected_peers().into_iter().collect();
-    let newly_connected_count =
-        current.iter().filter(|n| !last_known_peers.contains(*n)).count();
+    let newly_connected_count = current
+        .iter()
+        .filter(|n| !last_known_peers.contains(*n))
+        .count();
     *last_known_peers = current;
 
     // Gate 1: transition required.
@@ -2578,10 +2587,7 @@ fn forward_actions_to_facade(
             }
             ConsensusEngineAction::BroadcastVote(vote) => {
                 if let Err(e) = facade.broadcast_vote(&vote) {
-                    eprintln!(
-                        "[binary-consensus] outbound broadcast_vote failed: {:?}",
-                        e
-                    );
+                    eprintln!("[binary-consensus] outbound broadcast_vote failed: {:?}", e);
                 } else {
                     inbound_stats.outbound_votes_sent =
                         inbound_stats.outbound_votes_sent.saturating_add(1);
@@ -2657,9 +2663,7 @@ pub(crate) fn handle_inbound_consensus_msg(
         ConsensusNetMsg::Timeout(_)
         | ConsensusNetMsg::NewView(_)
         | ConsensusNetMsg::RestoreCatchupRequest(_)
-        | ConsensusNetMsg::RestoreCatchupResponse(_) => {
-            metrics.network().inc_inbound_other()
-        }
+        | ConsensusNetMsg::RestoreCatchupResponse(_) => metrics.network().inc_inbound_other(),
     }
 
     match msg {
@@ -2714,12 +2718,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                     }
                 }
                 Err(e) => {
-                    stats.inbound_decode_failures =
-                        stats.inbound_decode_failures.saturating_add(1);
-                    eprintln!(
-                        "[binary-consensus] inbound proposal decode failed: {:?}",
-                        e
-                    );
+                    stats.inbound_decode_failures = stats.inbound_decode_failures.saturating_add(1);
+                    eprintln!("[binary-consensus] inbound proposal decode failed: {:?}", e);
                 }
             }
         }
@@ -2754,8 +2754,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                     }
                 }
                 Err(e) => {
-                    stats.inbound_decode_failures =
-                        stats.inbound_decode_failures.saturating_add(1);
+                    stats.inbound_decode_failures = stats.inbound_decode_failures.saturating_add(1);
                     eprintln!("[binary-consensus] inbound vote decode failed: {:?}", e);
                 }
             }
@@ -2794,8 +2793,7 @@ pub(crate) fn handle_inbound_consensus_msg(
             // several orders of magnitude above the true upper bound
             // for these messages; see `MAX_INBOUND_TIMEOUT_FRAME_BYTES`.
             if bytes.len() > MAX_INBOUND_TIMEOUT_FRAME_BYTES {
-                stats.inbound_decode_failures =
-                    stats.inbound_decode_failures.saturating_add(1);
+                stats.inbound_decode_failures = stats.inbound_decode_failures.saturating_add(1);
                 stats.view_timeout_decode_failures =
                     stats.view_timeout_decode_failures.saturating_add(1);
                 eprintln!(
@@ -2842,9 +2840,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                             .saturating_add(1);
                         match res {
                             Ok(()) => {
-                                stats.inbound_timeout_verify_accepted = stats
-                                    .inbound_timeout_verify_accepted
-                                    .saturating_add(1);
+                                stats.inbound_timeout_verify_accepted =
+                                    stats.inbound_timeout_verify_accepted.saturating_add(1);
                             }
                             Err(e) => {
                                 stats.inbound_timeout_verify_rejected_total = stats
@@ -2867,9 +2864,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.inbound_timeouts_engine_accepted =
                                 stats.inbound_timeouts_engine_accepted.saturating_add(1);
                             if verification_ctx.is_some() {
-                                stats.inbound_timeout_engine_accepted = stats
-                                    .inbound_timeout_engine_accepted
-                                    .saturating_add(1);
+                                stats.inbound_timeout_engine_accepted =
+                                    stats.inbound_timeout_engine_accepted.saturating_add(1);
                             }
                             if let Some(tc) = maybe_tc {
                                 apply_local_tc_and_broadcast_new_view(
@@ -2885,9 +2881,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.view_timeout_engine_rejects =
                                 stats.view_timeout_engine_rejects.saturating_add(1);
                             if verification_ctx.is_some() {
-                                stats.inbound_timeout_engine_rejected = stats
-                                    .inbound_timeout_engine_rejected
-                                    .saturating_add(1);
+                                stats.inbound_timeout_engine_rejected =
+                                    stats.inbound_timeout_engine_rejected.saturating_add(1);
                             }
                             eprintln!(
                                 "[binary-consensus] B14: inbound timeout rejected by engine: {:?}",
@@ -2897,8 +2892,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                     }
                 }
                 Err(e) => {
-                    stats.inbound_decode_failures =
-                        stats.inbound_decode_failures.saturating_add(1);
+                    stats.inbound_decode_failures = stats.inbound_decode_failures.saturating_add(1);
                     stats.view_timeout_decode_failures =
                         stats.view_timeout_decode_failures.saturating_add(1);
                     eprintln!(
@@ -2924,8 +2918,7 @@ pub(crate) fn handle_inbound_consensus_msg(
             // Defense-in-depth size cap (see Timeout arm above). Same
             // ceiling for `TimeoutCertificate` payloads.
             if bytes.len() > MAX_INBOUND_TIMEOUT_FRAME_BYTES {
-                stats.inbound_decode_failures =
-                    stats.inbound_decode_failures.saturating_add(1);
+                stats.inbound_decode_failures = stats.inbound_decode_failures.saturating_add(1);
                 stats.view_timeout_decode_failures =
                     stats.view_timeout_decode_failures.saturating_add(1);
                 eprintln!(
@@ -3007,9 +3000,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                             .saturating_add(1);
                         match res {
                             Ok(_) => {
-                                stats.inbound_newview_verify_accepted = stats
-                                    .inbound_newview_verify_accepted
-                                    .saturating_add(1);
+                                stats.inbound_newview_verify_accepted =
+                                    stats.inbound_newview_verify_accepted.saturating_add(1);
                             }
                             Err(e) => {
                                 stats.inbound_newview_verify_rejected_total = stats
@@ -3032,18 +3024,15 @@ pub(crate) fn handle_inbound_consensus_msg(
                     match engine.on_timeout_certificate(&tc) {
                         Ok(to_view) => {
                             if to_view > from_view {
-                                stats.inbound_new_views_engine_accepted = stats
-                                    .inbound_new_views_engine_accepted
-                                    .saturating_add(1);
+                                stats.inbound_new_views_engine_accepted =
+                                    stats.inbound_new_views_engine_accepted.saturating_add(1);
                                 stats.view_timeout_advances =
                                     stats.view_timeout_advances.saturating_add(1);
                                 if verification_ctx.is_some() {
-                                    stats.inbound_newview_engine_accepted = stats
-                                        .inbound_newview_engine_accepted
-                                        .saturating_add(1);
-                                    stats.view_advances_due_to_verified_tc = stats
-                                        .view_advances_due_to_verified_tc
-                                        .saturating_add(1);
+                                    stats.inbound_newview_engine_accepted =
+                                        stats.inbound_newview_engine_accepted.saturating_add(1);
+                                    stats.view_advances_due_to_verified_tc =
+                                        stats.view_advances_due_to_verified_tc.saturating_add(1);
                                 }
                                 eprintln!(
                                     "[binary-consensus] B14: NewView advanced view {} -> {}",
@@ -3055,9 +3044,8 @@ pub(crate) fn handle_inbound_consensus_msg(
                             stats.view_timeout_engine_rejects =
                                 stats.view_timeout_engine_rejects.saturating_add(1);
                             if verification_ctx.is_some() {
-                                stats.inbound_newview_engine_rejected = stats
-                                    .inbound_newview_engine_rejected
-                                    .saturating_add(1);
+                                stats.inbound_newview_engine_rejected =
+                                    stats.inbound_newview_engine_rejected.saturating_add(1);
                             }
                             eprintln!(
                                 "[binary-consensus] B14: NewView rejected by engine: {:?}",
@@ -3067,8 +3055,7 @@ pub(crate) fn handle_inbound_consensus_msg(
                     }
                 }
                 Err(e) => {
-                    stats.inbound_decode_failures =
-                        stats.inbound_decode_failures.saturating_add(1);
+                    stats.inbound_decode_failures = stats.inbound_decode_failures.saturating_add(1);
                     stats.view_timeout_decode_failures =
                         stats.view_timeout_decode_failures.saturating_add(1);
                     eprintln!(
@@ -3373,8 +3360,7 @@ fn maybe_emit_view_timeout(
             formed_tc = maybe_tc;
         }
         Err(e) => {
-            stats.view_timeout_engine_rejects =
-                stats.view_timeout_engine_rejects.saturating_add(1);
+            stats.view_timeout_engine_rejects = stats.view_timeout_engine_rejects.saturating_add(1);
             eprintln!(
                 "[binary-consensus] B14: local timeout ingest rejected by engine: {:?}",
                 e
@@ -3431,14 +3417,12 @@ fn apply_local_tc_and_broadcast_new_view(
     outbound: Option<&dyn ConsensusNetworkFacade>,
     verification_active: bool,
 ) {
-    stats.timeout_certificates_formed =
-        stats.timeout_certificates_formed.saturating_add(1);
+    stats.timeout_certificates_formed = stats.timeout_certificates_formed.saturating_add(1);
     let from_view = engine.current_view();
     match engine.on_timeout_certificate(tc) {
         Ok(to_view) => {
             if to_view > from_view {
-                stats.view_timeout_advances =
-                    stats.view_timeout_advances.saturating_add(1);
+                stats.view_timeout_advances = stats.view_timeout_advances.saturating_add(1);
                 if verification_active {
                     // Run 030: a locally-formed TC that the engine
                     // accepted carries the same `signed_timeouts`
@@ -3459,8 +3443,7 @@ fn apply_local_tc_and_broadcast_new_view(
             }
         }
         Err(e) => {
-            stats.view_timeout_engine_rejects =
-                stats.view_timeout_engine_rejects.saturating_add(1);
+            stats.view_timeout_engine_rejects = stats.view_timeout_engine_rejects.saturating_add(1);
             eprintln!(
                 "[binary-consensus] B14: local TC apply rejected by engine: {:?}",
                 e
@@ -3473,13 +3456,10 @@ fn apply_local_tc_and_broadcast_new_view(
     };
     match bincode::serialize(tc) {
         Ok(bytes) => {
-            if let Err(e) =
-                facade.broadcast_consensus_msg(&ConsensusNetMsg::NewView(bytes))
-            {
+            if let Err(e) = facade.broadcast_consensus_msg(&ConsensusNetMsg::NewView(bytes)) {
                 eprintln!("[binary-consensus] B14: NewView broadcast failed: {:?}", e);
             } else {
-                stats.outbound_new_views_sent =
-                    stats.outbound_new_views_sent.saturating_add(1);
+                stats.outbound_new_views_sent = stats.outbound_new_views_sent.saturating_add(1);
             }
         }
         Err(e) => {
@@ -3508,14 +3488,12 @@ fn inc_timeout_reject_reason(
                 .saturating_add(1);
         }
         TimeoutVerifyError::MissingKey(_) => {
-            stats.inbound_timeout_rejected_missing_key = stats
-                .inbound_timeout_rejected_missing_key
-                .saturating_add(1);
+            stats.inbound_timeout_rejected_missing_key =
+                stats.inbound_timeout_rejected_missing_key.saturating_add(1);
         }
         TimeoutVerifyError::SuiteMismatch { .. } => {
-            stats.inbound_timeout_rejected_wrong_suite = stats
-                .inbound_timeout_rejected_wrong_suite
-                .saturating_add(1);
+            stats.inbound_timeout_rejected_wrong_suite =
+                stats.inbound_timeout_rejected_wrong_suite.saturating_add(1);
         }
         TimeoutVerifyError::UnsupportedSuite { .. } => {
             stats.inbound_timeout_rejected_unsupported_suite = stats
@@ -3573,9 +3551,8 @@ fn inc_newview_reject_reason(
                 .saturating_add(1);
         }
         TimeoutVerifyError::MixedView { .. } => {
-            stats.inbound_newview_rejected_mixed_view = stats
-                .inbound_newview_rejected_mixed_view
-                .saturating_add(1);
+            stats.inbound_newview_rejected_mixed_view =
+                stats.inbound_newview_rejected_mixed_view.saturating_add(1);
         }
         TimeoutVerifyError::InsufficientQuorum { .. } => {
             stats.inbound_newview_rejected_insufficient_quorum = stats
@@ -3588,14 +3565,12 @@ fn inc_newview_reject_reason(
                 .saturating_add(1);
         }
         TimeoutVerifyError::MissingKey(_) => {
-            stats.inbound_newview_rejected_missing_key = stats
-                .inbound_newview_rejected_missing_key
-                .saturating_add(1);
+            stats.inbound_newview_rejected_missing_key =
+                stats.inbound_newview_rejected_missing_key.saturating_add(1);
         }
         TimeoutVerifyError::SuiteMismatch { .. } => {
-            stats.inbound_newview_rejected_wrong_suite = stats
-                .inbound_newview_rejected_wrong_suite
-                .saturating_add(1);
+            stats.inbound_newview_rejected_wrong_suite =
+                stats.inbound_newview_rejected_wrong_suite.saturating_add(1);
         }
         TimeoutVerifyError::UnsupportedSuite { .. } => {
             stats.inbound_newview_rejected_unsupported_suite = stats
@@ -3730,12 +3705,7 @@ fn handle_restore_catchup_response(
         // Even on an empty response, evaluate the transition condition:
         // if the peer reports being at or below our committed height we
         // have nothing more to catch up to from this peer.
-        evaluate_restore_mode_transition(
-            engine,
-            stats,
-            restore_mode,
-            responder_committed_height,
-        );
+        evaluate_restore_mode_transition(engine, stats, restore_mode, responder_committed_height);
         return;
     }
     if engine.committed_height() != Some(resp.request_from_height)
@@ -3753,12 +3723,7 @@ fn handle_restore_catchup_response(
         // transition condition only against the responder's reported
         // anchor (peer-progress observation), not against our local
         // unchanged height.
-        evaluate_restore_mode_transition(
-            engine,
-            stats,
-            restore_mode,
-            responder_committed_height,
-        );
+        evaluate_restore_mode_transition(engine, stats, restore_mode, responder_committed_height);
         return;
     }
 
@@ -3965,8 +3930,7 @@ impl std::fmt::Display for EpochPersistenceFailed {
                  block ID was supplied — the binary-path consensus loop must fail \
                  closed rather than persist a zero reconfig_block_id marker for a \
                  real transition.",
-                self.previous_epoch,
-                self.target_epoch,
+                self.previous_epoch, self.target_epoch,
             ),
         }
     }
@@ -4309,17 +4273,13 @@ pub fn maybe_transition_epoch_from_committed_block(
             // on this loop — treat it as a normal block (no-op).
             // This is the safe default: we only act on observed
             // canonical reconfig metadata.
-            detector.next_commit_index = detector
-                .next_commit_index
-                .saturating_add(1);
+            detector.next_commit_index = detector.next_commit_index.saturating_add(1);
             continue;
         };
 
         if header.payload_kind != qbind_wire::PAYLOAD_KIND_RECONFIG {
             // Ordinary committed block — no epoch change.
-            detector.next_commit_index = detector
-                .next_commit_index
-                .saturating_add(1);
+            detector.next_commit_index = detector.next_commit_index.saturating_add(1);
             continue;
         }
 
@@ -4344,8 +4304,7 @@ pub fn maybe_transition_epoch_from_committed_block(
         // we reuse `BasicHotStuffEngine::transition_to_epoch` — we
         // do NOT redesign HotStuff commit rules, epoch semantics,
         // or validator-set rotation.
-        let new_epoch_id =
-            qbind_consensus::validator_set::EpochId::new(header.next_epoch);
+        let new_epoch_id = qbind_consensus::validator_set::EpochId::new(header.next_epoch);
         let same_validator_set = engine.validators().clone();
         if let Err(e) = engine.transition_to_epoch(new_epoch_id, same_validator_set) {
             return Err(ReconfigTransitionError::EngineRejected {
@@ -4371,9 +4330,7 @@ pub fn maybe_transition_epoch_from_committed_block(
             header.next_epoch,
         );
 
-        detector.next_commit_index = detector
-            .next_commit_index
-            .saturating_add(1);
+        detector.next_commit_index = detector.next_commit_index.saturating_add(1);
     }
 
     Ok(new_epoch_observed)
@@ -4637,7 +4594,9 @@ pub fn spawn_binary_consensus_loop(
     JoinHandle<BinaryConsensusLoopProgress>,
     Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
 ) {
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let progress_for_task = progress.clone();
     let handle = tokio::spawn(async move {
         run_binary_consensus_loop(cfg, shutdown_rx, progress_for_task, metrics).await
@@ -4663,17 +4622,13 @@ pub fn spawn_binary_consensus_loop_with_io(
     JoinHandle<BinaryConsensusLoopProgress>,
     Arc<parking_lot::Mutex<BinaryConsensusLoopProgress>>,
 ) {
-    let progress = Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+    let progress = Arc::new(parking_lot::Mutex::new(
+        BinaryConsensusLoopProgress::default(),
+    ));
     let progress_for_task = progress.clone();
     let handle = tokio::spawn(async move {
-        run_binary_consensus_loop_with_io(
-            cfg,
-            shutdown_rx,
-            progress_for_task,
-            metrics,
-            Some(io),
-        )
-        .await
+        run_binary_consensus_loop_with_io(cfg, shutdown_rx, progress_for_task, metrics, Some(io))
+            .await
     });
     (handle, progress)
 }
@@ -4729,8 +4684,7 @@ mod tests {
     #[tokio::test]
     async fn periodic_snapshot_trigger_does_not_fire_without_snapshot_dir() {
         let data = TempDir::new().unwrap();
-        let (snapshot_config, runtime, chain_id) =
-            vm_v0_periodic_runtime(data.path(), None, 4, 3);
+        let (snapshot_config, runtime, chain_id) = vm_v0_periodic_runtime(data.path(), None, 4, 3);
         let periodic = BinaryPeriodicSnapshotConfig::new(snapshot_config, Some(runtime), chain_id);
         let metrics = Arc::new(NodeMetrics::new());
         let mut last_height = None;
@@ -4886,8 +4840,9 @@ mod tests {
             .with_max_ticks(50);
 
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
         let final_progress =
             run_binary_consensus_loop(cfg, shutdown_rx, progress.clone(), metrics).await;
@@ -4910,8 +4865,9 @@ mod tests {
         let cfg = BinaryConsensusLoopConfig::new(ValidatorId::new(0), 1)
             .with_tick_interval(Duration::from_millis(10));
         let (shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
 
         let handle = tokio::spawn({
@@ -4929,7 +4885,10 @@ mod tests {
             .expect("loop did not exit within 2s of shutdown")
             .expect("task panicked");
 
-        assert!(final_progress.ticks > 0, "loop should have ticked at least once");
+        assert!(
+            final_progress.ticks > 0,
+            "loop should have ticked at least once"
+        );
     }
 
     #[test]
@@ -4948,8 +4907,9 @@ mod tests {
             .with_max_ticks(50);
 
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
 
         // Sanity: pre-run all consensus-relevant counters/gauges are zero.
@@ -4961,13 +4921,9 @@ mod tests {
         assert_eq!(metrics.view_lag().highest_seen_view(), 0);
         assert_eq!(metrics.progress().view_changes_total(), 0);
 
-        let final_progress = run_binary_consensus_loop(
-            cfg,
-            shutdown_rx,
-            progress.clone(),
-            Arc::clone(&metrics),
-        )
-        .await;
+        let final_progress =
+            run_binary_consensus_loop(cfg, shutdown_rx, progress.clone(), Arc::clone(&metrics))
+                .await;
 
         // Ticks must be reflected.
         assert_eq!(
@@ -5030,8 +4986,9 @@ mod tests {
             .with_tick_interval(Duration::from_secs(60));
 
         let (shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
 
         let handle = {
@@ -5101,8 +5058,9 @@ mod tests {
             .with_restore_baseline(baseline);
 
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
         let final_progress =
             run_binary_consensus_loop(cfg, shutdown_rx, progress.clone(), metrics).await;
@@ -5144,11 +5102,11 @@ mod tests {
         assert!(cfg.restore_baseline.is_none());
 
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
-        let final_progress =
-            run_binary_consensus_loop(cfg, shutdown_rx, progress, metrics).await;
+        let final_progress = run_binary_consensus_loop(cfg, shutdown_rx, progress, metrics).await;
 
         // 20 ticks at view 0 must keep the committed height firmly below
         // any plausible snapshot height. We use 100 as an order-of-magnitude
@@ -5198,7 +5156,10 @@ mod tests {
     #[test]
     fn restore_mode_inactive_without_baseline() {
         let mut s = RestoreCatchupModeState::from_config(None);
-        assert!(!s.is_active(), "no baseline ⇒ never in restore-catchup mode");
+        assert!(
+            !s.is_active(),
+            "no baseline ⇒ never in restore-catchup mode"
+        );
         // Even if a peer reports a higher anchor, with no baseline we are
         // not in catchup mode and never flip.
         let exited = s.maybe_exit_after_response(Some(10), Some(10));
@@ -5249,7 +5210,10 @@ mod tests {
         // Peer at 5, local at 5 — both equal to the baseline. We have
         // not made any strict progress above the baseline.
         assert_eq!(s.maybe_exit_after_response(Some(5), Some(5)), None);
-        assert!(s.is_active(), "must not exit at exactly the baseline height");
+        assert!(
+            s.is_active(),
+            "must not exit at exactly the baseline height"
+        );
 
         // Now we advance one block above the baseline AND peer is at-or-below.
         assert_eq!(s.maybe_exit_after_response(Some(5), Some(6)), Some(6));
@@ -5465,17 +5429,10 @@ mod tests {
             fn broadcast_vote(&self, _v: &Vote) -> Result<(), NetworkError> {
                 Ok(())
             }
-            fn send_vote_to(
-                &self,
-                _to: ValidatorId,
-                _v: &Vote,
-            ) -> Result<(), NetworkError> {
+            fn send_vote_to(&self, _to: ValidatorId, _v: &Vote) -> Result<(), NetworkError> {
                 Ok(())
             }
-            fn broadcast_consensus_msg(
-                &self,
-                _m: &ConsensusNetMsg,
-            ) -> Result<(), NetworkError> {
+            fn broadcast_consensus_msg(&self, _m: &ConsensusNetMsg) -> Result<(), NetworkError> {
                 *self.broadcasts.lock().unwrap() += 1;
                 Ok(())
             }
@@ -5791,7 +5748,13 @@ mod tests {
         // Below window: no emission.
         let mut __b46_e = ViewTimeoutBackoffState::no_growth(Some(2));
         maybe_emit_view_timeout(
-            &mut engine, &mut view_state, 1, &mut __b46_e, false, Some(&facade), &mut stats,
+            &mut engine,
+            &mut view_state,
+            1,
+            &mut __b46_e,
+            false,
+            Some(&facade),
+            &mut stats,
             None,
         );
         assert_eq!(stats.view_timeouts_emitted, 0);
@@ -5799,7 +5762,13 @@ mod tests {
         // At window: emit, self-ingest, TC forms (1 ≥ 2/3 of 1 = 1),
         // engine advances view, NewView broadcast.
         maybe_emit_view_timeout(
-            &mut engine, &mut view_state, 2, &mut __b46_e, false, Some(&facade), &mut stats,
+            &mut engine,
+            &mut view_state,
+            2,
+            &mut __b46_e,
+            false,
+            Some(&facade),
+            &mut stats,
             None,
         );
         assert_eq!(stats.view_timeouts_emitted, 1);
@@ -5836,7 +5805,13 @@ mod tests {
 
         let mut __b46_f = ViewTimeoutBackoffState::no_growth(Some(2));
         maybe_emit_view_timeout(
-            &mut engine, &mut view_state, 2, &mut __b46_f, false, Some(&facade), &mut stats,
+            &mut engine,
+            &mut view_state,
+            2,
+            &mut __b46_f,
+            false,
+            Some(&facade),
+            &mut stats,
             None,
         );
         update_binary_view_timeout_metrics(&metrics, &stats);
@@ -5925,7 +5900,11 @@ mod tests {
         let tc: TimeoutCertificate<[u8; 32]> = TimeoutCertificate::new(
             15,
             None,
-            vec![ValidatorId::new(1), ValidatorId::new(2), ValidatorId::new(3)],
+            vec![
+                ValidatorId::new(1),
+                ValidatorId::new(2),
+                ValidatorId::new(3),
+            ],
         );
         let bytes = bincode::serialize(&tc).unwrap();
 
@@ -6163,16 +6142,13 @@ mod tests {
             .with_tick_interval(Duration::from_millis(2))
             .with_max_ticks(60); // > default view_timeout_ticks (50)
         let (_shutdown_tx, shutdown_rx) = watch::channel(());
-        let progress =
-            Arc::new(parking_lot::Mutex::new(BinaryConsensusLoopProgress::default()));
+        let progress = Arc::new(parking_lot::Mutex::new(
+            BinaryConsensusLoopProgress::default(),
+        ));
         let metrics = Arc::new(NodeMetrics::new());
-        let final_progress = run_binary_consensus_loop(
-            cfg,
-            shutdown_rx,
-            progress.clone(),
-            Arc::clone(&metrics),
-        )
-        .await;
+        let final_progress =
+            run_binary_consensus_loop(cfg, shutdown_rx, progress.clone(), Arc::clone(&metrics))
+                .await;
         // QC-driven progression must have occurred.
         assert!(final_progress.proposals_emitted > 0);
         assert!(final_progress.current_view > 0);
@@ -6432,8 +6408,14 @@ mod tests {
                 None,
             );
         }
-        assert_eq!(stats.view_timeouts_emitted, 1, "first timeout emitted at base");
-        assert!(engine.current_view() > from_view, "TC self-fire advanced view");
+        assert_eq!(
+            stats.view_timeouts_emitted, 1,
+            "first timeout emitted at base"
+        );
+        assert!(
+            engine.current_view() > from_view,
+            "TC self-fire advanced view"
+        );
         assert_eq!(backoff.threshold(), Some(8), "backoff doubled after emit");
         assert_eq!(backoff.current_level(), 1);
         assert_eq!(backoff.backoff_increases_total(), 1);
@@ -6475,7 +6457,10 @@ mod tests {
             &mut stats,
             None,
         );
-        assert_eq!(stats.view_timeouts_emitted, 2, "second timeout fires at doubled threshold");
+        assert_eq!(
+            stats.view_timeouts_emitted, 2,
+            "second timeout fires at doubled threshold"
+        );
         assert_eq!(backoff.threshold(), Some(16), "backoff doubled again");
         assert_eq!(backoff.current_level(), 2);
         assert_eq!(backoff.backoff_increases_total(), 2);
@@ -6590,12 +6575,13 @@ mod tests {
         assert!(out.contains("qbind_consensus_view_timeout_max_cap_hits_total 0"));
     }
 
-
     mod run030 {
         use super::*;
         use crate::metrics::NodeMetrics;
         use crate::validator_signer::{LocalKeySigner, ValidatorSigner};
-        use qbind_consensus::crypto_verifier::{ConsensusSigBackendRegistry, SimpleBackendRegistry};
+        use qbind_consensus::crypto_verifier::{
+            ConsensusSigBackendRegistry, SimpleBackendRegistry,
+        };
         use qbind_consensus::ids::ValidatorId;
         use qbind_consensus::key_registry::SuiteAwareValidatorKeyProvider;
         use qbind_consensus::network::NetworkError;
@@ -6617,10 +6603,7 @@ mod tests {
             keys: HashMap<ValidatorId, (ConsensusSigSuiteId, Vec<u8>)>,
         }
         impl SuiteAwareValidatorKeyProvider for TestKeyProvider {
-            fn get_suite_and_key(
-                &self,
-                id: ValidatorId,
-            ) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
+            fn get_suite_and_key(&self, id: ValidatorId) -> Option<(ConsensusSigSuiteId, Vec<u8>)> {
                 self.keys.get(&id).cloned()
             }
         }
@@ -6677,8 +6660,7 @@ mod tests {
                     .get(&id)
                     .expect("signer key present")
                     .clone();
-                Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk))
-                    as Arc<dyn ValidatorSigner>
+                Arc::new(LocalKeySigner::new(id, TEST_SUITE_U16, sk)) as Arc<dyn ValidatorSigner>
             });
             TimeoutVerificationContext {
                 validators: fixture.validators.clone(),
@@ -6723,26 +6705,16 @@ mod tests {
             }
         }
         impl ConsensusNetworkFacade for CapturingFacade {
-            fn send_vote_to(
-                &self,
-                _to: ValidatorId,
-                _v: &Vote,
-            ) -> Result<(), NetworkError> {
+            fn send_vote_to(&self, _to: ValidatorId, _v: &Vote) -> Result<(), NetworkError> {
                 Ok(())
             }
             fn broadcast_vote(&self, _v: &Vote) -> Result<(), NetworkError> {
                 Ok(())
             }
-            fn broadcast_proposal(
-                &self,
-                _p: &BlockProposal,
-            ) -> Result<(), NetworkError> {
+            fn broadcast_proposal(&self, _p: &BlockProposal) -> Result<(), NetworkError> {
                 Ok(())
             }
-            fn broadcast_consensus_msg(
-                &self,
-                msg: &ConsensusNetMsg,
-            ) -> Result<(), NetworkError> {
+            fn broadcast_consensus_msg(&self, msg: &ConsensusNetMsg) -> Result<(), NetworkError> {
                 self.captured.lock().unwrap().push(msg.clone());
                 Ok(())
             }
@@ -6801,7 +6773,11 @@ mod tests {
                 ctx.backend_registry.as_ref(),
                 QBIND_DEVNET_CHAIN_ID,
             );
-            assert!(res.is_ok(), "broadcasted timeout should self-verify: {:?}", res);
+            assert!(
+                res.is_ok(),
+                "broadcasted timeout should self-verify: {:?}",
+                res
+            );
         }
 
         #[test]
@@ -7023,10 +6999,7 @@ mod tests {
             );
         }
 
-        fn build_valid_tc(
-            fixture: &Fixture,
-            timeout_view: u64,
-        ) -> TimeoutCertificate<[u8; 32]> {
+        fn build_valid_tc(fixture: &Fixture, timeout_view: u64) -> TimeoutCertificate<[u8; 32]> {
             let signed: Vec<TimeoutMsg<[u8; 32]>> = (0u64..3)
                 .map(|i| signed_timeout(timeout_view, ValidatorId(i), &fixture.sks))
                 .collect();
@@ -7235,12 +7208,7 @@ mod tests {
                 block_id: [0xab; 32],
                 signers: vec![],
             };
-            let tc = TimeoutCertificate::new_with_evidence(
-                0,
-                Some(bogus_qc),
-                signers,
-                signed,
-            );
+            let tc = TimeoutCertificate::new_with_evidence(0, Some(bogus_qc), signers, signed);
             let view_before = engine.current_view();
             deliver_newview(&mut engine, &mut stats, Some(&ctx), &tc, &metrics);
 

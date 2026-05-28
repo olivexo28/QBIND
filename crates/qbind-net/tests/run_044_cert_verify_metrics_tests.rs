@@ -210,26 +210,38 @@ const UNREGISTERED_SIG_SUITE: u8 = 99;
 fn provider_ok_sig() -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(DummyKem { suite_id: KEM_SUITE }))
+            .with_kem_suite(Arc::new(DummyKem {
+                suite_id: KEM_SUITE,
+            }))
             .with_aead_suite(Arc::new(DummyAead {
                 suite_id: AEAD_SUITE,
             }))
-            .with_signature_suite(Arc::new(AlwaysOkSig { suite_id: SIG_SUITE })),
+            .with_signature_suite(Arc::new(AlwaysOkSig {
+                suite_id: SIG_SUITE,
+            })),
     )
 }
 
 fn provider_fail_sig() -> Arc<StaticCryptoProvider> {
     Arc::new(
         StaticCryptoProvider::new()
-            .with_kem_suite(Arc::new(DummyKem { suite_id: KEM_SUITE }))
+            .with_kem_suite(Arc::new(DummyKem {
+                suite_id: KEM_SUITE,
+            }))
             .with_aead_suite(Arc::new(DummyAead {
                 suite_id: AEAD_SUITE,
             }))
-            .with_signature_suite(Arc::new(AlwaysFailSig { suite_id: SIG_SUITE })),
+            .with_signature_suite(Arc::new(AlwaysFailSig {
+                suite_id: SIG_SUITE,
+            })),
     )
 }
 
-fn make_cert(validator_id: [u8; 32], root_key_id: [u8; 32], sig_suite_id: u8) -> NetworkDelegationCert {
+fn make_cert(
+    validator_id: [u8; 32],
+    root_key_id: [u8; 32],
+    sig_suite_id: u8,
+) -> NetworkDelegationCert {
     NetworkDelegationCert {
         version: 1,
         validator_id,
@@ -276,10 +288,7 @@ fn server_cfg(
     }
 }
 
-fn client_init_with_cert(
-    validator_id: [u8; 32],
-    client_cert_bytes: Vec<u8>,
-) -> ClientInit {
+fn client_init_with_cert(validator_id: [u8; 32], client_cert_bytes: Vec<u8>) -> ClientInit {
     ClientInit {
         version: PROTOCOL_VERSION_2,
         kem_suite_id: KEM_SUITE,
@@ -304,7 +313,9 @@ fn run_listener(
     crypto: Arc<StaticCryptoProvider>,
 ) -> Result<(), NetError> {
     let mut server = ServerHandshake::new(cfg, [1u8; 32]);
-    server.handle_client_init(crypto.as_ref(), &init).map(|_| ())
+    server
+        .handle_client_init(crypto.as_ref(), &init)
+        .map(|_| ())
 }
 
 #[test]
@@ -315,14 +326,23 @@ fn listener_accepted_increments_accepted_once() {
     let trusted = TrustedClientRoots::new(|_| Some(vec![0xAAu8; 32]));
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let cfg = server_cfg(provider.clone(), validator_id, Some(trusted), Some(dyn_sink));
+    let cfg = server_cfg(
+        provider.clone(),
+        validator_id,
+        Some(trusted),
+        Some(dyn_sink),
+    );
 
     let client_cert = encode_cert(&make_cert(validator_id, [9u8; 32], SIG_SUITE));
     let init = client_init_with_cert(validator_id, client_cert);
 
     // The downstream KEM decapsulation will succeed for DummyKem.
     let result = run_listener(cfg, init, provider);
-    assert!(result.is_ok(), "listener handshake should succeed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "listener handshake should succeed: {:?}",
+        result
+    );
 
     let (accepted, ur, ws, bs, vm, m, e) = sink.snapshot();
     assert_eq!(accepted, 1, "accepted must increment exactly once");
@@ -338,7 +358,12 @@ fn listener_unknown_root_increments_unknown_root_once() {
     let trusted = TrustedClientRoots::new(|_| None);
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let cfg = server_cfg(provider.clone(), validator_id, Some(trusted), Some(dyn_sink));
+    let cfg = server_cfg(
+        provider.clone(),
+        validator_id,
+        Some(trusted),
+        Some(dyn_sink),
+    );
 
     let client_cert = encode_cert(&make_cert(validator_id, [9u8; 32], SIG_SUITE));
     let init = client_init_with_cert(validator_id, client_cert);
@@ -364,12 +389,16 @@ fn listener_wrong_suite_increments_wrong_suite_once() {
     let trusted = TrustedClientRoots::new(|_| Some(vec![0xAAu8; 32]));
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let cfg = server_cfg(provider.clone(), validator_id, Some(trusted), Some(dyn_sink));
+    let cfg = server_cfg(
+        provider.clone(),
+        validator_id,
+        Some(trusted),
+        Some(dyn_sink),
+    );
 
     // Cert claims an UNREGISTERED signature suite id → `signature_suite`
     // returns None → `verify_delegation_cert` yields `UnsupportedSuite`.
-    let client_cert =
-        encode_cert(&make_cert(validator_id, [9u8; 32], UNREGISTERED_SIG_SUITE));
+    let client_cert = encode_cert(&make_cert(validator_id, [9u8; 32], UNREGISTERED_SIG_SUITE));
     let init = client_init_with_cert(validator_id, client_cert);
 
     let err = run_listener(cfg, init, provider).expect_err("must fail closed");
@@ -395,7 +424,12 @@ fn listener_bad_signature_increments_bad_signature_once() {
     let trusted = TrustedClientRoots::new(|_| Some(vec![0xAAu8; 32]));
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let cfg = server_cfg(provider.clone(), validator_id, Some(trusted), Some(dyn_sink));
+    let cfg = server_cfg(
+        provider.clone(),
+        validator_id,
+        Some(trusted),
+        Some(dyn_sink),
+    );
 
     let client_cert = encode_cert(&make_cert(validator_id, [9u8; 32], SIG_SUITE));
     let init = client_init_with_cert(validator_id, client_cert);
@@ -421,7 +455,12 @@ fn listener_malformed_cert_increments_malformed_once() {
     let trusted = TrustedClientRoots::new(|_| Some(vec![0xAAu8; 32]));
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let cfg = server_cfg(provider.clone(), validator_id, Some(trusted), Some(dyn_sink));
+    let cfg = server_cfg(
+        provider.clone(),
+        validator_id,
+        Some(trusted),
+        Some(dyn_sink),
+    );
 
     // Send completely malformed cert bytes that cannot decode.
     let init = client_init_with_cert(validator_id, vec![0xFFu8; 3]);
@@ -514,7 +553,11 @@ fn dialer_accepted_increments_accepted_once() {
     let server_cert = encode_cert(&make_cert(validator_id, [9u8; 32], SIG_SUITE));
 
     let result = run_dialer_cert_verify(provider, Some(dyn_sink), server_cert, validator_id);
-    assert!(result.is_ok(), "dialer cert-verify should succeed: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "dialer cert-verify should succeed: {:?}",
+        result
+    );
 
     let (accepted, ur, ws, bs, vm, m, e) = sink.snapshot();
     assert_eq!(accepted, 1, "accepted must increment exactly once");
@@ -532,7 +575,10 @@ fn dialer_malformed_cert_increments_malformed_once() {
     let err = run_dialer_cert_verify(provider, Some(dyn_sink), vec![0xFF; 3], validator_id)
         .expect_err("must fail closed");
     assert!(
-        matches!(err, NetError::KeySchedule("failed to parse delegation cert")),
+        matches!(
+            err,
+            NetError::KeySchedule("failed to parse delegation cert")
+        ),
         "wrong error variant: {:?}",
         err
     );
@@ -549,8 +595,7 @@ fn dialer_wrong_suite_increments_wrong_suite_once() {
     let sink = Arc::new(CountingSink::default());
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
 
-    let server_cert =
-        encode_cert(&make_cert(validator_id, [9u8; 32], UNREGISTERED_SIG_SUITE));
+    let server_cert = encode_cert(&make_cert(validator_id, [9u8; 32], UNREGISTERED_SIG_SUITE));
 
     let err = run_dialer_cert_verify(provider, Some(dyn_sink), server_cert, validator_id)
         .expect_err("must fail closed");
@@ -620,7 +665,10 @@ fn dialer_no_sink_preserves_verification_behaviour() {
     let server_cert = encode_cert(&make_cert(validator_id, [9u8; 32], SIG_SUITE));
     let err = run_dialer_cert_verify(provider, None, server_cert, validator_id)
         .expect_err("must fail closed");
-    assert!(matches!(err, NetError::KeySchedule("signature verify error")));
+    assert!(matches!(
+        err,
+        NetError::KeySchedule("signature verify error")
+    ));
 }
 
 #[test]
@@ -642,7 +690,12 @@ fn expired_counter_documented_unused_at_live_boundary() {
     // Listener malformed
     let trusted = TrustedClientRoots::new(|_| Some(vec![0xAAu8; 32]));
     let dyn_sink: Arc<dyn CertVerifyMetricsSink> = sink.clone();
-    let cfg = server_cfg(provider.clone(), validator_id, Some(trusted), Some(dyn_sink));
+    let cfg = server_cfg(
+        provider.clone(),
+        validator_id,
+        Some(trusted),
+        Some(dyn_sink),
+    );
     let _ = run_listener(
         cfg,
         client_init_with_cert(validator_id, vec![0xFFu8; 3]),

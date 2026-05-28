@@ -12,8 +12,8 @@ use qbind_consensus::ids::ValidatorId;
 use qbind_crypto::{AeadSuite, CryptoError, KemSuite, SignatureSuite, StaticCryptoProvider};
 use qbind_ledger::InMemoryLedger;
 use qbind_net::{
-    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode, ServerConnectionConfig,
-    ServerHandshakeConfig,
+    ClientConnectionConfig, ClientHandshakeConfig, KemPrivateKey, MutualAuthMode,
+    ServerConnectionConfig, ServerHandshakeConfig,
 };
 use qbind_node::hotstuff_node_sim::NodeHotstuffHarness;
 use qbind_node::ledger_bridge::InMemoryNodeLedgerHarness;

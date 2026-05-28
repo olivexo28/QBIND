@@ -158,7 +158,6 @@ use qbind_crypto::CryptoProvider;
 use qbind_hash::vote_digest;
 use qbind_wire::consensus::{BlockProposal, QuorumCertificate as WireQuorumCertificate, Vote};
 
-
 /// Information about a single consensus validator that the verifier needs.
 #[derive(Clone, Debug)]
 pub struct ValidatorInfo {

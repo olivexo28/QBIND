@@ -60,7 +60,11 @@ fn validator_record_roundtrip_all_statuses() {
             network_pk: vec![0x02; 200],
             stake: 5000000,
             last_slash_height: 12345,
-            jailed_until_epoch: if status == ValidatorStatus::Jailed { Some(100) } else { None }, // M13
+            jailed_until_epoch: if status == ValidatorStatus::Jailed {
+                Some(100)
+            } else {
+                None
+            }, // M13
             ext_bytes: vec![0xAA, 0xBB, 0xCC],
         };
 

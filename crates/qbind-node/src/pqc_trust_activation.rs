@@ -341,14 +341,20 @@ impl std::fmt::Display for ActivationScope {
 impl std::fmt::Display for TrustBundleActivationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CurrentHeightUnavailable { required_height, scope } => write!(
+            Self::CurrentHeightUnavailable {
+                required_height,
+                scope,
+            } => write!(
                 f,
                 "pqc trust-bundle activation height gating requires current_height but no \
                  runtime height source is available (scope={}, required_height={}); fail closed \
                  — runtime height source is needed to evaluate the gate",
                 scope, required_height
             ),
-            Self::CurrentEpochUnavailable { required_epoch, scope } => write!(
+            Self::CurrentEpochUnavailable {
+                required_epoch,
+                scope,
+            } => write!(
                 f,
                 "pqc trust-bundle activation epoch gating requires current_epoch but no runtime \
                  epoch source is available in this build (scope={}, required_epoch={}); fail \
@@ -394,8 +400,14 @@ impl std::fmt::Display for TrustBundleActivationError {
                  close to current_height for environment {}. Reschedule the bundle with \
                  activation_height >= {} (= current_height + minimum_margin). No fallback to \
                  --p2p-trusted-root.",
-                scope, environment, current_height, activation_height, minimum_margin,
-                required_min_height, environment, required_min_height
+                scope,
+                environment,
+                current_height,
+                activation_height,
+                minimum_margin,
+                required_min_height,
+                environment,
+                required_min_height
             ),
             Self::RevocationActivationHeightBelowMinimumMargin {
                 environment,
@@ -412,8 +424,13 @@ impl std::fmt::Display for TrustBundleActivationError {
                  revocation activation_height is too close to current_height for environment \
                  {}. Emergency revocations should be published without activation_height \
                  (immediate effect, preserved by Run 065). No fallback to --p2p-trusted-root.",
-                scope, environment, current_height, activation_height, minimum_margin,
-                required_min_height, environment
+                scope,
+                environment,
+                current_height,
+                activation_height,
+                minimum_margin,
+                required_min_height,
+                environment
             ),
         }
     }
@@ -431,8 +448,7 @@ impl TrustBundleActivationError {
     pub fn is_future_activation(&self) -> bool {
         matches!(
             self,
-            Self::ActivationHeightNotYetReached { .. }
-                | Self::ActivationEpochNotYetReached { .. }
+            Self::ActivationHeightNotYetReached { .. } | Self::ActivationEpochNotYetReached { .. }
         )
     }
 }
@@ -492,13 +508,11 @@ pub fn check_bundle_activation(
                 })
             }
             Some(cur) if cur < req => {
-                return Err(
-                    TrustBundleActivationError::ActivationHeightNotYetReached {
-                        current_height: cur,
-                        required_height: req,
-                        scope: ActivationScope::Bundle,
-                    },
-                )
+                return Err(TrustBundleActivationError::ActivationHeightNotYetReached {
+                    current_height: cur,
+                    required_height: req,
+                    scope: ActivationScope::Bundle,
+                })
             }
             Some(_) => { /* satisfied */ }
         }
@@ -513,13 +527,11 @@ pub fn check_bundle_activation(
                 })
             }
             Some(cur) if cur < req => {
-                return Err(
-                    TrustBundleActivationError::ActivationEpochNotYetReached {
-                        current_epoch: cur,
-                        required_epoch: req,
-                        scope: ActivationScope::Bundle,
-                    },
-                )
+                return Err(TrustBundleActivationError::ActivationEpochNotYetReached {
+                    current_epoch: cur,
+                    required_epoch: req,
+                    scope: ActivationScope::Bundle,
+                })
             }
             Some(_) => { /* satisfied */ }
         }
@@ -545,13 +557,11 @@ pub fn check_bundle_activation(
                     })
                 }
                 Some(cur) if cur < req => {
-                    return Err(
-                        TrustBundleActivationError::ActivationHeightNotYetReached {
-                            current_height: cur,
-                            required_height: req,
-                            scope: ActivationScope::Root(r.root_id.clone()),
-                        },
-                    )
+                    return Err(TrustBundleActivationError::ActivationHeightNotYetReached {
+                        current_height: cur,
+                        required_height: req,
+                        scope: ActivationScope::Root(r.root_id.clone()),
+                    })
                 }
                 Some(_) => {}
             }
@@ -566,13 +576,11 @@ pub fn check_bundle_activation(
                     })
                 }
                 Some(cur) if cur < req => {
-                    return Err(
-                        TrustBundleActivationError::ActivationEpochNotYetReached {
-                            current_epoch: cur,
-                            required_epoch: req,
-                            scope: ActivationScope::Root(r.root_id.clone()),
-                        },
-                    )
+                    return Err(TrustBundleActivationError::ActivationEpochNotYetReached {
+                        current_epoch: cur,
+                        required_epoch: req,
+                        scope: ActivationScope::Root(r.root_id.clone()),
+                    })
                 }
                 Some(_) => {}
             }
@@ -778,8 +786,7 @@ mod tests {
     #[test]
     fn missing_activation_fields_accepted_with_no_runtime_source() {
         let b = fresh_bundle();
-        let out =
-            check_bundle_activation(&b, ActivationContext::unavailable()).expect("accepted");
+        let out = check_bundle_activation(&b, ActivationContext::unavailable()).expect("accepted");
         assert_eq!(out.required_height, None);
         assert_eq!(out.required_epoch, None);
         assert_eq!(out.current_height, None);
@@ -789,8 +796,8 @@ mod tests {
     #[test]
     fn missing_activation_fields_accepted_with_height_source() {
         let b = fresh_bundle();
-        let out = check_bundle_activation(&b, ActivationContext::height_only(42))
-            .expect("accepted");
+        let out =
+            check_bundle_activation(&b, ActivationContext::height_only(42)).expect("accepted");
         assert_eq!(out.required_height, None);
         assert_eq!(out.current_height, Some(42));
     }
@@ -799,8 +806,8 @@ mod tests {
     fn bundle_activation_height_satisfied_accepted() {
         let mut b = fresh_bundle();
         b.activation_height = Some(100);
-        let out = check_bundle_activation(&b, ActivationContext::height_only(200))
-            .expect("accepted");
+        let out =
+            check_bundle_activation(&b, ActivationContext::height_only(200)).expect("accepted");
         assert_eq!(out.required_height, Some(100));
         assert_eq!(out.current_height, Some(200));
     }
@@ -880,8 +887,7 @@ mod tests {
         // Even with a height source, an epoch source is required when
         // the bundle declares an epoch gate. This is what makes
         // "epoch gating is deferred" honest at the binary boundary.
-        let err = check_bundle_activation(&b, ActivationContext::height_only(123_456))
-            .unwrap_err();
+        let err = check_bundle_activation(&b, ActivationContext::height_only(123_456)).unwrap_err();
         assert!(matches!(
             err,
             TrustBundleActivationError::CurrentEpochUnavailable {
@@ -913,8 +919,8 @@ mod tests {
         b.activation_height = Some(50);
         b.activation_epoch = Some(2);
         let ctx = ActivationContext {
-            current_height: Some(60),  // height satisfied
-            current_epoch: Some(1),    // epoch NOT satisfied
+            current_height: Some(60), // height satisfied
+            current_epoch: Some(1),   // epoch NOT satisfied
         };
         let err = check_bundle_activation(&b, ctx).unwrap_err();
         assert!(matches!(
@@ -927,8 +933,7 @@ mod tests {
     fn root_level_activation_height_future_rejected() {
         let mut b = fresh_bundle();
         b.roots[0].activation_height = Some(1_000);
-        let err =
-            check_bundle_activation(&b, ActivationContext::height_only(999)).unwrap_err();
+        let err = check_bundle_activation(&b, ActivationContext::height_only(999)).unwrap_err();
         match err {
             TrustBundleActivationError::ActivationHeightNotYetReached {
                 current_height,
@@ -1090,12 +1095,8 @@ mod tests {
         let mut b = testnet_bundle();
         // current = 0, margin = 8, activation = 7 -> 0 <= 7 < 8.
         b.activation_height = Some(MIN_TESTNET_ACTIVATION_MARGIN - 1);
-        let err = check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Testnet,
-            Some(0),
-        )
-        .unwrap_err();
+        let err = check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(0))
+            .unwrap_err();
         match err {
             TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
                 environment,
@@ -1131,12 +1132,9 @@ mod tests {
     fn run065_testnet_immediate_cutover_rejected() {
         let mut b = testnet_bundle();
         b.activation_height = Some(100);
-        let err = check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Testnet,
-            Some(100),
-        )
-        .unwrap_err();
+        let err =
+            check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(100))
+                .unwrap_err();
         assert!(matches!(
             err,
             TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
@@ -1180,12 +1178,8 @@ mod tests {
     fn run065_testnet_already_effective_bundle_not_retroactively_rejected() {
         let mut b = testnet_bundle();
         b.activation_height = Some(5); // very old, current is now 1000
-        check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Testnet,
-            Some(1000),
-        )
-        .expect("already-effective bundle (activation_height < current_height) is accepted");
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(1000))
+            .expect("already-effective bundle (activation_height < current_height) is accepted");
     }
 
     /// MainNet rejects a bundle inside its (stricter) reject window.
@@ -1197,12 +1191,8 @@ mod tests {
         let mut b = mainnet_bundle();
         // 10 satisfies TestNet (>= 8) but is in MainNet's [0, 32) window.
         b.activation_height = Some(10);
-        let err = check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Mainnet,
-            Some(0),
-        )
-        .unwrap_err();
+        let err = check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(0))
+            .unwrap_err();
         match err {
             TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
                 environment,
@@ -1237,12 +1227,8 @@ mod tests {
     fn run065_root_level_activation_height_below_margin_rejected_on_testnet() {
         let mut b = testnet_bundle();
         b.roots[0].activation_height = Some(1); // in [0, 8)
-        let err = check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Testnet,
-            Some(0),
-        )
-        .unwrap_err();
+        let err = check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(0))
+            .unwrap_err();
         match err {
             TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
                 scope: ActivationScope::Root(id),
@@ -1301,12 +1287,8 @@ mod tests {
             effective_from: 0,
             activation_height: Some(10), // in [0, 32)
         });
-        let err = check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Mainnet,
-            Some(0),
-        )
-        .unwrap_err();
+        let err = check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(0))
+            .unwrap_err();
         match err {
             TrustBundleActivationError::RevocationActivationHeightBelowMinimumMargin {
                 environment,
@@ -1382,12 +1364,9 @@ mod tests {
     fn run065_required_min_is_current_plus_margin_on_restore() {
         let mut b = testnet_bundle();
         b.activation_height = Some(105); // in [100, 108)
-        let err = check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Testnet,
-            Some(100),
-        )
-        .unwrap_err();
+        let err =
+            check_min_activation_height_policy(&b, TrustBundleEnvironment::Testnet, Some(100))
+                .unwrap_err();
         match err {
             TrustBundleActivationError::ActivationHeightBelowMinimumMargin {
                 required_min_height: 108,
@@ -1422,21 +1401,13 @@ mod tests {
     fn run065_required_min_height_saturates_on_overflow() {
         let mut b = mainnet_bundle();
         b.activation_height = Some(u64::MAX); // accepted: equal to saturated required
-        check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Mainnet,
-            Some(u64::MAX),
-        )
-        .expect("saturating add keeps required_min_height at u64::MAX");
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(u64::MAX))
+            .expect("saturating add keeps required_min_height at u64::MAX");
 
         // u64::MAX - 1 is in [u64::MAX, u64::MAX)? No: u64::MAX-1 < u64::MAX = current,
         // so it falls in the "already-effective" past path and is accepted.
         b.activation_height = Some(u64::MAX - 1);
-        check_min_activation_height_policy(
-            &b,
-            TrustBundleEnvironment::Mainnet,
-            Some(u64::MAX),
-        )
-        .expect("activation < current is already-effective, accepted");
+        check_min_activation_height_policy(&b, TrustBundleEnvironment::Mainnet, Some(u64::MAX))
+            .expect("activation < current is already-effective, accepted");
     }
 }

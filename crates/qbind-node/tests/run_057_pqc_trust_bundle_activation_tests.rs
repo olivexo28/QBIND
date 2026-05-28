@@ -27,17 +27,14 @@ use qbind_crypto::MlDsa44Backend;
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_activation::{
-    check_bundle_activation, ActivationContext, ActivationScope,
-    TrustBundleActivationError,
+    check_bundle_activation, ActivationContext, ActivationScope, TrustBundleActivationError,
 };
 use qbind_node::pqc_trust_bundle::{
     build_helper_bundle, derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
     BundleSigningKeySet, HelperBundleMode, RootStatus, TrustBundle, TrustBundleEnvironment,
     TrustBundleError, TrustBundleRoot,
 };
-use qbind_node::pqc_trust_sequence::{
-    check_and_update_sequence, load_record, sequence_file_path,
-};
+use qbind_node::pqc_trust_sequence::{check_and_update_sequence, load_record, sequence_file_path};
 use qbind_types::NetworkEnvironment;
 
 fn hex_lower(b: &[u8]) -> String {
@@ -277,12 +274,10 @@ fn activation_height_present_without_current_height_refuses() {
     .unwrap_err();
     assert!(matches!(
         err,
-        TrustBundleError::Activation(
-            TrustBundleActivationError::CurrentHeightUnavailable {
-                required_height: 5,
-                scope: ActivationScope::Bundle,
-            }
-        )
+        TrustBundleError::Activation(TrustBundleActivationError::CurrentHeightUnavailable {
+            required_height: 5,
+            scope: ActivationScope::Bundle,
+        })
     ));
 }
 
@@ -311,12 +306,10 @@ fn activation_epoch_present_without_current_epoch_refuses() {
     .unwrap_err();
     assert!(matches!(
         err,
-        TrustBundleError::Activation(
-            TrustBundleActivationError::CurrentEpochUnavailable {
-                required_epoch: 7,
-                scope: ActivationScope::Bundle,
-            }
-        )
+        TrustBundleError::Activation(TrustBundleActivationError::CurrentEpochUnavailable {
+            required_epoch: 7,
+            scope: ActivationScope::Bundle,
+        })
     ));
 }
 
@@ -422,8 +415,8 @@ fn future_activation_bundle_is_structurally_valid_and_signed() {
 
     // And the activation check, run separately on the validated
     // bundle, fires only on the gate.
-    let err = check_bundle_activation(&loaded.bundle, ActivationContext::height_only(999))
-        .unwrap_err();
+    let err =
+        check_bundle_activation(&loaded.bundle, ActivationContext::height_only(999)).unwrap_err();
     assert!(err.is_future_activation());
 }
 
@@ -481,16 +474,14 @@ fn per_root_activation_height_future_refuses_bundle() {
     let h = devnet_signing_harness();
     // Build via build_helper_bundle then mutate, then SIGN so the
     // mutation is covered by the signed preimage.
-    let mut b =
-        build_helper_bundle(HelperBundleMode::Valid, &h.root_id_hex, &h.root_pk_hex, 10);
+    let mut b = build_helper_bundle(HelperBundleMode::Valid, &h.root_id_hex, &h.root_pk_hex, 10);
     b.environment = TrustBundleEnvironment::Devnet;
     b.chain_id = Some(format!(
         "{:016x}",
         NetworkEnvironment::Devnet.chain_id().as_u64()
     ));
     b.roots[0].activation_height = Some(2_000);
-    let sig =
-        sign_bundle_devnet_helper(&b, h.signing_key_id, &h.signing_sk).expect("sign");
+    let sig = sign_bundle_devnet_helper(&b, h.signing_key_id, &h.signing_sk).expect("sign");
     b.signature = Some(sig);
 
     let dir = fresh_dir("per-root-future");

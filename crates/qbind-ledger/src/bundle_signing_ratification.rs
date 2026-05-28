@@ -67,8 +67,7 @@
 use serde::{Deserialize, Serialize};
 
 use qbind_crypto::{
-    MlDsa44SignatureSuite, SignatureSuite, ML_DSA_44_PUBLIC_KEY_SIZE,
-    ML_DSA_44_SIGNATURE_SIZE,
+    MlDsa44SignatureSuite, SignatureSuite, ML_DSA_44_PUBLIC_KEY_SIZE, ML_DSA_44_SIGNATURE_SIZE,
 };
 
 use crate::genesis::{
@@ -89,8 +88,7 @@ use crate::genesis::{
 /// domain-bound digests (e.g. `QBIND:GENESIS:v1` for the canonical genesis
 /// hash). Bumping the trailing version invalidates every previously signed
 /// ratification object.
-pub const BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1: &[u8] =
-    b"QBIND:BUNDLE-SIGNING-RATIFICATION:v1";
+pub const BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1: &[u8] = b"QBIND:BUNDLE-SIGNING-RATIFICATION:v1";
 
 /// Current ratification-object schema version. Run 103 = `1`.
 ///
@@ -239,12 +237,10 @@ mod hex_vec {
         let bytes = s.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
-            let hi = hex_nibble(bytes[i]).ok_or_else(|| {
-                serde::de::Error::custom("non-hex byte in hex_vec field")
-            })?;
-            let lo = hex_nibble(bytes[i + 1]).ok_or_else(|| {
-                serde::de::Error::custom("non-hex byte in hex_vec field")
-            })?;
+            let hi = hex_nibble(bytes[i])
+                .ok_or_else(|| serde::de::Error::custom("non-hex byte in hex_vec field"))?;
+            let lo = hex_nibble(bytes[i + 1])
+                .ok_or_else(|| serde::de::Error::custom("non-hex byte in hex_vec field"))?;
             out.push((hi << 4) | lo);
             i += 2;
         }
@@ -293,13 +289,18 @@ pub fn canonical_ratification_preimage(r: &BundleSigningRatification) -> Vec<u8>
     let mut buf: Vec<u8> = Vec::with_capacity(
         BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1.len()
             + 4
-            + 4 + r.chain_id.len()
-            + 4 + r.environment.tag().len()
+            + 4
+            + r.chain_id.len()
+            + 4
+            + r.environment.tag().len()
             + 32
-            + 4 + r.authority_root_fingerprint.len()
+            + 4
+            + r.authority_root_fingerprint.len()
             + 1
-            + 4 + r.bundle_signing_public_key.len()
-            + 4 + r.bundle_signing_public_key_fingerprint.len(),
+            + 4
+            + r.bundle_signing_public_key.len()
+            + 4
+            + r.bundle_signing_public_key_fingerprint.len(),
     );
     buf.extend_from_slice(BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1);
     buf.extend_from_slice(&r.version.to_be_bytes());
@@ -383,10 +384,7 @@ pub enum RatificationFailure {
 
     /// The `bundle_signing_public_key_fingerprint` field does not equal
     /// `sha3_256_hex(bundle_signing_public_key)`.
-    BundleSigningKeyFingerprintMismatch {
-        expected: String,
-        got: String,
-    },
+    BundleSigningKeyFingerprintMismatch { expected: String, got: String },
 
     /// `bundle_signing_public_key` has the wrong length for the declared
     /// suite (e.g. not 1312 bytes for ML-DSA-44).
@@ -883,7 +881,13 @@ pub fn classify_authority_root_kind(
     fingerprint: &str,
     suite_id: GenesisAuthoritySuiteId,
 ) -> Option<GenesisAuthorityRootKind> {
-    if find_root(&authority.bundle_signing_authority_roots, fingerprint, suite_id).is_some() {
+    if find_root(
+        &authority.bundle_signing_authority_roots,
+        fingerprint,
+        suite_id,
+    )
+    .is_some()
+    {
         return Some(GenesisAuthorityRootKind::BundleSigning);
     }
     if find_root(&authority.pqc_transport_roots, fingerprint, suite_id).is_some() {
@@ -1155,8 +1159,10 @@ pub fn enforce_bundle_signing_key_ratification<'a>(
 
     // 0. Defense-in-depth: refuse legacy-unratified on MainNet under any
     //    code path, even if the caller passed it by mistake.
-    if matches!(inputs.policy, RatificationEnforcementPolicy::AllowLegacyUnratified)
-        && matches!(env, RatificationEnvironment::Mainnet)
+    if matches!(
+        inputs.policy,
+        RatificationEnforcementPolicy::AllowLegacyUnratified
+    ) && matches!(env, RatificationEnvironment::Mainnet)
     {
         return Err(RatificationEnforcementFailure::LegacyUnratifiedRefusedOnMainnet);
     }
@@ -1169,9 +1175,9 @@ pub fn enforce_bundle_signing_key_ratification<'a>(
     if matches!(inputs.policy, RatificationEnforcementPolicy::Strict)
         && inputs.authority.bundle_signing_authority_roots.is_empty()
     {
-        return Err(RatificationEnforcementFailure::NoBundleSigningAuthorityConfigured {
-            environment: env,
-        });
+        return Err(
+            RatificationEnforcementFailure::NoBundleSigningAuthorityConfigured { environment: env },
+        );
     }
 
     match inputs.ratification {
@@ -1235,8 +1241,7 @@ pub fn enforce_bundle_signing_key_ratification<'a>(
 /// Distinct from the v1 domain tag
 /// [`BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1`] so that no v1 preimage can
 /// be confused with a v2 preimage under any input combination.
-pub const BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2: &[u8] =
-    b"QBIND:BUNDLE-SIGNING-RATIFICATION:v2";
+pub const BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2: &[u8] = b"QBIND:BUNDLE-SIGNING-RATIFICATION:v2";
 
 /// Schema version for v2 ratification objects. Run 130 = `2`.
 pub const BUNDLE_SIGNING_RATIFICATION_VERSION_V2: u32 = 2;
@@ -1449,7 +1454,8 @@ pub struct BundleSigningRatificationV2 {
 /// Changing **any** security-relevant field produces different bytes.
 pub fn ratification_v2_signing_preimage(v: &BundleSigningRatificationV2) -> Vec<u8> {
     let env_tag = v.environment.tag().as_bytes();
-    let mut buf: Vec<u8> = Vec::with_capacity(256 + v.chain_id.len() + v.target_bundle_signing_public_key.len());
+    let mut buf: Vec<u8> =
+        Vec::with_capacity(256 + v.chain_id.len() + v.target_bundle_signing_public_key.len());
 
     buf.extend_from_slice(BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2);
     buf.extend_from_slice(&v.schema_version.to_be_bytes());
@@ -1887,10 +1893,12 @@ pub fn verify_bundle_signing_key_ratification_v2(
                 ),
             });
         }
-        let pk_bytes = decode_hex(pk_hex).ok_or_else(|| RatificationV2Failure::AuthorityKeyMaterialMalformed {
-            fingerprint: bundle_root.key_fingerprint.clone(),
-            suite_id: bundle_root.suite_id,
-            reason: "public_key_hex is not valid lowercase hex".into(),
+        let pk_bytes = decode_hex(pk_hex).ok_or_else(|| {
+            RatificationV2Failure::AuthorityKeyMaterialMalformed {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                reason: "public_key_hex is not valid lowercase hex".into(),
+            }
         })?;
         if pk_bytes.len() != GENESIS_AUTHORITY_ML_DSA_44_PUBLIC_KEY_BYTES {
             return Err(RatificationV2Failure::AuthorityKeyMaterialMalformed {
@@ -1941,11 +1949,13 @@ pub fn verify_bundle_signing_key_ratification_v2(
                 required_hex_len,
             });
         }
-        let pk = decode_hex(fp_hex).ok_or_else(|| RatificationV2Failure::AuthorityKeyMaterialUnavailable {
-            fingerprint: bundle_root.key_fingerprint.clone(),
-            suite_id: bundle_root.suite_id,
-            got_hex_len: fp_hex.len(),
-            required_hex_len,
+        let pk = decode_hex(fp_hex).ok_or_else(|| {
+            RatificationV2Failure::AuthorityKeyMaterialUnavailable {
+                fingerprint: bundle_root.key_fingerprint.clone(),
+                suite_id: bundle_root.suite_id,
+                got_hex_len: fp_hex.len(),
+                required_hex_len,
+            }
         })?;
         if pk.len() != ML_DSA_44_PUBLIC_KEY_SIZE {
             return Err(RatificationV2Failure::AuthorityKeyMaterialUnavailable {
@@ -2008,7 +2018,10 @@ pub fn verify_bundle_signing_key_ratification_v2(
                 return Err(RatificationV2Failure::MissingPreviousDigestForRotate);
             }
             // Validate the digest hex format.
-            let digest_hex = v.previous_ratification_digest.as_deref().expect("checked above");
+            let digest_hex = v
+                .previous_ratification_digest
+                .as_deref()
+                .expect("checked above");
             if digest_hex.len() != 64 {
                 return Err(RatificationV2Failure::MalformedPreviousDigest {
                     reason: format!(
@@ -2197,7 +2210,10 @@ mod tests {
         let mut cfg = GenesisConfig::new(
             chain_id,
             1_738_000_000_000,
-            vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+            vec![GenesisAllocation::new(
+                format!("0x{}", "11".repeat(32)),
+                100,
+            )],
             vec![GenesisValidator::new(
                 format!("0x{}", "22".repeat(32)),
                 "ab".repeat(32),
@@ -2854,7 +2870,10 @@ mod tests {
         let mut cfg = GenesisConfig::new(
             chain_id,
             1_738_000_000_000,
-            vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+            vec![GenesisAllocation::new(
+                format!("0x{}", "11".repeat(32)),
+                100,
+            )],
             vec![GenesisValidator::new(
                 format!("0x{}", "22".repeat(32)),
                 "ab".repeat(32),
@@ -2955,7 +2974,10 @@ mod tests {
             &bsk_pk,
         );
         // Corrupt the genesis-bound public_key_hex by truncation.
-        let pk_mut = cfg.authority.as_mut().unwrap()
+        let pk_mut = cfg
+            .authority
+            .as_mut()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex
             .as_mut()
@@ -2971,7 +2993,10 @@ mod tests {
         ))
         .unwrap_err();
         assert!(
-            matches!(err, RatificationFailure::AuthorityKeyMaterialMalformed { .. }),
+            matches!(
+                err,
+                RatificationFailure::AuthorityKeyMaterialMalformed { .. }
+            ),
             "got {:?}",
             err
         );
@@ -2996,7 +3021,9 @@ mod tests {
         );
         // Swap in a different PK while leaving the SHA3 fingerprint
         // declaring the original — this is the tampering case.
-        cfg.authority.as_mut().unwrap()
+        cfg.authority
+            .as_mut()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex = Some(full_pk_hex(&other_pk));
         let auth = cfg.authority.as_ref().unwrap();
@@ -3009,7 +3036,10 @@ mod tests {
         ))
         .unwrap_err();
         assert!(
-            matches!(err, RatificationFailure::AuthorityKeyMaterialMalformed { .. }),
+            matches!(
+                err,
+                RatificationFailure::AuthorityKeyMaterialMalformed { .. }
+            ),
             "got {:?}",
             err
         );
@@ -3025,7 +3055,9 @@ mod tests {
         // no legacy full-PK overload. The verifier must fail closed.
         let mut cfg = mk_genesis("qbind-mainnet-v0", &fp_hex);
         // Clear any accidental public_key_hex helper effect.
-        cfg.authority.as_mut().unwrap()
+        cfg.authority
+            .as_mut()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex = None;
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
@@ -3294,7 +3326,11 @@ mod tests {
         let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
         let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         // Strip bundle-signing roots after construction.
-        cfg.authority.as_mut().unwrap().bundle_signing_authority_roots.clear();
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .bundle_signing_authority_roots
+            .clear();
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let r = test_helpers::build_signed_ratification(
             "qbind-mainnet-v0",
@@ -3333,13 +3369,15 @@ mod tests {
         let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
         let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         // Add a transport root and have the ratification point at it.
-        cfg.authority.as_mut().unwrap().pqc_transport_roots.push(
-            GenesisAuthorityRoot::new(
+        cfg.authority
+            .as_mut()
+            .unwrap()
+            .pqc_transport_roots
+            .push(GenesisAuthorityRoot::new(
                 GENESIS_AUTHORITY_SUITE_ML_DSA_44,
                 &full_pk_hex(&transport_pk),
                 "transport-1",
-            ),
-        );
+            ));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut r = test_helpers::build_signed_ratification(
             "qbind-mainnet-v0",
@@ -3384,12 +3422,11 @@ mod tests {
     // =======================================================================
 
     use super::{
-        v2_test_helpers::build_signed_ratification_v2, BundleSigningRatificationV2,
-        BundleSigningRatificationV2Action, BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2,
-        BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1,
-        RatificationV2Failure, RatificationV2VerifierInputs,
         canonical_ratification_v2_digest, ratification_v2_signing_preimage,
-        verify_bundle_signing_key_ratification_v2,
+        v2_test_helpers::build_signed_ratification_v2, verify_bundle_signing_key_ratification_v2,
+        BundleSigningRatificationV2, BundleSigningRatificationV2Action, RatificationV2Failure,
+        RatificationV2VerifierInputs, BUNDLE_SIGNING_RATIFICATION_DOMAIN_V1,
+        BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2,
     };
 
     // -----------------------------------------------------------------------
@@ -3431,7 +3468,12 @@ mod tests {
             target_bsk_pk,
             seq,
             BundleSigningRatificationV2Action::Ratify,
-            None, None, None, None, None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
         )
     }
 
@@ -3446,8 +3488,13 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let p = ratification_v2_signing_preimage(&v);
         assert!(p.starts_with(BUNDLE_SIGNING_RATIFICATION_DOMAIN_V2));
@@ -3461,8 +3508,13 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let p1 = ratification_v2_signing_preimage(&v);
         let p2 = ratification_v2_signing_preimage(&v);
@@ -3487,65 +3539,114 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let base = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let base_p = ratification_v2_signing_preimage(&base);
 
         // environment
         let mut m = base.clone();
         m.environment = RatificationEnvironment::Testnet;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "environment must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "environment must change digest"
+        );
 
         // chain_id
         let mut m = base.clone();
         m.chain_id = "qbind-mainnet-vX".into();
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "chain_id must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "chain_id must change digest"
+        );
 
         // genesis_hash
         let mut m = base.clone();
         m.genesis_hash[0] ^= 0xFF;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "genesis_hash must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "genesis_hash must change digest"
+        );
 
         // authority_root_fingerprint
         let mut m = base.clone();
         m.authority_root_fingerprint.push('0');
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "authority fp must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "authority fp must change digest"
+        );
 
         // authority_root_suite_id
         let mut m = base.clone();
         m.authority_root_suite_id = 7;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "authority suite must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "authority suite must change digest"
+        );
 
         // target key fingerprint
         let mut m = base.clone();
         m.target_bundle_signing_key_fingerprint = "00".repeat(32);
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "target fp must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "target fp must change digest"
+        );
 
         // target key suite_id
         let mut m = base.clone();
         m.target_bundle_signing_key_suite_id = 7;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "target suite must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "target suite must change digest"
+        );
 
         // target key bytes
         let mut m = base.clone();
         m.target_bundle_signing_public_key[0] ^= 0xFF;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "target key must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "target key must change digest"
+        );
 
         // authority_domain_sequence
         let mut m = base.clone();
         m.authority_domain_sequence = 99;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "sequence must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "sequence must change digest"
+        );
 
         // lifecycle action
         let mut m = base.clone();
         m.key_lifecycle_action = BundleSigningRatificationV2Action::Revoke;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "lifecycle action must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "lifecycle action must change digest"
+        );
 
         // authority_policy_version
         let mut m = base.clone();
         m.authority_policy_version = 99;
-        assert_ne!(ratification_v2_signing_preimage(&m), base_p, "authority_policy_version must change digest");
+        assert_ne!(
+            ratification_v2_signing_preimage(&m),
+            base_p,
+            "authority_policy_version must change digest"
+        );
     }
 
     #[test]
@@ -3568,7 +3669,10 @@ mod tests {
             BundleSigningRatificationV2Action::Rotate,
             Some(pqc_public_key_fingerprint(&prev_pk)),
             Some(prev_digest_hex.clone()),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         let base_p = ratification_v2_signing_preimage(&base);
 
@@ -3604,7 +3708,10 @@ mod tests {
             &bsk_pk,
             3,
             BundleSigningRatificationV2Action::Revoke,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
             Some("compromised".to_string()),
             Some("all".to_string()),
         );
@@ -3628,8 +3735,13 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         assert_eq!(
             canonical_ratification_v2_digest(&v),
@@ -3648,16 +3760,29 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let ok = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).expect("valid v2 ratify must verify");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect("valid v2 ratify must verify");
         assert_eq!(ok.public_key, bsk_pk);
         assert_eq!(ok.authority_domain_sequence, 1);
-        assert_eq!(ok.key_lifecycle_action, BundleSigningRatificationV2Action::Ratify);
+        assert_eq!(
+            ok.key_lifecycle_action,
+            BundleSigningRatificationV2Action::Ratify
+        );
         assert_eq!(ok.suite_id, GENESIS_AUTHORITY_SUITE_ML_DSA_44);
     }
 
@@ -3681,13 +3806,24 @@ mod tests {
             BundleSigningRatificationV2Action::Rotate,
             Some(pqc_public_key_fingerprint(&prev_pk)),
             Some(prev_digest),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let ok = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).expect("valid v2 rotate must verify");
-        assert_eq!(ok.key_lifecycle_action, BundleSigningRatificationV2Action::Rotate);
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect("valid v2 rotate must verify");
+        assert_eq!(
+            ok.key_lifecycle_action,
+            BundleSigningRatificationV2Action::Rotate
+        );
         assert_eq!(ok.authority_domain_sequence, 2);
     }
 
@@ -3707,15 +3843,26 @@ mod tests {
             &bsk_pk,
             3,
             BundleSigningRatificationV2Action::Revoke,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
             Some("compromised".to_string()),
             Some("all".to_string()),
         );
         let auth = cfg.authority.as_ref().unwrap();
         let ok = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).expect("valid v2 revoke must verify");
-        assert_eq!(ok.key_lifecycle_action, BundleSigningRatificationV2Action::Revoke);
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect("valid v2 revoke must verify");
+        assert_eq!(
+            ok.key_lifecycle_action,
+            BundleSigningRatificationV2Action::Revoke
+        );
     }
 
     #[test]
@@ -3725,23 +3872,31 @@ mod tests {
         let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
         // Genesis: bundle-signing set = auth_pk, transport set = transport_pk.
         let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
-        cfg.authority.as_mut().unwrap().pqc_transport_roots = vec![
-            GenesisAuthorityRoot::new(
-                GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-                full_pk_hex(&transport_pk),
-                "transport-1",
-            )
-        ];
+        cfg.authority.as_mut().unwrap().pqc_transport_roots = vec![GenesisAuthorityRoot::new(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            full_pk_hex(&transport_pk),
+            "transport-1",
+        )];
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         // Ratification signed by auth_pk (in bundle-signing set) must succeed.
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let auth = cfg.authority.as_ref().unwrap();
         verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).expect("bundle-signing root must succeed in v2");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect("bundle-signing root must succeed in v2");
     }
 
     // -----------------------------------------------------------------------
@@ -3755,15 +3910,31 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.schema_version = 1;
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::UnsupportedSchemaVersion { got: 1, .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RatificationV2Failure::UnsupportedSchemaVersion { got: 1, .. }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3773,15 +3944,28 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.environment = RatificationEnvironment::Testnet;
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::WrongEnvironment { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::WrongEnvironment { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3791,15 +3975,28 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.chain_id = "qbind-testnet-beta".into();
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::ChainMismatch { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::ChainMismatch { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3809,16 +4006,29 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let mut wrong_gh = gh;
         wrong_gh[0] ^= 0xFF;
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &wrong_gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::GenesisHashMismatch { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &wrong_gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::GenesisHashMismatch { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3830,14 +4040,27 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&other_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::AuthorityRootUnknown { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::AuthorityRootUnknown { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3846,23 +4069,34 @@ mod tests {
         let (other_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
         let (bsk_pk, _) = MlDsa44Backend::generate_keypair().unwrap();
         let mut cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&other_pk));
-        cfg.authority.as_mut().unwrap().pqc_transport_roots = vec![
-            GenesisAuthorityRoot::new(
-                GENESIS_AUTHORITY_SUITE_ML_DSA_44,
-                full_pk_hex(&auth_pk),
-                "transport-1",
-            )
-        ];
+        cfg.authority.as_mut().unwrap().pqc_transport_roots = vec![GenesisAuthorityRoot::new(
+            GENESIS_AUTHORITY_SUITE_ML_DSA_44,
+            full_pk_hex(&auth_pk),
+            "transport-1",
+        )];
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::TransportRootNotAllowed { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::TransportRootNotAllowed { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3873,11 +4107,19 @@ mod tests {
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let fp_hex = pqc_public_key_fingerprint(&auth_pk);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &fp_hex, &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &fp_hex,
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         // Corrupt the genesis-bound public_key_hex.
-        let pk_mut = cfg.authority.as_mut().unwrap()
+        let pk_mut = cfg
+            .authority
+            .as_mut()
+            .unwrap()
             .bundle_signing_authority_roots[0]
             .public_key_hex
             .as_mut()
@@ -3885,9 +4127,20 @@ mod tests {
         pk_mut.truncate(pk_mut.len() - 2);
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::AuthorityKeyMaterialMalformed { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RatificationV2Failure::AuthorityKeyMaterialMalformed { .. }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3897,15 +4150,31 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.target_bundle_signing_key_fingerprint = "00".repeat(32);
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::TargetKeyFingerprintMismatch { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RatificationV2Failure::TargetKeyFingerprintMismatch { .. }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3915,15 +4184,28 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.signature[0] ^= 0xFF;
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::SignatureInvalid), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::SignatureInvalid),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3933,8 +4215,13 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         // sequence 0 is invalid (must be >= 1).
         v.authority_domain_sequence = 0;
@@ -3943,10 +4230,18 @@ mod tests {
         v.signature = qbind_crypto::ml_dsa_44_sign_digest(&auth_sk, &digest).unwrap();
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
         assert!(
-            matches!(err, RatificationV2Failure::InvalidAuthorityDomainSequence { got: 0 }),
+            matches!(
+                err,
+                RatificationV2Failure::InvalidAuthorityDomainSequence { got: 0 }
+            ),
             "{err}"
         );
     }
@@ -3967,15 +4262,26 @@ mod tests {
             &bsk_pk,
             2,
             BundleSigningRatificationV2Action::Rotate,
-            None,                       // ← missing previous_key_fingerprint
+            None, // ← missing previous_key_fingerprint
             Some("ab".repeat(32)),
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::MissingPreviousKeyForRotate), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::MissingPreviousKeyForRotate),
+            "{err}"
+        );
     }
 
     #[test]
@@ -3996,14 +4302,25 @@ mod tests {
             2,
             BundleSigningRatificationV2Action::Rotate,
             Some(pqc_public_key_fingerprint(&prev_pk)),
-            None,                       // ← missing previous_ratification_digest
-            None, None, None, None,
+            None, // ← missing previous_ratification_digest
+            None,
+            None,
+            None,
+            None,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::MissingPreviousDigestForRotate), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::MissingPreviousDigestForRotate),
+            "{err}"
+        );
     }
 
     #[test]
@@ -4022,15 +4339,26 @@ mod tests {
             &bsk_pk,
             1,
             BundleSigningRatificationV2Action::Ratify,
-            Some("ff".repeat(32)),      // ← unexpected rotation field
+            Some("ff".repeat(32)), // ← unexpected rotation field
             None,
-            None, None, None, None,
+            None,
+            None,
+            None,
+            None,
         );
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::UnexpectedRotateFieldsForRatify), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::UnexpectedRotateFieldsForRatify),
+            "{err}"
+        );
     }
 
     #[test]
@@ -4049,15 +4377,26 @@ mod tests {
             &bsk_pk,
             3,
             BundleSigningRatificationV2Action::Revoke,
-            None, None, None, None,
-            None,   // ← missing revocation_reason
-            None,   // ← missing capabilities_scope
+            None,
+            None,
+            None,
+            None,
+            None, // ← missing revocation_reason
+            None, // ← missing capabilities_scope
         );
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::MissingRevocationFieldsForRevoke), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::MissingRevocationFieldsForRevoke),
+            "{err}"
+        );
     }
 
     #[test]
@@ -4067,15 +4406,28 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.signature.truncate(50);
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::MalformedSignature { .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationV2Failure::MalformedSignature { .. }),
+            "{err}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -4101,9 +4453,17 @@ mod tests {
         r.version = 2;
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification(mk_inputs(
-            &r, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationFailure::UnsupportedVersion { got: 2, .. }), "{err}");
+            &r,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(err, RatificationFailure::UnsupportedVersion { got: 2, .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -4114,15 +4474,31 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let mut v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         v.schema_version = 1;
         let auth = cfg.authority.as_ref().unwrap();
         let err = verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).unwrap_err();
-        assert!(matches!(err, RatificationV2Failure::UnsupportedSchemaVersion { got: 1, .. }), "{err}");
+            &v,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RatificationV2Failure::UnsupportedSchemaVersion { got: 1, .. }
+            ),
+            "{err}"
+        );
     }
 
     #[test]
@@ -4132,15 +4508,25 @@ mod tests {
         let cfg = mk_genesis("qbind-mainnet-v0", &full_pk_hex(&auth_pk));
         let gh = compute_canonical_genesis_hash(&cfg, NetworkEnvironmentPolicy::Mainnet);
         let v = build_v2_ratify(
-            "qbind-mainnet-v0", RatificationEnvironment::Mainnet, gh,
-            &full_pk_hex(&auth_pk), &auth_sk, &bsk_pk, 1,
+            "qbind-mainnet-v0",
+            RatificationEnvironment::Mainnet,
+            gh,
+            &full_pk_hex(&auth_pk),
+            &auth_sk,
+            &bsk_pk,
+            1,
         );
         let s = serde_json::to_string(&v).expect("v2 ser");
         let v2: BundleSigningRatificationV2 = serde_json::from_str(&s).expect("v2 de");
         assert_eq!(v, v2);
         let auth = cfg.authority.as_ref().unwrap();
         verify_bundle_signing_key_ratification_v2(mk_v2_inputs(
-            &v2, auth, "qbind-mainnet-v0", NetworkEnvironmentPolicy::Mainnet, &gh,
-        )).expect("v2 must still verify after JSON round-trip");
+            &v2,
+            auth,
+            "qbind-mainnet-v0",
+            NetworkEnvironmentPolicy::Mainnet,
+            &gh,
+        ))
+        .expect("v2 must still verify after JSON round-trip");
     }
 }

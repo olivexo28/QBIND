@@ -87,9 +87,8 @@
 use std::path::{Path, PathBuf};
 
 use qbind_ledger::{
-    BundleSigningRatification, GenesisAuthorityConfig, GenesisHash,
-    NetworkEnvironmentPolicy, RatificationEnforcementFailure,
-    RatificationEnforcementInputs, RatificationEnforcementPolicy,
+    BundleSigningRatification, GenesisAuthorityConfig, GenesisHash, NetworkEnvironmentPolicy,
+    RatificationEnforcementFailure, RatificationEnforcementInputs, RatificationEnforcementPolicy,
 };
 use qbind_types::{ChainId, NetworkEnvironment};
 
@@ -98,9 +97,7 @@ use crate::pqc_trust_bundle::{
     self, BundleSigningKeySet, LoadedTrustBundle, LocalLeafIssuerRootSelfCheckError,
     LocalLeafSelfCheckError, TrustBundle, TrustBundleEnvironment, TrustBundleError,
 };
-use crate::pqc_trust_sequence::{
-    self, SequencePeekOutcome, TrustBundleSequenceError,
-};
+use crate::pqc_trust_sequence::{self, SequencePeekOutcome, TrustBundleSequenceError};
 
 // ============================================================================
 // Run 070 — local operator-triggered live trust-bundle apply
@@ -493,7 +490,14 @@ pub fn validate_candidate_bundle(
 /// trigger.
 pub fn validate_candidate_bundle_full(
     inputs: ReloadCheckInputs<'_>,
-) -> Result<(LoadedTrustBundle, ActivationCheckOutcome, ValidatedCandidate), ReloadCheckError> {
+) -> Result<
+    (
+        LoadedTrustBundle,
+        ActivationCheckOutcome,
+        ValidatedCandidate,
+    ),
+    ReloadCheckError,
+> {
     // 1. Run 050/051/053/057/062/065 reuse — exactly the same loader
     // the binary calls at startup, so any future hardening of any
     // sub-check (e.g. a new field in `TrustBundle`) automatically
@@ -603,7 +607,14 @@ pub fn validate_candidate_bundle_full(
 pub fn validate_candidate_bundle_full_with_ratification(
     inputs: ReloadCheckInputs<'_>,
     ratification_ctx: &RatificationEnforcementContext<'_>,
-) -> Result<(LoadedTrustBundle, ActivationCheckOutcome, ValidatedCandidate), ReloadCheckError> {
+) -> Result<
+    (
+        LoadedTrustBundle,
+        ActivationCheckOutcome,
+        ValidatedCandidate,
+    ),
+    ReloadCheckError,
+> {
     let signing_keys = inputs.signing_keys;
     let (loaded, activation, candidate) = validate_candidate_bundle_full(inputs)?;
 
@@ -612,8 +623,8 @@ pub fn validate_candidate_bundle_full_with_ratification(
     // inapplicable; on MainNet/TestNet the loader already refused
     // them, so we never reach this branch with `Unsigned` there.
     if let Some(signing_pk) = resolve_loaded_bundle_signing_public_key(&loaded, signing_keys) {
-        let outcome = qbind_ledger::enforce_bundle_signing_key_ratification(
-            RatificationEnforcementInputs {
+        let outcome =
+            qbind_ledger::enforce_bundle_signing_key_ratification(RatificationEnforcementInputs {
                 ratification: ratification_ctx.ratification,
                 authority: ratification_ctx.authority,
                 expected_chain_id: ratification_ctx.expected_chain_id_str,
@@ -621,9 +632,8 @@ pub fn validate_candidate_bundle_full_with_ratification(
                 expected_genesis_hash: ratification_ctx.expected_genesis_hash,
                 candidate_bundle_signing_public_key: signing_pk,
                 policy: ratification_ctx.policy,
-            },
-        )
-        .map_err(ReloadCheckError::RatificationRefused)?;
+            })
+            .map_err(ReloadCheckError::RatificationRefused)?;
         // Verdict diagnostics are surfaced by the call site; the
         // validator itself is silent on a successful accept branch
         // (matches the Run 069 contract).
@@ -771,10 +781,7 @@ pub enum ReloadApplyError {
     /// `rollback_ok` flag reflects whether the rollback itself
     /// succeeded; if `false`, the caller MUST treat the node as
     /// in a fatal state per `task/RUN_070_TASK.txt` policy.
-    SessionEvictionFailed {
-        message: String,
-        rollback_ok: bool,
-    },
+    SessionEvictionFailed { message: String, rollback_ok: bool },
     /// [`LiveTrustApplyContext::commit_sequence`] failed AFTER the
     /// state swap and session eviction succeeded. The
     /// implementation invoked
@@ -880,18 +887,14 @@ pub trait LiveTrustApplyContext {
     /// Snapshot the current active live trust state so that the
     /// apply pipeline can roll back if any later step fails.
     /// MUST NOT mutate any state.
-    fn snapshot_active(&mut self)
-        -> Result<Box<dyn std::any::Any + Send + Sync>, String>;
+    fn snapshot_active(&mut self) -> Result<Box<dyn std::any::Any + Send + Sync>, String>;
 
     /// Atomically replace the active trust state with the
     /// validated candidate's roots / active revocation sets /
     /// sequence. MUST be all-or-nothing: on `Err`, the live trust
     /// state is unchanged. On `Ok`, the new state is in effect for
     /// subsequent handshake verifiers.
-    fn swap_trust_state(
-        &mut self,
-        candidate: &LoadedTrustBundle,
-    ) -> Result<(), String>;
+    fn swap_trust_state(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String>;
 
     /// Close / evict all existing P2P / KEMTLS sessions so peers
     /// reconnect under the new trust context. MUST report success
@@ -905,10 +908,7 @@ pub trait LiveTrustApplyContext {
     /// successful [`evict_sessions`](Self::evict_sessions). Calling
     /// it earlier would burn the sequence on a rejected or partial
     /// apply (violates Run 055/070 anti-rollback contract).
-    fn commit_sequence(
-        &mut self,
-        candidate: &LoadedTrustBundle,
-    ) -> Result<(), String>;
+    fn commit_sequence(&mut self, candidate: &LoadedTrustBundle) -> Result<(), String>;
 
     /// Restore the live trust state from the snapshot returned by
     /// [`snapshot_active`](Self::snapshot_active). Called only when
@@ -1276,12 +1276,10 @@ mod tests {
         // safe — so operator logs are never ambiguous about whether
         // the candidate landed.
         let cases: Vec<ReloadApplyError> = vec![
-            ReloadApplyError::ValidationFailed(ReloadCheckError::Bundle(
-                TrustBundleError::Io("path: kind".into()),
-            )),
-            ReloadApplyError::UnsupportedRuntimeContext(
-                "no mutable runtime trust handle".into(),
-            ),
+            ReloadApplyError::ValidationFailed(ReloadCheckError::Bundle(TrustBundleError::Io(
+                "path: kind".into(),
+            ))),
+            ReloadApplyError::UnsupportedRuntimeContext("no mutable runtime trust handle".into()),
             ReloadApplyError::LiveReloadDisabled("flag not set".into()),
             ReloadApplyError::StateSwapFailed("write lock unavailable".into()),
             ReloadApplyError::SessionEvictionFailed {
@@ -1383,7 +1381,11 @@ mod tests {
         let line = applied.applied_log_line();
         assert!(line.contains("Run 070"), "{}", line);
         assert!(line.contains("APPLIED live"), "{}", line);
-        assert!(line.contains("conservative session-eviction v0 policy"), "{}", line);
+        assert!(
+            line.contains("conservative session-eviction v0 policy"),
+            "{}",
+            line
+        );
         assert!(line.contains("operator-triggered"), "{}", line);
         assert!(line.contains("old_fp=abababab"), "{}", line);
         assert!(line.contains("new_fp=cdcdcdcd"), "{}", line);

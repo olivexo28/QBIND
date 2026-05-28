@@ -158,7 +158,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -277,7 +280,12 @@ fn make_controller(
     sidecar_path: Option<PathBuf>,
     policy: RatificationEnforcementPolicy,
     enforce: bool,
-) -> (LiveReloadController, Arc<LivePqcTrustState>, Arc<MockP2pSessionEvictor>, Arc<P2pMetrics>) {
+) -> (
+    LiveReloadController,
+    Arc<LivePqcTrustState>,
+    Arc<MockP2pSessionEvictor>,
+    Arc<P2pMetrics>,
+) {
     let baseline = load_baseline_loaded(baseline_path, &h.signing_keys);
     let live = Arc::new(LivePqcTrustState::initialize_from_loaded_bundle(&baseline));
     let mock = Arc::new(MockP2pSessionEvictor::new(0));
@@ -401,9 +409,9 @@ fn run114_strict_missing_sidecar_refuses_before_any_mutation() {
     let out = ctl.try_trigger_with_now(300);
     match out {
         LiveReloadOutcome::Invalid(ReloadApplyError::ValidationFailed(
-            ReloadCheckError::RatificationRefused(
-                RatificationEnforcementFailure::Missing { .. },
-            ),
+            ReloadCheckError::RatificationRefused(RatificationEnforcementFailure::Missing {
+                ..
+            }),
         )) => {}
         other => panic!("expected Missing refusal, got {:?}", other),
     }
@@ -412,7 +420,10 @@ fn run114_strict_missing_sidecar_refuses_before_any_mutation() {
     let post_fp = snapshot_state_fingerprint(&live);
     assert_eq!(pre_fp, post_fp, "live state must not mutate on refusal");
     // No sequence file written.
-    assert!(!seq_path.exists(), "sequence file must NOT be created on refusal");
+    assert!(
+        !seq_path.exists(),
+        "sequence file must NOT be created on refusal"
+    );
     // No session eviction.
     assert_eq!(mock.attempt_count(), 0);
     // Metrics: trigger counted, apply_failure counted, success NOT bumped.
@@ -711,7 +722,10 @@ fn run114_strict_sidecar_io_failure_refuses_before_any_mutation() {
         LiveReloadOutcome::Invalid(ReloadApplyError::ValidationFailed(
             ReloadCheckError::Bundle(_),
         )) => {}
-        other => panic!("expected Invalid(ValidationFailed(Bundle(Io))), got {:?}", other),
+        other => panic!(
+            "expected Invalid(ValidationFailed(Bundle(Io))), got {:?}",
+            other
+        ),
     }
     assert_eq!(snapshot_state_fingerprint(&live), pre_fp);
     assert!(!seq_path.exists());
@@ -811,7 +825,10 @@ fn run114_invalid_sighup_followed_by_valid_sighup_succeeds() {
     let out2 = ctl.try_trigger_with_now(301);
     match out2 {
         LiveReloadOutcome::Applied(applied) => assert_eq!(applied.validated.sequence, 2),
-        other => panic!("expected Applied after valid sidecar appears, got {:?}", other),
+        other => panic!(
+            "expected Applied after valid sidecar appears, got {:?}",
+            other
+        ),
     }
     assert_ne!(snapshot_state_fingerprint(&live), pre_fp);
     assert!(seq_path.exists());
@@ -997,9 +1014,9 @@ fn run114_ratification_refusal_short_circuits_apply_pipeline() {
     // Must be the `Missing` refusal, NOT a later-pipeline error.
     match out {
         LiveReloadOutcome::Invalid(ReloadApplyError::ValidationFailed(
-            ReloadCheckError::RatificationRefused(
-                RatificationEnforcementFailure::Missing { .. },
-            ),
+            ReloadCheckError::RatificationRefused(RatificationEnforcementFailure::Missing {
+                ..
+            }),
         )) => {}
         other => panic!(
             "expected Missing ratification refusal to short-circuit, got {:?}",

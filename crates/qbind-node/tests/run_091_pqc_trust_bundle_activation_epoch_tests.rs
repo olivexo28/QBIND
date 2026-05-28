@@ -66,9 +66,7 @@ use qbind_node::pqc_trust_bundle::{
 use qbind_node::pqc_trust_reload::{
     validate_candidate_bundle, ReloadCheckError, ReloadCheckInputs,
 };
-use qbind_node::pqc_trust_sequence::{
-    chain_id_hex, load_record, sequence_file_path,
-};
+use qbind_node::pqc_trust_sequence::{chain_id_hex, load_record, sequence_file_path};
 use qbind_types::NetworkEnvironment;
 
 // ---------------------------------------------------------------------
@@ -161,8 +159,7 @@ fn build_signed_devnet_bundle(
         activation_epoch: bundle_act_e,
         activation_height: bundle_act_h,
     };
-    let sig =
-        sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
+    let sig = sign_bundle_devnet_helper(&bundle, h.signing_key_id, &h.signing_sk).expect("sign");
     bundle.signature = Some(sig);
     bundle
 }
@@ -362,7 +359,10 @@ fn run091_root_activation_epoch_future_rejected() {
         } => {
             assert_eq!(id, &h.root_id_hex);
         }
-        other => panic!("expected Root-scope ActivationEpochNotYetReached, got {:?}", other),
+        other => panic!(
+            "expected Root-scope ActivationEpochNotYetReached, got {:?}",
+            other
+        ),
     }
 }
 
@@ -434,7 +434,10 @@ fn run091_testnet_unsupported_epoch_source_fails_closed() {
         .expect_err("testnet height-only fail-closed");
     assert!(matches!(
         err2,
-        TrustBundleActivationError::CurrentEpochUnavailable { required_epoch: 1, .. }
+        TrustBundleActivationError::CurrentEpochUnavailable {
+            required_epoch: 1,
+            ..
+        }
     ));
 }
 
@@ -457,7 +460,10 @@ fn run091_mainnet_unsupported_epoch_source_fails_closed() {
         .expect_err("mainnet height-only fail-closed");
     assert!(matches!(
         err2,
-        TrustBundleActivationError::CurrentEpochUnavailable { required_epoch: 1, .. }
+        TrustBundleActivationError::CurrentEpochUnavailable {
+            required_epoch: 1,
+            ..
+        }
     ));
 }
 
@@ -618,11 +624,7 @@ fn run091_current_epoch_unavailable_display_is_safe_and_explicit() {
         "required_epoch missing: {}",
         msg
     );
-    assert!(
-        msg.contains("scope=bundle"),
-        "scope missing: {}",
-        msg
-    );
+    assert!(msg.contains("scope=bundle"), "scope missing: {}", msg);
     // No DummySig / DummyKem / DummyAead / no fallback to
     // --p2p-trusted-root leakage in error text.
     assert!(!msg.to_ascii_lowercase().contains("dummy"));

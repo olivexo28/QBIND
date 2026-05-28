@@ -291,20 +291,32 @@ fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
 
     // request_id: 8 bytes LE
     let request_id = u64::from_le_bytes([
-        data[offset], data[offset+1], data[offset+2], data[offset+3],
-        data[offset+4], data[offset+5], data[offset+6], data[offset+7],
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+        data[offset + 4],
+        data[offset + 5],
+        data[offset + 6],
+        data[offset + 7],
     ]);
     offset += 8;
 
     // validator_id: 8 bytes LE
     let validator_id = u64::from_le_bytes([
-        data[offset], data[offset+1], data[offset+2], data[offset+3],
-        data[offset+4], data[offset+5], data[offset+6], data[offset+7],
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+        data[offset + 4],
+        data[offset + 5],
+        data[offset + 6],
+        data[offset + 7],
     ]);
     offset += 8;
 
     // suite_id: 2 bytes LE
-    let suite_id = u16::from_le_bytes([data[offset], data[offset+1]]);
+    let suite_id = u16::from_le_bytes([data[offset], data[offset + 1]]);
     offset += 2;
 
     // kind: 1 byte (using message_type constants)
@@ -316,8 +328,14 @@ fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
     let view = if data[offset] != 0 {
         offset += 1;
         let v = u64::from_le_bytes([
-            data[offset], data[offset+1], data[offset+2], data[offset+3],
-            data[offset+4], data[offset+5], data[offset+6], data[offset+7],
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+            data[offset + 4],
+            data[offset + 5],
+            data[offset + 6],
+            data[offset + 7],
         ]);
         offset += 8;
         Some(v)
@@ -328,7 +346,10 @@ fn decode_request(data: &[u8]) -> Result<RemoteSignRequest, RemoteSignError> {
 
     // preimage_len: 4 bytes LE
     let preimage_len = u32::from_le_bytes([
-        data[offset], data[offset+1], data[offset+2], data[offset+3],
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
     ]) as usize;
     offset += 4;
 
@@ -723,15 +744,15 @@ keystore_entry_id = "validator42"
         // Build a proper M10 format request
         let domain_tag = REMOTE_SIGNER_DOMAIN_TAG.as_bytes();
         let mut data = Vec::new();
-        data.extend_from_slice(domain_tag);           // domain tag
-        data.extend_from_slice(&1u64.to_le_bytes());  // request_id
+        data.extend_from_slice(domain_tag); // domain tag
+        data.extend_from_slice(&1u64.to_le_bytes()); // request_id
         data.extend_from_slice(&42u64.to_le_bytes()); // validator_id
         data.extend_from_slice(&100u16.to_le_bytes()); // suite_id
-        data.push(message_type::SIGN_PROPOSAL);       // kind
-        data.push(0);                                  // view not present
-        data.extend_from_slice(&0u64.to_le_bytes());  // view (unused)
-        data.extend_from_slice(&4u32.to_le_bytes());  // preimage_len
-        data.extend_from_slice(&[1, 2, 3, 4]);        // preimage
+        data.push(message_type::SIGN_PROPOSAL); // kind
+        data.push(0); // view not present
+        data.extend_from_slice(&0u64.to_le_bytes()); // view (unused)
+        data.extend_from_slice(&4u32.to_le_bytes()); // preimage_len
+        data.extend_from_slice(&[1, 2, 3, 4]); // preimage
 
         let req = decode_request(&data).unwrap();
         assert_eq!(req.request_id, 1);
@@ -766,7 +787,7 @@ keystore_entry_id = "validator42"
         };
         let enc = encode_response(&resp);
         assert_eq!(enc[0], 0); // status = success
-        // request_id is bytes 1-8
+                               // request_id is bytes 1-8
         let request_id = u64::from_le_bytes([
             enc[1], enc[2], enc[3], enc[4], enc[5], enc[6], enc[7], enc[8],
         ]);

@@ -93,18 +93,17 @@ use qbind_ledger::genesis::{
     GENESIS_AUTHORITY_SUITE_ML_DSA_44,
 };
 use qbind_ledger::{
-    canonical_ratification_v2_digest, compute_canonical_genesis_hash,
-    BundleSigningRatification, BundleSigningRatificationV2, BundleSigningRatificationV2Action,
-    GenesisHash, NetworkEnvironmentPolicy, RatificationEnforcementPolicy,
-    RatificationEnvironment,
+    canonical_ratification_v2_digest, compute_canonical_genesis_hash, BundleSigningRatification,
+    BundleSigningRatificationV2, BundleSigningRatificationV2Action, GenesisHash,
+    NetworkEnvironmentPolicy, RatificationEnforcementPolicy, RatificationEnvironment,
 };
 use qbind_node::metrics::P2pMetrics;
 use qbind_node::p2p_session_eviction::{MockP2pSessionEvictor, P2pSessionEvictor};
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, load_authority_state, load_authority_state_versioned,
-    persist_authority_state_atomic, persist_authority_state_v2_atomic,
-    AuthorityStateUpdateSource, PersistentAuthorityStateRecord,
-    PersistentAuthorityStateRecordV2, PersistentAuthorityStateRecordVersioned,
+    persist_authority_state_atomic, persist_authority_state_v2_atomic, AuthorityStateUpdateSource,
+    PersistentAuthorityStateRecord, PersistentAuthorityStateRecordV2,
+    PersistentAuthorityStateRecordVersioned,
 };
 use qbind_node::pqc_devnet_helper::mint_devnet_root;
 use qbind_node::pqc_live_trust::LivePqcTrustState;
@@ -184,7 +183,10 @@ fn devnet_harness() -> Harness {
     let mut genesis_cfg = GenesisConfig::new(
         &chain_id_str,
         1_738_000_000_000,
-        vec![GenesisAllocation::new(format!("0x{}", "11".repeat(32)), 100)],
+        vec![GenesisAllocation::new(
+            format!("0x{}", "11".repeat(32)),
+            100,
+        )],
         vec![GenesisValidator::new(
             format!("0x{}", "22".repeat(32)),
             "ab".repeat(32),
@@ -309,11 +311,7 @@ fn build_valid_v1_ratification(h: &Harness) -> BundleSigningRatification {
     )
 }
 
-fn write_v2_ratification(
-    dir: &Path,
-    name: &str,
-    r: &BundleSigningRatificationV2,
-) -> PathBuf {
+fn write_v2_ratification(dir: &Path, name: &str, r: &BundleSigningRatificationV2) -> PathBuf {
     let path = dir.join(name);
     let bytes = serde_json::to_vec_pretty(r).expect("serialise v2 ratification");
     std::fs::write(&path, &bytes).expect("write v2 ratification");
@@ -360,9 +358,8 @@ fn make_controller(
     } else {
         None
     };
-    let authority_marker = marker_path.map(|marker_path| LiveReloadAuthorityMarkerConfig {
-        marker_path,
-    });
+    let authority_marker =
+        marker_path.map(|marker_path| LiveReloadAuthorityMarkerConfig { marker_path });
     let cfg = LiveReloadConfig {
         candidate_path,
         environment: NetworkEnvironment::Devnet,
@@ -437,7 +434,10 @@ fn run138_a1_first_accepted_v2_sighup_creates_v2_marker() {
     assert_eq!(mock.attempt_count(), 1);
 
     // Marker file created and is V2 schema.
-    assert!(marker_path.exists(), "v2 marker must be created post-commit");
+    assert!(
+        marker_path.exists(),
+        "v2 marker must be created post-commit"
+    );
     let persisted = load_authority_state_versioned(&marker_path)
         .expect("load")
         .expect("marker present after first-write");
@@ -632,9 +632,9 @@ fn run138_a4_v1_to_v2_sighup_migration_promotes_marker() {
         h.authority.authority_epoch,
         h.authority_root_fingerprint.clone(),
         signing_key_fingerprint_hex(&h.signing_pk),
-        hex_lower(
-            &qbind_ledger::canonical_ratification_digest(&v1_ratification),
-        ),
+        hex_lower(&qbind_ledger::canonical_ratification_digest(
+            &v1_ratification,
+        )),
         AuthorityStateUpdateSource::SighupReload,
         100,
     );
@@ -758,7 +758,10 @@ fn run138_r1_lower_sequence_v2_sighup_refuses_pre_mutation() {
 
     // No mutation.
     assert_eq!(snapshot_state_fingerprint(&live), pre_fp);
-    assert!(!seq_path.exists(), "sequence file must NOT be written on R1");
+    assert!(
+        !seq_path.exists(),
+        "sequence file must NOT be written on R1"
+    );
     assert_eq!(mock.attempt_count(), 0, "no eviction on R1");
     let marker_bytes_after = std::fs::read(&marker_path).expect("marker still exists");
     assert_eq!(
@@ -959,8 +962,7 @@ fn run138_r4_wrong_domain_v2_sidecar_refuses_pre_mutation() {
         None,
         None,
     );
-    let sidecar_path =
-        write_v2_ratification(&dir, "ratification-v2.json", &wrong_ratification);
+    let sidecar_path = write_v2_ratification(&dir, "ratification-v2.json", &wrong_ratification);
 
     let (ctl, live, mock, _metrics) = make_controller(
         &h,
@@ -1049,12 +1051,18 @@ fn run138_r6_v2_marker_persist_failure_after_commit_is_fatal() {
     // Run 138 R6: persist failure must be is_fatal() so the binary's
     // SIGHUP task initiates graceful shutdown (mirrors the v1 Run 121
     // fatal shape).
-    assert!(out.is_fatal(), "R6 persist failure must signal fatal shutdown");
+    assert!(
+        out.is_fatal(),
+        "R6 persist failure must signal fatal shutdown"
+    );
     assert!(out.is_applied(), "live state did advance");
     assert_ne!(snapshot_state_fingerprint(&live), pre_fp);
     assert!(seq_path.exists());
     assert_eq!(mock.attempt_count(), 1);
-    assert!(!marker_path.exists(), "marker file must not exist post-fail");
+    assert!(
+        !marker_path.exists(),
+        "marker file must not exist post-fail"
+    );
 
     // Metrics: success bumped (apply pipeline completed); failure
     // counter unchanged.
@@ -1139,7 +1147,10 @@ fn run138_r7_v1_sighup_sidecar_still_takes_v1_path() {
     let v1 = load_authority_state(&marker_path)
         .expect("load v1")
         .expect("present");
-    assert_eq!(v1.last_update_source, AuthorityStateUpdateSource::SighupReload);
+    assert_eq!(
+        v1.last_update_source,
+        AuthorityStateUpdateSource::SighupReload
+    );
     assert_eq!(metrics.live_reload_apply_success_total(), 1);
 }
 
