@@ -5,6 +5,27 @@
 **Date:** 2026-05-18  
 **Scope:** Future peer-driven trust-bundle propagation and apply safety gates
 
+> **Run 144 supersession pointer (apply surface only).** Effective Run 144,
+> the **peer-driven live trust-bundle apply** surface is governed by the
+> dedicated specification
+> [`QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`](./QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md).
+> That specification defines the mandatory six-phase pipeline (receive,
+> validation-only, eligibility-to-stage, local authorization gate, apply
+> via the existing Run 070 contract, and evidence/audit), the mandatory
+> 18-invariant set, the mandatory 14-action threat model, the mandatory
+> per-environment policy matrix (DevNet/TestNet/MainNet with MainNet
+> blocked until governance / ratification / KMS-HSM authority is
+> separately specified and evidenced), and the mandatory future-run
+> decomposition (Run 145 source/test staging queue → Run 146 release-
+> binary staging evidence → Run 147 source/test DevNet-only apply →
+> Run 148 release-binary DevNet-only apply evidence → Run 149+
+> governance / ratification / KMS-HSM hardening before any TestNet or
+> MainNet claim). The propagation-only surface — the original scope of
+> Runs 087/088/089 — continues to be governed by this document. Both
+> documents preserve every Run 050–143 invariant verbatim. Run 144 is
+> **specification / design only** and changes no production runtime
+> source, no CLI flag, no metric, and no wire / schema.
+
 ## 1. Scope and non-goals
 
 This document is a formal design gate for any future work that might add

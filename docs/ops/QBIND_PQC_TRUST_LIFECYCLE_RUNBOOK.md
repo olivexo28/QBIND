@@ -5025,3 +5025,74 @@ Peer-driven live trust-bundle apply, signing-key rotation/revocation
 lifecycle, KMS/HSM authority-key custody, MainNet governance
 attestation, validator-set rotation, full C4 closure, and C5 closure
 all remain out of scope.
+## Run 144 — Peer-driven live trust-bundle apply: safety specification (no
+runtime change)
+
+**Run 144 is specification / design only.** It does not change any
+mutating surface, any CLI flag, any metric, or any wire/schema.
+
+The new specification is:
+
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+
+Operator-visible facts:
+
+* The live inbound peer-candidate `0x05` path **remains
+  validation-only / propagation-only** on every environment (DevNet,
+  TestNet, MainNet), exactly as Runs 142/143 already evidence.
+  Receiving a peer-candidate frame **does not** mutate
+  `LivePqcTrustState`, **does not** write the trust-bundle sequence
+  file, **does not** write the authority marker, and **does not**
+  evict sessions.
+* **Peer-driven live trust-bundle apply is not implemented and is
+  disabled by default on every environment.** No CLI flag exists today
+  that enables it.
+* When peer-driven apply is eventually implemented (future Run 145+),
+  the mandatory per-environment policy will be:
+  * **DevNet** — MAY be enabled in a future run behind an explicit
+    hidden DevNet-only CLI flag; **disabled by default**; the flag
+    MUST refuse to bind on TestNet or MainNet.
+  * **TestNet** — MAY be enabled only with explicit operator opt-in
+    **and** a ratified v2 authority on the receiving node;
+    **disabled by default**.
+  * **MainNet** — **BLOCKED.** Peer-driven apply MUST be refused
+    until governance / ratification / KMS-HSM authority is
+    separately specified and evidenced. **Local peer majority alone
+    is insufficient** and will never authorize MainNet peer-driven
+    apply on its own.
+* When peer-driven apply is eventually implemented, it MUST reuse
+  the existing Run 070 apply contract exactly
+  (`validate → snapshot previous → swap LivePqcTrustState → evict
+  sessions → commit_sequence → persist v2 authority marker`), with
+  the v2 marker persisted **strictly after** `commit_sequence`
+  returns `Ok`. The v2 marker for a peer-driven apply will carry a
+  distinct `last_update_source=peer-driven-apply` audit variant so
+  operator audit tooling can distinguish a peer-driven apply from a
+  reload-apply, startup-load, SIGHUP-reload, or snapshot-restore.
+
+Operator action required by Run 144: **none.** Run 144 changes no
+runtime behavior. Operators should however be aware that:
+
+* No future build will silently enable peer-driven apply. Any future
+  enablement requires an explicit per-environment hidden flag and
+  per-environment ratification proof (or, on MainNet, governance /
+  KMS-HSM authority that does not yet exist).
+* Operator-pinned authority state (a pinned `(environment, chain_id,
+  genesis_hash, authority_root)` tuple, or a pinned minimum
+  `latest_authority_domain_sequence`) is part of the mandatory
+  Phase 2 eligibility check and will be honored fail-closed by any
+  future peer-driven apply implementation.
+
+**Scope notice:** Run 144 is **specification / design only**. No
+production runtime source is modified, no peer-driven live apply is
+added, no SIGHUP / reload-apply / snapshot/restore / startup /
+live-inbound-`0x05` mutating surface beyond Run 134/136/138/140/142's
+existing wiring is touched, no v2 marker is persisted from any new
+code path, no trust-bundle / peer-candidate / ratification wire
+format is changed, no CLI flag is added, no metric family is added or
+changed, no KMS/HSM is introduced, no MainNet governance artifact is
+verified, and no signing-key rotation or revocation lifecycle is
+implemented. Peer-driven live trust-bundle apply, signing-key
+rotation/revocation lifecycle, KMS/HSM authority-key custody, MainNet
+governance attestation, validator-set rotation, full C4 closure, and
+C5 closure all remain out of scope.

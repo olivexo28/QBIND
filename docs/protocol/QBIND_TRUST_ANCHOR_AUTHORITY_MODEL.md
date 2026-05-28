@@ -2769,3 +2769,71 @@ implemented. Peer-driven live trust-bundle apply, signing-key
 rotation/revocation lifecycle, KMS / HSM custody, MainNet governance
 artifact verification, validator-set rotation, full C4 closure, and
 C5 closure all remain out of scope.
+## Run 144 — peer-driven live trust-bundle apply: authority cannot be
+mutated by peers (specification / design only)
+
+Run 144 is a **specification / design only** run. It introduces no
+production runtime change, no new mutating surface, no CLI flag, no
+metric, and no wire / schema change. It lands the new specification
+`docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md` and the
+canonical design report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_144.md`. The Run 142/143
+validation-only / propagation-only behaviour of the live inbound
+peer-candidate `0x05` surface is preserved verbatim.
+
+The authority-model invariant Run 144 formalizes is:
+
+> **Authority cannot be mutated by peer majority on any environment.**
+> Receiving a validly signed peer-candidate frame, on its own, does
+> not advance the local PQC trust-anchor authority state. A
+> peer-driven live apply may only ever occur after passing a
+> staged, fail-closed, operator-controllable, and per-environment
+> policy-bound pipeline whose authorization gate refuses MainNet
+> apply in the absence of separately specified governance /
+> ratification / KMS-HSM authority.
+
+Mandatory per-environment authority-model stance after Run 144:
+
+- **DevNet** — peer-driven apply MAY be enabled in a future run
+  behind an explicit hidden DevNet-only CLI flag; **disabled by
+  default**; the flag MUST refuse to bind on TestNet or MainNet.
+  Authority advance from a peer-driven apply on DevNet still uses
+  the existing Run 070 contract verbatim.
+- **TestNet** — peer-driven apply MAY be enabled only with explicit
+  operator opt-in **and** a ratified v2 authority on the receiving
+  node; **disabled by default**. Authority advance from a
+  peer-driven apply on TestNet still uses the existing Run 070
+  contract verbatim and still emits a v2 marker post-commit.
+- **MainNet** — peer-driven apply is **BLOCKED** until governance /
+  ratification / KMS-HSM authority is separately specified and
+  evidenced. Authority on MainNet **cannot** be advanced by a
+  peer-driven path under Run 144 or under any subsequent run that
+  has not closed the governance / ratification / KMS-HSM
+  pre-requisites. Local config alone remains insufficient for
+  MainNet bundle-signing authority, and **local peer majority alone
+  also remains insufficient** — Run 144 makes this explicit.
+
+When peer-driven apply is eventually implemented, the v2 authority
+marker emitted for such an apply MUST carry a distinct
+`last_update_source=peer-driven-apply` audit variant so the
+authority-model audit trail can distinguish a peer-driven apply from
+a reload-apply (`reload-apply`), a startup-load (`startup-load`), a
+SIGHUP-reload (`sighup-reload`), or a snapshot-restore. Reusing an
+existing variant for peer-driven apply is **prohibited** by the
+Run 144 specification.
+
+Run 144 does not change any existing authority-model invariant. The
+Run 050–143 invariants remain in force verbatim: Run 055 anti-
+rollback, Run 065/091 activation gates, Run 070 apply ordering,
+Run 076/079/088 envelope and propagation discipline, Run 109/123 v1
+enforcement, Run 130/131 v2 verifier and marker primitives,
+Run 132/142 validation-only paths, Run 134/136/138 post-commit marker
+discipline, Run 140/141 snapshot/restore parity, and the
+`--p2p-trusted-root` fallback rejection. **Static production source-
+code anchors remain rejected.** **Local config alone remains
+insufficient for MainNet bundle-signing authority.** **Local peer
+majority alone is insufficient for MainNet bundle-signing authority
+(formalized by Run 144).** Peer-driven live trust-bundle apply,
+signing-key rotation / revocation lifecycle, KMS / HSM authority-key
+custody, MainNet governance attestation, validator-set rotation,
+full C4 closure, and C5 closure all remain out of scope.
