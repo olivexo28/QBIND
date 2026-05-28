@@ -2681,3 +2681,91 @@ v2 evidence is **deferred to Run 143**. Peer-driven live apply,
 signing-key rotation/revocation lifecycle, KMS / HSM custody, MainNet
 governance artifact verification, validator-set rotation, full C4
 closure, and C5 closure all remain out of scope.
+Run 143 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_143.md`) supplies the
+release-binary evidence that Run 142 deferred for the **live inbound
+P2P peer-candidate `0x05` v2 validation-only receive path**, and
+nothing else. **No production runtime source is modified, no CLI flag
+is added or renamed, no metric family is changed, no wire / on-disk /
+sidecar / marker schema is changed, and no new fixture helper is
+introduced** — Run 143 reuses
+`crates/qbind-node/examples/run_133_v2_validation_only_fixture_helper.rs`
+verbatim (same `sha256`, same ELF `BuildID` as Run 133's pinned
+evidence). The deliverables are a release-binary harness
+`scripts/devnet/run_143_live_inbound_0x05_v2_validation_release_binary.sh`,
+the persistent evidence archive
+`docs/devnet/run_143_live_inbound_0x05_v2_validation_release_binary/`,
+and the canonical report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_143.md`.
+
+The harness builds the real release `qbind-node` and the DevNet helper
+binaries (`devnet_pqc_root_helper`, `devnet_pqc_trust_bundle_helper`,
+`devnet_consensus_signer_keystore_helper`,
+`run_133_v2_validation_only_fixture_helper`), records build provenance
+(`sha256`, `build-id`, `git_commit`, `rustc --version`,
+`cargo --version`), and stands up the N=3 DevNet topology used by
+Run 110 — V0 publisher fires exactly one peer-candidate `0x05` frame
+via `--p2p-trust-bundle-peer-candidate-wire-publish-path` +
+`--p2p-trust-bundle-peer-candidate-wire-publish-once`; V1 is the v2
+validation-only receiver with the operator-supplied v2 ratification
+sidecar via `--p2p-trust-bundle-ratification`,
+`--p2p-trust-bundle-ratification-enforcement-enabled`, and
+`--p2p-trust-bundle-allow-unratified-testnet-devnet` so the Run 106
+gate INVOKES the dispatcher; V2 is a second validation-only receiver
+that independently exercises the v2 path and observes Run 088
+propagation behaviour when V1 has
+`--p2p-trust-bundle-peer-candidate-propagation-enabled`.
+
+Run 143 covers the full task-mandated scenario matrix: A1 valid v2
+first-seen, A2 v2 idempotent (against seeded v2 marker), A3 v2
+higher-sequence (against seeded v2 marker), A4 v2-after-v1 migration
+(against seeded v1 marker), R1 lower-sequence reject, R2 same-sequence
+different-digest equivocation reject, R3 bad-signature reject (Run 130
+verifier failure), R4 wrong-environment reject, R5 wrong-chain reject,
+R6 wrong-genesis reject, R7 ambiguous v1+v2 fail-closed via the
+operator-supplied versioned sidecar loader preflight refusal (binary
+exits non-zero, P2P transport never up), R8 corrupted local marker
+fail-closed (corrupt bytes preserved verbatim), R9 v1 live inbound
+`0x05` regression (existing Run 109/123 v1 path verbatim, no v2 path
+selected, no v2 marker fabricated), R10 DevNet no-opt-in legacy
+regression (Run 106 SKIPPED branch, pre-Run-109 unguarded path), R11a
+propagation-disabled valid v2 (V1 validates, V2 receives no propagated
+copy), R11b propagation-enabled valid v2 (V1 validates AND rebroadcasts
+only after validation, V2 receives + validates under v2), R11c
+propagation-enabled invalid v2 (V1 rejects, NEVER rebroadcasts,
+`propagation_suppressed_invalid_total >= 1`, `propagation_sent_total ==
+0`).
+
+For every scenario the harness asserts: (i) the Run 109 `live
+peer-candidate ratification gate INVOKED` log on every v2-enforced
+scenario and the Run 109 `SKIPPED` log on R10; (ii) the appropriate
+`peer_candidate_validated_total` / `peer_candidate_rejected_total`
+floor; (iii) `propagation_sent_total == 0` on every reject and
+`propagation_suppressed_invalid_total >= 1` on every propagation-
+enabled reject; (iv) V0 (the publisher) `peer_candidate_received_total
+== 0` (source-peer exclusion preserved by Run 088); (v) byte-identical
+`pqc_trust_bundle_sequence.json` and `pqc_authority_state.json` bytes
+across pre/post on every node and every scenario; (vi) no
+`pqc_authority_state.json.tmp` sibling on any node; (vii) the explicit
+out-of-scope denylist — `trust-bundle candidate APPLIED live`,
+`VERDICT=applied`, `session_evictions=[1-9]`, `\bSIGHUP\b`,
+`reload-apply (success\|failure)`, `RESTORED_FROM_SNAPSHOT`,
+`signing-key (rotation\|revocation) lifecycle`, `\bKMS\b`, `\bHSM\b`,
+`MainNet governance`, `\bDummySig\b`, `\bDummyKem\b`, `\bDummyAead\b`,
+`fallback to --p2p-trusted-root` — produces **zero matches** across
+the captured corpus; (viii) the V1 receiver remains running after
+every reject scenario (the live dispatcher must not crash on
+rejection).
+
+Run 143 is **release-binary evidence only** for the live inbound
+`0x05` v2 validation-only surface. No production runtime source is
+modified, no peer-driven live apply is added, no SIGHUP / reload-
+apply / snapshot/restore mutating surface beyond Run 134/136/138/140's
+existing wiring is touched, no v2 marker is persisted from the live
+receive path (which never writes the marker file under any code
+path), no trust-bundle / peer-candidate / ratification wire format is
+changed, no KMS / HSM is introduced, no MainNet governance artifact
+is verified, and no signing-key rotation or revocation lifecycle is
+implemented. Peer-driven live trust-bundle apply, signing-key
+rotation/revocation lifecycle, KMS / HSM custody, MainNet governance
+artifact verification, validator-set rotation, full C4 closure, and
+C5 closure all remain out of scope.
