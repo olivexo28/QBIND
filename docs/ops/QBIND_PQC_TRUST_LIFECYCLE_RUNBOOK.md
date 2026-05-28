@@ -4949,3 +4949,79 @@ Peer-driven live trust-bundle apply, signing-key rotation/revocation
 lifecycle, KMS/HSM authority-key custody, MainNet governance
 attestation, validator-set rotation, full C4 closure, and C5 closure
 all remain out of scope.
+## Run 143 — release-binary evidence for live inbound `0x05` v2 validation-only
+
+Run 143 (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_143.md`) produces the
+release-binary evidence that Run 142 deferred for the **live inbound
+P2P peer-candidate `0x05` v2 validation-only receive path**, and
+nothing else. **No production runtime source is modified, no CLI flag
+is added or renamed, no metric family is changed, no wire / on-disk /
+sidecar / marker schema is changed, and no new fixture helper is
+introduced** — Run 143 reuses Run 133's
+`run_133_v2_validation_only_fixture_helper` verbatim.
+
+A new release-binary harness
+`scripts/devnet/run_143_live_inbound_0x05_v2_validation_release_binary.sh`
+builds the real release `qbind-node` and the DevNet helper binaries,
+records build provenance (`sha256`, ELF `BuildID`, `git_commit`,
+`rustc --version`, `cargo --version`), and drives the N=3 DevNet
+topology (V0 publisher, V1 v2 validation-only receiver, V2 second
+receiver / propagation observer) used by Run 110 — same mutual-auth
+Required, same signed DevNet trust bundle, same ML-KEM-768 KEM,
+ML-DSA-44 signing, ChaCha20-Poly1305 AEAD, Run 033 active=true
+keystores, no `DummySig` / `DummyKem` / `DummyAead` in any active
+path.
+
+**Operator behaviour validated by Run 143 on real release binaries:**
+
+* When the operator supplies a **v2** ratification sidecar via
+  `--p2p-trust-bundle-ratification` and the Run 106 gate decision
+  INVOKES the dispatcher, every inbound `0x05` peer-candidate frame is
+  routed through the Run 130 v2 verifier and (when `--data-dir` is
+  configured) the Run 132 `verify_marker_for_validation_only_v2`
+  helper.
+* When the operator supplies a **v1** sidecar, the live `0x05` path
+  takes the existing Run 109/123 v1 dispatcher verbatim; no v2 path is
+  selected; no v2 marker is fabricated.
+* When the operator supplies **no** sidecar on DevNet, the Run 106
+  gate logs `SKIPPED (policy=devnet-no-operator-opt-in)` and the
+  pre-Run-109 unguarded path runs; no v2 marker is fabricated.
+* When the operator-supplied sidecar simultaneously carries v1 **and**
+  v2 envelope material (an ambiguous document), the versioned sidecar
+  loader refuses at preflight — the binary exits non-zero and the
+  P2P transport never comes up. The ambiguity guard is therefore a
+  release-binary preflight property as well as a per-frame dispatcher
+  property.
+
+**Release-binary non-mutation guarantees asserted by Run 143:**
+
+* per-node `pqc_trust_bundle_sequence.json` is byte-identical before
+  and after every scenario;
+* per-node `pqc_authority_state.json` (when present) is byte-identical
+  before and after every scenario — accept and reject paths both
+  preserve marker bytes verbatim, including the deliberately corrupt
+  blob in the R8 corrupted-marker scenario;
+* no `pqc_authority_state.json.tmp` sibling is ever left behind;
+* no `qbind_p2p_pqc_trust_bundle_peer_candidate_applied_total` metric
+  family appears;
+* `qbind_p2p_trust_bundle_live_reload_*` and
+  `qbind_p2p_session_eviction_*` counters all stay at 0;
+* no `--p2p-trusted-root` fallback log line fires on any node;
+* no `DummySig` / `DummyKem` / `DummyAead` / `dummy_*_registered=true`
+  marker fires on any node;
+* invalid candidates never produce `propagation_sent_total >= 1` and
+  always produce `propagation_suppressed_invalid_total >= 1` when
+  propagation is enabled.
+
+**Scope notice:** Run 143 is **release-binary evidence only**. No
+production runtime source is modified, no peer-driven live apply is
+added, no SIGHUP / reload-apply / snapshot/restore mutating surface
+beyond Run 134/136/138/140's existing wiring is touched, no v2 marker
+is persisted from the live receive path, no trust-bundle /
+peer-candidate / ratification wire format is changed, no KMS/HSM is
+introduced, no MainNet governance artifact is verified, and no
+signing-key rotation or revocation lifecycle is implemented.
+Peer-driven live trust-bundle apply, signing-key rotation/revocation
+lifecycle, KMS/HSM authority-key custody, MainNet governance
+attestation, validator-set rotation, full C4 closure, and C5 closure
+all remain out of scope.

@@ -1,0 +1,52 @@
+Run 143 live inbound 0x05 v2 validation-only release-binary evidence
+====================================================================
+
+Harness:
+  scripts/devnet/run_143_live_inbound_0x05_v2_validation_release_binary.sh
+
+This file is the persistent placeholder for the harness `summary.txt`.
+It is overwritten in-place by the harness on every release-binary run
+of Run 143, with the per-run provenance:
+
+  - git_commit at the time of the run
+  - rustc / cargo versions
+  - per-binary sha256 + ELF BuildID for:
+      target/release/qbind-node
+      target/release/examples/devnet_pqc_trust_bundle_helper
+      target/release/examples/devnet_pqc_root_helper
+      target/release/examples/devnet_consensus_signer_keystore_helper
+      target/release/examples/run_133_v2_validation_only_fixture_helper
+  - per-scenario verdict for the A1–A4 / R1–R11 matrix
+  - non-mutation invariant checks (sequence + marker + .tmp + metric
+    + log denylist)
+  - wire / schema / CLI / metric drift checks
+
+The canonical evidence report
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_143.md restates the verdict and
+records the explicit out-of-scope deferral list:
+
+  * peer-driven live trust-bundle apply       — remains OPEN
+  * signing-key rotation/revocation lifecycle — remains OPEN
+  * KMS / HSM authority custody               — remains OPEN
+  * MainNet governance artifact verification  — remains OPEN
+  * full C4 closure                           — remains OPEN
+  * C5 closure                                — remains OPEN
+
+scenario status (filled in by the harness on each run):
+  A1_valid_v2_first_seen
+  A2_v2_idempotent
+  A3_v2_higher_sequence
+  A4_v2_after_v1_migration
+  R1_v2_lower_sequence
+  R2_v2_same_seq_diff_digest
+  R3_v2_bad_signature
+  R4_v2_wrong_environment
+  R5_v2_wrong_chain
+  R6_v2_wrong_genesis
+  R7_ambiguous_v1_v2_fail_closed
+  R8_corrupted_local_marker
+  R9_v1_live_inbound_regression
+  R10_legacy_no_optin
+  R11a_propagation_disabled_valid
+  R11b_propagation_enabled_valid
+  R11c_propagation_enabled_invalid
