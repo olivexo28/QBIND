@@ -39,6 +39,13 @@ The harness records:
 - hidden-flag proof;
 - MainNet refusal proof.
 
+Current archived identities:
+
+- `qbind-node.sha256`: `986ea7a31d933cd06f57b6e580a61eccb2685763a130d50bc5f56ef1e644e86a`
+- `qbind-node.build_id`: `83efc5701b8280300005a0eb5fa532bfedec6f3c`
+- `run_133_v2_helper.sha256`: `13052a30cbae73400d9c77c1d296df61eb817f40303ae5d3c7bedc894f900df0`
+- `run_133_v2_helper.build_id`: `8f89f053bf76d155435b61145048e0de4aa81845`
+
 ## Scenario verdicts
 
 | Scenario | Verdict | Notes |
