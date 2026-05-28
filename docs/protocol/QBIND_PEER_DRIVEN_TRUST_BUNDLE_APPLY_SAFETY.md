@@ -566,3 +566,165 @@ Remaining open phases of this specification after Run 146:
 Run 146 does not change any invariant from §3, §4, or §7 of this
 specification, and does not change any invariant from Run 145's §11
 progress entry.
+## 13. Run 147 progress entry — release-binary evidence for the live `0x05` peer-candidate staging hook (hidden opt-in arming flag + release-binary evidence)
+
+Run 147 produces the release-binary evidence that Run 146
+explicitly deferred for the Phase 2 staging queue (§4 of this
+specification) **and** lands the smallest possible source delta
+required to genuinely arm that queue on the release binary. The
+Run 147 feasibility gate ("can a real `target/release/qbind-node`
+binary arm `LivePeerCandidateWireDispatcher::staging_queue` through
+an existing runtime config path?") returned **NO** against the
+Run 146 state: `crates/qbind-node/src/main.rs` constructed
+`dispatcher_cfg.staging_queue = None` and the `set_staging_queue`
+late-install surface on `LivePeerCandidateWireDispatcher` was
+source/test only.
+
+Per `task/RUN_147_TASK.txt`'s "preferred path if a flag is
+necessary" allowance, Run 147 adds the smallest hidden,
+disabled-by-default DevNet/TestNet-only arming flag
+
+```
+--p2p-trust-bundle-peer-candidate-staging-enabled
+```
+
+with the following Run 144 / Run 145 / Run 146-aligned properties:
+
+* hidden from `--help` (clap `hide = true`);
+* defaults `false`;
+* refused on MainNet unconditionally with exit code `1` and a
+  `[binary] Run 147: FATAL ...` stderr line at the top-level
+  partial-config gate; the P2P transport is never brought up;
+* refused without
+  `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+  (same exit code, same FATAL line shape);
+* does NOT imply propagation (the existing
+  `--p2p-trust-bundle-peer-candidate-propagation-enabled` flag
+  remains orthogonal);
+* does NOT imply apply (the Phase 4 apply gate from §3 / §4 of
+  this specification is unchanged and unreached);
+* constructs a bounded `PeerCandidateStagingQueue` using
+  `PeerDrivenStagingPolicy::devnet_enabled()` /
+  `PeerDrivenStagingPolicy::testnet_enabled()` (the Run 145
+  conservative defaults);
+* adds no metric family;
+* changes no wire format or on-disk schema.
+
+The source delta is exactly:
+
+1. one new hidden CLI flag in `crates/qbind-node/src/cli.rs`;
+2. one top-level partial-config refusal gate in
+   `crates/qbind-node/src/main.rs` (MainNet refused; missing
+   live-`0x05`-validation refused);
+3. one inline branch in the existing Run 079 dispatcher-config
+   construction in `crates/qbind-node/src/main.rs` that replaces
+   the Run 146 placeholder `staging_queue: None` with
+   `Some(Arc::new(parking_lot::Mutex::new(PeerCandidateStagingQueue::new(policy))))`
+   when the flag is supplied, plus a defensive MainNet guard at
+   queue construction.
+
+**No dispatcher-level code is changed.** Run 146's
+`set_staging_queue`, `staging_queue()`, and
+`staging_hook_is_armed()` surface is preserved verbatim and
+remains the future-run hook for additional install topologies.
+
+### Mapping to the six-phase pipeline (§3)
+
+* **Phase 0 / Phase 1 (receive + validation-only)** — unchanged
+  from Runs 142 / 143. Run 147 does not relax any validation
+  predicate.
+* **Phase 2 (eligibility-to-stage)** — Run 147 is the
+  release-binary acceptance run for this phase. The queue is
+  genuinely armed on DevNet/TestNet; staging happens only on
+  `PeerCandidateOutcome::Validated(_)`; rejected/oversize/rate-
+  limited/duplicate-suppressed/disabled outcomes never reach
+  `try_stage_validated` (the queue's
+  `StagingOutcome::RefusedNotValidated` guard filters them).
+* **Phase 3 (local authorization gate)** — unchanged. The DevNet
+  flag is hidden, defaults off, requires the existing live
+  `0x05` validation flag, and is refused on TestNet without
+  explicit operator opt-in via the policy's `allow_testnet`
+  selector (the Run 147 flag selects
+  `PeerDrivenStagingPolicy::testnet_enabled()` only when
+  `config.environment == NetworkEnvironment::Testnet`; MainNet is
+  refused at the CLI gate and again defensively at queue
+  construction).
+* **Phase 4 (apply)** — **NOT reached.** Run 147 does not
+  implement peer-driven apply. The Phase 4 specification still
+  governs the future Run 148+ apply runs.
+* **Phase 5 (evidence and audit)** — Run 147 lands the canonical
+  release-binary evidence report and harness for Phase 2.
+
+### Run 147 release-binary evidence
+
+`scripts/devnet/run_147_live_0x05_peer_candidate_staging_release_binary.sh`
+captures, for every Run 147 scenario:
+
+* binary identities (`sha256` and ELF `BuildID` for `qbind-node`
+  plus the four reused Run 143 helper binaries);
+* `git_commit`, `rustc --version`, `cargo --version`;
+* per-node stdout / stderr;
+* per-node Prometheus metrics scrapes;
+* per-node `pqc_trust_bundle_sequence.json` and
+  `pqc_authority_state.json` `sha256` pre/post (byte-identical
+  asserted);
+* per-node data-dir inventories (absent of
+  `pqc_authority_state.json.tmp`, `RESTORED_FROM_SNAPSHOT.json`);
+* per-scenario refusal exit codes for C1 / C2 / R2;
+* denylist grep (asserted empty).
+
+Acceptance evidence (source-level regression):
+
+* `crates/qbind-node/tests/run_146_live_inbound_0x05_staging_hook_tests.rs`
+  — 19 tests covering A1–A4, R1–R14, plus a late-install
+  regression. All green under the Run 147 binary (Run 147 does
+  not change dispatcher-level code; the source-level proof of the
+  hook is unchanged).
+* `crates/qbind-node/tests/run_145_peer_candidate_staging_tests.rs`
+  — 20 tests covering the underlying queue invariants. All green.
+* Regression suites verified green after Run 147: `run_146` (19),
+  `run_145` (20), `run_142` (16), `run_088`, `run_079`, `run_109`,
+  `run_134`, `run_138`, `qbind-node --lib pqc_authority`,
+  `qbind-node --lib`.
+
+### Verdict (mandatory disclosure per `task/RUN_147_TASK.txt`)
+
+Run 147 is **NOT pure evidence-only.** It is
+
+> **"source/test + release-binary evidence for hidden opt-in
+> staging arming."**
+
+The source delta is the single new hidden CLI flag, the top-level
+partial-config refusal gate, and the dispatcher-construction
+install branch documented above. Default release-binary behaviour
+(no flag supplied) is bit-for-bit Run 143 / Run 146.
+
+### Remaining open phases of this specification after Run 147
+
+* **Run 148** — release-binary DevNet-only peer-driven apply
+  evidence proving apply, post-commit marker persistence,
+  session-eviction ordering, and Run 070 rollback behaviour. (The
+  Run 144 specification still governs that surface.)
+* **Run 149+** — governance / ratification / KMS / HSM hardening
+  before any TestNet / MainNet claim.
+
+### Invariants preserved by Run 147
+
+Run 147 does not change any invariant from §3, §4, §7, §11, or §12
+of this specification, and does not change any invariant from
+Runs 145 / 146 progress entries. Specifically:
+
+* Phase 4 (apply) is not entered.
+* The Run 070 apply ordering is not changed.
+* The Run 144 invariants 1–18 continue to hold.
+* The Run 145 staging-queue non-application property continues to
+  hold.
+* The Run 146 dispatcher-hook ordering continues to hold:
+  staging is downstream of validation and Run 142 / Run 123
+  marker conflict checks, and strictly upstream of Run 088
+  propagation.
+* MainNet is refused both at the CLI gate and at queue
+  construction; local peer majority remains insufficient for
+  MainNet bundle-signing authority.
+* No new wire format, no new on-disk schema, no new metric
+  family, no new fixture helper.

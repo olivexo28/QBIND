@@ -2969,3 +2969,81 @@ trust-bundle apply, MainNet staging enablement, signing-key
 rotation / revocation lifecycle, KMS / HSM authority-key custody,
 MainNet governance attestation, validator-set rotation, full C4
 closure, and C5 closure all remain out of scope.
+## Run 147 — Peer-driven trust-bundle apply: release-binary evidence for the live `0x05` peer-candidate staging hook (hidden opt-in arming flag)
+
+Run 147 produces release-binary evidence that Run 146 explicitly
+deferred for the Run 145 / Run 146 non-applying
+`PeerCandidateStagingQueue`. The Run 147 feasibility gate ("can a
+real `target/release/qbind-node` binary arm
+`LivePeerCandidateWireDispatcher::staging_queue` through an
+existing runtime config path?") returned **NO** against the Run 146
+state. Per `task/RUN_147_TASK.txt`'s "preferred path if a flag is
+necessary" allowance, Run 147 adds the smallest hidden,
+disabled-by-default DevNet/TestNet-only arming flag
+`--p2p-trust-bundle-peer-candidate-staging-enabled` plus a
+top-level partial-config refusal gate and a single inline branch in
+`crates/qbind-node/src/main.rs` that installs a bounded
+`PeerCandidateStagingQueue` into the dispatcher config when (and
+only when) the flag is supplied with valid co-requisites on
+DevNet/TestNet. **No dispatcher-level code is changed; no other
+authority-model surface is touched.**
+
+The Run 147 wiring does not change any existing authority-model
+contract:
+
+* The authority-marker is **still** persisted only by the existing
+  Run 134 / Run 136 / Run 138 / Run 140 / Run 141 paths. The
+  staging hook never writes the marker file under any code path.
+  Run 147 confirms this on release binaries by asserting
+  `pqc_authority_state.json` is byte-identical pre/post on every
+  scenario.
+* The persistent trust-bundle sequence file is **still** written
+  only by the existing Run 070 apply contract. The staging hook
+  never writes the sequence file. Run 147 confirms this on release
+  binaries by asserting `pqc_trust_bundle_sequence.json` is
+  byte-identical pre/post on every scenario.
+* `LivePqcTrustState` is **still** mutated only by the existing
+  Run 070 apply contract. The staging hook does not own a
+  `LivePqcTrustState` and does not construct one.
+* P2P / KEMTLS sessions are **still** evicted only by the existing
+  Run 072 / Run 074 paths. The staging hook does not own a
+  `P2pSessionEvictor` and does not construct one.
+* The SIGHUP / reload-apply paths (Run 073 / Run 074 / Run 138)
+  are unchanged.
+* The snapshot / restore authority-marker surface (Run 124 / Run 130 /
+  Run 140 / Run 141) is unchanged.
+* The MainNet authority barrier is reinforced: the Run 147 flag is
+  refused on MainNet **twice** (top-level CLI gate and queue
+  construction defensive guard); local peer majority remains
+  insufficient for MainNet bundle-signing authority.
+
+Run 147 introduces no new wire format, no new on-disk schema, no
+new metric family. The only public source-surface delta is the
+single new hidden CLI flag plus its install branch, both
+documented in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`. The
+Run 146 dispatcher contract (`set_staging_queue`, `staging_queue()`,
+`staging_hook_is_armed()`) is preserved verbatim and exercised at
+install time inline; the late-install API remains usable for tests
+and future runs unchanged.
+
+Crosscheck performed against Runs 050–146 invariants: Run 147
+introduces no contradictions because the staging hook is dead code
+when the new flag is not supplied (the default for every release
+binary), and even when armed it performs no mutation. Every
+Run 050–146 invariant remains intact, including Run 055
+anti-rollback, Run 065/091 activation gates, Run 070 apply
+ordering, Run 076/079/088 envelope/propagation discipline,
+Run 109/123 v1 enforcement, Run 130/131 v2 verifier and marker
+primitives, Run 132/142 validation-only paths, Run 134/136/138
+post-commit marker discipline, Run 140/141 snapshot/restore parity,
+the Run 144 six-phase fail-closed pipeline, the Run 145 staging-queue
+non-application property, and the Run 146 dispatcher hook ordering.
+**Static production source-code anchors remain rejected.** **Local
+config alone remains insufficient for MainNet bundle-signing
+authority.** **Local peer majority alone is insufficient for MainNet
+bundle-signing authority (formalized by Run 144; reaffirmed by
+Runs 145, 146, and 147).** Peer-driven live trust-bundle apply,
+MainNet staging enablement (refused fail-closed by Run 147),
+signing-key rotation / revocation lifecycle, KMS / HSM
+authority-key custody, MainNet governance attestation, validator-set
+rotation, full C4 closure, and C5 closure all remain out of scope.

@@ -654,6 +654,43 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_propagation_enabled: bool,
 
+    /// Run 147 — hidden, **disabled-by-default** operator opt-in flag
+    /// that arms the Run 146 [`LivePeerCandidateWireDispatcher`]
+    /// non-applying [`PeerCandidateStagingQueue`] hook on the live
+    /// inbound `0x05` validation-only receive path.
+    ///
+    /// **Strictly non-authoritative.** Setting this flag does NOT
+    /// imply propagation, does NOT imply apply, does NOT mutate
+    /// `LivePqcTrustState`, does NOT write
+    /// `pqc_trust_bundle_sequence.json`, does NOT write
+    /// `pqc_authority_state.json`, does NOT evict sessions, and
+    /// does NOT invoke SIGHUP / reload-apply. The flag only
+    /// installs a bounded in-memory queue that records
+    /// `PeerCandidateOutcome::Validated(_)` outcomes already
+    /// produced by the Run 142 v2 (or Run 109 v1) validation path,
+    /// after both the Run 142 v2 and Run 123 v1 authority-marker
+    /// conflict checks have passed, and **before** any Run 088
+    /// propagation rebroadcast.
+    ///
+    /// Requires `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`
+    /// at the binary level (a queue with no upstream validation
+    /// pipeline would never receive any candidate). MainNet is
+    /// **refused unconditionally** at startup even when this flag
+    /// is set: the binary aborts with a fatal `[binary] Run 147:
+    /// FATAL` line and exit code 1; the P2P transport is never
+    /// brought up. The refusal is enforced both at the CLI gate
+    /// and again at the queue's
+    /// [`PeerDrivenStagingPolicy::permitted`] layer.
+    ///
+    /// See `task/RUN_147_TASK.txt`,
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_147.md`, and
+    /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-staging-enabled",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_staging_enabled: bool,
+
     /// Run 105 — disabled-by-default operator opt-in flag for the
     /// **non-mutating bundle-signing-key ratification enforcement**
     /// layer. Without this flag, supplying `--p2p-trust-bundle-ratification
