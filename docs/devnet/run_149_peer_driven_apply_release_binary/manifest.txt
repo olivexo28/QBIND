@@ -1,0 +1,7 @@
+# Run 149 peer-driven apply release-binary evidence
+generated_at=2026-05-28T15:55:12Z
+repo=/tmp/workspace/olivexo28/QBIND
+git_commit=76f259c820fb21b3c27718455d3f84339592e639
+rustc=rustc 1.95.0 (59807616e 2026-04-14)
+cargo=cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+node_bin=/tmp/workspace/olivexo28/QBIND/target/release/qbind-node

@@ -1,0 +1,344 @@
+QBIND blockchain node with PQC consensus
+
+Usage: qbind-node [OPTIONS]
+
+Options:
+  -P, --profile <PROFILE>
+          Configuration profile: devnet-v0, testnet-alpha, testnet-beta, or mainnet.
+          
+          When specified, provides a canonical configuration preset. Individual settings below can still override specific values.
+          
+          - devnet-v0: Frozen DevNet (NonceOnly, FIFO, LocalMesh) - testnet-alpha: TestNet Alpha (VmV0, gas off, FIFO, LocalMesh) - testnet-beta: TestNet Beta (VmV0, gas on, DAG, P2P) - mainnet: MainNet v0 (VmV0, gas required, DAG required, P2P required)
+          
+          If not specified, falls back to building config from individual flags.
+          
+          NOTE: MainNet profile enforces strict invariants. See validate_mainnet_invariants().
+
+  -e, --env <ENVIRONMENT>
+          Network environment: devnet, testnet, or mainnet.
+          
+          Determines the chain ID and domain scope for signing operations. Default: devnet
+          
+          [default: devnet]
+
+      --execution-profile <EXECUTION_PROFILE>
+          Execution profile: nonce-only or vm-v0.
+          
+          - nonce-only: DevNet default, nonce-based execution - vm-v0: TestNet Alpha, VM with account balances Default: nonce-only
+          
+          [default: nonce-only]
+
+      --enable-gas <ENABLE_GAS>
+          Enable gas enforcement.
+          
+          When true, transactions are validated and executed with gas metering. Default: false (DevNet/Alpha default). TestNet Beta preset enables this.
+          
+          [possible values: true, false]
+
+      --enable-fee-priority <ENABLE_FEE_PRIORITY>
+          Enable fee-priority mempool ordering.
+          
+          When true, transactions are ordered by max_fee_per_gas and effective_fee. Requires gas enforcement to be meaningful. Default: false (DevNet/Alpha default). TestNet Beta preset enables this.
+          
+          [possible values: true, false]
+
+      --mempool-mode <MEMPOOL_MODE>
+          Mempool mode: fifo or dag.
+          
+          - fifo: Traditional FIFO queue (DevNet/Alpha default) - dag: DAG-based mempool with batches (TestNet Beta default)
+
+      --enable-dag-availability <ENABLE_DAG_AVAILABILITY>
+          Enable DAG availability certificates.
+          
+          Only meaningful when mempool-mode is 'dag'. Default: false (Alpha default). TestNet Beta preset enables this.
+          
+          [possible values: true, false]
+
+      --enable-stage-b <ENABLE_STAGE_B>
+          Enable Stage B parallel execution.
+          
+          When enabled, uses conflict-graph-based parallel execution for VM v0. Produces identical results as sequential execution but with improved throughput.
+          
+          Default: false (DevNet/Alpha/Beta default). MainNet preset enables this.
+          
+          [possible values: true, false]
+
+      --dag-coupling-mode <DAG_COUPLING_MODE>
+          DAG–consensus coupling mode: off, warn, or enforce.
+          
+          Controls how the consensus layer interacts with DAG availability certificates: - off: No coupling; consensus ignores DAG certificates (DevNet/TestNet default) - warn: Log warnings for uncertified batches but don't reject (testing) - enforce: Reject proposals with uncertified batches (MainNet required)
+          
+          MainNet profile requires `enforce` mode.
+
+      --monetary-mode <MONETARY_MODE>
+          Monetary engine mode: off, shadow, or active.
+          
+          Controls the monetary engine's behavior: - off: No decisions, no metrics, no issuance (DevNet default) - shadow: Decisions + metrics only, no state changes (TestNet default) - active: Decisions + metrics + minting + seigniorage split
+          
+          MainNet profile requires at least `shadow` mode (cannot be `off`).
+
+      --network-mode <NETWORK_MODE>
+          Network mode: local-mesh or p2p.
+          
+          - local-mesh: Existing local/loopback networking (default) - p2p: P2P transport via TcpKemTlsP2pService Default: local-mesh
+          
+          [default: local-mesh]
+
+      --enable-p2p
+          Enable P2P networking.
+          
+          When true and network-mode is p2p, starts the P2P transport service. Default: false (DevNet freeze preserved)
+
+      --p2p-listen-addr <P2P_LISTEN_ADDR>
+          P2P listen address (host:port).
+          
+          The address to bind the P2P listener to. Default: 127.0.0.1:0 (OS-assigned port)
+          
+          [default: 127.0.0.1:0]
+
+      --p2p-advertised-addr <P2P_ADVERTISED_ADDR>
+          P2P advertised address (host:port).
+          
+          The address to advertise to peers. If not specified, uses listen_addr. Useful when behind NAT or load balancers.
+
+      --p2p-peer <P2P_PEERS>
+          Static peer addresses (host:port).
+          
+          Peers to connect to at startup. Can be specified multiple times. Example: --p2p-peer 192.168.1.10:19000 --p2p-peer 192.168.1.11:19000
+
+      --p2p-mutual-auth <P2P_MUTUAL_AUTH>
+          B12 — mutual KEMTLS authentication mode for the binary path.
+          
+          Accepts `required`, `optional`, `disabled` (and aliases handled by `parse_mutual_auth_mode`). When set to `required`, the listener requires a v2 `ClientInit` carrying a verified client `NetworkDelegationCert`, and accepted-session identity is derived from the cert's `validator_id` field rather than from the dialer's self-asserted `client_random`. Defaults to `disabled` to preserve pre-B12 test-grade DevNet behaviour.
+          
+          Also readable from `QBIND_MUTUAL_AUTH` (the env var only takes effect when this flag is left unset). See `docs/whitepaper/contradiction.md` C4 / B12.
+
+      --require-timeout-verification
+          Run 031: require timeout-verification activation under `--p2p-mutual-auth required` multi-validator deployments.
+          
+          When set, `qbind-node` refuses to start if a real `TimeoutVerificationContext` cannot be honestly built from existing production components (validator keystore, peer pubkey distribution, suite-aware key provider, backend registry, local signer). When unset, activation is best-effort: if production pieces are missing, the binary logs a precise reason and continues with `verification_ctx: None` (Run 030 semantics, bit-equivalent to today's path).
+          
+          See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_031.md` and `docs/whitepaper/contradiction.md` C5.
+
+      --validator-consensus-key <VALIDATOR_CONSENSUS_KEYS>
+          Run 033: explicit per-validator consensus public key for timeout-verification activation.
+          
+          Format: `VID:SUITE:HEXPK` where - `VID` is the validator id (decimal `u64`), - `SUITE` is the signature suite id (decimal `u16`; today only `100` = ML-DSA-44), - `HEXPK` is the lowercase hex-encoded public key bytes (no `0x` prefix, even length).
+          
+          Can be specified multiple times; one entry per active validator (local + every `--p2p-peer vid@addr` peer). Required for `--require-timeout-verification` to honestly activate `TimeoutVerificationContext`. Without these entries, the binary path keeps the Run 032 disabled behaviour with `SignerPresentKeyProviderUnavailable`.
+          
+          This is **consensus** timeout-verification key distribution, not transport-level KEMTLS root-key distribution. See `docs/whitepaper/contradiction.md` C4/C5.
+          
+          Example: `--validator-consensus-key 0:100:abcd... --validator-consensus-key 1:100:1234...`
+
+      --p2p-pqc-root-mode <P2P_PQC_ROOT_MODE>
+          Run 037 (C4 piece (c)): production-honest PQC KEMTLS root-key distribution mode for the binary path.
+          
+          Accepted values: - `test-grade-dummy-sig` (aliases: `test-grade`, `dummy`, `test`) — pre-Run-037 B12 wiring with `DummySig` + deterministic `TrustedClientRoots`. Available on DevNet only. - `pqc-static-root` (aliases: `pqc-static`, `pqc`, `static-root`) — real `MlDsa44SignatureSuite` registered; `TrustedClientRoots` consults `--p2p-trusted-root`; dialer presents the real ML-DSA-44-signed `NetworkDelegationCert` loaded from `--p2p-leaf-cert*`. Required for any production-honest claim.
+          
+          Defaults to `test-grade-dummy-sig` to preserve every existing DevNet test-grade evidence run bit-for-bit.
+          
+          See `docs/whitepaper/contradiction.md` C4 piece (c) and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_037.md`.
+
+      --p2p-trusted-root <P2P_TRUSTED_ROOTS>
+          Run 037: trusted PQC transport root public key, repeatable.
+          
+          Format: `ROOT_KEY_ID_HEX:SUITE:ROOT_PK_HEX` where - `ROOT_KEY_ID_HEX` is exactly 64 lowercase hex chars (32 bytes), the stable identifier embedded in the cert `root_key_id` field; - `SUITE` is the decimal signature suite id; today only `100` (ML-DSA-44) is accepted; - `ROOT_PK_HEX` is the lowercase hex of the root public key (for ML-DSA-44, must decode to `qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE` bytes).
+          
+          Strict parsing: malformed entries / duplicate `root_key_id` / unsupported suite all fail closed at startup. Required (non-empty) under `--p2p-mutual-auth required` + `--p2p-pqc-root-mode pqc-static-root`.
+
+      --p2p-leaf-cert <P2P_LEAF_CERT>
+          Run 037: path to a file containing this node's encoded `NetworkDelegationCert` (the bytes produced by `qbind_node::pqc_devnet_helper::encode_cert`). Required under `--p2p-mutual-auth required` + `--p2p-pqc-root-mode pqc-static-root`
+
+      --p2p-leaf-cert-key <P2P_LEAF_CERT_KEY>
+          Run 037: path to a file containing this node's KEM secret key bytes corresponding to the `leaf_kem_pk` bound by `--p2p-leaf-cert`. Required under `--p2p-mutual-auth required` + `--p2p-pqc-root-mode pqc-static-root`.
+          
+          **Discipline**: this file must be readable by the qbind-node process only. The binary never logs the bytes it loads.
+
+      --p2p-peer-leaf-cert <P2P_PEER_LEAF_CERTS>
+          Run 039: peer leaf certificate mapping for `pqc-static-root`.
+          
+          Format: `VID:PATH`, repeated once per static peer whose certified ML-KEM-768 public key must be known before the KEMTLS ClientInit.
+
+      --p2p-trust-bundle <P2P_TRUST_BUNDLE>
+          Run 050: path to a JSON PQC transport trust-anchor bundle.
+          
+          When supplied with `--p2p-pqc-root-mode pqc-static-root`, the bundle's per-environment, status- and validity-window-checked, non-revoked roots are merged into the trust set (in addition to any `--p2p-trusted-root` CLI roots, which are accepted only on DevNet; TestNet/MainNet fail closed if both are supplied).
+          
+          The bundle is validated at load time (environment binding, validity window, root status, root window, duplicates, unsupported suite, revocation list consistency, signature model). Any failure aborts startup with a precise reason.
+          
+          **Run 051 update**: signed bundles are now verified with ML-DSA-44 against the `--p2p-trust-bundle-signing-key` list. DevNet still accepts unsigned bundles for development convenience; TestNet and MainNet REFUSE unsigned bundles and REFUSE signed bundles whose signature does not verify.
+
+      --p2p-trust-bundle-signing-key <P2P_TRUST_BUNDLE_SIGNING_KEYS>
+          Run 051: bundle-signing verification public key, repeatable.
+          
+          Format: `KEYID:SUITE:PK` where - `KEYID` is exactly 64 lowercase hex chars (32 bytes), the stable identifier of the bundle-signing key. MUST NOT collide with any transport root id (either from `--p2p-trusted-root` or from the bundle's `roots[]`). - `SUITE` is the decimal signature suite id; today only `100` (ML-DSA-44) is accepted. - `PK` is the lowercase hex of the bundle-signing public key (for ML-DSA-44, must decode to `qbind_crypto::ML_DSA_44_PUBLIC_KEY_SIZE` bytes).
+          
+          Strict parsing: malformed entries / duplicate `KEYID` / unsupported suite all fail closed at startup. This flag is REQUIRED when `--p2p-trust-bundle` is supplied on TestNet/MainNet (those environments require a verified signed bundle). On DevNet it is optional (unsigned DevNet bundles still load) but, when both an unsigned bundle and signing keys are supplied, the unsigned bundle still loads and the signing-key list has no effect.
+
+  -v, --validator-id <VALIDATOR_ID>
+          Validator ID (0-based index).
+          
+          The validator's index in the validator set.
+
+  -d, --data-dir <DATA_DIR>
+          Data directory for persistent state.
+          
+          When specified, enables persistent storage (e.g., RocksDB for VM v0). When not specified, uses in-memory state only.
+
+      --restore-from-snapshot <RESTORE_FROM_SNAPSHOT>
+          B3: Restore-from-snapshot startup path.
+          
+          When specified, the node will validate the snapshot directory at `<PATH>` (expected to contain `meta.json` + `state/` per the `StateSnapshotter` format) and materialize its `state/` checkpoint into `<data-dir>/state_vm_v0` before starting consensus.
+          
+          Requires `--data-dir` to be set. Fails clearly and loudly (non-zero exit) if the snapshot is missing, has the wrong chain id, has the wrong layout, or if the target state directory is already populated.
+          
+          See `crates/qbind-node/src/snapshot_restore.rs` and `docs/whitepaper/contradiction.md` C4 (B3).
+
+      --p2p-max-outbound <P2P_MAX_OUTBOUND>
+          Maximum outbound P2P connections.
+          
+          Default: 16
+          
+          [default: 16]
+
+      --p2p-max-inbound <P2P_MAX_INBOUND>
+          Maximum inbound P2P connections.
+          
+          Default: 64
+          
+          [default: 64]
+
+      --p2p-gossip-fanout <P2P_GOSSIP_FANOUT>
+          P2P gossip fanout.
+          
+          Number of peers to forward gossip messages to. Default: 6
+          
+          [default: 6]
+
+      --p2p-diversity-mode <P2P_DIVERSITY_MODE>
+          P2P diversity enforcement mode: off, warn, or enforce (T206).
+          
+          Controls anti-eclipse IP-prefix diversity constraints: - off: No diversity checks (DevNet, TestNet Alpha default) - warn: Log warnings but allow connections (TestNet Beta default) - enforce: Reject connections that violate limits (MainNet required)
+          
+          MainNet profile requires `enforce` mode.
+
+      --state-retention-mode <STATE_RETENTION_MODE>
+          State retention mode: disabled or height (T208).
+          
+          Controls how the node manages historical state data: - disabled: Retain all historical state (DevNet, TestNet Alpha default) - height: Prune state below `current_height - retain_height` (TestNet Beta, MainNet default)
+          
+          MainNet profile requires `height` mode for disk space management.
+
+      --state-retain-height <STATE_RETAIN_HEIGHT>
+          Number of blocks of history to retain when state-retention-mode is 'height' (T208).
+          
+          State data below `current_height - retain_height` may be pruned.
+          
+          Recommended values: - TestNet Beta: 100_000 (~6 days at 5s blocks) - MainNet: 500_000 (~30 days at 5s blocks)
+
+      --state-prune-interval <STATE_PRUNE_INTERVAL>
+          Interval (in committed blocks) between state pruning runs (T208).
+          
+          Pruning is triggered every N blocks to amortize the cost.
+          
+          Default: 1_000 blocks (~83 minutes at 5s blocks)
+
+      --snapshot-dir <SNAPSHOT_DIR>
+          Directory where in-process VM-v0 snapshots are written.
+          
+          When set with `--execution-profile vm-v0 --data-dir <DIR>`, the running validator installs the bounded SIGUSR1 snapshot trigger and, when `--snapshot-interval-blocks` is non-zero, the committed-height periodic trigger. Both write snapshots to `<PATH>/<committed_height>/` using the opened `<data-dir>/state_vm_v0` RocksDB handle.
+
+      --snapshot-interval-blocks <SNAPSHOT_INTERVAL_BLOCKS>
+          Committed-block interval for snapshot configuration.
+          
+          When paired with `--snapshot-dir`, the binary checks committed anchors and creates a VM-v0 snapshot at positive interval heights.
+
+      --snapshot-max-snapshots <SNAPSHOT_MAX_SNAPSHOTS>
+          Maximum number of numeric snapshot directories to retain
+
+      --signer-mode <SIGNER_MODE>
+          Signer mode for validator key management (T210).
+          
+          Controls how the validator signing key is stored and accessed: - loopback-testing: In-memory keys for testing (DevNet only, forbidden on MainNet) - encrypted-fs: Encrypted filesystem keystore (recommended for TestNet/MainNet) - remote-signer: External signer service via gRPC/Unix socket - hsm-pkcs11: Hardware Security Module via PKCS#11 interface
+          
+          MainNet profile forbids 'loopback-testing' mode.
+
+      --signer-keystore-path <SIGNER_KEYSTORE_PATH>
+          Path to the encrypted keystore directory (T210).
+          
+          Required when signer-mode is 'encrypted-fs'. The keystore stores validator signing keys encrypted at rest.
+          
+          Example: /data/qbind/keystore
+
+      --remote-signer-url <REMOTE_SIGNER_URL>
+          URL for the remote signer service (T210).
+          
+          Required when signer-mode is 'remote-signer'. Supports grpc://, http://, or unix:// schemes.
+          
+          Examples: - grpc://localhost:50051 - unix:///var/run/qbind-signer.sock
+
+      --hsm-config-path <HSM_CONFIG_PATH>
+          Path to the HSM/PKCS#11 configuration file (T210).
+          
+          Required when signer-mode is 'hsm-pkcs11'. Contains PKCS#11 library path, slot ID, and key label.
+          
+          Example: /etc/qbind/hsm.toml
+
+      --genesis-path <GENESIS_PATH>
+          Path to the external genesis configuration file (T232).
+          
+          Required for MainNet. Optional for DevNet/TestNet (uses embedded genesis if not provided). The file must be a valid JSON file conforming to the GenesisConfig schema.
+          
+          Example: /etc/qbind/genesis.json
+
+      --print-genesis-hash
+          Print the canonical Run 101 genesis hash of the parsed genesis file and exit.
+          
+          Run 102 update: this flag now computes the **canonical Run 101 genesis hash** over the *parsed* `GenesisConfig` — that is, a SHA3-256 over a length-prefixed canonical encoding of `chain_id`, `genesis_time_unix_ms`, the validator set, allocations, council config, monetary config, and the `authority` block — under the environment policy resolved from `--env` (DEV / TST / MAIN). It is **not** a hash over the exact file bytes; two JSON files that differ only in whitespace or key ordering produce the same canonical hash, while two files that differ in any authority, chain_id, or validator field produce different canonical hashes.
+          
+          Requires `--genesis-path` to be specified. Malformed genesis files are rejected with a clear error and a non-zero exit code; there is no raw-file-byte fallback.
+          
+          The printed value is a `0x`-prefixed 64-char lowercase hex string and can be pasted verbatim into `--expect-genesis-hash` to pin the canonical hash for subsequent startups.
+          
+          Example: ```bash qbind-node --print-genesis-hash --genesis-path /etc/qbind/genesis.json --env mainnet ```
+          
+          See `crates/qbind-node/src/pqc_boot_genesis.rs`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_102.md`, and `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`.
+
+      --expect-genesis-hash <EXPECT_GENESIS_HASH>
+          Expected canonical Run 101 genesis hash (T233 + Run 102).
+          
+          When set, qbind-node loads the configured `--genesis-path`, parses it as a `GenesisConfig`, computes the canonical Run 101 genesis hash under the resolved environment policy, and compares it against this expected value. On mismatch, malformed genesis, missing authority (on MainNet/TestNet), or any other Run 101 verification failure the release binary refuses to start with a precise typed error — before any trust-bundle / network / consensus startup begins.
+          
+          Accepts hex string with or without `0x` prefix (64 hex characters).
+          
+          **Required for MainNet**: MainNet validators MUST specify this flag. The T233 `MainnetConfigError::ExpectedGenesisHashMissing` shield in `validate_mainnet_invariants` composes with the Run 102 canonical verification — the shield refuses MainNet startup if the flag is absent, and the Run 102 verifier refuses startup if the flag's value does not match the parsed canonical hash.
+          
+          Example: ```bash qbind-node --profile mainnet \ --genesis-path /etc/qbind/genesis.json \ --expect-genesis-hash 0xabc123... ```
+
+      --mempool-eviction-mode <MEMPOOL_EVICTION_MODE>
+          Mempool eviction rate limiting mode: off, warn, or enforce (T219).
+          
+          Controls how the mempool handles eviction rate limiting: - off: No rate limiting (DevNet default) - warn: Log warnings but still evict (TestNet Alpha) - enforce: Reject incoming txs instead of exceeding limit (MainNet required)
+          
+          MainNet profile requires `enforce` mode.
+
+      --mempool-eviction-max-per-interval <MEMPOOL_EVICTION_MAX_PER_INTERVAL>
+          Maximum evictions allowed per interval (T219).
+          
+          When the eviction count reaches this limit within the interval, behavior depends on the eviction mode.
+          
+          Recommended values: - DevNet: 10,000 (very loose) - TestNet Alpha: 5,000 (moderate) - TestNet Beta: 2,000 (tighter) - MainNet: 1,000 (conservative)
+
+      --mempool-eviction-interval-secs <MEMPOOL_EVICTION_INTERVAL_SECS>
+          Eviction rate measurement interval in seconds (T219).
+          
+          The eviction counter is reset when this interval elapses.
+          
+          Default: 10 seconds
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version

@@ -1,0 +1,2 @@
+[T175] Warning: P2P enabled with zero static peers. Node will operate in single-node loopback mode.
+[binary] Run 149: FATAL: --p2p-trust-bundle-peer-candidate-apply-enabled is refused on MainNet unconditionally. Local peer majority is NOT authority on MainNet. No staging; no apply; no sequence write; no marker write; no session eviction; no P2P startup.

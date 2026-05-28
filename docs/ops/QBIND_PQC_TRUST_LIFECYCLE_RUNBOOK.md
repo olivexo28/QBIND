@@ -5413,3 +5413,6 @@ Out of scope (unchanged from Run 147):
 * Validator-set rotation.
 * Full C4 closure.
 * C5 closure.
+## Run 149 operator note — peer-driven apply evidence flag
+
+`--p2p-trust-bundle-peer-candidate-apply-enabled` is a hidden evidence flag. It is disabled by default, refused on MainNet, and requires both live peer-candidate wire validation and peer-candidate staging. Operators must not treat it as MainNet readiness or governance approval; it exists to produce DevNet/TestNet evidence that a staged, validated candidate can enter the existing Run 070 apply contract.

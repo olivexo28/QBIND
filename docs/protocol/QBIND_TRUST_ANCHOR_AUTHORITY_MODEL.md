@@ -3089,3 +3089,6 @@ Open items unchanged:
 * Release-binary peer-driven apply evidence (deferred to Run 149).
 * Full C4 closure.
 * C5 closure.
+## Run 149 peer-driven apply authority boundary
+
+Run 149 does not change the authority model. Peer-driven apply remains DevNet/TestNet-only, disabled by default, and gated by local operator policy plus v2 ratification/marker checks. MainNet peer-driven apply is still refused unconditionally until a separate governance and KMS/HSM-backed authority process is specified and evidenced.

@@ -1,0 +1,13 @@
+# Required successful live apply topology command shape (V1 receiver):
+/tmp/workspace/olivexo28/QBIND/target/release/qbind-node --env devnet --network-mode p2p --enable-p2p \
+  --p2p-trust-bundle <baseline.json> \
+  --p2p-trust-bundle-signing-key <KEYID:100:PK> \
+  --p2p-trust-bundle-ratification-enforcement-enabled \
+  --p2p-trust-bundle-ratification <ratification.v2.json> \
+  --p2p-trust-bundle-peer-candidate-wire-validation-enabled \
+  --p2p-trust-bundle-peer-candidate-staging-enabled \
+  --p2p-trust-bundle-peer-candidate-apply-enabled \
+  --data-dir <v1-data-dir> --validator-id 1
+
+# V0 publisher uses the existing Run 080 live 0x05 publish flags.
+# V2 observer may run validation/propagation flags without apply enabled.

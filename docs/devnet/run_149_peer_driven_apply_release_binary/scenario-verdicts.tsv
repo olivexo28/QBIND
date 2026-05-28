@@ -1,0 +1,5 @@
+scenario	verdict	note
+feasibility-gate	minimal-source-wiring-required	Run 148 controller existed but had no binary runtime invocation path before this run.
+mainnet-refusal	pass	Release binary exits non-zero with Run 149 FATAL before P2P startup.
+hidden-flag	pass	Apply flag is hidden from --help and default false.
+live-0x05-apply	partial-positive	Harness records command surface; full local N=3 mutation archive must be generated on a host with the Run 133 v2 fixtures/helper built.

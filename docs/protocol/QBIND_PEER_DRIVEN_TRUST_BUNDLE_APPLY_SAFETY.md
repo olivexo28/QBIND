@@ -786,3 +786,8 @@ Invariants preserved by Run 148:
 * MainNet remains refused at every layer.
 * No new wire format, no new on-disk schema, no new metric
   family, no new operator CLI flag.
+## Run 149 update — minimal binary arming surface
+
+Run 149 answered the Run 148 feasibility gate: the source/test controller existed, but the release binary had no runtime path to invoke it. Run 149 therefore adds a hidden, disabled-by-default `--p2p-trust-bundle-peer-candidate-apply-enabled` flag for DevNet/TestNet evidence only.
+
+The flag is refused on MainNet unconditionally, requires live inbound `0x05` validation and the Run 147 staging hook, does not imply propagation, and calls only the Run 148 controller. The controller continues to delegate mutation to the existing Run 070 apply contract and persists v2 marker state only after sequence commit. This does not close governance, KMS/HSM, signing-key lifecycle, full C4, or C5.
