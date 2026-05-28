@@ -728,3 +728,61 @@ Runs 145 / 146 progress entries. Specifically:
   MainNet bundle-signing authority.
 * No new wire format, no new on-disk schema, no new metric
   family, no new fixture helper.
+## Run 148 progress entry — source/test peer-driven apply controller
+
+Run 148 adds the first source-and-test wiring of a peer-driven
+**apply** controller, behind an explicit local DevNet/TestNet
+policy. It is library-only; the node binary's reload-apply and
+SIGHUP paths are unchanged in Run 148.
+
+Source delta:
+
+* New module `crates/qbind-node/src/pqc_peer_candidate_apply.rs`
+  exposing `PeerDrivenApplyPolicy` (default disabled;
+  `devnet_enabled()`, `testnet_enabled()`, `mainnet_attempted()`
+  constructors), the 13-variant `PeerDrivenApplyOutcome` enum,
+  a `V2MarkerCoordinator` trait + `NoV2MarkerCoordinator`, and
+  `try_apply_staged_peer_candidate(...)`.
+* One `pub mod` line in `crates/qbind-node/src/lib.rs`.
+* New integration test
+  `crates/qbind-node/tests/run_148_peer_driven_apply_devnet_tests.rs`
+  covering the A1–A4 + R1–R16 matrix from
+  `task/RUN_148_TASK.txt` §7.
+
+Scope statement:
+
+* **Run 148 is source/test only.**
+* **Peer-driven apply is now source/test wired only for
+  DevNet/TestNet local policy.**
+* **MainNet remains refused unconditionally.** Both the
+  policy environment and the runtime-domain environment are
+  checked; `allow_mainnet` is reserved for future governance
+  wiring and has no effect on the refusal in Run 148.
+* **Release-binary DevNet/TestNet peer-driven apply evidence is
+  deferred to Run 149.**
+* **Governance / KMS / HSM / signing-key lifecycle remain open.**
+* **Full C4 remains open.**
+* **C5 remains open.**
+
+Invariants preserved by Run 148:
+
+* The Run 070 apply contract is reused unchanged. The controller
+  calls `apply_validated_candidate_with_previous(...)`; it does
+  not duplicate validation, snapshot, swap, eviction, commit, or
+  rollback logic.
+* The v2 authority marker is **never** persisted before the
+  Run 070 sequence commit succeeds. Persistence is delegated to
+  a `V2MarkerCoordinator` after the apply returns `Ok`; a
+  persist failure is surfaced as
+  `PeerDrivenApplyOutcome::MarkerPersistFailedAfterCommit`, an
+  operator-actionable fatal outcome.
+* Pre-apply marker conflicts (lower sequence, same-sequence
+  different digest) refuse **before** any state mutation, per
+  Run 123 / Run 134 / Run 138.
+* The Run 144 invariants 1–18 continue to hold; the Run 145
+  staging-queue non-application property continues to hold; the
+  Run 146 dispatcher-hook ordering continues to hold; the
+  Run 147 hidden-arming-flag semantics are unchanged.
+* MainNet remains refused at every layer.
+* No new wire format, no new on-disk schema, no new metric
+  family, no new operator CLI flag.
