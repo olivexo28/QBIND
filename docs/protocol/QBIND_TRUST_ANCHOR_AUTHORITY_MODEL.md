@@ -3341,3 +3341,55 @@ are unchanged:
   rotation/revocation lifecycle** is introduced; those remain
   open.
 * **Full C4 is NOT claimed by Run 152; C5 remains OPEN.**
+
+## Run 153 — release-binary end-to-end peer-driven apply evidence; authority model unchanged
+
+Run 153 wires the Run 152 binary-reachable plumbing into the Run 151
+hidden drain-once hook so the full peer-driven apply pipeline is
+callable from a real `target/release/qbind-node`. **No authority-model
+invariant is changed.** The drain routes through Run 150 / Run 148 /
+Run 070 verbatim.
+
+Authority invariants reaffirmed by Run 153:
+
+* **Local config alone remains insufficient for MainNet
+  bundle-signing authority.** MainNet is refused at four layers
+  (early-startup gate, co-requisites gate, `PeerDrivenDrainPolicy`,
+  drain-once invocation guard).
+* **No new authority predicate.** The drain-once invocation block
+  reuses the existing Run 150 / Run 148 / Run 070 chain; no new
+  trust anchor, ratification primitive, or authority root is added.
+* **Local peer majority remains insufficient for MainNet
+  bundle-signing authority** (formalized by Run 144; reaffirmed by
+  Runs 145, 146, 147, 148, 149, 150, 151, 152, and 153).
+* **No autonomous apply, no automatic apply on receipt.** The
+  drain remains operator-triggered (Run 151 hidden CLI flag)
+  and exactly one-shot per trigger.
+
+Authority-relevant negative assertions for Run 153:
+
+* No new trust anchor embedded.
+* No new authority root introduced.
+* No new v2 marker write site.
+* No new wire format or schema change.
+* No governance implementation.
+* No KMS / HSM implementation.
+* No signing-key rotation / revocation lifecycle.
+* No autonomous background drain.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No MainNet enablement.
+
+Open items after Run 153 (unchanged from Run 152):
+
+* Governance / ratification authority.
+* KMS / HSM custody.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+
+Run 153's contribution to the authority model is the fulfilment of
+the Run 152 deferral of release-binary end-to-end peer-driven apply
+evidence. The authority model itself is unchanged; every authority
+invariant from Runs 050–152 is reaffirmed. **Full C4 is NOT claimed
+by Run 153; C5 remains OPEN.**

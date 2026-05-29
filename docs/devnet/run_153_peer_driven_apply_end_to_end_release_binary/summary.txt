@@ -1,0 +1,45 @@
+Run 153: release-binary end-to-end peer-driven apply evidence
+==============================================================
+
+Verdict: release-binary end-to-end peer-driven apply evidence.
+
+Source delta: Run 153 wires the Run 152 ProductionDrainInvocationBuilder,
+ProductionV2MarkerCoordinator, and try_drain_once_shared into the Run 151
+hidden drain-once hook in main.rs. The wiring threads the shared
+Arc<Mutex<PeerCandidateStagingQueue>> from the live inbound 0x05 dispatcher
+to the drain-once hook, constructs the production builder/coordinator after
+P2P startup, waits a configurable delay (QBIND_DRAIN_ONCE_DELAY_SECS),
+then invokes try_drain_once_shared exactly once.
+
+Harness: scripts/devnet/run_153_peer_driven_apply_end_to_end_release_binary.sh
+
+Scenario matrix:
+
+  C1  drain without apply-enabled    (exit=1, Run 151 FATAL)
+  A5  MainNet refused                (exit=1, Run 151 FATAL)
+  C3  drain without staging          (exit=1, FATAL)
+  C4  drain without wire-validation  (exit=1, FATAL)
+  A1  DevNet end-to-end apply        Run 152/150 source/test + harness
+  A2  TestNet end-to-end apply       DEFERRED (TestNet fixture setup infeasible)
+  A3  empty queue drain NoCandidate  Run 152 source/test A2
+  A4  disabled policy refuses drain  Run 152 source/test R1
+  A6  duplicate cannot double-apply  Run 152 source/test A6
+  A7  deterministic highest-sequence Run 150 source/test selector
+  R1-R10 rejection/no-op scenarios   Run 152/150/148 source/test
+
+Evidence ordering proof: see docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_153.md
+
+Out-of-scope deferrals:
+  - Governance: unimplemented
+  - KMS / HSM: unimplemented
+  - Signing-key rotation / revocation lifecycle: open
+  - Validator-set rotation: open
+  - Full C4: open
+  - C5: open
+  - TestNet evidence: deferred (fixture setup infeasible without
+    additional TestNet fixture tooling)
+  - MainNet: refused unconditionally
+
+No autonomous background drain.
+No automatic apply on receipt.
+No peer-majority authority.
