@@ -5902,3 +5902,76 @@ Out of scope for Run 155 (unchanged from Run 154):
 * Signing-key rotation / revocation lifecycle.
 * Validator-set rotation.
 * Full C4 / C5 closure.
+## Run 156 — positive TestNet release-binary apply driven on real binaries; positive A1 BLOCKED, exact blocker documented (no operator surface change)
+
+Run 156 drives the **positive** TestNet end-to-end peer-driven apply path
+on a real `target/release/qbind-node` over a **live N=3 TestNet P2P
+cluster** (V0 publisher of one live `0x05` candidate, V1 receiver with
+wire-validation/staging/apply/drain-once armed, V2 observer), rather than
+mapping the positive path to source/test coverage as Run 153/155 did.
+Operators have **no new CLI surface and no new runtime behaviour**: the
+Run 153 hidden, disabled-by-default
+`--p2p-trust-bundle-peer-candidate-drain-once` hook is reused verbatim.
+
+What Run 156 adds for the lab/evidence workflow:
+
+* A release-binary live N=3 TestNet harness
+  `scripts/devnet/run_156_testnet_positive_peer_driven_apply_release_binary.sh`.
+  Build and run it as:
+
+  ```
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node \
+      --example run_133_v2_validation_only_fixture_helper
+  bash scripts/devnet/run_156_testnet_positive_peer_driven_apply_release_binary.sh
+  ```
+
+  The harness mints transport material and TestNet fixtures with the real
+  release helpers, launches the three nodes, publishes one live `0x05`
+  candidate from V0, waits for the explicit delayed drain-once on V1, and
+  records the **actual** drain outcome under
+  `docs/devnet/run_156_testnet_positive_peer_driven_apply_release_binary/`.
+
+* The evidence archive and report
+  (`docs/devnet/run_156_testnet_positive_peer_driven_apply_release_binary/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_156.md`).
+
+**Result on the fixtures shipped in this repository:** the live pipeline
+runs end-to-end up to V1's wire-validation gate (P2P up; V0 publishes; V1
+observes `Run 078 … outcome=rejected; NOT applied`), but the candidate is
+rejected before staging, so the drain-once returns `NoCandidate` with **no
+live trust mutation** (V1 logs only `first-load persisted_sequence=1`).
+The **exact blocker** (recorded in the archive `a1_blocker.txt` and the
+evidence report): the live P2P transport bundle / leaf credentials are
+minted by `devnet_pqc_trust_bundle_helper` under one root authority, while
+the only TestNet apply candidate (`run_133` helper
+`testnet/peer-candidate.valid.json`) is signed under a **disjoint** root
+with no matching P2P leaf credentials, so it is not a Run-070 successor of
+V1's live baseline. No existing fixture tool mints a single unified
+universe with both N=3 P2P leaf credentials and a self-consistent
+seq1→seq2 apply pair signed by the same transport root.
+
+**Unblock path (out of Run 156 scope):** a future fixture-tooling run can
+mint the unified universe; the harness already accepts
+`QBIND_RUN156_TRANSPORT_DIR` / `QBIND_RUN156_CANDIDATE_ENVELOPE` /
+`QBIND_RUN156_SIDECAR` / `QBIND_RUN156_GENESIS` /
+`QBIND_RUN156_GENESIS_HASH` overrides, and on a unified universe it drives
+the real apply and asserts the `Applied` ordering automatically.
+
+Run 156 also re-confirms the negative invariants on the real binary
+(A6/C2 MainNet drain-once refused, exit=1 with `Run 151: FATAL`; no
+autonomous drain; no automatic apply on receipt; denylist grep clean).
+
+Out of scope for Run 156 (unchanged from Run 155):
+
+* Operator CLI / runtime behaviour change.
+* Unified fixture tooling (the unblock path above).
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement (MainNet remains refused).
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+* Validator-set rotation.
+* Full C4 / C5 closure (the positive TestNet release-binary A1 apply
+  remains BLOCKED pending unified fixture tooling).

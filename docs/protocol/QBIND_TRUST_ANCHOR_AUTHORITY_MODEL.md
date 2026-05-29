@@ -3456,3 +3456,61 @@ Open items after Run 155 (unchanged from Run 154):
 Run 155 is release-binary TestNet evidence that closes the Run 153 A2
 TestNet evidence deferral; DevNet evidence from Run 153 remains valid.
 **Full C4 is NOT claimed by Run 155; C5 remains OPEN.**
+
+## Run 156 — positive TestNet release-binary apply driven live; positive A1 BLOCKED by disjoint authority universes
+
+Run 156 drives the **positive** TestNet end-to-end peer-driven apply path
+on a real `target/release/qbind-node` over a live N=3 TestNet P2P cluster
+(instead of mapping it to source/test coverage as Run 153/155 did) and
+**changes nothing in the authority model**. The model is unchanged; every
+authority invariant from Runs 050–155 is reaffirmed. Run 156 adds **no
+source delta**: it reuses the Run 153 `main.rs` wiring verbatim.
+
+Run 156's core finding is an **authority-universe** observation that is
+itself a reaffirmation of the model: peer-driven apply requires the
+published candidate to be a valid Run-070 successor of V1's live baseline
+`LivePqcTrustState`, which is anchored to the **root authority of V1's live
+P2P transport bundle**. On the fixtures shipped in this repository the live
+transport bundle and the N=3 leaf credentials are minted by
+`devnet_pqc_trust_bundle_helper` (`signed-testnet`) under one ephemeral
+root authority, while the only TestNet apply candidate (`run_133` helper
+`testnet/peer-candidate.valid.json`) is signed under a **disjoint**
+ephemeral root authority with no matching P2P leaf credentials. Because the
+candidate's authority root is not the live baseline's authority root, V1's
+live `0x05` wire-validation / ratification gate **rejects** it — exactly
+the authority-binding the model requires (a candidate cannot apply unless
+it descends, by sequence, from the in-force authority). The drain-once
+therefore returns `NoCandidate` with no live trust mutation. No existing
+fixture tool mints a single unified universe binding both (a) N=3 P2P leaf
+credentials and (b) a self-consistent seq1→seq2 apply pair under one shared
+root authority plus the matching v2 ratification sidecar.
+
+Every authority-root fingerprint exercised by Run 156 is derived from
+**freshly minted, ephemeral** key material — there is **no static
+production source-code anchor**, **no fallback root**, and **no fallback
+signing key**. The Run 150 drain / apply policies remain reachable only
+behind explicit local `testnet_enabled()` / `devnet_enabled()` policy;
+**MainNet remains refused unconditionally** at the policy-gate,
+runtime-domain, Run 148 controller, and Run 144 specification layers, and
+local material alone remains insufficient for MainNet bundle-signing
+authority. **Local peer majority remains insufficient for MainNet
+bundle-signing authority.**
+
+Open items after Run 156 (unchanged from Run 155):
+
+* Governance / ratification authority.
+* KMS / HSM custody.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Unified TestNet fixture tooling that binds live transport credentials and
+  the apply baseline/candidate pair under one root authority (the unblock
+  path for the live positive A1 apply).
+
+Run 156 is release-binary live-path evidence plus the exact fixture
+blocker; it explicitly does **not** claim the positive A1 path closed and
+does **not** substitute source/test coverage for the live positive
+verdict. DevNet evidence from Run 153 and TestNet evidence from Run 155
+remain valid. **Full C4 is NOT claimed by Run 156; C5 remains OPEN; the
+positive TestNet release-binary A1 apply remains BLOCKED pending unified
+fixture tooling.**
