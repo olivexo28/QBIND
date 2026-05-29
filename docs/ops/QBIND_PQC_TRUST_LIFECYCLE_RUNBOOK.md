@@ -5714,3 +5714,83 @@ gate, Run 150 `PeerDrivenDrainPolicy`, Run 148 controller).
 Governance remains unimplemented. KMS / HSM remains
 unimplemented. Signing-key rotation / revocation lifecycle
 remains open. Full C4 remains open; C5 remains open.
+
+## Run 153 — release-binary end-to-end peer-driven apply evidence
+
+Run 153 wires the Run 152 binary-reachable plumbing
+(`ProductionDrainInvocationBuilder`, `ProductionV2MarkerCoordinator`,
+`try_drain_once_shared`) into the Run 151 hidden
+`--p2p-trust-bundle-peer-candidate-drain-once` hook so the full
+peer-driven apply pipeline is callable from a real
+`target/release/qbind-node`. **Operators who already pass the hidden
+drain-once flag now get the full end-to-end pipeline**: after P2P
+startup and a configurable delay (`QBIND_DRAIN_ONCE_DELAY_SECS`,
+default 10s) the drain-once block constructs the production builder,
+coordinator, and context from the live trust state and invokes
+`try_drain_once_shared` exactly once through the full chain:
+
+    staging queue → ProductionDrainInvocationBuilder
+    → ProductionV2MarkerCoordinator → Run 150 drain
+    → Run 148 controller → Run 070 apply → LivePqcTrustState swap
+    → session eviction → sequence commit → v2 marker persist
+
+New operator-visible log lines:
+
+```
+[run-153] drain-once: invoking try_drain_once_shared ...
+[run-153] drain-once outcome: <PeerDrivenDrainOutcome variant>
+```
+
+Safety guarantees for operators:
+
+* **MainNet refused unconditionally** at the drain-once invocation
+  point (defensive guard on top of the Run 151 early-startup and
+  co-requisites gates).
+* **No new CLI flag.** The existing Run 151 hidden flag controls
+  the drain-once behaviour.
+* **One-shot.** `try_drain_once_shared` fires exactly once after
+  the configurable delay; no autonomous background drain loop.
+* **No automatic apply on receipt.** The drain fires on a delay
+  after P2P startup, not automatically when a `0x05` candidate
+  arrives.
+* **Ordering contract.** The drain routes through Run 150 / Run
+  148 / Run 070 verbatim; the Run 070 ordering invariant
+  (`validate → snapshot → swap → evict → commit → marker`) is
+  unchanged.
+
+Refusal scenarios evidenced by the Run 153 release-binary harness
+(`scripts/devnet/run_153_peer_driven_apply_end_to_end_release_binary.sh`):
+
+* C1: drain-once without `--p2p-trust-bundle-peer-candidate-apply-enabled`
+  → `[binary] Run 151: FATAL` exit 1.
+* A5: drain-once on `--env mainnet`
+  → `[binary] Run 151: FATAL` early-startup exit 1.
+* C3: drain-once + apply without staging → FATAL exit 1.
+* C4: drain-once + apply + staging without wire-validation → FATAL exit 1.
+
+End-to-end accepted scenarios (A1 DevNet apply, A3 empty queue
+NoCandidate, A4 disabled policy, A6 duplicate cannot double-apply,
+A7 deterministic highest-sequence selection) and rejection scenarios
+(R1–R10) are cited from Run 152 (23 / 23 green) and Run 150
+(19 / 19 green) source/test coverage where release-binary fault
+injection is infeasible.
+
+Negative assertions reaffirmed by Run 153 (matching Run 152 /
+Run 151 / Run 150):
+
+* No autonomous background drain.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No MainNet enablement.
+* No governance / KMS / HSM implementation.
+* No signing-key rotation / revocation lifecycle.
+
+Out of scope for Run 153 (unchanged from Run 152):
+
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+* TestNet evidence (deferred; fixture tooling needed).

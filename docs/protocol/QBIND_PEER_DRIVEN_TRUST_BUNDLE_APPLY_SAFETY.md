@@ -1241,3 +1241,63 @@ no marker write, no session eviction, no Run 070 apply call,
 no SIGHUP outcome, no reload-apply outcome, no peer-majority
 authority claim, and no MainNet apply. **Full C4 is NOT
 claimed by Run 152; C5 remains OPEN.**
+
+## Run 153 — release-binary end-to-end peer-driven apply evidence
+
+Run 153 wires the Run 152 binary-reachable plumbing into the Run 151
+hidden `--p2p-trust-bundle-peer-candidate-drain-once` hook so the full
+peer-driven apply pipeline is callable from a real release binary.
+
+The source delta in `crates/qbind-node/src/main.rs` is minimal (~180
+LOC, gated by the existing drain-once flag): a staging queue
+`Arc<Mutex<PeerCandidateStagingQueue>>` is cloned from the live `0x05`
+dispatcher's queue into the drain-once block, and after P2P startup +
+configurable delay the drain block constructs the production builder,
+coordinator, and context from the live trust state and invokes
+`try_drain_once_shared` exactly once through the full pipeline:
+
+    staging queue → ProductionDrainInvocationBuilder
+    → ProductionV2MarkerCoordinator → Run 150 drain
+    → Run 148 controller → Run 070 apply → LivePqcTrustState swap
+    → session eviction → sequence commit → v2 marker persist
+
+The Run 153 source delta honours the Run 150 / Run 151 / Run 152
+safety contract bit-for-bit:
+
+* **MainNet refused at four layers.** Early-startup gate (Run 151),
+  co-requisites gate (Run 151), `PeerDrivenDrainPolicy` MainNet
+  refusal (Run 150), and a new defensive guard at the drain-once
+  invocation point.
+* **One-shot, operator-triggered.** The drain fires exactly once
+  after a configurable delay (`QBIND_DRAIN_ONCE_DELAY_SECS`); no
+  autonomous background loop.
+* **Ordering unchanged.** The drain routes through Run 150 / Run 148
+  / Run 070 verbatim; the Run 070 ordering invariant is preserved.
+* **Concurrency-guarded.** Run 150's `Arc<AtomicBool>` in-progress
+  flag prevents concurrent drains.
+* **No new wire format, no schema change, no new CLI flag.**
+
+Verdict for Run 153: **"release-binary end-to-end peer-driven apply
+evidence"** — the full pipeline is now callable from the release
+binary via the hidden drain-once hook. Accepted apply evidence (A1,
+A3, A4, A6, A7) and rejection evidence (R1–R10) are cited from
+Run 152 (23 / 23 green) and Run 150 (19 / 19 green) source/test
+coverage. Refusal scenarios (C1–C4, A5 MainNet) are evidenced by the
+Run 153 release-binary harness. A2 TestNet evidence is deferred.
+
+Out of scope for Run 153 (unchanged from Run 152):
+
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+
+Run 153 is **release-binary end-to-end evidence**: validation-only
+and propagation-only behaviour remain unchanged, MainNet remains
+refused unconditionally, the drain is operator-triggered and
+one-shot, no autonomous background apply exists, no governance /
+KMS / HSM is implemented, no signing-key rotation / revocation
+lifecycle is added. **Full C4 is NOT claimed by Run 153; C5
+remains OPEN.**

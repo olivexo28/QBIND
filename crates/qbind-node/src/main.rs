@@ -5714,6 +5714,13 @@ async fn run_p2p_node(
     let mut propagation_dispatcher_for_sender: Option<
         Arc<qbind_node::pqc_peer_candidate_wire::LivePeerCandidateWireDispatcher>,
     > = None;
+    // Run 153 — hold a reference to the shared staging queue for the
+    // drain-once hook. When the drain-once flag is armed, this is the
+    // SAME `Arc<Mutex<PeerCandidateStagingQueue>>` the live inbound
+    // `0x05` dispatcher stages into. No second queue, no copy.
+    let mut drain_once_staging_queue: Option<
+        std::sync::Arc<parking_lot::Mutex<qbind_node::pqc_peer_candidate_staging::PeerCandidateStagingQueue>>,
+    > = None;
     let builder = if args.p2p_trust_bundle_peer_candidate_wire_validation_enabled
         || args.p2p_trust_bundle_peer_candidate_propagation_enabled
     {
@@ -5979,9 +5986,19 @@ async fn run_p2p_node(
                                 policy.max_candidates_per_peer,
                                 policy.ttl_secs
                             );
-                            Some(std::sync::Arc::new(Mutex::new(
-                                PeerCandidateStagingQueue::new(policy),
-                            )))
+                            Some({
+                                let q = std::sync::Arc::new(Mutex::new(
+                                    PeerCandidateStagingQueue::new(policy),
+                                ));
+                                // Run 153 — hold a clone so the
+                                // drain-once hook can consume from
+                                // the SAME shared queue after P2P
+                                // startup.
+                                if args.p2p_trust_bundle_peer_candidate_drain_once {
+                                    drain_once_staging_queue = Some(std::sync::Arc::clone(&q));
+                                }
+                                q
+                            })
                         } else {
                             None
                         },
@@ -6083,6 +6100,260 @@ async fn run_p2p_node(
                     e
                 );
             }
+        }
+    }
+
+    // Run 153 — release-binary end-to-end peer-driven apply drain-once.
+    //
+    // When `--p2p-trust-bundle-peer-candidate-drain-once` is armed AND the
+    // staging queue is populated from the live inbound `0x05` path, this
+    // block performs exactly ONE drain through the full pipeline:
+    //
+    //   staging queue → ProductionDrainInvocationBuilder
+    //   → ProductionV2MarkerCoordinator → Run 150 drain → Run 148
+    //   controller → Run 070 apply → LivePqcTrustState swap → session
+    //   eviction → sequence commit → v2 authority marker persist.
+    //
+    // Minimal, hidden, disabled-by-default, DevNet/TestNet-only,
+    // MainNet-refused. No autonomous background drain. No automatic apply
+    // on receipt. The drain fires once after a configurable delay
+    // (QBIND_DRAIN_ONCE_DELAY_SECS, default 10) to give live inbound `0x05`
+    // candidates time to arrive and stage.
+    if args.p2p_trust_bundle_peer_candidate_drain_once {
+        if let Some(shared_queue) = drain_once_staging_queue.as_ref() {
+            let delay_secs: u64 = std::env::var("QBIND_DRAIN_ONCE_DELAY_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10);
+            eprintln!(
+                "[run-153] drain-once delay: waiting {}s for live inbound 0x05 candidates \
+                 to arrive and stage before triggering the explicit drain-once.",
+                delay_secs
+            );
+            tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            let drain_live_state = live_for_reload_apply.as_ref().cloned();
+
+            if let Some(drain_live_state) = drain_live_state {
+
+            let evictor: Arc<dyn qbind_node::p2p_session_eviction::P2pSessionEvictor> =
+                node_context.p2p_service.clone();
+
+            let seq_path = config
+                .data_dir
+                .as_ref()
+                .map(|d| qbind_node::pqc_trust_sequence::sequence_file_path(d));
+
+            let live_arc = std::sync::Arc::new(drain_live_state);
+            let apply_ctx = qbind_node::pqc_live_trust_apply::ProductionLiveTrustApplyContext::new(
+                live_arc,
+                evictor,
+                config.environment,
+                config.chain_id(),
+                seq_path.clone(),
+                now_secs,
+            );
+
+            // Scratch directory for the drain builder's candidate material.
+            let scratch_dir = std::env::temp_dir().join(format!(
+                "qbind-run153-drain-scratch-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::create_dir_all(&scratch_dir);
+            let candidate_path = scratch_dir.join("drain_candidate.bundle");
+
+            let (prev_fp_prefix, prev_seq) = {
+                let snap = apply_ctx.snapshot_previous_metadata();
+                snap
+            };
+
+            // Construct the production drain invocation builder.
+            let mut invocation_builder = qbind_node::pqc_peer_candidate_drain::ProductionDrainInvocationBuilder::new(
+                candidate_path,
+                bundle_signing_keys.clone(),
+                seq_path,
+                config.environment,
+                config.chain_id(),
+                now_secs,
+                qbind_node::pqc_trust_activation::ActivationContext::height_only(0),
+                None, // local_leaf_cert_bytes
+                apply_ctx,
+                prev_fp_prefix,
+                prev_seq,
+                3600, // max_candidate_age_secs (1 hour)
+                now_secs,
+            );
+
+            // Construct the v2 marker coordinator (or no-op if v2
+            // ratification is unavailable).
+            let mut marker_coordinator: Box<dyn qbind_node::pqc_peer_candidate_apply::V2MarkerCoordinator> =
+                match build_run_105_reload_check_context(&args, &config) {
+                    Ok(ctx_data) => {
+                        if let Some(ratification_v2) = ctx_data.ratification_v2 {
+                            use qbind_ledger::{
+                                verify_bundle_signing_key_ratification_v2,
+                                RatificationV2VerifierInputs,
+                            };
+                            match verify_bundle_signing_key_ratification_v2(
+                                RatificationV2VerifierInputs {
+                                    ratification: &ratification_v2,
+                                    authority: &ctx_data.authority,
+                                    expected_chain_id: &ctx_data.chain_id_str,
+                                    expected_environment: ctx_data.env_policy,
+                                    expected_genesis_hash: &ctx_data.canonical_hash,
+                                },
+                            ) {
+                                Ok(ratified_v2) => {
+                                    let marker_path = config
+                                        .data_dir
+                                        .as_ref()
+                                        .map(|d| {
+                                            qbind_node::pqc_authority_state::authority_state_file_path(d)
+                                        })
+                                        .unwrap_or_else(|| {
+                                            std::path::PathBuf::from("/dev/null")
+                                        });
+                                    let mut genesis_hash_hex = String::with_capacity(64);
+                                    for b in ctx_data.canonical_hash {
+                                        use std::fmt::Write;
+                                        let _ = write!(genesis_hash_hex, "{:02x}", b);
+                                    }
+                                    eprintln!(
+                                        "[run-153] drain-once: ProductionV2MarkerCoordinator \
+                                         constructed (v2 ratification verified)."
+                                    );
+                                    Box::new(
+                                        qbind_node::pqc_peer_candidate_apply::ProductionV2MarkerCoordinator::new(
+                                            marker_path,
+                                            config.environment,
+                                            config.chain_id(),
+                                            genesis_hash_hex,
+                                            ratification_v2,
+                                            ratified_v2,
+                                            qbind_node::pqc_authority_state::AuthorityStateUpdateSource::ReloadApply,
+                                            now_secs,
+                                        ),
+                                    )
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "[run-153] drain-once: v2 ratification verification \
+                                         failed: {}. Falling back to NoV2MarkerCoordinator.",
+                                        e
+                                    );
+                                    Box::new(
+                                        qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator,
+                                    )
+                                }
+                            }
+                        } else {
+                            eprintln!(
+                                "[run-153] drain-once: no v2 ratification sidecar available. \
+                                 Using NoV2MarkerCoordinator."
+                            );
+                            Box::new(
+                                qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator,
+                            )
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[run-153] drain-once: reload-check context could not be built: \
+                             {}. Using NoV2MarkerCoordinator.",
+                            e
+                        );
+                        Box::new(
+                            qbind_node::pqc_peer_candidate_apply::NoV2MarkerCoordinator,
+                        )
+                    }
+                };
+
+            // Construct drain policy and apply policy.
+            use qbind_node::pqc_peer_candidate_drain::{
+                PeerDrivenApplyDrain, PeerDrivenDrainPolicy,
+            };
+            use qbind_node::pqc_peer_candidate_apply::{
+                PeerDrivenApplyPolicy, PeerDrivenApplyRuntimeDomain,
+            };
+            let drain_policy = match config.environment {
+                qbind_types::NetworkEnvironment::Devnet => {
+                    PeerDrivenDrainPolicy::devnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Testnet => {
+                    PeerDrivenDrainPolicy::testnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Mainnet => {
+                    eprintln!(
+                        "[run-153] FATAL: MainNet peer-driven apply drain refused \
+                         unconditionally at drain-once invocation (defensive guard)."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let apply_policy = match config.environment {
+                qbind_types::NetworkEnvironment::Devnet => {
+                    PeerDrivenApplyPolicy::devnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Testnet => {
+                    PeerDrivenApplyPolicy::testnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Mainnet => {
+                    eprintln!(
+                        "[run-153] FATAL: MainNet peer-driven apply policy refused \
+                         unconditionally at drain-once invocation (defensive guard)."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let runtime_domain = PeerDrivenApplyRuntimeDomain::new(
+                config.environment,
+                qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id()),
+            );
+            let drain = PeerDrivenApplyDrain::new();
+
+            eprintln!(
+                "[run-153] drain-once: invoking try_drain_once_shared (env={:?}, \
+                 drain_enabled={}, apply_enabled={}).",
+                config.environment,
+                drain_policy.enabled,
+                apply_policy.enabled,
+            );
+
+            let outcome = qbind_node::pqc_peer_candidate_drain::try_drain_once_shared(
+                &drain,
+                shared_queue,
+                &mut invocation_builder,
+                marker_coordinator.as_mut(),
+                &drain_policy,
+                &apply_policy,
+                &runtime_domain,
+                now_secs,
+            );
+
+            eprintln!(
+                "[run-153] drain-once outcome: {:?}. No autonomous repeat drain; \
+                 no automatic apply on receipt; MainNet refused unconditionally; \
+                 governance / KMS / HSM unimplemented; signing-key rotation/revocation \
+                 lifecycle open; full C4 open; C5 open.",
+                outcome
+            );
+            } else {
+                eprintln!(
+                    "[run-153] drain-once skipped: no baseline LivePqcTrustState is \
+                     available (--p2p-trust-bundle was not supplied). No drain; no apply; \
+                     no mutation."
+                );
+            }
+        } else {
+            eprintln!(
+                "[run-153] drain-once: no staging queue available (staging not armed). \
+                 Drain skipped; no mutation."
+            );
         }
     }
 
