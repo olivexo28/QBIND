@@ -3423,3 +3423,36 @@ Run 154 is source/test fixture tooling that fulfils the Run 153 A2
 TestNet fixture-tooling prerequisite; release-binary TestNet end-to-end
 peer-driven apply evidence is **deferred to Run 155**. **Full C4 is NOT
 claimed by Run 154; C5 remains OPEN.**
+
+## Run 155 — release-binary TestNet end-to-end peer-driven apply evidence
+
+Run 155 produces **release-binary TestNet end-to-end peer-driven apply
+evidence** and changes nothing in the authority model. The model is
+unchanged; every authority invariant from Runs 050–154 is reaffirmed.
+
+Run 155 adds **no source delta**: it reuses the Run 153 `main.rs` wiring
+verbatim and binds the exercise to the TestNet runtime domain
+(`environment = testnet`, TestNet `chain_id`, TestNet genesis hash, the
+minted authority-root fingerprint, and the v2 authority-domain sequence)
+using the Run 154 TestNet fixtures. The authority-root fingerprint carried
+by every TestNet artifact is derived from a **freshly minted, ephemeral**
+ML-DSA-44 authority key — there is **no static production source-code
+anchor**, **no fallback root**, and **no fallback signing key**. The Run 150
+drain / apply policies remain reachable only behind explicit local
+`testnet_enabled()` / `devnet_enabled()` policy; **MainNet remains refused
+unconditionally** at the policy-gate, runtime-domain, Run 148 controller,
+and Run 144 specification layers, and local material alone remains
+insufficient for MainNet bundle-signing authority. **Local peer majority
+remains insufficient for MainNet bundle-signing authority.**
+
+Open items after Run 155 (unchanged from Run 154):
+
+* Governance / ratification authority.
+* KMS / HSM custody.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+
+Run 155 is release-binary TestNet evidence that closes the Run 153 A2
+TestNet evidence deferral; DevNet evidence from Run 153 remains valid.
+**Full C4 is NOT claimed by Run 155; C5 remains OPEN.**

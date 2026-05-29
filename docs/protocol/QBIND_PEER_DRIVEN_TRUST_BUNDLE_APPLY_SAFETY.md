@@ -1339,3 +1339,45 @@ peer-driven apply evidence remains **deferred to Run 155**. MainNet
 remains refused. Governance, KMS/HSM, signing-key rotation/revocation
 lifecycle, and validator-set rotation all remain open. **Full C4 is NOT
 claimed by Run 154; C5 remains OPEN.**
+## Run 155 — release-binary TestNet end-to-end peer-driven apply evidence (evidence only)
+
+Run 155 produces **release-binary TestNet end-to-end peer-driven apply
+evidence** under the safety specification. It mirrors the Run 153 DevNet
+end-to-end exercise on a real `target/release/qbind-node`, but binds the
+whole exercise to the **TestNet runtime domain** using the Run 154 TestNet
+fixtures. It **adds no source delta** and **does not modify the
+peer-driven apply safety contract** in any way: the Run 153 wiring in
+`main.rs` (the hidden, disabled-by-default
+`--p2p-trust-bundle-peer-candidate-drain-once` hook driving
+`ProductionDrainInvocationBuilder` → `ProductionV2MarkerCoordinator` →
+Run 150 drain → Run 148 controller → Run 070 apply contract) is reused
+verbatim, with the Run 150 `PeerDrivenDrainPolicy` / `PeerDrivenApplyPolicy`
+selected by environment (`testnet_enabled()`) and MainNet refused
+unconditionally.
+
+The six-phase fail-closed pipeline is unchanged. For every accepted
+TestNet apply the strict Run 070 ordering
+(validate → snapshot previous → swap → evict_sessions → commit_sequence)
+holds, the v2 authority marker persists strictly **after** sequence commit,
+and there is no autonomous repeat drain. The TestNet domain binding
+(`environment = testnet`, TestNet `chain_id` / chain-id hex
+`51424e4454535400`, TestNet genesis hash, minted authority-root
+fingerprint, v2 authority-domain sequence) is captured per run; all key
+material is ephemeral (no production anchor, fallback root, or fallback
+signing key).
+
+The release-binary harness
+(`scripts/devnet/run_155_testnet_peer_driven_apply_end_to_end_release_binary.sh`)
+proves on the real binary that drain-once is refused fail-closed when
+co-requisites are missing (C1 without apply, C3 without staging, C4 without
+wire-validation) and that MainNet is refused unconditionally (A6/C2), each
+with exit=1 and a `FATAL` banner. The positive TestNet apply path (A1) and
+the deterministic-selection / duplicate / reject matrix (A2–A5, R1–R11) are
+evidenced by the Run 154 TestNet fixture suite (21 tests) and the
+Run 152/150/148 source/test matrices, all green.
+
+Run 155 closes the **Run 153 A2 TestNet evidence deferral**. DevNet
+evidence from Run 153 remains valid. MainNet remains refused. Governance,
+KMS/HSM, signing-key rotation/revocation lifecycle, and validator-set
+rotation all remain open. **Full C4 is NOT claimed by Run 155; C5 remains
+OPEN.**
