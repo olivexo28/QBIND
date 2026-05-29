@@ -5794,3 +5794,54 @@ Out of scope for Run 153 (unchanged from Run 152):
 * Governance / KMS / HSM implementation.
 * Signing-key rotation / revocation lifecycle.
 * TestNet evidence (deferred; fixture tooling needed).
+## Run 154 — TestNet fixture tooling (source/test only; no operator surface change)
+
+Run 154 is **source/test fixture tooling only**. Operators have **no new
+CLI surface and no new runtime behaviour** in this run.
+
+What Run 154 adds for the lab/evidence workflow:
+
+* The Run 133 v2 fixture helper
+  (`crates/qbind-node/examples/run_133_v2_validation_only_fixture_helper.rs`)
+  now also mints a `testnet/` fixture directory alongside `devnet/` and
+  `mainnet/`. Run it the same way as before:
+
+  ```
+  cargo run -p qbind-node --example run_133_v2_validation_only_fixture_helper <OUTDIR>
+  ```
+
+  The `testnet/` directory contains TestNet genesis / runtime-domain
+  metadata, a signed TestNet trust bundle (baseline + candidate), the
+  ML-DSA-44 bundle-signing public key spec, v1 + v2 ratification sidecars
+  bound to the TestNet environment, seeded v1/v2 markers, a valid v2
+  peer-candidate `0x05` fixture, and the invalid negative peer-candidate
+  fixtures (lower-sequence, same-sequence different-digest, bad-signature,
+  wrong-environment, wrong-chain, duplicate).
+
+* Every TestNet artifact is domain-bound (`environment = TestNet`,
+  TestNet `chain_id`, TestNet genesis hash, minted authority-root
+  fingerprint, v2 authority-domain sequence). Operators feeding these to
+  a TestNet evidence harness must capture the non-deterministic fields
+  per run: the ephemeral authority / bundle-signing / transport-root keys,
+  all signatures, and the genesis hash (derived from the minted authority
+  key).
+
+* **DevNet helper behaviour is unchanged** (the `devnet/` output is
+  byte-for-byte identical to prior runs); the `mainnet/` directory stays
+  clearly fixture-only and is never production-authoritative.
+
+Run 154 closes the fixture-tooling blocker that deferred the Run 153 A2
+TestNet evidence. Release-binary TestNet end-to-end peer-driven apply
+evidence is **deferred to Run 155**.
+
+Out of scope for Run 154 (unchanged from Run 153):
+
+* Operator CLI / runtime behaviour change.
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement (MainNet remains refused).
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+* Validator-set rotation.
+* Full C4 / C5 closure.

@@ -1301,3 +1301,41 @@ one-shot, no autonomous background apply exists, no governance /
 KMS / HSM is implemented, no signing-key rotation / revocation
 lifecycle is added. **Full C4 is NOT claimed by Run 153; C5
 remains OPEN.**
+## Run 154 — source/test TestNet fixture tooling (fixture tooling only)
+
+Run 154 adds the smallest TestNet fixture tooling required to mint signed
+TestNet trust-bundle material, v2 ratification sidecars bound to the
+TestNet environment, transport credentials, a valid v2 peer-candidate
+`0x05` fixture, and the invalid peer-candidate negative matrix
+(lower-sequence, same-sequence different-digest, bad-signature,
+wrong-environment, wrong-chain, duplicate). It is **source/test fixture
+tooling only** and **does not modify the peer-driven apply safety
+contract** in any way.
+
+The fixture tooling extends the existing Run 133 v2 fixture helper
+(`crates/qbind-node/examples/run_133_v2_validation_only_fixture_helper.rs`)
+to also emit a `testnet/` directory; DevNet and MainNet output remain
+byte-for-byte unchanged and the MainNet directory stays clearly
+fixture-only (it is never production-authoritative). Every TestNet
+artifact is domain-bound to `environment = TestNet`, the TestNet
+`chain_id`, the TestNet genesis hash, the minted authority-root
+fingerprint, and the v2 authority-domain sequence. All minted key
+material is ephemeral: no production source-code anchor, fallback root,
+or fallback signing key is introduced.
+
+The Run 154 verify/reject matrix (21 tests in
+`crates/qbind-node/tests/run_154_testnet_peer_apply_fixture_tests.rs`)
+proves TestNet bundles / v2 ratifications / peer-candidates verify under
+a TestNet context and fail under DevNet and MainNet contexts, that
+wrong-chain / wrong-genesis / bad-signature variants fail, and that
+lower-sequence and same-sequence different-digest variants fail through
+the validation-only v2 authority-marker comparison (the on-disk marker is
+byte-identical pre/post). The Run 070 / Run 142 / Run 143 / Run 145–153
+surfaces are untouched and their suites remain green.
+
+Run 154 closes the fixture-tooling blocker that caused the **Run 153 A2
+TestNet evidence to be deferred**. Release-binary TestNet end-to-end
+peer-driven apply evidence remains **deferred to Run 155**. MainNet
+remains refused. Governance, KMS/HSM, signing-key rotation/revocation
+lifecycle, and validator-set rotation all remain open. **Full C4 is NOT
+claimed by Run 154; C5 remains OPEN.**
