@@ -1115,3 +1115,129 @@ sequence write, no marker write, no session eviction, no
 Run 070 apply call from `main.rs`, no SIGHUP outcome, no
 reload-apply outcome, no peer-majority authority claim, and no
 MainNet apply.
+
+## Run 152 — source/test wiring for binary-reachable peer-driven drain invocation plumbing
+
+Run 152 lands the source/test wiring that Run 151 explicitly
+deferred under its "smallest possible operator-local hook"
+allowance: a production `PeerDrivenDrainInvocationBuilder`
+implementation, a production `V2MarkerCoordinator`
+implementation, and a shared in-memory staging-queue handle so
+that the Run 151 hidden `--p2p-trust-bundle-peer-candidate-drain-once`
+hook is now capable of constructing a real drain invocation
+from the live staged peer-candidate queue and routing it
+through:
+
+```
+live inbound 0x05 candidate
+  → validation-only v2 acceptance
+  → staging queue
+  → hidden explicit drain-once hook
+  → ProductionDrainInvocationBuilder
+  → ProductionV2MarkerCoordinator
+  → Run 150 PeerDrivenApplyDrain::try_drain_once
+  → Run 148 try_apply_staged_peer_candidate
+  → Run 070 apply_validated_candidate_with_previous
+```
+
+The Run 152 source delta honours the Run 150 / Run 151
+contracts bit-for-bit:
+
+* **`ProductionV2MarkerCoordinator`** (in
+  `crates/qbind-node/src/pqc_peer_candidate_apply.rs`) reuses
+  the existing Run 130/134/136/138 marker-acceptance helpers
+  (`pqc_authority_marker_acceptance`); the pre-apply decision
+  is captured by `decide_pre_apply` and persisted by
+  `persist_after_commit` strictly **after** the Run 070
+  `commit_sequence` boundary has succeeded. The coordinator
+  fails closed on lower sequence, same-sequence different
+  digest, wrong domain, and corrupted local marker. A
+  post-commit persist failure is surfaced as the
+  fatal/operator-actionable
+  `PeerDrivenApplyOutcome::MarkerPersistFailedAfterCommit`
+  per Run 134 §PersistFailure. The coordinator never mutates
+  `LivePqcTrustState`, never evicts sessions, and never calls
+  Run 070 directly.
+
+* **`ProductionDrainInvocationBuilder<C: LiveTrustApplyContext>`**
+  (in `crates/qbind-node/src/pqc_peer_candidate_drain.rs`)
+  consumes only candidates already accepted by
+  validation-only/staging, re-checks freshness/expiry,
+  environment / chain_id / genesis_hash / authority-root
+  binding, and v2 marker relation before any apply; fails
+  closed on missing candidate material, malformed staged
+  metadata, and ambiguous v1+v2 material. The builder never
+  writes marker or sequence files itself, never mutates
+  `LivePqcTrustState`, never evicts sessions, and never calls
+  Run 070 directly.
+
+* **Shared in-memory staging queue handle.** The drain
+  consumes the same
+  `Arc<parking_lot::Mutex<PeerCandidateStagingQueue>>` that the
+  `LivePeerCandidateWireDispatcher` stages into via
+  `pqc_peer_candidate_drain::try_drain_once_shared`. The queue
+  remains in-memory only (no on-disk staging), bounded,
+  deduped, and disabled unless the existing staging/apply
+  flags enable it. Existing validation-only and
+  propagation-only behaviour is unchanged.
+
+* **`main.rs` arming-only reachability block** (gated entirely
+  by the Run 151 `--p2p-trust-bundle-peer-candidate-drain-once`
+  co-requisites scope) names the production types and the
+  shared-queue drain function so the release binary observably
+  links them in, and emits a `[run-152] binary-reachable
+  peer-driven drain invocation plumbing PRESENT ...` banner
+  declaring the full pipeline and the post-commit-only marker
+  persist discipline. The release binary does **not**
+  autonomously invoke the drain here: the live apply context,
+  the verified v2 ratification, and the operator-supplied
+  previous-fingerprint metadata are threaded by the Run 153
+  end-to-end release-binary harness, which is explicitly
+  deferred.
+
+* **Hidden, disabled-by-default, DevNet/TestNet-only,
+  MainNet refused.** The Run 151 CLI flag, gating, and arming
+  banners are unchanged; Run 152 enforces MainNet refusal
+  defensively at three layers (early-startup gate, Run 150
+  `PeerDrivenDrainPolicy`, Run 148 controller).
+
+* **Concurrency-guarded; one-shot.** Run 150's
+  `Arc<AtomicBool>` RAII concurrency guard is unchanged; a
+  second drain after a successful apply returns
+  `NoCandidate` / `AlreadyApplied` / deduped per Run 150
+  policy; a concurrent drain returns `AlreadyInProgress`.
+
+* **Strict Run 070 ordering preserved.** The accepted
+  source/test apply path preserves exactly
+  `validate → snapshot previous → swap LivePqcTrustState →
+  evict_sessions → commit_sequence → persist v2 authority
+  marker`. The marker persist is strictly after sequence
+  commit.
+
+Verdict for Run 152: **"source/test wiring only"** for the
+binary-reachable peer-driven drain invocation plumbing. The
+production builder, the production v2 marker coordinator, the
+shared staging-queue handle, and the shared-queue drain entry
+point are now compiled into and reachable from the release
+binary; end-to-end release-binary peer-driven apply evidence
+is **DEFERRED to Run 153**.
+
+Out of scope for Run 152 (unchanged from Run 148 / Run 149 /
+Run 150 / Run 151):
+
+* Release-binary end-to-end peer-driven apply harness
+  (deferred to Run 153).
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+
+Run 152 is **source/test wiring only**: validation-only and
+propagation-only behaviour remain unchanged, every refusal /
+no-op scenario asserts no live trust swap, no sequence write,
+no marker write, no session eviction, no Run 070 apply call,
+no SIGHUP outcome, no reload-apply outcome, no peer-majority
+authority claim, and no MainNet apply. **Full C4 is NOT
+claimed by Run 152; C5 remains OPEN.**

@@ -5677,3 +5677,40 @@ canonical verdict, the source delta, the scenario matrix, the
 ordering proof citations (Run 150 source/test for A1 / A2 / A6
 / A7), the negative invariants, and the release-binary harness
 `scripts/devnet/run_151_peer_driven_apply_drain_release_binary.sh`.
+
+## Run 152 — source/test wiring for binary-reachable peer-driven drain invocation plumbing
+
+Run 152 lands the source/test wiring that Run 151 explicitly
+deferred under its "smallest possible operator-local hook"
+allowance: a production `ProductionDrainInvocationBuilder`, a
+production `ProductionV2MarkerCoordinator`, a shared in-memory
+`Arc<parking_lot::Mutex<PeerCandidateStagingQueue>>` handle, and
+a `pqc_peer_candidate_drain::try_drain_once_shared` shared-queue
+drain entry point. The Run 151 hidden
+`--p2p-trust-bundle-peer-candidate-drain-once` hook is now
+capable of constructing a real drain invocation from the live
+staged peer-candidate queue and routing it through
+`live inbound 0x05 → validation-only v2 acceptance → staging
+queue → hidden drain hook → ProductionDrainInvocationBuilder
+→ ProductionV2MarkerCoordinator → Run 150 drain → Run 148
+controller → Run 070 apply`. The v2 authority marker is
+persisted only AFTER the Run 070 `commit_sequence` boundary
+succeeds; a post-commit persist failure is surfaced as the
+fatal/operator-actionable
+`PeerDrivenApplyOutcome::MarkerPersistFailedAfterCommit` per
+Run 134 §PersistFailure.
+
+**Run 152 is source/test wiring only.** The release binary does
+not autonomously invoke the drain: the live apply context, the
+verified v2 ratification, and the operator-supplied
+previous-fingerprint metadata are threaded by the Run 153
+end-to-end release-binary harness, which is **explicitly
+deferred**. Operators should treat the existing Run 151 hidden
+CLI flag as trigger-surface armed only; no operational change
+to the runbook is required. No autonomous background apply
+exists. No automatic apply on receipt exists. MainNet remains
+refused at every layer (defensive triplicate: early-startup
+gate, Run 150 `PeerDrivenDrainPolicy`, Run 148 controller).
+Governance remains unimplemented. KMS / HSM remains
+unimplemented. Signing-key rotation / revocation lifecycle
+remains open. Full C4 remains open; C5 remains open.

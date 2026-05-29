@@ -3308,3 +3308,36 @@ release-binary-armed drain-trigger surface — the binary-level
 fulfilment of the Run 150 deferral of release-binary trigger
 evidence — with **no change to who may sign a MainNet trust
 bundle and no change to which anchors are accepted**.
+
+## Run 152 authority-relevant negative assertions
+
+Run 152 is **source/test wiring only** for the binary-reachable
+peer-driven drain invocation plumbing (production
+`PeerDrivenDrainInvocationBuilder`, production
+`V2MarkerCoordinator`, shared in-memory staging-queue handle,
+shared-queue drain entry point). Authority-relevant invariants
+are unchanged:
+
+* **No new authority surface.** Run 152 does not introduce a
+  new trust anchor, a new authority root, a new ratification
+  primitive, a new v2 marker write site, or any new wire /
+  schema. The production v2 marker coordinator reuses the
+  existing Run 130/131/134/136/138 marker-acceptance helpers;
+  the production drain invocation builder consumes only
+  candidates already accepted by validation-only/staging.
+* **No autonomous apply, no automatic apply on receipt.** The
+  drain remains operator-triggered (Run 151 hidden CLI flag)
+  and exactly one-shot per trigger.
+* **No peer-majority authority.** Local peer majority remains
+  insufficient for MainNet bundle-signing authority (Run 144;
+  reaffirmed by Runs 145, 146, 147, 148, 149, 150, 151, 152).
+* **MainNet refused unconditionally** at three layers
+  (early-startup gate, Run 150 `PeerDrivenDrainPolicy`,
+  Run 148 controller).
+* **No release-binary end-to-end peer-driven apply harness**;
+  release-binary end-to-end peer-driven apply evidence is
+  **deferred to Run 153**.
+* **No governance, KMS / HSM, or signing-key
+  rotation/revocation lifecycle** is introduced; those remain
+  open.
+* **Full C4 is NOT claimed by Run 152; C5 remains OPEN.**
