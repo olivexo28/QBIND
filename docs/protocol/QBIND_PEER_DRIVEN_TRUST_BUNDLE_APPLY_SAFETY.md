@@ -907,3 +907,105 @@ remains in force: governance / ratification / KMS / HSM hardening
 (future Run 150+), signing-key rotation/revocation lifecycle, and
 validator-set rotation remain pre-requisites for any TestNet /
 MainNet peer-driven apply closure claim.
+
+## Run 150 progress entry — explicit DevNet/TestNet drain trigger (source/test only)
+
+Run 150 lands the smallest **source/test-only** wiring that connects
+the Run 145/146 staged peer-candidate queue to the Run 148
+peer-driven apply controller — and through it the existing Run 070
+apply contract — behind an explicit local DevNet/TestNet-only
+policy. Release-binary operator trigger evidence is **deferred to
+Run 151**.
+
+The new module
+`crates/qbind-node/src/pqc_peer_candidate_drain.rs` adds:
+
+* `PeerDrivenDrainPolicy` (disabled-by-default; explicit
+  `devnet_enabled()` / `testnet_enabled()` /
+  `mainnet_attempted()` constructors mirroring Run 145 / Run 148);
+* `PeerDrivenDrainOutcome` (typed enum: `Disabled`,
+  `MainNetRefused`, `RefusedEnvironmentPolicy`,
+  `AlreadyInProgress`, `NoCandidate`, `CandidateExpired`,
+  `CandidateNotValidated`, `CandidateWrongDomain`,
+  `CandidateRejectedBeforeApply`, `CandidateMarkerConflict`,
+  `Applied`, `ApplyRejected`, `ApplyFatal`);
+* `PeerDrivenDrainInvocationBuilder` (the only seam through
+  which a caller threads the candidate path / signing keys /
+  live apply context / previous-fingerprint metadata into the
+  Run 148 `PeerDrivenApplyInvocation`);
+* `PeerDrivenApplyDrain` controller holding an `Arc<AtomicBool>`
+  RAII-released concurrency guard with `try_drain_once(...)` as
+  the single entry point;
+* a deterministic selection rule: highest sequence wins; ties
+  broken by lexicographically smallest `fingerprint_hex`; only
+  signature-verified, domain-matching, non-expired entries are
+  eligible.
+
+Plus one additive helper on the Run 145 staging queue:
+
+* `PeerCandidateStagingQueue::remove_by_id(fingerprint_prefix,
+  sequence) -> Option<StagedPeerCandidate>` — strictly in-memory
+  removal used by the drain after a successful terminal apply
+  (or after a permanently-invalid pre-apply refusal classified as
+  drop-from-queue). Touches no live trust state, no sequence
+  file, no marker file, no P2P sessions, and no propagation.
+
+The Run 150 safety contract that this document reaffirms:
+
+* **Disabled by default.** The drain policy's
+  `enabled / allow_devnet / allow_testnet` flags all default to
+  `false`. The first decision in `try_drain_once` is the policy
+  gate; the staging queue is never consulted and the concurrency
+  guard is never touched when disabled.
+* **DevNet / TestNet only.** MainNet is refused at the policy
+  gate, again at the runtime-domain check, again defensively
+  inside the environment-permission match, and the Run 148
+  controller enforces its own MainNet refusal on the delegated
+  call.
+* **Operator/local only.** No peer-driven trigger surface. The
+  trigger is an internal method exercised by tests and
+  explicitly documented as the future Run 151 binary hook.
+* **Concurrency-guarded.** Atomic compare-exchange on an
+  `AtomicBool` ensures at most one drain enters the pipeline per
+  controller instance; concurrent triggers observe
+  `AlreadyInProgress`. The guard is RAII-released so a panic in
+  the drain never leaves the controller permanently locked.
+* **At most one candidate per trigger.** Each `try_drain_once`
+  call drains a single eligible candidate; bulk / autonomous /
+  background drains are explicitly out of scope.
+* **No new apply algorithm.** Apply is delegated to the Run 148
+  controller, which delegates to the Run 070
+  `apply_validated_candidate_with_previous(...)` contract.
+  `validate → snapshot_active → swap_trust_state →
+  evict_sessions → commit_sequence` ordering is preserved
+  verbatim; rollback / fatal semantics mirror Run 070; the v2
+  authority marker is persisted only after `commit_sequence`
+  succeeds via the existing Run 148 `V2MarkerCoordinator`
+  post-commit boundary; a post-commit persist failure surfaces
+  as the fatal / operator-actionable
+  `PeerDrivenDrainOutcome::ApplyFatal{inner=MarkerPersistFailedAfterCommit}`.
+* **No staging-queue / validation-only / propagation-only
+  weakening.** The drain consumes the existing
+  `StagedPeerCandidate` type, never re-validates the candidate
+  (defence-in-depth filters re-check `signature_verified`,
+  domain, and TTL), and never invokes any propagation surface.
+* **No new metric family, no new wire format, no new on-disk
+  schema, no new CLI flag.**
+
+Out of scope for Run 150 (unchanged from Run 148 / Run 149):
+
+* Release-binary operator-visible trigger (deferred to Run 151).
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+
+Run 150 is **strongest-positive within source/test scope**: the
+A1–A8 + R1–R12 matrix from `task/RUN_150_TASK.txt` is implemented
+in `crates/qbind-node/tests/run_150_peer_driven_apply_drain_tests.rs`
+(19/19 green) and every refusal/no-op scenario asserts no live trust
+swap, no sequence write, no marker write, no session eviction, no
+Run 070 apply call, no SIGHUP outcome, no reload-apply outcome, no
+peer-majority authority claim, and no MainNet apply.

@@ -3167,3 +3167,67 @@ Open items unchanged:
 authority.** **Local peer majority alone is insufficient for
 MainNet bundle-signing authority (formalized by Run 144;
 reaffirmed by Runs 145, 146, 147, 148, and 149).**
+
+## Run 150 progress entry — drain trigger landed (source/test only); authority model unchanged
+
+Run 150 adds source-and-test wiring for an explicit peer-driven
+apply **drain trigger** (`PeerDrivenApplyDrain::try_drain_once`) that
+connects the Run 145/146 staged peer-candidate queue to the Run 148
+peer-driven apply controller, and through it to the existing Run 070
+apply contract. **No authority-model invariant is changed.** Run 150
+is a source/test landing; release-binary operator-trigger evidence
+is deferred to Run 151.
+
+Authority invariants reaffirmed by Run 150:
+
+* **Local config alone remains insufficient for MainNet
+  bundle-signing authority.** The Run 150 drain refuses MainNet at
+  the policy-gate layer (`PeerDrivenDrainPolicy::mainnet_attempted`
+  refuses by construction), at the runtime-domain check inside
+  `try_drain_once`, defensively inside the environment-permission
+  match, and through delegation to the Run 148 controller which
+  enforces its own MainNet refusal. Four independent refusal layers
+  guard the MainNet boundary on this path.
+* **Local peer majority remains insufficient for MainNet
+  bundle-signing authority.** No new peer-majority surface is
+  introduced. The drain consumes a single staged candidate per
+  trigger; no quorum, no voting, no ratification claim.
+* **Static production source-code anchors remain rejected.** The
+  Run 150 module does not embed any trust-anchor material and does
+  not add any source-code anchor surface.
+* **DevNet/TestNet drain is explicitly behind disabled-by-default
+  local config.** The new `PeerDrivenDrainPolicy` mirrors Run 145 /
+  Run 148 policy shape: `enabled / allow_devnet / allow_testnet` all
+  default to `false`; explicit `devnet_enabled()` / `testnet_enabled()`
+  constructors are required to reach the drain pipeline.
+
+Authority-relevant negative assertions for Run 150:
+
+* No new MainNet enablement path.
+* No new MainNet governance attestation surface.
+* No new validator-set rotation surface.
+* No KMS / HSM integration.
+* No signing-key rotation / revocation lifecycle change.
+* No new wire format, no new on-disk schema, no new on-disk anchor.
+* No new metric family.
+* No SIGHUP / reload-apply behaviour change.
+* No autonomous / background / on-receipt apply.
+* No release-binary operator trigger (deferred to Run 151).
+
+Open items after Run 150 (unchanged from Run 149):
+
+* Release-binary operator-visible peer-driven apply trigger
+  (deferred to Run 151).
+* Governance / ratification authority implementation.
+* KMS / HSM custody for bundle-signing keys.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Full C4 closure; C5 closure.
+
+Run 150's contribution to the authority model is therefore strictly
+the addition of an explicit, disabled-by-default, MainNet-refused,
+source/test-only drain entry point — a wiring step toward the Run
+151 release-binary trigger, with **no change to who may sign a
+MainNet trust bundle and no change to which anchors are accepted
+on which domain.**

@@ -5485,3 +5485,72 @@ Out of scope (operator-relevant; unchanged from Run 148):
   eligible staged candidate).
 * Full C4 closure.
 * C5 closure.
+
+## Run 150 — Peer-driven apply drain: source/test wiring only (no operator surface yet)
+
+Run 150 adds a source-and-test only wiring that connects the Run
+145/146 staged peer-candidate queue to the Run 148 peer-driven
+apply controller. **Operators have nothing to do in Run 150.**
+There is no new CLI flag, no new SIGHUP behaviour, no new
+reload-apply behaviour, no new metric, no new log line you must
+watch, and no new on-disk artefact. The release binary's
+operator-visible behaviour is byte-for-byte unchanged from Run 149.
+
+What did change (source/test only):
+
+* A new library module `crates/qbind-node/src/pqc_peer_candidate_drain.rs`
+  exposes an explicit `PeerDrivenApplyDrain::try_drain_once(...)` entry
+  point gated by a disabled-by-default `PeerDrivenDrainPolicy` and
+  layered MainNet refusal.
+* A new helper `PeerCandidateStagingQueue::remove_by_id(...)` lets the
+  drain remove a staged entry from the in-memory queue after a
+  successful apply (or after a permanently-invalid pre-apply refusal).
+  No live trust state, sequence file, marker file, P2P session, or
+  propagation surface is touched by this helper.
+* A new integration test file
+  `crates/qbind-node/tests/run_150_peer_driven_apply_drain_tests.rs`
+  exercises 19 acceptance scenarios end-to-end; in-module unit tests
+  cover policy / outcome classification / selector / concurrency-guard
+  behaviour.
+
+Operator-visible deferral:
+
+* **Release-binary trigger evidence is deferred to Run 151.** The
+  Run 150 module is reachable only from tests. No `main.rs` /
+  `cli.rs` change has been made.
+
+Operator runbook impact: **none in this run.** When Run 151 lands
+the operator trigger, this runbook will gain a new section
+describing the explicit DevNet/TestNet CLI surface, the
+disabled-by-default policy, the unconditional MainNet refusal at
+every layer, and the expected `PeerDrivenDrainOutcome`
+classification. Until then, peer-driven apply remains a
+source/test capability only.
+
+Negative assertions reaffirmed by Run 150 (matching Run 148 / Run 149):
+
+* No new MainNet apply path; MainNet refusal is enforced at the
+  Run 150 policy gate, the runtime-domain check, and the Run 148
+  controller.
+* No autonomous / background / on-receipt apply.
+* No new wire format, no new on-disk schema, no new metric family.
+* No SIGHUP behaviour change.
+* No reload-apply behaviour change.
+* No live `0x05` dispatcher behaviour change.
+* No Run 070 apply contract change; the drain delegates verbatim
+  through the Run 148 controller to the existing Run 070
+  `apply_validated_candidate_with_previous(...)` path.
+
+Out of scope for Run 150 (carried forward from Run 149's out-of-scope
+list, unchanged):
+
+* Release-binary operator trigger (now: Run 151).
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Full C4 closure; C5 closure.
