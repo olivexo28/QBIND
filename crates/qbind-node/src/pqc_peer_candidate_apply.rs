@@ -273,6 +273,139 @@ impl V2MarkerCoordinator for NoV2MarkerCoordinator {
     }
 }
 
+/// Run 152 — **production-capable** [`V2MarkerCoordinator`] for the
+/// peer-driven apply path. Wires the existing Run 134/136/138/150 v2
+/// marker decision discipline
+/// ([`crate::pqc_authority_marker_acceptance::decide_marker_acceptance_v2`]
+/// + [`crate::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary`])
+/// into the Run 148 controller's pre-apply / post-commit boundary so a
+/// real `target/release/qbind-node` drain can run the same fail-closed
+/// marker logic the local reload-apply (Run 134), SIGHUP (Run 138), and
+/// snapshot/restore (Run 140) paths use.
+///
+/// **Invariants (matching Run 134/138 and the [`V2MarkerCoordinator`]
+/// trait contract):**
+///
+/// - [`Self::decide_pre_apply`] runs `decide_marker_acceptance_v2`,
+///   which performs **no** disk write. It re-checks
+///   environment / chain_id / genesis_hash / authority-root binding,
+///   refuses a lower `authority_domain_sequence`, refuses a
+///   same-sequence different-digest equivocation, refuses a wrong
+///   trust domain, and refuses a corrupted / unsupported persisted
+///   marker. On any refusal the controller short-circuits with
+///   [`PeerDrivenApplyOutcome::CandidateMarkerConflict`] **before** the
+///   Run 070 apply pipeline is entered — no sequence write, no swap, no
+///   marker write.
+/// - The accepted decision is held in `decision` and is the only thing
+///   [`Self::persist_after_commit`] writes — and only after the Run 070
+///   `commit_sequence` boundary has succeeded. A persist failure there
+///   is surfaced as
+///   [`PeerDrivenApplyOutcome::MarkerPersistFailedAfterCommit`]
+///   (fatal / operator-actionable) per Run 134 §PersistFailure.
+/// - The coordinator never mutates [`crate::pqc_live_trust::LivePqcTrustState`],
+///   never evicts sessions, and never calls Run 070 directly.
+///
+/// The coordinator owns the verified v2 ratification + verifier output
+/// (`ratification` / `ratified`) because
+/// [`crate::pqc_authority_marker_acceptance::MarkerAcceptanceV2Inputs`]
+/// borrows them; production callers obtain those from the existing
+/// Run 130 verifier output captured during validation-only acceptance.
+pub struct ProductionV2MarkerCoordinator {
+    marker_path: std::path::PathBuf,
+    runtime_env: NetworkEnvironment,
+    runtime_chain_id: qbind_types::ChainId,
+    runtime_genesis_hash_hex: String,
+    ratification: qbind_ledger::BundleSigningRatificationV2,
+    ratified: qbind_ledger::RatifiedBundleSigningKeyV2,
+    update_source: crate::pqc_authority_state::AuthorityStateUpdateSource,
+    updated_at_unix_secs: u64,
+    /// Accepted pre-apply decision, populated by `decide_pre_apply`.
+    /// Persisted (when `should_persist`) by `persist_after_commit`.
+    decision: Option<crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2>,
+}
+
+impl ProductionV2MarkerCoordinator {
+    /// Construct a production coordinator for the supplied trust domain
+    /// and verified v2 ratification. `update_source` is audit-only
+    /// (excluded from the marker security digest); peer-driven apply
+    /// reuses the Run 070 reload-apply contract, so
+    /// [`crate::pqc_authority_state::AuthorityStateUpdateSource::ReloadApply`]
+    /// is the honest default.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        marker_path: std::path::PathBuf,
+        runtime_env: NetworkEnvironment,
+        runtime_chain_id: qbind_types::ChainId,
+        runtime_genesis_hash_hex: String,
+        ratification: qbind_ledger::BundleSigningRatificationV2,
+        ratified: qbind_ledger::RatifiedBundleSigningKeyV2,
+        update_source: crate::pqc_authority_state::AuthorityStateUpdateSource,
+        updated_at_unix_secs: u64,
+    ) -> Self {
+        Self {
+            marker_path,
+            runtime_env,
+            runtime_chain_id,
+            runtime_genesis_hash_hex,
+            ratification,
+            ratified,
+            update_source,
+            updated_at_unix_secs,
+            decision: None,
+        }
+    }
+
+    /// Audit-only accessor for the accepted pre-apply decision (if any).
+    /// Returns `None` before `decide_pre_apply` has accepted.
+    pub fn accepted_decision(
+        &self,
+    ) -> Option<&crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2> {
+        self.decision.as_ref()
+    }
+}
+
+impl V2MarkerCoordinator for ProductionV2MarkerCoordinator {
+    fn decide_pre_apply(&mut self) -> Result<(), String> {
+        let inputs = crate::pqc_authority_marker_acceptance::MarkerAcceptanceV2Inputs {
+            marker_path: &self.marker_path,
+            runtime_env: self.runtime_env,
+            runtime_chain_id: self.runtime_chain_id,
+            runtime_genesis_hash_hex: &self.runtime_genesis_hash_hex,
+            ratification: &self.ratification,
+            ratified: &self.ratified,
+            update_source: self.update_source,
+            updated_at_unix_secs: self.updated_at_unix_secs,
+        };
+        match crate::pqc_authority_marker_acceptance::decide_marker_acceptance_v2(inputs) {
+            Ok(decision) => {
+                self.decision = Some(decision);
+                Ok(())
+            }
+            Err(e) => {
+                // Fail closed: clear any stale decision so a later
+                // `persist_after_commit` can never write a marker for a
+                // refused candidate.
+                self.decision = None;
+                Err(e.to_string())
+            }
+        }
+    }
+
+    fn persist_after_commit(&mut self) -> Result<(), String> {
+        // Defence-in-depth: persistence is only ever reachable after a
+        // successful `decide_pre_apply`; never fabricate a write.
+        let decision = self.decision.as_ref().ok_or_else(|| {
+            "Run 152: persist_after_commit invoked without an accepted \
+             pre-apply v2 marker decision (fail closed; no marker write)"
+                .to_string()
+        })?;
+        crate::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(
+            decision,
+        )
+        .map_err(|e| e.to_string())
+    }
+}
+
 /// Runtime trust domain (environment + chain id encoded as 16 lowercase
 /// hex chars, matching [`crate::pqc_trust_sequence::chain_id_hex`]).
 /// Used to fail-closed any staged candidate whose declared environment

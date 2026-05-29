@@ -50,3 +50,4 @@ qbind-system = { path = "../qbind-system" }
 qbind-ledger = { path = "../qbind-ledger", features = ["test-helpers"] }
 tempfile    = "3.10"
 proptest    = "1"
+parking_lot = "0.12"
