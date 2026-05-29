@@ -305,6 +305,19 @@ pub mod pqc_peer_candidate_staging;
 // peer-driven apply evidence is deferred to Run 149.
 pub mod pqc_peer_candidate_apply;
 
+// Run 150 — explicit local DevNet/TestNet-only drain trigger that
+// wires the Run 145/146 staged peer-candidate queue into the Run 148
+// peer-driven apply controller and through it the existing Run 070
+// apply contract. **Source/test only**, disabled-by-default,
+// concurrency-guarded, deterministic-selection, at-most-one apply per
+// trigger. MainNet refused unconditionally. Introduces no new apply
+// algorithm, no autonomous background drain, no new wire format, no
+// schema change. Release-binary operator trigger evidence is deferred
+// to Run 151. See module docs,
+// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_150.md`, and
+// `docs/whitepaper/contradiction.md` C4.
+pub mod pqc_peer_candidate_drain;
+
 // T183 DAG Fetch-on-Miss modules
 pub mod dag_fetch_handler;
 pub mod dag_net_p2p;

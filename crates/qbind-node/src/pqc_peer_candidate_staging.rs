@@ -449,6 +449,29 @@ impl PeerCandidateStagingQueue {
         self.entries.iter().cloned().collect()
     }
 
+    /// Run 150 (explicit local drain trigger) consumption helper.
+    ///
+    /// Remove and return the staged entry matching the
+    /// `(fingerprint_prefix, sequence)` pair. Returns `None` if no
+    /// matching entry exists. This is an additive, in-memory-only
+    /// removal path used **exclusively** by the Run 150 drain
+    /// controller after a successful terminal apply (or after a
+    /// permanently-invalid pre-apply refusal classified as
+    /// "drop-from-queue" by policy). It does **not** touch live trust
+    /// state, the sequence file, the authority marker file, P2P
+    /// sessions, or propagation; the queue itself remains
+    /// non-applying per Run 145.
+    pub fn remove_by_id(
+        &mut self,
+        fingerprint_prefix: &str,
+        sequence: u64,
+    ) -> Option<StagedPeerCandidate> {
+        let pos = self.entries.iter().position(|e| {
+            e.fingerprint_prefix == fingerprint_prefix && e.sequence == sequence
+        })?;
+        self.entries.remove(pos)
+    }
+
     /// Sweep entries whose age exceeds `policy.ttl_secs` relative to
     /// `now_unix_secs`. Returns the number of entries removed.
     /// This is the **only** lifecycle removal path in Run 145 — staged
