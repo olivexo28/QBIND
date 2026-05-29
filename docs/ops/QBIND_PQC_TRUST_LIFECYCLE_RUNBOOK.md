@@ -5845,3 +5845,60 @@ Out of scope for Run 154 (unchanged from Run 153):
 * Signing-key rotation / revocation lifecycle.
 * Validator-set rotation.
 * Full C4 / C5 closure.
+## Run 155 — release-binary TestNet end-to-end peer-driven apply evidence (no operator surface change)
+
+Run 155 is **release-binary TestNet end-to-end peer-driven apply
+evidence**. It mirrors the Run 153 DevNet end-to-end exercise but under the
+**TestNet runtime domain**, using the Run 154 TestNet fixtures. Operators
+have **no new CLI surface and no new runtime behaviour** in this run: the
+Run 153 hidden, disabled-by-default
+`--p2p-trust-bundle-peer-candidate-drain-once` hook is reused verbatim, and
+its Run 150 drain / apply policies are already selected by environment
+(`testnet_enabled()` under `--env testnet`) with MainNet refused
+unconditionally.
+
+What Run 155 adds for the lab/evidence workflow:
+
+* A release-binary TestNet harness
+  `scripts/devnet/run_155_testnet_peer_driven_apply_end_to_end_release_binary.sh`
+  that runs against a real `target/release/qbind-node`. Build and run it as:
+
+  ```
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node \
+      --example run_133_v2_validation_only_fixture_helper
+  bash scripts/devnet/run_155_testnet_peer_driven_apply_end_to_end_release_binary.sh
+  ```
+
+  The harness mints the Run 154 TestNet fixtures with the **real release
+  helper**, records their TestNet domain binding (environment, chain id,
+  genesis hash) and SHA-256s under
+  `docs/devnet/run_155_testnet_peer_driven_apply_end_to_end_release_binary/fixtures/`,
+  and runs the TestNet fail-closed matrix on the real binary
+  (A6/C2 MainNet refused; C1/C3/C4 co-requisite refusals — each exit=1 with
+  a `Run 151: FATAL` / `FATAL` banner).
+
+* The evidence archive and report
+  (`docs/devnet/run_155_testnet_peer_driven_apply_end_to_end_release_binary/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_155.md`) document the full
+  TestNet apply pipeline (validation-only → staging → drain-once →
+  ProductionDrainInvocationBuilder → ProductionV2MarkerCoordinator →
+  Run 150 drain → Run 148 controller → Run 070 apply → swap → eviction →
+  sequence commit → v2 marker persist after commit) and cite the Run 154
+  TestNet fixture suite and the Run 152/150/148 source/test matrices for
+  the positive apply path and the reject/no-op matrix.
+
+Run 155 closes the Run 153 A2 TestNet evidence deferral. DevNet evidence
+from Run 153 remains valid and untouched.
+
+Out of scope for Run 155 (unchanged from Run 154):
+
+* Operator CLI / runtime behaviour change.
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement (MainNet remains refused).
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+* Validator-set rotation.
+* Full C4 / C5 closure.
