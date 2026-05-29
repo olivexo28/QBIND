@@ -30,6 +30,25 @@
 //!
 //! Run 133 is evidence-only. This helper does NOT modify production
 //! runtime code and does NOT touch any wire format.
+//!
+//! Run 154 extension (source/test fixture tooling only): the helper now
+//! also mints a `testnet` fixture directory so a future Run 155
+//! release-binary TestNet peer-driven apply evidence harness has signed
+//! TestNet trust-bundle material, a v2 ratification sidecar bound to the
+//! TestNet environment, transport root/leaf credentials, a valid v2
+//! peer-candidate `0x05` fixture, and an explicit set of invalid
+//! peer-candidate negative fixtures (lower-sequence, same-sequence
+//! different-digest, bad-signature, wrong-environment, wrong-chain,
+//! duplicate). Every TestNet artifact is domain-bound to
+//! `environment = TestNet`, the TestNet `chain_id`, the TestNet genesis
+//! hash, the minted authority-root fingerprint, and the v2 authority
+//! sequence. Run 154 closes the fixture-tooling blocker that caused the
+//! Run 153 A2 TestNet evidence to be deferred. All minted key material
+//! is ephemeral: no production source-code anchor, fallback root, or
+//! fallback signing key is introduced. DevNet and MainNet output remain
+//! byte-for-byte unchanged (the TestNet-only negatives are written only
+//! under the `testnet` directory); the MainNet directory stays clearly
+//! fixture-only and is not production-authoritative.
 
 use std::env;
 use std::fs;
@@ -235,8 +254,22 @@ fn envelope_for(
     sequence: u64,
 ) -> PeerCandidateEnvelope {
     let bundle = signed_bundle(h, signing, sequence);
-    let fp = hex_lower(&canonical_fingerprint(&bundle));
-    let bytes = serde_json::to_vec_pretty(&bundle).expect("serialize bundle");
+    envelope_from_bundle(h, &bundle, peer_id, sequence)
+}
+
+/// Wrap an already-built (possibly tampered) trust bundle in a
+/// peer-candidate envelope. Used by the Run 154 TestNet negative-fixture
+/// generator so the envelope's declared metadata matches the embedded
+/// bundle bytes while leaving the bundle content under the caller's
+/// control.
+fn envelope_from_bundle(
+    h: &Harness,
+    bundle: &TrustBundle,
+    peer_id: &str,
+    sequence: u64,
+) -> PeerCandidateEnvelope {
+    let fp = hex_lower(&canonical_fingerprint(bundle));
+    let bytes = serde_json::to_vec_pretty(bundle).expect("serialize bundle");
     PeerCandidateEnvelope {
         envelope_version: PeerCandidateEnvelope::ENVELOPE_VERSION,
         domain_tag: PeerCandidateEnvelope::DOMAIN_TAG.to_string(),
@@ -248,6 +281,24 @@ fn envelope_for(
         declared_length: bytes.len(),
         bundle_bytes: bytes,
     }
+}
+
+/// Sign a trust bundle with an explicit `generated_at` so a same-sequence
+/// candidate can be minted with a *different* canonical fingerprint (and
+/// therefore a different digest) than the baseline at that sequence.
+fn signed_bundle_with_generated_at(
+    h: &Harness,
+    signing: &Signing,
+    sequence: u64,
+    generated_at: u64,
+) -> TrustBundle {
+    let mut bundle = signed_bundle(h, signing, sequence);
+    bundle.signature = None;
+    bundle.generated_at = generated_at;
+    let sig =
+        sign_bundle_devnet_helper(&bundle, signing.key_id, &signing.sk).expect("sign bundle");
+    bundle.signature = Some(sig);
+    bundle
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -499,10 +550,89 @@ fn write_env_fixtures(base: &Path, env: NetworkEnvironment) {
     );
     write_json(&base.join("seed-marker.v2.seq2.json"), &v2_marker_seq2);
 
+    // ----------------- Run 154: TestNet-only peer-candidate negatives ------
+    // Written only under the `testnet` directory so DevNet and MainNet
+    // output remain byte-for-byte unchanged.
+    if env == NetworkEnvironment::Testnet {
+        write_testnet_peer_candidate_negatives(base, &h, &active, &rotated);
+    }
+
     // ----------------- defensive: drop authority secret key ---------------
     drop(h.authority_sk);
     drop(active.sk);
     drop(rotated.sk);
+}
+
+/// Run 154 — TestNet-only peer-candidate `0x05` fixtures: one explicit
+/// valid candidate plus the negative matrix required by a future Run 155
+/// release-binary TestNet peer-driven apply evidence harness. Every
+/// fixture is bound to the TestNet runtime domain carried by `h`.
+fn write_testnet_peer_candidate_negatives(
+    base: &Path,
+    h: &Harness,
+    active: &Signing,
+    rotated: &Signing,
+) {
+    // Valid v2 peer-candidate at sequence=2 (explicit name alongside the
+    // shared `peer-candidate.json`).
+    write_json(
+        &base.join("peer-candidate.valid.json"),
+        &envelope_for(h, active, "run154-testnet-active", 2),
+    );
+
+    // Duplicate of the valid candidate (duplicate-suppression testing).
+    write_json(
+        &base.join("peer-candidate.duplicate.json"),
+        &envelope_for(h, active, "run154-testnet-active", 2),
+    );
+
+    // Lower-sequence candidate (seq=1) to be replayed against a seq=2 marker.
+    write_json(
+        &base.join("peer-candidate.lower-sequence.json"),
+        &envelope_for(h, active, "run154-testnet-lower", 1),
+    );
+
+    // Same-sequence different-digest: same active signing key at seq=2 but a
+    // different `generated_at` -> different canonical fingerprint/digest.
+    let diff_digest = signed_bundle_with_generated_at(h, active, 2, 99);
+    write_json(
+        &base.join("peer-candidate.same-sequence-different-digest.json"),
+        &envelope_from_bundle(h, &diff_digest, "run154-testnet-diff-digest", 2),
+    );
+
+    // Bad-signature candidate: tamper the bundle signature bytes.
+    let mut bad_sig = signed_bundle(h, active, 2);
+    if let Some(sig) = bad_sig.signature.as_mut() {
+        let mut bytes: Vec<u8> = (0..sig.sig_bytes.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&sig.sig_bytes[i..i + 2], 16).expect("hex"))
+            .collect();
+        if !bytes.is_empty() {
+            bytes[0] ^= 0xff;
+        }
+        sig.sig_bytes = hex_lower(&bytes);
+    }
+    write_json(
+        &base.join("peer-candidate.bad-signature.json"),
+        &envelope_from_bundle(h, &bad_sig, "run154-testnet-bad-sig", 2),
+    );
+
+    // Wrong-environment candidate: declare DevNet on a TestNet bundle.
+    let mut wrong_env = envelope_for(h, active, "run154-testnet-wrong-env", 2);
+    wrong_env.environment = TrustBundleEnvironment::Devnet;
+    write_json(
+        &base.join("peer-candidate.wrong-environment.json"),
+        &wrong_env,
+    );
+
+    // Wrong-chain candidate: declare a bogus chain id.
+    let mut wrong_chain = envelope_for(h, active, "run154-testnet-wrong-chain", 2);
+    wrong_chain.chain_id_hex = "ffffffffffffffff".to_string();
+    write_json(&base.join("peer-candidate.wrong-chain.json"), &wrong_chain);
+
+    // The `rotated` key is unused by the peer-candidate negatives (kept for
+    // the shared v2 rotate sidecar above); reference it to avoid confusion.
+    let _ = rotated;
 }
 
 fn main() {
@@ -514,7 +644,11 @@ fn main() {
     let _ = fs::remove_dir_all(&outdir);
     fs::create_dir_all(&outdir).expect("mkdir outdir");
 
-    for env in [NetworkEnvironment::Devnet, NetworkEnvironment::Mainnet] {
+    for env in [
+        NetworkEnvironment::Devnet,
+        NetworkEnvironment::Mainnet,
+        NetworkEnvironment::Testnet,
+    ] {
         let sub = outdir.join(match env {
             NetworkEnvironment::Devnet => "devnet",
             NetworkEnvironment::Mainnet => "mainnet",
