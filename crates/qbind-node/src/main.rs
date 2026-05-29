@@ -2934,6 +2934,79 @@ async fn main() {
             // Run 149 controller-layer arming-only pattern.
             let _ = (drain, drain_policy);
         }
+
+        // Run 152 — binary-reachable drain invocation plumbing
+        // declaration. Run 151 left the production
+        // `PeerDrivenDrainInvocationBuilder` / `V2MarkerCoordinator`
+        // implementations and the cross-scope shared staging-queue
+        // plumbing out of scope; Run 152 lands them in the library
+        // (source/test wiring only) so the hidden drain-once hook is
+        // now capable of constructing a real drain invocation from the
+        // live staged peer-candidate queue and routing it through:
+        //
+        //   live inbound 0x05 → validation-only v2 acceptance →
+        //   staging queue → hidden drain hook →
+        //   ProductionDrainInvocationBuilder → ProductionV2MarkerCoordinator
+        //   → Run 150 drain → Run 148 controller → Run 070 apply contract
+        //
+        // The same `Arc<parking_lot::Mutex<PeerCandidateStagingQueue>>`
+        // installed on the `LivePeerCandidateWireDispatcher`
+        // (`staging_queue()`) is the queue the drain consumes via
+        // `pqc_peer_candidate_drain::try_drain_once_shared`. The marker
+        // discipline reuses the Run 134/136/138 helpers through
+        // `pqc_peer_candidate_apply::ProductionV2MarkerCoordinator`.
+        //
+        // **Run 152 remains source/test wiring only.** The release
+        // binary does NOT autonomously invoke the drain here: the live
+        // apply context, the verified v2 ratification, and the
+        // operator-supplied previous-fingerprint metadata are threaded
+        // by the Run 153 end-to-end release-binary harness, which is
+        // explicitly deferred. No autonomous background drain; no
+        // automatic apply on receipt; MainNet still refused at every
+        // layer. The references below prove the plumbing is compiled
+        // into and reachable from the release binary without invoking
+        // any apply.
+        {
+            let _binary_reachable_plumbing: [&'static str; 3] = [
+                core::any::type_name::<
+                    qbind_node::pqc_peer_candidate_drain::ProductionDrainInvocationBuilder<
+                        qbind_node::pqc_live_trust_apply::ProductionLiveTrustApplyContext,
+                    >,
+                >(),
+                core::any::type_name::<
+                    qbind_node::pqc_peer_candidate_apply::ProductionV2MarkerCoordinator,
+                >(),
+                core::any::type_name::<
+                    fn(
+                        &qbind_node::pqc_peer_candidate_drain::PeerDrivenApplyDrain,
+                        &std::sync::Arc<
+                            parking_lot::Mutex<
+                                qbind_node::pqc_peer_candidate_staging::PeerCandidateStagingQueue,
+                            >,
+                        >,
+                    ),
+                >(),
+            ];
+            eprintln!(
+                "[run-152] binary-reachable peer-driven drain invocation plumbing PRESENT \
+                 (production_builder={}, production_v2_marker_coordinator={}, \
+                 shared_queue_drain=pqc_peer_candidate_drain::try_drain_once_shared). \
+                 Source/test wiring only; release-binary end-to-end peer-driven apply \
+                 evidence is DEFERRED to Run 153. The hidden drain-once hook consumes the \
+                 SAME Arc<Mutex<PeerCandidateStagingQueue>> the live inbound 0x05 \
+                 dispatcher stages into; the drain routes through Run 150 \
+                 PeerDrivenApplyDrain::try_drain_once → Run 148 \
+                 try_apply_staged_peer_candidate → Run 070 \
+                 apply_validated_candidate_with_previous; the v2 authority marker is \
+                 persisted only AFTER sequence commit succeeds. NO autonomous background \
+                 drain; NO automatic apply on receipt; MainNet refused unconditionally; \
+                 governance / KMS / HSM unimplemented; signing-key rotation/revocation \
+                 lifecycle open; full C4 open; C5 open. See \
+                 docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_152.md.",
+                _binary_reachable_plumbing[0],
+                _binary_reachable_plumbing[1],
+            );
+        }
     }
 
 

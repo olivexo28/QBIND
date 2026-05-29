@@ -115,10 +115,11 @@
 //!   existing [`StagedPeerCandidate`] type and produces the existing
 //!   [`PeerDrivenApplyOutcome`] via the Run 148 controller.
 
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use qbind_types::NetworkEnvironment;
+use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::pqc_peer_candidate_apply::{
     try_apply_staged_peer_candidate, PeerDrivenApplyInvocation, PeerDrivenApplyOutcome,
@@ -128,7 +129,9 @@ use crate::pqc_peer_candidate_apply::{
 use crate::pqc_peer_candidate_staging::{
     PeerCandidateStagingQueue, StagedPeerCandidate,
 };
-use crate::pqc_trust_bundle::TrustBundleEnvironment;
+use crate::pqc_trust_activation::ActivationContext;
+use crate::pqc_trust_bundle::{BundleSigningKeySet, TrustBundleEnvironment};
+use crate::pqc_trust_reload::{LiveTrustApplyContext, ReloadCheckInputs};
 
 /// Policy that decides whether — and on which environment — the
 /// Run 150 explicit drain trigger is permitted to consume a staged
@@ -766,6 +769,260 @@ fn select_drain_candidate(
                 .cmp(&b.sequence)
                 .then_with(|| b.fingerprint_hex.cmp(&a.fingerprint_hex))
         })
+}
+
+/// Run 152 — **production-capable** [`PeerDrivenDrainInvocationBuilder`].
+///
+/// Converts a deterministically-selected [`StagedPeerCandidate`] into a
+/// Run 148 [`PeerDrivenApplyInvocation`] using the already-persisted
+/// candidate bundle file, the live signing-key set, the activation
+/// context, the sequence-persistence path, and a live apply context
+/// (`C`) — in production
+/// [`crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext`];
+/// in tests the same `FakeLiveTrustApplyContext` the Run 070 / Run 148 /
+/// Run 150 tests use so the strict `snapshot → swap → evict → commit`
+/// ordering is observable.
+///
+/// The builder is generic over the live apply context type `C` so the
+/// same production type can be exercised by tests with a deterministic
+/// fake context without `dyn` gymnastics or borrow-checker friction.
+///
+/// # Defensive pre-build re-checks (fail closed → `Err(reason)`)
+///
+/// The deep crypto re-validation (signature, environment, chain_id,
+/// genesis hash, authority-root, sequence anti-rollback, activation)
+/// happens inside the Run 070 apply pipeline that the Run 148
+/// controller invokes. The builder additionally re-checks the cheap,
+/// queue-local invariants **before** the controller is ever entered so
+/// a malformed or stale staged entry can never reach apply:
+///
+/// - **missing candidate material** — the on-disk bundle file at
+///   `candidate_path` must exist;
+/// - **malformed staged metadata** — `fingerprint_hex` must be 64
+///   lowercase hex chars and `fingerprint_prefix` must be its prefix;
+/// - **freshness/expiry** — `now - staged_at` must be
+///   `<= max_candidate_age_secs`;
+/// - **environment / chain-id binding** — the staged candidate must
+///   declare the same `(environment, chain_id_hex)` as the configured
+///   runtime domain;
+/// - **ambiguous v1+v2 / missing v2 material** — when
+///   `require_v2_marker_digest` is `true` (the default for the v2
+///   apply path) the staged candidate must carry an
+///   `authority_marker_digest`; a candidate that is neither cleanly v1
+///   nor cleanly v2 is refused fail-closed;
+/// - **validation flag** — `signature_verified` must be `true`.
+///
+/// On any refusal the drain controller maps the `Err` to
+/// [`PeerDrivenDrainOutcome::CandidateRejectedBeforeApply`] **without**
+/// invoking the Run 148 controller (and therefore without any Run 070
+/// call, marker touch, live-state swap, or session eviction).
+///
+/// # The builder never mutates anything
+///
+/// `build_for` performs **no** disk write, **no** sequence write, **no**
+/// marker write, **no** `LivePqcTrustState` mutation, **no** session
+/// eviction, and **never** calls Run 070 directly. It only assembles
+/// the inputs the Run 148 controller consumes.
+pub struct ProductionDrainInvocationBuilder<C: LiveTrustApplyContext> {
+    candidate_path: PathBuf,
+    signing_keys: BundleSigningKeySet,
+    sequence_persistence_path: Option<PathBuf>,
+    environment: NetworkEnvironment,
+    chain_id: ChainId,
+    validation_time_secs: u64,
+    activation_ctx: ActivationContext,
+    local_leaf_cert_bytes: Option<Vec<u8>>,
+    live_apply_ctx: C,
+    previous_fingerprint_prefix: String,
+    previous_sequence: Option<u64>,
+    max_candidate_age_secs: u64,
+    now_unix_secs: u64,
+    require_v2_marker_digest: bool,
+}
+
+impl<C: LiveTrustApplyContext> ProductionDrainInvocationBuilder<C> {
+    /// Construct a builder for one drain trigger. All material is owned
+    /// by the builder so per-trigger borrows do not fight the borrow
+    /// checker; the builder is consumed (or re-used) per trigger.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        candidate_path: PathBuf,
+        signing_keys: BundleSigningKeySet,
+        sequence_persistence_path: Option<PathBuf>,
+        environment: NetworkEnvironment,
+        chain_id: ChainId,
+        validation_time_secs: u64,
+        activation_ctx: ActivationContext,
+        local_leaf_cert_bytes: Option<Vec<u8>>,
+        live_apply_ctx: C,
+        previous_fingerprint_prefix: String,
+        previous_sequence: Option<u64>,
+        max_candidate_age_secs: u64,
+        now_unix_secs: u64,
+    ) -> Self {
+        Self {
+            candidate_path,
+            signing_keys,
+            sequence_persistence_path,
+            environment,
+            chain_id,
+            validation_time_secs,
+            activation_ctx,
+            local_leaf_cert_bytes,
+            live_apply_ctx,
+            previous_fingerprint_prefix,
+            previous_sequence,
+            max_candidate_age_secs,
+            now_unix_secs,
+            require_v2_marker_digest: true,
+        }
+    }
+
+    /// Override whether the builder requires a v2 `authority_marker_digest`
+    /// on the staged candidate. Defaults to `true` (v2 apply path).
+    pub fn with_require_v2_marker_digest(mut self, require: bool) -> Self {
+        self.require_v2_marker_digest = require;
+        self
+    }
+
+    /// Borrow the owned live apply context (test introspection of the
+    /// ordered callback log).
+    pub fn live_apply_ctx(&self) -> &C {
+        &self.live_apply_ctx
+    }
+
+    /// Cheap queue-local re-checks. Returns `Err(reason)` (fail closed)
+    /// or `Ok(())`.
+    fn precheck(&self, staged: &StagedPeerCandidate) -> Result<(), String> {
+        // missing candidate material
+        if !self.candidate_path.exists() {
+            return Err(format!(
+                "missing candidate bundle material at {}",
+                self.candidate_path.display()
+            ));
+        }
+        // validation flag (defence-in-depth; selector also enforces)
+        if !staged.signature_verified {
+            return Err("staged candidate is not signature-verified".to_string());
+        }
+        // malformed staged metadata
+        let fp = &staged.fingerprint_hex;
+        if fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err(format!(
+                "malformed staged fingerprint_hex (expected 64 lowercase hex chars): {:?}",
+                fp
+            ));
+        }
+        if staged.fingerprint_prefix.is_empty()
+            || !fp.starts_with(&staged.fingerprint_prefix)
+        {
+            return Err(format!(
+                "malformed staged metadata: fingerprint_prefix {:?} is not a prefix of \
+                 fingerprint_hex",
+                staged.fingerprint_prefix
+            ));
+        }
+        // freshness / expiry
+        let age = self.now_unix_secs.saturating_sub(staged.staged_at_unix_secs);
+        if age > self.max_candidate_age_secs {
+            return Err(format!(
+                "staged candidate expired: age={}s > max_candidate_age_secs={}s",
+                age, self.max_candidate_age_secs
+            ));
+        }
+        // environment / chain-id binding
+        let runtime_trust_env = TrustBundleEnvironment::from_runtime(self.environment);
+        if staged.environment != runtime_trust_env {
+            return Err(format!(
+                "staged candidate environment {:?} does not match runtime {:?}",
+                staged.environment, runtime_trust_env
+            ));
+        }
+        let runtime_chain_id_hex = crate::pqc_trust_sequence::chain_id_hex(self.chain_id);
+        if staged.chain_id_hex != runtime_chain_id_hex {
+            return Err(format!(
+                "staged candidate chain_id_hex {} does not match runtime {}",
+                staged.chain_id_hex, runtime_chain_id_hex
+            ));
+        }
+        // ambiguous v1+v2 / missing v2 material
+        if self.require_v2_marker_digest && staged.authority_marker_digest.is_none() {
+            return Err(
+                "staged candidate carries no v2 authority_marker_digest under the v2 apply \
+                 path (ambiguous v1+v2 / missing v2 material; fail closed)"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl<C: LiveTrustApplyContext> PeerDrivenDrainInvocationBuilder
+    for ProductionDrainInvocationBuilder<C>
+{
+    fn build_for<'a>(
+        &'a mut self,
+        staged: &StagedPeerCandidate,
+    ) -> Result<PeerDrivenApplyInvocation<'a>, String> {
+        self.precheck(staged)?;
+        let inputs = ReloadCheckInputs {
+            candidate_path: &self.candidate_path,
+            environment: self.environment,
+            chain_id: self.chain_id,
+            validation_time_secs: self.validation_time_secs,
+            signing_keys: &self.signing_keys,
+            activation_ctx: self.activation_ctx.clone(),
+            sequence_persistence_path: self.sequence_persistence_path.as_deref(),
+            local_leaf_cert_bytes: self.local_leaf_cert_bytes.as_deref(),
+        };
+        Ok(PeerDrivenApplyInvocation {
+            inputs,
+            live_apply_ctx: &mut self.live_apply_ctx,
+            previous_fingerprint_prefix: self.previous_fingerprint_prefix.clone(),
+            previous_sequence: self.previous_sequence,
+        })
+    }
+}
+
+/// Run 152 — **binary-reachable** shared-queue drain orchestration.
+///
+/// The live inbound `0x05` validation-only path
+/// ([`crate::pqc_peer_candidate_wire::LivePeerCandidateWireDispatcher`])
+/// holds the staging queue as an
+/// `Arc<parking_lot::Mutex<PeerCandidateStagingQueue>>` and exposes it
+/// via `LivePeerCandidateWireDispatcher::staging_queue()`. This helper
+/// lets the hidden `--p2p-trust-bundle-peer-candidate-drain-once` hook
+/// consume **that same** shared queue instance: the candidate staged by
+/// the live inbound path is exactly the candidate the drain sees. No
+/// second queue, no copy, no disk persistence.
+///
+/// The helper simply locks the shared queue and delegates to
+/// [`PeerDrivenApplyDrain::try_drain_once`]; every Run 150 / Run 148 /
+/// Run 070 invariant (policy gate, MainNet refusal, concurrency guard,
+/// strict ordering, post-commit marker discipline) is enforced by the
+/// delegate. It never calls Run 070 directly.
+#[allow(clippy::too_many_arguments)]
+pub fn try_drain_once_shared<B: PeerDrivenDrainInvocationBuilder>(
+    drain: &PeerDrivenApplyDrain,
+    shared_queue: &Arc<parking_lot::Mutex<PeerCandidateStagingQueue>>,
+    invocation_builder: &mut B,
+    marker_coordinator: &mut dyn V2MarkerCoordinator,
+    policy: &PeerDrivenDrainPolicy,
+    apply_policy: &PeerDrivenApplyPolicy,
+    runtime_domain: &PeerDrivenApplyRuntimeDomain,
+    now_unix_secs: u64,
+) -> PeerDrivenDrainOutcome {
+    let mut queue = shared_queue.lock();
+    drain.try_drain_once(
+        &mut queue,
+        invocation_builder,
+        marker_coordinator,
+        policy,
+        apply_policy,
+        runtime_domain,
+        now_unix_secs,
+    )
 }
 
 #[cfg(test)]
