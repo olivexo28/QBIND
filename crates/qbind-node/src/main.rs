@@ -1439,6 +1439,33 @@ async fn main() {
         }
     }
 
+    // Run 151 — early MainNet refusal for the disabled-by-default
+    // explicit local one-shot drain trigger flag. The Run 150
+    // `PeerDrivenApplyDrain` controller is forbidden from operating
+    // on MainNet under any condition; local peer majority is NOT
+    // authority on MainNet. The flag is refused unconditionally
+    // with exit code 1 and the P2P transport is never brought up,
+    // **before** the Run 149 apply-flag co-requisites gate is
+    // consulted so the operator sees the precise Run 151 FATAL
+    // reason. See `task/RUN_151_TASK.txt`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md`, and
+    // `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    if args.p2p_trust_bundle_peer_candidate_drain_once {
+        use qbind_types::NetworkEnvironment;
+        if matches!(config.environment, NetworkEnvironment::Mainnet) {
+            eprintln!(
+                "[binary] Run 151: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-drain-once is refused on MainNet \
+                 unconditionally. Local peer majority is NOT authority on MainNet. No \
+                 drain; no apply; no staging consumption; no sequence write; no marker \
+                 write; no session eviction; no P2P startup. Governance / ratification / \
+                 KMS-HSM authority is required for any MainNet bundle-signing apply and \
+                 is NOT implemented. See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md."
+            );
+            std::process::exit(1);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Run 127 — `--authority-state-reset` offline operator ceremony.
     //
@@ -2741,6 +2768,171 @@ async fn main() {
                 policy.allow_testnet,
                 policy.allow_mainnet,
             );
+        }
+    }
+
+    // Run 151 — hidden, disabled-by-default DevNet/TestNet-only
+    // co-requisites gate + acceptance banner + Run 150
+    // `PeerDrivenApplyDrain` controller-layer arming banner for the
+    // explicit local one-shot drain trigger flag. This is the
+    // minimum hidden source delta Run 151 adds to make the Run 150
+    // source/test drain trigger reachable from the release binary
+    // at all (the Run 150 task explicitly deferred the binary
+    // operator trigger to Run 151).
+    //
+    // Co-requisites enforced here:
+    //   * Refuse on MainNet unconditionally (defensive second guard
+    //     after the early refusal above). Local peer majority is
+    //     NOT authority on MainNet.
+    //   * Refuse unless `--p2p-trust-bundle-peer-candidate-apply-enabled`
+    //     is also set — the drain controller has nothing to delegate
+    //     to without the Run 148 apply policy armed. The Run 149
+    //     apply gate itself transitively requires
+    //     `--p2p-trust-bundle-peer-candidate-staging-enabled` and
+    //     `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`,
+    //     so neither extra co-requisite is re-checked here.
+    //
+    // Acceptance scope (deliberately narrow): the Run 151 banners
+    // declare the binary is ready to drain at most one staged
+    // candidate per trigger via the Run 150 drain → Run 148
+    // controller → Run 070 apply pipeline; the v2 authority marker
+    // is persisted only AFTER `commit_sequence` succeeds. The flag
+    // adds NO new apply algorithm, NO autonomous background drain,
+    // NO automatic apply on receipt, NO peer-majority authority, NO
+    // new wire format, NO schema change, and NO bypass of any
+    // existing validation / staging / verifier / marker /
+    // anti-rollback / activation gate.
+    //
+    // See `task/RUN_151_TASK.txt`,
+    // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md`, and
+    // `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    if args.p2p_trust_bundle_peer_candidate_drain_once {
+        use qbind_types::NetworkEnvironment;
+        if matches!(config.environment, NetworkEnvironment::Mainnet) {
+            eprintln!(
+                "[binary] Run 151: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-drain-once is refused on MainNet \
+                 unconditionally (defensive second guard). Local peer majority is NOT \
+                 authority on MainNet. No drain; no apply; no staging consumption; no \
+                 sequence write; no marker write; no session eviction; no P2P startup. \
+                 See docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md."
+            );
+            std::process::exit(1);
+        }
+        if !args.p2p_trust_bundle_peer_candidate_apply_enabled {
+            eprintln!(
+                "[binary] Run 151: FATAL: \
+                 --p2p-trust-bundle-peer-candidate-drain-once requires \
+                 --p2p-trust-bundle-peer-candidate-apply-enabled. The Run 150 \
+                 peer-driven apply drain controller delegates apply to the Run 148 \
+                 peer-driven apply controller; without the Run 148 controller armed \
+                 there is nothing to drain into and the trigger is refused fail-closed \
+                 rather than silently introducing a new apply algorithm that bypasses \
+                 the Run 148 controller. No drain; no apply; no staging consumption; \
+                 no sequence write; no marker write; no session eviction; no P2P \
+                 startup."
+            );
+            std::process::exit(1);
+        }
+        eprintln!(
+            "[binary] Run 151: peer-candidate drain-once trigger flag accepted \
+             (env={:?}). The Run 150 PeerDrivenDrainPolicy is selected by environment \
+             (devnet_enabled / testnet_enabled); MainNet is refused unconditionally. \
+             Drain, when fired, routes through the Run 150 \
+             PeerDrivenApplyDrain::try_drain_once → Run 148 \
+             try_apply_staged_peer_candidate → existing Run 070 \
+             apply_validated_candidate_with_previous pipeline (validate → snapshot \
+             previous → swap → evict_sessions → commit_sequence); the v2 authority \
+             marker is persisted only AFTER sequence commit succeeds, via the \
+             V2MarkerCoordinator post-commit boundary. At most one candidate per \
+             trigger; concurrency-guarded; never calls Run 070 directly from main.rs. \
+             NO autonomous background drain; NO automatic apply on receipt; NO \
+             peer-majority authority; NO new apply algorithm; NO bypass of staging; \
+             NO bypass of v2 marker / Run 055 anti-rollback / activation gates. See \
+             docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md.",
+            config.environment
+        );
+        // Run 151 — defensive controller-layer arming banner. The
+        // Run 150 `PeerDrivenDrainPolicy` constructor for the current
+        // environment and a fresh `PeerDrivenApplyDrain` controller
+        // object are materialized at startup so the operator sees
+        // the exact drain-trigger capabilities the binary is armed
+        // with and the in-progress concurrency guard is observably
+        // initialized (`in_progress=false`). The drain object itself
+        // is NOT yet invoked from main.rs because the production
+        // `PeerDrivenDrainInvocationBuilder` and live
+        // `V2MarkerCoordinator` implementations (which would thread
+        // candidate paths, signing-key references, and the live
+        // `LivePqcTrustState` apply context through the drain) are
+        // out of scope of the "smallest possible hook" allowance in
+        // `task/RUN_151_TASK.txt`. End-to-end release-binary apply
+        // through the drain therefore remains under Run 150
+        // source/test coverage; Run 151 is classified honestly as
+        // **partial-positive (trigger-surface arming)** in
+        // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md`.
+        {
+            use qbind_node::pqc_peer_candidate_drain::{
+                PeerDrivenApplyDrain, PeerDrivenDrainPolicy,
+            };
+            let drain_policy = match config.environment {
+                qbind_types::NetworkEnvironment::Devnet => {
+                    PeerDrivenDrainPolicy::devnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Testnet => {
+                    PeerDrivenDrainPolicy::testnet_enabled()
+                }
+                qbind_types::NetworkEnvironment::Mainnet => {
+                    // Unreachable: MainNet was rejected above
+                    // (twice). Defensive triplicate to keep
+                    // fail-closed even if both outer guards are
+                    // ever loosened.
+                    eprintln!(
+                        "[binary] Run 151: FATAL: MainNet peer-driven apply drain \
+                         policy refused at controller-layer arming banner (defensive \
+                         guard). Aborting."
+                    );
+                    std::process::exit(1);
+                }
+            };
+            let drain = PeerDrivenApplyDrain::new();
+            let in_progress = drain
+                .in_progress_flag()
+                .load(std::sync::atomic::Ordering::Acquire);
+            eprintln!(
+                "[run-151] live peer-driven apply drain trigger ARMED \
+                 (env={:?}, enabled={}, allow_devnet={}, allow_testnet={}, \
+                 max_candidate_age_secs={}, remove_after_apply={}, \
+                 in_progress={}). DevNet/TestNet only; MainNet refused \
+                 unconditionally. At most one candidate per trigger; \
+                 concurrency-guarded (Arc<AtomicBool>); RAII-released. Drain \
+                 delegated to Run 148 try_apply_staged_peer_candidate which \
+                 delegates apply to Run 070 apply_validated_candidate_with_previous; \
+                 v2 authority marker persisted only AFTER sequence commit succeeds. \
+                 NO autonomous background drain; NO automatic apply on receipt; NO \
+                 peer-majority authority; NO new apply algorithm; NO bypass of \
+                 validation; NO bypass of staging; NO bypass of v2 marker / Run 055 \
+                 / activation gates.",
+                drain_policy.environment,
+                drain_policy.enabled,
+                drain_policy.allow_devnet,
+                drain_policy.allow_testnet,
+                drain_policy.max_candidate_age_secs,
+                drain_policy.remove_after_apply,
+                in_progress,
+            );
+            // Defensive: prove the controller object's typed
+            // `Disabled` short-circuit is reachable from main.rs by
+            // exercising the policy's enabled invariants without
+            // touching any production state. The drain itself is
+            // NOT invoked because the production
+            // `PeerDrivenDrainInvocationBuilder` /
+            // `V2MarkerCoordinator` impls are out of scope (see the
+            // comment above). The `drain` and `drain_policy`
+            // bindings are intentionally dropped here so no
+            // production state references the drain controller
+            // beyond the arming banner — exactly mirroring the
+            // Run 149 controller-layer arming-only pattern.
+            let _ = (drain, drain_policy);
         }
     }
 

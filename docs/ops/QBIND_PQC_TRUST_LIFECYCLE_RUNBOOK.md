@@ -5554,3 +5554,126 @@ list, unchanged):
 * MainNet governance attestation.
 * Validator-set rotation.
 * Full C4 closure; C5 closure.
+## Run 151 — release-binary trigger surface for the DevNet/TestNet explicit drain
+
+Run 151 surfaces the Run 150 explicit DevNet/TestNet-only
+peer-driven apply drain trigger
+(`PeerDrivenApplyDrain::try_drain_once`) on the real
+`target/release/qbind-node` via the smallest hidden,
+disabled-by-default DevNet/TestNet-only CLI flag:
+
+```
+--p2p-trust-bundle-peer-candidate-drain-once    (hide=true)
+```
+
+The flag is **refused on MainNet unconditionally** at three
+independent layers (early-startup `main.rs` gate; co-requisites
+`main.rs` gate; the Run 150 `PeerDrivenDrainPolicy` MainNet
+unconditional refusal in the drain controller itself). The flag
+requires `--p2p-trust-bundle-peer-candidate-apply-enabled`
+(which itself transitively requires
+`--p2p-trust-bundle-peer-candidate-staging-enabled` and
+`--p2p-trust-bundle-peer-candidate-wire-validation-enabled`);
+supplying the flag without that co-requisite chain is refused
+fail-closed with one of the `[binary] Run 147 / 149 / 151:
+FATAL` lines and exit code 1, and the P2P transport is never
+brought up.
+
+Operator-visible banners (DevNet / TestNet, full co-requisites
+supplied):
+
+```
+[binary] Run 151: peer-candidate drain-once trigger flag accepted ...
+[run-151] live peer-driven apply drain trigger ARMED
+  (env=<Devnet|Testnet>, enabled=true, allow_devnet=<bool>,
+   allow_testnet=<bool>, max_candidate_age_secs=<u64>,
+   remove_after_apply=true, in_progress=false) ...
+```
+
+The arming banner's `in_progress=false` field observably loads
+the Run 150 `PeerDrivenApplyDrain` controller's
+`Arc<AtomicBool>` concurrency guard at construction time,
+proving the guard is freshly initialized at the moment the
+trigger surface is armed.
+
+Operator semantics:
+
+* **Disabled by default.** The flag is `hide=true` and defaults
+  to `false`. Operators must explicitly supply the flag plus
+  the Run 149 apply co-requisite (which itself transitively
+  requires Run 147 staging + Run 146 wire-validation).
+* **DevNet / TestNet only; MainNet refused.** Local config
+  alone is insufficient for MainNet bundle-signing authority;
+  the Run 151 drain-once trigger refuses MainNet at three
+  independent layers (defensive triplicate).
+* **At most one candidate per trigger.** The Run 150
+  `try_drain_once` contract is unchanged; Run 151 does not
+  introduce a bulk drain.
+* **Concurrency-guarded.** The Run 150 `Arc<AtomicBool>`
+  in-progress flag prevents double drains; concurrent triggers
+  return `AlreadyInProgress` and do not enter the drain
+  pipeline.
+* **Never calls Run 070 directly from `main.rs`.** The trigger
+  routes through the Run 150 drain → Run 148 controller →
+  Run 070 `apply_validated_candidate_with_previous` pipeline
+  only; the v2 authority marker is persisted strictly **after**
+  Run 055 `commit_sequence` succeeds via the existing
+  `V2MarkerCoordinator` post-commit boundary.
+* **No autonomous background drain task.** The arming banner
+  materializes the drain controller and policy and drops both
+  at the end of the block; no timer, signal handler, or
+  background task is installed.
+* **No automatic apply on receipt.** Inbound `0x05` candidates
+  continue to follow the Run 142 / Run 143 validation-only and
+  Run 146 / Run 147 non-applying staging paths; apply requires
+  an explicit operator trigger.
+
+Verdict: **"minimal source wiring + release-binary evidence —
+partial-positive (trigger-surface arming)."** End-to-end
+release-binary apply through the drain (matrix rows A1, A2, A6,
+A7) remains under **Run 150 source/test coverage**
+(`crates/qbind-node/tests/run_150_peer_driven_apply_drain_tests.rs`
+19 / 19 green) because the productionization of the
+`PeerDrivenDrainInvocationBuilder` + `V2MarkerCoordinator`
+implementations and the cross-scope plumbing of the live
+staging-queue handle into a drain caller exceed the "smallest
+possible hook" allowance in `task/RUN_151_TASK.txt`.
+
+Refusal scenarios (release-binary evidenced):
+
+* C1 drain-once supplied without
+  `--p2p-trust-bundle-peer-candidate-apply-enabled`:
+  `[binary] Run 151: FATAL` + exit 1.
+* C2 / R2 drain-once supplied on `--env mainnet`:
+  `[binary] Run 151: FATAL` (early-startup) + exit 1.
+* C3 drain-once + apply supplied without staging:
+  `[binary] Run 149: FATAL` (transitive staging co-requisite
+  gate) + exit 1.
+* C4 drain-once + apply + staging supplied without
+  wire-validation: `[binary] Run 147: FATAL` (upstream staging
+  gate; staging requires wire-validation upstream of the
+  Run 149 apply gate) + exit 1.
+
+Out of scope for Run 151 (unchanged from Run 150):
+
+* Production `PeerDrivenDrainInvocationBuilder` /
+  `V2MarkerCoordinator` impls + cross-scope staging-queue
+  plumbing for end-to-end release-binary apply through the
+  drain (next future-run piece on the C4 closure
+  decomposition).
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Full C4 closure; C5 closure.
+
+Operator instructions: see
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md` for the
+canonical verdict, the source delta, the scenario matrix, the
+ordering proof citations (Run 150 source/test for A1 / A2 / A6
+/ A7), the negative invariants, and the release-binary harness
+`scripts/devnet/run_151_peer_driven_apply_drain_release_binary.sh`.

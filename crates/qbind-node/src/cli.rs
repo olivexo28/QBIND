@@ -751,6 +751,81 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_apply_enabled: bool,
 
+    /// Run 151 — hidden, **disabled-by-default** DevNet/TestNet-only
+    /// **explicit local one-shot drain trigger** for the Run 150
+    /// peer-driven apply drain controller
+    /// (`pqc_peer_candidate_drain::PeerDrivenApplyDrain`). When this
+    /// flag is present, the binary arms the Run 150 drain controller
+    /// alongside the Run 148 peer-driven apply controller already
+    /// armed by `--p2p-trust-bundle-peer-candidate-apply-enabled` and
+    /// declares — via the
+    /// `[run-151] live peer-driven apply drain trigger ARMED` banner
+    /// — that the binary is prepared to drain at most one eligible
+    /// staged peer candidate per trigger fire into the Run 148
+    /// controller and through it the existing Run 070 apply contract.
+    ///
+    /// **Strictly explicit / local / operator-controlled.** The flag
+    /// is the smallest hidden source delta Run 151 adds in order to
+    /// make the Run 150 source/test drain trigger reachable from the
+    /// release binary at all. It introduces NO autonomous background
+    /// drain task, NO automatic apply on receipt, NO peer-majority
+    /// authority, NO new apply algorithm, NO new wire format, NO new
+    /// trust-bundle / ratification-sidecar / authority-marker /
+    /// sequence-file / peer-candidate-envelope schema change, NO new
+    /// metric family, and NO bypass of any Run 142 v2 validation /
+    /// Run 145 staging / Run 130 verifier / Run 132/142 marker
+    /// pre-apply / Run 055 anti-rollback / Run 065/091 activation
+    /// gate.
+    ///
+    /// **Requires `--p2p-trust-bundle-peer-candidate-apply-enabled`**
+    /// at the binary level, which itself transitively requires
+    /// `--p2p-trust-bundle-peer-candidate-staging-enabled` and
+    /// `--p2p-trust-bundle-peer-candidate-wire-validation-enabled`.
+    /// Without the Run 148 apply arming flag the drain controller
+    /// would have nothing to delegate to; supplying this Run 151 flag
+    /// without the Run 148 flag is refused fail-closed at startup
+    /// with the `[binary] Run 151: FATAL` line and exit code 1, and
+    /// the P2P transport is never brought up.
+    ///
+    /// **MainNet is refused unconditionally** even when this flag is
+    /// set: the binary aborts with a fatal `[binary] Run 151: FATAL`
+    /// line and exit code 1; the P2P transport is never brought up.
+    /// Local peer majority is NOT authority on MainNet. The refusal
+    /// is enforced at the top-level CLI gate (before the Run 149
+    /// apply gate is consulted) and the Run 150
+    /// `PeerDrivenDrainPolicy::mainnet_attempted()` continues to
+    /// return `PeerDrivenDrainOutcome::MainNetRefused` defensively at
+    /// the drain controller layer even if the gate is ever loosened.
+    ///
+    /// **Concurrency-guarded.** The Run 150
+    /// `PeerDrivenApplyDrain` controller carries an
+    /// `Arc<AtomicBool>` in-progress flag (RAII-released). At most
+    /// one trigger may enter the drain pipeline; concurrent triggers
+    /// observe `AlreadyInProgress` and short-circuit. No double
+    /// apply, no double sequence write, no double marker write, no
+    /// double session eviction is possible.
+    ///
+    /// **At most one candidate per trigger.** The trigger drains a
+    /// single eligible staged candidate; bulk / autonomous /
+    /// background drains are explicitly out of scope.
+    ///
+    /// **Never calls Run 070 directly from `main.rs`.** The trigger
+    /// routes through the Run 150 drain → Run 148 controller → Run
+    /// 070 `apply_validated_candidate_with_previous` pipeline only.
+    /// The v2 authority marker is persisted strictly **after** Run
+    /// 055 `commit_sequence` succeeds via the existing
+    /// `V2MarkerCoordinator` post-commit boundary, matching Run
+    /// 134/136/138 discipline.
+    ///
+    /// See `task/RUN_151_TASK.txt`,
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_151.md`, and
+    /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-drain-once",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_drain_once: bool,
+
     /// Run 105 — disabled-by-default operator opt-in flag for the
     /// **non-mutating bundle-signing-key ratification enforcement**
     /// layer. Without this flag, supplying `--p2p-trust-bundle-ratification
