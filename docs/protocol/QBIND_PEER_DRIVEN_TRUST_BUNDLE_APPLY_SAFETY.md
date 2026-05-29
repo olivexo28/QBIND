@@ -1009,3 +1009,109 @@ in `crates/qbind-node/tests/run_150_peer_driven_apply_drain_tests.rs`
 swap, no sequence write, no marker write, no session eviction, no
 Run 070 apply call, no SIGHUP outcome, no reload-apply outcome, no
 peer-majority authority claim, and no MainNet apply.
+## Run 151 — release-binary evidence for the explicit DevNet/TestNet drain trigger
+
+Run 151 lands release-binary evidence for the smallest hidden,
+disabled-by-default DevNet/TestNet-only **explicit local one-shot
+drain trigger** that surfaces the Run 150 source/test
+`PeerDrivenApplyDrain::try_drain_once` controller on the real
+`target/release/qbind-node`. The trigger is the hidden CLI flag
+`--p2p-trust-bundle-peer-candidate-drain-once` (defined in
+`crates/qbind-node/src/cli.rs`); the matching `main.rs` blocks
+add an early-startup MainNet refusal, a co-requisites gate
+requiring `--p2p-trust-bundle-peer-candidate-apply-enabled`
+(which itself transitively requires staging-enabled +
+wire-validation-enabled), an acceptance banner
+(`[binary] Run 151: peer-candidate drain-once trigger flag
+accepted ...`), and a Run 150 controller-layer arming banner
+(`[run-151] live peer-driven apply drain trigger ARMED ...`)
+that materializes `PeerDrivenDrainPolicy::{devnet,testnet}_enabled()`
+plus a fresh `PeerDrivenApplyDrain` controller with an
+observably initialized `in_progress=false` concurrency flag.
+
+The Run 151 source delta honours the Run 150 contract bit-for-bit:
+
+* **Disabled by default.** The CLI flag is `hide=true` and
+  defaults to `false`.
+* **DevNet / TestNet only; MainNet refused.** The early-startup
+  gate, the controller-layer gate, and the Run 150
+  `PeerDrivenDrainPolicy` itself each enforce MainNet refusal
+  independently (defensive triplicate).
+* **Smallest possible hook.** Run 151 adds a single CLI bool
+  plus two `main.rs` blocks (early refusal + co-requisites /
+  arming). No new module, no new metric family, no new wire
+  format, no new on-disk schema, no production
+  `PeerDrivenDrainInvocationBuilder` impl, no production
+  `V2MarkerCoordinator` impl, no plumbing of the live
+  staging-queue handle across the `LivePeerCandidateWireDispatcher`
+  builder scope.
+* **Never calls Run 070 directly from `main.rs`.** The arming
+  banner declares the chain `Run 150 try_drain_once → Run 148
+  try_apply_staged_peer_candidate → Run 070
+  apply_validated_candidate_with_previous`; Run 151 does not
+  shortcut the chain.
+* **At most one candidate per trigger.** The Run 150
+  `try_drain_once` contract is unchanged; Run 151 does not
+  introduce a bulk drain.
+* **Concurrency-guarded.** The arming banner observably loads
+  and prints the `Arc<AtomicBool>` in-progress flag's value as
+  `in_progress=false`, confirming the guard is freshly
+  constructed.
+* **Operator/local only.** The trigger is operator-supplied at
+  process start. No autonomous background task / timer / signal
+  handler / peer-supplied trigger is added.
+
+Verdict for Run 151:
+**"minimal source wiring + release-binary evidence —
+partial-positive (trigger-surface arming)."**
+
+The release-binary harness (C1 missing apply-enabled co-requisite;
+C2 / R2 MainNet refused unconditionally; C3 missing staging-enabled
+via transitive Run 149 gate; C4 missing wire-validation-enabled
+via upstream Run 147 gate; C5 / C6 DevNet / TestNet acceptance via
+optional N=3 cluster harness; C7 clap-parser recognition; R1 flag
+absent → Run 149 behaviour preserved; R12 propagation-only
+unchanged; D1 denylist see-zero) is captured in
+`scripts/devnet/run_151_peer_driven_apply_drain_release_binary.sh`
+and archived under
+`docs/devnet/run_151_peer_driven_apply_drain_release_binary/`.
+
+End-to-end release-binary apply through the drain (matrix rows
+A1, A2, A6, A7) remains under **Run 150 source/test coverage**
+(`crates/qbind-node/tests/run_150_peer_driven_apply_drain_tests.rs`
+19 / 19 green) which already exercises the strict Run 070
+ordering `validate → snapshot_active → swap_trust_state →
+evict_sessions → commit_sequence`, the v2 marker
+`decide_pre_apply → persist_after_commit` post-commit-only
+boundary, the `Applied` outcome, the queue-removal-on-success
+contract, and the rollback / fatal semantics for R7 / R8 / R9
+forced failures. Wiring the production
+`PeerDrivenDrainInvocationBuilder` + `V2MarkerCoordinator`
+implementations and plumbing the live staging-queue handle
+across `main.rs` scopes so a real release-binary candidate
+flows through the drain into Run 070 → `commit_sequence` →
+post-commit v2 marker persist is a multi-piece production
+source change that exceeds the "smallest possible hook"
+allowance of `task/RUN_151_TASK.txt` and is the next future-run
+piece on the C4 closure decomposition.
+
+Out of scope for Run 151 (unchanged from Run 148 / Run 149 /
+Run 150):
+
+* Production `PeerDrivenDrainInvocationBuilder` /
+  `V2MarkerCoordinator` impls wired into the binary (next
+  future-run piece on the C4 closure decomposition).
+* Autonomous background drain task.
+* Automatic apply on receipt.
+* Peer-majority authority.
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Signing-key rotation / revocation lifecycle.
+
+Run 151 is **partial-positive trigger-surface arming**: the
+trigger surface is now release-binary-armed and refusable, and
+every refusal / no-op scenario asserts no live trust swap, no
+sequence write, no marker write, no session eviction, no
+Run 070 apply call from `main.rs`, no SIGHUP outcome, no
+reload-apply outcome, no peer-majority authority claim, and no
+MainNet apply.

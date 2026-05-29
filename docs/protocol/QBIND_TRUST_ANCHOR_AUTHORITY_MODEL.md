@@ -3231,3 +3231,80 @@ source/test-only drain entry point — a wiring step toward the Run
 151 release-binary trigger, with **no change to who may sign a
 MainNet trust bundle and no change to which anchors are accepted
 on which domain.**
+## Run 151 — release-binary surface for the explicit DevNet/TestNet drain trigger
+
+Run 151 surfaces the Run 150 source/test
+`PeerDrivenApplyDrain::try_drain_once` controller on the real
+`target/release/qbind-node` via the smallest hidden,
+disabled-by-default DevNet/TestNet-only CLI flag
+`--p2p-trust-bundle-peer-candidate-drain-once` plus the
+matching `main.rs` early-startup MainNet refusal, co-requisites
+gate (requires `--p2p-trust-bundle-peer-candidate-apply-enabled`,
+which itself transitively requires staging-enabled +
+wire-validation-enabled), acceptance banner, and Run 150
+controller-layer arming banner with an observably initialized
+`in_progress=false` concurrency flag.
+
+Authority invariants reaffirmed by Run 151:
+
+* **Local peer majority is NOT MainNet bundle-signing
+  authority.** The Run 151 drain-once trigger refuses MainNet
+  at three independent layers (early-startup gate; co-
+  requisites gate; Run 150 `PeerDrivenDrainPolicy` MainNet
+  unconditional refusal); local config alone remains
+  insufficient for MainNet bundle-signing authority.
+* **No new authority predicate.** The Run 151 trigger
+  delegates drain to the Run 150 controller, which delegates
+  apply to the Run 148 controller, which delegates apply to
+  the existing Run 070
+  `apply_validated_candidate_with_previous` contract. No new
+  authority-domain predicate, no new sequence rule, no new
+  marker rule, no new wire / schema / on-disk anchor.
+* **No new authority surface.** The drain controller object is
+  materialized at the arming banner and immediately dropped;
+  no production drain caller is constructed and `try_drain_once`
+  is not invoked from `main.rs` (the production
+  `PeerDrivenDrainInvocationBuilder` /
+  `V2MarkerCoordinator` impls + cross-scope staging-queue
+  plumbing are out of scope per the "smallest possible hook"
+  allowance in `task/RUN_151_TASK.txt`). Run 151 is therefore
+  classified as **partial-positive trigger-surface arming**.
+
+Authority-relevant negative assertions for Run 151:
+
+* No new MainNet enablement path.
+* No new MainNet governance attestation surface.
+* No new validator-set rotation surface.
+* No KMS / HSM integration.
+* No signing-key rotation / revocation lifecycle change.
+* No new wire format, no new on-disk schema, no new on-disk
+  anchor.
+* No new metric family.
+* No SIGHUP / reload-apply behaviour change.
+* No autonomous / background / on-receipt apply.
+* No production drain caller (the production
+  `PeerDrivenDrainInvocationBuilder` /
+  `V2MarkerCoordinator` impls + cross-scope staging-queue
+  plumbing remain the next future-run piece on the C4 closure
+  decomposition).
+
+Open items after Run 151 (unchanged from Run 150):
+
+* Production `PeerDrivenDrainInvocationBuilder` /
+  `V2MarkerCoordinator` impls + cross-scope staging-queue
+  plumbing for end-to-end release-binary apply through the
+  drain (matrix rows A1, A2, A6, A7 currently under Run 150
+  source/test coverage).
+* Governance / ratification authority implementation.
+* KMS / HSM custody for bundle-signing keys.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+* Full C4 closure; C5 closure.
+
+Run 151's contribution to the authority model is strictly the
+addition of an explicit, disabled-by-default, MainNet-refused,
+release-binary-armed drain-trigger surface — the binary-level
+fulfilment of the Run 150 deferral of release-binary trigger
+evidence — with **no change to who may sign a MainNet trust
+bundle and no change to which anchors are accepted**.
