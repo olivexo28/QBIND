@@ -3393,3 +3393,33 @@ the Run 152 deferral of release-binary end-to-end peer-driven apply
 evidence. The authority model itself is unchanged; every authority
 invariant from Runs 050–152 is reaffirmed. **Full C4 is NOT claimed
 by Run 153; C5 remains OPEN.**
+## Run 154 — TestNet fixture tooling (source/test only)
+
+Run 154 adds **source/test TestNet fixture tooling** and changes nothing
+in the authority model. The model is unchanged; every authority invariant
+from Runs 050–153 is reaffirmed.
+
+Run 154 extends the Run 133 v2 fixture helper to mint TestNet material
+bound to the TestNet runtime domain (`environment = TestNet`, TestNet
+`chain_id`, TestNet genesis hash, the minted authority-root fingerprint,
+and the v2 authority-domain sequence). The authority-root fingerprint
+carried by every TestNet artifact is derived from a **freshly minted,
+ephemeral** ML-DSA-44 authority key — there is **no static production
+source-code anchor**, **no fallback root**, and **no fallback signing
+key**. The Run 154 tests prove TestNet artifacts verify only under a
+TestNet context and fail under DevNet and MainNet contexts; **MainNet
+remains refused**, and local material alone remains insufficient for
+MainNet bundle-signing authority.
+
+Open items after Run 154 (unchanged from Run 153):
+
+* Governance / ratification authority.
+* KMS / HSM custody.
+* Signing-key rotation / revocation lifecycle.
+* MainNet governance attestation.
+* Validator-set rotation.
+
+Run 154 is source/test fixture tooling that fulfils the Run 153 A2
+TestNet fixture-tooling prerequisite; release-binary TestNet end-to-end
+peer-driven apply evidence is **deferred to Run 155**. **Full C4 is NOT
+claimed by Run 154; C5 remains OPEN.**
