@@ -1439,3 +1439,10 @@ remain valid. MainNet remains refused. Governance, KMS/HSM, signing-key
 rotation/revocation lifecycle, and validator-set rotation all remain open.
 **Full C4 is NOT claimed by Run 156; C5 remains OPEN; the positive TestNet
 release-binary A1 apply remains BLOCKED pending unified fixture tooling.**
+## Run 157 fixture-universe requirement
+
+Run 157 adds source/test fixture tooling only for a unified TestNet peer-driven apply universe. The helper-generated TestNet manifest is intended for validation and future Run 158 harness consumption; it does not change the peer-candidate wire format, does not add automatic apply on receipt, and does not make a release-binary positive apply claim.
+
+A valid TestNet positive-apply fixture universe must bind all of the following to the same domain: environment `testnet`, TestNet chain id, canonical TestNet genesis hash, genesis-bound authority root, active bundle-signing key, live transport root, baseline bundle sequence 1, candidate bundle sequence 2, v2 ratification sidecar, seeded marker if present, and peer-candidate envelope. A disjoint-universe shape like Run 156 must fail before staging.
+
+Run 157 leaves MainNet refused and fixture-only. Governance, KMS/HSM, signing-key rotation/revocation lifecycle, validator-set rotation, full C4, and C5 remain open. Release-binary positive TestNet apply evidence remains deferred to Run 158.

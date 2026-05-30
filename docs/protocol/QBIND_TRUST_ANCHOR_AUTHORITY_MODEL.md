@@ -3514,3 +3514,8 @@ verdict. DevNet evidence from Run 153 and TestNet evidence from Run 155
 remain valid. **Full C4 is NOT claimed by Run 156; C5 remains OPEN; the
 positive TestNet release-binary A1 apply remains BLOCKED pending unified
 fixture tooling.**
+## Run 157 note — TestNet fixture authority unification
+
+Run 157 introduces source/test fixture tooling that mints one coherent TestNet authority universe for future positive peer-driven apply evidence. The generated baseline bundle, candidate bundle, v2 ratification sidecar, seeded marker, peer-candidate envelope, and V0/V1/V2 transport material are all bound to one TestNet genesis, authority root, transport root, and bundle-signing authority.
+
+This does not alter the production authority model and does not create a MainNet source-code anchor or fallback root. MainNet remains refused / fixture-only; governance remains unimplemented; KMS/HSM remains unimplemented; signing-key rotation/revocation lifecycle remains open; validator-set rotation remains open; full C4 and C5 remain open. Release-binary positive TestNet apply evidence is deferred to Run 158.

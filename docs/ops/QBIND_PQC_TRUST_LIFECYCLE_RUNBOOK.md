@@ -5975,3 +5975,8 @@ Out of scope for Run 156 (unchanged from Run 155):
 * Validator-set rotation.
 * Full C4 / C5 closure (the positive TestNet release-binary A1 apply
   remains BLOCKED pending unified fixture tooling).
+## Run 157 note — unified TestNet fixture universe
+
+Run 157 adds source/test fixture tooling only: `run_157_unified_testnet_peer_apply_fixture_helper` emits `unified_testnet_manifest.json` for a coherent TestNet fixture universe. It fixes the Run 156 disjoint-universe blocker by ensuring live transport material and baseline/candidate peer-apply material share the same TestNet domain, chain id, genesis hash, authority root, transport root, and bundle-signing authority.
+
+Operators must not treat Run 157 output as production MainNet authority material. Release-binary positive TestNet apply evidence is deferred to Run 158. MainNet remains refused; governance, KMS/HSM, signing-key rotation/revocation lifecycle, and validator-set rotation remain open. Full C4 and C5 remain open.
