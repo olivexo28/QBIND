@@ -282,7 +282,7 @@ fn a2_baseline_testnet_bundle_validates_under_testnet_domain() {
     let keys = signing_keys(m);
     let baseline = load_bundle(&m.baseline_trust_bundle);
     assert_eq!(baseline.environment, TrustBundleEnvironment::Testnet);
-    assert_eq!(baseline.chain_id.as_deref(), Some(&m.chain_id_hex));
+    assert_eq!(baseline.chain_id.as_deref(), Some(m.chain_id_hex.as_str()));
     assert_eq!(baseline.sequence, 1);
     let validated = validate_path(&m.baseline_trust_bundle, &keys);
     assert_eq!(validated.sequence, 1);
@@ -346,8 +346,8 @@ fn a4_candidate_v2_ratification_verifies_under_testnet_domain() {
         },
     )
     .expect("v2 ratification verifies");
-    assert_eq!(rat.sequence, 2);
-    assert_eq!(verified.sequence, 2);
+    assert_eq!(rat.authority_domain_sequence, 2);
+    assert_eq!(verified.authority_domain_sequence, 2);
     let candidate = load_bundle(&m.candidate_trust_bundle);
     assert_eq!(hex_lower(&canonical_fingerprint(&candidate)), m.expected_candidate_digest);
 }
@@ -378,7 +378,13 @@ fn a5_seeded_v2_marker_accepts_candidate_as_higher_sequence() {
         ratified: &ratified,
     })
     .expect("marker accepts higher sequence");
-    assert_eq!(decision, ValidationOnlyMarkerV2AcceptReason::HigherSequenceAccepted);
+    assert_eq!(
+        decision,
+        ValidationOnlyMarkerV2AcceptReason::UpgradeCompatible {
+            previous_sequence: 1,
+            new_sequence: 2,
+        }
+    );
 }
 
 #[test]

@@ -27,8 +27,8 @@ use qbind_node::pqc_devnet_helper::{
 };
 use qbind_node::pqc_root_config::PQC_TRANSPORT_SUITE_ML_DSA_44;
 use qbind_node::pqc_trust_bundle::{
-    canonical_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper, BundleSigningKey,
-    BundleSigningKeySet, RootStatus, TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
+    canonical_fingerprint, derive_signing_key_id, sign_bundle_devnet_helper, RootStatus,
+    TrustBundle, TrustBundleEnvironment, TrustBundleRoot,
 };
 use qbind_node::pqc_trust_peer_candidate::PeerCandidateEnvelope;
 use qbind_node::pqc_trust_sequence::chain_id_hex;
@@ -170,14 +170,6 @@ fn harness() -> Harness {
         candidate_extra_root: mint_devnet_root().expect("mint candidate extra root"),
         signing: mint_signing(),
     }
-}
-
-fn signing_keys(signing: &Signing) -> BundleSigningKeySet {
-    BundleSigningKeySet::from_keys_unchecked(vec![BundleSigningKey {
-        key_id_bytes: signing.key_id,
-        suite_id: PQC_TRANSPORT_SUITE_ML_DSA_44,
-        pk_bytes: signing.pk.clone(),
-    }])
 }
 
 fn root_entry(root: &DevNetRoot) -> TrustBundleRoot {
