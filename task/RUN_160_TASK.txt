@@ -1,0 +1,240 @@
+Task: Run 160 — Release-Binary Evidence / Boundary for v2 Signing-Key Lifecycle Validation
+
+Current accepted state:
+- Run 153: DevNet release-binary end-to-end peer-driven apply evidence landed.
+- Run 158: TestNet release-binary end-to-end peer-driven apply evidence landed using the unified Run 157 fixture universe.
+- Run 159: source/test v2 bundle-signing-key lifecycle validator landed:
+  - `pqc_authority_lifecycle.rs`;
+  - `LocalLifecycleAction::{ActivateInitial, Rotate, Retire, Revoke, EmergencyRevoke}`;
+  - `AuthorityTrustDomain`;
+  - `AuthorityLifecycleTransitionOutcome`;
+  - `validate_v2_lifecycle_transition`;
+  - `classify_local_lifecycle_action`;
+  - 29 lifecycle tests covering A1–A6 and R1–R17.
+- Run 159 is pure and additive:
+  - no I/O;
+  - no sequence write;
+  - no authority-marker write;
+  - no live trust mutation;
+  - no mutating-surface rewiring;
+  - no wire format change;
+  - no marker schema change.
+- Run 159 intentionally does not rewire the Run 134/136/138/150/152 marker-comparison helpers.
+- Run 159 defers release-binary lifecycle evidence to Run 160.
+- MainNet remains refused.
+- Governance remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Produce the strongest honest release-binary evidence currently possible for the Run 159 v2 signing-key lifecycle validator, and clearly determine whether the current production binary can exercise lifecycle validation through an existing release-binary path.
+
+This run must not fake lifecycle closure. If the lifecycle validator is not reachable from any release-binary surface yet, Run 160 must report that honestly as a partial-positive boundary and identify the exact next integration run.
+
+Strict scope:
+- Release-binary evidence / boundary run.
+- Use real `target/release/qbind-node` and release-built helpers where applicable.
+- No MainNet peer-driven apply enablement.
+- No governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No schema/wire change unless the task explicitly discovers that release-binary evidence is impossible without one; if so, stop and document the blocker rather than silently changing schemas.
+- No marker schema change.
+- No sequence-file schema change.
+- Do not weaken Runs 070, 130–159.
+- Do not claim full C4 or C5 closure.
+
+Investigation requirement:
+First determine all possible release-binary surfaces that could honestly exercise Run 159 lifecycle validation:
+
+1. startup `--p2p-trust-bundle` v2 path;
+2. reload-check validation-only path;
+3. local peer-candidate-check validation-only path;
+4. process-start reload-apply path;
+5. SIGHUP live-reload path;
+6. live inbound `0x05` validation-only path;
+7. peer-driven staged queue / drain-once path;
+8. fixture helper / example binary path.
+
+For each surface, document:
+- whether it currently calls `validate_v2_lifecycle_transition`;
+- whether it can observe `LocalLifecycleAction`;
+- whether it can carry `ActivateInitial`, `Rotate`, `Retire`, `Revoke`, or `EmergencyRevoke`;
+- whether exercising it would require a wire/schema change;
+- whether it can be used for release-binary evidence without production behavior drift.
+
+Required deliverables:
+1. Add release-binary evidence harness:
+   scripts/devnet/run_160_authority_lifecycle_release_binary.sh
+
+2. Add evidence archive:
+   docs/devnet/run_160_authority_lifecycle_release_binary/
+
+3. Add canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_160.md
+
+4. Update narrowly:
+   - docs/whitepaper/contradiction.md
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+   - docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Preferred evidence path:
+If an existing release-binary path can exercise the lifecycle validator without schema drift, use it.
+
+The preferred order is:
+
+A. release-built helper emits lifecycle fixtures;
+B. real `target/release/qbind-node` validates them through an existing v2 validation surface;
+C. logs prove lifecycle accept/reject outcomes;
+D. no mutation occurs unless the chosen surface is already a mutating surface and existing ordering rules are preserved.
+
+Supported lifecycle evidence matrix:
+
+A1. ActivateInitial accepted
+- no persisted marker;
+- valid initial lifecycle material;
+- release-binary path accepts or classifies it.
+- no unexpected mutation outside the chosen surface.
+
+A2. Rotate accepted
+- persisted active key A;
+- candidate active key B;
+- higher authority-domain sequence;
+- previous key binding correct;
+- accepted as rotation.
+
+A3. Retire accepted, if representable without schema change
+- candidate retires prior key under higher sequence;
+- accepted.
+- If not representable on the existing wire/action byte set, document as release-binary-infeasible and cite Run 159 source/test coverage.
+
+A4. Revoke accepted
+- candidate revokes key A under higher sequence;
+- revoked metadata well-formed;
+- accepted.
+
+A5. EmergencyRevoke accepted, if representable without schema change
+- candidate emergency-revokes key A under higher sequence;
+- accepted.
+- If not representable on existing wire/action byte set, document as release-binary-infeasible and cite Run 159 source/test coverage.
+
+A6. Idempotent same record accepted
+- same sequence and same digest;
+- accepted/idempotent.
+
+Required rejection matrix:
+
+R1. lower-sequence lifecycle candidate rejected.
+
+R2. same-sequence different digest rejected.
+
+R3. wrong environment rejected.
+
+R4. wrong chain rejected.
+
+R5. wrong genesis rejected.
+
+R6. wrong authority root rejected.
+
+R7. wrong previous-key fingerprint rejected.
+
+R8. revoked key reuse rejected.
+
+R9. retired key reuse rejected outside allowed overlap.
+
+R10. emergency revocation replay rejected.
+
+R11. malformed revoked metadata rejected.
+
+R12. non-PQC signing-key suite rejected.
+
+R13. unsupported lifecycle action byte rejected.
+
+R14. candidate signed by revoked key rejected if this path is currently wired.
+
+R15. MainNet peer-driven apply remains refused.
+
+Required evidence if lifecycle validator is not release-binary reachable:
+If no existing release-binary surface calls `validate_v2_lifecycle_transition`, the harness/report must still prove:
+
+- release-built helper can mint the lifecycle fixture corpus;
+- real `target/release/qbind-node` surfaces remain unchanged and do not silently claim lifecycle enforcement;
+- existing v2 apply/validation evidence from Runs 153/158 remains valid;
+- no MainNet enablement;
+- no governance/KMS/HSM/validator-set rotation claim;
+- exact source-level call graph showing Run 159 validator is not yet composed into marker decision helpers;
+- exact proposed next run for composition, likely Run 161.
+
+In that case, the verdict must be:
+
+`partial-positive: release-binary fixture/evidence boundary captured; lifecycle validator not yet production-surface reachable`.
+
+Do not call it strongest-positive.
+
+Required negative invariants:
+Across all scenarios:
+- no MainNet apply;
+- no autonomous apply;
+- no apply on receipt;
+- no peer-majority authority;
+- no governance claim;
+- no KMS/HSM claim;
+- no validator-set rotation claim;
+- no fallback to `--p2p-trusted-root`;
+- no active DummySig / DummyKem / DummyAead;
+- no schema/wire/metric drift;
+- no marker write before sequence commit on any mutating surface;
+- no sequence write on validation-only surfaces;
+- no marker write on validation-only surfaces.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example run_157_unified_testnet_peer_apply_fixture_helper
+- cargo build --release -p qbind-node --example <lifecycle fixture helper if added>
+- bash scripts/devnet/run_160_authority_lifecycle_release_binary.sh
+- cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+- cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+- cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+- cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+- cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_160.md` must state:
+- whether Run 159 lifecycle validation is release-binary reachable today;
+- which lifecycle actions were actually evidenced on release binaries;
+- which lifecycle actions remain source/test-only and why;
+- whether any schema gap blocks Retire / EmergencyRevoke release-binary evidence;
+- no MainNet apply is enabled;
+- governance remains unimplemented;
+- KMS/HSM remains unimplemented;
+- validator-set rotation remains open;
+- full C4 remains open;
+- C5 remains open.
+
+Acceptance criteria:
+Run 160 is acceptable only if:
+1. It honestly determines release-binary reachability of Run 159 lifecycle validation.
+2. It captures release-binary lifecycle evidence for every feasible existing action.
+3. It documents infeasible lifecycle actions without fabricating evidence.
+4. It preserves all validation-only and mutating-surface invariants.
+5. It does not introduce schema/wire drift silently.
+6. MainNet remains refused.
+7. Governance/KMS-HSM/validator-set rotation remain open.
+8. The next required integration run is precisely identified if release-binary reachability is incomplete.
+9. No full C4 or C5 closure is claimed.
