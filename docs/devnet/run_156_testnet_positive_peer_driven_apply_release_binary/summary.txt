@@ -1,0 +1,37 @@
+Run 156: positive TestNet release-binary end-to-end peer-driven apply
+====================================================================
+
+A1 verdict: BLOCKED (drain-once outcome: NoCandidate)
+
+The real release binaries executed the live path up to V1's wire-
+validation gate: V0 published a live 0x05 TestNet candidate and V1
+OBSERVED it on the wire, but the candidate could not stage/apply
+with the available fixtures, so the explicit drain-once returned
+'NoCandidate'. The EXACT blocker is documented in a1_blocker.txt.
+Per task/RUN_156_TASK.txt, Run 156 does NOT substitute source/test
+coverage for the positive verdict; it stops and documents the
+blocker. The harness drives the real binary and will assert the
+Applied ordering automatically once a unified fixture universe is
+supplied via the QBIND_RUN156_* overrides.
+
+Harness: scripts/devnet/run_156_testnet_positive_peer_driven_apply_release_binary.sh
+
+Scenario matrix:
+  A1    TestNet end-to-end peer-driven apply   BLOCKED (outcome=NoCandidate)
+  A6/C2 MainNet drain-once refused             see exit_codes/A6_mainnet_refused.exit_code
+
+Negative invariants (held in this run):
+  - No autonomous background drain (single explicit drain-once).
+  - No automatic apply on receipt (drain is explicit + delayed).
+  - No peer-majority authority.
+  - MainNet refused unconditionally (Run 151 FATAL, exit=1).
+  - No live trust sequence mutation when the candidate did not apply.
+  - Denylist grep: see grep_summaries/out_of_scope.txt
+
+Out-of-scope deferrals (unchanged):
+  - Governance / KMS / HSM: unimplemented.
+  - Signing-key rotation/revocation lifecycle: open.
+  - Validator-set rotation: open.
+  - Full C4: open. C5: open.
+
+Evidence report: docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_156.md

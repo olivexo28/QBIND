@@ -1381,3 +1381,61 @@ evidence from Run 153 remains valid. MainNet remains refused. Governance,
 KMS/HSM, signing-key rotation/revocation lifecycle, and validator-set
 rotation all remain open. **Full C4 is NOT claimed by Run 155; C5 remains
 OPEN.**
+
+## Run 156 — positive TestNet release-binary apply driven live; positive A1 BLOCKED by disjoint fixture universes, exact blocker documented (evidence only)
+
+Run 156 drives the **positive** TestNet end-to-end peer-driven apply path
+on a real `target/release/qbind-node` over a **live N=3 TestNet P2P
+cluster**, instead of mapping the positive path to source/test coverage as
+Run 153/155 did. It **adds no source delta** and **does not modify the
+peer-driven apply safety contract**: the Run 153 `main.rs` wiring (the
+hidden, disabled-by-default
+`--p2p-trust-bundle-peer-candidate-drain-once` hook →
+`ProductionDrainInvocationBuilder` → `ProductionV2MarkerCoordinator` →
+Run 150 drain → Run 148 controller → Run 070 apply contract) is reused
+verbatim, with the Run 150 policies selected by environment and MainNet
+refused unconditionally.
+
+The six-phase fail-closed pipeline is unchanged. On the fixtures shipped
+in this repository, the live binaries drive the pipeline end-to-end **up
+to V1's wire-validation gate**: V0 publishes one live `0x05` candidate and
+V1 observes it (`Run 078 … outcome=rejected; NOT applied`), but the
+candidate is rejected before staging — so the explicit drain-once returns
+`NoCandidate` with **no live trust mutation** (the fail-closed contract
+held correctly: an empty staged queue does not apply). The
+wire-validation gate behaved exactly as the safety contract requires; the
+limitation is in the fixtures, not the contract.
+
+**Exact blocker:** peer-driven apply requires the candidate to be a valid
+Run-070 successor of V1's live baseline `LivePqcTrustState`, initialised
+from V1's live `--p2p-trust-bundle`. The live transport bundle and the
+N=3 leaf credentials are minted by `devnet_pqc_trust_bundle_helper`
+(`signed-testnet`) under one root authority; the only TestNet apply
+candidate (`run_133` helper `testnet/peer-candidate.valid.json`,
+`declared_sequence=2`) is signed under a **disjoint** root with no
+matching P2P leaf credentials, so it is not a successor of V1's live
+baseline and is rejected at the live `0x05` wire-validation / ratification
+gate. No existing fixture tool mints a single unified universe providing
+both (a) N=3 P2P leaf credentials and (b) a self-consistent seq1→seq2
+apply pair signed by that same transport root plus the matching v2
+ratification sidecar.
+
+The release-binary harness
+(`scripts/devnet/run_156_testnet_positive_peer_driven_apply_release_binary.sh`)
+is a **complete driver**: it accepts `QBIND_RUN156_TRANSPORT_DIR` /
+`QBIND_RUN156_CANDIDATE_ENVELOPE` / `QBIND_RUN156_SIDECAR` /
+`QBIND_RUN156_GENESIS` / `QBIND_RUN156_GENESIS_HASH` overrides so that,
+once a future fixture-tooling run mints a unified universe, re-running it
+drives the real apply and asserts the strict Run 070 ordering
+(validate → snapshot previous → swap → evict_sessions → commit_sequence,
+with the v2 authority marker persisted strictly after sequence commit)
+automatically. It also re-confirms MainNet drain-once refusal (A6/C2,
+exit=1, `Run 151: FATAL`).
+
+Run 156 explicitly **does not** claim the positive A1 path closed and
+**does not** substitute source/test coverage for the live positive
+verdict. DevNet evidence from Run 153 and TestNet evidence from Run 155
+remain valid. MainNet remains refused. Governance, KMS/HSM, signing-key
+rotation/revocation lifecycle, and validator-set rotation all remain open.
+**Full C4 is NOT claimed by Run 156; C5 remains OPEN; the positive TestNet
+release-binary A1 apply remains BLOCKED pending unified fixture tooling.**

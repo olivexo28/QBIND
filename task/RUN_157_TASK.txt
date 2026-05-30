@@ -1,0 +1,258 @@
+Task: Run 157 — Unified TestNet Fixture Universe for Positive Peer-Driven Apply
+
+Current accepted state:
+- Run 153: DevNet release-binary end-to-end peer-driven apply evidence landed.
+- Run 154: TestNet fixture tooling landed, but only source/test fixture coverage.
+- Run 155: partial-positive TestNet release-binary refusal/domain evidence landed.
+- Run 156: real TestNet N=3 release-binary positive apply attempt was driven, but blocked:
+  - V0 published a live 0x05 TestNet candidate.
+  - V1 observed the live 0x05 frame.
+  - V1 rejected the candidate before staging.
+  - drain-once fired exactly once and returned NoCandidate.
+  - no mutation occurred.
+  - MainNet refusal remained intact.
+- Run 156 blocker:
+  TestNet live transport universe and TestNet apply-candidate universe are disjoint.
+  `devnet_pqc_trust_bundle_helper signed-testnet` mints one root/baseline universe, while `run_133_v2_validation_only_fixture_helper` mints a different TestNet v2 candidate/ratification universe.
+- Therefore the candidate is not a valid Run-070 successor of V1’s live baseline trust state and is correctly rejected before staging.
+- Full C4 remains open.
+- C5 remains open.
+
+Objective:
+Create unified TestNet fixture tooling that mints a single coherent TestNet authority universe containing both:
+
+1. live N=3 P2P transport material, and
+2. a valid baseline(seq=1) → candidate(seq=2) peer-driven apply pair,
+
+all under the same TestNet environment, chain ID, genesis hash, authority root, bundle-signing authority, and v2 ratification domain.
+
+This is source/test fixture tooling only. Release-binary positive TestNet apply evidence is deferred to Run 158.
+
+Strict scope:
+- Source/test fixture tooling only.
+- No release-binary positive apply claim in this run.
+- No production MainNet enablement.
+- No governance implementation.
+- No KMS/HSM implementation.
+- No signing-key rotation/revocation lifecycle.
+- No validator-set rotation.
+- No autonomous background drain.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No wire-format change.
+- No trust-bundle schema change.
+- No ratification sidecar schema change.
+- No authority-marker schema change.
+- No sequence-file schema change.
+- No peer-candidate envelope schema change.
+- Do not weaken Runs 070, 142, 143, 145–156.
+- Do not claim full C4 or C5 closure.
+
+Required fixture universe:
+Add or extend fixture tooling so one invocation can produce a coherent TestNet universe with:
+
+A. TestNet domain
+- environment = testnet;
+- chain_id = qbind-testnet-v0 / 0x51424e4454535400, matching current project constants;
+- canonical TestNet genesis file;
+- expected TestNet genesis hash;
+- same genesis hash used by:
+  - baseline trust bundle;
+  - candidate trust bundle;
+  - v2 ratification sidecar;
+  - peer-candidate envelope;
+  - local seeded marker, if any.
+
+B. Transport/authentication material
+- one transport root authority;
+- V0/V1/V2 leaf certs issued by that root;
+- V0/V1/V2 ML-KEM leaf keys;
+- material usable by real `target/release/qbind-node` N=3 mutual-auth TestNet topology.
+
+C. Trust-bundle material
+- baseline TestNet trust bundle seq=1 trusted by V1 at startup;
+- candidate TestNet trust bundle seq=2 that is a valid successor of baseline;
+- same chain/environment/genesis/authority universe;
+- candidate adds/removes/updates enough material to prove live trust mutation without breaking transport before apply;
+- bundle signatures verify under the same configured bundle-signing authority set.
+
+D. v2 ratification material
+- v2 ratification sidecar for candidate seq=2;
+- signed under authority accepted by TestNet receiver;
+- bound to the same:
+  - environment;
+  - chain_id;
+  - genesis_hash;
+  - authority root;
+  - active bundle-signing key;
+  - candidate digest;
+  - authority-domain sequence;
+- compatible with Run 130 verifier and Run 132/142/150/152 marker logic.
+
+E. authority marker material
+- optional seeded v2 marker seq=1 matching baseline, or whatever Run 153/156 receiver requires before candidate validation;
+- if emitted, it must be domain-bound to the same TestNet universe;
+- candidate seq=2 must compare as `HigherSequenceAccepted` or equivalent.
+
+F. peer-candidate 0x05 envelope
+- valid TestNet v2 peer-candidate envelope for candidate seq=2;
+- negative fixtures:
+  - lower sequence;
+  - same-sequence different digest;
+  - bad signature;
+  - wrong environment;
+  - wrong chain;
+  - wrong genesis;
+  - ambiguous v1+v2;
+  - duplicate candidate;
+  - expired candidate if current expiry mechanism supports it.
+
+Integration requirement:
+Prefer extending the existing `run_133_v2_validation_only_fixture_helper` or adding a clearly named example helper such as:
+
+  run_157_unified_testnet_peer_apply_fixture_helper
+
+The helper should output a machine-readable manifest, for example:
+
+  unified_testnet_manifest.json
+
+The manifest must list paths for:
+- genesis;
+- expected genesis hash;
+- baseline trust bundle;
+- candidate trust bundle;
+- v2 ratification sidecar;
+- bundle-signing key specs;
+- V0/V1/V2 leaf certs;
+- V0/V1/V2 KEM keys;
+- seeded authority marker, if any;
+- valid peer-candidate envelope;
+- negative peer-candidate envelopes;
+- expected authority-domain sequence;
+- expected candidate fingerprint/digest.
+
+The manifest should be easy for Run 158 harness to consume.
+
+Required tests:
+Add focused tests, preferably:
+
+crates/qbind-node/tests/run_157_unified_testnet_fixture_universe_tests.rs
+
+Minimum matrix:
+
+A1. unified helper produces all required files
+- manifest parses;
+- every listed file exists;
+- no missing required material.
+
+A2. baseline TestNet bundle validates under TestNet domain
+- signature verifies;
+- environment/chain/genesis match;
+- no fallback roots required.
+
+A3. candidate TestNet bundle validates as successor of baseline
+- candidate seq=2;
+- baseline seq=1;
+- Run 055-style anti-rollback would accept;
+- same authority universe.
+
+A4. candidate v2 ratification verifies under TestNet domain
+- Run 130 verifier accepts;
+- digest matches candidate;
+- authority-domain sequence expected.
+
+A5. v2 marker comparison accepts candidate
+- seeded marker seq=1 vs candidate seq=2 returns higher-sequence accepted;
+- no same-sequence conflict;
+- no wrong root.
+
+A6. peer-candidate envelope validates through local peer-candidate-check path
+- same validation result expected on live inbound path;
+- accepted validation-only;
+- no mutation.
+
+A7. live P2P transport material is internally coherent
+- V0/V1/V2 certs issued by same transport root;
+- V1 baseline trusts the issuing root;
+- no disjoint root universe.
+
+A8. fixture universe can be consumed by a dry-run command-builder
+- build the exact `qbind-node` command arguments for V0/V1/V2 without executing release binary;
+- ensure all referenced paths exist.
+
+Negative tests:
+
+R1. old disjoint-universe shape is rejected
+- reproduce or simulate Run 156 mismatch;
+- candidate from different root universe fails before staging.
+
+R2. wrong-environment candidate rejected
+- DevNet candidate under TestNet context fails.
+
+R3. wrong-chain candidate rejected.
+
+R4. wrong-genesis candidate rejected.
+
+R5. bad-signature ratification rejected.
+
+R6. lower-sequence candidate rejected.
+
+R7. same-sequence different-digest rejected.
+
+R8. ambiguous v1+v2 material rejected.
+
+R9. MainNet fixture use refused or clearly fixture-only
+- no production-authoritative MainNet material generated accidentally.
+
+Required documentation:
+Add:
+- docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_157.md
+
+Update:
+- docs/whitepaper/contradiction.md
+- docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+- docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+- docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+Documentation must state:
+- Run 157 is source/test fixture tooling only.
+- It fixes the Run 156 disjoint fixture-universe blocker.
+- Release-binary positive TestNet apply evidence remains deferred to Run 158.
+- MainNet remains refused.
+- Governance remains unimplemented.
+- KMS/HSM remains unimplemented.
+- signing-key rotation/revocation lifecycle remains open.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- cargo build -p qbind-node --lib
+- cargo build -p qbind-node --example run_133_v2_validation_only_fixture_helper
+- cargo build -p qbind-node --example run_157_unified_testnet_peer_apply_fixture_helper
+  or the actual helper name if extending Run 133 helper only
+- cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+- cargo test -p qbind-node --test run_154_testnet_peer_apply_fixture_tests
+- cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+- cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+- cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 157 is acceptable only if:
+1. A single unified TestNet fixture universe can be generated.
+2. Live transport material and peer-apply candidate material share the same authority/root/genesis/domain universe.
+3. Baseline seq=1 and candidate seq=2 form a valid successor pair.
+4. v2 ratification verifies under TestNet context.
+5. v2 marker comparison accepts candidate as higher sequence.
+6. valid peer-candidate envelope validates through local validation path.
+7. disjoint-universe mismatch like Run 156 is covered by a negative test.
+8. MainNet remains refused / fixture-only.
+9. No production schema/wire/CLI/metric drift is introduced.
+10. Docs defer release-binary positive TestNet evidence to Run 158.
+11. No full C4 or C5 closure is claimed.
