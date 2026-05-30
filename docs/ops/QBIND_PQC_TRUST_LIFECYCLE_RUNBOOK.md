@@ -6009,3 +6009,26 @@ Out of scope for Run 158 (unchanged from Run 157):
 * Full C4 / C5 closure.
 
 MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Signing-key rotation / revocation lifecycle remains open. Validator-set rotation remains open. Full C4 and C5 remain open.
+## Run 159 — source/test signing-key rotation and revocation lifecycle for v2 authority state
+
+Run 159 lands typed pure transition validation for the v2 bundle-signing-key lifecycle (`ActivateInitial`, `Rotate`, `Retire`, `Revoke`, `EmergencyRevoke`) as a new `qbind_node::pqc_authority_lifecycle` module. The new validator is **pure** and **typed**: it performs no I/O, never writes the sequence file, never mutates the persisted authority marker, and never touches a live trust bundle. Operators have **no new CLI surface** and **no new runtime behaviour** in Run 159. The lifecycle validator is a *pre-flight typed surface* that future runs may compose into the existing Run 134 / 136 / 138 / 150 / 152 marker-comparison and accept-and-persist pipeline once a wire-level encoding for `Retire` / `EmergencyRevoke` lands; until then, the existing marker-comparison helpers remain the authoritative mutating-surface decision points and are unchanged.
+
+Reproducing the lifecycle test matrix from a clean checkout:
+
+```
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+```
+
+The matrix covers the A1–A6 acceptance cases (initial activation, planned rotation, idempotent same record, retirement of a previous signing key under higher sequence, revocation under higher sequence, emergency revocation under higher sequence) and the R1–R17 rejection cases (lower-sequence rollback, same-sequence equivocation, wrong environment / chain / genesis / authority-root, wrong previous-key fingerprint, revoked-key reuse, retired-key reuse without overlap, emergency-revoke replay, malformed revoked metadata, non-PQC suite, unsupported lifecycle action under the current persisted state, revoked-active-key candidate rejected through the lifecycle path, persisted record bytes unchanged on rejection, Run 134/136/138/150/152 marker comparison behavior unchanged, DevNet/TestNet domain coverage with MainNet pure-validation parsing not implying MainNet apply enablement).
+
+Out of scope for Run 159:
+
+* Release-binary lifecycle evidence — **deferred to Run 160**.
+* MainNet enablement (refused unconditionally).
+* Governance.
+* KMS / HSM.
+* Validator-set rotation.
+* Full C4 / C5 closure.
+
+MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Validator-set rotation remains open. Release-binary lifecycle evidence is deferred to Run 160. Full C4 and C5 remain open.
