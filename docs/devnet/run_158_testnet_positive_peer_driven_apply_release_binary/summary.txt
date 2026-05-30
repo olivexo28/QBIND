@@ -31,9 +31,9 @@ Unified TestNet fixtures minted by the real release helper:
   /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/fixtures/testnet/ (see testnet_manifest.txt)
 
 Apply mutation (V1):
-  marker before: d6424b37475e9fe1f21fadb3f80654a7209478585aa222b4f24aad975d4fddc5  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/marker_hashes/A1_testnet_unified_apply.before.json
-  marker after:  d6424b37475e9fe1f21fadb3f80654a7209478585aa222b4f24aad975d4fddc5  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/marker_hashes/A1_testnet_unified_apply.after.json
-  sequence after sha256: 258ce14d7986302ae9a522c2d88f0ebde81c0e010433face7fed6b93996b0ec0  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/sequence/A1_testnet_unified_apply.after.json
+  marker before: 2a48466d3314f9aa19cbcdfca53573e2b985db5434770bc440c8e99fe9a71e6c  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/marker_hashes/A1_testnet_unified_apply.before.json
+  marker after:  2a48466d3314f9aa19cbcdfca53573e2b985db5434770bc440c8e99fe9a71e6c  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/marker_hashes/A1_testnet_unified_apply.after.json
+  sequence after sha256: 3bebb9a0ed1d4ef2d9efbb51f0819abf81dde1da2fc001f5fe8eedcd3360a98c  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/sequence/A1_testnet_unified_apply.after.json
 
 Negative invariants held in this run:
   - No autonomous background drain (single explicit, delayed drain-once).

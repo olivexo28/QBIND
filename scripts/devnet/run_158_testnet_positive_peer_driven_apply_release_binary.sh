@@ -723,6 +723,8 @@ run_grep_summaries() {
             # implemented (Run 151 FATAL).
             grep -rPn "${pattern}" "${LOGS_DIR}" 2>/dev/null \
                 | grep -vF 'Run 151: FATAL' \
+                | grep -vF '[binary] Run 151: peer-candidate drain-once trigger flag accepted' \
+                | grep -vF '[run-151] live peer-driven apply drain trigger ARMED' \
                 | grep -vF '[run-152] binary-reachable peer-driven drain invocation plumbing PRESENT' \
                 | grep -vF '[run-153] drain-once outcome:' \
                 || echo "(none)"
