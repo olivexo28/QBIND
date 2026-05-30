@@ -1,0 +1,303 @@
+Task: Run 159 — Source/Test Signing-Key Rotation and Revocation Lifecycle for v2 Authority State
+
+Current accepted state:
+- Run 153: DevNet release-binary end-to-end peer-driven apply evidence landed.
+- Run 154: TestNet fixture tooling landed.
+- Run 155: partial-positive TestNet refusal/domain evidence landed.
+- Run 156: TestNet positive attempt blocked by disjoint fixture universe.
+- Run 157: unified TestNet fixture universe landed.
+- Run 158: positive TestNet release-binary end-to-end peer-driven apply evidence landed using the Run 157 unified fixture universe.
+- DevNet/TestNet peer-driven apply is now evidenced under explicit local drain-once only.
+- MainNet remains refused.
+- Governance remains unimplemented.
+- KMS/HSM remains unimplemented.
+- signing-key rotation/revocation lifecycle remains open.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Implement source/test coverage for the v2 bundle-signing-key lifecycle: planned rotation, retirement, revocation, emergency revocation, replay refusal, stale-key refusal, and same-epoch/same-sequence equivocation refusal.
+
+This run must define and enforce the local v2 authority-state transition rules for bundle-signing-key lifecycle actions. It must not enable MainNet peer-driven apply, governance, KMS/HSM, or validator-set rotation.
+
+Strict scope:
+- Source/test only.
+- No release-binary evidence in this run.
+- No MainNet peer-driven apply enablement.
+- No governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous peer-driven apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No new wire format unless the existing v2 ratification/lifecycle fields are insufficient; if insufficient, stop and report blocker instead of inventing a new schema silently.
+- No trust-bundle schema change unless absolutely required.
+- No authority-marker schema change unless absolutely required.
+- No sequence-file schema change.
+- Do not weaken Runs 070, 130–158.
+- Do not claim full C4 or C5 closure.
+
+Implementation target:
+Use the existing v2 ratification / authority-state machinery where possible:
+- Run 130 v2 verifier;
+- Run 131/134/136/138/150/152 v2 marker comparison/persistence helpers;
+- existing lifecycle action byte / previous_bundle_signing_key_fingerprint / revoked_key_metadata fields if present;
+- existing authority-domain sequence anti-rollback;
+- existing chain_id / environment / genesis_hash / authority-root binding.
+
+If the existing v2 sidecar already carries lifecycle action fields, implement the transition validator around those fields. If it does not, document the precise schema gap and stop with a partial-positive blocker report.
+
+Required lifecycle actions:
+At minimum support or explicitly pin these action classes:
+
+1. `ActivateInitial`
+- establishes the first active bundle-signing key for a domain, if no prior marker exists;
+- must be domain-bound;
+- must not bypass genesis/authority-root checks.
+
+2. `Rotate`
+- replaces active signing key A with new active signing key B;
+- requires higher authority-domain sequence;
+- must name previous key A if the schema supports previous-key binding;
+- must not accept same-sequence different digest;
+- must not accept lower sequence;
+- must not accept wrong authority root;
+- old key becomes retired or no-longer-active according to current model.
+
+3. `Retire`
+- marks a previous signing key as retired without emergency semantics;
+- must not remove audit history;
+- must not allow a retired key to sign new active bundles after the retirement boundary.
+
+4. `Revoke`
+- marks a signing key revoked;
+- revoked key must not sign future trust bundles;
+- revoked key must not be reactivated by stale lower-sequence material;
+- revocation must be domain-bound.
+
+5. `EmergencyRevoke`
+- immediate revocation path;
+- must bypass only planned activation delay if the design allows that;
+- must not bypass signature, authority-root, genesis, chain, environment, or anti-rollback checks;
+- must require higher authority-domain sequence.
+
+Required transition rules:
+- Every lifecycle transition must be bound to:
+  - environment;
+  - chain_id;
+  - genesis_hash;
+  - authority_root_fingerprint;
+  - signing-key suite id;
+  - active bundle-signing key fingerprint;
+  - authority-domain sequence.
+- Authority-domain sequence must be strictly monotonic for non-idempotent transitions.
+- Same sequence + same digest may be idempotent.
+- Same sequence + different digest must be rejected as equivocation.
+- Lower sequence must be rejected as rollback.
+- Wrong environment / chain / genesis / authority root must be rejected.
+- Non-PQC suite IDs must be rejected.
+- Revoked signing keys must not authorize new trust-bundle candidates.
+- Retired signing keys must not authorize new trust-bundle candidates outside the explicitly allowed overlap window, if any.
+- Emergency revocation must not be replayable after a later rotation/revocation state.
+- Local marker bytes must be preserved on rejected transitions.
+- No sequence file write or live trust mutation occurs in this validator unless invoked through existing apply surfaces.
+
+Required source additions:
+Prefer adding a focused module or extending an existing module:
+
+crates/qbind-node/src/pqc_authority_lifecycle.rs
+
+or extend the existing `pqc_authority_state.rs` if that is the natural home.
+
+The module should expose typed pure transition validation, for example:
+
+```rust
+validate_v2_lifecycle_transition(
+    persisted: Option<&PersistentAuthorityStateRecordVersioned>,
+    candidate: &PersistentAuthorityStateRecordV2,
+    trust_domain: &AuthorityTrustDomain,
+) -> AuthorityLifecycleTransitionOutcome
+
+Names can differ, but the behavior must be typed, pure, and testable.
+
+Required outcome types:
+The validator must distinguish at least:
+
+initial accepted;
+rotation accepted;
+retirement accepted;
+revocation accepted;
+emergency revocation accepted;
+idempotent;
+lower-sequence rejected;
+same-sequence conflicting digest rejected;
+wrong-domain rejected;
+wrong-authority-root rejected;
+wrong-previous-key rejected;
+revoked-key reuse rejected;
+retired-key reuse rejected;
+unsupported lifecycle action rejected;
+malformed revoked metadata rejected;
+non-PQC suite rejected.
+
+Required tests:
+Add a focused test file, preferably:
+
+crates/qbind-node/tests/run_159_authority_signing_key_lifecycle_tests.rs
+
+Minimum matrix:
+
+A1. initial active signing key accepted
+
+no persisted marker;
+valid v2 initial lifecycle record;
+accepted;
+no disk write by pure validator.
+
+A2. planned rotation accepted
+
+persisted active key A seq=N;
+candidate active key B seq=N+1 with previous=A;
+accepted as rotation.
+
+A3. idempotent same record accepted
+
+same sequence and same digest;
+idempotent;
+no mutation.
+
+A4. retire previous signing key accepted
+
+candidate marks prior key retired under higher sequence;
+retired key preserved in audit metadata if model supports it.
+
+A5. revocation accepted
+
+candidate revokes key A under higher sequence;
+revoked metadata well-formed.
+
+A6. emergency revocation accepted
+
+higher sequence;
+immediate emergency action;
+still requires valid authority/root/domain/signature.
+
+R1. lower-sequence lifecycle candidate rejected
+
+persisted seq=N;
+candidate seq<N;
+reject rollback.
+
+R2. same-sequence different digest rejected
+
+reject equivocation.
+
+R3. wrong environment rejected.
+
+R4. wrong chain rejected.
+
+R5. wrong genesis rejected.
+
+R6. wrong authority root rejected.
+
+R7. wrong previous-key fingerprint rejected
+
+rotation claims previous key C when persisted active key is A.
+
+R8. revoked key reuse rejected
+
+key A revoked at seq=N;
+later candidate attempts to reactivate A;
+reject.
+
+R9. retired key reuse rejected outside allowed overlap
+
+if no overlap is defined, always reject;
+if overlap exists, test both allowed and disallowed boundaries.
+
+R10. emergency revocation replay rejected
+
+same or lower sequence replay does not change state.
+
+R11. malformed revoked metadata rejected.
+
+R12. non-PQC signing-key suite rejected.
+
+R13. unsupported lifecycle action byte rejected.
+
+R14. candidate signed by revoked key rejected in trust-bundle validation path
+
+integrate with existing v2 ratification verifier if feasible.
+
+R15. local marker bytes preserved on all rejected transitions
+
+use temp files around existing marker loader if needed.
+
+R16. existing Run 134/136/138/150/152 marker comparison behavior unchanged
+
+regression test or targeted comparison compatibility test.
+
+R17. DevNet/TestNet behavior covered; MainNet remains refused for apply
+
+lifecycle validation may parse MainNet-like domain fixtures, but must not enable MainNet peer-driven apply.
+
+Required integration checks:
+
+Existing reload-apply/startup/SIGHUP/drain marker decision helpers must either:
+reuse the lifecycle transition validator, or
+explicitly document why existing marker comparison remains sufficient and this validator is only for future signing-key lifecycle enforcement.
+If reused, existing test suites must remain green.
+
+Required documentation:
+Add:
+
+docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_159.md
+
+Update:
+
+docs/whitepaper/contradiction.md
+docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+Docs must state:
+
+Run 159 is source/test lifecycle validation only.
+No release-binary evidence is captured in this run.
+No MainNet apply is enabled.
+Governance remains unimplemented.
+KMS/HSM remains unimplemented.
+validator-set rotation remains open.
+release-binary lifecycle evidence is deferred to Run 160.
+full C4 remains open.
+C5 remains open.
+
+Validation commands:
+Run at minimum:
+
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+cargo test -p qbind-node --lib pqc_authority
+cargo test -p qbind-node --lib
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 159 is acceptable only if:
+
+v2 signing-key lifecycle transition validation is implemented as typed source/test logic.
+planned rotation, retirement, revocation, and emergency revocation have explicit accepted/rejected behavior.
+lower-sequence rollback, same-sequence equivocation, wrong-domain, wrong-root, wrong-previous-key, revoked-key reuse, retired-key reuse, malformed metadata, non-PQC suite, and unsupported action are fail-closed.
+existing v2 marker comparison/apply surfaces are not weakened.
+DevNet/TestNet peer-driven apply evidence from Runs 153/158 remains valid.
+MainNet remains refused.
+docs defer release-binary lifecycle evidence to Run 160.
+no full C4 or C5 closure is claimed.

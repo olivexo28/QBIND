@@ -3519,3 +3519,20 @@ fixture tooling.**
 Run 157 introduces source/test fixture tooling that mints one coherent TestNet authority universe for future positive peer-driven apply evidence. The generated baseline bundle, candidate bundle, v2 ratification sidecar, seeded marker, peer-candidate envelope, and V0/V1/V2 transport material are all bound to one TestNet genesis, authority root, transport root, and bundle-signing authority.
 
 This does not alter the production authority model and does not create a MainNet source-code anchor or fallback root. MainNet remains refused / fixture-only; governance remains unimplemented; KMS/HSM remains unimplemented; signing-key rotation/revocation lifecycle remains open; validator-set rotation remains open; full C4 and C5 remain open. Release-binary positive TestNet apply evidence is deferred to Run 158.
+## Run 158 — TestNet authority model is unchanged; positive release-binary peer-driven apply evidence drawn under Run 157 unified universe
+
+Run 158 produces release-binary positive TestNet end-to-end peer-driven apply evidence using the Run 157 unified TestNet fixture universe. The trust-anchor authority invariant from Runs 050–157 is reaffirmed: the **only** way V1's `LivePqcTrustState` advances is through the Run 070 apply contract on a candidate that is a **valid successor** of V1's existing baseline (signed under the same active transport-root authority, with a strictly greater sequence, a matching v2 ratification sidecar bound to the same TestNet domain / chain id / genesis hash / authority root / bundle-signing authority, and a v2 authority-marker decision that strictly succeeds the seeded marker).
+
+Run 158 introduces **no production authority-model source change** and **no MainNet source-code anchor**. It does not enable a fallback authority root; it does not enable `--p2p-trusted-root` as a fallback; it does not weaken Run 144's MainNet-refusal layering (policy-gate / runtime-domain / Run 148 controller / Run 144 safety specification, all still refusing MainNet drain-once unconditionally). The Run 153 `main.rs` wiring, the Run 152 production builder / coordinator, the Run 150 drain, the Run 148 controller, the Run 070 apply contract, and the Run 134/138 v2-marker post-commit boundary are all reused verbatim.
+
+Every authority-root fingerprint exercised by Run 158 is derived from the unified Run 157 universe (a TestNet-domain, ephemeral, reproducible `harness()` minted on every invocation). No release-binary path imports a static MainNet authority root; the TestNet authority root used in Run 158 is per-invocation ephemeral and is **not** treated as a production authority anchor by `qbind-node`. MainNet remains refused / fixture-only.
+
+Open items after Run 158 (unchanged from Run 157):
+
+- Production MainNet bundle-signing authority root (governance / ratification authority).
+- KMS / HSM custody.
+- Signing-key rotation / revocation lifecycle.
+- Validator-set rotation.
+- Full C4 / C5 closure.
+
+Run 158 is positive TestNet release-binary peer-driven apply evidence drawn against the unified Run 157 universe. The Run 156 disjoint-universe blocker is closed for any harness invocation in which the positive A1 path is recorded in `a1_apply_proof.txt`; otherwise the harness records the exact failure mode in `a1_blocker.txt` and does **not** substitute source/test coverage for the positive verdict. DevNet evidence from Run 153, TestNet refusal evidence from Run 155, and Run 156's release-binary live-path evidence + exact blocker remain valid. **Full C4 is NOT claimed by Run 158; C5 remains OPEN.** Local config alone remains insufficient for MainNet bundle-signing authority. Local peer majority remains insufficient for MainNet bundle-signing authority.

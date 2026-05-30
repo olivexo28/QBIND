@@ -5980,3 +5980,32 @@ Out of scope for Run 156 (unchanged from Run 155):
 Run 157 adds source/test fixture tooling only: `run_157_unified_testnet_peer_apply_fixture_helper` emits `unified_testnet_manifest.json` for a coherent TestNet fixture universe. It fixes the Run 156 disjoint-universe blocker by ensuring live transport material and baseline/candidate peer-apply material share the same TestNet domain, chain id, genesis hash, authority root, transport root, and bundle-signing authority.
 
 Operators must not treat Run 157 output as production MainNet authority material. Release-binary positive TestNet apply evidence is deferred to Run 158. MainNet remains refused; governance, KMS/HSM, signing-key rotation/revocation lifecycle, and validator-set rotation remain open. Full C4 and C5 remain open.
+## Run 158 — positive TestNet release-binary peer-driven apply evidence using the Run 157 unified fixture universe (no operator surface change)
+
+Run 158 closes the **Run 156 disjoint-universe blocker** by driving a real `target/release/qbind-node` TestNet receiver through the **complete positive peer-driven apply path** over **live P2P**, using the **Run 157 unified TestNet fixture universe**. Run 158 introduces **no operator-visible CLI surface change**: the same hidden, disabled-by-default `--p2p-trust-bundle-peer-candidate-drain-once` hook from Run 153 / 155 / 156 drives the full Run 152 → 150 → 148 → 070 pipeline under `--env testnet`.
+
+What Run 158 adds for the lab/evidence workflow:
+- `scripts/devnet/run_158_testnet_positive_peer_driven_apply_release_binary.sh` — release-binary harness that mints the unified TestNet universe with `run_157_unified_testnet_peer_apply_fixture_helper`, mints per-validator consensus signer keystores, runs the TestNet fail-closed refusal matrix (`R2_mainnet_refused`, `C1_testnet_drain_without_apply`, `C3_testnet_drain_without_staging`, `C4_testnet_drain_without_wire_validation`), drives the live N=3 cluster for the positive A1 scenario and the R3 wrong-environment rejection scenario, captures before/after V1 sequence and v2 marker JSON + SHA-256, writes either `a1_apply_proof.txt` (positive) or `a1_blocker.txt` (blocker), and emits in-scope and out-of-scope grep summaries.
+- `docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/` — evidence archive with `README.md` + `summary.txt` tracked and per-run artifacts gitignored.
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_158.md` — canonical evidence report.
+
+Operators have **no new CLI surface** and **no new runtime behaviour** in Run 158. The harness is reproducible from a clean checkout via:
+
+```
+cargo build --release -p qbind-node --bin qbind-node
+cargo build --release -p qbind-node --example run_157_unified_testnet_peer_apply_fixture_helper
+cargo build --release -p qbind-node --example devnet_consensus_signer_keystore_helper
+bash scripts/devnet/run_158_testnet_positive_peer_driven_apply_release_binary.sh
+```
+
+Run 158 does **not** substitute source/test coverage for the positive A1 verdict: the harness asserts the canonical Run 070 ordering (`validate → snapshot previous → swap → evict_sessions → commit_sequence`), the Run 055 sequence advance (`persisted_sequence=1 → persisted_sequence=2`), and the Run 134/138 v2-marker post-commit boundary in V1's release-binary stderr; otherwise it writes a blocker documenting the exact failure mode.
+
+Out of scope for Run 158 (unchanged from Run 157):
+* MainNet enablement (refused unconditionally).
+* Governance.
+* KMS / HSM.
+* Signing-key rotation / revocation lifecycle.
+* Validator-set rotation.
+* Full C4 / C5 closure.
+
+MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Signing-key rotation / revocation lifecycle remains open. Validator-set rotation remains open. Full C4 and C5 remain open.
