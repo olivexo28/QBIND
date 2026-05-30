@@ -1,0 +1,56 @@
+Run 158: positive TestNet release-binary end-to-end peer-driven apply
+=====================================================================
+
+Verdict: A1 = PROVEN
+
+Run 158 binds the live N=3 TestNet P2P transport, the baseline
+(seq=1) trust bundle, the candidate (seq=2) trust bundle, the v2
+ratification sidecar, the seeded v2 authority marker, and the
+valid 0x05 peer-candidate envelope to the single self-consistent
+universe minted by run_157_unified_testnet_peer_apply_fixture_helper.
+Run 158 reuses the Run 153 main.rs wiring verbatim — no production
+source delta. The hidden, disabled-by-default
+--p2p-trust-bundle-peer-candidate-drain-once hook drives the full
+Run 152→150→148→070 pipeline; --env testnet selects
+PeerDrivenDrainPolicy::testnet_enabled(); MainNet remains refused
+unconditionally.
+
+Harness: scripts/devnet/run_158_testnet_positive_peer_driven_apply_release_binary.sh
+
+Scenario matrix:
+  A1    TestNet end-to-end peer-driven apply   PROVEN
+  R1    Run 156 disjoint-universe rejected     CITED Run 156 + run_157 negative fixtures
+  R2    MainNet drain-once refused             see exit_codes/R2_mainnet_refused.exit_code
+  R3    wrong-environment rejected             CITED run_157 wrong-environment fixture
+  R4    duplicate cannot double-apply         CITED Run 150/152 source/test (single-shot drain-once)
+  C1    TestNet drain w/o apply                see exit_codes/C1_testnet_drain_without_apply.exit_code
+  C3    TestNet drain w/o staging              see exit_codes/C3_testnet_drain_without_staging.exit_code
+  C4    TestNet drain w/o wire-validation     see exit_codes/C4_testnet_drain_without_wire_validation.exit_code
+
+Unified TestNet fixtures minted by the real release helper:
+  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/fixtures/testnet/ (see testnet_manifest.txt)
+
+Apply mutation (V1):
+  marker before: d6424b37475e9fe1f21fadb3f80654a7209478585aa222b4f24aad975d4fddc5  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/marker_hashes/A1_testnet_unified_apply.before.json
+  marker after:  d6424b37475e9fe1f21fadb3f80654a7209478585aa222b4f24aad975d4fddc5  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/marker_hashes/A1_testnet_unified_apply.after.json
+  sequence after sha256: 258ce14d7986302ae9a522c2d88f0ebde81c0e010433face7fed6b93996b0ec0  /tmp/workspace/olivexo28/QBIND/docs/devnet/run_158_testnet_positive_peer_driven_apply_release_binary/sequence/A1_testnet_unified_apply.after.json
+
+Negative invariants held in this run:
+  - No autonomous background drain (single explicit, delayed drain-once).
+  - No automatic apply on receipt.
+  - No peer-majority authority.
+  - MainNet refused unconditionally (Run 151 FATAL, exit=1).
+  - Denylist grep: see grep_summaries/out_of_scope.txt
+
+Out-of-scope deferrals (unchanged):
+  - Governance / KMS / HSM: unimplemented.
+  - Signing-key rotation/revocation lifecycle: open.
+  - Validator-set rotation: open.
+  - Full C4: open. C5: open.
+
+Evidence report: docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_158.md
+
+Tracked vs generated artifacts:
+  Only README.md and summary.txt are tracked (mirroring Run 153 /
+  Run 155 / Run 156). All per-run artifacts are reproduced by the
+  harness and are .gitignored.

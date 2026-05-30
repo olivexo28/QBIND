@@ -78,7 +78,10 @@ fn genesis_chain_id(env: NetworkEnvironment) -> &'static str {
 
 fn vid_bytes(vid: u64) -> [u8; 32] {
     let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&vid.to_be_bytes());
+    let name = format!("qbind-val-{}", vid);
+    let bytes = name.as_bytes();
+    let copy_len = bytes.len().min(32);
+    out[..copy_len].copy_from_slice(&bytes[..copy_len]);
     out
 }
 
