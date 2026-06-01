@@ -1,0 +1,275 @@
+Task: Run 165 — Wire Governance Authority Verification into Lifecycle Marker Decisions
+
+Current accepted state:
+- Run 159: source/test v2 signing-key lifecycle validator landed.
+- Run 161: lifecycle validation wired into shared v2 marker-decision helper.
+- Run 162: release-binary lifecycle enforcement evidence landed through validation-only and mutating v2 marker-decision surfaces.
+- Run 163: source/test governance ratification authority verifier landed:
+  - `pqc_governance_authority.rs`;
+  - `GovernanceAuthorityProof`;
+  - `GovernanceAuthorityClass::{GenesisBound, EmergencyCouncil, OnChainGovernance}`;
+  - `verify_governance_authority_proof`;
+  - `validate_lifecycle_with_governance_authority`;
+  - 32 tests.
+- Run 164: partial-positive release-binary governance boundary landed:
+  - release-built helper exercises A1–A5 / R1–R16 corpus successfully;
+  - `verify_governance_authority_proof` and `validate_lifecycle_with_governance_authority` have zero production callers outside `pqc_governance_authority.rs` and `lib.rs`;
+  - no production v2 surface invokes governance verification yet.
+- MainNet peer-driven apply remains refused.
+- Governance execution / on-chain proof remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Wire the Run 163 governance authority verifier into the existing v2 lifecycle / marker-decision path so governance authority checks become production-source reachable before lifecycle-sensitive marker decisions are accepted.
+
+This is source/test integration only. Release-binary governance enforcement evidence is deferred to Run 166.
+
+The integration must remain non-MainNet-enabling: accepting a governance proof must not enable MainNet peer-driven apply or bypass any existing environment gate.
+
+Strict scope:
+- Source/test only.
+- No release-binary harness in this run.
+- No MainNet peer-driven apply enablement.
+- No governance execution engine.
+- No on-chain governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No wire-format change unless a hard blocker is found; if so, stop and report the blocker instead of silently changing schema.
+- No marker schema change.
+- No sequence-file schema change.
+- No trust-bundle schema change unless a hard blocker is found and explicitly documented.
+- Do not weaken Runs 070, 130–164.
+- Do not claim full C4 or C5 closure.
+
+Design requirement:
+Integrate governance verification into the lifecycle marker-decision path created by Runs 159/161.
+
+Expected composition:
+
+1. Existing v2 marker anti-rollback comparison runs.
+2. Run 159 lifecycle validation runs.
+3. Run 163 governance authority verification runs for lifecycle-sensitive actions.
+4. The final marker decision accepts only if all required layers accept:
+   - domain binding;
+   - v2 marker anti-rollback;
+   - lifecycle transition validity;
+   - governance authority proof validity, where required.
+5. The decision remains pure/preflight.
+6. Marker persistence still occurs only at existing post-Run-055-commit points.
+
+Required policy:
+Define exactly which actions require governance proof:
+
+- `ActivateInitial`:
+  - may be accepted under existing genesis-bound/dev fixture rules if that was already allowed;
+  - governance proof optional only if existing semantics require it.
+- `Rotate`:
+  - require governance authority proof unless existing DevNet/TestNet fixture policy explicitly exempts it.
+- `Retire`:
+  - require governance authority proof.
+- `Revoke`:
+  - require governance authority proof.
+- `EmergencyRevoke`:
+  - require EmergencyCouncil or equivalent emergency governance proof if representable.
+- `OnChainGovernance`:
+  - remains unsupported/fail-closed unless an actual on-chain proof format is implemented in a future run.
+
+If the current v2 ratification/marker material cannot carry governance proof data into production surfaces, do not invent a schema silently. Instead:
+- add a typed `GovernanceProofUnavailable` / `GovernanceProofRequiredButMissing` result;
+- wire refusal behavior;
+- document exact future schema/carrying gap.
+
+Required source behavior:
+Add or extend a shared helper, for example:
+
+`decide_v2_marker_acceptance_with_lifecycle_and_governance(...)`
+
+or extend existing `decide_marker_acceptance_v2(...)` to accept optional governance proof context.
+
+The helper must:
+- call `validate_v2_lifecycle_transition`;
+- call `verify_governance_authority_proof` or `validate_lifecycle_with_governance_authority` when a proof is present/required;
+- return a typed rejection if proof is missing, malformed, wrong-domain, wrong-action, wrong-digest, wrong-sequence, invalid signature, unsupported suite, threshold-not-met, replayed, peer-majority-only, or local-config-only;
+- perform no I/O;
+- not write marker;
+- not write sequence;
+- not mutate live trust;
+- not evict sessions.
+
+Required error typing:
+Add a typed marker-decision error variant, for example:
+
+`GovernanceAuthorityRejected(GovernanceAuthorityVerificationOutcome)`
+
+and, if needed:
+
+`GovernanceAuthorityRequiredButMissing`
+
+Names may differ, but errors must be typed and testable.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_165_governance_marker_integration_tests.rs`
+
+Minimum acceptance matrix:
+
+A1. Rotate accepted with GenesisBound governance proof.
+- persisted key A seq=N;
+- candidate key B seq=N+1;
+- valid lifecycle transition;
+- valid governance proof;
+- marker decision accepts.
+
+A2. Revoke accepted with GenesisBound governance proof.
+- valid revocation lifecycle metadata;
+- valid proof;
+- decision accepts.
+
+A3. EmergencyRevoke accepted with EmergencyCouncil proof, if representable.
+- valid emergency lifecycle metadata;
+- valid EmergencyCouncil proof;
+- decision accepts.
+
+A4. Idempotent same lifecycle/governance record accepted.
+- same sequence/digest/proof;
+- idempotent decision.
+
+A5. Existing DevNet/TestNet non-governance fixture path remains compatible if policy allows.
+- if governance is now required for all lifecycle actions, then this test should assert clear `GovernanceAuthorityRequiredButMissing` rejection instead of silent acceptance.
+- document the chosen policy.
+
+Required rejection matrix:
+
+R1. Rotate without required governance proof rejected.
+
+R2. Revoke without required governance proof rejected.
+
+R3. EmergencyRevoke without emergency authority proof rejected.
+
+R4. wrong environment proof rejected.
+
+R5. wrong chain proof rejected.
+
+R6. wrong genesis proof rejected.
+
+R7. wrong authority root proof rejected.
+
+R8. wrong lifecycle action proof rejected.
+
+R9. wrong candidate digest proof rejected.
+
+R10. wrong authority-domain sequence proof rejected.
+
+R11. invalid issuer signature rejected.
+
+R12. unsupported issuer suite rejected.
+
+R13. non-PQC suite rejected.
+
+R14. threshold not met rejected, if threshold metadata is representable.
+
+R15. malformed proof rejected.
+
+R16. stale/replayed lower authority proof rejected.
+
+R17. OnChainGovernance proof rejected as unsupported.
+
+R18. local operator config alone rejected as MainNet authority proof.
+
+R19. peer majority / gossip count rejected as authority proof.
+
+R20. lifecycle-valid but governance-invalid candidate rejected before apply.
+
+R21. governance-valid but lifecycle-invalid candidate rejected before apply.
+
+R22. governance rejection on reload-apply produces no Run 070 call.
+
+R23. governance rejection on startup produces no marker write.
+
+R24. governance rejection on SIGHUP produces no live trust swap, no eviction, no sequence write, and no marker write.
+
+R25. governance rejection on peer-driven drain produces no apply, no swap, no eviction, no sequence write, and no marker write.
+
+R26. validation-only surfaces remain non-mutating when governance validation is added.
+
+R27. MainNet peer-driven apply remains refused even with valid governance proof.
+
+Required surface coverage:
+At source/test level, cover governance-aware marker decisions across:
+
+1. reload-check validation-only;
+2. reload-apply mutating preflight;
+3. startup marker preflight;
+4. SIGHUP marker preflight;
+5. peer-driven drain `ProductionV2MarkerCoordinator`;
+6. live `0x05` / local peer-candidate validation-only if it shares the same helper.
+
+Required regression checks:
+- Run 163 governance verifier tests remain green.
+- Run 161 lifecycle marker integration tests remain green.
+- Run 159 lifecycle tests remain green.
+- Run 162 evidence assumptions remain valid.
+- Run 153/158 DevNet/TestNet peer-driven apply tests remain compatible or documented as requiring governance-proof fixture updates for future evidence.
+
+Required documentation:
+Add:
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_165.md`
+
+Update:
+- `docs/whitepaper/contradiction.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+- Run 165 is source/test integration only.
+- Governance authority verification is now production-source reachable through marker-decision paths.
+- Release-binary governance enforcement evidence is deferred to Run 166.
+- MainNet apply remains refused.
+- OnChainGovernance remains unsupported/fail-closed unless actually implemented.
+- Governance execution remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- `cargo build -p qbind-node --lib`
+- `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+- `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+- `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+- `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+- `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+- `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+- `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+- `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+- `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+- `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+- `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+- `cargo test -p qbind-node --lib pqc_authority`
+- `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 165 is acceptable only if:
+1. `verify_governance_authority_proof` or `validate_lifecycle_with_governance_authority` has production `src` call sites outside `pqc_governance_authority.rs`.
+2. Governance verification is composed into lifecycle/marker decision paths.
+3. Missing/invalid governance proof rejects lifecycle-sensitive transitions where policy requires proof.
+4. Governance-valid but lifecycle-invalid transitions still reject.
+5. Lifecycle-valid but governance-invalid transitions reject.
+6. Rejected governance decisions produce no mutation.
+7. Validation-only surfaces remain non-mutating.
+8. Mutating surfaces still persist marker only after sequence commit.
+9. MainNet apply remains refused even with valid governance proof.
+10. Existing DevNet/TestNet peer-driven apply evidence is not silently invalidated; any fixture update requirement is documented.
+11. Docs defer release-binary governance enforcement evidence to Run 166.
+12. No full C4 or C5 closure is claimed.
