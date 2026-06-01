@@ -1,0 +1,93 @@
+Run 160: release-binary evidence/boundary for the v2 signing-key lifecycle validator
+====================================================================================
+
+Verdict: partial-positive: release-binary fixture/evidence boundary
+captured; lifecycle validator not yet production-surface reachable.
+
+Run 160 is required by `task/RUN_160_TASK.txt` to produce the strongest
+honest release-binary evidence currently possible for the Run 159
+v2 bundle-signing-key lifecycle validator
+(`qbind_node::pqc_authority_lifecycle::validate_v2_lifecycle_transition`)
+and to clearly determine whether the current production binary can
+exercise lifecycle validation through an existing release-binary
+surface. The Run 160 source-level call graph (captured in
+`call_graph/reachability.txt`) shows that
+`validate_v2_lifecycle_transition` and `classify_local_lifecycle_action`
+have zero production callers. The Run 159 module is referenced only
+from its own definition, the `pub mod` declaration in
+`crates/qbind-node/src/lib.rs`, and the Run 159 test suite. Run 160
+therefore declines to fake lifecycle closure and records the boundary
+honestly.
+
+Harness: scripts/devnet/run_160_authority_lifecycle_release_binary.sh
+
+Captured release-binary evidence:
+  * release-built helper minted lifecycle fixture corpus (A1-A6 +
+    R1-R14) — see fixtures/lifecycle_corpus/manifest.txt and
+    fixture_manifest.txt for per-file sha256s.
+  * release-built `target/release/qbind-node` identity in
+    provenance.txt (sha256 + ELF Build ID).
+  * Run 159 lifecycle test suite + Run 134/138/142/148/150/152/157
+    regression suites + `lib pqc_authority` + full lib tests run on
+    the same checkout — see test_results/.
+  * source-level call graph proves the Run 159 lifecycle validator
+    has no production caller — see call_graph/reachability.txt.
+
+Lifecycle action coverage at the release-binary surface:
+  ActivateInitial:  FIXTURE-ONLY (release-built helper minted A1)
+  Rotate:           FIXTURE-ONLY (release-built helper minted A2)
+  Retire:           FIXTURE-ONLY (release-built helper minted A3)
+  Revoke:           FIXTURE-ONLY (release-built helper minted A4)
+  EmergencyRevoke:  FIXTURE-ONLY (release-built helper minted A5)
+  Idempotent:       FIXTURE-ONLY (release-built helper minted A6)
+  All R1-R14:       FIXTURE-ONLY (release-built helper minted)
+
+No release-binary surface (startup `--p2p-trust-bundle` v2,
+reload-check, local peer-candidate-check, process-start reload-apply,
+SIGHUP, live inbound 0x05, peer-driven staged drain-once) currently
+calls `validate_v2_lifecycle_transition`. Retire and EmergencyRevoke
+are representable on the existing wire/marker schemas via the
+Run 159 metadata sub-class convention; the schema is NOT the gap,
+the production wiring is.
+
+Refused claims:
+  * NOT strongest-positive.
+  * NOT MainNet apply.
+  * NOT governance enforcement.
+  * NOT KMS / HSM custody.
+  * NOT validator-set rotation.
+  * NOT autonomous drain / apply on receipt / peer-majority authority.
+  * NOT full C4 closure.
+  * NOT C5 closure.
+
+Negative invariants held in this run:
+  - No MainNet apply (no harness scenario enables MainNet).
+  - No autonomous drain / apply on receipt / peer-majority.
+  - No fallback `--p2p-trusted-root`.
+  - No active DummySig / DummyKem / DummyAead.
+  - No schema/wire/metric drift.
+  - No marker write before sequence commit (no mutating surface is
+    exercised — the lifecycle validator is pure).
+  - No sequence write on validation-only surfaces.
+  - No marker write on validation-only surfaces.
+  - Denylist grep: see grep_summaries/out_of_scope.txt.
+
+Out-of-scope deferrals (unchanged):
+  - Governance / KMS / HSM: unimplemented.
+  - Validator-set rotation: open.
+  - Full C4: open. C5: open.
+
+Exact next required integration run: Run 161 — wire
+`validate_v2_lifecycle_transition` into the existing Run 134 / 136 /
+138 / 150 / 152 marker-comparison and accept-and-persist boundary
+(or a typed pre-flight gate immediately upstream of those helpers)
+so the reload-apply / SIGHUP / drain-once / live 0x05 / startup v2
+paths exercise the lifecycle validator without changing the on-wire
+byte set or the marker schema.
+
+Evidence report: docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_160.md
+
+Tracked vs generated artifacts:
+  Only README.md and summary.txt are tracked (mirroring Run 153 /
+  Run 155 / Run 156 / Run 158). All per-run artifacts are reproduced
+  by the harness and are .gitignored.

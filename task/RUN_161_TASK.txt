@@ -1,0 +1,300 @@
+Task: Run 161 — Wire v2 Signing-Key Lifecycle Validation into Marker-Decision and Persist Boundaries
+
+Current accepted state:
+
+* Run 153: DevNet release-binary end-to-end peer-driven apply evidence landed.
+* Run 158: TestNet release-binary end-to-end peer-driven apply evidence landed using the Run 157 unified fixture universe.
+* Run 159: source/test v2 bundle-signing-key lifecycle validator landed:
+
+  * `pqc_authority_lifecycle.rs`;
+  * `LocalLifecycleAction::{ActivateInitial, Rotate, Retire, Revoke, EmergencyRevoke}`;
+  * `AuthorityTrustDomain`;
+  * `AuthorityLifecycleTransitionOutcome`;
+  * `validate_v2_lifecycle_transition`;
+  * `classify_local_lifecycle_action`;
+  * 29 lifecycle tests.
+* Run 160: partial-positive release-binary lifecycle boundary captured:
+
+  * lifecycle fixture corpus can be minted;
+  * no schema/wire blocker found;
+  * `validate_v2_lifecycle_transition` and `classify_local_lifecycle_action` have zero non-self production `src` call sites;
+  * lifecycle validator is not reachable from startup, reload-check, peer-candidate-check, reload-apply, SIGHUP, live `0x05`, or peer-driven drain surfaces yet.
+* Run 160 identifies the required next integration run:
+  wire `validate_v2_lifecycle_transition` into existing Run 134/136/138/150/152 marker-comparison and accept-and-persist boundaries.
+* MainNet remains refused.
+* Governance remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open.
+* C5 remains open.
+
+Objective:
+Wire the Run 159 v2 signing-key lifecycle validator into the existing v2 authority-marker decision paths so lifecycle transitions become enforceable by production source paths.
+
+This is source/test integration only. Release-binary lifecycle evidence is deferred to Run 162.
+
+The integration must preserve all existing v2 marker anti-rollback behavior while adding lifecycle-specific checks for ActivateInitial, Rotate, Retire, Revoke, and EmergencyRevoke.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary harness in this run.
+* No MainNet peer-driven apply enablement.
+* No governance implementation.
+* No KMS/HSM implementation.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No wire-format change.
+* No marker schema change.
+* No sequence-file schema change.
+* No trust-bundle schema change unless a hard blocker is found; if so, stop and report the blocker.
+* Do not weaken Runs 070, 130–160.
+* Do not claim full C4 or C5 closure.
+
+Implementation target:
+Integrate lifecycle validation into the shared v2 marker-decision layer used by:
+
+1. Run 134 process-start reload-apply v2 marker path.
+2. Run 136 startup `--p2p-trust-bundle` v2 marker path.
+3. Run 138 SIGHUP live-reload v2 marker path.
+4. Run 150 peer-driven drain source/test path.
+5. Run 152 production drain invocation / v2 marker coordinator path.
+
+If reload-check / peer-candidate-check / live `0x05` validation-only paths also share the same v2 marker decision helper, they must receive lifecycle validation in validation-only mode without any disk writes.
+
+Required design:
+Add a narrow lifecycle-validation call inside the existing v2 marker comparison/decision helper, not as an independent parallel path.
+
+The expected composition is:
+
+1. Load existing persisted authority marker, if present.
+2. Build `AuthorityTrustDomain` from the runtime environment, chain ID, genesis hash, and authority root.
+3. Decode/classify the candidate lifecycle action from existing v2 ratification/action fields using `classify_local_lifecycle_action`.
+4. Call `validate_v2_lifecycle_transition(persisted, candidate, trust_domain)`.
+5. Combine the lifecycle outcome with the existing v2 marker anti-rollback decision.
+6. Return one typed marker decision object.
+7. Perform no disk write during preflight.
+8. Persist marker only at existing post-commit points.
+
+Required semantics:
+
+* Existing v2 anti-rollback remains mandatory:
+
+  * lower sequence rejected;
+  * same-sequence different digest rejected;
+  * same-sequence same digest idempotent;
+  * wrong environment / chain / genesis / authority root rejected.
+* Lifecycle validation adds:
+
+  * wrong previous key rejected;
+  * revoked key reuse rejected;
+  * retired key reuse rejected;
+  * malformed revoked metadata rejected;
+  * non-PQC suite rejected;
+  * unsupported lifecycle action rejected;
+  * emergency revocation replay rejected.
+* Accepted lifecycle actions:
+
+  * ActivateInitial accepted only when no persisted marker or when existing rules allow first-write.
+  * Rotate accepted only with higher sequence and correct previous key.
+  * Retire accepted only with higher sequence and well-formed lifecycle metadata.
+  * Revoke accepted only with higher sequence and well-formed revoked metadata.
+  * EmergencyRevoke accepted only with higher sequence and valid emergency subclass metadata.
+  * Idempotent same-record accepted as idempotent, not as a new mutation.
+* Rejected lifecycle transitions must not:
+
+  * write marker;
+  * write sequence;
+  * mutate `LivePqcTrustState`;
+  * evict sessions;
+  * call Run 070 apply;
+  * allow propagation-to-apply.
+
+Required ordering:
+For all mutating surfaces:
+
+* lifecycle validation must run before live mutation;
+* marker persistence remains strictly after successful Run 055 sequence commit;
+* if lifecycle validation fails, no Run 070 apply begins;
+* if Run 070 apply fails before sequence commit, no marker persist;
+* if marker persist fails after sequence commit, existing fatal/operator-actionable behavior remains.
+
+Required source behavior:
+The existing helper names may differ, but update the natural shared helper around:
+
+* Run 134/136/138 marker decision;
+* Run 150 drain marker decision;
+* Run 152 `ProductionV2MarkerCoordinator`.
+
+Do not duplicate lifecycle logic per surface unless unavoidable. Prefer a shared helper such as:
+
+`decide_v2_marker_acceptance_with_lifecycle(...)`
+
+or extend the existing `decide_marker_acceptance_v2(...)`.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_161_lifecycle_marker_integration_tests.rs`
+
+Minimum acceptance matrix:
+
+A1. ActivateInitial accepted through shared marker decision
+
+* no persisted marker;
+* valid initial lifecycle candidate;
+* decision accepts;
+* no disk write during decision.
+
+A2. Rotate accepted through reload-apply marker path
+
+* persisted active key A seq=N;
+* candidate key B seq=N+1 with previous=A;
+* decision accepts rotation.
+
+A3. Rotate accepted through startup marker path
+
+* same as A2 but using startup source tag / helper path.
+
+A4. Rotate accepted through SIGHUP marker path
+
+* same as A2 but using SIGHUP source tag / helper path.
+
+A5. Rotate accepted through peer-driven drain marker coordinator
+
+* same as A2 but using Run 152 `ProductionV2MarkerCoordinator`.
+
+A6. Retire accepted if representable
+
+* higher sequence;
+* valid retired-key metadata;
+* accepted.
+
+A7. Revoke accepted
+
+* higher sequence;
+* valid revoked-key metadata;
+* accepted.
+
+A8. EmergencyRevoke accepted
+
+* higher sequence;
+* valid emergency subclass metadata;
+* accepted.
+
+A9. Idempotent same lifecycle record accepted
+
+* same sequence;
+* same digest;
+* idempotent decision.
+
+Required rejection matrix:
+
+R1. lower-sequence lifecycle candidate rejected before apply.
+
+R2. same-sequence different digest rejected.
+
+R3. wrong environment rejected.
+
+R4. wrong chain rejected.
+
+R5. wrong genesis rejected.
+
+R6. wrong authority root rejected.
+
+R7. wrong previous key rejected.
+
+R8. revoked key reuse rejected.
+
+R9. retired key reuse rejected outside allowed overlap.
+
+R10. emergency revocation replay rejected.
+
+R11. malformed revoked metadata rejected.
+
+R12. non-PQC suite rejected.
+
+R13. unsupported lifecycle action byte rejected.
+
+R14. corrupted local marker rejected fail-closed.
+
+R15. lifecycle rejection on reload-apply produces no Run 070 call.
+
+R16. lifecycle rejection on startup produces no marker write.
+
+R17. lifecycle rejection on SIGHUP produces no live trust swap, no eviction, no sequence write, and no marker write.
+
+R18. lifecycle rejection on peer-driven drain produces no apply, no swap, no eviction, no sequence write, and no marker write.
+
+R19. validation-only surfaces remain non-mutating when lifecycle validation is added.
+
+R20. existing Run 134/136/138/150/152 accepted non-lifecycle v2 cases remain compatible or are explicitly classified as ActivateInitial/Rotate according to existing action bytes.
+
+Required regression checks:
+
+* Run 134 reload-apply v2 marker tests must remain green.
+* Run 136 startup v2 marker tests must remain green if available.
+* Run 138 SIGHUP v2 marker tests must remain green.
+* Run 150 drain tests must remain green.
+* Run 152 binary-reachable drain plumbing tests must remain green.
+* Run 159 lifecycle tests must remain green.
+* Run 158 TestNet evidence assumptions must remain valid at source level.
+
+Required documentation:
+Add:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_161.md`
+
+Update:
+
+* `docs/whitepaper/contradiction.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+
+* Run 161 is source/test integration only.
+* Run 159 lifecycle validation is now wired into production source marker-decision paths.
+* Release-binary lifecycle evidence is deferred to Run 162.
+* No MainNet apply is enabled.
+* Governance remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open.
+* C5 remains open.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate the nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 161 is acceptable only if:
+
+1. `validate_v2_lifecycle_transition` has production `src` call sites outside `pqc_authority_lifecycle.rs`.
+2. Lifecycle validation is composed into shared v2 marker decision/preflight paths.
+3. Startup, reload-apply, SIGHUP, and peer-driven drain paths are covered at source/test level.
+4. Validation-only paths remain non-mutating.
+5. Mutating paths still persist v2 marker only after sequence commit.
+6. Lifecycle rejects prevent apply/mutation before Run 070 starts.
+7. Existing v2 anti-rollback behavior is not weakened.
+8. MainNet remains refused.
+9. Governance/KMS-HSM/validator-set rotation remain open.
+10. Docs defer release-binary lifecycle evidence to Run 162.
+11. No full C4 or C5 closure is claimed.
