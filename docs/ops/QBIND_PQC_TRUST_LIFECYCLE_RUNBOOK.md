@@ -6032,3 +6032,23 @@ Out of scope for Run 159:
 * Full C4 / C5 closure.
 
 MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Validator-set rotation remains open. Release-binary lifecycle evidence is deferred to Run 160. Full C4 and C5 remain open.
+## Run 160 — release-binary evidence / boundary for the v2 signing-key lifecycle validator
+
+Run 160 produces release-binary evidence for the Run 159 v2 bundle-signing-key lifecycle validator (`qbind_node::pqc_authority_lifecycle::validate_v2_lifecycle_transition`). The Run 160 source-level call graph (captured by the harness) shows that the lifecycle validator has **zero** production callers today — none of the eight release-binary surfaces (startup `--p2p-trust-bundle` v2, reload-check, local peer-candidate-check, process-start reload-apply, SIGHUP, live inbound `0x05`, peer-driven staged drain-once, fixture helper / example) calls `validate_v2_lifecycle_transition`. Operators therefore have **no new CLI surface** and **no new runtime behaviour** in Run 160. The lifecycle validator remains a *pre-flight typed surface* that future runs may compose into the existing Run 134 / 136 / 138 / 150 / 152 marker-comparison and accept-and-persist pipeline; until that wiring lands (the exact next required integration run is **Run 161**), the existing marker-comparison helpers remain the authoritative mutating-surface decision points and are unchanged.
+
+What Run 160 does add is **release-binary evidence that is honestly available today**:
+
+* a release-built helper (`target/release/examples/run_160_authority_lifecycle_fixture_helper`) that mints the lifecycle fixture corpus covering A1–A6 (`ActivateInitial`, `Rotate`, `Retire`, `Revoke`, `EmergencyRevoke`, idempotent same-record) and R1–R14 (lower-sequence rollback, same-sequence equivocation, wrong environment / chain / genesis / authority root, wrong previous-key fingerprint on rotate, revoked-key reuse, retired-key reuse, emergency-revoke replay, malformed revoked metadata, non-PQC suite, unsupported lifecycle action, V1-persisted-V2-candidate refusal) using the existing marker schemas without any wire / sidecar / marker / sequence-file change;
+* the real `target/release/qbind-node` binary identity (sha256 + ELF Build ID) recorded in the harness's `provenance.txt`;
+* the Run 159 lifecycle test suite plus the Run 134 / 138 / 142 / 148 / 150 / 152 / 157 regression suites and `cargo test -p qbind-node --lib pqc_authority` / `cargo test -p qbind-node --lib` run on the same checkout, with per-suite stdout/stderr/exit_code captured in `docs/devnet/run_160_authority_lifecycle_release_binary/test_results/`;
+* a `partial_positive_proof.txt` documenting the verdict — `partial-positive: release-binary fixture/evidence boundary captured; lifecycle validator not yet production-surface reachable` — and the schema-gap analysis (Retire and EmergencyRevoke are representable on the existing wire/marker schemas via the Run 159 metadata sub-class convention; the schema is not the gap, the production wiring is).
+
+Out of scope for Run 160:
+
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Validator-set rotation.
+* Production wiring of `validate_v2_lifecycle_transition` into any mutating surface — **deferred to Run 161**.
+* Wire-level encoding of `Retire` / `EmergencyRevoke` as distinct action bytes (the existing `Ratify=0` / `Rotate=1` / `Revoke=2` byte set is preserved unchanged; Run 159's local sub-class metadata convention is sufficient).
+
+MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Validator-set rotation remains open. Release-binary lifecycle apply remains not enabled. The exact next required integration run is **Run 161**. Full C4 and C5 remain open.

@@ -1,0 +1,14 @@
+# Run 160 evidence archive — generated run artifacts are reproduced by
+# the harness and are not tracked (they contain per-run, machine-specific
+# data such as absolute paths, ephemeral helper output, and timestamps).
+# Only README.md and summary.txt are tracked, mirroring the Run 153 /
+# Run 155 / Run 156 / Run 158 evidence-archive precedent.
+/logs/
+/test_results/
+/exit_codes/
+/grep_summaries/
+/fixtures/
+/call_graph/
+/provenance.txt
+/fixture_manifest.txt
+/partial_positive_proof.txt
