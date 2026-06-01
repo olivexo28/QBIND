@@ -188,6 +188,15 @@ pub mod pqc_authority_state_reset;
 // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 159 update,
 // and `docs/whitepaper/contradiction.md` Run 159 update.
 pub mod pqc_authority_lifecycle;
+// Run 163 — typed pure governance ratification authority verifier for
+// v2 bundle-signing-key lifecycle transitions. Source/test only. No
+// MainNet apply enablement, no governance execution, no on-chain
+// governance integration, no KMS/HSM, no validator-set rotation.
+// Release-binary governance verifier evidence is deferred to Run 164.
+// See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_163.md`,
+// `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 163 update,
+// and `docs/whitepaper/contradiction.md` Run 163 update.
+pub mod pqc_governance_authority;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
