@@ -1323,6 +1323,31 @@ pub enum MutatingSurfaceMarkerV2Error {
     /// MUST NOT mutate `LivePqcTrustState`, MUST NOT evict sessions,
     /// MUST NOT call `commit_sequence`, and MUST NOT persist a marker.
     LifecycleRejected(crate::pqc_authority_lifecycle::AuthorityLifecycleTransitionOutcome),
+
+    /// Run 165 — a governance authority proof was supplied for a
+    /// lifecycle-sensitive marker decision but the Run 163 verifier
+    /// rejected it. Wraps the precise typed verifier outcome (wrong
+    /// domain/action/digest/sequence, invalid signature, unsupported or
+    /// non-PQC suite, threshold-not-met, replay, malformed, on-chain
+    /// unsupported, local-config-only, peer-majority-only).
+    ///
+    /// Fail-closed: the mutating surface MUST NOT begin Run 070 apply,
+    /// MUST NOT mutate `LivePqcTrustState`, MUST NOT evict sessions,
+    /// MUST NOT call `commit_sequence`, and MUST NOT persist a marker.
+    GovernanceAuthorityRejected(
+        crate::pqc_governance_authority::GovernanceAuthorityVerificationOutcome,
+    ),
+
+    /// Run 165 — the active [`crate::pqc_governance_authority::GovernanceProofPolicy`]
+    /// requires a governance authority proof for this lifecycle action,
+    /// but no proof was available to the surface. Today the v2
+    /// ratification / marker wire material does NOT carry governance
+    /// proof fields (documented schema-carrying gap); a future run that
+    /// defines a proof-carrying schema or supplies a proof out-of-band
+    /// resolves this. Fail-closed exactly like `GovernanceAuthorityRejected`.
+    GovernanceAuthorityRequiredButMissing {
+        action: crate::pqc_authority_lifecycle::LocalLifecycleAction,
+    },
 }
 
 impl std::fmt::Display for MutatingSurfaceMarkerV2Error {
@@ -1412,6 +1437,23 @@ impl std::fmt::Display for MutatingSurfaceMarkerV2Error {
                  no live trust mutation, no sequence commit, no marker \
                  persist)",
                 o
+            ),
+            Self::GovernanceAuthorityRejected(o) => write!(
+                f,
+                "Run 165: v2 authority-marker governance authority proof \
+                 rejected by Run 163 verifier: {:?} (fail closed; no Run 070 \
+                 apply, no live trust mutation, no sequence commit, no marker \
+                 persist; acceptance would NOT enable MainNet apply)",
+                o
+            ),
+            Self::GovernanceAuthorityRequiredButMissing { action } => write!(
+                f,
+                "Run 165: v2 authority-marker decision requires a governance \
+                 authority proof for lifecycle action '{}' but none was \
+                 available (documented wire schema-carrying gap; fail closed; \
+                 no Run 070 apply, no live trust mutation, no sequence commit, \
+                 no marker persist)",
+                action.tag()
             ),
         }
     }
@@ -1548,6 +1590,21 @@ impl MarkerAcceptDecisionV2 {
 pub fn decide_marker_acceptance_v2(
     inputs: MarkerAcceptanceV2Inputs<'_>,
 ) -> Result<MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
+    decide_marker_acceptance_v2_inner(inputs).map(|(decision, _persisted_sequence)| decision)
+}
+
+/// Run 165 — internal core shared by [`decide_marker_acceptance_v2`] and
+/// [`decide_v2_marker_acceptance_with_lifecycle_and_governance`].
+///
+/// Identical behaviour to the public [`decide_marker_acceptance_v2`]
+/// (anti-rollback compare + Run 159/161 lifecycle validation, no disk
+/// writes) but additionally returns the persisted v2
+/// `authority_domain_sequence` (if any) so the governance-aware wrapper
+/// can pass it to the Run 163 verifier for stale/replay detection
+/// without re-reading the marker file.
+fn decide_marker_acceptance_v2_inner(
+    inputs: MarkerAcceptanceV2Inputs<'_>,
+) -> Result<(MarkerAcceptDecisionV2, Option<u64>), MutatingSurfaceMarkerV2Error> {
     use crate::pqc_authority_state::{
         compare_authority_marker_v2, derive_authority_state_v2_from_ratification,
         load_authority_state_versioned, AuthorityMarkerV2ComparisonOutcome,
@@ -1569,6 +1626,17 @@ pub fn decide_marker_acceptance_v2(
     // Step 2: load persisted versioned marker.
     let persisted = load_authority_state_versioned(inputs.marker_path)
         .map_err(MutatingSurfaceMarkerV2Error::LoadOrCorruption)?;
+
+    // Run 165: capture the persisted v2 authority-domain sequence (if the
+    // on-disk marker is already v2) so the governance-aware wrapper can
+    // feed it to the Run 163 verifier for stale/replay detection without a
+    // second marker read.
+    let persisted_sequence = match persisted.as_ref() {
+        Some(PersistentAuthorityStateRecordVersioned::V2(v)) => {
+            Some(v.latest_authority_domain_sequence)
+        }
+        _ => None,
+    };
 
     // Pre-step 3: detect persisted-domain mismatch on a v1 record before
     // routing through migrate (so the operator sees a clear "wrong trust
@@ -1738,7 +1806,78 @@ pub fn decide_marker_acceptance_v2(
         }
     }
 
-    Ok(decision)
+    Ok((decision, persisted_sequence))
+}
+
+/// Run 165 — governance-aware shared marker decision.
+///
+/// Composes, in order:
+///
+/// 1. the existing v2 marker anti-rollback comparison
+///    ([`crate::pqc_authority_state::compare_authority_marker_v2`]);
+/// 2. the Run 159 typed lifecycle transition validator
+///    ([`crate::pqc_authority_lifecycle::validate_v2_lifecycle_transition`]);
+/// 3. the Run 163 governance authority verifier
+///    ([`crate::pqc_governance_authority::verify_governance_authority_proof`]),
+///    gated by [`GovernanceProofPolicy`] / [`GovernanceProofContext`].
+///
+/// The final decision accepts only if every required layer accepts:
+/// domain binding, v2 anti-rollback, lifecycle transition validity, and —
+/// where the policy requires it — governance authority proof validity.
+///
+/// This is the production-source call site that makes the Run 163
+/// governance verifier reachable from the v2 marker-decision path
+/// (reload-apply, startup, SIGHUP, and peer-driven drain all flow through
+/// [`decide_marker_acceptance_v2`], whose core this shares).
+///
+/// Mutation/IO contract (unchanged from [`decide_marker_acceptance_v2`]):
+/// performs no disk writes, persists no marker, writes no sequence,
+/// mutates no live trust state, evicts no sessions. On any reject the
+/// caller drops the decision and the on-disk marker is untouched.
+///
+/// Non-MainNet-enabling: a valid governance proof does NOT enable MainNet
+/// peer-driven apply and does NOT bypass any existing environment gate —
+/// those gates live in the calling surface and are unchanged by Run 165.
+pub fn decide_v2_marker_acceptance_with_lifecycle_and_governance(
+    inputs: MarkerAcceptanceV2Inputs<'_>,
+    policy: crate::pqc_governance_authority::GovernanceProofPolicy,
+    governance: crate::pqc_governance_authority::GovernanceProofContext<'_>,
+) -> Result<MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
+    use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use crate::pqc_governance_authority::{evaluate_governance_marker_gate, GovernanceMarkerGate};
+
+    // Layers 1+2: anti-rollback compare + Run 159/161 lifecycle validation.
+    let (decision, persisted_sequence) = decide_marker_acceptance_v2_inner(inputs)?;
+
+    // Layer 3: governance authority verification, gated by policy/context.
+    // The trust domain is reconstructed from the already-derived candidate
+    // (no re-read, no I/O).
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+
+    match evaluate_governance_marker_gate(
+        candidate,
+        &trust_domain,
+        persisted_sequence,
+        policy,
+        governance,
+    ) {
+        GovernanceMarkerGate::NotRequiredNoProof | GovernanceMarkerGate::Accepted(_) => {
+            Ok(decision)
+        }
+        GovernanceMarkerGate::RequiredButMissing { action } => {
+            Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing { action })
+        }
+        GovernanceMarkerGate::Rejected(outcome) => {
+            Err(MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected(outcome))
+        }
+    }
 }
 
 /// Run 134 — persist a previously-accepted v2 marker after the existing

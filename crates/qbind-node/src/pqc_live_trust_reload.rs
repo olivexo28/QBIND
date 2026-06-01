@@ -164,7 +164,7 @@ use qbind_types::{ChainId, NetworkEnvironment};
 use crate::metrics::P2pMetrics;
 use crate::p2p_session_eviction::P2pSessionEvictor;
 use crate::pqc_authority_marker_acceptance::{
-    decide_marker_acceptance, decide_marker_acceptance_v2,
+    decide_marker_acceptance,
     persist_accepted_marker_after_commit_boundary,
     persist_accepted_v2_marker_after_commit_boundary, MarkerAcceptDecision,
     MarkerAcceptDecisionV2, MarkerAcceptanceInputs, MarkerAcceptanceV2Inputs,
@@ -1319,16 +1319,27 @@ impl LiveReloadController {
         }
 
         // Step 3 — Run 134/136 v2 marker decision (no disk write).
-        let decision = decide_marker_acceptance_v2(MarkerAcceptanceV2Inputs {
-            marker_path: marker_cfg.marker_path.as_path(),
-            runtime_env: self.config.environment,
-            runtime_chain_id: self.config.chain_id,
-            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
-            ratification: ratification_v2,
-            ratified: &ratified_v2,
-            update_source: AuthorityStateUpdateSource::SighupReload,
-            updated_at_unix_secs: now_unix_secs,
-        })?;
+        // Run 165: route through the governance-aware shared helper so the
+        // Run 163 governance authority verifier is composed into this
+        // marker decision path. The reload-apply surface carries no
+        // governance proof in the existing wire material (documented
+        // schema-carrying gap), so it supplies `Unavailable` under the
+        // `NotRequired` policy — behaviour-preserving for Run 165;
+        // release-binary governance enforcement is deferred to Run 166.
+        let decision = crate::pqc_authority_marker_acceptance::decide_v2_marker_acceptance_with_lifecycle_and_governance(
+            MarkerAcceptanceV2Inputs {
+                marker_path: marker_cfg.marker_path.as_path(),
+                runtime_env: self.config.environment,
+                runtime_chain_id: self.config.chain_id,
+                runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+                ratification: ratification_v2,
+                ratified: &ratified_v2,
+                update_source: AuthorityStateUpdateSource::SighupReload,
+                updated_at_unix_secs: now_unix_secs,
+            },
+            crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+            crate::pqc_governance_authority::GovernanceProofContext::Unavailable,
+        )?;
         Ok(Some(decision))
     }
 }
