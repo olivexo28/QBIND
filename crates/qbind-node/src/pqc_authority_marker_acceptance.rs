@@ -1313,6 +1313,16 @@ pub enum MutatingSurfaceMarkerV2Error {
     /// stale-by-one (safely replayable per Run 118 §D / Run 131) but the
     /// operator MUST be told.
     PersistFailure(crate::pqc_authority_state::AuthorityStateError),
+
+    /// Run 161 — the Run 159 typed v2 lifecycle validator
+    /// ([`crate::pqc_authority_lifecycle::validate_v2_lifecycle_transition`])
+    /// rejected the candidate. Wraps the typed reject outcome so the
+    /// caller can render an exact operator log line.
+    ///
+    /// Fail-closed: the mutating surface MUST NOT begin Run 070 apply,
+    /// MUST NOT mutate `LivePqcTrustState`, MUST NOT evict sessions,
+    /// MUST NOT call `commit_sequence`, and MUST NOT persist a marker.
+    LifecycleRejected(crate::pqc_authority_lifecycle::AuthorityLifecycleTransitionOutcome),
 }
 
 impl std::fmt::Display for MutatingSurfaceMarkerV2Error {
@@ -1394,6 +1404,14 @@ impl std::fmt::Display for MutatingSurfaceMarkerV2Error {
                  118 §D crash-window rule. Operator MUST surface this \
                  failure)",
                 e
+            ),
+            Self::LifecycleRejected(o) => write!(
+                f,
+                "Run 161: v2 authority-marker lifecycle transition rejected \
+                 by Run 159 validator: {:?} (fail closed; no Run 070 apply, \
+                 no live trust mutation, no sequence commit, no marker \
+                 persist)",
+                o
             ),
         }
     }
@@ -1577,77 +1595,150 @@ pub fn decide_marker_acceptance_v2(
     // Step 3: compare v2 candidate against persisted (v1 / v2 / none).
     let outcome = compare_authority_marker_v2(persisted.as_ref(), &candidate);
 
-    match outcome {
-        AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted => Ok(MarkerAcceptDecisionV2 {
+    let decision = match outcome {
+        AuthorityMarkerV2ComparisonOutcome::FirstV2MarkerAccepted => MarkerAcceptDecisionV2 {
             marker_path: inputs.marker_path.to_path_buf(),
-            candidate,
+            candidate: candidate.clone(),
             should_persist: true,
             kind: MarkerAcceptKindV2::FirstV2Write,
-        }),
-        AuthorityMarkerV2ComparisonOutcome::SameV2MarkerIdempotent => Ok(MarkerAcceptDecisionV2 {
+        },
+        AuthorityMarkerV2ComparisonOutcome::SameV2MarkerIdempotent => MarkerAcceptDecisionV2 {
             marker_path: inputs.marker_path.to_path_buf(),
-            candidate,
+            candidate: candidate.clone(),
             should_persist: false,
             kind: MarkerAcceptKindV2::Idempotent,
-        }),
+        },
         AuthorityMarkerV2ComparisonOutcome::HigherSequenceAccepted {
             persisted_sequence,
             candidate_sequence,
-        } => Ok(MarkerAcceptDecisionV2 {
+        } => MarkerAcceptDecisionV2 {
             marker_path: inputs.marker_path.to_path_buf(),
-            candidate,
+            candidate: candidate.clone(),
             should_persist: true,
             kind: MarkerAcceptKindV2::UpgradeV2 {
                 previous_sequence: persisted_sequence,
                 new_sequence: candidate_sequence,
             },
-        }),
+        },
         AuthorityMarkerV2ComparisonOutcome::V2AfterV1ExplicitMigrationAllowed => {
-            Ok(MarkerAcceptDecisionV2 {
+            MarkerAcceptDecisionV2 {
                 marker_path: inputs.marker_path.to_path_buf(),
-                candidate,
+                candidate: candidate.clone(),
                 should_persist: true,
                 kind: MarkerAcceptKindV2::V2AfterV1Migration,
-            })
+            }
         }
         AuthorityMarkerV2ComparisonOutcome::LowerSequenceRejected {
             persisted_sequence,
             candidate_sequence,
-        } => Err(MutatingSurfaceMarkerV2Error::LowerV2SequenceRefused {
-            persisted_sequence,
-            attempted_sequence: candidate_sequence,
-        }),
+        } => {
+            return Err(MutatingSurfaceMarkerV2Error::LowerV2SequenceRefused {
+                persisted_sequence,
+                attempted_sequence: candidate_sequence,
+            });
+        }
         AuthorityMarkerV2ComparisonOutcome::SameSequenceDifferentDigestRejected {
             sequence,
             persisted_digest,
             candidate_digest,
-        } => Err(MutatingSurfaceMarkerV2Error::SameSequenceConflictingDigest {
-            sequence,
-            persisted_digest,
-            attempted_digest: candidate_digest,
-        }),
-        AuthorityMarkerV2ComparisonOutcome::WrongKeyActionLinkageRejected { reason } => Err(
-            MutatingSurfaceMarkerV2Error::SameSequenceConflictingKeyOrAction { reason },
-        ),
+        } => {
+            return Err(MutatingSurfaceMarkerV2Error::SameSequenceConflictingDigest {
+                sequence,
+                persisted_digest,
+                attempted_digest: candidate_digest,
+            });
+        }
+        AuthorityMarkerV2ComparisonOutcome::WrongKeyActionLinkageRejected { reason } => {
+            return Err(MutatingSurfaceMarkerV2Error::SameSequenceConflictingKeyOrAction {
+                reason,
+            });
+        }
         AuthorityMarkerV2ComparisonOutcome::V1AfterV2Rejected => {
-            Err(MutatingSurfaceMarkerV2Error::V1AfterV2Rejected)
+            return Err(MutatingSurfaceMarkerV2Error::V1AfterV2Rejected);
         }
         AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected { reason } => {
-            Err(MutatingSurfaceMarkerV2Error::UnsupportedMarkerVersion { reason })
+            return Err(MutatingSurfaceMarkerV2Error::UnsupportedMarkerVersion { reason });
         }
         other @ AuthorityMarkerV2ComparisonOutcome::WrongEnvironmentRejected { .. }
         | other @ AuthorityMarkerV2ComparisonOutcome::WrongChainIdRejected { .. }
         | other @ AuthorityMarkerV2ComparisonOutcome::WrongGenesisHashRejected { .. }
         | other @ AuthorityMarkerV2ComparisonOutcome::WrongAuthorityRootRejected { .. } => {
-            Err(MutatingSurfaceMarkerV2Error::PersistedDomainMismatch(other))
+            return Err(MutatingSurfaceMarkerV2Error::PersistedDomainMismatch(other));
         }
         // Legacy v1 outcome — should not occur on the v2-derive path since
         // the candidate is v2 and migrate produces V2AfterV1ExplicitMigrationAllowed,
         // but route defensively.
         other @ AuthorityMarkerV2ComparisonOutcome::LegacyV1(_) => {
-            Err(MutatingSurfaceMarkerV2Error::Conflict(other))
+            return Err(MutatingSurfaceMarkerV2Error::Conflict(other));
+        }
+    };
+
+    // Step 4 (Run 161): wire the Run 159 typed v2 lifecycle validator into
+    // the shared marker decision. The pure validator
+    // (`validate_v2_lifecycle_transition`) performs no I/O and never
+    // touches the persisted bytes — it is composed AFTER the existing
+    // anti-rollback compare so that:
+    //
+    // * existing anti-rollback semantics (lower sequence, same-sequence
+    //   different digest, wrong env/chain/genesis/authority-root,
+    //   v1-after-v2) remain mandatory and report through the same precise
+    //   error variants;
+    // * lifecycle-specific semantics (wrong previous key, revoked-key
+    //   reuse, retired-key reuse, malformed metadata, non-PQC suite,
+    //   unsupported lifecycle action, emergency replay) are added on top
+    //   and reported via `LifecycleRejected`.
+    //
+    // Back-compat exceptions (R20):
+    //
+    // 1. A `Ratify` candidate landing on top of a persisted v2 marker
+    //    classifies in Run 159 as
+    //    `InitialActivationAfterPersistedRejected`. Run 134/136/138/150/152
+    //    accept that pattern as benign re-ratification once the existing
+    //    anti-rollback compare has accepted it (`HigherSequenceAccepted`
+    //    / `SameV2MarkerIdempotent`).
+    //
+    // 2. A v2 candidate landing on top of a persisted v1 marker is the
+    //    Run 131 v1→v2 explicit migration boundary. Run 159 explicitly
+    //    refuses to validate v1→v2 transitions (`V1PersistedV2Candidate-
+    //    NotSupportedHere`); the marker-decision layer keeps using the
+    //    Run 131 migration outcome unchanged.
+    //
+    // All other lifecycle reject variants are fail-closed.
+    {
+        use crate::pqc_authority_lifecycle::{
+            validate_v2_lifecycle_transition, AuthorityLifecycleTransitionOutcome,
+            AuthorityTrustDomain,
+        };
+
+        let trust_domain = AuthorityTrustDomain::new(
+            candidate.environment,
+            candidate.chain_id.clone(),
+            candidate.genesis_hash.clone(),
+            candidate.authority_root_fingerprint.clone(),
+            candidate.authority_root_suite_id,
+        );
+        let lifecycle =
+            validate_v2_lifecycle_transition(persisted.as_ref(), &candidate, &trust_domain);
+        if lifecycle.is_reject() {
+            // Back-compat: existing v2 surfaces re-issue the wire-byte
+            // `Ratify` action on every accepted advancement (FirstWrite,
+            // Idempotent, HigherSequence). Run 159 classifies that as a
+            // lifecycle reject only when a persisted marker already
+            // exists. We fold that single case back into the existing
+            // anti-rollback decision (which has already accepted) and
+            // rely on the marker-layer compare for the safety properties
+            // the v2 marker schema already enforces.
+            if !matches!(
+                lifecycle,
+                AuthorityLifecycleTransitionOutcome::InitialActivationAfterPersistedRejected
+                    | AuthorityLifecycleTransitionOutcome::V1PersistedV2CandidateNotSupportedHere
+            ) {
+                return Err(MutatingSurfaceMarkerV2Error::LifecycleRejected(lifecycle));
+            }
         }
     }
+
+    Ok(decision)
 }
 
 /// Run 134 — persist a previously-accepted v2 marker after the existing

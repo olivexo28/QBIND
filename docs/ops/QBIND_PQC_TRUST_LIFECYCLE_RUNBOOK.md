@@ -6052,3 +6052,22 @@ Out of scope for Run 160:
 * Wire-level encoding of `Retire` / `EmergencyRevoke` as distinct action bytes (the existing `Ratify=0` / `Rotate=1` / `Revoke=2` byte set is preserved unchanged; Run 159's local sub-class metadata convention is sufficient).
 
 MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Validator-set rotation remains open. Release-binary lifecycle apply remains not enabled. The exact next required integration run is **Run 161**. Full C4 and C5 remain open.
+## Run 161 — wire the v2 signing-key lifecycle validator into the shared marker-decision helper
+
+Run 161 is **source/test integration only**. The Run 159 typed v2 bundle-signing-key lifecycle validator (`qbind_node::pqc_authority_lifecycle::validate_v2_lifecycle_transition`) is now composed inside the shared v2 marker-decision helper `qbind_node::pqc_authority_marker_acceptance::decide_marker_acceptance_v2` that is already used by every existing v2 surface: Run 134 (process-start reload-apply), Run 136 (startup `--p2p-trust-bundle`), Run 138 (SIGHUP live-reload), Run 150 (peer-driven drain), Run 152 (`ProductionV2MarkerCoordinator`), Run 132 (reload-check), and Run 142 (live inbound `0x05` validation-only). Operators have **no new CLI surface, no new flag, and no new runtime mutation primitive**. The on-wire byte set (`Ratify=0` / `Rotate=1` / `Revoke=2`) is unchanged; the trust-bundle / authority-marker / sequence-file / peer-candidate-envelope schemas are unchanged; the Run 159 local sub-class metadata convention (`01`=Revoke, `02`=Retire, `03`=EmergencyRevoke) is reused verbatim.
+
+What Run 161 changes for operators in practice:
+
+* On every existing v2 mutating surface, a malformed lifecycle transition (wrong previous-key fingerprint on rotate, revoked-key reuse, retired-key reuse, malformed revoked metadata, non-PQC suite, unsupported lifecycle action under the current persisted state, emergency-revoke replay, structurally malformed v2 candidate) now fail-closed at the marker-decision step, surfaced via the new typed reject `MutatingSurfaceMarkerV2Error::LifecycleRejected(AuthorityLifecycleTransitionOutcome)`. The reject is observed before any disk write — `decide_marker_acceptance_v2` itself never touches disk and persistence remains strictly after Run 055 sequence commit.
+* On every existing v2 validation-only surface (reload-check, local peer-candidate-check, live `0x05`), the same lifecycle rejects now appear in validation output without mutating local state.
+* Two Run 159 reject variants are passed through to the existing comparison decision rather than escalated, by design (R20 back-compat): `InitialActivationAfterPersistedRejected` (the wire-byte `Ratify` advancement that pre-Run-161 fixtures continue to issue, where anti-rollback is already enforced by the existing v2 marker-schema compare) and `V1PersistedV2CandidateNotSupportedHere` (the Run 131 explicit v1→v2 migration boundary, which Run 159 deliberately does not validate).
+
+Out of scope for Run 161:
+
+* MainNet enablement.
+* Governance / KMS / HSM implementation.
+* Validator-set rotation.
+* Release-binary lifecycle evidence — **deferred to Run 162**.
+* Wire-level encoding of `Retire` / `EmergencyRevoke` as distinct action bytes (the existing `Ratify=0` / `Rotate=1` / `Revoke=2` byte set is preserved unchanged; Run 159's local sub-class metadata convention is sufficient).
+
+MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Validator-set rotation remains open. Release-binary lifecycle evidence is deferred to Run 162. Full C4 and C5 remain open.

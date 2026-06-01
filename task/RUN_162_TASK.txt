@@ -1,0 +1,236 @@
+Task: Run 162 — Release-Binary Lifecycle Enforcement Evidence for v2 Marker-Decision Surfaces
+
+Current accepted state:
+- Run 159: source/test v2 bundle-signing-key lifecycle validator landed.
+- Run 160: partial-positive release-binary lifecycle boundary proved the validator had zero production `src` callers.
+- Run 161: source/test integration wired `validate_v2_lifecycle_transition` into `decide_marker_acceptance_v2`, the shared v2 marker-decision helper used by:
+  - process-start reload-apply;
+  - startup `--p2p-trust-bundle`;
+  - SIGHUP live reload;
+  - peer-driven drain / `ProductionV2MarkerCoordinator`;
+  - validation-only paths where they share the same helper.
+- Run 161 added `MutatingSurfaceMarkerV2Error::LifecycleRejected(AuthorityLifecycleTransitionOutcome)`.
+- Run 161 preserved:
+  - no wire-format change;
+  - no marker schema change;
+  - no sequence-file schema change;
+  - no CLI flag change;
+  - no MainNet enablement;
+  - no new metric;
+  - marker persistence remains strictly after Run 055 sequence commit.
+- Release-binary lifecycle evidence is deferred to Run 162.
+- Governance remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Produce release-binary evidence that Run 159 lifecycle validation is now reachable through production binary v2 marker-decision surfaces after Run 161.
+
+This run must prove, on real `target/release/qbind-node`, that lifecycle-accepted candidates pass and lifecycle-rejected candidates fail closed through at least one validation-only surface and at least one mutating surface.
+
+Strict scope:
+- Release-binary evidence only.
+- Use real `target/release/qbind-node`.
+- Use release-built helper(s) to mint lifecycle fixtures.
+- No new production behavior unless a tiny harness-only helper extension is required.
+- No MainNet apply enablement.
+- No governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No wire-format change.
+- No marker schema change.
+- No sequence-file schema change.
+- No trust-bundle schema change.
+- Do not weaken Runs 070, 130–161.
+- Do not claim full C4 or C5 closure.
+
+Required deliverables:
+1. Add release-binary harness:
+   scripts/devnet/run_162_authority_lifecycle_release_binary_enforcement.sh
+
+2. Add evidence archive:
+   docs/devnet/run_162_authority_lifecycle_release_binary_enforcement/
+
+3. Add canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_162.md
+
+4. Update narrowly:
+   - docs/whitepaper/contradiction.md
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+   - docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Required release-binary surfaces:
+Exercise at least these two categories:
+
+A. Validation-only surface:
+- `--p2p-trust-bundle-reload-check`, or
+- local peer-candidate-check, or
+- another existing release-binary validation-only v2 surface.
+
+B. Mutating surface:
+- process-start reload-apply, or
+- startup `--p2p-trust-bundle`, or
+- SIGHUP live reload, or
+- peer-driven drain-once.
+
+Preferred minimal matrix:
+Use `reload-check` for validation-only and `reload-apply` for mutating evidence, because they are easier to drive deterministically than long-running SIGHUP or live `0x05`.
+
+Required accepted lifecycle scenarios:
+A1. ActivateInitial accepted, if representable on release binary.
+- no persisted marker;
+- valid initial lifecycle candidate;
+- release binary accepts.
+
+A2. Rotate accepted.
+- persisted key A seq=N;
+- candidate key B seq=N+1 with previous=A;
+- release binary accepts.
+
+A3. Retire accepted.
+- valid retire subclass metadata;
+- release binary accepts if representable.
+
+A4. Revoke accepted.
+- valid revoked-key metadata;
+- release binary accepts.
+
+A5. EmergencyRevoke accepted.
+- valid emergency subclass metadata;
+- release binary accepts if representable.
+
+A6. Idempotent same lifecycle record accepted.
+- same sequence and digest;
+- release binary accepts as idempotent/no-op.
+
+If any accepted action is not representable through the current fixture/helper without schema drift, document exactly why and cite Run 159/161 source-test coverage. Do not fabricate evidence.
+
+Required rejection scenarios:
+R1. lower-sequence lifecycle candidate rejected.
+- lifecycle / marker error visible;
+- no sequence write;
+- no marker write.
+
+R2. same-sequence different digest rejected.
+
+R3. wrong environment rejected.
+
+R4. wrong chain rejected.
+
+R5. wrong genesis rejected.
+
+R6. wrong authority root rejected.
+
+R7. wrong previous key rejected.
+
+R8. revoked key reuse rejected.
+
+R9. retired key reuse rejected.
+
+R10. emergency revocation replay rejected.
+
+R11. malformed revoked metadata rejected.
+
+R12. non-PQC signing-key suite rejected.
+
+R13. unsupported lifecycle action byte rejected.
+
+R14. corrupted local marker rejected fail-closed.
+
+R15. MainNet peer-driven apply remains refused.
+
+Required mutation proof for mutating accepted scenarios:
+For every accepted mutating lifecycle scenario:
+- lifecycle validation occurs before mutation;
+- Run 070 / relevant apply validation succeeds;
+- live trust mutation occurs only after validation;
+- session eviction occurs where applicable;
+- Run 055 sequence commit succeeds;
+- v2 authority marker persists strictly after sequence commit;
+- marker JSON/SHA before/after captured;
+- sequence JSON/SHA before/after captured.
+
+Required negative invariant proof:
+For every rejected scenario:
+- binary exits non-zero or returns typed refusal according to the surface;
+- lifecycle rejection is visible, preferably `LifecycleRejected(...)`;
+- no live trust swap;
+- no session eviction;
+- no Run 055 sequence write;
+- no v2 marker write;
+- marker bytes unchanged;
+- sequence bytes unchanged;
+- no `.tmp` residue;
+- no fallback to `--p2p-trusted-root`;
+- no active DummySig / DummyKem / DummyAead.
+
+Required reachability proof:
+The evidence report must include:
+- grep/call-site proof that `validate_v2_lifecycle_transition` has production `src` caller(s) after Run 161;
+- release-binary log proof that lifecycle rejection/acceptance is exercised through `decide_marker_acceptance_v2`;
+- comparison against Run 160’s “zero production caller” boundary.
+
+Required captured metadata:
+- qbind-node SHA-256 and ELF Build ID;
+- lifecycle helper SHA-256 and ELF Build ID;
+- git commit hash;
+- rustc/cargo versions;
+- exact commands;
+- stdout/stderr logs;
+- per-scenario exit codes;
+- marker/sequence JSON and SHA before/after;
+- data-dir inventories;
+- denylist grep results.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example run_160_authority_lifecycle_fixture_helper
+- bash scripts/devnet/run_162_authority_lifecycle_release_binary_enforcement.sh
+- cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests
+- cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+- cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+- cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+- cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+- cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_162.md` must state:
+- Run 162 is release-binary lifecycle enforcement evidence.
+- Which surfaces were exercised.
+- Which lifecycle actions were accepted on release binaries.
+- Which lifecycle actions were rejected on release binaries.
+- Which actions, if any, remain source/test-only and why.
+- No MainNet apply is enabled.
+- Governance remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open unless separately closed by explicit criteria.
+- C5 remains open.
+
+Acceptance criteria:
+Run 162 is acceptable only if:
+1. Real release binaries exercise lifecycle validation through production v2 marker-decision surfaces.
+2. At least one validation-only and one mutating surface are covered, unless a precise blocker is documented.
+3. Lifecycle accepts and rejects are visible in release-binary evidence.
+4. Rejected lifecycle candidates produce no mutation.
+5. Mutating accepted candidates preserve sequence-before-marker ordering.
+6. Run 160’s zero-call-site boundary is explicitly superseded.
+7. MainNet remains refused.
+8. Governance/KMS-HSM/validator-set rotation remain open.
+9. No full C4 or C5 closure is overclaimed.
