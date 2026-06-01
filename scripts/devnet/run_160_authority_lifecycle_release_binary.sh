@@ -201,15 +201,21 @@ TESTS="${REPO_ROOT}/crates/qbind-node/tests"
 } > "${CALL_GRAPH_DIR}/main_rs_grep.txt"
 
 # 3d. Reachability summary.
-src_call_count=$(grep -c 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/src_grep.txt" || true)
-tests_call_count=$(grep -c 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/tests_grep.txt" || true)
-main_call_count=$(grep -c 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/main_rs_grep.txt" || true)
+set +o pipefail
+src_call_count=$(grep -c 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/src_grep.txt" 2>/dev/null || echo 0)
+tests_call_count=$(grep -c 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/tests_grep.txt" 2>/dev/null || echo 0)
+main_call_count=$(grep -c 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/main_rs_grep.txt" 2>/dev/null || echo 0)
 
 # Count call sites that are NOT inside the validator's own module.
-non_self_call_count=$( ( grep 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/src_grep.txt" || true ) \
+non_self_call_count=$( grep 'validate_v2_lifecycle_transition' "${CALL_GRAPH_DIR}/src_grep.txt" 2>/dev/null \
     | grep -v 'pqc_authority_lifecycle.rs:' \
     | grep -v 'lib.rs:' \
-    | wc -l )
+    | wc -l | tr -d ' ' )
+set -o pipefail
+src_call_count="${src_call_count:-0}"
+tests_call_count="${tests_call_count:-0}"
+main_call_count="${main_call_count:-0}"
+non_self_call_count="${non_self_call_count:-0}"
 
 {
     echo "Run 160 source-level reachability of validate_v2_lifecycle_transition"
