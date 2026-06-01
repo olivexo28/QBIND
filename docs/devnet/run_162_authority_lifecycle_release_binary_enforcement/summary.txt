@@ -1,0 +1,128 @@
+Run 162: release-binary lifecycle ENFORCEMENT evidence for v2 marker-decision surfaces
+=======================================================================================
+
+Verdict: release-binary lifecycle enforcement evidence captured;
+lifecycle accepts and rejects are now observable on the real release
+binary through both a validation-only and a mutating v2 marker-decision
+surface; Run 160's "zero production caller" boundary is superseded.
+
+Run 162 is the partner deliverable to Run 161. Run 161 wired the Run
+159 typed v2 bundle-signing-key lifecycle validator
+(`qbind_node::pqc_authority_lifecycle::validate_v2_lifecycle_transition`)
+into the shared v2 marker-decision helper
+(`qbind_node::pqc_authority_marker_acceptance::decide_marker_acceptance_v2`).
+Run 162 proves on `target/release/qbind-node` that lifecycle accepts
+and rejects flow through that wiring.
+
+Harness: scripts/devnet/run_162_authority_lifecycle_release_binary_enforcement.sh
+
+Surfaces exercised on the release binary:
+  * validation-only:  --p2p-trust-bundle-reload-check       (Run 132 dispatch)
+  * mutating:         --p2p-trust-bundle-reload-apply-path  (Run 134 dispatch)
+
+Captured release-binary evidence:
+  * release-built helpers minted the v2 ratification fixture corpus
+    (Run 133 helper) and the release-binary lifecycle fixture corpus
+    (Run 160 helper) — see fixtures/ and fixture_manifest.txt for
+    per-file sha256s.
+  * release-built target/release/qbind-node identity in provenance.txt
+    (sha256 + ELF Build ID).
+  * source-level reachability proof (reachability/src_grep.txt and
+    reachability/reachability.txt) showing
+    `validate_v2_lifecycle_transition` and the matching
+    `MutatingSurfaceMarkerV2Error::LifecycleRejected` constructor are
+    invoked from `crates/qbind-node/src/pqc_authority_marker_acceptance.rs`
+    (`decide_marker_acceptance_v2`) in production source — Run 160's
+    zero-call-site boundary explicitly superseded.
+
+Lifecycle action coverage at the release-binary surface:
+  ActivateInitial  (A1):  RELEASE-BINARY ACCEPT (reload-check + reload-apply)
+  Rotate           (A2):  RELEASE-BINARY ACCEPT (reload-check + reload-apply)
+  Retire           (A3):  source/test only — sub-class metadata not
+                          surfaced by CLI; Run 159 A3/R9 + Run 161 A6 cited.
+  Revoke           (A4):  wire-byte path covered by lower-sequence /
+                          equivocation comparisons; sub-class semantics
+                          source/test only — Run 159 A4/R8 cited.
+  EmergencyRevoke  (A5):  source/test only — sub-class metadata not
+                          surfaced by CLI; Run 159 A5/R10 + Run 161 A8 cited.
+  Idempotent       (A6):  RELEASE-BINARY ACCEPT (reload-check + reload-apply)
+
+Lifecycle rejection coverage at the release-binary surface:
+  R1   lower-sequence:                   reload-check + reload-apply REJECT
+  R2   same-sequence different-digest:   reload-check + reload-apply REJECT
+  R3   wrong environment:                reload-check + reload-apply REJECT
+  R4   wrong chain:                      reload-check REJECT
+  R5   wrong genesis:                    reload-check REJECT
+  R6   wrong authority root:             source/test only — Run 159 R6 + Run 161 R6 cited
+  R7   wrong previous key:               source/test only — Run 159 R7 + Run 161 R7 cited
+  R8   revoked-key reuse:                source/test only — Run 159 R8 + Run 161 R8 cited
+  R9   retired-key reuse:                source/test only — Run 159 R9 + Run 161 R9 cited
+  R10  emergency revocation replay:      source/test only — Run 159 R10 + Run 161 R10 cited
+  R11  malformed revoked metadata:       source/test only — Run 159 R11 + Run 161 R11 cited
+  R12  non-PQC suite:                    PQC verifier surrogate (bad-signature) REJECT;
+                                         non-PQC suite source/test — Run 159 R12 cited
+  R13  unsupported lifecycle action byte:pinned by Run 130 wire-byte enum
+                                         (`Ratify=0`, `Rotate=1`, `Revoke=2`); any
+                                         unknown byte fails decode at the wire layer
+  R14  corrupted local marker:           reload-apply fail-closed REJECT
+  R15  MainNet peer-driven apply:        refused unconditionally — cited from
+                                         Run 151 / Run 158 release-binary evidence;
+                                         this harness does NOT enable MainNet on
+                                         any surface
+
+Required mutation proof on accept (B.A1, B.A2, B.A6):
+  lifecycle validation occurs BEFORE any live trust mutation;
+  Run 070 apply succeeds (`trust-bundle candidate APPLIED live`);
+  Run 055 sequence commit succeeds (`sequence_commit=ok`);
+  v2 authority marker persists strictly AFTER sequence commit
+    (`[run-134] v2 authority-marker persisted`);
+  marker JSON / SHA before+after captured under marker_hashes/;
+  sequence JSON / SHA after captured under sequence_hashes/;
+  on idempotent (B.A6), v2 marker bytes are byte-identical to seed.
+
+Required negative invariant proof on reject (every reject scenario):
+  exit code non-zero; lifecycle/marker rejection visible on stderr;
+  no live trust swap; no session eviction;
+  no Run 055 sequence write (no pqc_trust_bundle_sequence.json);
+  no v2 marker write (no pqc_authority_state.json created when none
+    was seeded; pre-seeded marker bytes preserved when one was);
+  no .tmp residue (no pqc_authority_state.json.tmp);
+  no fallback to --p2p-trusted-root;
+  no active DummySig / DummyKem / DummyAead.
+
+Out-of-scope assertions (the denylist `grep_summaries/out_of_scope.txt`
+must be empty):
+  no autonomous drain;
+  no apply on receipt;
+  no peer-majority authority;
+  no governance enforced;
+  no KMS / HSM enforced;
+  no validator-set rotated;
+  no MainNet apply enabled;
+  no fallback to --p2p-trusted-root;
+  no active DummySig / DummyKem / DummyAead;
+  no schema/wire/metric drift;
+  no claim of full C4 / C5 closure.
+
+Documentation:
+  docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_162.md (canonical evidence report)
+  docs/devnet/run_162_authority_lifecycle_release_binary_enforcement/README.md
+  docs/whitepaper/contradiction.md (Run 162 entry)
+  docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md (Run 162 entry)
+  docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md (Run 162 entry)
+  docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md (Run 162 entry)
+
+Open work explicitly NOT closed by Run 162:
+  governance / ratification authority remains unimplemented;
+  KMS / HSM custody remains unimplemented;
+  validator-set rotation remains open;
+  full C4 closure remains OPEN;
+  C5 closure remains OPEN;
+  MainNet bundle-signing authority remains refused unconditionally.
+
+Tracked vs generated artifacts:
+  tracked:    README.md, summary.txt
+  generated:  logs/, data/, fixtures/, exit_codes/, marker_hashes/,
+              sequence_hashes/, data_inventories/, grep_summaries/,
+              reachability/, provenance.txt, fixture_manifest.txt
+              (mirroring Run 153 / 155 / 156 / 158 / 160 precedent)

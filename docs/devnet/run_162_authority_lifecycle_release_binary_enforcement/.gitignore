@@ -1,0 +1,17 @@
+# Run 162 evidence archive — generated run artifacts are reproduced by
+# the harness (`scripts/devnet/run_162_authority_lifecycle_release_binary_enforcement.sh`)
+# and are not tracked (they contain per-run, machine-specific data such
+# as absolute paths, ephemeral helper output, and timestamps). Only
+# README.md and summary.txt are tracked, mirroring the Run 153 / Run 155 /
+# Run 156 / Run 158 / Run 160 evidence-archive precedent.
+/logs/
+/data/
+/fixtures/
+/exit_codes/
+/marker_hashes/
+/sequence_hashes/
+/data_inventories/
+/grep_summaries/
+/reachability/
+/provenance.txt
+/fixture_manifest.txt

@@ -6070,4 +6070,27 @@ Out of scope for Run 161:
 * Release-binary lifecycle evidence — **deferred to Run 162**.
 * Wire-level encoding of `Retire` / `EmergencyRevoke` as distinct action bytes (the existing `Ratify=0` / `Rotate=1` / `Revoke=2` byte set is preserved unchanged; Run 159's local sub-class metadata convention is sufficient).
 
+## Run 162 — release-binary lifecycle ENFORCEMENT evidence on real `target/release/qbind-node`
+
+Run 162 is **release-binary evidence only**: a new release-binary harness (`scripts/devnet/run_162_authority_lifecycle_release_binary_enforcement.sh`), a new evidence archive (`docs/devnet/run_162_authority_lifecycle_release_binary_enforcement/`), a canonical evidence report (`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_162.md`), and four narrow doc alignment updates. Operators have **no new CLI surface, no new flag, and no new runtime mutation primitive**. The on-wire byte set, the v2 marker schema, the sequence-file schema, and the peer-candidate envelope schema are all unchanged.
+
+What Run 162 proves for operators:
+
+* On real `target/release/qbind-node`, the Run 161 wiring of the Run 159 lifecycle validator into `decide_marker_acceptance_v2` is now exercised end-to-end through the existing `--p2p-trust-bundle-reload-check` (validation-only) and `--p2p-trust-bundle-reload-apply-path` (mutating) flags. The release-binary captures show:
+  * `ActivateInitial` accept (no persisted marker → first v2 marker write strictly after Run 055 sequence commit);
+  * `Rotate` accept (v2-seq=1 marker → v2-seq=2 marker, again strictly after Run 055 sequence commit);
+  * `Idempotent` same-record accept (no rewrite; marker bytes byte-identical to seed);
+  * `lower-sequence`, `same-sequence different-digest` (equivocation), `wrong environment`, `wrong chain`, `wrong genesis`, the PQC-verifier surrogate for `non-PQC suite`, and `corrupted local marker` rejected fail-closed with no live trust swap, no session eviction, no Run 055 sequence write, no v2 marker write, no `.tmp` residue, no fallback to `--p2p-trusted-root`, and no active `DummySig` / `DummyKem` / `DummyAead`.
+* The harness writes a source-level reachability proof (`reachability/src_grep.txt`) showing `validate_v2_lifecycle_transition` and `MutatingSurfaceMarkerV2Error::LifecycleRejected` are invoked from `crates/qbind-node/src/pqc_authority_marker_acceptance.rs` (the Run 161 wiring); this **explicitly supersedes Run 160's "zero production caller" boundary**.
+* Lifecycle scenarios that depend on the Run 159 local sub-class metadata (`02`=Retire, `03`=EmergencyRevoke) and on sub-class-prefixed persisted markers (`R6`–`R11`) remain source/test-only on the release binary today, because the persisted-marker sub-class prefix is not surfaced by the existing CLI; Run 159 source/test coverage and Run 161 source/test integration coverage continue to enforce those cases on release-built test binaries running the **same** `decide_marker_acceptance_v2` helper.
+
+Out of scope for Run 162:
+
+* MainNet enablement (this harness does not enable MainNet on any surface; MainNet peer-driven apply refusal is cited from Run 151 / Run 158 release-binary evidence).
+* Governance / KMS / HSM implementation.
+* Validator-set rotation.
+* Wire-level encoding of `Retire` / `EmergencyRevoke` as distinct action bytes.
+* Sub-class-metadata-driven Retire / EmergencyRevoke release-binary acceptance evidence and the sub-class-only rejection cases R6–R11.
+* Full **C4** closure. **C5** remains open.
+
 MainNet remains refused. Governance remains unimplemented. KMS / HSM remains unimplemented. Validator-set rotation remains open. Release-binary lifecycle evidence is deferred to Run 162. Full C4 and C5 remain open.
