@@ -500,7 +500,7 @@ impl CombinedLifecycleGovernanceOutcome {
 /// against the candidate v2 record and the expected trust domain.
 ///
 /// Acceptance does **not** imply MainNet peer-driven apply enablement.
-pub fn verify_governance_authority_proof<V: GovernanceIssuerSignatureVerifier>(
+pub fn verify_governance_authority_proof<V: GovernanceIssuerSignatureVerifier + ?Sized>(
     proof: &GovernanceAuthorityProof,
     candidate: &PersistentAuthorityStateRecordV2,
     trust_domain: &AuthorityTrustDomain,
@@ -823,7 +823,12 @@ pub fn validate_lifecycle_with_governance_authority<V: GovernanceIssuerSignature
 /// compare the proof's declared `lifecycle_action` against the
 /// candidate's encoded lifecycle action without consulting persisted
 /// state.
-fn classify_candidate_lifecycle_action(
+///
+/// Run 165 makes this public so the marker-decision layer can determine
+/// — without re-deriving any state — whether a candidate's lifecycle
+/// action is governance-sensitive and therefore requires a governance
+/// authority proof under the active [`GovernanceProofPolicy`].
+pub fn classify_candidate_lifecycle_action(
     candidate: &PersistentAuthorityStateRecordV2,
 ) -> Result<LocalLifecycleAction, String> {
     match candidate.latest_lifecycle_action {
@@ -846,6 +851,185 @@ fn classify_candidate_lifecycle_action(
                     "unknown lifecycle sub-class prefix '{}' (expected 01/02/03)",
                     other
                 )),
+            }
+        }
+    }
+}
+// ===========================================================================
+// Run 165 — governance-aware marker-decision policy + gate
+// ===========================================================================
+//
+// Run 165 wires the Run 163 governance authority verifier into the v2
+// lifecycle / marker-decision path so governance authority checks become
+// production-source reachable before lifecycle-sensitive marker decisions
+// are accepted.
+//
+// Strict scope (unchanged from Runs 159/161/162/163/164):
+//
+// * source/test integration only — release-binary governance enforcement
+//   evidence is deferred to Run 166;
+// * accepting a governance proof does NOT enable MainNet peer-driven apply
+//   and does NOT bypass any existing environment gate;
+// * no governance execution engine, no on-chain governance, no KMS/HSM,
+//   no validator-set rotation, no wire/marker/sequence/trust-bundle schema
+//   change.
+//
+// ## Documented schema-carrying gap
+//
+// The current v2 ratification / authority-marker wire material does NOT
+// carry governance authority proof fields. Run 165 deliberately does NOT
+// invent a schema to smuggle proof bytes through the existing wire format.
+// Instead, a surface that cannot obtain a proof supplies
+// [`GovernanceProofContext::Unavailable`]; under a policy that requires a
+// proof for the candidate's lifecycle action the gate fails closed with
+// [`GovernanceMarkerGate::RequiredButMissing`]. A future run that defines
+// an actual proof-carrying schema (or supplies a proof out-of-band) passes
+// [`GovernanceProofContext::Supplied`].
+
+/// Run 165 — which lifecycle actions require a governance authority proof.
+///
+/// The default production wiring for Run 165 is [`Self::NotRequired`]:
+/// governance verification is composed into the marker-decision path and
+/// is exercised whenever a proof is supplied, but a *missing* proof does
+/// not by itself refuse a transition. This preserves the existing
+/// DevNet/TestNet peer-driven apply evidence (Runs 148/150/152/153/158),
+/// which has no governance-proof fixtures yet, and defers release-binary
+/// governance enforcement to Run 166.
+///
+/// [`Self::RequiredForLifecycleSensitive`] is the fail-closed policy the
+/// Run 165 test matrix uses to prove that missing/invalid governance
+/// proofs reject lifecycle-sensitive transitions (`Rotate`, `Retire`,
+/// `Revoke`, `EmergencyRevoke`). `ActivateInitial` remains governance-
+/// optional under both policies (genesis-bound first activation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GovernanceProofPolicy {
+    /// Governance proof optional for every action. A supplied proof is
+    /// still verified; an absent proof does not refuse the transition.
+    NotRequired,
+    /// `Rotate` / `Retire` / `Revoke` / `EmergencyRevoke` require a valid
+    /// governance authority proof. `ActivateInitial` remains optional.
+    RequiredForLifecycleSensitive,
+}
+
+impl GovernanceProofPolicy {
+    /// Returns `true` iff this policy requires a governance authority
+    /// proof for `action`.
+    pub fn requires_proof_for(self, action: LocalLifecycleAction) -> bool {
+        match self {
+            Self::NotRequired => false,
+            Self::RequiredForLifecycleSensitive => matches!(
+                action,
+                LocalLifecycleAction::Rotate
+                    | LocalLifecycleAction::Retire
+                    | LocalLifecycleAction::Revoke
+                    | LocalLifecycleAction::EmergencyRevoke
+            ),
+        }
+    }
+}
+
+/// Run 165 — governance proof context handed to the marker-decision path.
+///
+/// The verifier reference is a trait object so the marker-decision layer
+/// stays non-generic; the trait is object-safe and `dyn Trait` itself
+/// implements [`GovernanceIssuerSignatureVerifier`], so the existing
+/// generic [`verify_governance_authority_proof`] accepts it unchanged.
+pub enum GovernanceProofContext<'a> {
+    /// No governance proof is available to the calling surface. Today the
+    /// v2 ratification / marker wire material does NOT carry governance
+    /// proof fields (documented schema gap). Under a policy that requires
+    /// a proof for the candidate's lifecycle action this fails closed.
+    Unavailable,
+    /// A governance proof is supplied (source/test fixture path, or a
+    /// future run that carries proof material out-of-band).
+    Supplied {
+        proof: &'a GovernanceAuthorityProof,
+        verifier: &'a dyn GovernanceIssuerSignatureVerifier,
+    },
+}
+
+/// Run 165 — typed outcome of [`evaluate_governance_marker_gate`].
+///
+/// Pure / non-mutating. The caller MUST NOT begin Run 070 apply, mutate
+/// live trust, evict sessions, write a sequence, or persist a marker on
+/// any non-accept variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GovernanceMarkerGate {
+    /// Policy does not require a proof for this action and none was
+    /// supplied. The governance layer is a no-op for this decision; the
+    /// existing anti-rollback + lifecycle decision stands unchanged.
+    NotRequiredNoProof,
+    /// A governance proof was supplied and accepted by
+    /// [`verify_governance_authority_proof`].
+    Accepted(GovernanceAuthorityVerificationOutcome),
+    /// Policy requires a governance proof for this lifecycle action but
+    /// none was available (documented wire schema gap). Fail closed.
+    RequiredButMissing { action: LocalLifecycleAction },
+    /// A governance proof was supplied but rejected. Carries the precise
+    /// typed verifier outcome for the operator log line. Fail closed.
+    Rejected(GovernanceAuthorityVerificationOutcome),
+}
+
+impl GovernanceMarkerGate {
+    pub fn is_accept(&self) -> bool {
+        matches!(self, Self::NotRequiredNoProof | Self::Accepted(_))
+    }
+
+    pub fn is_reject(&self) -> bool {
+        !self.is_accept()
+    }
+}
+
+/// Run 165 — pure governance gate over an already-derived candidate.
+///
+/// Performs **no I/O**. Writes no marker, no sequence, mutates no live
+/// trust state, evicts no sessions. Determines the candidate's lifecycle
+/// action, then:
+///
+/// * if a proof is supplied, verifies it via
+///   [`verify_governance_authority_proof`] and returns
+///   [`GovernanceMarkerGate::Accepted`] / [`GovernanceMarkerGate::Rejected`];
+/// * if no proof is supplied, returns
+///   [`GovernanceMarkerGate::RequiredButMissing`] when `policy` requires a
+///   proof for the action, else [`GovernanceMarkerGate::NotRequiredNoProof`].
+///
+/// Acceptance does **not** imply MainNet peer-driven apply enablement.
+pub fn evaluate_governance_marker_gate(
+    candidate: &PersistentAuthorityStateRecordV2,
+    trust_domain: &AuthorityTrustDomain,
+    persisted_sequence: Option<u64>,
+    policy: GovernanceProofPolicy,
+    context: GovernanceProofContext<'_>,
+) -> GovernanceMarkerGate {
+    let action = match classify_candidate_lifecycle_action(candidate) {
+        Ok(a) => a,
+        Err(reason) => {
+            return GovernanceMarkerGate::Rejected(
+                GovernanceAuthorityVerificationOutcome::MalformedProof { reason },
+            );
+        }
+    };
+
+    match context {
+        GovernanceProofContext::Supplied { proof, verifier } => {
+            let outcome = verify_governance_authority_proof(
+                proof,
+                candidate,
+                trust_domain,
+                persisted_sequence,
+                verifier,
+            );
+            if outcome.is_accept() {
+                GovernanceMarkerGate::Accepted(outcome)
+            } else {
+                GovernanceMarkerGate::Rejected(outcome)
+            }
+        }
+        GovernanceProofContext::Unavailable => {
+            if policy.requires_proof_for(action) {
+                GovernanceMarkerGate::RequiredButMissing { action }
+            } else {
+                GovernanceMarkerGate::NotRequiredNoProof
             }
         }
     }

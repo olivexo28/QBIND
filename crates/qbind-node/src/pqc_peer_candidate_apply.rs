@@ -376,7 +376,21 @@ impl V2MarkerCoordinator for ProductionV2MarkerCoordinator {
             update_source: self.update_source,
             updated_at_unix_secs: self.updated_at_unix_secs,
         };
-        match crate::pqc_authority_marker_acceptance::decide_marker_acceptance_v2(inputs) {
+        // Run 165: route the peer-driven drain pre-apply decision through
+        // the governance-aware shared helper so the Run 163 governance
+        // authority verifier is composed into the peer-driven
+        // `ProductionV2MarkerCoordinator` marker decision path. The
+        // peer-driven wire material carries no governance proof (documented
+        // schema-carrying gap), so `Unavailable` under the `NotRequired`
+        // policy is behaviour-preserving for Run 165; release-binary
+        // governance enforcement is deferred to Run 166. MainNet
+        // peer-driven apply remains refused by the existing environment
+        // gate regardless of governance proof.
+        match crate::pqc_authority_marker_acceptance::decide_v2_marker_acceptance_with_lifecycle_and_governance(
+            inputs,
+            crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+            crate::pqc_governance_authority::GovernanceProofContext::Unavailable,
+        ) {
             Ok(decision) => {
                 self.decision = Some(decision);
                 Ok(())

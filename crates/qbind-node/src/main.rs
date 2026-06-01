@@ -695,9 +695,10 @@ fn preflight_run_134_v2_marker_decision(
 > {
     use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
     use qbind_node::pqc_authority_marker_acceptance::{
-        decide_marker_acceptance_v2, MarkerAcceptanceV2Inputs,
+        decide_v2_marker_acceptance_with_lifecycle_and_governance, MarkerAcceptanceV2Inputs,
         MutatingSurfaceMarkerV2Error,
     };
+    use qbind_node::pqc_governance_authority::{GovernanceProofContext, GovernanceProofPolicy};
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
@@ -745,16 +746,27 @@ fn preflight_run_134_v2_marker_decision(
 
     let marker_path = authority_state_file_path(data_dir);
 
-    let decision = decide_marker_acceptance_v2(MarkerAcceptanceV2Inputs {
-        marker_path: &marker_path,
-        runtime_env,
-        runtime_chain_id,
-        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
-        ratification: ratification_v2,
-        ratified: &ratified_v2,
-        update_source: AuthorityStateUpdateSource::ReloadApply,
-        updated_at_unix_secs,
-    })?;
+    // Run 165: route through the governance-aware shared helper so the
+    // Run 163 governance authority verifier is composed into this
+    // reload-apply marker decision path. No governance proof is carried by
+    // the existing wire material (documented schema-carrying gap), so this
+    // surface supplies `Unavailable` under the `NotRequired` policy —
+    // behaviour-preserving for Run 165; release-binary governance
+    // enforcement is deferred to Run 166.
+    let decision = decide_v2_marker_acceptance_with_lifecycle_and_governance(
+        MarkerAcceptanceV2Inputs {
+            marker_path: &marker_path,
+            runtime_env,
+            runtime_chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            ratification: ratification_v2,
+            ratified: &ratified_v2,
+            update_source: AuthorityStateUpdateSource::ReloadApply,
+            updated_at_unix_secs,
+        },
+        GovernanceProofPolicy::NotRequired,
+        GovernanceProofContext::Unavailable,
+    )?;
 
     Ok(Some(decision))
 }
@@ -818,9 +830,10 @@ fn preflight_run_136_v2_marker_decision_for_startup(
 > {
     use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
     use qbind_node::pqc_authority_marker_acceptance::{
-        decide_marker_acceptance_v2, MarkerAcceptanceV2Inputs,
+        decide_v2_marker_acceptance_with_lifecycle_and_governance, MarkerAcceptanceV2Inputs,
         MutatingSurfaceMarkerV2Error,
     };
+    use qbind_node::pqc_governance_authority::{GovernanceProofContext, GovernanceProofPolicy};
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
@@ -873,16 +886,27 @@ fn preflight_run_136_v2_marker_decision_for_startup(
 
     let marker_path = authority_state_file_path(data_dir);
 
-    let decision = decide_marker_acceptance_v2(MarkerAcceptanceV2Inputs {
-        marker_path: &marker_path,
-        runtime_env,
-        runtime_chain_id,
-        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
-        ratification: ratification_v2,
-        ratified: &ratified_v2,
-        update_source: AuthorityStateUpdateSource::StartupLoad,
-        updated_at_unix_secs,
-    })?;
+    // Run 165: route through the governance-aware shared helper so the
+    // Run 163 governance authority verifier is composed into this startup
+    // marker decision path. No governance proof is carried by the existing
+    // wire material (documented schema-carrying gap), so this surface
+    // supplies `Unavailable` under the `NotRequired` policy —
+    // behaviour-preserving for Run 165; release-binary governance
+    // enforcement is deferred to Run 166.
+    let decision = decide_v2_marker_acceptance_with_lifecycle_and_governance(
+        MarkerAcceptanceV2Inputs {
+            marker_path: &marker_path,
+            runtime_env,
+            runtime_chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            ratification: ratification_v2,
+            ratified: &ratified_v2,
+            update_source: AuthorityStateUpdateSource::StartupLoad,
+            updated_at_unix_secs,
+        },
+        GovernanceProofPolicy::NotRequired,
+        GovernanceProofContext::Unavailable,
+    )?;
 
     // Keep `MutatingSurfaceMarkerV2Error` re-export in scope for the
     // explicit Result type without triggering an unused-import warning
