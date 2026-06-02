@@ -1,0 +1,296 @@
+Task: Run 168 — Release-Binary Governance-Proof Carrying Enforcement Evidence
+
+Current accepted state:
+- Run 163: pure governance authority verifier landed.
+- Run 164: release-built helper evidence showed the verifier worked but was not production-surface reachable.
+- Run 165: governance gate wired into lifecycle / marker-decision paths.
+- Run 166: release-binary governance gate evidence landed:
+  - `NotRequired` compatibility proven on real `target/release/qbind-node`;
+  - `RequiredButMissing` / `GovernanceAuthorityRejected` fail-closed behavior proven through release-built helper linked to production helper symbols;
+  - production v2 material could not yet carry real governance proofs.
+- Run 167: source/test governance-proof carrier landed:
+  - `pqc_governance_proof_wire.rs`;
+  - `GovernanceAuthorityProofWire`;
+  - schema version 1;
+  - optional `governance_authority_proof` JSON sibling for v2 ratification sidecars;
+  - `GovernanceProofLoadStatus::{Absent, Available, Malformed}`;
+  - adapter into the Run 165 `GovernanceProofContext`;
+  - `load_v2_ratification_sidecar_with_governance_proof_from_path`;
+  - 47-test A1–A9 / R1–R21 matrix.
+- Run 167 did not change `qbind_ledger::BundleSigningRatificationV2` or the existing Run 132 dispatcher.
+- Existing no-proof sidecars remain compatible under `NotRequired`.
+- Required policy fails closed when proof is missing.
+- Release-binary proof-carrying enforcement is deferred to Run 168.
+- MainNet peer-driven apply remains refused.
+- OnChainGovernance remains unsupported/fail-closed.
+- governance execution remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Produce release-binary evidence that governance-proof carrying v2 sidecars are parsed and enforced by real `target/release/qbind-node` production surfaces.
+
+This run must prove, on real release binaries:
+1. old no-proof sidecars remain compatible under `NotRequired`;
+2. proof-required policy fails closed when proof is absent;
+3. valid proof-carrying sidecars reach the Run 165 governance gate and are accepted where lifecycle/anti-rollback checks also pass;
+4. malformed or invalid proof-carrying sidecars fail closed;
+5. MainNet peer-driven apply remains refused even with a valid governance proof.
+
+Strict scope:
+- Release-binary evidence only.
+- Use real `target/release/qbind-node`.
+- Use release-built helper(s) to mint proof-carrying sidecars.
+- No MainNet peer-driven apply enablement.
+- No governance execution engine.
+- No on-chain governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No new wire/schema changes beyond the Run 167 additive optional proof-carrier already landed.
+- No marker schema change.
+- No sequence-file schema change.
+- No trust-bundle core schema change.
+- Do not weaken Runs 070, 130–167.
+- Do not claim full C4 or C5 closure.
+
+Required deliverables:
+1. Add release-binary harness:
+   scripts/devnet/run_168_governance_proof_carrier_release_binary.sh
+
+2. Add evidence archive:
+   docs/devnet/run_168_governance_proof_carrier_release_binary/
+
+3. Add canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_168.md
+
+4. Update narrowly:
+   - docs/whitepaper/contradiction.md
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+   - docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Required release-binary surfaces:
+Exercise at least:
+
+A. Validation-only surface:
+- preferred: `--p2p-trust-bundle-reload-check`.
+
+B. Mutating surface:
+- preferred: process-start `--p2p-trust-bundle-reload-apply-path`.
+
+If startup, SIGHUP, or peer-driven drain are easier to drive with the proof-carrying sibling file, they may be used, but reload-check/reload-apply are preferred because the evidence is deterministic.
+
+Required accepted scenarios:
+
+A1. old no-proof sidecar under NotRequired remains accepted on reload-check
+- Expected:
+  - release binary exits success;
+  - governance proof load status = Absent / NotRequired compatibility path;
+  - validation-only semantics preserved;
+  - no sequence write;
+  - no marker write.
+
+A2. old no-proof sidecar under NotRequired remains accepted on reload-apply
+- Expected:
+  - release binary accepts and applies according to existing Run 134/162/166 semantics;
+  - sequence commit occurs before v2 marker persist;
+  - no governance-proof-required error.
+
+A3. valid proof-carrying GenesisBound Rotate sidecar accepted on reload-check with Required policy
+- Expected:
+  - proof sibling parsed as `Available`;
+  - governance verifier accepts;
+  - lifecycle validation accepts;
+  - marker decision accepts;
+  - no sequence write;
+  - no marker write.
+
+A4. valid proof-carrying GenesisBound Rotate sidecar accepted on reload-apply with Required policy
+- Expected:
+  - proof sibling parsed as `Available`;
+  - governance verifier accepts;
+  - lifecycle validation accepts;
+  - Run 070/Run 055 ordering preserved;
+  - v2 marker persists only after sequence commit.
+
+A5. valid proof-carrying GenesisBound Revoke sidecar accepted where representable
+- If fully representable on release binary, cover validation-only and/or mutating surface.
+- If not practical on mutating release-binary surface, document exact limitation and cite Run 167 source-test coverage.
+
+A6. valid proof-carrying EmergencyCouncil EmergencyRevoke sidecar accepted where representable
+- If representable and fixture-supported, cover it.
+- If not, document exact limitation and cite Run 167 source-test coverage.
+
+A7. idempotent proof-carrying sidecar accepted
+- same authority sequence / digest / proof;
+- accepted as idempotent / no-op according to existing marker rules.
+
+Required rejection scenarios:
+
+R1. proof required but sidecar has no proof
+- Expected:
+  - `GovernanceAuthorityRequiredButMissing`;
+  - no sequence write;
+  - no marker write.
+
+R2. malformed governance proof sibling rejected
+- Expected:
+  - typed malformed proof/load error;
+  - no mutation.
+
+R3. wrong environment proof rejected.
+
+R4. wrong chain proof rejected.
+
+R5. wrong genesis proof rejected.
+
+R6. wrong authority root proof rejected.
+
+R7. wrong lifecycle action proof rejected.
+
+R8. wrong candidate digest proof rejected.
+
+R9. wrong authority-domain sequence proof rejected.
+
+R10. invalid issuer signature rejected.
+
+R11. unsupported issuer suite rejected.
+
+R12. non-PQC suite rejected.
+
+R13. threshold-not-met rejected if representable.
+
+R14. stale/replayed lower authority proof rejected.
+
+R15. OnChainGovernance proof rejected as unsupported/fail-closed.
+
+R16. local operator config alone cannot satisfy proof-required policy.
+
+R17. peer majority / gossip count cannot satisfy proof-required policy.
+
+R18. proof valid but lifecycle invalid rejected.
+
+R19. lifecycle valid but proof invalid rejected.
+
+R20. proof valid but MainNet peer-driven apply remains refused.
+
+Required source-reachability proof:
+The evidence report must include:
+- grep/call-site proof for:
+  - `load_v2_ratification_sidecar_with_governance_proof_from_path`;
+  - `GovernanceProofLoadStatus`;
+  - `GovernanceProofContext::Available`;
+  - `decide_v2_marker_acceptance_with_lifecycle_and_governance`;
+- comparison against Run 166’s boundary: proof-carrying was previously helper-only / unavailable to production surfaces.
+
+Required mutation proof for accepted mutating scenarios:
+For every accepted mutating proof-carrying scenario:
+- proof parse occurs before marker decision;
+- governance verification occurs before apply/mutation;
+- lifecycle validation occurs before apply/mutation;
+- Run 070 apply ordering preserved;
+- Run 055 sequence commit succeeds;
+- v2 marker persists strictly after sequence commit;
+- marker JSON/SHA before/after captured;
+- sequence JSON/SHA before/after captured.
+
+Required no-mutation proof for rejected scenarios:
+For every rejected scenario:
+- binary exits non-zero or typed refusal according to surface;
+- no Run 070 apply call;
+- no live trust swap;
+- no session eviction;
+- no sequence write;
+- no marker write;
+- marker bytes unchanged;
+- sequence bytes unchanged;
+- no `.tmp` residue;
+- no fallback to `--p2p-trusted-root`;
+- no active DummySig / DummyKem / DummyAead.
+
+Required denylist:
+Across the run prove:
+- no MainNet apply;
+- no autonomous apply;
+- no apply on receipt;
+- no peer-majority authority;
+- no governance execution claim;
+- no on-chain governance claim;
+- no KMS/HSM claim;
+- no validator-set rotation claim;
+- no fallback to `--p2p-trusted-root`;
+- no active DummySig / DummyKem / DummyAead;
+- no schema/wire/metric drift beyond Run 167’s optional proof carrier;
+- no marker write before sequence commit;
+- no sequence write on validation-only surfaces;
+- no marker write on validation-only surfaces.
+
+Required captured metadata:
+- qbind-node SHA-256 and ELF Build ID;
+- helper SHA-256 and ELF Build ID;
+- git commit hash;
+- rustc/cargo versions;
+- exact commands;
+- stdout/stderr logs;
+- per-scenario exit codes;
+- proof sidecar paths and hashes;
+- marker/sequence JSON and SHA before/after;
+- data-dir inventories;
+- denylist grep results.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example <proof-carrying fixture helper>
+- bash scripts/devnet/run_168_governance_proof_carrier_release_binary.sh
+- cargo test -p qbind-node --test run_167_governance_proof_carrier_tests
+- cargo test -p qbind-node --test run_165_governance_marker_integration_tests
+- cargo test -p qbind-node --test run_163_governance_authority_verifier_tests
+- cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests
+- cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+- cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+- cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+- cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+- cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_168.md` must state:
+- Run 168 is release-binary governance-proof carrier enforcement evidence.
+- Existing no-proof sidecars remain compatible under NotRequired.
+- Required policy fails closed when proof is absent.
+- Valid proof-carrying sidecars are accepted through production surfaces where lifecycle/anti-rollback checks pass.
+- Invalid proof-carrying sidecars fail closed.
+- OnChainGovernance remains unsupported/fail-closed.
+- No MainNet apply is enabled.
+- governance execution/on-chain proof remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open unless separately closed.
+- C5 remains open.
+
+Acceptance criteria:
+Run 168 is acceptable only if:
+1. Real release binaries parse proof-carrying governance sidecars.
+2. No-proof sidecars remain compatible under NotRequired.
+3. Proof-required/no-proof cases fail closed.
+4. Valid proof-carrying sidecars reach and pass the governance gate.
+5. Invalid proof-carrying sidecars fail closed.
+6. Accepted mutating cases preserve sequence-before-marker ordering.
+7. Rejected cases produce no mutation.
+8. MainNet remains refused even with valid governance proof.
+9. No governance execution/KMS-HSM/validator-set rotation claim is made.
+10. No full C4 or C5 closure is claimed.

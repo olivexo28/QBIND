@@ -257,6 +257,128 @@ pub fn load_versioned_ratification_from_path(
     }
 }
 
+// ===========================================================================
+// Run 167 — additive optional governance-proof carrier on v2 sidecars
+// ===========================================================================
+
+use crate::pqc_governance_proof_wire::{
+    GovernanceAuthorityProofWire, GovernanceProofLoadStatus, GovernanceProofWireParseError,
+};
+
+/// Run 167 — typed result of loading a v2 ratification sidecar together
+/// with its optional [`GovernanceAuthorityProofWire`] sibling field.
+///
+/// The struct is purely additive: a v2 sidecar without the optional
+/// `governance_authority_proof` JSON sibling continues to parse exactly
+/// as it did before Run 167 and yields
+/// [`GovernanceProofLoadStatus::Absent`]. A sidecar with a malformed
+/// sibling yields [`GovernanceProofLoadStatus::Malformed`] (fail-closed
+/// at the gate under any policy that requires a proof). A sidecar with
+/// a well-formed sibling yields [`GovernanceProofLoadStatus::Available`]
+/// carrying the typed Run 163
+/// [`crate::pqc_governance_authority::GovernanceAuthorityProof`].
+///
+/// Run 167 does **NOT** mutate persisted state during parsing: no marker
+/// write, no sequence write, no live trust swap, no session eviction.
+#[derive(Debug, Clone)]
+pub struct LoadedV2RatificationSidecar {
+    pub ratification: qbind_ledger::BundleSigningRatificationV2,
+    pub governance_proof: GovernanceProofLoadStatus,
+}
+
+/// Run 167 — load a v2 ratification sidecar JSON file and additionally
+/// attempt to parse its optional
+/// [`GovernanceAuthorityProofWire`] sibling field
+/// (`governance_authority_proof`).
+///
+/// # Behaviour
+///
+/// * The optional sibling field is **strictly additive**. A v2 sidecar
+///   without the field continues to parse as before Run 167 and yields
+///   [`GovernanceProofLoadStatus::Absent`].
+/// * A sibling that fails to deserialise as
+///   [`GovernanceAuthorityProofWire`], or that carries an unknown
+///   schema version, an empty required field, or an empty issuer
+///   signature, yields [`GovernanceProofLoadStatus::Malformed`] —
+///   never a partially-parsed proof. The v2 ratification itself is
+///   still returned so the caller can fall through the policy/gate
+///   pipeline (under `RequiredForLifecycleSensitive` the gate fails
+///   closed; under `NotRequired` the gate is a no-op).
+/// * A v1 sidecar at this path is rejected with
+///   [`VersionedRatificationInputError::MalformedSidecar`] because the
+///   Run 167 carrier is v2-only by design (the v1 verifier predates the
+///   Run 159 lifecycle classification).
+/// * No file write, no marker write, no sequence write, no live trust
+///   swap, no session eviction.
+pub fn load_v2_ratification_sidecar_with_governance_proof_from_path(
+    path: &Path,
+) -> Result<LoadedV2RatificationSidecar, VersionedRatificationInputError> {
+    let bytes = std::fs::read(path).map_err(|error| VersionedRatificationInputError::Io {
+        path: path.to_path_buf(),
+        error,
+    })?;
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| VersionedRatificationInputError::JsonParse {
+            path: path.to_path_buf(),
+            error: e.to_string(),
+        })?;
+
+    let version_value = value
+        .get("schema_version")
+        .or_else(|| value.get("version"));
+    let version_int = match version_value.and_then(|v| v.as_u64()) {
+        Some(v) => v as u32,
+        None => {
+            return Err(VersionedRatificationInputError::UnknownSchemaVersion {
+                path: path.to_path_buf(),
+                got: version_value.cloned(),
+            });
+        }
+    };
+    if version_int != 2 {
+        return Err(VersionedRatificationInputError::MalformedSidecar {
+            path: path.to_path_buf(),
+            schema_version: version_int,
+            error: format!(
+                "Run 167 governance-proof carrier requires v2 sidecar (got schema_version={})",
+                version_int
+            ),
+        });
+    }
+
+    // Parse the optional sibling first so a malformed sibling does not
+    // poison the v2 parse path. The optional sibling is a SEPARATE JSON
+    // field; we extract it from the generic value, then re-deserialise
+    // the rest into `BundleSigningRatificationV2`.
+    let sibling = value.get("governance_authority_proof").cloned();
+    let governance_proof = match sibling {
+        None => GovernanceProofLoadStatus::Absent,
+        Some(serde_json::Value::Null) => GovernanceProofLoadStatus::Absent,
+        Some(raw) => match serde_json::from_value::<GovernanceAuthorityProofWire>(raw) {
+            Ok(wire) => match wire.to_governance_authority_proof() {
+                Ok(proof) => GovernanceProofLoadStatus::Available(proof),
+                Err(e) => GovernanceProofLoadStatus::Malformed(e),
+            },
+            Err(e) => GovernanceProofLoadStatus::Malformed(GovernanceProofWireParseError::Json {
+                error: e.to_string(),
+            }),
+        },
+    };
+
+    let ratification: qbind_ledger::BundleSigningRatificationV2 = serde_json::from_value(value)
+        .map_err(|e| VersionedRatificationInputError::MalformedSidecar {
+            path: path.to_path_buf(),
+            schema_version: 2,
+            error: e.to_string(),
+        })?;
+
+    Ok(LoadedV2RatificationSidecar {
+        ratification,
+        governance_proof,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

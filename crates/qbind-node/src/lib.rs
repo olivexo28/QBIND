@@ -197,6 +197,15 @@ pub mod pqc_authority_lifecycle;
 // `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md` Run 163 update,
 // and `docs/whitepaper/contradiction.md` Run 163 update.
 pub mod pqc_governance_authority;
+// Run 167 — additive, source/test wire-safe governance-proof carrier
+// for v2 ratification sidecars. Defines `GovernanceAuthorityProofWire`,
+// the optional `governance_authority_proof` sibling field on the v2
+// ratification sidecar JSON, and the `GovernanceProofLoadStatus` typed
+// loader result that the Run 165 governance gate consumes via
+// `GovernanceProofContext`. Source/test only — no MainNet enablement,
+// no on-chain governance, no KMS/HSM, no validator-set rotation, no
+// release-binary proof-carrying enforcement (deferred to Run 168).
+pub mod pqc_governance_proof_wire;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
