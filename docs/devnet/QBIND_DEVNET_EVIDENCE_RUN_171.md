@@ -149,9 +149,13 @@ open; C5 remains open.
 `codeql_checker` was run as part of Run 171 closure. Result recorded
 here:
 
-* **Result:** no security alerts attributable to Run 171 changes.
+* **Result:** no security alerts. The closure diff is
+  documentation-only plus test-only Rust edits (removing unused
+  imports / dead code and de-flaking a concurrency test), so the
+  checker classified the changes as trivial and reported no findings.
 * No production behavior changes were introduced during closure
-  (documentation + selector-wiring source/test only, already landed).
+  (the selector-wiring source/test landed in prior commits; this
+  closure adds documentation and fixes test-only warnings/flakiness).
 
 ## Inheritance from prior runs
 
