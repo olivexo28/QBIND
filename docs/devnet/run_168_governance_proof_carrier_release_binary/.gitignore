@@ -1,0 +1,24 @@
+# Run 168 evidence archive — generated run artifacts are reproduced by
+# the harness (`scripts/devnet/run_168_governance_proof_carrier_release_binary.sh`)
+# and are not tracked (they contain per-run, machine-specific data such
+# as absolute paths, ephemeral helper output, ELF Build IDs, and
+# timestamps). Only README.md and summary.txt are tracked, mirroring the
+# Run 153 / Run 155 / Run 156 / Run 158 / Run 160 / Run 162 / Run 164 /
+# Run 166 evidence-archive precedent.
+/logs/
+/data/
+/fixtures/
+/exit_codes/
+/marker_hashes/
+/sequence_hashes/
+/data_inventories/
+/grep_summaries/
+/reachability/
+/test_results/
+/helper_evidence/
+/helper_corpus/
+/provenance.txt
+/fixture_manifest.txt
+/scenario_assertions.txt
+/negative_invariants.txt
+/enforcement_proof.txt
