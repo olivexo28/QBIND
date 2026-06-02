@@ -366,6 +366,17 @@ struct Run105ReloadCheckContextData {
     /// Run 132: optional v2 ratification sidecar. Present when the
     /// operator-supplied sidecar is schema_version=2.
     ratification_v2: Option<qbind_ledger::BundleSigningRatificationV2>,
+    /// Run 169 — typed Run 167 governance-proof load status for the
+    /// operator-supplied v2 ratification sidecar (when present). v1
+    /// sidecars always yield
+    /// [`qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus::Absent`].
+    /// This makes the `load_v2_ratification_sidecar_with_governance_proof_from_path`
+    /// loader output reachable from the reload-check / reload-apply /
+    /// startup `--p2p-trust-bundle` / SIGHUP / live inbound `0x05`
+    /// preflights so they no longer hardcode
+    /// `GovernanceProofContext::Unavailable`.
+    governance_proof_load:
+        qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus,
 }
 
 /// Run 105 — build the owned context the reload-check / peer-candidate-
@@ -386,8 +397,10 @@ fn build_run_105_reload_check_context(
 ) -> Result<Run105ReloadCheckContextData, String> {
     use qbind_node::pqc_boot_genesis::{load_external_genesis, map_environment};
     use qbind_node::pqc_ratification_input::{
-        load_versioned_ratification_from_path, VersionedRatificationSidecar,
+        load_versioned_ratification_with_governance_proof_from_path,
+        VersionedRatificationSidecarWithGovernanceProof,
     };
+    use qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus;
     use qbind_types::NetworkEnvironment;
 
     let genesis_path = config.genesis_source.genesis_path.as_ref().ok_or_else(|| {
@@ -416,14 +429,31 @@ fn build_run_105_reload_check_context(
     let chain_id_str =
         qbind_node::pqc_trust_sequence::chain_id_hex(config.chain_id());
     // Run 132: load with versioned dispatcher to support v1 and v2 sidecars.
-    let (ratification, ratification_v2) = match args.p2p_trust_bundle_ratification.as_ref() {
-        Some(path) => match load_versioned_ratification_from_path(path) {
-            Ok(VersionedRatificationSidecar::V1(v1)) => (Some(v1), None),
-            Ok(VersionedRatificationSidecar::V2(v2)) => (None, Some(v2)),
-            Err(e) => return Err(format!("{}", e)),
-        },
-        None => (None, None),
-    };
+    // Run 169: when the operator supplies a v2 sidecar, additionally
+    // attempt to parse the optional Run 167 `governance_authority_proof`
+    // sibling field via
+    // `load_v2_ratification_sidecar_with_governance_proof_from_path`
+    // (delegated to by the versioned-with-governance-proof dispatcher)
+    // so the typed load status reaches the Run 165 governance gate
+    // through the binary-side preflight helpers
+    // (`preflight_run_134_v2_marker_decision`,
+    // `preflight_run_136_v2_marker_decision_for_startup`).
+    let (ratification, ratification_v2, governance_proof_load) =
+        match args.p2p_trust_bundle_ratification.as_ref() {
+            Some(path) => match load_versioned_ratification_with_governance_proof_from_path(path) {
+                Ok(VersionedRatificationSidecarWithGovernanceProof::V1(v1)) => (
+                    Some(v1),
+                    None,
+                    GovernanceProofLoadStatus::Absent,
+                ),
+                Ok(VersionedRatificationSidecarWithGovernanceProof::V2 {
+                    ratification,
+                    governance_proof,
+                }) => (None, Some(ratification), governance_proof),
+                Err(e) => return Err(format!("{}", e)),
+            },
+            None => (None, None, GovernanceProofLoadStatus::Absent),
+        };
     let policy = match config.environment {
         NetworkEnvironment::Mainnet => qbind_ledger::RatificationEnforcementPolicy::Strict,
         NetworkEnvironment::Testnet | NetworkEnvironment::Devnet => {
@@ -442,6 +472,7 @@ fn build_run_105_reload_check_context(
         ratification,
         policy,
         ratification_v2,
+        governance_proof_load,
     })
 }
 
@@ -695,10 +726,12 @@ fn preflight_run_134_v2_marker_decision(
 > {
     use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
     use qbind_node::pqc_authority_marker_acceptance::{
-        decide_v2_marker_acceptance_with_lifecycle_and_governance, MarkerAcceptanceV2Inputs,
-        MutatingSurfaceMarkerV2Error,
+        MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
-    use qbind_node::pqc_governance_authority::{GovernanceProofContext, GovernanceProofPolicy};
+    use qbind_node::pqc_governance_authority::{
+        fixture_issuer_signature_verifier, GovernanceProofPolicy,
+    };
+    use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
@@ -746,14 +779,18 @@ fn preflight_run_134_v2_marker_decision(
 
     let marker_path = authority_state_file_path(data_dir);
 
-    // Run 165: route through the governance-aware shared helper so the
-    // Run 163 governance authority verifier is composed into this
-    // reload-apply marker decision path. No governance proof is carried by
-    // the existing wire material (documented schema-carrying gap), so this
-    // surface supplies `Unavailable` under the `NotRequired` policy —
-    // behaviour-preserving for Run 165; release-binary governance
-    // enforcement is deferred to Run 166.
-    let decision = decide_v2_marker_acceptance_with_lifecycle_and_governance(
+    // Run 169: route through the governance-aware shared helper via the
+    // Run 169 surface shim so the typed Run 167
+    // `GovernanceProofLoadStatus` carried by `ctx_data` reaches the Run
+    // 165 gate. Production retains `GovernanceProofPolicy::NotRequired`
+    // so old no-proof v2 sidecars remain compatible. The fixture
+    // verifier is the source/test issuer-signature verifier — release-
+    // binary production-surface proof-carrying evidence is deferred to
+    // Run 170 (a real PQC verifier replaces this hook then). MainNet
+    // peer-driven apply remains refused at the calling surface
+    // regardless of governance proof.
+    let verifier = fixture_issuer_signature_verifier();
+    let decision = preflight_v2_marker_decision_with_governance_proof_load(
         MarkerAcceptanceV2Inputs {
             marker_path: &marker_path,
             runtime_env,
@@ -765,7 +802,8 @@ fn preflight_run_134_v2_marker_decision(
             updated_at_unix_secs,
         },
         GovernanceProofPolicy::NotRequired,
-        GovernanceProofContext::Unavailable,
+        &ctx_data.governance_proof_load,
+        &verifier,
     )?;
 
     Ok(Some(decision))
@@ -830,10 +868,12 @@ fn preflight_run_136_v2_marker_decision_for_startup(
 > {
     use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
     use qbind_node::pqc_authority_marker_acceptance::{
-        decide_v2_marker_acceptance_with_lifecycle_and_governance, MarkerAcceptanceV2Inputs,
-        MutatingSurfaceMarkerV2Error,
+        MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
-    use qbind_node::pqc_governance_authority::{GovernanceProofContext, GovernanceProofPolicy};
+    use qbind_node::pqc_governance_authority::{
+        fixture_issuer_signature_verifier, GovernanceProofPolicy,
+    };
+    use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
@@ -886,14 +926,17 @@ fn preflight_run_136_v2_marker_decision_for_startup(
 
     let marker_path = authority_state_file_path(data_dir);
 
-    // Run 165: route through the governance-aware shared helper so the
-    // Run 163 governance authority verifier is composed into this startup
-    // marker decision path. No governance proof is carried by the existing
-    // wire material (documented schema-carrying gap), so this surface
-    // supplies `Unavailable` under the `NotRequired` policy —
-    // behaviour-preserving for Run 165; release-binary governance
-    // enforcement is deferred to Run 166.
-    let decision = decide_v2_marker_acceptance_with_lifecycle_and_governance(
+    // Run 169: route through the governance-aware shared helper via the
+    // Run 169 surface shim so the typed Run 167
+    // `GovernanceProofLoadStatus` carried by `ctx_data` reaches the
+    // Run 165 gate at startup `--p2p-trust-bundle` time. Production
+    // retains `GovernanceProofPolicy::NotRequired` so old no-proof v2
+    // sidecars remain compatible. The fixture verifier is the
+    // source/test issuer-signature verifier — release-binary
+    // production-surface proof-carrying evidence is deferred to Run 170.
+    // MainNet peer-driven apply remains refused at the calling surface.
+    let verifier = fixture_issuer_signature_verifier();
+    let decision = preflight_v2_marker_decision_with_governance_proof_load(
         MarkerAcceptanceV2Inputs {
             marker_path: &marker_path,
             runtime_env,
@@ -905,7 +948,8 @@ fn preflight_run_136_v2_marker_decision_for_startup(
             updated_at_unix_secs,
         },
         GovernanceProofPolicy::NotRequired,
-        GovernanceProofContext::Unavailable,
+        &ctx_data.governance_proof_load,
+        &verifier,
     )?;
 
     // Keep `MutatingSurfaceMarkerV2Error` re-export in scope for the

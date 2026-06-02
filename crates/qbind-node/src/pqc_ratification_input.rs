@@ -379,6 +379,130 @@ pub fn load_v2_ratification_sidecar_with_governance_proof_from_path(
     })
 }
 
+// ===========================================================================
+// Run 169 — versioned dispatcher with optional governance-proof carrier
+// ===========================================================================
+
+/// Run 169 — typed result of dispatching a versioned ratification
+/// sidecar AND, for v2 sidecars, parsing the optional Run 167
+/// `governance_authority_proof` sibling.
+///
+/// v1 sidecars are unchanged (no governance-proof carrier was ever
+/// defined for v1; the v1 verifier predates the Run 159 lifecycle
+/// classification). v2 sidecars carry an additive
+/// [`GovernanceProofLoadStatus`] alongside the typed
+/// [`qbind_ledger::BundleSigningRatificationV2`].
+#[derive(Debug, Clone)]
+pub enum VersionedRatificationSidecarWithGovernanceProof {
+    /// v1 sidecar (schema version 1). No governance-proof carrier.
+    V1(BundleSigningRatification),
+    /// v2 sidecar (schema version 2) with optional governance-proof
+    /// carrier load status.
+    V2 {
+        ratification: qbind_ledger::BundleSigningRatificationV2,
+        governance_proof: GovernanceProofLoadStatus,
+    },
+}
+
+impl VersionedRatificationSidecarWithGovernanceProof {
+    /// Project to the existing Run 132 [`VersionedRatificationSidecar`]
+    /// for callers that do not consume governance-proof carrier data.
+    /// The governance-proof load status is dropped.
+    pub fn into_versioned_sidecar(self) -> VersionedRatificationSidecar {
+        match self {
+            Self::V1(r) => VersionedRatificationSidecar::V1(r),
+            Self::V2 { ratification, .. } => VersionedRatificationSidecar::V2(ratification),
+        }
+    }
+
+    /// Run 169 — return the governance-proof load status, or `Absent`
+    /// for v1 sidecars (which never carry a Run 167 proof).
+    pub fn governance_proof_load_status(&self) -> GovernanceProofLoadStatus {
+        match self {
+            Self::V1(_) => GovernanceProofLoadStatus::Absent,
+            Self::V2 { governance_proof, .. } => governance_proof.clone(),
+        }
+    }
+}
+
+/// Run 169 — load a versioned ratification sidecar AND, for v2
+/// sidecars, parse the optional Run 167 `governance_authority_proof`
+/// sibling field. Drop-in successor for
+/// [`load_versioned_ratification_from_path`] for callers that want the
+/// typed Run 167 [`GovernanceProofLoadStatus`] available to the Run
+/// 165 governance gate.
+///
+/// # Behaviour
+///
+/// * v1 sidecars: identical to [`load_versioned_ratification_from_path`].
+/// * v2 sidecars: identical to
+///   [`load_v2_ratification_sidecar_with_governance_proof_from_path`].
+/// * Unknown schema version: fail closed
+///   ([`VersionedRatificationInputError::UnknownSchemaVersion`]).
+/// * Malformed sidecar: fail closed
+///   ([`VersionedRatificationInputError::MalformedSidecar`]).
+///
+/// The optional `governance_authority_proof` sibling is **strictly
+/// additive** — pre-Run-167 v2 sidecars continue to parse and yield
+/// [`GovernanceProofLoadStatus::Absent`].
+///
+/// No file write, no marker write, no sequence write, no live trust
+/// swap, no session eviction.
+pub fn load_versioned_ratification_with_governance_proof_from_path(
+    path: &Path,
+) -> Result<VersionedRatificationSidecarWithGovernanceProof, VersionedRatificationInputError> {
+    let bytes = std::fs::read(path).map_err(|error| VersionedRatificationInputError::Io {
+        path: path.to_path_buf(),
+        error,
+    })?;
+
+    let value: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| VersionedRatificationInputError::JsonParse {
+            path: path.to_path_buf(),
+            error: e.to_string(),
+        })?;
+
+    let version_value = value
+        .get("schema_version")
+        .or_else(|| value.get("version"));
+    let version_int = match version_value.and_then(|v| v.as_u64()) {
+        Some(v) => v as u32,
+        None => {
+            return Err(VersionedRatificationInputError::UnknownSchemaVersion {
+                path: path.to_path_buf(),
+                got: version_value.cloned(),
+            });
+        }
+    };
+
+    match version_int {
+        1 => {
+            let r: BundleSigningRatification = serde_json::from_value(value).map_err(|e| {
+                VersionedRatificationInputError::MalformedSidecar {
+                    path: path.to_path_buf(),
+                    schema_version: 1,
+                    error: e.to_string(),
+                }
+            })?;
+            Ok(VersionedRatificationSidecarWithGovernanceProof::V1(r))
+        }
+        2 => {
+            // Reuse the Run 167 v2 loader by re-parsing via the
+            // existing path-based entry to keep the governance-proof
+            // sibling extraction logic single-sourced.
+            let loaded = load_v2_ratification_sidecar_with_governance_proof_from_path(path)?;
+            Ok(VersionedRatificationSidecarWithGovernanceProof::V2 {
+                ratification: loaded.ratification,
+                governance_proof: loaded.governance_proof,
+            })
+        }
+        _ => Err(VersionedRatificationInputError::UnknownSchemaVersion {
+            path: path.to_path_buf(),
+            got: version_value.cloned(),
+        }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

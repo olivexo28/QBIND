@@ -322,6 +322,20 @@ pub struct ProductionV2MarkerCoordinator {
     /// Accepted pre-apply decision, populated by `decide_pre_apply`.
     /// Persisted (when `should_persist`) by `persist_after_commit`.
     decision: Option<crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2>,
+    /// Run 169 — typed Run 167 governance-proof load status for the
+    /// peer-driven candidate. Defaults to
+    /// [`crate::pqc_governance_proof_wire::GovernanceProofLoadStatus::Absent`]
+    /// (preserving every Run 148/150/152/153 invariant when the peer
+    /// candidate envelope carries no Run 167 sibling). Populated via
+    /// [`Self::with_governance_proof_carrier`] when an additive
+    /// governance-proof carrier is available out-of-band (DevNet/TestNet
+    /// fixtures or the Run 170 release-binary path).
+    governance_proof_load: crate::pqc_governance_proof_wire::GovernanceProofLoadStatus,
+    /// Run 169 — governance proof policy. Defaults to
+    /// [`crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired`]
+    /// so the existing Run 148/150/152/153 peer-driven apply test
+    /// matrix (which has no Run 167 fixtures) remains green.
+    governance_policy: crate::pqc_governance_authority::GovernanceProofPolicy,
 }
 
 impl ProductionV2MarkerCoordinator {
@@ -331,6 +345,13 @@ impl ProductionV2MarkerCoordinator {
     /// reuses the Run 070 reload-apply contract, so
     /// [`crate::pqc_authority_state::AuthorityStateUpdateSource::ReloadApply`]
     /// is the honest default.
+    ///
+    /// Run 169 — the coordinator defaults to
+    /// [`crate::pqc_governance_proof_wire::GovernanceProofLoadStatus::Absent`]
+    /// under
+    /// [`crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired`].
+    /// Use [`Self::with_governance_proof_carrier`] (additive builder) to
+    /// attach a typed Run 167 governance-proof load status and policy.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         marker_path: std::path::PathBuf,
@@ -352,7 +373,37 @@ impl ProductionV2MarkerCoordinator {
             update_source,
             updated_at_unix_secs,
             decision: None,
+            governance_proof_load:
+                crate::pqc_governance_proof_wire::GovernanceProofLoadStatus::Absent,
+            governance_policy:
+                crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
         }
+    }
+
+    /// Run 169 — additive builder that attaches a typed Run 167
+    /// [`crate::pqc_governance_proof_wire::GovernanceProofLoadStatus`]
+    /// and a Run 165
+    /// [`crate::pqc_governance_authority::GovernanceProofPolicy`] to
+    /// the coordinator so [`Self::decide_pre_apply`] routes through the
+    /// Run 169 governance-proof surface shim and the Run 165
+    /// governance gate sees the actual loader output.
+    ///
+    /// Default behaviour (without this builder) is preserved bit-for-bit
+    /// — `Absent` + `NotRequired` = `NotRequiredNoProof` accept at the
+    /// gate, identical to Run 165's documented baseline.
+    ///
+    /// Non-MainNet-enabling: a valid governance proof here does **not**
+    /// enable MainNet peer-driven apply. The existing environment gate
+    /// upstream of the coordinator owns that refusal and is unchanged
+    /// by Run 169.
+    pub fn with_governance_proof_carrier(
+        mut self,
+        governance_proof_load: crate::pqc_governance_proof_wire::GovernanceProofLoadStatus,
+        governance_policy: crate::pqc_governance_authority::GovernanceProofPolicy,
+    ) -> Self {
+        self.governance_proof_load = governance_proof_load;
+        self.governance_policy = governance_policy;
+        self
     }
 
     /// Audit-only accessor for the accepted pre-apply decision (if any).
@@ -376,20 +427,24 @@ impl V2MarkerCoordinator for ProductionV2MarkerCoordinator {
             update_source: self.update_source,
             updated_at_unix_secs: self.updated_at_unix_secs,
         };
-        // Run 165: route the peer-driven drain pre-apply decision through
-        // the governance-aware shared helper so the Run 163 governance
-        // authority verifier is composed into the peer-driven
-        // `ProductionV2MarkerCoordinator` marker decision path. The
-        // peer-driven wire material carries no governance proof (documented
-        // schema-carrying gap), so `Unavailable` under the `NotRequired`
-        // policy is behaviour-preserving for Run 165; release-binary
-        // governance enforcement is deferred to Run 166. MainNet
-        // peer-driven apply remains refused by the existing environment
-        // gate regardless of governance proof.
-        match crate::pqc_authority_marker_acceptance::decide_v2_marker_acceptance_with_lifecycle_and_governance(
+        // Run 169: route the peer-driven drain pre-apply decision
+        // through the Run 169 governance-proof surface shim so the
+        // typed Run 167 `GovernanceProofLoadStatus` attached via
+        // `with_governance_proof_carrier` (or the `Absent` default)
+        // reaches the Run 165 governance gate. The fixture verifier
+        // is the source/test issuer-signature verifier — release-
+        // binary production-surface proof-carrying evidence is
+        // deferred to Run 170 (a real PQC verifier replaces this hook
+        // then). MainNet peer-driven apply remains refused by the
+        // existing upstream environment gate regardless of governance
+        // proof.
+        let verifier =
+            crate::pqc_governance_authority::fixture_issuer_signature_verifier();
+        match crate::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load(
             inputs,
-            crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
-            crate::pqc_governance_authority::GovernanceProofContext::Unavailable,
+            self.governance_policy,
+            &self.governance_proof_load,
+            &verifier,
         ) {
             Ok(decision) => {
                 self.decision = Some(decision);

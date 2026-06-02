@@ -206,6 +206,17 @@ pub mod pqc_governance_authority;
 // no on-chain governance, no KMS/HSM, no validator-set rotation, no
 // release-binary proof-carrying enforcement (deferred to Run 168).
 pub mod pqc_governance_proof_wire;
+// Run 169 — production marker-decision surface integration for the
+// Run 167 governance-proof loader. Single library shim that lets the
+// reload-check / reload-apply / startup `--p2p-trust-bundle` / SIGHUP
+// live reload / live inbound `0x05` / peer-driven drain
+// (`ProductionV2MarkerCoordinator`) callers consume a typed
+// `GovernanceProofLoadStatus` and pass it to the Run 165 governance
+// gate. Source/test integration only — release-binary proof-carrying
+// production-surface evidence is deferred to Run 170. MainNet
+// peer-driven apply remains refused; `OnChainGovernance` remains
+// unsupported / fail-closed.
+pub mod pqc_governance_proof_surface;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

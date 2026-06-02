@@ -176,8 +176,9 @@ use crate::pqc_authority_state::{
 use crate::pqc_live_trust::LivePqcTrustState;
 use crate::pqc_live_trust_apply::ProductionLiveTrustApplyContext;
 use crate::pqc_ratification_input::{
-    load_versioned_ratification_from_path, VersionedRatificationInputError,
-    VersionedRatificationSidecar,
+    load_versioned_ratification_with_governance_proof_from_path,
+    VersionedRatificationInputError,
+    VersionedRatificationSidecarWithGovernanceProof,
 };
 use crate::pqc_trust_activation::ActivationContext;
 use crate::pqc_trust_bundle::{
@@ -870,9 +871,12 @@ impl LiveReloadController {
                 // verifier path which surfaces the typed `Missing`
                 // refusal under Strict policy.
                 let ratification_obj_v1 = match rcfg.ratification_sidecar_path.as_ref() {
-                    Some(path) => match load_versioned_ratification_from_path(path) {
-                        Ok(VersionedRatificationSidecar::V1(r)) => Some(r),
-                        Ok(VersionedRatificationSidecar::V2(r2)) => {
+                    Some(path) => match load_versioned_ratification_with_governance_proof_from_path(path) {
+                        Ok(VersionedRatificationSidecarWithGovernanceProof::V1(r)) => Some(r),
+                        Ok(VersionedRatificationSidecarWithGovernanceProof::V2 {
+                            ratification: r2,
+                            governance_proof,
+                        }) => {
                             // Run 138 — v2 dispatch. Skip the v1
                             // ratification context entirely; the v2
                             // verifier runs inside the preflight
@@ -880,10 +884,18 @@ impl LiveReloadController {
                             // `apply_validated_candidate_with_previous`
                             // (no v1 ratification ctx), mirroring the
                             // Run 134 reload-apply v2 branch.
+                            // Run 169 — additionally feed the typed
+                            // Run 167 `GovernanceProofLoadStatus`
+                            // parsed from the same sidecar load into
+                            // the SIGHUP preflight so the Run 165
+                            // governance gate sees the actual proof
+                            // carrier (Available / Absent / Malformed)
+                            // instead of a hardcoded `Unavailable`.
                             let marker_decision_v2 =
                                 match self.preflight_sighup_v2_marker_decision(
                                     rcfg,
                                     &r2,
+                                    &governance_proof,
                                     now_unix_secs,
                                 ) {
                                     Ok(opt) => opt,
@@ -1271,6 +1283,7 @@ impl LiveReloadController {
         &self,
         rcfg: &LiveReloadRatificationConfig,
         ratification_v2: &BundleSigningRatificationV2,
+        governance_proof_load: &crate::pqc_governance_proof_wire::GovernanceProofLoadStatus,
         now_unix_secs: u64,
     ) -> Result<Option<MarkerAcceptDecisionV2>, MutatingSurfaceMarkerV2Error> {
         let marker_cfg = match &self.config.authority_marker {
@@ -1319,14 +1332,20 @@ impl LiveReloadController {
         }
 
         // Step 3 — Run 134/136 v2 marker decision (no disk write).
-        // Run 165: route through the governance-aware shared helper so the
-        // Run 163 governance authority verifier is composed into this
-        // marker decision path. The reload-apply surface carries no
-        // governance proof in the existing wire material (documented
-        // schema-carrying gap), so it supplies `Unavailable` under the
-        // `NotRequired` policy — behaviour-preserving for Run 165;
-        // release-binary governance enforcement is deferred to Run 166.
-        let decision = crate::pqc_authority_marker_acceptance::decide_v2_marker_acceptance_with_lifecycle_and_governance(
+        // Run 169: route through the Run 169 governance-proof surface
+        // shim so the typed Run 167 `GovernanceProofLoadStatus` parsed
+        // from the SIGHUP-trigger sidecar load reaches the Run 165
+        // governance gate. Production retains
+        // `GovernanceProofPolicy::NotRequired` so old no-proof v2
+        // sidecars under SIGHUP remain compatible. The fixture
+        // verifier is the source/test issuer-signature verifier;
+        // release-binary production-surface proof-carrying evidence
+        // is deferred to Run 170. MainNet peer-driven apply remains
+        // refused at the calling surface regardless of governance
+        // proof.
+        let verifier =
+            crate::pqc_governance_authority::fixture_issuer_signature_verifier();
+        let decision = crate::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load(
             MarkerAcceptanceV2Inputs {
                 marker_path: marker_cfg.marker_path.as_path(),
                 runtime_env: self.config.environment,
@@ -1338,7 +1357,8 @@ impl LiveReloadController {
                 updated_at_unix_secs: now_unix_secs,
             },
             crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
-            crate::pqc_governance_authority::GovernanceProofContext::Unavailable,
+            governance_proof_load,
+            &verifier,
         )?;
         Ok(Some(decision))
     }
