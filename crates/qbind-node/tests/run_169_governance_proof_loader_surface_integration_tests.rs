@@ -81,7 +81,7 @@ use qbind_ledger::{
 };
 use qbind_node::pqc_authority_lifecycle::LocalLifecycleAction;
 use qbind_node::pqc_authority_marker_acceptance::{
-    MarkerAcceptKindV2, MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
+    MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
 };
 use qbind_node::pqc_authority_state::{
     authority_state_file_path, AuthorityStateUpdateSource, PersistentAuthorityStateRecordV2,
@@ -99,7 +99,6 @@ use qbind_node::pqc_peer_candidate_apply::{ProductionV2MarkerCoordinator, V2Mark
 use qbind_node::pqc_ratification_input::{
     load_v2_ratification_sidecar_with_governance_proof_from_path,
     load_versioned_ratification_with_governance_proof_from_path,
-    VersionedRatificationSidecarWithGovernanceProof,
 };
 use qbind_node::pqc_trust_bundle::TrustBundleEnvironment;
 use qbind_node::pqc_trust_sequence::chain_id_hex;
@@ -373,17 +372,6 @@ fn seed_prior_v2_marker(h: &Harness, marker_path: &Path) -> Vec<u8> {
     qbind_node::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary(&d1)
         .expect("persist seed marker");
     std::fs::read(marker_path).expect("read seed marker bytes")
-}
-
-/// Build a Rotate v2 ratification at sequence 2 with previous_fp =
-/// fingerprint(signing_pk_a) (matching the seeded prior marker).
-fn rotate_after_seed(h: &Harness) -> BundleSigningRatificationV2 {
-    h.build_v2(
-        &h.signing_pk_b,
-        2,
-        BundleSigningRatificationV2Action::Rotate,
-        Some(pqc_public_key_fingerprint(&h.signing_pk_a)),
-    )
 }
 
 fn assert_no_marker_on_disk(marker_path: &Path) {

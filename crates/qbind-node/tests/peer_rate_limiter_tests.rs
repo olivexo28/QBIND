@@ -390,13 +390,22 @@ fn test_thread_safety_same_peer_concurrent() {
     let limiter = Arc::new(PeerRateLimiter::new(config));
     let peer = PeerId(42);
 
+    // Pin a single shared instant for every thread. The bucket refills at
+    // `max_messages_per_second` (100/s here), so if each thread captured its
+    // own `Instant::now()` the sub-microsecond differences between threads
+    // would add fractional token refills and occasionally allow one extra
+    // message (e.g. 101 instead of 100). Sharing one instant makes elapsed
+    // time exactly zero across all consumers, so this test deterministically
+    // verifies the atomic-consumption invariant: no more than `capacity`
+    // tokens can ever be spent.
+    let now = Instant::now();
+
     let mut handles = vec![];
 
     // Spawn multiple threads, all using the same peer
     for _ in 0..5 {
         let limiter_clone = Arc::clone(&limiter);
         let handle = thread::spawn(move || {
-            let now = Instant::now();
             let mut allowed = 0;
             for _ in 0..50 {
                 if limiter_clone.allow(&peer, now) {

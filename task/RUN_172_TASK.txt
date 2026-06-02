@@ -1,0 +1,376 @@
+Task: Run 172 — Release-Binary Required-Policy Production-Surface Governance-Proof Evidence
+
+Current accepted state:
+- Run 167: additive governance-proof carrier landed.
+- Run 168: release-built helper boundary proved proof-carrying sidecars parse and pass/fail through production loader/gate symbols.
+- Run 169: source/test integration wired the Run 167 typed governance-proof loader into production v2 marker-decision callers.
+- Run 170: release-binary boundary evidence landed:
+  - real `target/release/qbind-node` proves old no-proof sidecars remain compatible under `GovernanceProofPolicy::NotRequired`;
+  - real `target/release/qbind-node` proves reload-check and reload-apply compatibility remains intact;
+  - release-built helper proves valid/invalid proof-carrying matrix through production symbols;
+  - MainNet refusal remains intact;
+  - production release-binary Required-policy evidence remained open.
+- Run 171: source/test hidden Required-policy selector landed and is now fully closed:
+  - hidden CLI flag `--p2p-trust-bundle-governance-proof-required` with `clap hide=true`;
+  - env var `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED`;
+  - truthy values `1|true|yes|on`;
+  - selector helpers:
+    - `governance_proof_required_env_selector_enabled`;
+    - `governance_proof_policy_from_selector`;
+    - `governance_proof_policy_from_cli_or_env`;
+  - default remains `GovernanceProofPolicy::NotRequired`;
+  - Required policy routes through the Run 169 shim across production v2 marker-decision surfaces:
+    - reload-check;
+    - reload-apply;
+    - startup `--p2p-trust-bundle`;
+    - SIGHUP;
+    - peer-driven `ProductionV2MarkerCoordinator`;
+  - `LiveReloadConfig.governance_proof_policy` added for SIGHUP;
+  - Run 171 tests 35/35 passing;
+  - required regressions and `cargo test -p qbind-node --lib` passed;
+  - CodeQL checked;
+  - release-binary Required-policy production-surface evidence deferred to Run 172.
+- MainNet peer-driven apply remains refused.
+- OnChainGovernance remains unsupported/fail-closed.
+- governance execution remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Produce release-binary evidence that real `target/release/qbind-node` production v2 marker-decision surfaces enforce `GovernanceProofPolicy::RequiredForLifecycleSensitive` using the hidden Run 171 selector.
+
+This run must prove on real release binaries:
+1. default behavior remains `NotRequired`;
+2. hidden CLI/env selector enables Required policy;
+3. Required policy accepts valid proof-carrying sidecars where anti-rollback, lifecycle, and governance checks all pass;
+4. Required policy fails closed for no-proof, malformed-proof, and invalid-proof sidecars;
+5. accepted mutating cases preserve sequence-before-marker ordering;
+6. rejected cases produce no mutation;
+7. MainNet peer-driven apply remains refused even with Required policy and a valid proof.
+
+Strict scope:
+- Release-binary evidence only.
+- Use real `target/release/qbind-node`.
+- Use release-built helper(s) to mint proof-carrying sidecars.
+- No production source change unless a tiny harness-only fix is required.
+- No MainNet peer-driven apply enablement.
+- No governance execution engine.
+- No on-chain governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No new schema/wire changes.
+- No marker schema change.
+- No sequence-file schema change.
+- No trust-bundle core schema change.
+- No peer-candidate envelope schema change.
+- Do not weaken Runs 070, 130–171.
+- Do not claim full C4 or C5 closure.
+
+Required deliverables:
+1. Add release-binary harness:
+   scripts/devnet/run_172_governance_required_policy_release_binary.sh
+
+2. Add evidence archive:
+   docs/devnet/run_172_governance_required_policy_release_binary/
+
+3. Add canonical evidence report:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_172.md
+
+4. Update narrowly:
+   - docs/whitepaper/contradiction.md
+   - docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   - docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+   - docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+
+5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in contradiction.md before finalizing.
+
+Required production surfaces:
+Exercise at minimum:
+
+A. Validation-only:
+- `--p2p-trust-bundle-reload-check`.
+
+B. Mutating:
+- process-start `--p2p-trust-bundle-reload-apply-path`.
+
+If feasible, also include one of:
+- startup `--p2p-trust-bundle`;
+- SIGHUP live reload;
+- peer-driven drain coordinator.
+
+Do not substitute helper-only evidence for the central Required-policy production-surface accepted-proof claim.
+
+Required accepted scenarios:
+
+A1. default no-proof reload-check remains NotRequired-compatible
+- No CLI flag and no env var.
+- Old no-proof sidecar.
+- Expected:
+  - real `qbind-node` exits success;
+  - default policy is NotRequired;
+  - validation-only semantics preserved;
+  - no sequence write;
+  - no marker write.
+
+A2. default no-proof reload-apply remains NotRequired-compatible
+- No CLI flag and no env var.
+- Old no-proof sidecar.
+- Expected:
+  - real `qbind-node` accepts and applies according to existing Run 134/162/170 semantics;
+  - Run 055 sequence commit succeeds;
+  - v2 marker persists strictly after sequence commit;
+  - no governance-proof-required error.
+
+A3. CLI selector enables Required policy on reload-check and accepts valid proof-carrying Rotate
+- Use `--p2p-trust-bundle-governance-proof-required`.
+- Valid proof-carrying GenesisBound Rotate sidecar.
+- Expected:
+  - hidden CLI selector observed;
+  - proof sibling parsed through production loader;
+  - `GovernanceProofLoadStatus::Available` or equivalent visible;
+  - `GovernanceProofContext::Available` reaches marker decision;
+  - governance verifier accepts;
+  - lifecycle validation accepts;
+  - marker decision accepts;
+  - validation-only non-mutation preserved;
+  - no sequence write;
+  - no marker write.
+
+A4. CLI selector enables Required policy on reload-apply and accepts valid proof-carrying Rotate
+- Use `--p2p-trust-bundle-governance-proof-required`.
+- Valid proof-carrying GenesisBound Rotate sidecar.
+- Expected:
+  - proof sibling parsed through production loader;
+  - governance verifier accepts;
+  - lifecycle validation accepts;
+  - mutating apply succeeds;
+  - Run 055 sequence commit succeeds;
+  - v2 marker persists strictly after sequence commit.
+
+A5. env selector enables Required policy on reload-check and accepts valid proof-carrying Rotate
+- Use `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1`.
+- Expected:
+  - env selector observed;
+  - Required policy active;
+  - valid proof accepted;
+  - validation-only non-mutation preserved.
+
+A6. env selector enables Required policy on reload-apply and accepts valid proof-carrying Rotate
+- Use `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1`.
+- Expected:
+  - mutating apply succeeds;
+  - sequence-before-marker ordering preserved.
+
+A7. valid proof-carrying GenesisBound Revoke sidecar accepted where representable
+- Prefer reload-check first.
+- Mutating surface optional if fixture-supported.
+- If not practical on release binary, document exact limitation and cite Run 167/169/171 source-test coverage.
+
+A8. valid proof-carrying EmergencyCouncil EmergencyRevoke sidecar accepted where representable
+- If fixture-supported, cover it.
+- If not practical, document exact limitation and cite Run 167/169/171 source-test coverage.
+
+A9. idempotent proof-carrying sidecar accepted under Required policy
+- same authority sequence / digest / proof;
+- accepted as idempotent / no-op according to existing marker rules.
+
+Required rejection scenarios:
+
+R1. CLI Required policy + no-proof sidecar rejected on reload-check
+- Expected:
+  - `GovernanceAuthorityRequiredButMissing` visible;
+  - no sequence write;
+  - no marker write.
+
+R2. CLI Required policy + no-proof sidecar rejected on reload-apply
+- Expected:
+  - `GovernanceAuthorityRequiredButMissing` visible;
+  - no Run 070 apply call;
+  - no live trust swap;
+  - no session eviction;
+  - no sequence write;
+  - no marker write.
+
+R3. env Required policy + no-proof sidecar rejected on reload-check.
+
+R4. env Required policy + no-proof sidecar rejected on reload-apply.
+
+R5. malformed governance proof sibling rejected.
+
+R6. wrong environment proof rejected.
+
+R7. wrong chain proof rejected.
+
+R8. wrong genesis proof rejected.
+
+R9. wrong authority root proof rejected.
+
+R10. wrong lifecycle action proof rejected.
+
+R11. wrong candidate digest proof rejected.
+
+R12. wrong authority-domain sequence proof rejected.
+
+R13. invalid issuer signature rejected.
+
+R14. unsupported issuer suite rejected.
+
+R15. non-PQC suite rejected.
+
+R16. threshold-not-met rejected if representable.
+
+R17. stale/replayed lower authority proof rejected.
+
+R18. OnChainGovernance proof rejected as unsupported/fail-closed.
+
+R19. local operator config alone cannot satisfy Required policy.
+
+R20. peer majority / gossip count cannot satisfy Required policy.
+
+R21. proof valid but lifecycle invalid rejected.
+
+R22. lifecycle valid but proof invalid rejected.
+
+R23. proof valid but MainNet peer-driven apply remains refused.
+
+R24. selector cannot be accidentally enabled by unrelated flags.
+
+Required selector proof:
+The evidence report must include:
+- CLI proof:
+  - `--p2p-trust-bundle-governance-proof-required` is present but hidden;
+  - enabling it activates Required policy.
+- env proof:
+  - `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1` activates Required policy;
+  - false / unset value preserves NotRequired.
+- source grep/call-site proof for:
+  - `governance_proof_policy_from_cli_or_env`;
+  - `governance_proof_required_env_selector_enabled`;
+  - `GovernanceProofPolicy::RequiredForLifecycleSensitive`;
+  - `preflight_v2_marker_decision_with_governance_proof_load`;
+  - `load_versioned_ratification_with_governance_proof_from_path`;
+  - `GovernanceProofContext::Available`.
+
+Required production-surface reachability proof:
+The report must include release-binary logs proving:
+- production surfaces, not helper-only binaries, exercised:
+  - Required policy;
+  - proof-carrying Available path;
+  - proof-required missing path;
+  - malformed or invalid proof path where feasible.
+
+Required mutation proof for accepted mutating scenarios:
+For every accepted mutating Required-policy proof-carrying scenario:
+- selector activation occurs before sidecar load;
+- proof parse occurs before marker decision;
+- governance verification occurs before apply/mutation;
+- lifecycle validation occurs before apply/mutation;
+- Run 070 / relevant apply ordering preserved;
+- Run 055 sequence commit succeeds;
+- v2 marker persists strictly after sequence commit;
+- marker JSON/SHA before/after captured;
+- sequence JSON/SHA before/after captured.
+
+Required no-mutation proof for rejected scenarios:
+For every rejected scenario:
+- binary exits non-zero or typed refusal according to surface;
+- no Run 070 apply call;
+- no live trust swap;
+- no session eviction;
+- no sequence write;
+- no marker write;
+- marker bytes unchanged;
+- sequence bytes unchanged;
+- no `.tmp` residue;
+- no fallback to `--p2p-trusted-root`;
+- no active DummySig / DummyKem / DummyAead.
+
+Required denylist:
+Across the run prove:
+- no MainNet apply;
+- no autonomous apply;
+- no apply on receipt;
+- no peer-majority authority;
+- no governance execution claim;
+- no on-chain governance claim;
+- no KMS/HSM claim;
+- no validator-set rotation claim;
+- no fallback to `--p2p-trusted-root`;
+- no active DummySig / DummyKem / DummyAead;
+- no schema/wire/metric drift;
+- no marker write before sequence commit;
+- no sequence write on validation-only surfaces;
+- no marker write on validation-only surfaces.
+
+Required captured metadata:
+- qbind-node SHA-256 and ELF Build ID;
+- helper SHA-256 and ELF Build ID;
+- git commit hash;
+- rustc/cargo versions;
+- exact commands;
+- stdout/stderr logs;
+- per-scenario exit codes;
+- proof sidecar paths and hashes;
+- marker/sequence JSON and SHA before/after;
+- data-dir inventories;
+- denylist grep results.
+
+Validation commands:
+Run at minimum:
+- cargo build --release -p qbind-node --bin qbind-node
+- cargo build --release -p qbind-node --example <proof-carrying fixture helper>
+- bash scripts/devnet/run_172_governance_required_policy_release_binary.sh
+- cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests
+- cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests
+- cargo test -p qbind-node --test run_167_governance_proof_carrier_tests
+- cargo test -p qbind-node --test run_165_governance_marker_integration_tests
+- cargo test -p qbind-node --test run_163_governance_authority_verifier_tests
+- cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests
+- cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+- cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+- cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+- cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+- cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+- cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+- cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+- cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+- cargo test -p qbind-node --lib pqc_authority
+- cargo test -p qbind-node --lib
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_172.md` must state:
+- Run 172 is release-binary Required-policy production-surface governance-proof evidence.
+- Default remains NotRequired.
+- Hidden CLI/env selector activates Required policy.
+- Existing no-proof sidecars remain compatible under NotRequired.
+- Required policy fails closed when proof is absent.
+- Valid proof-carrying sidecars pass under Required policy through real production surfaces where lifecycle/anti-rollback checks pass.
+- Invalid proof-carrying sidecars fail closed.
+- OnChainGovernance remains unsupported/fail-closed.
+- No MainNet apply is enabled.
+- governance execution/on-chain proof remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open unless separately closed by explicit criteria.
+- C5 remains open.
+
+Acceptance criteria:
+Run 172 is acceptable only if:
+1. Real release binaries exercise the hidden Required-policy selector.
+2. Default NotRequired compatibility remains proven.
+3. CLI selector and env selector both activate Required policy.
+4. Required-policy/no-proof cases fail closed.
+5. Valid proof-carrying sidecars reach and pass the governance gate on at least one validation-only and one mutating production surface.
+6. Invalid proof-carrying sidecars fail closed.
+7. Accepted mutating cases preserve sequence-before-marker ordering.
+8. Rejected cases produce no mutation.
+9. MainNet remains refused even with Required policy and valid governance proof.
+10. No governance execution/KMS-HSM/validator-set rotation claim is made.
+11. No full C4 or C5 closure is claimed.
