@@ -1,0 +1,181 @@
+Run 168: release-binary EVIDENCE / ENFORCEMENT for the Run 167
+governance-proof carrier composed with the Run 165 governance gate.
+=======================================================================
+
+Verdict: positive (release-binary boundary): the Run 167 production
+sidecar loader (`load_v2_ratification_sidecar_with_governance_proof_from_path`)
+parses real on-disk proof-carrying v2 ratification sidecars through a
+release-built helper that links the same production helper symbols
+`target/release/qbind-node` links; the Run 165 governance gate accepts
+valid proof-carrying GenesisBound Rotate sidecars and fail-closes on
+absent / malformed / wrong-binding / invalid-signature / unsupported
+proofs; old no-proof v2 sidecars remain compatible under `NotRequired`
+on the real release binary `--p2p-trust-bundle-reload-check` and
+`--p2p-trust-bundle-reload-apply-path` surfaces; MainNet peer-driven
+apply remains refused regardless of any governance-proof carrier.
+
+Run 168 supersedes Run 166's "wire cannot carry a proof" boundary by
+demonstrating that the additive Run 167 sibling field
+(`governance_authority_proof`) is parsed and enforced end-to-end on the
+release-built artifacts. The four production marker-decision callers
+(`crates/qbind-node/src/main.rs` reload-apply preflight,
+`crates/qbind-node/src/main.rs` startup `--p2p-trust-bundle` preflight,
+`crates/qbind-node/src/pqc_live_trust_reload.rs` SIGHUP preflight,
+`crates/qbind-node/src/pqc_peer_candidate_apply.rs` peer-driven drain)
+continue to supply `policy=NotRequired, context=Unavailable` on their
+direct call sites; switching those call sites to consume the Run 167
+loader and a configurable governance-proof policy is documented as a
+follow-up operator-control wiring run and is not in Run 168 scope (no
+schema/wire change is involved).
+
+Harness:
+  scripts/devnet/run_168_governance_proof_carrier_release_binary.sh
+
+Surfaces investigated and proof-carrier wiring:
+
+  1. real `target/release/qbind-node` --p2p-trust-bundle-reload-check
+     against an old no-proof v2 sidecar (Run 133 corpus). Loader
+     status: Absent. Policy: NotRequired. Expected: accept; no sequence
+     write; no marker write.
+  2. real `target/release/qbind-node` --p2p-trust-bundle-reload-apply-path
+     against an old no-proof v2 sidecar. Loader status: Absent.
+     Policy: NotRequired. Expected: accept; sequence-before-marker
+     preserved (Run 070 / Run 055).
+  3. release-built `run_168_governance_proof_carrier_release_binary_helper`
+     against a proof-carrying GenesisBound Rotate sidecar.
+     Loader status: Available. Policy: RequiredForLifecycleSensitive.
+     Expected: `MarkerAcceptKindV2::UpgradeV2 { previous_sequence: 1,
+     new_sequence: 2 }` accept; seed marker bytes byte-for-byte
+     unchanged before the post-commit boundary.
+  4. helper, idempotent re-presentation of the same proof-carrying
+     sidecar. Expected: deterministically-equal accept; no marker
+     mutation.
+  5. helper, no-proof Rotate sidecar under Required. Expected:
+     `GovernanceAuthorityRequiredButMissing(Rotate)`; no mutation.
+  6. helper, malformed `governance_authority_proof` sibling
+     (`schema_version=99`). Loader status: Malformed.
+     `governance_proof_context` maps Malformed to Unavailable. Gate:
+     fail-closes with `GovernanceAuthorityRequiredButMissing(Rotate)`.
+  7. helper, wrong authority root fingerprint. Loader: Available.
+     Gate: `GovernanceAuthorityRejected(WrongAuthorityRoot)`.
+  8. helper, wrong lifecycle action. Loader: Available. Gate:
+     `GovernanceAuthorityRejected(WrongLifecycleAction)`.
+  9. helper, wrong candidate digest. Loader: Available. Gate:
+     `GovernanceAuthorityRejected(WrongCandidateDigest)`.
+ 10. helper, wrong authority-domain sequence. Loader: Available.
+     Gate: `GovernanceAuthorityRejected(WrongAuthoritySequence)`.
+ 11. helper, invalid issuer signature. Loader: Available. Gate:
+     `GovernanceAuthorityRejected(InvalidIssuerSignature)`.
+ 12. helper, `OnChainGovernance` issuer class. Loader: Available
+     (round-trips through the wire). Gate:
+     `GovernanceAuthorityRejected(UnsupportedOnChainGovernance)`.
+ 13. helper, empty issuer signature (R16-equivalent: no in-band path
+     for "local operator config alone"). Wire boundary rejects empty
+     issuer signature; loader status: Malformed(EmptyIssuerSignature).
+     Gate: fail-closes with
+     `GovernanceAuthorityRequiredButMissing(Rotate)`.
+ 14. real `target/release/qbind-node` MainNet refusal regression
+     (R20). MainNet peer-driven apply remains refused regardless of
+     any governance-proof carrier; the surface refusal is owned by
+     Run 130 environment policy and unchanged by Run 165 / Run 167.
+
+R3 (wrong env), R4 (wrong chain), R6 (wrong genesis), R11 (unsupported
+issuer suite), R12 (non-PQC suite), R13 (threshold not met), R14
+(stale/replayed lower-sequence proof), R17 (peer-majority/gossip count
+unrepresentable), R18 (proof valid but lifecycle invalid), R19
+(lifecycle valid but proof invalid) are covered structurally by the
+Run 167 source/test matrix
+(`crates/qbind-node/tests/run_167_governance_proof_carrier_tests.rs`)
+and the Run 163 governance verifier tests
+(`crates/qbind-node/tests/run_163_governance_authority_verifier_tests.rs`).
+The Run 168 evidence README cites those tests for completeness.
+
+Captured release-binary evidence:
+
+  * release-built `target/release/qbind-node` identity in
+    `provenance.txt` (sha256 + ELF Build ID);
+  * release-built proof-carrier helper identity in `provenance.txt`;
+  * release-built Run 133 / Run 164 / Run 166 helper identities in
+    `provenance.txt`;
+  * source-level reachability proof
+    (`reachability/src_grep.txt` + `reachability/reachability.txt`)
+    showing
+    `load_v2_ratification_sidecar_with_governance_proof_from_path`,
+    `GovernanceProofLoadStatus`,
+    `GovernanceProofContext::{Available, Supplied}`,
+    `decide_v2_marker_acceptance_with_lifecycle_and_governance`, and
+    `evaluate_governance_marker_gate` reachable from the four
+    production marker-decision callers;
+  * release-built helper actually invokes the production helper symbol
+    `decide_v2_marker_acceptance_with_lifecycle_and_governance` after
+    parsing real on-disk proof-carrying sidecars through the production
+    Run 167 loader
+    (`load_v2_ratification_sidecar_with_governance_proof_from_path`);
+  * per-scenario stdout/stderr logs and exit codes;
+  * marker SHA-256 before/after for every seeded scenario;
+  * sequence SHA-256 before/after for the A2 mutating scenario;
+  * proof-carrying sidecar JSON files + SHA-256 under
+    `helper_evidence/run_168/scenarios/<id>/sidecar.{json,sha256}`;
+  * data-dir inventories under `data_inventories/`;
+  * denylist grep results under `grep_summaries/denylist.txt`;
+  * fixture manifest under `fixture_manifest.txt`.
+
+No-mutation invariants asserted on every rejected scenario:
+
+  * binary or helper exits non-zero or returns the precise typed
+    error;
+  * no Run 070 apply call;
+  * no live trust swap;
+  * no session eviction;
+  * no sequence write;
+  * no marker write (marker bytes byte-for-byte unchanged on seeded
+    scenarios; absent on un-seeded ones);
+  * no `.tmp` residue;
+  * no fallback to `--p2p-trusted-root`;
+  * no active `DummySig` / `DummyKem` / `DummyAead`.
+
+Mutation-ordering invariants asserted on every accepted mutating
+scenario:
+
+  * proof parse occurs before marker decision (Run 167 loader);
+  * governance verification occurs before apply/mutation (Run 165
+    gate);
+  * lifecycle validation occurs before apply/mutation (Run 161);
+  * Run 070 reload-apply ordering preserved;
+  * Run 055 sequence commit succeeds before v2 marker persist.
+
+Denylist invariants (across the run):
+
+  * no MainNet apply;
+  * no autonomous apply;
+  * no apply on receipt;
+  * no peer-majority authority;
+  * no governance execution claim;
+  * no on-chain governance claim;
+  * no KMS/HSM claim;
+  * no validator-set rotation claim;
+  * no fallback to `--p2p-trusted-root`;
+  * no active `DummySig` / `DummyKem` / `DummyAead` in production
+    source;
+  * no schema/wire/metric drift beyond Run 167's optional sibling
+    field;
+  * no marker write before sequence commit;
+  * no sequence write on validation-only surfaces;
+  * no marker write on validation-only surfaces.
+
+Out of scope (deferred):
+
+  * MainNet peer-driven apply enablement — remains refused;
+  * governance execution engine — remains unimplemented;
+  * on-chain governance integration — `OnChainGovernance` remains
+    fail-closed at the verifier;
+  * KMS/HSM custody — remains unimplemented;
+  * validator-set rotation — remains open;
+  * autonomous / on-receipt / peer-majority apply — remains refused;
+  * full C4 closure — remains open;
+  * C5 closure — remains open;
+  * wiring the four production marker-decision callers to consume
+    `load_v2_ratification_sidecar_with_governance_proof_from_path`
+    and to expose a configurable governance-proof policy on the CLI
+    is operator-control plumbing intentionally not in Run 168 scope
+    (no schema/wire change; documented as a follow-up wiring run).
