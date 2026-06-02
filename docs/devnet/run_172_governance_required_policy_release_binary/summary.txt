@@ -1,0 +1,33 @@
+Run 172 — Required-policy release-binary scenario verdicts
+git_commit: 0fbb49e469d4fd2a16c7d5b8619a833bb6770b4f
+
+scenario verdicts:
+  A1_default_noproof_reload_check                            rc=0
+  A2_default_noproof_reload_apply                            rc=0
+  A3_cli_required_valid_proof_reload_check                   rc=0
+  A4_cli_required_valid_proof_reload_apply                   rc=0
+  A5_env_required_valid_proof_reload_check                   rc=0
+  A6_env_required_valid_proof_reload_apply                   rc=0
+  A9_idempotent_required (helper-replay)                   rc=skipped
+  R2_cli_required_noproof_reload_apply                       rc=1
+  R4_env_required_noproof_reload_apply                       rc=1
+  R5_required_malformed_proof_reload_apply                   rc=1
+  R9_required_wrong_root_reload_apply                        rc=1
+  R10_required_wrong_action_reload_apply                     rc=1
+  R11_required_wrong_digest_reload_apply                     rc=1
+  R12_required_wrong_sequence_reload_apply                   rc=1
+  R13_required_invalid_signature_reload_apply                rc=1
+  R14_required_unsupported_suite_reload_apply                rc=1
+  R18_required_onchain_governance_reload_apply               rc=1
+  R21_required_lifecycle_invalid_reload_apply (deferred)   rc=skipped
+  R23_mainnet_peer_driven_refusal                            rc=1
+  R24_selector_not_implicit                                  rc=0
+  test:run_171_governance_required_policy_selector_tests     rc=0
+  test:run_169_governance_proof_loader_surface_integration_tests rc=0
+  test:run_167_governance_proof_carrier_tests                rc=0
+  test:run_165_governance_marker_integration_tests           rc=0
+  test:pqc_authority_lib                                     rc=0
+
+verdict: PASS — Run 172 release-binary Required-policy production-surface evidence captured.
+honest limitation: validation-only reload-check does not call governance_proof_policy_from_cli_or_env;
+  validation-only Required-policy gate is observed at symbol level via Run 168 helper + Run 169/171 tests.
