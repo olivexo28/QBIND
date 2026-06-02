@@ -1,0 +1,264 @@
+Task: Run 167 — Source/Test Governance-Proof Carrying Schema for v2 Authority Sidecars
+
+Current accepted state:
+- Run 163: pure governance authority verifier landed.
+- Run 164: release-binary helper/boundary evidence showed the verifier worked but had zero production-surface callers.
+- Run 165: governance gate wired into lifecycle / marker-decision paths:
+  - `GovernanceProofPolicy`;
+  - `GovernanceProofContext`;
+  - `GovernanceMarkerGate`;
+  - `evaluate_governance_marker_gate`;
+  - `decide_v2_marker_acceptance_with_lifecycle_and_governance`;
+  - typed errors `GovernanceAuthorityRejected` and `GovernanceAuthorityRequiredButMissing`.
+- Run 166: release-binary boundary evidence landed:
+  - governance gate is production-source reachable;
+  - `NotRequired` compatibility proven on real `target/release/qbind-node`;
+  - `RequiredButMissing` and `GovernanceAuthorityRejected` fail closed on release-built helper;
+  - existing production v2 wire material cannot yet carry real governance proofs.
+- Run 166 explicitly identifies the next required run as the governance-proof carrying/schema run.
+- MainNet peer-driven apply remains refused.
+- Governance execution / on-chain proof remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Objective:
+Add a source/test additive governance-proof carrier for v2 authority/ratiﬁcation sidecars so production v2 surfaces can carry a `GovernanceAuthorityProof` into the Run 165 governance gate.
+
+This run must make governance proof data representable and parsable by production source paths, but it must not enable MainNet apply and must not claim release-binary governance-proof acceptance yet.
+
+Release-binary proof-carrying evidence is deferred to Run 168.
+
+Strict scope:
+- Source/test schema/carrying work only.
+- No release-binary harness in this run.
+- No MainNet peer-driven apply enablement.
+- No governance execution engine.
+- No on-chain governance implementation.
+- No KMS/HSM implementation.
+- No validator-set rotation.
+- No autonomous apply.
+- No automatic apply on receipt.
+- No peer-majority authority.
+- No trust-bundle core schema change unless unavoidable.
+- Prefer additive optional governance-proof field on existing v2 ratification / authority sidecar.
+- No sequence-file schema change.
+- No authority-marker schema change unless absolutely required.
+- No weakening of Runs 070, 130–166.
+- Do not claim full C4 or C5 closure.
+
+Required design:
+Add an additive, versioned governance-proof carrier to the v2 authority/ratiﬁcation sidecar path.
+
+Preferred shape:
+- Extend the existing v2 ratification sidecar structure with an optional field such as:
+  - `governance_authority_proof: Option<GovernanceAuthorityProofWire>`
+  - or equivalent.
+- Existing sidecars without this field must remain parseable and valid under `GovernanceProofPolicy::NotRequired`.
+- Existing sidecars without this field must fail closed under `GovernanceProofPolicy::RequiredForLifecycleSensitive`.
+- Sidecars with malformed governance-proof data must fail closed.
+- Sidecars with valid governance-proof data must construct `GovernanceProofContext::Available(...)` or equivalent and pass it into the Run 165 governance gate.
+
+Canonical binding requirements:
+The governance proof must be bound to:
+- environment;
+- chain_id;
+- genesis_hash;
+- authority root fingerprint;
+- lifecycle action;
+- candidate digest;
+- authority-domain sequence;
+- active / new / revoked bundle-signing key fingerprint where applicable;
+- issuer authority class;
+- issuer signature suite;
+- issuer signature.
+
+The proof must not be interpreted as:
+- peer-majority authority;
+- local operator config;
+- MainNet apply authorization by itself;
+- KMS/HSM custody;
+- on-chain governance execution proof.
+
+OnChainGovernance remains unsupported/fail-closed unless a real proof format is implemented, which is out of scope for this run.
+
+Required source behavior:
+1. Define a wire-safe governance proof representation, preferably near the existing v2 sidecar types.
+2. Add conversion between the wire representation and `GovernanceAuthorityProof`.
+3. Add parsing / serialization tests.
+4. Update the existing v2 sidecar loader so it can return:
+   - `GovernanceProofContext::Unavailable` when no proof is present;
+   - `GovernanceProofContext::Available(proof)` when proof parses;
+   - typed parse error when proof is malformed.
+5. Update production source preflight contexts to pass the parsed governance proof context into:
+   - reload-check;
+   - local peer-candidate-check;
+   - reload-apply;
+   - startup `--p2p-trust-bundle`;
+   - SIGHUP live reload;
+   - live inbound `0x05`;
+   - peer-driven drain / `ProductionV2MarkerCoordinator`,
+   wherever these surfaces already consume v2 sidecar/context data.
+6. Preserve existing `NotRequired` compatibility behavior.
+7. Preserve existing `RequiredButMissing` behavior for proof-required candidates with no proof.
+8. Do not perform any marker write, sequence write, live trust swap, or session eviction during proof parsing.
+
+Required policies:
+- DevNet/TestNet:
+  - proof may be available and verified in source/test paths;
+  - apply remains controlled by existing flags/gates.
+- MainNet:
+  - proof parsing may work;
+  - governance proof acceptance alone must not enable MainNet peer-driven apply;
+  - existing MainNet refusal remains intact.
+- OnChainGovernance:
+  - fail-closed unsupported unless a real proof format is explicitly implemented, which is out of scope.
+
+Required accepted cases:
+A1. sidecar without governance proof parses under NotRequired policy.
+- Existing fixtures remain compatible.
+
+A2. sidecar without governance proof fails under RequiredForLifecycleSensitive policy.
+- Expected `GovernanceAuthorityRequiredButMissing`.
+
+A3. sidecar with valid GenesisBound Rotate proof parses and verifies.
+- proof context is Available;
+- marker decision accepts if lifecycle and anti-rollback also accept.
+
+A4. sidecar with valid GenesisBound Revoke proof parses and verifies.
+
+A5. sidecar with valid EmergencyCouncil EmergencyRevoke proof parses and verifies, if representable.
+
+A6. idempotent sidecar with same governance proof accepted / classified idempotent.
+
+A7. valid proof-carrying sidecar works through reload-check validation-only source path.
+- no sequence write;
+- no marker write.
+
+A8. valid proof-carrying sidecar works through reload-apply preflight source path.
+- no mutation during preflight;
+- if test exercises full apply, marker still persists only after sequence commit.
+
+A9. valid proof-carrying sidecar reaches peer-driven drain marker coordinator source path.
+- no MainNet enablement.
+
+Required rejection cases:
+R1. malformed governance proof rejected.
+
+R2. wrong environment proof rejected.
+
+R3. wrong chain proof rejected.
+
+R4. wrong genesis proof rejected.
+
+R5. wrong authority root proof rejected.
+
+R6. wrong lifecycle action proof rejected.
+
+R7. wrong candidate digest proof rejected.
+
+R8. wrong authority-domain sequence proof rejected.
+
+R9. invalid issuer signature rejected.
+
+R10. unsupported issuer suite rejected.
+
+R11. non-PQC suite rejected.
+
+R12. threshold not met rejected, if threshold metadata is representable.
+
+R13. stale/replayed lower authority proof rejected.
+
+R14. OnChainGovernance proof rejected as unsupported.
+
+R15. local operator config alone cannot be encoded as valid governance authority proof.
+
+R16. peer majority / gossip count cannot be encoded as valid governance authority proof.
+
+R17. proof valid but lifecycle invalid rejects.
+
+R18. lifecycle valid but proof invalid rejects.
+
+R19. proof valid but MainNet peer-driven apply still refused.
+
+R20. old v2 sidecars remain valid under NotRequired policy.
+
+R21. old v2 sidecars fail closed under Required policy.
+
+Required surface coverage:
+At source/test level, cover proof-carrying behavior across:
+
+1. reload-check validation-only;
+2. reload-apply preflight;
+3. startup preflight;
+4. SIGHUP preflight;
+5. live `0x05` / local peer-candidate validation-only if it shares v2 context data;
+6. peer-driven drain `ProductionV2MarkerCoordinator`.
+
+Required backwards-compatibility checks:
+- Run 134 reload-apply v2 marker tests remain green.
+- Run 138 SIGHUP v2 tests remain green.
+- Run 142 live inbound `0x05` v2 validation tests remain green.
+- Run 148 / 150 / 152 peer-driven apply tests remain green.
+- Run 161 lifecycle marker integration tests remain green.
+- Run 163 governance verifier tests remain green.
+- Run 165 governance marker integration tests remain green.
+- Run 166 evidence assumptions remain valid.
+
+Required documentation:
+Add:
+- `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_167.md`
+
+Update:
+- `docs/whitepaper/contradiction.md`
+- `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+- `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+- `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+- Run 167 is source/test governance-proof carrier work.
+- Governance proof data is now representable in v2 sidecars at source/test level.
+- Existing no-proof sidecars remain compatible under NotRequired policy.
+- Required policy fails closed when proof is missing.
+- Release-binary proof-carrying enforcement is deferred to Run 168.
+- MainNet peer-driven apply remains refused.
+- OnChainGovernance remains unsupported/fail-closed.
+- governance execution remains unimplemented.
+- KMS/HSM remains unimplemented.
+- validator-set rotation remains open.
+- full C4 remains open.
+- C5 remains open.
+
+Validation commands:
+Run at minimum:
+- `cargo build -p qbind-node --lib`
+- `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+- `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+- `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+- `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+- `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+- `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+- `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+- `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+- `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+- `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+- `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+- `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+- `cargo test -p qbind-node --lib pqc_authority`
+- `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 167 is acceptable only if:
+1. v2 sidecar/context material can carry an optional governance authority proof.
+2. Existing no-proof sidecars remain compatible under NotRequired policy.
+3. Required policy fails closed when proof is absent.
+4. Valid proof-carrying sidecars produce `GovernanceProofContext::Available` or equivalent.
+5. Invalid proof-carrying sidecars fail closed.
+6. Proof-carrying context reaches marker-decision source paths.
+7. MainNet peer-driven apply remains refused even with a valid proof.
+8. No silent schema drift or backwards-incompatible sidecar parsing is introduced.
+9. Docs defer release-binary proof-carrying evidence to Run 168.
+10. No full C4 or C5 closure is claimed.

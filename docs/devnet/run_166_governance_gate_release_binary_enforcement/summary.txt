@@ -1,0 +1,215 @@
+Run 166: release-binary EVIDENCE / ENFORCEMENT for the Run 165
+governance gate
+=======================================================================
+
+Verdict: positive (release-binary boundary): the Run 165 governance gate
+is production-source reachable from `target/release/qbind-node` after
+Run 165, the `NotRequired` compatibility path remains green on the real
+release binary through `--p2p-trust-bundle-reload-check` and
+`--p2p-trust-bundle-reload-apply-path`, and the
+`GovernanceAuthorityRequiredButMissing` /
+`GovernanceAuthorityRejected` fail-closed behaviour is proven on a
+release-built helper that links the same
+`decide_v2_marker_acceptance_with_lifecycle_and_governance` symbol the
+four mutating v2 surfaces call.
+
+Run 166 is the partner deliverable to Run 165. It supersedes Run 164's
+"zero production-surface caller" partial-positive boundary by proving on
+the real release binary that the governance-aware marker decision helper
+is reachable from at least one validation-only v2 marker-decision
+surface (`reload-check`) and at least one mutating v2 marker-decision
+surface (`reload-apply`).
+
+Harness:
+  scripts/devnet/run_166_governance_gate_release_binary_enforcement.sh
+
+Surfaces investigated and governance-gate wiring:
+
+  1. startup `--p2p-trust-bundle`              — reachable; production
+     wiring routes through
+     `decide_v2_marker_acceptance_with_lifecycle_and_governance`
+     (`crates/qbind-node/src/main.rs` startup pre-flight) at
+     `policy=NotRequired`, `context=Unavailable`. Carries a real
+     governance proof? NO (wire schema gap; deferred to Run 167).
+  2. reload-check validation-only              — reachable; the v2
+     anti-rollback / lifecycle / governance composition is decided
+     source-locally (Run 132 / Run 165) without persisting. Carries a
+     real governance proof? NO.
+  3. local peer-candidate-check validation-only — same as (2).
+  4. process-start reload-apply                 — reachable; production
+     wiring routes through the governance-aware helper at
+     `policy=NotRequired`, `context=Unavailable`
+     (`crates/qbind-node/src/main.rs` reload-apply pre-flight).
+     Carries a real governance proof? NO.
+  5. SIGHUP live reload                         — reachable; production
+     wiring routes through the governance-aware helper at
+     `policy=NotRequired`, `context=Unavailable`
+     (`crates/qbind-node/src/pqc_live_trust_reload.rs`). Carries a
+     real governance proof? NO.
+  6. live inbound `0x05`                        — reachable through the
+     same lifecycle marker decision path the governance composition
+     extends (Run 142 / Run 143). Carries a real governance proof? NO.
+  7. peer-driven drain / `ProductionV2MarkerCoordinator` — reachable;
+     production wiring routes through the governance-aware helper at
+     `policy=NotRequired`, `context=Unavailable`
+     (`crates/qbind-node/src/pqc_peer_candidate_apply.rs`). Carries a
+     real governance proof? NO.
+
+Captured release-binary evidence:
+
+  * release-built `target/release/qbind-node` identity in
+    `provenance.txt` (sha256 + ELF Build ID).
+  * release-built
+    `target/release/examples/run_166_governance_gate_release_binary_helper`
+    identity in `provenance.txt`.
+  * release-built
+    `target/release/examples/run_164_governance_authority_fixture_helper`
+    identity in `provenance.txt`.
+  * release-built
+    `target/release/examples/run_133_v2_validation_only_fixture_helper`
+    identity in `provenance.txt`.
+  * source-level reachability proof (`reachability/src_grep.txt` and
+    `reachability/reachability.txt`) showing
+    `decide_v2_marker_acceptance_with_lifecycle_and_governance`,
+    `evaluate_governance_marker_gate`,
+    `MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing`,
+    and `MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected` in
+    `pqc_authority_marker_acceptance.rs`, plus the four production
+    callers in `pqc_live_trust_reload.rs`, `pqc_peer_candidate_apply.rs`,
+    and `main.rs`.
+  * release-built helper actually invokes the production helper symbol
+    on every accept and reject scenario H1–H7; per-scenario actual typed
+    outcome is asserted to match the expected typed-outcome regex.
+  * release-built Run 164 helper replays the full A1–A5 / R1–R16
+    governance proof corpus on this checkout.
+  * release-binary regression for Runs 165 / 163 / 161 / 159 / 157 /
+    152 / 150 / 148 / 142 / 134 / 138 and `lib pqc_authority` all green.
+
+Acceptance scenarios exercised on the real `target/release/qbind-node`:
+
+  A1  reload-check accepts a v2 ratify@seq=1 candidate
+      (NotRequired compatibility; validation-only; no marker write,
+       no sequence write).
+  A2  reload-apply accepts the same v2 ratify@seq=1 candidate
+      (NotRequired compatibility; mutating; Run 070 apply +
+       Run 055 sequence commit + post-commit v2 marker persist).
+  A2' reload-apply accepts a Rotate@seq=2 lifecycle-sensitive candidate
+      over a seeded v2-seq=1 marker (NotRequired compatibility on a
+      lifecycle-sensitive transition; missing proof does NOT refuse).
+
+Governance enforcement scenarios exercised on the release-built helper:
+
+  H1  policy=NotRequired                  context=Unavailable
+                                          → Accept (FirstV2Write).
+  H2  policy=NotRequired                  context=Unavailable
+                                          → Accept (UpgradeV2 1->2,
+                                            Rotate after seed).
+  H3  policy=RequiredForLifecycleSensitive context=Unavailable
+                                          → GovernanceAuthorityRequired-
+                                            ButMissing(Rotate);
+                                            seed marker bytes UNCHANGED.
+  H4  policy=RequiredForLifecycleSensitive context=Unavailable
+                                          → Accept (FirstV2Write,
+                                            ActivateInitial governance-
+                                            optional).
+  H5  policy=RequiredForLifecycleSensitive context=Supplied(good,Rotate)
+                                          → Accept (UpgradeV2 1->2).
+  H6  policy=RequiredForLifecycleSensitive context=Supplied(tampered)
+                                          → GovernanceAuthorityRejected(
+                                            InvalidIssuerSignature);
+                                            no marker write.
+  H7  policy=NotRequired                  context=Unavailable (x2)
+                                          → deterministic Accept;
+                                            no marker write; acceptance
+                                            carries no MainNet-apply
+                                            capability (the surface
+                                            environment gate, unchanged
+                                            by Run 165, owns the MainNet
+                                            refusal).
+
+Rejection matrix coverage (release-built helper evidence):
+
+  * wrong environment / wrong chain / wrong genesis / wrong authority
+    root / wrong lifecycle action / wrong candidate digest / wrong
+    authority-domain sequence / invalid issuer signature / unsupported
+    issuer suite / non-PQC suite / threshold not met / malformed proof /
+    stale-replayed proof / OnChainGovernance unsupported / local
+    operator config alone / peer-majority alone — all covered by the
+    Run 164 release-built helper corpus replay
+    (`scenario_assertions.run164_corpus.txt`).
+  * `RequiredButMissing` (Rotate) and `Rejected(InvalidIssuerSignature)`
+    additionally covered through the Run 166 helper
+    (`scenario_assertions.txt`).
+
+Negative invariants:
+
+  * MainNet peer-driven apply remains refused unconditionally.
+  * harness does NOT enable MainNet on any surface, does NOT open a P2P
+    socket, does NOT mutate live trust state outside the existing
+    Run 070 apply on accepted A2/A2', does NOT modify any data dir
+    outside the OUTDIR.
+  * out-of-scope denylist grep clean post banner-exclusion.
+  * no fallback to `--p2p-trusted-root`.
+  * no active DummySig / DummyKem / DummyAead.
+  * no marker write, no sequence write, no live trust mutation, and no
+    session eviction on any rejected governance-gate scenario.
+  * persisted seed marker bytes byte-for-byte unchanged on H3 (Required-
+    ButMissing) and on every H6-style Rejected variant.
+
+Regression suites (all green on this checkout):
+
+  * cargo test -p qbind-node --test run_165_governance_marker_integration_tests
+  * cargo test -p qbind-node --test run_163_governance_authority_verifier_tests
+  * cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests
+  * cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests
+  * cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests
+  * cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests
+  * cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests
+  * cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests
+  * cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests
+  * cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests
+  * cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests
+  * cargo test -p qbind-node --lib pqc_authority
+
+Out-of-scope explicitly NOT done (and NOT claimed):
+
+  * MainNet peer-driven apply enablement.
+  * autonomous peer-driven apply.
+  * automatic apply on receipt.
+  * peer-majority authority.
+  * governance execution engine.
+  * on-chain governance integration (`OnChainGovernance` remains
+    fail-closed / `UnsupportedOnChainGovernance`).
+  * KMS / HSM custody implementation.
+  * validator-set rotation.
+  * any wire-format / marker-schema / sequence-file-schema /
+    trust-bundle-schema / peer-candidate-envelope-schema change.
+  * any new CLI flag, environment variable, or configuration key flipping
+    the four mutating production surfaces from `policy=NotRequired` to
+    `policy=RequiredForLifecycleSensitive` on the real release binary —
+    that flip is the subject of Run 167 (governance-proof carrying
+    schema).
+
+Documented infeasibility on existing release-binary v2 surfaces:
+
+  * Carrying a real `GovernanceAuthorityProof` through any production
+    `target/release/qbind-node` surface (reload-check, reload-apply,
+    SIGHUP, startup, live `0x05`, peer-driven drain,
+    peer-candidate-check) requires a wire-format extension that does
+    not yet exist. Run 166 deliberately does NOT invent one. The
+    fail-closed `RequiredButMissing` semantics are evidenced through the
+    release-built helper that links the same production helper symbol
+    `target/release/qbind-node` links.
+
+Next required integration run: Run 167 — governance-proof carrying
+schema design / implementation. Run 167 must define the wire-format
+extension that carries a real `GovernanceAuthorityProof` through the v2
+ratification or authority-marker envelope without weakening any existing
+rejection class, and flip the four mutating production surfaces from
+`policy=NotRequired` to `policy=RequiredForLifecycleSensitive` so
+accepted-governance-proof evidence becomes captureable directly on
+`target/release/qbind-node`.
+
+Run 166 does NOT claim strongest-positive accepted-governance-proof
+evidence through production surfaces. Run 166 does NOT claim full C4
+closure. Run 166 does NOT claim C5 closure.
