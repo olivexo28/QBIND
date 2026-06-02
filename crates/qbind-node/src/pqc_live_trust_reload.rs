@@ -284,6 +284,26 @@ pub struct LiveReloadConfig {
     /// its `--data-dir` without a restart (same scope rule as the
     /// Run 074 `sequence_path` field).
     pub authority_marker: Option<LiveReloadAuthorityMarkerConfig>,
+
+    /// Run 171 — active governance-proof policy for the SIGHUP live
+    /// reload v2 marker-decision preflight (Run 169 surface shim).
+    ///
+    /// Defaults to
+    /// [`crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired`]
+    /// when the binary's hidden
+    /// `--p2p-trust-bundle-governance-proof-required` flag and the
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED` environment
+    /// variable are both absent (preserves Run 138 SIGHUP behaviour
+    /// bit-for-bit). When the operator sets either source, the
+    /// binary populates this field with
+    /// [`crate::pqc_governance_authority::GovernanceProofPolicy::RequiredForLifecycleSensitive`]
+    /// and the SIGHUP preflight routes through the Run 169 shim under
+    /// that policy.
+    ///
+    /// Non-MainNet-enabling. The Run 148/149/152 MainNet peer-driven
+    /// apply refusal is upstream of this controller and is unchanged
+    /// by Run 171.
+    pub governance_proof_policy: crate::pqc_governance_authority::GovernanceProofPolicy,
 }
 
 /// Run 114 — owned ratification enforcement inputs the
@@ -1335,14 +1355,24 @@ impl LiveReloadController {
         // Run 169: route through the Run 169 governance-proof surface
         // shim so the typed Run 167 `GovernanceProofLoadStatus` parsed
         // from the SIGHUP-trigger sidecar load reaches the Run 165
-        // governance gate. Production retains
-        // `GovernanceProofPolicy::NotRequired` so old no-proof v2
-        // sidecars under SIGHUP remain compatible. The fixture
-        // verifier is the source/test issuer-signature verifier;
-        // release-binary production-surface proof-carrying evidence
-        // is deferred to Run 170. MainNet peer-driven apply remains
-        // refused at the calling surface regardless of governance
-        // proof.
+        // governance gate.
+        //
+        // Run 171: the policy is now selected by the binary at
+        // controller construction time from the hidden
+        // `--p2p-trust-bundle-governance-proof-required` flag /
+        // `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED` env var
+        // (`LiveReloadConfig::governance_proof_policy`). Default
+        // remains `NotRequired` so old no-proof v2 sidecars under
+        // SIGHUP remain compatible bit-for-bit; under
+        // `RequiredForLifecycleSensitive` a missing or invalid Run 167
+        // proof on a `Rotate`/`Retire`/`Revoke`/`EmergencyRevoke`
+        // sidecar fails closed before any Run 070 apply / live-trust
+        // swap / session eviction / sequence write / marker persist.
+        // The fixture verifier is the source/test issuer-signature
+        // verifier; release-binary Required-policy production-surface
+        // evidence is deferred to Run 172. MainNet peer-driven apply
+        // remains refused at the calling surface regardless of
+        // governance proof.
         let verifier =
             crate::pqc_governance_authority::fixture_issuer_signature_verifier();
         let decision = crate::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load(
@@ -1356,7 +1386,7 @@ impl LiveReloadController {
                 update_source: AuthorityStateUpdateSource::SighupReload,
                 updated_at_unix_secs: now_unix_secs,
             },
-            crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+            self.config.governance_proof_policy,
             governance_proof_load,
             &verifier,
         )?;
@@ -1481,6 +1511,8 @@ mod tests {
             local_leaf_cert_bytes: None,
             ratification: None,
             authority_marker: None,
+            governance_proof_policy:
+                crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
         }
     }
 

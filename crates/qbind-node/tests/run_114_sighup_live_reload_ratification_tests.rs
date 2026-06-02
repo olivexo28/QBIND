@@ -305,7 +305,8 @@ fn make_controller(
         local_leaf_cert_bytes: None,
         ratification,
         authority_marker: None,
-    };
+    governance_proof_policy: qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+};
     let ctl = LiveReloadController::new(live.clone(), evictor, metrics.clone(), cfg);
     (ctl, live, mock, metrics)
 }
