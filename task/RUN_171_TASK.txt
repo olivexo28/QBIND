@@ -1,0 +1,273 @@
+Task: Run 171 — Source/Test Hidden Governance-Proof Required-Policy Selector for Production Surfaces
+
+Current accepted state:
+
+* Run 167: additive governance-proof carrier landed.
+* Run 168: release-built helper boundary proved proof-carrying sidecars parse and pass/fail through production loader/gate symbols.
+* Run 169: source/test integration wired the Run 167 loader into production v2 marker-decision callers.
+* Run 170: release-binary boundary evidence landed:
+
+  * real `target/release/qbind-node` proves old no-proof sidecars remain compatible under `GovernanceProofPolicy::NotRequired`;
+  * real `target/release/qbind-node` proves reload-check and reload-apply compatibility remains intact;
+  * release-built helper proves valid and invalid proof-carrying matrix through production symbols;
+  * MainNet refusal remains intact;
+  * no production source delta;
+  * no schema/wire/metric drift.
+* Run 170 limitation:
+  production release-binary surfaces are still hard-wired to `GovernanceProofPolicy::NotRequired` by default.
+  There is no release-binary CLI/env/operator selector for `GovernanceProofPolicy::RequiredForLifecycleSensitive`.
+* Therefore production-surface release-binary Required-policy proof-carrying acceptance/rejection remains open.
+* MainNet peer-driven apply remains refused.
+* OnChainGovernance remains unsupported/fail-closed.
+* governance execution remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open.
+* C5 remains open.
+
+Objective:
+Add the smallest hidden, disabled-by-default, DevNet/TestNet-safe governance-proof Required-policy selector so production v2 marker-decision surfaces can be exercised under `GovernanceProofPolicy::RequiredForLifecycleSensitive` on release binaries.
+
+This is source/test only. Release-binary Required-policy production-surface evidence is deferred to Run 172.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary harness in this run.
+* Hidden operator/test selector only.
+* Disabled by default.
+* No MainNet peer-driven apply enablement.
+* No governance execution engine.
+* No on-chain governance implementation.
+* No KMS/HSM implementation.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No new proof schema.
+* No marker schema change.
+* No sequence-file schema change.
+* No trust-bundle core schema change.
+* No peer-candidate envelope schema change.
+* Do not weaken Runs 070, 130–170.
+* Do not claim full C4 or C5 closure.
+
+Required selector design:
+Add a hidden governance-proof policy selector that can choose:
+
+1. `GovernanceProofPolicy::NotRequired`
+
+   * default;
+   * existing behavior;
+   * all old sidecars remain compatible.
+
+2. `GovernanceProofPolicy::RequiredForLifecycleSensitive`
+
+   * hidden;
+   * explicit;
+   * DevNet/TestNet allowed for evidence;
+   * MainNet must remain refused for peer-driven apply;
+   * validation-only MainNet parsing may be allowed only if it does not enable apply and existing policy permits it.
+
+Acceptable selector forms:
+Prefer one narrow hidden CLI flag or environment variable, for example:
+
+* `--p2p-trust-bundle-governance-proof-required`
+* or `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1`
+
+The selector must be:
+
+* hidden;
+* disabled by default;
+* documented as Run 171 evidence/operator-test surface only;
+* not a governance execution engine;
+* not an on-chain governance proof;
+* not a KMS/HSM custody claim;
+* not sufficient to enable MainNet apply.
+
+Required surface wiring:
+The selector must feed the policy into all production v2 marker-decision preflight call sites already wired by Run 169:
+
+1. reload-check validation-only;
+2. reload-apply;
+3. startup `--p2p-trust-bundle`;
+4. SIGHUP live reload;
+5. peer-driven `ProductionV2MarkerCoordinator`;
+6. live `0x05` / local peer-candidate validation-only if applicable.
+
+Required behavior:
+
+* Default behavior remains `NotRequired`.
+* Required-policy mode:
+
+  * no-proof sidecar fails with `GovernanceAuthorityRequiredButMissing` for lifecycle-sensitive transitions;
+  * valid proof-carrying sidecar reaches `GovernanceProofContext::Available`;
+  * invalid proof-carrying sidecar fails with `GovernanceAuthorityRejected` or typed parse/load error;
+  * validation-only surfaces remain non-mutating;
+  * mutating surfaces still persist marker only after successful Run 055 sequence commit.
+* MainNet peer-driven apply remains refused even if Required policy is enabled and proof is valid.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_171_governance_required_policy_selector_tests.rs`
+
+Minimum acceptance matrix:
+
+A1. default selector is NotRequired
+
+* no hidden flag/env set;
+* old no-proof v2 sidecar accepted as before.
+
+A2. hidden selector sets RequiredForLifecycleSensitive
+
+* config parsing / runtime context selects Required policy.
+
+A3. reload-check Required policy accepts valid proof-carrying Rotate sidecar
+
+* no marker write;
+* no sequence write.
+
+A4. reload-apply Required policy accepts valid proof-carrying Rotate sidecar
+
+* preflight accepts;
+* if apply path exercised, sequence commit precedes marker persist.
+
+A5. startup Required policy accepts valid proof-carrying Rotate sidecar
+
+* marker decision receives Required policy.
+
+A6. SIGHUP Required policy accepts valid proof-carrying Rotate sidecar
+
+* marker decision receives Required policy.
+
+A7. peer-driven coordinator Required policy accepts valid proof-carrying Rotate sidecar
+
+* MainNet still refused.
+
+A8. old no-proof sidecar remains accepted under default NotRequired across representative surfaces.
+
+Required rejection matrix:
+
+R1. Required policy + no-proof sidecar rejected with RequiredButMissing on reload-check.
+
+R2. Required policy + no-proof sidecar rejected before Run 070 on reload-apply.
+
+R3. Required policy + malformed proof rejected before mutation.
+
+R4. Required policy + invalid issuer signature rejected.
+
+R5. Required policy + wrong environment proof rejected.
+
+R6. Required policy + wrong chain proof rejected.
+
+R7. Required policy + wrong genesis proof rejected.
+
+R8. Required policy + wrong authority root proof rejected.
+
+R9. Required policy + wrong lifecycle action proof rejected.
+
+R10. Required policy + wrong candidate digest proof rejected.
+
+R11. Required policy + wrong authority-domain sequence proof rejected.
+
+R12. Required policy + OnChainGovernance proof rejected as unsupported.
+
+R13. Required policy + local operator config alone rejected as authority proof.
+
+R14. Required policy + peer majority / gossip count rejected as authority proof.
+
+R15. proof valid but lifecycle invalid rejected.
+
+R16. lifecycle valid but proof invalid rejected.
+
+R17. validation-only Required-policy rejection produces no sequence write and no marker write.
+
+R18. mutating Required-policy rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+R19. MainNet peer-driven apply remains refused even with Required policy and valid proof.
+
+R20. selector cannot be accidentally enabled by unrelated flags.
+
+Required source-reachability proof:
+Tests/docs must show:
+
+* policy selector reaches the Run 169 shim;
+* Required policy reaches `evaluate_governance_marker_gate`;
+* no-proof sidecars under Required produce `GovernanceAuthorityRequiredButMissing`;
+* valid proof-carrying sidecars under Required produce `GovernanceProofContext::Available`.
+
+Required backwards compatibility:
+All prior tests must remain green:
+
+* Run 170 assumptions remain valid.
+* Run 169 governance proof loader integration tests.
+* Run 167 carrier tests.
+* Run 165 governance marker tests.
+* Run 163 governance verifier tests.
+* Run 161 lifecycle marker tests.
+* Run 159 lifecycle tests.
+* Run 134/138/142/148/150/152 regression suites.
+
+Required documentation:
+Add:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_171.md`
+
+Update:
+
+* `docs/whitepaper/contradiction.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+
+* Run 171 is source/test selector wiring only.
+* A hidden Required-policy selector exists for DevNet/TestNet evidence.
+* Default remains NotRequired.
+* MainNet peer-driven apply remains refused.
+* OnChainGovernance remains unsupported/fail-closed.
+* governance execution remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* release-binary Required-policy production-surface evidence is deferred to Run 172.
+* full C4 remains open.
+* C5 remains open.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
+* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
+* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 171 is acceptable only if:
+
+1. A hidden Required-policy selector exists.
+2. Default behavior remains NotRequired.
+3. Required policy reaches production marker-decision preflight contexts at source/test level.
+4. Valid proof-carrying sidecars pass under Required policy.
+5. Missing/invalid proof sidecars fail closed under Required policy.
+6. Validation-only surfaces remain non-mutating.
+7. Mutating surfaces still persist marker only after sequence commit.
+8. MainNet peer-driven apply remains refused even with Required policy and valid proof.
+9. Docs defer release-binary Required-policy evidence to Run 172.
+10. No full C4 or C5 closure is claimed.
