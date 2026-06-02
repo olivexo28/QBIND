@@ -104,3 +104,93 @@ pub fn preflight_v2_marker_decision_with_governance_proof_load(
     let context = proof_load.governance_proof_context(verifier);
     decide_v2_marker_acceptance_with_lifecycle_and_governance(inputs, policy, context)
 }
+
+/// Run 171 — environment-variable name of the hidden,
+/// disabled-by-default DevNet/TestNet-safe governance-proof Required-
+/// policy selector. The selector accepts any of `1`, `true`, `TRUE`,
+/// `yes`, `on` (case-insensitive) as enable values; any other value
+/// (or unset) leaves the selector disabled and the policy on its
+/// `NotRequired` default.
+///
+/// The flag-equivalent CLI surface is
+/// `--p2p-trust-bundle-governance-proof-required` (see
+/// [`crate::cli::CliArgs::p2p_trust_bundle_governance_proof_required`]).
+/// Either source is sufficient — they are OR-combined by
+/// [`governance_proof_policy_from_selector`].
+pub const QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED_ENV: &str =
+    "QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED";
+
+/// Run 171 — pure environment-variable readback for the hidden
+/// governance-proof Required-policy selector. Returns `true` when the
+/// env var is set to a recognized truthy value (`1`, `true`, `yes`,
+/// `on` — case-insensitive); `false` otherwise.
+///
+/// This helper performs an [`std::env::var`] read and is otherwise
+/// pure. It is intentionally exposed (instead of inlined) so the
+/// Run 171 source-test matrix can drive the selector deterministically
+/// from a test process by setting/unsetting the env var.
+pub fn governance_proof_required_env_selector_enabled() -> bool {
+    match std::env::var(QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED_ENV) {
+        Ok(v) => {
+            let s = v.trim();
+            // Recognized truthy values; any other value (including
+            // empty / "0" / "false") leaves the selector disabled.
+            s.eq_ignore_ascii_case("1")
+                || s.eq_ignore_ascii_case("true")
+                || s.eq_ignore_ascii_case("yes")
+                || s.eq_ignore_ascii_case("on")
+        }
+        Err(_) => false,
+    }
+}
+
+/// Run 171 — translate the hidden Required-policy selector inputs
+/// (CLI flag OR environment variable, OR-combined) into a
+/// [`GovernanceProofPolicy`]:
+///
+/// * `false` (default — flag unset and env var unset/falsey) →
+///   [`GovernanceProofPolicy::NotRequired`] (existing behavior; old
+///   no-proof v2 sidecars remain compatible).
+/// * `true` (flag set OR env var truthy) →
+///   [`GovernanceProofPolicy::RequiredForLifecycleSensitive`]
+///   (`Rotate` / `Retire` / `Revoke` / `EmergencyRevoke` require a
+///   valid Run 167 governance authority proof).
+///
+/// **Non-MainNet-enabling.** A `RequiredForLifecycleSensitive` policy
+/// returned by this helper does NOT enable MainNet peer-driven apply
+/// and does NOT bypass any existing environment gate. The MainNet
+/// refusal lives at the calling surface (e.g.
+/// [`crate::pqc_peer_candidate_apply::ProductionV2MarkerCoordinator`]
+/// upstream binary gate, covered by Run 152 tests) and is unchanged
+/// by Run 171.
+///
+/// **Not a governance execution engine, KMS/HSM custody claim,
+/// validator-set rotation primitive, on-chain governance proof, or
+/// peer-majority authority claim.** Run 171 is source/test selector
+/// wiring only; release-binary Required-policy production-surface
+/// evidence is deferred to Run 172.
+pub fn governance_proof_policy_from_selector(
+    selector_enabled: bool,
+) -> GovernanceProofPolicy {
+    if selector_enabled {
+        GovernanceProofPolicy::RequiredForLifecycleSensitive
+    } else {
+        GovernanceProofPolicy::NotRequired
+    }
+}
+
+/// Run 171 — convenience wrapper that resolves the active
+/// [`GovernanceProofPolicy`] from the OR-combination of an explicit
+/// CLI-flag boolean and the
+/// [`QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED_ENV`]
+/// environment variable.
+///
+/// Either source is sufficient to enable the Required policy; both
+/// being absent / falsey preserves the `NotRequired` default.
+pub fn governance_proof_policy_from_cli_or_env(
+    cli_flag_set: bool,
+) -> GovernanceProofPolicy {
+    governance_proof_policy_from_selector(
+        cli_flag_set || governance_proof_required_env_selector_enabled(),
+    )
+}

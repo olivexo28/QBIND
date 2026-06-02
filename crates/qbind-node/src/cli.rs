@@ -751,6 +751,59 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_apply_enabled: bool,
 
+    /// Run 171 — hidden, **disabled-by-default** DevNet/TestNet-safe
+    /// governance-proof Required-policy selector for the production
+    /// v2 marker-decision preflights wired by Run 169 (reload-check
+    /// validation-only, reload-apply, startup `--p2p-trust-bundle`,
+    /// SIGHUP live reload, peer-driven `ProductionV2MarkerCoordinator`,
+    /// live `0x05` / local peer-candidate validation-only).
+    ///
+    /// **Default behavior unchanged:** when this flag and the
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED` environment
+    /// variable are both absent, every production marker-decision
+    /// preflight runs under
+    /// [`qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired`]
+    /// — old no-proof v2 sidecars remain bit-for-bit compatible
+    /// (Runs 134/136/138/142/148/150/152/161/165/167/169/170 invariants).
+    ///
+    /// **When set:** the preflights run under
+    /// [`qbind_node::pqc_governance_authority::GovernanceProofPolicy::RequiredForLifecycleSensitive`]
+    /// so `Rotate` / `Retire` / `Revoke` / `EmergencyRevoke` lifecycle
+    /// transitions require a valid Run 167 governance authority proof
+    /// sibling on the v2 ratification sidecar; missing or invalid
+    /// proofs fail closed with the typed
+    /// `GovernanceAuthorityRequiredButMissing` /
+    /// `GovernanceAuthorityRejected` reason BEFORE any Run 070 apply,
+    /// live-trust swap, session eviction, sequence write, or marker
+    /// persist (mutation contract preserved per Run 165 / Run 169 /
+    /// Run 170).
+    ///
+    /// **NOT** a governance execution engine, **NOT** an on-chain
+    /// governance proof, **NOT** a KMS/HSM custody claim, **NOT** a
+    /// validator-set rotation primitive, **NOT** sufficient to enable
+    /// MainNet peer-driven apply. MainNet peer-driven apply remains
+    /// refused unconditionally regardless of this flag (Run 148/149
+    /// gate, Run 152 binary-reachable refusal). Validation-only
+    /// MainNet parsing of v2 sidecars carrying a Run 167 proof is
+    /// permitted only insofar as the existing per-environment
+    /// validation-only policy already permits parsing (this flag adds
+    /// no MainNet apply path).
+    ///
+    /// May also be enabled by the equivalent environment variable
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1` (operator
+    /// convenience for systemd-style overrides). Either source is
+    /// sufficient; the flag and env-var are OR-combined.
+    ///
+    /// Run 171 is source/test selector wiring only. Release-binary
+    /// Required-policy production-surface evidence is deferred to
+    /// Run 172. See `task/RUN_171_TASK.txt` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_171.md`.
+    #[arg(
+        long = "p2p-trust-bundle-governance-proof-required",
+        hide = true
+    )]
+    pub p2p_trust_bundle_governance_proof_required: bool,
+
     /// Run 151 — hidden, **disabled-by-default** DevNet/TestNet-only
     /// **explicit local one-shot drain trigger** for the Run 150
     /// peer-driven apply drain controller

@@ -377,6 +377,22 @@ struct Run105ReloadCheckContextData {
     /// `GovernanceProofContext::Unavailable`.
     governance_proof_load:
         qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus,
+    /// Run 171 — captured value of the hidden
+    /// `--p2p-trust-bundle-governance-proof-required` CLI flag at
+    /// `Run105ReloadCheckContext` build time.
+    ///
+    /// The Run 171 selector is OR-combined with the
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED` environment
+    /// variable when the v2 marker-decision preflight resolves the
+    /// active [`qbind_node::pqc_governance_authority::GovernanceProofPolicy`]
+    /// via
+    /// [`qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env`].
+    /// The env-var lookup happens at preflight time so a TestNet/DevNet
+    /// operator can flip the policy between the reload-check (Run 134)
+    /// and reload-apply (Run 134/136) preflights without restarting.
+    /// Default `false` preserves
+    /// [`qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired`].
+    governance_proof_required_selector: bool,
 }
 
 /// Run 105 — build the owned context the reload-check / peer-candidate-
@@ -473,6 +489,12 @@ fn build_run_105_reload_check_context(
         policy,
         ratification_v2,
         governance_proof_load,
+        // Run 171 — capture the hidden
+        // `--p2p-trust-bundle-governance-proof-required` selector
+        // boolean from the CLI args. The env-var sibling is consulted
+        // at preflight time inside
+        // `governance_proof_policy_from_cli_or_env`.
+        governance_proof_required_selector: args.p2p_trust_bundle_governance_proof_required,
     })
 }
 
@@ -729,7 +751,7 @@ fn preflight_run_134_v2_marker_decision(
         MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
     use qbind_node::pqc_governance_authority::{
-        fixture_issuer_signature_verifier, GovernanceProofPolicy,
+        fixture_issuer_signature_verifier,
     };
     use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
@@ -782,14 +804,22 @@ fn preflight_run_134_v2_marker_decision(
     // Run 169: route through the governance-aware shared helper via the
     // Run 169 surface shim so the typed Run 167
     // `GovernanceProofLoadStatus` carried by `ctx_data` reaches the Run
-    // 165 gate. Production retains `GovernanceProofPolicy::NotRequired`
-    // so old no-proof v2 sidecars remain compatible. The fixture
-    // verifier is the source/test issuer-signature verifier — release-
-    // binary production-surface proof-carrying evidence is deferred to
-    // Run 170 (a real PQC verifier replaces this hook then). MainNet
+    // 165 gate.
+    //
+    // Run 171: the policy is now selected by the hidden
+    // `--p2p-trust-bundle-governance-proof-required` flag /
+    // `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED` env var
+    // (`governance_proof_policy_from_cli_or_env`). Default remains
+    // `GovernanceProofPolicy::NotRequired` so old no-proof v2 sidecars
+    // remain compatible. The fixture verifier is the source/test
+    // issuer-signature verifier — release-binary production-surface
+    // proof-carrying evidence is deferred to Run 172. MainNet
     // peer-driven apply remains refused at the calling surface
     // regardless of governance proof.
     let verifier = fixture_issuer_signature_verifier();
+    let policy = qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+        ctx_data.governance_proof_required_selector,
+    );
     let decision = preflight_v2_marker_decision_with_governance_proof_load(
         MarkerAcceptanceV2Inputs {
             marker_path: &marker_path,
@@ -801,7 +831,7 @@ fn preflight_run_134_v2_marker_decision(
             update_source: AuthorityStateUpdateSource::ReloadApply,
             updated_at_unix_secs,
         },
-        GovernanceProofPolicy::NotRequired,
+        policy,
         &ctx_data.governance_proof_load,
         &verifier,
     )?;
@@ -871,7 +901,7 @@ fn preflight_run_136_v2_marker_decision_for_startup(
         MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
     use qbind_node::pqc_governance_authority::{
-        fixture_issuer_signature_verifier, GovernanceProofPolicy,
+        fixture_issuer_signature_verifier,
     };
     use qbind_node::pqc_governance_proof_surface::preflight_v2_marker_decision_with_governance_proof_load;
     use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
@@ -929,13 +959,21 @@ fn preflight_run_136_v2_marker_decision_for_startup(
     // Run 169: route through the governance-aware shared helper via the
     // Run 169 surface shim so the typed Run 167
     // `GovernanceProofLoadStatus` carried by `ctx_data` reaches the
-    // Run 165 gate at startup `--p2p-trust-bundle` time. Production
-    // retains `GovernanceProofPolicy::NotRequired` so old no-proof v2
-    // sidecars remain compatible. The fixture verifier is the
-    // source/test issuer-signature verifier — release-binary
-    // production-surface proof-carrying evidence is deferred to Run 170.
-    // MainNet peer-driven apply remains refused at the calling surface.
+    // Run 165 gate at startup `--p2p-trust-bundle` time.
+    //
+    // Run 171: the policy is now selected by the hidden
+    // `--p2p-trust-bundle-governance-proof-required` flag /
+    // `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED` env var.
+    // Default remains `GovernanceProofPolicy::NotRequired` so old
+    // no-proof v2 sidecars remain compatible. The fixture verifier is
+    // the source/test issuer-signature verifier — release-binary
+    // production-surface proof-carrying evidence is deferred to Run
+    // 172. MainNet peer-driven apply remains refused at the calling
+    // surface.
     let verifier = fixture_issuer_signature_verifier();
+    let policy = qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+        ctx_data.governance_proof_required_selector,
+    );
     let decision = preflight_v2_marker_decision_with_governance_proof_load(
         MarkerAcceptanceV2Inputs {
             marker_path: &marker_path,
@@ -947,7 +985,7 @@ fn preflight_run_136_v2_marker_decision_for_startup(
             update_source: AuthorityStateUpdateSource::StartupLoad,
             updated_at_unix_secs,
         },
-        GovernanceProofPolicy::NotRequired,
+        policy,
         &ctx_data.governance_proof_load,
         &verifier,
     )?;
@@ -6295,6 +6333,25 @@ async fn run_p2p_node(
                                         "[run-153] drain-once: ProductionV2MarkerCoordinator \
                                          constructed (v2 ratification verified)."
                                     );
+                                    // Run 171 — attach the typed Run
+                                    // 167 governance proof load and
+                                    // the active Run 165 policy
+                                    // (selected by the hidden
+                                    // `--p2p-trust-bundle-governance-proof-required`
+                                    // flag / env var). Default
+                                    // remains `Absent` + `NotRequired`
+                                    // so the existing Run 148/150/152/
+                                    // 153 peer-driven apply test
+                                    // matrix is unchanged. MainNet
+                                    // peer-driven apply remains
+                                    // refused at the upstream binary
+                                    // gate regardless of policy.
+                                    let governance_proof_load =
+                                        ctx_data.governance_proof_load.clone();
+                                    let governance_policy =
+                                        qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+                                            ctx_data.governance_proof_required_selector,
+                                        );
                                     Box::new(
                                         qbind_node::pqc_peer_candidate_apply::ProductionV2MarkerCoordinator::new(
                                             marker_path,
@@ -6305,6 +6362,10 @@ async fn run_p2p_node(
                                             ratified_v2,
                                             qbind_node::pqc_authority_state::AuthorityStateUpdateSource::ReloadApply,
                                             now_secs,
+                                        )
+                                        .with_governance_proof_carrier(
+                                            governance_proof_load,
+                                            governance_policy,
                                         ),
                                     )
                                 }
@@ -7371,6 +7432,17 @@ fn spawn_run074_live_reload_task(
         local_leaf_cert_bytes: local_leaf_bytes,
         ratification: ratification_cfg_opt,
         authority_marker: authority_marker_cfg_opt,
+        // Run 171 — hidden, disabled-by-default DevNet/TestNet-safe
+        // governance-proof Required-policy selector. Default
+        // `NotRequired` preserves Run 138 SIGHUP behaviour bit-for-
+        // bit; under `--p2p-trust-bundle-governance-proof-required`
+        // (or the equivalent env var) every SIGHUP-triggered
+        // marker-decision preflight runs under
+        // `RequiredForLifecycleSensitive`.
+        governance_proof_policy:
+            qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+                args.p2p_trust_bundle_governance_proof_required,
+            ),
     };
     let controller = LiveReloadController::new(
         Arc::new(live_state),

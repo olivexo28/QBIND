@@ -301,7 +301,8 @@ fn devnet_config(
         local_leaf_cert_bytes: None,
         ratification: None,
         authority_marker: None,
-    }
+    governance_proof_policy: qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+}
 }
 
 // ============================================================================
