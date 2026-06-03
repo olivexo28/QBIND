@@ -304,6 +304,18 @@ pub struct LiveReloadConfig {
     /// apply refusal is upstream of this controller and is unchanged
     /// by Run 171.
     pub governance_proof_policy: crate::pqc_governance_authority::GovernanceProofPolicy,
+
+    /// Run 182 — captured value of the hidden, disabled-by-default
+    /// `--p2p-trust-bundle-onchain-governance-fixture-allowed` CLI
+    /// flag at controller-construction time. OR-combined at preflight
+    /// time with the `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`
+    /// environment variable inside
+    /// [`crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env`].
+    /// Default `false` resolves to
+    /// [`crate::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::Disabled`]
+    /// and preserves the pre-Run-182 SIGHUP preflight flow bit-for-bit.
+    /// Source/test only — never enables MainNet peer-driven apply.
+    pub onchain_governance_fixture_allowed_selector: bool,
 }
 
 /// Run 114 — owned ratification enforcement inputs the
@@ -1390,8 +1402,62 @@ impl LiveReloadController {
             governance_proof_load,
             &verifier,
         )?;
+
+        // Run 182 — production call-site reachability for the Run 180
+        // OnChainGovernance per-surface preflight wrapper for SIGHUP
+        // live trust-bundle reload mutating-preflight. Pure: no
+        // marker write, no sequence write, no live trust swap, no
+        // session eviction, no Run 070 invocation. Wire blocker:
+        // current SIGHUP-trigger sidecar formats do not carry a
+        // typed `OnChainGovernanceProof`; documented in
+        // `pqc_onchain_governance_callsite_wiring.rs`.
+        invoke_run_182_sighup_callsite_onchain_governance_marker_decision(
+            &decision,
+            self.config.onchain_governance_fixture_allowed_selector,
+        );
+
         Ok(Some(decision))
     }
+}
+
+/// Run 182 — SIGHUP production call-site reachability hook.
+fn invoke_run_182_sighup_callsite_onchain_governance_marker_decision(
+    decision: &crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    onchain_governance_fixture_allowed_selector: bool,
+) {
+    use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use crate::pqc_onchain_governance_callsite_wiring::{
+        sighup_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use crate::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let policy = onchain_governance_proof_policy_from_cli_or_env(
+        onchain_governance_fixture_allowed_selector,
+    );
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome = sighup_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 /// Run 121 — decode a 64-char lowercase-hex string into a `[u8; 32]`.
@@ -1513,6 +1579,7 @@ mod tests {
             authority_marker: None,
             governance_proof_policy:
                 crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+            onchain_governance_fixture_allowed_selector: false,
         }
     }
 

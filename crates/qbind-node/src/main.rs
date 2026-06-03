@@ -393,6 +393,20 @@ struct Run105ReloadCheckContextData {
     /// Default `false` preserves
     /// [`qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired`].
     governance_proof_required_selector: bool,
+    /// Run 182 — captured value of the hidden
+    /// `--p2p-trust-bundle-onchain-governance-fixture-allowed` CLI
+    /// flag at `Run105ReloadCheckContext` build time.
+    ///
+    /// The Run 180 selector is OR-combined with the
+    /// `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED` env
+    /// var when the v2 marker-decision preflight resolves the active
+    /// [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy`]
+    /// via
+    /// [`qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env`].
+    /// Default `false` preserves
+    /// [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::Disabled`].
+    /// Source/test only — never enables MainNet peer-driven apply.
+    onchain_governance_fixture_allowed_selector: bool,
 }
 
 /// Run 105 — build the owned context the reload-check / peer-candidate-
@@ -495,6 +509,18 @@ fn build_run_105_reload_check_context(
         // at preflight time inside
         // `governance_proof_policy_from_cli_or_env`.
         governance_proof_required_selector: args.p2p_trust_bundle_governance_proof_required,
+        // Run 182 — capture the hidden Run 180 OnChainGovernance
+        // fixture-allowed selector at context-build time. Combined
+        // with the `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`
+        // env var inside
+        // `pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env`
+        // when each preflight resolves the active
+        // `OnChainGovernanceProofPolicy`. Default `false` preserves
+        // `OnChainGovernanceProofPolicy::Disabled` and the existing
+        // pre-Run-182 reload-check / reload-apply / startup /
+        // peer-candidate-check flow bit-for-bit.
+        onchain_governance_fixture_allowed_selector:
+            args.p2p_trust_bundle_onchain_governance_fixture_allowed,
     })
 }
 
@@ -836,7 +862,60 @@ fn preflight_run_134_v2_marker_decision(
         &verifier,
     )?;
 
+    // Run 182 — production call-site reachability for the Run 180
+    // OnChainGovernance per-surface preflight wrapper for the
+    // `--p2p-trust-bundle-reload-apply-*` mutating-preflight path.
+    // Pure / non-mutating; preserves the existing
+    // `commit_sequence` → `persist_accepted_v2_marker_after_commit_boundary`
+    // sequence-before-marker ordering bit-for-bit. See
+    // `pqc_onchain_governance_callsite_wiring.rs` for the wire
+    // blocker that keeps `proof: None` at this surface today.
+    invoke_run_182_reload_apply_callsite_onchain_governance_marker_decision(
+        &decision,
+        ctx_data.onchain_governance_fixture_allowed_selector,
+    );
+
     Ok(Some(decision))
+}
+
+/// Run 182 — reload-apply production call-site reachability hook.
+fn invoke_run_182_reload_apply_callsite_onchain_governance_marker_decision(
+    decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    onchain_governance_fixture_allowed_selector: bool,
+) {
+    use qbind_node::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use qbind_node::pqc_onchain_governance_callsite_wiring::{
+        reload_apply_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use qbind_node::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let policy = onchain_governance_proof_policy_from_cli_or_env(
+        onchain_governance_fixture_allowed_selector,
+    );
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome = reload_apply_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 /// Run 136 — pre-mutation v2 authority-marker accept-and-persist preflight
@@ -995,7 +1074,57 @@ fn preflight_run_136_v2_marker_decision_for_startup(
     // (mirrors the Run 134 reload-apply preflight).
     let _ = std::marker::PhantomData::<MutatingSurfaceMarkerV2Error>;
 
+    // Run 182 — production call-site reachability for the Run 180
+    // OnChainGovernance per-surface preflight wrapper for the
+    // startup `--p2p-trust-bundle` mutating-preflight path.
+    invoke_run_182_startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision(
+        &decision,
+        ctx_data.onchain_governance_fixture_allowed_selector,
+    );
+
     Ok(Some(decision))
+}
+
+/// Run 182 — startup `--p2p-trust-bundle` production call-site
+/// reachability hook.
+fn invoke_run_182_startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision(
+    decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    onchain_governance_fixture_allowed_selector: bool,
+) {
+    use qbind_node::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use qbind_node::pqc_onchain_governance_callsite_wiring::{
+        startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use qbind_node::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let policy = onchain_governance_proof_policy_from_cli_or_env(
+        onchain_governance_fixture_allowed_selector,
+    );
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome =
+        startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 /// Run 120 — pre-mutation authority-marker accept-and-persist preflight
@@ -1529,7 +1658,118 @@ fn preflight_run_132_validation_only_v2_marker_check(
         &verifier,
     )?;
 
+    // Run 182 — production call-site reachability for the Run 180
+    // OnChainGovernance per-surface preflight wrapper.
+    // `--p2p-trust-bundle-reload-check` is validation-only; the
+    // wiring entry is invoked here with `proof: None` and the policy
+    // resolved from the Run 180 selector
+    // (`--p2p-trust-bundle-onchain-governance-fixture-allowed` /
+    // `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`).
+    // Default `Disabled` short-circuits at the policy gate; an
+    // operator-armed `AllowFixtureSourceTest` policy with `proof:
+    // None` short-circuits at the no-proof gate. Either way the
+    // wiring entry is pure (no marker write, no sequence write, no
+    // live trust swap, no session eviction, no Run 070 invocation).
+    // Wire blocker: current sidecar/wire formats do not carry a
+    // typed `OnChainGovernanceProof`; documented in
+    // `pqc_onchain_governance_callsite_wiring.rs`.
+    invoke_run_182_reload_check_callsite_onchain_governance_marker_decision(
+        &decision,
+        ctx_data.onchain_governance_fixture_allowed_selector,
+    );
+
     Ok(Some(decision))
+}
+
+/// Run 182 — reload-check production call-site reachability hook.
+///
+/// Constructs the `OnChainGovernanceCallsiteContext` from the just-
+/// computed validation-only decision and invokes the matching Run 180
+/// per-surface wrapper through the
+/// [`qbind_node::pqc_onchain_governance_callsite_wiring::reload_check_callsite_onchain_governance_marker_decision`]
+/// entry. Pure: no I/O, no marker write, no sequence write, no live
+/// trust swap, no session eviction, no Run 070 call. The returned
+/// outcome is intentionally dropped — the validation-only invariant
+/// is enforced by the calling surface, not by this hook.
+fn invoke_run_182_reload_check_callsite_onchain_governance_marker_decision(
+    decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    onchain_governance_fixture_allowed_selector: bool,
+) {
+    use qbind_node::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use qbind_node::pqc_onchain_governance_callsite_wiring::{
+        reload_check_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use qbind_node::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let policy = onchain_governance_proof_policy_from_cli_or_env(
+        onchain_governance_fixture_allowed_selector,
+    );
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome = reload_check_callsite_onchain_governance_marker_decision(&ctx);
+}
+
+/// Run 182 — local `--p2p-trust-bundle-peer-candidate-check`
+/// production call-site reachability hook. Validation-only.
+fn invoke_run_182_local_peer_candidate_check_callsite_onchain_governance_marker_decision(
+    decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    onchain_governance_fixture_allowed_selector: bool,
+) {
+    use qbind_node::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use qbind_node::pqc_onchain_governance_callsite_wiring::{
+        local_peer_candidate_check_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use qbind_node::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let policy = onchain_governance_proof_policy_from_cli_or_env(
+        onchain_governance_fixture_allowed_selector,
+    );
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome =
+        local_peer_candidate_check_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 /// Main entry point for qbind-node binary.
@@ -2651,6 +2891,15 @@ async fn main() {
                                         qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
                                             ctx_data.governance_proof_required_selector,
                                         ),
+                                    );
+                                    // Run 182 — production call-site reachability for the
+                                    // Run 180 OnChainGovernance per-surface preflight wrapper
+                                    // for the local
+                                    // `--p2p-trust-bundle-peer-candidate-check`
+                                    // validation-only path. Pure / non-mutating.
+                                    invoke_run_182_local_peer_candidate_check_callsite_onchain_governance_marker_decision(
+                                        &decision,
+                                        ctx_data.onchain_governance_fixture_allowed_selector,
                                     );
                                 }
                                 Ok(None) => {
@@ -6502,6 +6751,9 @@ async fn run_p2p_node(
                                         .with_governance_proof_carrier(
                                             governance_proof_load,
                                             governance_policy,
+                                        )
+                                        .with_onchain_governance_fixture_allowed_selector(
+                                            args.p2p_trust_bundle_onchain_governance_fixture_allowed,
                                         ),
                                     )
                                 }
@@ -7579,6 +7831,12 @@ fn spawn_run074_live_reload_task(
             qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
                 args.p2p_trust_bundle_governance_proof_required,
             ),
+        // Run 182 — capture the hidden Run 180 OnChainGovernance
+        // fixture-allowed selector so the SIGHUP preflight production
+        // call-site reachability hook can resolve the active
+        // `OnChainGovernanceProofPolicy` (default `Disabled`).
+        onchain_governance_fixture_allowed_selector:
+            args.p2p_trust_bundle_onchain_governance_fixture_allowed,
     };
     let controller = LiveReloadController::new(
         Arc::new(live_state),

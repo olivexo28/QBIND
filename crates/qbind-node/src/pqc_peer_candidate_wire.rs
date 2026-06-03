@@ -1757,6 +1757,26 @@ impl LivePeerCandidateWireDispatcher {
                      propagation eligibility preserved).",
                     reason
                 );
+                // Run 182 — production call-site reachability for
+                // the Run 180 OnChainGovernance per-surface preflight
+                // wrapper for live inbound `0x05` validation. Pure:
+                // no marker write, no trust mutation, no propagation
+                // change, no Run 070 invocation. Wire blocker: the
+                // current `0x05` envelope does not carry a typed
+                // `OnChainGovernanceProof`. The selector for this
+                // surface is OR-resolved from the environment
+                // variable inside
+                // `onchain_governance_proof_policy_from_cli_or_env`
+                // (default `Disabled` short-circuits at the no-proof
+                // gate). Documented in
+                // `pqc_onchain_governance_callsite_wiring.rs`.
+                invoke_run_182_live_inbound_0x05_callsite_onchain_governance_marker_decision(
+                    self.expected_environment,
+                    self.expected_chain_id,
+                    &runtime_genesis_hash_hex,
+                    ratification_v2,
+                    &ratified_v2,
+                );
                 outcome
             }
             Err(marker_err) => {
@@ -2622,6 +2642,76 @@ fn load_run076_envelope_file(
         path: envelope_path.to_path_buf(),
         message: e.to_string(),
     })
+}
+
+
+/// Run 182 — live inbound `0x05` production call-site reachability hook.
+///
+/// Derives the candidate state from the verified ratification + ratified
+/// key (cheap, pure computation; mirrors the existing
+/// `verify_marker_for_validation_only_v2` derivation path) and invokes
+/// the Run 180 OnChainGovernance per-surface preflight wrapper. No
+/// marker write, no trust mutation, no propagation change, no Run 070
+/// invocation. Selector resolves via env-only on this surface (the
+/// dispatcher is constructed without a CLI plumbing path); default
+/// `Disabled` short-circuits at the no-proof gate.
+fn invoke_run_182_live_inbound_0x05_callsite_onchain_governance_marker_decision(
+    runtime_env: NetworkEnvironment,
+    runtime_chain_id: ChainId,
+    runtime_genesis_hash_hex: &str,
+    ratification: &qbind_ledger::BundleSigningRatificationV2,
+    ratified: &qbind_ledger::RatifiedBundleSigningKeyV2,
+) {
+    use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use crate::pqc_authority_state::{
+        derive_authority_state_v2_from_ratification, AuthorityStateDerivationV2Inputs,
+        AuthorityStateUpdateSource,
+    };
+    use crate::pqc_onchain_governance_callsite_wiring::{
+        live_inbound_0x05_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use crate::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = match derive_authority_state_v2_from_ratification(
+        AuthorityStateDerivationV2Inputs {
+            runtime_env,
+            runtime_chain_id,
+            runtime_genesis_hash_hex,
+            ratification,
+            ratified,
+            update_source: AuthorityStateUpdateSource::ReloadApply,
+            updated_at_unix_secs: 0,
+        },
+    ) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    // CLI plumbing is not available on this surface; the env var
+    // remains the operator-visible toggle. Default `Disabled`.
+    let policy = onchain_governance_proof_policy_from_cli_or_env(false);
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate: &candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome = live_inbound_0x05_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 

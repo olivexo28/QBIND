@@ -248,6 +248,20 @@ pub mod pqc_onchain_governance_proof;
 // binary OnChainGovernance production-surface evidence is deferred
 // to Run 181.
 pub mod pqc_onchain_governance_proof_surface;
+// Run 182 — source/test production call-site wiring for the Run 178
+// typed `OnChainGovernance` fixture proof verifier. Exposes seven
+// named call-site entries (one per Run 180 per-surface wrapper) that
+// are invoked from the actual production v2 marker-decision call
+// sites (`pqc_trust_reload`, `pqc_live_trust_reload`,
+// `pqc_trust_peer_candidate`, `pqc_peer_candidate_wire`,
+// `pqc_peer_candidate_drain`, `pqc_peer_candidate_apply`, and
+// `main`). Default policy remains
+// `OnChainGovernanceProofPolicy::Disabled`. Source/test only — no
+// MainNet apply, no governance execution, no real on-chain proof
+// verification, no KMS/HSM, no validator-set rotation. Release-
+// binary OnChainGovernance production-surface evidence is deferred
+// to Run 183.
+pub mod pqc_onchain_governance_callsite_wiring;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
