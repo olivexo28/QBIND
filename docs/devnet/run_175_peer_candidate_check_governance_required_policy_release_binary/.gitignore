@@ -1,0 +1,22 @@
+# Run 175 evidence archive — only README.md and summary.txt are tracked
+# (see Run 153/155/156/158/160/162/164/166/168/170/172/174 precedent).
+# The per-run generated artifacts below contain absolute paths and
+# timing-dependent / ephemeral data and are NOT committed back to the
+# repository. They can be regenerated at any time by running:
+#
+#   bash scripts/devnet/run_175_peer_candidate_check_governance_required_policy_release_binary.sh
+#
+logs/
+data/
+fixtures/
+exit_codes/
+marker_hashes/
+sequence_hashes/
+data_inventories/
+grep_summaries/
+reachability/
+test_results/
+provenance.txt
+fixture_manifest.txt
+scenario_assertions.txt
+negative_invariants.txt

@@ -1,0 +1,41 @@
+Run 175 — local peer-candidate-check Required-policy release-binary scenario verdicts
+git_commit: bd9bd33e5a0ffe8933d386f161a1c2fe6e234bef
+
+scenario verdicts:
+  A1_default_noproof_peer_candidate_check                    rc=0
+  A2_cli_required_valid_proof_peer_candidate_check           rc=0
+  A3_env_required_valid_proof_peer_candidate_check           rc=0
+  A4a_env_false_preserves_notrequired                        rc=0
+  A4b_env_zero_preserves_notrequired                         rc=0
+  A5_required_idempotent_proof_replay                        rc=0
+  R1_cli_required_noproof_peer_candidate_check               rc=1
+  R2_env_required_noproof_peer_candidate_check               rc=1
+  R3_required_malformed_proof_peer_candidate_check           rc=1
+  R4_required_invalid_signature_peer_candidate_check         rc=1
+  R5_required_wrong_environment_peer_candidate_check       rc=skipped(deferred-source-test)
+  R6_required_wrong_chain_peer_candidate_check             rc=skipped(deferred-source-test)
+  R7_required_wrong_genesis_peer_candidate_check           rc=skipped(deferred-source-test)
+  R8_required_wrong_root_peer_candidate_check                rc=1
+  R9_required_wrong_action_peer_candidate_check              rc=1
+  R10_required_wrong_digest_peer_candidate_check             rc=1
+  R11_required_wrong_sequence_peer_candidate_check           rc=1
+  R12_required_onchain_governance_peer_candidate_check       rc=1
+  R13_required_local_operator_config_proof_rejected       rc=covered_by_R1
+  R14_required_peer_majority_proof_rejected               rc=covered_by_R1
+  R_extra_required_unsupported_suite_peer_candidate_check    rc=1
+  R15_validation_only_required_reject_no_marker_no_seq    rc=asserted_per_case
+  R16_validation_only_required_reject_no_run_070_no_swap  rc=asserted_per_case
+  R17_selector_not_implicit                                  rc=0
+  R18_mainnet_peer_driven_refusal                            rc=1
+  test:run_173_validation_only_governance_required_policy_tests rc=0
+  test:run_171_governance_required_policy_selector_tests     rc=0
+  test:run_169_governance_proof_loader_surface_integration_tests rc=0
+  test:run_167_governance_proof_carrier_tests                rc=0
+  test:run_165_governance_marker_integration_tests           rc=0
+  test:pqc_authority_lib                                     rc=0
+
+verdict: PASS — Run 175 release-binary local peer-candidate-check Required-policy production-surface evidence captured.
+honest limitations:
+  * live inbound 0x05 proof-carrying remains OPEN (envelope schema does not yet carry governance_authority_proof; forbidden by task scope).
+  * R5 / R6 / R7 (wrong-env/chain/genesis) covered at source level by run_173_validation_only_governance_required_policy_tests + Run 168 helper (release-binary upstream Run 130 verifier trips before the gate).
+  * full C4 / C5 closure NOT claimed; OnChainGovernance / governance execution / KMS-HSM / validator-set rotation remain open.
