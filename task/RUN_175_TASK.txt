@@ -1,4 +1,4 @@
-Task: Run 174 — Release-Binary Validation-Only Required-Policy Governance-Proof Evidence
+Task: Run 175 — Release-Binary Local Peer-Candidate-Check Required-Policy Governance-Proof Evidence
 
 Current accepted state:
 
@@ -7,23 +7,16 @@ Current accepted state:
   * CLI: `--p2p-trust-bundle-governance-proof-required`;
   * env: `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED`;
   * default remains `GovernanceProofPolicy::NotRequired`.
-* Run 172: release-binary Required-policy evidence landed for mutating surfaces:
+* Run 172: release-binary Required-policy evidence landed for mutating reload-apply surfaces.
+* Run 173: source/test validation-only Required-policy wiring landed for reload-check and local peer-candidate-check.
+* Run 174: release-binary validation-only Required-policy evidence landed for `--p2p-trust-bundle-reload-check`.
+* Run 174 explicitly deferred local peer-candidate-check release-binary cases:
 
-  * default NotRequired compatibility proven;
-  * Required + valid proof reload-apply accepted;
-  * Required + no-proof reload-apply rejected with `GovernanceAuthorityRequiredButMissing`;
-  * invalid proof variants rejected;
-  * MainNet peer-driven apply refused.
-* Run 173: source/test validation-only Required-policy wiring landed:
+  * A4/A5;
+  * R15/R16.
+* Run 174 also preserves the live inbound `0x05` limitation:
 
-  * `preflight_v2_validation_only_marker_check_with_governance_proof_load`;
-  * `preflight_run_132_validation_only_v2_marker_check` now resolves policy through `governance_proof_policy_from_cli_or_env`;
-  * `--p2p-trust-bundle-reload-check` and local `--p2p-trust-bundle-peer-candidate-check` consume Required policy by construction;
-  * validation-only invariants preserved.
-* Run 173 limitation:
-
-  * live inbound `0x05` peer-candidate envelopes still do not carry the governance-proof sibling;
-  * live `0x05` proof-carrying remains out of scope.
+  * live peer-candidate envelopes still do not carry the governance-proof sibling.
 * MainNet peer-driven apply remains refused.
 * OnChainGovernance remains unsupported/fail-closed.
 * governance execution remains unimplemented.
@@ -33,24 +26,25 @@ Current accepted state:
 * C5 remains open.
 
 Objective:
-Produce release-binary evidence that validation-only production surfaces enforce `GovernanceProofPolicy::RequiredForLifecycleSensitive` using the hidden Run 171 selector and the Run 173 validation-only wiring.
+Produce release-binary evidence that the local `--p2p-trust-bundle-peer-candidate-check` validation-only surface enforces `GovernanceProofPolicy::RequiredForLifecycleSensitive` using the hidden Run 171 selector and the Run 173 validation-only wiring.
 
 This run must prove on real `target/release/qbind-node`:
 
-1. default validation-only behavior remains `NotRequired`;
-2. CLI selector activates Required policy on validation-only reload-check;
-3. env selector activates Required policy on validation-only reload-check;
-4. Required policy accepts valid proof-carrying sidecars where anti-rollback, lifecycle, and governance checks all pass;
-5. Required policy rejects no-proof, malformed-proof, and invalid-proof sidecars fail-closed;
-6. validation-only surfaces remain strictly non-mutating;
+1. default local peer-candidate-check behavior remains `NotRequired`;
+2. CLI selector activates Required policy for local peer-candidate-check;
+3. env selector activates Required policy for local peer-candidate-check;
+4. Required policy accepts valid proof-carrying peer-candidate sidecars where anti-rollback, lifecycle, and governance checks all pass;
+5. Required policy rejects no-proof and invalid-proof peer-candidate sidecars fail-closed;
+6. local peer-candidate-check remains strictly validation-only and non-mutating;
 7. MainNet peer-driven apply remains refused.
 
 Strict scope:
 
 * Release-binary evidence only.
 * Use real `target/release/qbind-node`.
-* Use release-built helper(s) to mint proof-carrying sidecars.
+* Use release-built helper(s) to mint proof-carrying peer-candidate fixtures.
 * No production source change unless a tiny harness-only fix is required.
+* No live inbound `0x05` proof-carrying schema work.
 * No MainNet peer-driven apply enablement.
 * No governance execution engine.
 * No on-chain governance implementation.
@@ -64,19 +58,19 @@ Strict scope:
 * No sequence-file schema change.
 * No trust-bundle schema change.
 * No peer-candidate envelope schema change.
-* Do not weaken Runs 070, 130–173.
+* Do not weaken Runs 070, 130–174.
 * Do not claim full C4 or C5 closure.
 
 Required deliverables:
 
 1. Add release-binary harness:
-   `scripts/devnet/run_174_validation_only_governance_required_policy_release_binary.sh`
+   `scripts/devnet/run_175_peer_candidate_check_governance_required_policy_release_binary.sh`
 
 2. Add evidence archive:
-   `docs/devnet/run_174_validation_only_governance_required_policy_release_binary/`
+   `docs/devnet/run_175_peer_candidate_check_governance_required_policy_release_binary/`
 
 3. Add canonical evidence report:
-   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_174.md`
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_175.md`
 
 4. Update narrowly:
 
@@ -87,17 +81,16 @@ Required deliverables:
 
 5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md` before finalizing.
 
-Required production validation-only surfaces:
-Exercise at minimum:
+Required production validation-only surface:
+Exercise:
 
-1. `--p2p-trust-bundle-reload-check`
-2. local `--p2p-trust-bundle-peer-candidate-check`, if release-binary harness support exists
+* local `--p2p-trust-bundle-peer-candidate-check`
 
-Do not include live inbound `0x05` proof-carrying claims unless the envelope can actually carry the governance-proof sibling without schema drift. If not feasible, document that live `0x05` proof-carrying remains open.
+Do not claim live inbound `0x05` proof-carrying evidence in this run unless the envelope can actually carry the governance-proof sibling without schema drift.
 
 Required accepted scenarios:
 
-A1. reload-check default NotRequired accepts old no-proof sidecar
+A1. peer-candidate-check default NotRequired accepts old no-proof candidate
 
 * No CLI flag and no env var.
 * Expected:
@@ -108,7 +101,7 @@ A1. reload-check default NotRequired accepts old no-proof sidecar
   * no sequence write;
   * no marker write.
 
-A2. reload-check CLI Required accepts valid proof-carrying Rotate sidecar
+A2. peer-candidate-check CLI Required accepts valid proof-carrying Rotate candidate
 
 * Use `--p2p-trust-bundle-governance-proof-required`.
 * Expected:
@@ -125,7 +118,7 @@ A2. reload-check CLI Required accepts valid proof-carrying Rotate sidecar
   * no live trust mutation;
   * no session eviction.
 
-A3. reload-check env Required accepts valid proof-carrying Rotate sidecar
+A3. peer-candidate-check env Required accepts valid proof-carrying Rotate candidate
 
 * Use `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1`.
 * Expected:
@@ -135,33 +128,23 @@ A3. reload-check env Required accepts valid proof-carrying Rotate sidecar
   * valid proof accepted;
   * validation-only non-mutation preserved.
 
-A4. local peer-candidate-check default NotRequired accepts old no-proof sidecar, if supported
-
-* Expected:
-
-  * existing validation-only behavior preserved;
-  * no sequence write;
-  * no marker write.
-
-A5. local peer-candidate-check CLI/env Required accepts valid proof-carrying Rotate sidecar, if supported
-
-* Expected:
-
-  * proof context reaches validation-only marker decision;
-  * valid proof accepted;
-  * no mutation.
-
-A6. false/unset env preserves NotRequired
+A4. false/unset env preserves NotRequired
 
 * Test unset, `0`, `false`, or equivalent non-truthy value.
 * Expected:
 
   * Required policy is not activated accidentally;
-  * old no-proof sidecar remains compatible.
+  * old no-proof candidate remains compatible.
+
+A5. idempotent proof-carrying peer-candidate accepted under Required policy, if fixture-supported
+
+* same authority sequence / digest / proof;
+* accepted as idempotent/no-op according to existing marker rules;
+* no mutation.
 
 Required rejection scenarios:
 
-R1. reload-check CLI Required + no-proof sidecar rejected
+R1. peer-candidate-check CLI Required + no-proof candidate rejected
 
 * Expected:
 
@@ -169,7 +152,7 @@ R1. reload-check CLI Required + no-proof sidecar rejected
   * no sequence write;
   * no marker write.
 
-R2. reload-check env Required + no-proof sidecar rejected
+R2. peer-candidate-check env Required + no-proof candidate rejected
 
 * Expected:
 
@@ -177,41 +160,37 @@ R2. reload-check env Required + no-proof sidecar rejected
   * no sequence write;
   * no marker write.
 
-R3. reload-check Required + malformed proof rejected.
+R3. peer-candidate-check Required + malformed proof rejected.
 
-R4. reload-check Required + invalid issuer signature rejected.
+R4. peer-candidate-check Required + invalid issuer signature rejected.
 
-R5. reload-check Required + wrong environment proof rejected.
+R5. peer-candidate-check Required + wrong environment proof rejected.
 
-R6. reload-check Required + wrong chain proof rejected.
+R6. peer-candidate-check Required + wrong chain proof rejected.
 
-R7. reload-check Required + wrong genesis proof rejected.
+R7. peer-candidate-check Required + wrong genesis proof rejected.
 
-R8. reload-check Required + wrong authority root proof rejected.
+R8. peer-candidate-check Required + wrong authority root proof rejected.
 
-R9. reload-check Required + wrong lifecycle action proof rejected.
+R9. peer-candidate-check Required + wrong lifecycle action proof rejected.
 
-R10. reload-check Required + wrong candidate digest proof rejected.
+R10. peer-candidate-check Required + wrong candidate digest proof rejected.
 
-R11. reload-check Required + wrong authority-domain sequence proof rejected.
+R11. peer-candidate-check Required + wrong authority-domain sequence proof rejected.
 
-R12. reload-check Required + OnChainGovernance proof rejected as unsupported.
+R12. peer-candidate-check Required + OnChainGovernance proof rejected as unsupported.
 
-R13. reload-check Required + local operator config proof rejected.
+R13. peer-candidate-check Required + local operator config proof rejected.
 
-R14. reload-check Required + peer-majority proof rejected.
+R14. peer-candidate-check Required + peer-majority proof rejected.
 
-R15. local peer-candidate-check Required + no-proof sidecar rejected, if supported.
+R15. peer-candidate-check Required rejection writes no marker and no sequence.
 
-R16. local peer-candidate-check Required + invalid proof rejected, if supported.
+R16. peer-candidate-check Required rejection performs no live trust swap, no session eviction, and no Run 070 call.
 
-R17. validation-only Required rejection writes no marker and no sequence.
+R17. selector cannot be accidentally enabled by unrelated flags.
 
-R18. validation-only Required rejection performs no live trust swap, no session eviction, and no Run 070 call.
-
-R19. selector cannot be accidentally enabled by unrelated flags.
-
-R20. MainNet peer-driven apply remains refused even if validation-only Required proof check accepts.
+R18. MainNet peer-driven apply remains refused even if peer-candidate-check Required proof check accepts.
 
 Required selector proof:
 The evidence report must include:
@@ -219,15 +198,16 @@ The evidence report must include:
 * CLI proof:
 
   * `--p2p-trust-bundle-governance-proof-required` is present but hidden;
-  * enabling it activates Required policy for reload-check.
+  * enabling it activates Required policy for local peer-candidate-check.
 * env proof:
 
-  * `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1` activates Required policy for reload-check;
+  * `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1` activates Required policy for local peer-candidate-check;
   * false / unset value preserves NotRequired.
 * source grep/call-site proof for:
 
   * `governance_proof_policy_from_cli_or_env`;
   * `preflight_run_132_validation_only_v2_marker_check`;
+  * local peer-candidate-check dispatch;
   * `preflight_v2_validation_only_marker_check_with_governance_proof_load`;
   * `preflight_v2_marker_decision_with_governance_proof_load`;
   * `load_versioned_ratification_with_governance_proof_from_path`;
@@ -236,7 +216,7 @@ The evidence report must include:
 Required production-surface reachability proof:
 The report must include release-binary logs proving:
 
-* validation-only production surfaces exercised:
+* local peer-candidate-check production surface exercised:
 
   * Required policy;
   * proof-carrying Available path;
@@ -245,7 +225,7 @@ The report must include release-binary logs proving:
   * no-mutation behavior.
 
 Required no-mutation proof:
-For every validation-only scenario:
+For every peer-candidate-check scenario:
 
 * no Run 070 apply call;
 * no live trust swap;
@@ -284,7 +264,7 @@ Required captured metadata:
 * exact commands;
 * stdout/stderr logs;
 * per-scenario exit codes;
-* proof sidecar paths and hashes;
+* proof sidecar / candidate paths and hashes;
 * marker/sequence JSON and SHA before/after;
 * data-dir inventories;
 * denylist grep results.
@@ -294,7 +274,7 @@ Run at minimum:
 
 * `cargo build --release -p qbind-node --bin qbind-node`
 * `cargo build --release -p qbind-node --example <proof-carrying fixture helper>`
-* `bash scripts/devnet/run_174_validation_only_governance_required_policy_release_binary.sh`
+* `bash scripts/devnet/run_175_peer_candidate_check_governance_required_policy_release_binary.sh`
 * `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
 * `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
 * `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
@@ -316,17 +296,17 @@ Run at minimum:
 If exact test names differ, locate nearest existing targets and document exact commands/results.
 
 Documentation requirements:
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_174.md` must state:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_175.md` must state:
 
-* Run 174 is release-binary validation-only Required-policy governance-proof evidence.
+* Run 175 is release-binary local peer-candidate-check Required-policy governance-proof evidence.
 * Default remains NotRequired.
-* Hidden CLI/env selector activates Required policy on validation-only reload-check.
-* Existing no-proof sidecars remain compatible under NotRequired.
+* Hidden CLI/env selector activates Required policy on local peer-candidate-check.
+* Existing no-proof candidates remain compatible under NotRequired.
 * Required policy fails closed when proof is absent.
-* Valid proof-carrying sidecars pass under Required policy through real validation-only production surfaces where lifecycle/anti-rollback checks pass.
-* Invalid proof-carrying sidecars fail closed.
-* Validation-only surfaces remain strictly non-mutating.
-* Live inbound `0x05` proof-carrying remains open if envelope cannot carry the proof sibling.
+* Valid proof-carrying candidates pass under Required policy through the real local peer-candidate-check production surface where lifecycle/anti-rollback checks pass.
+* Invalid proof-carrying candidates fail closed.
+* Local peer-candidate-check remains strictly non-mutating.
+* Live inbound `0x05` proof-carrying remains open because the envelope cannot carry the governance-proof sibling.
 * OnChainGovernance remains unsupported/fail-closed.
 * No MainNet apply is enabled.
 * governance execution/on-chain proof remains unimplemented.
@@ -336,15 +316,15 @@ Documentation requirements:
 * C5 remains open.
 
 Acceptance criteria:
-Run 174 is acceptable only if:
+Run 175 is acceptable only if:
 
-1. Real release binaries exercise Required policy on validation-only reload-check.
+1. Real release binaries exercise Required policy on local peer-candidate-check.
 2. Default NotRequired compatibility remains proven.
-3. CLI selector and env selector both activate Required policy for validation-only reload-check.
-4. Required/no-proof validation-only cases fail closed.
-5. Valid proof-carrying sidecars reach and pass the governance gate on validation-only production surfaces.
-6. Invalid proof-carrying sidecars fail closed.
-7. Validation-only scenarios produce no mutation.
+3. CLI selector and env selector both activate Required policy for local peer-candidate-check.
+4. Required/no-proof local peer-candidate-check cases fail closed.
+5. Valid proof-carrying candidates reach and pass the governance gate on local peer-candidate-check.
+6. Invalid proof-carrying candidates fail closed.
+7. Local peer-candidate-check scenarios produce no mutation.
 8. MainNet remains refused even with Required policy and valid governance proof.
 9. No governance execution/KMS-HSM/validator-set rotation claim is made.
 10. No full C4 or C5 closure is claimed.
