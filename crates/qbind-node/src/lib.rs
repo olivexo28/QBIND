@@ -262,6 +262,24 @@ pub mod pqc_onchain_governance_proof_surface;
 // binary OnChainGovernance production-surface evidence is deferred
 // to Run 183.
 pub mod pqc_onchain_governance_callsite_wiring;
+// Run 184 — source/test OnChainGovernance proof-carrying production
+// payload/context layer. Adds a strictly additive optional
+// `onchain_governance_proof` sibling on the v2 ratification sidecar
+// JSON (alongside the Run 167 `governance_authority_proof` sibling),
+// reuses the Run 178 `OnChainGovernanceProofWire` schema, exposes a
+// typed `OnChainGovernanceProofLoadStatus` (`Absent` / `Available` /
+// `Malformed`), pure non-mutating loaders for path / bytes /
+// `serde_json::Value` envelopes (so the live inbound `0x05` peer-
+// candidate path can extend its existing optional-sibling envelope
+// safely), and seven Run 182 per-surface routing helpers that drive
+// the existing call-site entries with a typed
+// `MalformedOnChainGovernanceProofPayload` short-circuit placed in
+// front of the Run 182 outcome. Default policy remains
+// `OnChainGovernanceProofPolicy::Disabled`. Source/test only — no
+// MainNet apply, no governance execution, no real on-chain proof
+// verification, no KMS/HSM, no validator-set rotation. Release-binary
+// OnChainGovernance accepted-proof evidence is deferred to Run 185.
+pub mod pqc_onchain_governance_payload_carrying;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
