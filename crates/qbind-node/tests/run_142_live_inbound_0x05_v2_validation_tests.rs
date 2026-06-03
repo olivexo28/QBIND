@@ -281,6 +281,7 @@ fn wire_envelope(
         declared_fingerprint_prefix,
         declared_length: len,
         bundle_bytes,
+        governance_authority_proof: None,
     }
 }
 

@@ -245,3 +245,86 @@ pub fn preflight_v2_validation_only_marker_check_with_governance_proof_load(
         inputs, policy, proof_load, verifier,
     )
 }
+
+/// Run 176 — live inbound `0x05` peer-candidate validation-only
+/// marker-decision preflight.
+///
+/// Source/test entry point that lets a live inbound `0x05` peer-
+/// candidate wire envelope (which since Run 176 may carry the
+/// optional [`crate::pqc_peer_candidate_wire::PeerCandidateWireEnvelopeV1::governance_authority_proof`]
+/// carrier) reach the same Run 165 governance gate every other v2
+/// validation-only surface uses, with identical fail-closed
+/// semantics:
+///
+/// * `proof_load == Absent` under
+///   [`GovernanceProofPolicy::NotRequired`] → gate no-ops
+///   (legacy / no-proof live envelopes remain compatible — Run 142
+///   semantics preserved).
+/// * `proof_load == Absent` under
+///   [`GovernanceProofPolicy::RequiredForLifecycleSensitive`] →
+///   fail-closed
+///   [`MutatingSurfaceMarkerV2Error::GovernanceAuthorityRequiredButMissing`]
+///   for `Rotate` / `Retire` / `Revoke` / `EmergencyRevoke`.
+/// * `proof_load == Available(_)` → Run 163 verifier composition
+///   runs through `verifier`. Valid proof passes; invalid proof
+///   fails closed with
+///   [`MutatingSurfaceMarkerV2Error::GovernanceAuthorityRejected`].
+/// * `proof_load == Malformed(_)` → mapped to
+///   [`crate::pqc_governance_authority::GovernanceProofContext::Unavailable`]
+///   by [`GovernanceProofLoadStatus::governance_proof_context`] so
+///   the gate fails closed under any policy that requires a proof
+///   for the candidate's lifecycle action.
+///
+/// # Mutation contract
+///
+/// Performs **no** disk writes. Writes no marker, no sequence,
+/// mutates no live trust state, evicts no sessions, never invokes
+/// Run 070. The function is identical in behaviour to
+/// [`preflight_v2_validation_only_marker_check_with_governance_proof_load`];
+/// it is exposed under a distinct name so the Run 176 source-
+/// reachability claim ("live inbound `0x05` peer-candidate
+/// validation-only path consumes the optional governance-proof
+/// carrier and the hidden Required-policy selector") is grep-
+/// verifiable from the live `0x05` dispatcher call site as it
+/// gains the carrier wiring.
+///
+/// # Non-MainNet-enabling
+///
+/// A valid governance proof carried on a live inbound `0x05`
+/// envelope does NOT enable MainNet peer-driven apply, does NOT
+/// bypass any existing environment gate, does NOT advance the
+/// authority marker, does NOT advance the bundle-signing sequence,
+/// and does NOT cause a live trust swap. The MainNet refusal at
+/// peer-driven apply lives in
+/// [`crate::pqc_peer_candidate_apply::ProductionV2MarkerCoordinator`]
+/// and is unchanged by Run 176. Live inbound `0x05` remains
+/// validation-only / staging-only according to existing policy; no
+/// apply-on-receipt is introduced.
+///
+/// # Out of Run 176 scope
+///
+/// * Release-binary live inbound `0x05` proof-carrying evidence is
+///   deferred to Run 177.
+/// * No governance execution engine.
+/// * No on-chain governance implementation.
+/// * No KMS/HSM custody implementation.
+/// * No validator-set rotation.
+/// * No autonomous apply, no automatic apply on receipt, no peer-
+///   majority authority, no full C4 / C5 closure claim.
+pub fn preflight_live_inbound_0x05_validation_only_marker_check_with_governance_proof_carrier(
+    inputs: MarkerAcceptanceV2Inputs<'_>,
+    policy: GovernanceProofPolicy,
+    proof_load: &GovernanceProofLoadStatus,
+    verifier: &dyn GovernanceIssuerSignatureVerifier,
+) -> Result<MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
+    // Run 176 — single integration shim. Do not create a second
+    // selector or gate path; reuse the Run 173 validation-only shim
+    // (which itself reuses the Run 169 mutating shim) verbatim. The
+    // new entry point exists purely so the live inbound `0x05`
+    // governance-proof carrier reachability claim is grep-
+    // verifiable, mirroring how Run 173 names its validation-only
+    // surface.
+    preflight_v2_validation_only_marker_check_with_governance_proof_load(
+        inputs, policy, proof_load, verifier,
+    )
+}
