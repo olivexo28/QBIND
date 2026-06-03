@@ -836,6 +836,58 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_governance_proof_required: bool,
 
+    /// Run 180 — hidden, **disabled-by-default** DevNet/TestNet-safe
+    /// `OnChainGovernance` fixture-proof selector for the production
+    /// v2 marker-decision composition path wired by Run 180
+    /// ([`crate::pqc_onchain_governance_proof_surface::compose_onchain_governance_marker_decision`]
+    /// and the seven per-surface named wrappers it exposes for
+    /// reload-check, reload-apply, startup `--p2p-trust-bundle`,
+    /// SIGHUP, local peer-candidate-check, live inbound `0x05`, and
+    /// the Run 150 peer-driven apply drain coordinator).
+    ///
+    /// **Default behavior unchanged:** when this flag and the
+    /// `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`
+    /// environment variable are both absent, the resolved policy is
+    /// [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::Disabled`]
+    /// — every `OnChainGovernance` proof (fixture or otherwise) is
+    /// refused as `UnsupportedProductionOnChainGovernance` exactly
+    /// as in Run 178/179.
+    ///
+    /// **When set:** the resolved policy is
+    /// [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::AllowFixtureSourceTest`]
+    /// and DevNet/TestNet fixture `OnChainGovernance` proofs may pass
+    /// at source/test marker-decision level when every binding
+    /// matches (chain / genesis / authority-root / governance domain
+    /// / governance epoch / proposal / outcome / lifecycle action /
+    /// candidate digest / sequence / freshness / replay-id / quorum
+    /// / threshold / suite / proof bytes). MainNet remains refused
+    /// as `MainNetProductionProofUnavailable` regardless of this
+    /// flag, and the Run 147/Run 148/Run 152 MainNet peer-driven-
+    /// apply refusal at the calling surface is unchanged.
+    ///
+    /// **NOT** a governance execution engine, **NOT** a real
+    /// on-chain governance proof, **NOT** a KMS/HSM custody claim,
+    /// **NOT** a validator-set rotation primitive, **NOT** sufficient
+    /// to enable MainNet peer-driven apply, **NOT** an autonomous-
+    /// apply / apply-on-receipt / peer-majority authority claim, and
+    /// **NOT** a marker / sequence-file / trust-bundle-core / wire /
+    /// schema change.
+    ///
+    /// May also be enabled by the equivalent environment variable
+    /// `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED=1`
+    /// (operator convenience for systemd-style overrides). Either
+    /// source is sufficient; the flag and env-var are OR-combined.
+    ///
+    /// Run 180 is source/test selector wiring only. Release-binary
+    /// `OnChainGovernance` production-surface evidence is deferred
+    /// to Run 181. See `task/RUN_180_TASK.txt` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_180.md`.
+    #[arg(
+        long = "p2p-trust-bundle-onchain-governance-fixture-allowed",
+        hide = true
+    )]
+    pub p2p_trust_bundle_onchain_governance_fixture_allowed: bool,
+
     /// Run 151 — hidden, **disabled-by-default** DevNet/TestNet-only
     /// **explicit local one-shot drain trigger** for the Run 150
     /// peer-driven apply drain controller

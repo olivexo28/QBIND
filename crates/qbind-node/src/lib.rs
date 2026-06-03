@@ -229,6 +229,25 @@ pub mod pqc_governance_proof_surface;
 // KMS/HSM, no validator-set rotation. Release-binary OnChainGovernance
 // evidence is deferred to Run 179.
 pub mod pqc_onchain_governance_proof;
+// Run 180 — source/test production marker-decision composition for the
+// Run 178 typed `OnChainGovernance` proof verifier. Adds a hidden
+// `OnChainGovernanceProofPolicy` selector
+// (`--p2p-trust-bundle-onchain-governance-fixture-allowed` /
+// `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`),
+// composes anti-rollback marker decision + Run 159 v2 lifecycle +
+// Run 163 governance authority verification + Run 178
+// `OnChainGovernance` fixture verifier into a single typed shared
+// helper, and exposes named per-surface preflight wrappers
+// (reload-check, reload-apply, startup `--p2p-trust-bundle`, SIGHUP,
+// local peer-candidate-check, live inbound `0x05`, peer-driven
+// drain) so each production surface reaches the Run 178 verifier
+// through a grep-verifiable name. Default policy remains
+// `OnChainGovernanceProofPolicy::Disabled`. Source/test only — no
+// MainNet apply, no governance execution, no real on-chain proof
+// verification, no KMS/HSM, no validator-set rotation. Release-
+// binary OnChainGovernance production-surface evidence is deferred
+// to Run 181.
+pub mod pqc_onchain_governance_proof_surface;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
