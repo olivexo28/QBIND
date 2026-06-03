@@ -217,6 +217,18 @@ pub mod pqc_governance_proof_wire;
 // peer-driven apply remains refused; `OnChainGovernance` remains
 // unsupported / fail-closed.
 pub mod pqc_governance_proof_surface;
+// Run 178 — source/test-only typed `OnChainGovernance` proof format and
+// fail-closed verifier boundary. Adds `OnChainGovernanceProof`, the
+// `OnChainGovernanceProofPolicy` (default Disabled), and a pure
+// `verify_onchain_governance_proof` returning typed
+// `AcceptedOnChainGovernanceFixture` / `UnsupportedProductionOnChainGovernance`
+// / `MainNetProductionProofUnavailable` / wrong-domain / wrong-proposal /
+// expired / replay / quorum / threshold / invalid-proof / malformed /
+// unsupported-suite outcomes. Source/test only — no MainNet apply, no
+// governance execution, no real on-chain proof verification, no
+// KMS/HSM, no validator-set rotation. Release-binary OnChainGovernance
+// evidence is deferred to Run 179.
+pub mod pqc_onchain_governance_proof;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
