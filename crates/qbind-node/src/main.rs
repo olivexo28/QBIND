@@ -6248,6 +6248,19 @@ async fn run_p2p_node(
                 .p2p_trust_bundle_peer_candidate_wire_publish_path
                 .clone(),
             publish_once: true,
+            // Run 177 — optional, hidden, harness-only sibling carrier
+            // path. When `None`, the publish wire envelope's
+            // `governance_authority_proof` field stays `None` (bit-for-
+            // bit identical to pre-Run-177 publish behaviour). When
+            // present, the publisher parses the JSON as a
+            // `GovernanceAuthorityProofWire` (fail-closed on parse
+            // failure) and attaches it to the live `0x05` envelope
+            // before encoding the Run 078 wire frame. See
+            // `task/RUN_177_TASK.txt` and
+            // `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_177.md`.
+            governance_proof_path: args
+                .p2p_trust_bundle_peer_candidate_wire_publish_governance_proof_path
+                .clone(),
             ..PeerCandidateWirePublishConfig::default()
         };
         match publisher.publish_once_from_config(&publish_cfg).await {
