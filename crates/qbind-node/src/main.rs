@@ -1428,14 +1428,16 @@ fn preflight_run_132_validation_only_v2_marker_check(
     ctx_data: &Run105ReloadCheckContextData,
     data_dir: Option<&std::path::Path>,
 ) -> Result<
-    Option<qbind_node::pqc_authority_marker_acceptance::ValidationOnlyMarkerV2AcceptReason>,
-    qbind_node::pqc_authority_marker_acceptance::ValidationOnlyMarkerV2Error,
+    Option<qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2>,
+    qbind_node::pqc_authority_marker_acceptance::MutatingSurfaceMarkerV2Error,
 > {
+    use qbind_ledger::{verify_bundle_signing_key_ratification_v2, RatificationV2VerifierInputs};
     use qbind_node::pqc_authority_marker_acceptance::{
-        verify_marker_for_validation_only_v2, ValidationOnlyMarkerV2Error,
-        ValidationOnlyMarkerV2Inputs,
+        MarkerAcceptanceV2Inputs, MutatingSurfaceMarkerV2Error,
     };
-    use qbind_node::pqc_authority_state::authority_state_file_path;
+    use qbind_node::pqc_authority_state::{authority_state_file_path, AuthorityStateUpdateSource};
+    use qbind_node::pqc_governance_authority::fixture_issuer_signature_verifier;
+    use qbind_node::pqc_governance_proof_surface::preflight_v2_validation_only_marker_check_with_governance_proof_load;
 
     let Some(ratification_v2) = ctx_data.ratification_v2.as_ref() else {
         // No v2 sidecar — this function should only be called when v2 is present.
@@ -1451,16 +1453,27 @@ fn preflight_run_132_validation_only_v2_marker_check(
     };
 
     // Step 1: verify the v2 ratification using the Run 130 verifier.
-    let ratified_v2 = qbind_ledger::verify_bundle_signing_key_ratification_v2(
-        qbind_ledger::RatificationV2VerifierInputs {
-            ratification: ratification_v2,
-            authority: &ctx_data.authority,
-            expected_chain_id: &ctx_data.chain_id_str,
-            expected_environment: ctx_data.env_policy,
-            expected_genesis_hash: &ctx_data.canonical_hash,
-        },
-    )
-    .map_err(ValidationOnlyMarkerV2Error::V2VerifierFailure)?;
+    // Run 173: route the v2-verifier failure into
+    // `MutatingSurfaceMarkerV2Error::DerivationFailed` is not
+    // appropriate (that variant is for derivation failures, not
+    // verifier failures); the closest fail-closed variant for an
+    // upstream v2-verifier failure on a validation-only surface is
+    // the `Conflict` -> `MalformedOrUnsupportedMarkerRejected` mapping
+    // already used by `preflight_run_134_v2_marker_decision`.
+    let ratified_v2 = verify_bundle_signing_key_ratification_v2(RatificationV2VerifierInputs {
+        ratification: ratification_v2,
+        authority: &ctx_data.authority,
+        expected_chain_id: &ctx_data.chain_id_str,
+        expected_environment: ctx_data.env_policy,
+        expected_genesis_hash: &ctx_data.canonical_hash,
+    })
+    .map_err(|e| {
+        MutatingSurfaceMarkerV2Error::Conflict(
+            qbind_node::pqc_authority_state::AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+                reason: format!("v2 ratification verifier failure: {}", e),
+            },
+        )
+    })?;
 
     // Compute genesis hash hex for marker derivation.
     let mut runtime_genesis_hash_hex = String::with_capacity(64);
@@ -1471,16 +1484,52 @@ fn preflight_run_132_validation_only_v2_marker_check(
 
     let marker_path = authority_state_file_path(data_dir);
 
-    let accept_reason = verify_marker_for_validation_only_v2(ValidationOnlyMarkerV2Inputs {
-        marker_path: &marker_path,
-        runtime_env,
-        runtime_chain_id,
-        runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
-        ratification: ratification_v2,
-        ratified: &ratified_v2,
-    })?;
+    // Run 173 — route validation-only through the governance-aware
+    // shared helper via the Run 173 surface shim so the typed Run 167
+    // `GovernanceProofLoadStatus` carried by `ctx_data` reaches the
+    // Run 165 gate on validation-only surfaces too. The Run 171
+    // selector OR-combination
+    // (`--p2p-trust-bundle-governance-proof-required` /
+    // `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED`) drives the
+    // active policy; default remains
+    // `GovernanceProofPolicy::NotRequired` so old no-proof v2 sidecars
+    // remain compatible.
+    //
+    // The validation-only invariant is enforced by THIS surface: the
+    // returned decision is observed for the operator-log line and
+    // VERDICT exit code only — it is never persisted, never advances
+    // the bundle-signing sequence, never swaps live trust state,
+    // never evicts sessions, and never invokes Run 070. The fixture
+    // issuer-signature verifier is the source/test issuer-signature
+    // verifier; release-binary validation-only Required-policy
+    // production-surface evidence is deferred to Run 174. MainNet
+    // peer-driven apply remains refused at the calling surface
+    // regardless of this validation-only outcome.
+    let verifier = fixture_issuer_signature_verifier();
+    let policy = qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+        ctx_data.governance_proof_required_selector,
+    );
+    let decision = preflight_v2_validation_only_marker_check_with_governance_proof_load(
+        MarkerAcceptanceV2Inputs {
+            marker_path: &marker_path,
+            runtime_env,
+            runtime_chain_id,
+            runtime_genesis_hash_hex: &runtime_genesis_hash_hex,
+            ratification: ratification_v2,
+            ratified: &ratified_v2,
+            // `update_source` and `updated_at_unix_secs` are excluded
+            // from the canonical v2 marker digest (Run 131) and are
+            // never persisted from this surface — see the
+            // validation-only mutation contract on the shim doc.
+            update_source: AuthorityStateUpdateSource::TestOrFixture,
+            updated_at_unix_secs: 0,
+        },
+        policy,
+        &ctx_data.governance_proof_load,
+        &verifier,
+    )?;
 
-    Ok(Some(accept_reason))
+    Ok(Some(decision))
 }
 
 /// Main entry point for qbind-node binary.
@@ -2106,11 +2155,15 @@ async fn main() {
                             ctx_data,
                             config.data_dir.as_deref(),
                         ) {
-                            Ok(Some(reason)) => {
+                            Ok(Some(decision)) => {
                                 eprintln!(
                                     "[run-132] reload-check v2 authority-marker check passed: {} \
-                                     (validation-only; no marker persistence; no trust mutation).",
-                                    reason
+                                     (validation-only; no marker persistence; no trust mutation; \
+                                     governance policy={:?}).",
+                                    decision.kind(),
+                                    qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+                                        ctx_data.governance_proof_required_selector,
+                                    ),
                                 );
                             }
                             Ok(None) => {
@@ -2522,12 +2575,15 @@ async fn main() {
                                 ctx_data,
                                 config.data_dir.as_deref(),
                             ) {
-                                Ok(Some(reason)) => {
+                                Ok(Some(decision)) => {
                                     eprintln!(
                                         "[run-132] peer-candidate-check v2 authority-marker check \
                                          passed: {} (validation-only; no marker persistence; \
-                                         no trust mutation).",
-                                        reason
+                                         no trust mutation; governance policy={:?}).",
+                                        decision.kind(),
+                                        qbind_node::pqc_governance_proof_surface::governance_proof_policy_from_cli_or_env(
+                                            ctx_data.governance_proof_required_selector,
+                                        ),
                                     );
                                 }
                                 Ok(None) => {

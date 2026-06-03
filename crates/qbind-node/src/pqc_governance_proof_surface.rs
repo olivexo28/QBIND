@@ -194,3 +194,54 @@ pub fn governance_proof_policy_from_cli_or_env(
         cli_flag_set || governance_proof_required_env_selector_enabled(),
     )
 }
+
+/// Run 173 — validation-only marker-decision preflight that consumes
+/// the typed Run 167 [`GovernanceProofLoadStatus`] together with a
+/// Run 165 [`GovernanceProofPolicy`] and a
+/// [`GovernanceIssuerSignatureVerifier`] reference, but is documented
+/// **validation-only**: the caller MUST NOT persist the returned
+/// [`MarkerAcceptDecisionV2`] and MUST NOT invoke the Run 070 trust-
+/// apply pipeline. The function itself is identical in behaviour to
+/// [`preflight_v2_marker_decision_with_governance_proof_load`] —
+/// same anti-rollback / lifecycle / governance gate composition,
+/// same fail-closed semantics — but is exposed under a distinct name
+/// so the Run 173 source-reachability claim ("validation-only
+/// surfaces consume the hidden Required-policy selector") is
+/// grep-verifiable from the validation-only call sites
+/// (`--p2p-trust-bundle-reload-check`, local peer-candidate-check,
+/// and any shared validation-only helper used by live inbound `0x05`).
+///
+/// # Mutation contract
+///
+/// Performs **no** disk writes. Writes no marker, no sequence,
+/// mutates no live trust state, evicts no sessions, never invokes
+/// Run 070. **Unlike** [`preflight_v2_marker_decision_with_governance_proof_load`],
+/// validation-only callers MUST drop the returned decision rather
+/// than calling
+/// [`crate::pqc_authority_marker_acceptance::persist_accepted_v2_marker_after_commit_boundary`].
+/// This invariant is enforced by the surface, not by the helper —
+/// the helper is pure and cannot itself differentiate validation-only
+/// from mutating callers.
+///
+/// # Non-MainNet-enabling
+///
+/// A valid governance proof on a validation-only surface does NOT
+/// enable MainNet peer-driven apply and does NOT bypass any existing
+/// environment gate. Validation-only acceptance never advances the
+/// on-disk authority marker, never advances the bundle-signing
+/// sequence, and never causes a live trust swap. The MainNet refusal
+/// at peer-driven apply lives in
+/// [`crate::pqc_peer_candidate_apply::ProductionV2MarkerCoordinator`]
+/// and is unchanged by Run 173.
+pub fn preflight_v2_validation_only_marker_check_with_governance_proof_load(
+    inputs: MarkerAcceptanceV2Inputs<'_>,
+    policy: GovernanceProofPolicy,
+    proof_load: &GovernanceProofLoadStatus,
+    verifier: &dyn GovernanceIssuerSignatureVerifier,
+) -> Result<MarkerAcceptDecisionV2, MutatingSurfaceMarkerV2Error> {
+    // Run 173 — single integration shim. Do not create a second
+    // selector or gate path; reuse the Run 169 shim verbatim.
+    preflight_v2_marker_decision_with_governance_proof_load(
+        inputs, policy, proof_load, verifier,
+    )
+}
