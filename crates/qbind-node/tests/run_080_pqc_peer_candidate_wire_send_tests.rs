@@ -93,6 +93,7 @@ async fn run080_publish_once_success_reports_sent_and_not_applied_boundary() {
         publish_once: true,
         wait_for_peer_timeout: Duration::from_secs(1),
         wait_poll_interval: Duration::from_millis(10),
+        governance_proof_path: None,
     };
     let report = pubr.publish_once_from_config(&cfg).await.unwrap();
     assert_eq!(report.sent(), 2);
@@ -115,6 +116,7 @@ async fn run080_publish_once_no_peer_fails_closed() {
         publish_once: true,
         wait_for_peer_timeout: Duration::from_millis(20),
         wait_poll_interval: Duration::from_millis(5),
+        governance_proof_path: None,
     };
     let err = pubr.publish_once_from_config(&cfg).await.unwrap_err();
     assert!(matches!(
@@ -139,6 +141,7 @@ async fn run080_publish_once_queue_full_counts_failures() {
         publish_once: true,
         wait_for_peer_timeout: Duration::from_secs(1),
         wait_poll_interval: Duration::from_millis(10),
+        governance_proof_path: None,
     };
     let report = pubr.publish_once_from_config(&cfg).await.unwrap();
     assert_eq!(report.sent(), 0);

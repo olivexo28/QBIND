@@ -3288,6 +3288,7 @@ mod tests {
             publish_once: true,
             wait_for_peer_timeout: Duration::from_millis(20),
             wait_poll_interval: Duration::from_millis(5),
+            governance_proof_path: None,
         };
         let out = p.publish_once_from_config(&cfg).await.unwrap_err();
         assert!(matches!(
@@ -3312,6 +3313,7 @@ mod tests {
             publish_once: true,
             wait_for_peer_timeout: Duration::from_secs(1),
             wait_poll_interval: Duration::from_millis(10),
+            governance_proof_path: None,
         };
         let report = p.publish_once_from_config(&cfg).await.expect("publish");
         assert_eq!(report.attempted(), 2);
@@ -3341,6 +3343,7 @@ mod tests {
             publish_once: true,
             wait_for_peer_timeout: Duration::from_secs(1),
             wait_poll_interval: Duration::from_millis(10),
+            governance_proof_path: None,
         };
         let report = p.publish_once_from_config(&cfg).await.expect("publish");
         assert_eq!(report.attempted(), 2);
