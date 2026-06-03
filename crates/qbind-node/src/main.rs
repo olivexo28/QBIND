@@ -1622,6 +1622,73 @@ async fn main() {
     }
 
     // ------------------------------------------------------------------
+    // Run 180 — hidden, disabled-by-default DevNet/TestNet `OnChainGovernance`
+    // fixture-proof selector capture.
+    //
+    // Resolves the active
+    // [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy`]
+    // from the OR-combination of the hidden
+    // `--p2p-trust-bundle-onchain-governance-fixture-allowed` CLI
+    // flag and the `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`
+    // environment variable, and emits a single source-reachability
+    // banner. The default — both unset / falsey — preserves
+    // `OnChainGovernanceProofPolicy::Disabled`, which keeps every
+    // pre-Run-180 production marker-decision invariant intact:
+    // `OnChainGovernance` proofs (fixture or otherwise) are refused
+    // as `UnsupportedProductionOnChainGovernance` exactly as in
+    // Runs 178/179.
+    //
+    // This block is the smallest production source-reachability
+    // call site Run 180 needs in `main.rs` for
+    // [`qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env`]
+    // and
+    // [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::AllowFixtureSourceTest`].
+    // The composed marker-decision helper
+    // [`qbind_node::pqc_onchain_governance_proof_surface::compose_onchain_governance_marker_decision`]
+    // and its seven per-surface named wrappers are reached through
+    // the production library surface from this same module; Run 180
+    // is source/test only and does NOT introduce a binary-side
+    // mutating call site here. Release-binary `OnChainGovernance`
+    // production-surface evidence is deferred to Run 181.
+    //
+    // **Non-MainNet-enabling.** Even when the selector is enabled,
+    // the resolved policy never elevates a fixture proof into a
+    // MainNet apply path — the Run 178 verifier returns
+    // `MainNetProductionProofUnavailable` on MainNet, and the
+    // Run 147/Run 148/Run 152 MainNet peer-driven-apply refusal at
+    // the calling surface remains intact.
+    {
+        let onchain_governance_proof_policy =
+            qbind_node::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env(
+                args.p2p_trust_bundle_onchain_governance_fixture_allowed,
+            );
+        match onchain_governance_proof_policy {
+            qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::Disabled => {
+                // Default — no banner so existing operator console
+                // output is bit-for-bit unchanged for non-Run-180
+                // operators. The selector is hidden and disabled by
+                // default per Run 180 strict scope.
+            }
+            qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::AllowFixtureSourceTest => {
+                eprintln!(
+                    "[run-180] hidden DevNet/TestNet OnChainGovernance fixture-proof \
+                     policy ARMED (AllowFixtureSourceTest). Source/test only — fixture \
+                     verifier never enables MainNet peer-driven apply, never implements \
+                     governance execution, never implements real on-chain proof \
+                     verification, never implements KMS/HSM, never implements \
+                     validator-set rotation. MainNet remains refused as \
+                     MainNetProductionProofUnavailable. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_180.md."
+                );
+            }
+        }
+        // Hold the resolved policy in a binding so a future run can
+        // pass it down into the per-surface wrappers without
+        // changing this capture site.
+        let _ = onchain_governance_proof_policy;
+    }
+
+    // ------------------------------------------------------------------
     // Run 127 — `--authority-state-reset` offline operator ceremony.
     //
     // When `--authority-state-reset` is present the binary performs the
