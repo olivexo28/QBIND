@@ -1,0 +1,18 @@
+# Run 179 evidence archive — only README.md and summary.txt are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data.
+logs/
+data/
+exit_codes/
+marker_hashes/
+sequence_hashes/
+data_inventories/
+grep_summaries/
+reachability/
+test_results/
+fixtures/
+helper_evidence/
+helper_corpus/
+provenance.txt
+fixture_manifest.txt
+scenario_assertions.txt
+negative_invariants.txt

@@ -1,0 +1,75 @@
+Run 179 — release-binary OnChainGovernance proof boundary scenario verdicts
+git_commit: not-yet-run
+
+verdict: NOT-YET-RUN — this committed summary.txt is the placeholder canonical
+evidence-archive copy. The harness wipes and rewrites this file on every
+invocation under OUTDIR. Until the release builds + harness are run in an
+environment that can compile and exercise the full Run 179 helper corpus, this
+file remains the deferred placeholder.
+
+Reproducibility:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example run_179_onchain_governance_proof_release_binary_helper
+  bash scripts/devnet/run_179_onchain_governance_proof_release_binary.sh
+
+Scenario matrix (defined by task/RUN_179_TASK.txt; verdicts are populated by
+the harness in release mode against the Run 178 typed verifier):
+
+  A1_disabled_skip                                            (accept-skip)
+  A2_required_sidecar_disabled                                (accept)
+  A3_allow_fixture_source_test_validate_accept                (accept)
+  A4_allow_fixture_source_test_ratify_accept                  (accept)
+  A5_allow_fixture_source_test_revoke_accept                  (accept)
+  A6_allow_fixture_source_test_emergency_revoke_accept        (accept)
+  A7_co_present_governance_authority_proof_sibling            (accept)
+  R1_required_sidecar_missing_proof                           (reject)
+  R2_lifecycle_digest_mismatch_validate                       (reject)
+  R3_lifecycle_digest_mismatch_ratify                         (reject)
+  R4_lifecycle_digest_mismatch_revoke                         (reject)
+  R5_lifecycle_digest_mismatch_emergency_revoke               (reject)
+  R6_lifecycle_proof_carrier_digest_mismatch                  (reject)
+  R6b_lifecycle_proof_carrier_action_mismatch                 (reject)
+  R7_root_fingerprint_mismatch                                (reject)
+  R8_environment_mismatch                                     (reject)
+  R9_chain_id_mismatch                                        (reject)
+  R10_genesis_hash_mismatch                                   (reject)
+  R11_signature_mismatch                                      (reject)
+  R11b_tampered_message                                       (reject)
+  R12_threshold_underflow                                     (reject)
+  R12b_zero_quorum                                            (reject)
+  R13_replay_guard                                            (reject)
+  R14_freshness_guard                                         (reject)
+  R15_invalid_signer                                          (reject)
+  R16_unsupported_suite_id                                    (reject)
+  R16b_unsupported_wire_schema_version                        (reject)
+  R17_refused_suite_id_0xA2                                   (reject)
+  R17b_refused_suite_disabled_policy                          (reject)
+  R17c_disabled_with_sidecar_refusal                          (reject)
+  R17d_required_sidecar_without_sidecar                       (reject)
+  R18_duplicate_signers                                       (reject)
+  R19_pseudo_validate_rejection                               (reject)
+  R20_pseudo_ratify_rejection                                 (reject)
+  R21_pseudo_revoke_rejection                                 (reject)
+  R22_pseudo_emergency_revoke_rejection                       (reject)
+  R23_mainnet_refusal                                         (reject)
+  R24_run167_governance_authority_proof_wire_compat           (accept-roundtrip)
+  R24b_run178_onchain_governance_proof_wire_roundtrip         (accept-roundtrip)
+  R25_proposal_id_mismatch                                    (reject)
+  R25b_proposal_digest_mismatch                               (reject)
+  R25c_unique_decision_id_mismatch                            (reject)
+
+honest limitations:
+  * verify_onchain_governance_proof / validate_lifecycle_with_onchain_governance_proof
+    have zero production callers under crates/qbind-node/src/ as of Run 179.
+    The Run 179 helper exercises the verifier in-process through library
+    symbols — this is release-binary fixture/boundary evidence, not
+    release-binary production-surface evidence.
+  * release-binary production-surface evidence is deferred to the next
+    integration run wiring OnChainGovernanceProofPolicy::AllowFixtureSourceTest
+    and the Run 178 verifier into a production marker-decision caller behind
+    a hidden selector (Run 165 / 169 / 171 / 173 / 176 / 177 composition).
+  * MainNet peer-driven apply remains FATAL refusal (Run 147 invariant); the
+    Run 178/179 OnChainGovernance verifier landing does not weaken this.
+  * no real on-chain governance / execution / bridge / light client /
+    KMS-HSM / validator-set rotation is introduced.
+  * no schema / wire / metric drift beyond the Run 178 additive shape.
