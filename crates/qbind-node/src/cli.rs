@@ -642,6 +642,38 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_peer_candidate_wire_publish_once: bool,
 
+    /// Run 177 — hidden, **disabled-by-default**, harness-only path to a
+    /// `GovernanceAuthorityProofWire` JSON file (Run 167 / Run 176 wire
+    /// schema) that is attached to the live `0x05`
+    /// [`PeerCandidateWireEnvelopeV1`] published by the Run 080
+    /// publish-once path. **Strictly additive carrier** on the existing
+    /// Run 176 optional `governance_authority_proof` wire field — no
+    /// schema change, no domain-tag change, no envelope-version bump,
+    /// no marker / sequence-file / trust-bundle drift.
+    ///
+    /// When this flag is **absent**, the publish path is bit-for-bit
+    /// identical to pre-Run-177 behaviour: the wire envelope's
+    /// `governance_authority_proof` field stays `None`. When present,
+    /// the JSON file is parsed as a `GovernanceAuthorityProofWire`
+    /// (structural validation only — the issuer signature is verified
+    /// at the receiver by the Run 163 verifier, not here) and embedded
+    /// on the wire envelope before [`encode_peer_candidate_wire_frame`]
+    /// runs. Parse failures are fail-closed: the publish-once attempt
+    /// aborts without sending any frame.
+    ///
+    /// This carrier flag is required-together with
+    /// `--p2p-trust-bundle-peer-candidate-wire-publish-enabled` and
+    /// `--p2p-trust-bundle-peer-candidate-wire-publish-path`.
+    ///
+    /// See `task/RUN_177_TASK.txt`,
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_177.md`, and
+    /// `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`.
+    #[arg(
+        long = "p2p-trust-bundle-peer-candidate-wire-publish-governance-proof-path",
+        hide = true
+    )]
+    pub p2p_trust_bundle_peer_candidate_wire_publish_governance_proof_path: Option<PathBuf>,
+
     /// Run 088 — disabled-by-default validation-before-rebroadcast
     /// propagation prototype for peer-candidate `0x05` frames. This
     /// is propagation-only: candidates are rebroadcast only after the

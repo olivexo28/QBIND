@@ -1,0 +1,49 @@
+Run 177 — release-binary live inbound 0x05 governance-proof carrier scenario verdicts
+git_commit: not-yet-run
+
+verdict: NOT-YET-RUN — this committed summary.txt is the placeholder canonical
+evidence-archive copy. The harness wipes and rewrites this file on every
+invocation under OUTDIR. Until the release builds + harness are run in an
+environment that can compile and exercise the full N=3 DevNet topology, this
+file remains the deferred placeholder.
+
+Reproducibility:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example run_177_live_0x05_governance_proof_release_binary_helper
+  bash scripts/devnet/run_177_live_0x05_governance_proof_release_binary.sh
+
+Scenario matrix (defined by task/RUN_177_TASK.txt; verdicts are populated by
+the harness):
+  A1_legacy_no_proof_notrequired                             (validation-only)
+  A2_cli_required_valid_proof                                (validation-only)
+  A3_env_required_valid_proof                                (validation-only)
+  A4_revoke_release_binary                                   skipped(deferred-source-test)
+  A5_emergency_revoke_release_binary                         skipped(not-representable-at-v2-action-enum)
+  A6_idempotent_proof_replay                                 (validation-only)
+  R1_required_no_proof_rejected                              (rejected-on-receive)
+  R2_required_malformed_proof_rejected                       (rejected-on-receive)
+  R3_required_invalid_signature_rejected                     (rejected-on-receive)
+  R4_required_wrong_environment_proof                        skipped(deferred-source-test)
+  R5_required_wrong_chain_proof                              skipped(deferred-source-test)
+  R6_required_wrong_genesis_proof                            skipped(deferred-source-test)
+  R7_required_wrong_root_rejected                            (rejected-on-receive)
+  R8_required_wrong_action_rejected                          (rejected-on-receive)
+  R9_required_wrong_digest_rejected                          (rejected-on-receive)
+  R10_required_wrong_sequence_rejected                       (rejected-on-receive)
+  R11_required_unsupported_suite_rejected                    (rejected-on-receive)
+  R12_required_non_pqc_suite                                 covered_by_R11
+  R13_required_onchain_governance_rejected                   (rejected-on-receive)
+  R14_required_local_operator_config_rejected                covered_by_R1
+  R15_required_peer_majority_rejected                        covered_by_R1
+  R16_required_lifecycle_invalid                             skipped(deferred-source-test)
+  R17_required_lifecycle_valid_proof_invalid                 covered_by_R2_R3
+  R18_invalid_not_propagated                                 asserted_per_case
+  R19_invalid_not_staged                                     asserted_per_case
+  R20_invalid_not_drained                                    asserted_per_case
+  R21_valid_no_apply_on_receipt                              asserted_per_case_A2_A3_A6
+  R22_mainnet_peer_driven_refusal                            (rc=1 expected)
+
+honest limitations:
+  * R4/R5/R6 (wrong-env/chain/genesis) covered at source level by Run 173/176 + Run 168 helper (binary upstream Run 130 verifier trips before the gate).
+  * A4/A5 (Revoke / EmergencyRevoke release-binary representability) bounded by Run 161 metadata-prefix routing and the v2 ratification action enum (no EmergencyRevoke variant).
+  * full C4 / C5 closure NOT claimed; OnChainGovernance / governance execution / KMS-HSM / validator-set rotation remain open.

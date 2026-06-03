@@ -2366,6 +2366,13 @@ pub struct PeerCandidateWirePublishConfig {
     pub wait_for_peer_timeout: Duration,
     /// Poll cadence while waiting for peers.
     pub wait_poll_interval: Duration,
+    /// Run 177 — optional path to a `GovernanceAuthorityProofWire`
+    /// JSON file to attach to the live `0x05` wire envelope before
+    /// encoding. Strictly additive carrier on the existing Run 176
+    /// optional `governance_authority_proof` field. When `None`, the
+    /// publish path is bit-for-bit identical to pre-Run-177 behaviour
+    /// (envelope's `governance_authority_proof` stays `None`).
+    pub governance_proof_path: Option<PathBuf>,
 }
 
 impl Default for PeerCandidateWirePublishConfig {
@@ -2376,6 +2383,7 @@ impl Default for PeerCandidateWirePublishConfig {
             publish_once: false,
             wait_for_peer_timeout: Duration::from_secs(10),
             wait_poll_interval: Duration::from_millis(200),
+            governance_proof_path: None,
         }
     }
 }
@@ -2399,6 +2407,18 @@ pub enum PeerCandidateWirePublishError {
     },
     NoPeerWithinTimeout {
         timeout: Duration,
+    },
+    /// Run 177 — failed to read the optional governance-proof carrier
+    /// fixture before publishing the live `0x05` frame.
+    GovernanceProofIo {
+        path: PathBuf,
+        message: String,
+    },
+    /// Run 177 — the governance-proof carrier fixture did not parse
+    /// as a `GovernanceAuthorityProofWire`.
+    GovernanceProofParse {
+        path: PathBuf,
+        message: String,
     },
 }
 
@@ -2434,6 +2454,18 @@ impl std::fmt::Display for PeerCandidateWirePublishError {
                 f,
                 "Run 080 publish observed no authenticated peers within {:?}",
                 timeout
+            ),
+            Self::GovernanceProofIo { path, message } => write!(
+                f,
+                "Run 177 publish could not read governance-proof carrier at {}: {}",
+                path.display(),
+                message
+            ),
+            Self::GovernanceProofParse { path, message } => write!(
+                f,
+                "Run 177 publish could not parse governance-proof carrier at {} as GovernanceAuthorityProofWire JSON: {}",
+                path.display(),
+                message
             ),
         }
     }
@@ -2487,7 +2519,30 @@ impl LivePeerCandidateWirePublisher {
             .as_ref()
             .ok_or(PeerCandidateWirePublishError::EnvelopePathMissing)?;
         let envelope = load_run076_envelope_file(envelope_path)?;
-        let wire_envelope = PeerCandidateWireEnvelopeV1::from_run076_envelope(&envelope);
+        let mut wire_envelope = PeerCandidateWireEnvelopeV1::from_run076_envelope(&envelope);
+        // Run 177 — additive optional `governance_authority_proof`
+        // carrier on the live `0x05` wire envelope. When the operator
+        // supplies a JSON fixture path via the hidden harness-only
+        // `--p2p-trust-bundle-peer-candidate-wire-publish-governance-proof-path`
+        // flag, parse it as a `GovernanceAuthorityProofWire` (Run 167
+        // wire schema, also accepted on the in-band Run 176 carrier)
+        // and attach it to the wire envelope before encoding. Parse
+        // failures are fail-closed: no frame is sent. When the path is
+        // `None`, behaviour is bit-for-bit identical to pre-Run-177.
+        if let Some(proof_path) = cfg.governance_proof_path.as_ref() {
+            let raw = std::fs::read(proof_path).map_err(|e| {
+                PeerCandidateWirePublishError::GovernanceProofIo {
+                    path: proof_path.clone(),
+                    message: e.to_string(),
+                }
+            })?;
+            let proof_wire: GovernanceAuthorityProofWire = serde_json::from_slice(&raw)
+                .map_err(|e| PeerCandidateWirePublishError::GovernanceProofParse {
+                    path: proof_path.clone(),
+                    message: e.to_string(),
+                })?;
+            wire_envelope.governance_authority_proof = Some(proof_wire);
+        }
         let frame = match encode_peer_candidate_wire_frame(&wire_envelope) {
             Ok(f) => f,
             Err(PeerCandidateWireFrameError::DeclaredPayloadOversize { declared, cap }) => {
