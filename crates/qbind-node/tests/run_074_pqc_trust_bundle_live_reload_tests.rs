@@ -302,6 +302,7 @@ fn devnet_config(
         ratification: None,
         authority_marker: None,
     governance_proof_policy: qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+    onchain_governance_fixture_allowed_selector: false,
 }
 }
 

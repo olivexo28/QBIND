@@ -1,0 +1,391 @@
+Task: Run 183 — Release-Binary OnChainGovernance Production Call-Site Evidence
+
+Current accepted state:
+
+* Run 178: source/test typed OnChainGovernance proof verifier landed.
+* Run 179: release-binary boundary evidence showed the verifier worked through a release-built helper but had no production callers.
+* Run 180: source/test OnChainGovernance surface module landed:
+
+  * `pqc_onchain_governance_proof_surface.rs`;
+  * hidden CLI flag `--p2p-trust-bundle-onchain-governance-fixture-allowed`;
+  * env var `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`;
+  * default remains `OnChainGovernanceProofPolicy::Disabled`;
+  * seven per-surface wrappers for reload-check, reload-apply, startup, SIGHUP, peer-candidate-check, live `0x05`, and peer-driven drain.
+* Run 181: release-binary selector/boundary evidence landed:
+
+  * real `target/release/qbind-node` proved default Disabled remains silent/fail-closed;
+  * CLI selector and env selector arm `AllowFixtureSourceTest`;
+  * release-built helper exercised the Run 180 wrappers and Run 178/180 corpus;
+  * production call sites were not yet wired to invoke the wrappers.
+* Run 182: source/test production call-site wiring landed:
+
+  * all seven v2 marker-decision call sites are wired to the Run 180 OnChainGovernance preflight wrappers:
+
+    1. reload-check;
+    2. reload-apply;
+    3. startup `--p2p-trust-bundle`;
+    4. SIGHUP;
+    5. local peer-candidate-check;
+    6. live inbound `0x05`;
+    7. peer-driven drain;
+  * `pqc_onchain_governance_callsite_wiring` added with seven named entries + context struct;
+  * default Disabled policy preserved;
+  * MainNet peer-driven apply remains refused;
+  * 37/37 Run 182 tests passed;
+  * release-binary evidence deferred to Run 183.
+* MainNet peer-driven apply remains refused.
+* governance execution remains unimplemented.
+* real on-chain proof verification remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open.
+* C5 remains open.
+
+Objective:
+Produce release-binary evidence that real `target/release/qbind-node` production v2 marker-decision call sites now invoke the Run 180 OnChainGovernance wrappers after Run 182.
+
+This run must prove:
+
+1. default `OnChainGovernanceProofPolicy::Disabled` remains fail-closed on real production surfaces;
+2. hidden CLI/env selector enables `AllowFixtureSourceTest`;
+3. DevNet/TestNet fixture OnChainGovernance proofs pass through at least one validation-only and one mutating production call site where anti-rollback, lifecycle, and governance checks pass;
+4. invalid OnChainGovernance fixture proofs fail closed;
+5. rejected cases produce no mutation;
+6. accepted mutating cases preserve sequence-before-marker ordering;
+7. MainNet peer-driven apply remains refused even with a valid fixture proof and selector enabled;
+8. no real on-chain governance execution or MainNet production governance proof is claimed.
+
+Strict scope:
+
+* Release-binary evidence only.
+* Use real `target/release/qbind-node`.
+* Use release-built helper(s) to mint OnChainGovernance fixture proof material.
+* No production source change unless a tiny harness-only fix is required.
+* No MainNet peer-driven apply enablement.
+* No real governance execution engine.
+* No real on-chain proof verifier.
+* No bridge/light-client integration.
+* No KMS/HSM implementation.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No marker schema change.
+* No sequence-file schema change.
+* No trust-bundle core schema change.
+* No additional wire/schema change.
+* Do not weaken Runs 070, 130–182.
+* Do not claim full C4 or C5 closure.
+
+Required deliverables:
+
+1. Add release-binary harness:
+   `scripts/devnet/run_183_onchain_governance_callsite_release_binary.sh`
+
+2. Add evidence archive:
+   `docs/devnet/run_183_onchain_governance_callsite_release_binary/`
+
+3. Add canonical evidence report:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_183.md`
+
+4. Update narrowly:
+
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md` before finalizing.
+
+Required production surfaces:
+Exercise at minimum:
+
+A. Validation-only:
+
+* preferred: `--p2p-trust-bundle-reload-check`.
+
+B. Mutating:
+
+* preferred: process-start `--p2p-trust-bundle-reload-apply-path`.
+
+Also cover at least one of the following if feasible:
+
+* local `--p2p-trust-bundle-peer-candidate-check`;
+* live inbound `0x05`;
+* peer-driven drain;
+* startup `--p2p-trust-bundle`;
+* SIGHUP live reload.
+
+Do not substitute helper-only evidence for the central production call-site accepted-proof claim.
+
+Required accepted scenarios:
+
+A1. reload-check default Disabled rejects OnChainGovernance proof
+
+* No CLI flag and no env var.
+* Expected:
+
+  * real `qbind-node` exits non-zero or typed refusal;
+  * Disabled policy visible or inferable;
+  * no sequence write;
+  * no marker write.
+
+A2. CLI selector enables `AllowFixtureSourceTest` on reload-check and accepts valid DevNet OnChainGovernance Rotate proof
+
+* Use `--p2p-trust-bundle-onchain-governance-fixture-allowed`.
+* Expected:
+
+  * hidden CLI selector observed;
+  * fixture policy active;
+  * proof parsed;
+  * production reload-check call site invokes Run 180 wrapper;
+  * `verify_onchain_governance_proof` reached through production call site;
+  * lifecycle validation accepts;
+  * marker decision accepts;
+  * validation-only non-mutation preserved.
+
+A3. env selector enables `AllowFixtureSourceTest` on reload-check and accepts valid DevNet OnChainGovernance Rotate proof
+
+* Use `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED=1`.
+* Expected:
+
+  * env selector observed;
+  * fixture policy active;
+  * valid proof accepted;
+  * validation-only non-mutation preserved.
+
+A4. CLI selector enables `AllowFixtureSourceTest` on reload-apply and accepts valid DevNet OnChainGovernance Rotate proof
+
+* Expected:
+
+  * proof parsed before marker decision;
+  * production reload-apply call site invokes Run 180 wrapper;
+  * OnChainGovernance verifier accepts;
+  * lifecycle validation accepts;
+  * mutating apply succeeds;
+  * Run 055 sequence commit succeeds;
+  * v2 marker persists strictly after sequence commit.
+
+A5. env selector enables `AllowFixtureSourceTest` on reload-apply and accepts valid DevNet OnChainGovernance Rotate proof
+
+* Expected:
+
+  * same as A4 using env selector;
+  * sequence-before-marker ordering preserved.
+
+A6. local peer-candidate-check accepts valid DevNet OnChainGovernance Rotate proof under fixture selector, if feasible
+
+* validation-only;
+* no sequence write;
+* no marker write.
+
+A7. live inbound `0x05` accepts valid DevNet OnChainGovernance Rotate proof under fixture selector, if feasible
+
+* live receive path exercised;
+* no apply-on-receipt;
+* no marker write;
+* no sequence write.
+
+A8. peer-driven drain accepts valid fixture proof in preflight but MainNet remains refused
+
+* DevNet/TestNet only.
+* If not feasible in release-binary harness, cite Run 182 source/test and defer exact live drain evidence.
+
+A9. GenesisBound and EmergencyCouncil proof-carrying behavior remains unchanged
+
+* Minimal regression using existing helper/harness or targeted production surface.
+
+Required rejection scenarios:
+
+R1. selector unset / false keeps Disabled and rejects OnChainGovernance proof.
+
+R2. wrong environment rejected.
+
+R3. wrong chain rejected.
+
+R4. wrong genesis rejected.
+
+R5. wrong authority root rejected.
+
+R6. wrong governance domain rejected.
+
+R7. wrong proposal digest rejected.
+
+R8. wrong proposal outcome rejected.
+
+R9. wrong lifecycle action rejected.
+
+R10. wrong candidate digest rejected.
+
+R11. wrong authority-domain sequence rejected.
+
+R12. expired governance proof rejected.
+
+R13. replayed governance decision rejected.
+
+R14. quorum not met rejected.
+
+R15. threshold not met rejected.
+
+R16. invalid proof bytes rejected.
+
+R17. unsupported proof suite rejected.
+
+R18. malformed proof rejected.
+
+R19. local operator config rejected.
+
+R20. peer-majority / gossip count rejected.
+
+R21. OnChainGovernance proof valid but lifecycle invalid rejected.
+
+R22. lifecycle valid but OnChainGovernance proof invalid rejected.
+
+R23. MainNet peer-driven apply refused even with valid OnChainGovernance fixture proof and fixture selector enabled.
+
+R24. validation-only rejection remains non-mutating.
+
+R25. mutating preflight rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+R26. invalid live `0x05` OnChainGovernance proof candidate is not propagated, staged, or applied, if live surface is included.
+
+Required source/release reachability proof:
+The report must include:
+
+* source grep/call-site proof for:
+
+  * `pqc_onchain_governance_callsite_wiring`;
+  * seven named call-site entries;
+  * production calls to Run 180 wrappers;
+  * `verify_onchain_governance_proof`;
+  * `validate_lifecycle_with_onchain_governance_proof`;
+  * `OnChainGovernanceProofPolicy::AllowFixtureSourceTest`;
+  * selector helpers.
+* release-binary logs proving:
+
+  * selector disabled by default;
+  * CLI selector enables fixture policy;
+  * env selector enables fixture policy;
+  * production call sites, not helper-only binaries, reach OnChainGovernance verification for accepted fixture proofs;
+  * invalid proofs fail closed.
+
+Required mutation proof for accepted mutating scenarios:
+For every accepted mutating OnChainGovernance fixture scenario:
+
+* selector activation occurs before proof parse;
+* proof parse occurs before marker decision;
+* OnChainGovernance fixture verification occurs before apply/mutation;
+* lifecycle validation occurs before apply/mutation;
+* Run 070 / relevant apply ordering preserved;
+* Run 055 sequence commit succeeds;
+* v2 marker persists strictly after sequence commit;
+* marker JSON/SHA before/after captured;
+* sequence JSON/SHA before/after captured.
+
+Required no-mutation proof for rejected scenarios:
+For every rejected scenario:
+
+* binary exits non-zero or typed refusal according to surface;
+* no Run 070 apply call;
+* no live trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* marker bytes unchanged;
+* sequence bytes unchanged;
+* no `.tmp` residue;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead.
+
+Required denylist:
+Across the run prove:
+
+* no MainNet apply;
+* no autonomous apply;
+* no apply on receipt;
+* no peer-majority authority;
+* no real governance execution claim;
+* no real on-chain governance proof claim;
+* no KMS/HSM claim;
+* no validator-set rotation claim;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead;
+* no schema/wire/metric drift;
+* no marker write before sequence commit;
+* no sequence write on validation-only surfaces;
+* no marker write on validation-only surfaces.
+
+Required captured metadata:
+
+* qbind-node SHA-256 and ELF Build ID;
+* helper SHA-256 and ELF Build ID;
+* git commit hash;
+* rustc/cargo versions;
+* exact commands;
+* stdout/stderr logs;
+* per-scenario exit codes;
+* fixture proof paths and hashes;
+* marker/sequence JSON and SHA before/after where applicable;
+* data-dir inventories;
+* denylist grep results.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build --release -p qbind-node --bin qbind-node`
+* `cargo build --release -p qbind-node --example <onchain-governance-fixture-helper>`
+* `bash scripts/devnet/run_183_onchain_governance_callsite_release_binary.sh`
+* `cargo test -p qbind-node --test run_182_onchain_governance_production_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_180_onchain_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
+* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
+* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
+* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_183.md` must state:
+
+* Run 183 is release-binary OnChainGovernance production call-site evidence.
+* Default remains `OnChainGovernanceProofPolicy::Disabled`.
+* Hidden CLI/env selector enables `AllowFixtureSourceTest`.
+* DevNet/TestNet fixture OnChainGovernance proofs can pass through real production call sites where lifecycle/anti-rollback checks pass.
+* Invalid fixture proofs fail closed.
+* Production MainNet OnChainGovernance remains unsupported/fail-closed.
+* MainNet peer-driven apply remains refused.
+* governance execution remains unimplemented.
+* real on-chain proof verification remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open.
+* C5 remains open.
+
+Acceptance criteria:
+Run 183 is acceptable only if:
+
+1. Real release binaries exercise the hidden OnChainGovernance fixture selector.
+2. Default Disabled behavior remains fail-closed.
+3. CLI selector and env selector both activate fixture policy.
+4. DevNet/TestNet fixture OnChainGovernance proof reaches and passes production call-site verification at least through one validation-only and one mutating surface.
+5. Invalid OnChainGovernance proofs fail closed.
+6. Rejected scenarios produce no mutation.
+7. Accepted mutating scenarios preserve sequence-before-marker ordering.
+8. MainNet peer-driven apply remains refused even with a valid fixture OnChainGovernance proof.
+9. No real governance execution / real on-chain proof / KMS-HSM / validator-set rotation claim is made.
+10. No full C4 or C5 closure is claimed.

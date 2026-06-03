@@ -336,6 +336,18 @@ pub struct ProductionV2MarkerCoordinator {
     /// so the existing Run 148/150/152/153 peer-driven apply test
     /// matrix (which has no Run 167 fixtures) remains green.
     governance_policy: crate::pqc_governance_authority::GovernanceProofPolicy,
+    /// Run 182 — captured value of the hidden Run 180 OnChainGovernance
+    /// fixture-allowed CLI/env selector. OR-resolved at preflight time
+    /// inside
+    /// [`crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env`].
+    /// Default `false` resolves to
+    /// [`crate::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::Disabled`]
+    /// and preserves the pre-Run-182 peer-driven drain coordinator
+    /// behaviour bit-for-bit. The peer-driven-drain wiring entry layers
+    /// a surface-level MainNet refusal **before** invoking the
+    /// underlying verifier — agreeing with the Run 152 coordinator-
+    /// upstream MainNet refusal already in place.
+    onchain_governance_fixture_allowed_selector: bool,
 }
 
 impl ProductionV2MarkerCoordinator {
@@ -377,7 +389,21 @@ impl ProductionV2MarkerCoordinator {
                 crate::pqc_governance_proof_wire::GovernanceProofLoadStatus::Absent,
             governance_policy:
                 crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
+            onchain_governance_fixture_allowed_selector: false,
         }
+    }
+
+    /// Run 182 — additive builder that captures the hidden Run 180
+    /// OnChainGovernance fixture-allowed selector for the peer-driven
+    /// drain production call-site reachability hook. Default `false`
+    /// preserves Run 152 / Run 169 behaviour bit-for-bit.
+    pub fn with_onchain_governance_fixture_allowed_selector(
+        mut self,
+        onchain_governance_fixture_allowed_selector: bool,
+    ) -> Self {
+        self.onchain_governance_fixture_allowed_selector =
+            onchain_governance_fixture_allowed_selector;
+        self
     }
 
     /// Run 169 — additive builder that attaches a typed Run 167
@@ -447,6 +473,22 @@ impl V2MarkerCoordinator for ProductionV2MarkerCoordinator {
             &verifier,
         ) {
             Ok(decision) => {
+                // Run 182 — production call-site reachability for the
+                // Run 180 OnChainGovernance per-surface preflight
+                // wrapper for the peer-driven drain coordinator. Pure:
+                // no marker write, no sequence write, no live trust
+                // swap, no session eviction, no Run 070 invocation.
+                // The peer-driven-drain entry layers an additional
+                // MainNet refusal **inside** the wiring module —
+                // agreeing with the existing Run 148/149/152 upstream
+                // environment gate. Wire blocker: peer-candidate
+                // envelopes do not carry a typed
+                // `OnChainGovernanceProof`; documented in
+                // `pqc_onchain_governance_callsite_wiring.rs`.
+                invoke_run_182_peer_driven_drain_callsite_onchain_governance_marker_decision(
+                    &decision,
+                    self.onchain_governance_fixture_allowed_selector,
+                );
                 self.decision = Some(decision);
                 Ok(())
             }
@@ -906,6 +948,55 @@ pub fn staged_candidate_age(
     now_unix_secs: u64,
 ) -> Duration {
     Duration::from_secs(now_unix_secs.saturating_sub(staged_at_unix_secs))
+}
+
+/// Run 182 — peer-driven drain production call-site reachability hook.
+///
+/// Invokes the Run 180 OnChainGovernance per-surface preflight wrapper
+/// for peer-driven drain. The wiring entry layers a surface-level
+/// MainNet refusal before the underlying verifier; in addition the
+/// upstream environment gate on `decide_pre_apply` itself already
+/// refuses MainNet peer-driven apply, so MainNet binding produces a
+/// double-refusal (defence-in-depth, no behavior change). Pure: no
+/// marker write, no sequence write, no live trust swap, no session
+/// eviction, no Run 070 invocation.
+fn invoke_run_182_peer_driven_drain_callsite_onchain_governance_marker_decision(
+    decision: &crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    onchain_governance_fixture_allowed_selector: bool,
+) {
+    use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use crate::pqc_onchain_governance_callsite_wiring::{
+        peer_driven_drain_callsite_onchain_governance_marker_decision,
+        OnChainGovernanceCallsiteContext,
+    };
+    use crate::pqc_onchain_governance_proof::EmptyOnChainGovernanceReplaySet;
+    use crate::pqc_onchain_governance_proof_surface::onchain_governance_proof_policy_from_cli_or_env;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let policy = onchain_governance_proof_policy_from_cli_or_env(
+        onchain_governance_fixture_allowed_selector,
+    );
+    let ctx = OnChainGovernanceCallsiteContext {
+        persisted: None,
+        candidate,
+        proof: None,
+        trust_domain: &trust_domain,
+        policy,
+        expected_governance_domain_id: "",
+        expected_governance_epoch: 0,
+        expected_proposal_id: "",
+        expected_proposal_digest: "",
+        now_unix: 0,
+        replay_set: &EmptyOnChainGovernanceReplaySet,
+    };
+    let _outcome = peer_driven_drain_callsite_onchain_governance_marker_decision(&ctx);
 }
 
 #[cfg(test)]
