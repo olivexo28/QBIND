@@ -218,6 +218,7 @@ fn wire_envelope_with(
         declared_fingerprint_prefix,
         declared_length: len,
         bundle_bytes,
+        governance_authority_proof: None,
     }
 }
 
@@ -355,6 +356,7 @@ fn run078_wire_envelope_roundtrip_preserves_all_fields() {
         declared_fingerprint_prefix: "0badc0de".to_string(),
         declared_length: 5,
         bundle_bytes: vec![0x01, 0x02, 0x03, 0x04, 0x05],
+        governance_authority_proof: None,
     };
     let frame = encode_peer_candidate_wire_frame(&env).unwrap();
     assert_eq!(frame[0], DISCRIMINATOR_PEER_CANDIDATE_WIRE);

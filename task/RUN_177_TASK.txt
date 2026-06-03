@@ -1,0 +1,338 @@
+Task: Run 177 — Release-Binary Live Inbound 0x05 Governance-Proof Carrying Evidence
+
+Current accepted state:
+
+* Run 171: hidden Required-policy selector landed:
+
+  * CLI: `--p2p-trust-bundle-governance-proof-required`;
+  * env: `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED`;
+  * default remains `GovernanceProofPolicy::NotRequired`.
+* Run 172: release-binary Required-policy evidence landed for mutating reload-apply surfaces.
+* Run 173: source/test validation-only Required-policy wiring landed for reload-check and local peer-candidate-check.
+* Run 174: release-binary validation-only Required-policy evidence landed for `--p2p-trust-bundle-reload-check`.
+* Run 175: release-binary local `--p2p-trust-bundle-peer-candidate-check` Required-policy evidence landed.
+* Run 176: source/test live inbound `0x05` governance-proof carrier landed:
+
+  * additive optional `governance_authority_proof` field on `PeerCandidateWireEnvelopeV1`;
+  * old `0x05` JSON parses byte-for-byte;
+  * no-proof JSON serializes identically;
+  * `governance_proof_load_status()` helper;
+  * `preflight_live_inbound_0x05_validation_only_marker_check_with_governance_proof_carrier`;
+  * proof-carrying live `0x05` candidates can reach the governance gate at source/test level;
+  * invalid proof-carrying live `0x05` candidates fail closed and are not propagated, staged, or applied.
+* Run 176 is source/test only.
+* Release-binary live inbound `0x05` proof-carrying evidence is deferred to Run 177.
+* MainNet peer-driven apply remains refused.
+* OnChainGovernance remains unsupported/fail-closed.
+* governance execution remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open.
+* C5 remains open.
+
+Objective:
+Produce release-binary evidence that real live inbound `0x05` peer-candidate frames can carry governance authority proof material and enforce `GovernanceProofPolicy::RequiredForLifecycleSensitive` through the Run 176 live-envelope carrier path.
+
+This run must prove on real `target/release/qbind-node` nodes:
+
+1. legacy/no-proof live `0x05` candidates remain compatible under NotRequired;
+2. Required policy rejects no-proof live `0x05` candidates fail-closed;
+3. valid proof-carrying live `0x05` candidates reach `GovernanceProofContext::Available` and pass governance/lifecycle/anti-rollback validation;
+4. invalid or malformed proof-carrying live `0x05` candidates fail closed;
+5. invalid candidates are not propagated, staged, or applied;
+6. valid candidates are not applied automatically on receipt;
+7. MainNet peer-driven apply remains refused.
+
+Strict scope:
+
+* Release-binary evidence only.
+* Use real `target/release/qbind-node`.
+* Use real live P2P `0x05` exchange.
+* Use release-built helper(s) to mint proof-carrying live `0x05` peer-candidate envelopes.
+* No production source change unless a tiny harness-only fix is required.
+* No MainNet peer-driven apply enablement.
+* No governance execution engine.
+* No on-chain governance implementation.
+* No KMS/HSM implementation.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No additional schema/wire changes beyond Run 176’s optional envelope field.
+* No authority-marker schema change.
+* No sequence-file schema change.
+* No trust-bundle schema change.
+* Do not weaken Runs 070, 130–176.
+* Do not claim full C4 or C5 closure.
+
+Required deliverables:
+
+1. Add release-binary harness:
+   `scripts/devnet/run_177_live_0x05_governance_proof_release_binary.sh`
+
+2. Add evidence archive:
+   `docs/devnet/run_177_live_0x05_governance_proof_release_binary/`
+
+3. Add canonical evidence report:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_177.md`
+
+4. Update narrowly:
+
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+5. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md` before finalizing.
+
+Required topology:
+Use real N=3 DevNet or TestNet topology:
+
+* V0: publisher of live proof-carrying `0x05` peer-candidate envelope.
+* V1: receiver with live inbound `0x05` validation enabled and Required policy enabled.
+* V2: propagation/staging observer if propagation/staging paths are exercised.
+
+Use:
+
+* real `target/release/qbind-node`;
+* real P2P connection;
+* real signed trust-bundle material;
+* real v2 ratification sidecar material;
+* proof-carrying `PeerCandidateWireEnvelopeV1`;
+* real ML-KEM-768 / ML-DSA-44 / ChaCha20-Poly1305 path;
+* no active DummySig / DummyKem / DummyAead.
+
+Required accepted scenarios:
+
+A1. legacy/no-proof live `0x05` candidate accepted under NotRequired
+
+* Required selector disabled.
+* Expected:
+
+  * live `0x05` path exercised;
+  * old envelope parses;
+  * no-proof candidate accepted according to existing policy;
+  * no sequence write;
+  * no marker write;
+  * no live trust swap;
+  * no session eviction;
+  * no apply-on-receipt.
+
+A2. proof-carrying live `0x05` Rotate candidate accepted under CLI Required policy
+
+* Use `--p2p-trust-bundle-governance-proof-required`.
+* Expected:
+
+  * live `0x05` path exercised;
+  * `governance_authority_proof` parsed from envelope;
+  * `GovernanceProofContext::Available` reaches marker decision;
+  * governance verifier accepts;
+  * lifecycle validation accepts;
+  * marker decision accepts;
+  * valid candidate may stage only if existing staging policy permits;
+  * no automatic apply on receipt;
+  * no sequence write;
+  * no marker write.
+
+A3. proof-carrying live `0x05` Rotate candidate accepted under env Required policy
+
+* Use `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_PROOF_REQUIRED=1`.
+* Expected:
+
+  * Required policy active;
+  * valid proof accepted;
+  * validation-only non-mutation preserved.
+
+A4. proof-carrying live `0x05` Revoke candidate accepted where representable
+
+* If release-binary fixture support exists.
+* If not feasible, document exact limitation and cite Run 176 source/test coverage.
+
+A5. proof-carrying live `0x05` EmergencyRevoke candidate accepted where representable
+
+* If release-binary fixture support exists.
+* If not feasible, document exact limitation and cite Run 176 source/test coverage.
+
+A6. idempotent proof-carrying live `0x05` candidate accepted/deduped
+
+* same authority sequence / digest / proof;
+* no duplicate staging beyond existing dedupe rules;
+* no mutation.
+
+Required rejection scenarios:
+
+R1. Required policy + no-proof live `0x05` candidate rejected with `GovernanceAuthorityRequiredButMissing`.
+
+R2. malformed governance proof in live `0x05` candidate rejected.
+
+R3. invalid issuer signature rejected.
+
+R4. wrong environment proof rejected.
+
+R5. wrong chain proof rejected.
+
+R6. wrong genesis proof rejected.
+
+R7. wrong authority root proof rejected.
+
+R8. wrong lifecycle action proof rejected.
+
+R9. wrong candidate digest proof rejected.
+
+R10. wrong authority-domain sequence proof rejected.
+
+R11. unsupported issuer suite rejected.
+
+R12. non-PQC suite rejected.
+
+R13. OnChainGovernance proof rejected as unsupported/fail-closed.
+
+R14. local operator config proof rejected.
+
+R15. peer-majority / gossip-count proof rejected.
+
+R16. proof valid but lifecycle invalid rejected.
+
+R17. lifecycle valid but proof invalid rejected.
+
+R18. invalid proof-carrying live `0x05` candidate is not propagated.
+
+R19. invalid proof-carrying live `0x05` candidate is not staged.
+
+R20. invalid proof-carrying live `0x05` candidate cannot reach peer-driven drain.
+
+R21. valid proof-carrying live `0x05` candidate does not apply automatically on receipt.
+
+R22. MainNet peer-driven apply remains refused even with valid proof-carrying live `0x05` candidate.
+
+Required source/release reachability proof:
+The evidence report must include:
+
+* source grep/call-site proof for:
+
+  * `governance_authority_proof` on `PeerCandidateWireEnvelopeV1`;
+  * `governance_proof_load_status`;
+  * `preflight_live_inbound_0x05_validation_only_marker_check_with_governance_proof_carrier`;
+  * `GovernanceProofContext::Available`;
+  * live inbound `0x05` dispatch.
+* release-binary logs proving:
+
+  * live `0x05` frame received;
+  * proof-carrying envelope parsed;
+  * Required policy active;
+  * valid proof reaches governance gate;
+  * no-proof / invalid-proof cases fail closed;
+  * invalid candidates are not propagated/staged/applied.
+
+Required no-mutation proof:
+For every live `0x05` scenario:
+
+* no Run 070 apply call;
+* no live trust swap on receipt;
+* no session eviction on receipt;
+* no sequence write;
+* no authority-marker write;
+* no `.tmp` residue;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead.
+
+Required propagation/staging proof:
+
+* valid proof-carrying candidate may propagate only after validation if propagation is enabled by existing policy;
+* invalid proof-carrying candidate never propagates;
+* valid proof-carrying candidate may stage only after validation if staging is enabled by existing policy;
+* invalid proof-carrying candidate never stages;
+* staging does not imply apply;
+* no apply occurs without explicit drain.
+
+Required denylist:
+Across the run prove:
+
+* no MainNet apply;
+* no autonomous apply;
+* no apply on receipt;
+* no peer-majority authority;
+* no governance execution claim;
+* no on-chain governance claim;
+* no KMS/HSM claim;
+* no validator-set rotation claim;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead;
+* no additional schema/wire/metric drift beyond Run 176;
+* no sequence write on live validation-only receive;
+* no marker write on live validation-only receive.
+
+Required captured metadata:
+
+* qbind-node SHA-256 and ELF Build ID;
+* helper SHA-256 and ELF Build ID;
+* git commit hash;
+* rustc/cargo versions;
+* exact commands;
+* node PIDs;
+* stdout/stderr logs;
+* per-scenario exit codes;
+* proof-carrying envelope paths and hashes;
+* metrics before/after if available;
+* marker/sequence JSON and SHA before/after;
+* data-dir inventories;
+* denylist grep results.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build --release -p qbind-node --bin qbind-node`
+* `cargo build --release -p qbind-node --example <live-0x05-proof-carrying-fixture-helper>`
+* `bash scripts/devnet/run_177_live_0x05_governance_proof_release_binary.sh`
+* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
+* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
+* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
+* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_177.md` must state:
+
+* Run 177 is release-binary live inbound `0x05` governance-proof carrying evidence.
+* Existing no-proof live `0x05` candidates remain compatible under NotRequired.
+* Required policy fails closed when proof is absent.
+* Valid proof-carrying live `0x05` candidates pass under Required policy through real live P2P receive where lifecycle/anti-rollback checks pass.
+* Invalid proof-carrying live `0x05` candidates fail closed.
+* Invalid candidates are not propagated, staged, or applied.
+* Valid candidates are not applied automatically on receipt.
+* MainNet peer-driven apply remains refused.
+* OnChainGovernance remains unsupported/fail-closed.
+* governance execution/on-chain proof remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* full C4 remains open unless separately closed by explicit criteria.
+* C5 remains open.
+
+Acceptance criteria:
+Run 177 is acceptable only if:
+
+1. Real release binaries receive live proof-carrying `0x05` candidates.
+2. Existing no-proof live `0x05` candidates remain compatible under NotRequired.
+3. Required/no-proof live `0x05` cases fail closed.
+4. Valid proof-carrying live `0x05` candidates reach and pass the governance gate.
+5. Invalid proof-carrying live `0x05` candidates fail closed.
+6. Invalid candidates are not propagated, staged, or applied.
+7. Valid candidates are not applied automatically on receipt.
+8. MainNet remains refused even with Required policy and valid governance proof.
+9. No governance execution/KMS-HSM/validator-set rotation claim is made.
+10. No full C4 or C5 closure is claimed.

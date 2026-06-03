@@ -126,6 +126,9 @@ use qbind_types::{ChainId, NetworkEnvironment};
 
 use crate::metrics::P2pMetrics;
 use crate::p2p::NodeId;
+use crate::pqc_governance_proof_wire::{
+    GovernanceAuthorityProofWire, GovernanceProofLoadStatus,
+};
 use crate::pqc_peer_candidate_staging::{PeerCandidateStagingQueue, StagingOutcome};
 use crate::pqc_ratification_policy::RatificationGateDecision;
 use crate::pqc_trust_activation::ActivationContext;
@@ -227,6 +230,32 @@ pub struct PeerCandidateWireEnvelopeV1 {
     /// Serialised as a lowercase hex string (see Run 076).
     #[serde(with = "crate::pqc_trust_peer_candidate::peer_candidate_bundle_bytes_hex_pub")]
     pub bundle_bytes: Vec<u8>,
+
+    /// Run 176 — additive optional governance-proof carrier.
+    ///
+    /// Mirrors the Run 167 v2-sidecar optional sibling field
+    /// (`governance_authority_proof`) but lives directly on the live
+    /// inbound `0x05` peer-candidate wire envelope so a peer can
+    /// transport authority-proof material end-to-end at source/test
+    /// level. The field is `#[serde(default, skip_serializing_if =
+    /// "Option::is_none")]` so legacy / no-proof v1 envelopes (every
+    /// envelope produced before Run 176) continue to parse and
+    /// serialise byte-for-byte as they did before. The carrier itself
+    /// is structurally validated (schema version, non-empty required
+    /// fields, hex-decodable signature) by
+    /// [`Self::governance_proof_load_status`]; cryptographic /
+    /// trust-domain / lifecycle / digest / suite checks are owned by
+    /// the existing Run 163 verifier composition reachable through
+    /// the Run 173 / Run 176 validation-only shim.
+    ///
+    /// Carrying this field does NOT enable apply-on-receipt, MainNet
+    /// peer-driven apply, on-chain governance, peer-majority authority,
+    /// validator-set rotation, autonomous apply, KMS/HSM custody, or
+    /// any new mutating boundary. It is purely additive evidence that
+    /// the live inbound `0x05` validation-only path can pass into the
+    /// existing Run 173 governance-proof gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance_authority_proof: Option<GovernanceAuthorityProofWire>,
 }
 
 impl PeerCandidateWireEnvelopeV1 {
@@ -246,6 +275,11 @@ impl PeerCandidateWireEnvelopeV1 {
             declared_fingerprint_prefix: e.declared_fingerprint_prefix.clone(),
             declared_length: e.declared_length,
             bundle_bytes: e.bundle_bytes.clone(),
+            // Run 176 — Run 077 fixture envelope has no carrier; the
+            // bridge stays additive-default-`None` so promoting an
+            // existing fixture to a wire envelope never accidentally
+            // synthesises a proof.
+            governance_authority_proof: None,
         }
     }
 
@@ -266,6 +300,46 @@ impl PeerCandidateWireEnvelopeV1 {
             declared_fingerprint_prefix: self.declared_fingerprint_prefix,
             declared_length: self.declared_length,
             bundle_bytes: self.bundle_bytes,
+        }
+    }
+
+    /// Run 176 — typed governance-proof load status for the optional
+    /// carrier on this live inbound `0x05` peer-candidate wire
+    /// envelope.
+    ///
+    /// Mirrors the Run 167 sidecar loader behaviour bit-for-bit:
+    ///
+    /// * Carrier absent →
+    ///   [`GovernanceProofLoadStatus::Absent`] (legacy / no-proof
+    ///   envelope; backwards-compatible under
+    ///   [`crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired`]).
+    /// * Carrier present and structurally well-formed →
+    ///   [`GovernanceProofLoadStatus::Available`] carrying the typed
+    ///   Run 163
+    ///   [`crate::pqc_governance_authority::GovernanceAuthorityProof`].
+    ///   The proof has NOT yet been verified — verification is owned
+    ///   by the Run 173 / Run 176 validation-only shim through the
+    ///   Run 163 verifier.
+    /// * Carrier present but malformed (unknown schema version, empty
+    ///   required field, empty issuer signature) →
+    ///   [`GovernanceProofLoadStatus::Malformed`]; the gate fails
+    ///   closed under any policy that requires a proof, and the
+    ///   carrier is mapped to
+    ///   [`crate::pqc_governance_authority::GovernanceProofContext::Unavailable`]
+    ///   under
+    ///   [`crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired`]
+    ///   (Run 167 documented mapping).
+    ///
+    /// This helper performs structural validation only and is
+    /// mutation-free: no marker write, no sequence write, no live
+    /// trust swap, no session eviction, no Run 070 invocation.
+    pub fn governance_proof_load_status(&self) -> GovernanceProofLoadStatus {
+        match self.governance_authority_proof.as_ref() {
+            None => GovernanceProofLoadStatus::Absent,
+            Some(wire) => match wire.to_governance_authority_proof() {
+                Ok(proof) => GovernanceProofLoadStatus::Available(proof),
+                Err(err) => GovernanceProofLoadStatus::Malformed(err),
+            },
         }
     }
 }
@@ -2528,6 +2602,7 @@ mod tests {
             declared_fingerprint_prefix: "deadbeef".to_string(),
             declared_length: len,
             bundle_bytes: bytes,
+            governance_authority_proof: None,
         }
     }
 
