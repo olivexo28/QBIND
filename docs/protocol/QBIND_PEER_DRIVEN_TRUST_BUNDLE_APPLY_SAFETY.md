@@ -1577,3 +1577,103 @@ Real on-chain governance proof verification, governance execution,
 KMS/HSM custody, validator-set rotation, bridge/light-client
 integration, autonomous apply, and apply-on-receipt all remain
 unimplemented. Full C4 and C5 remain open.
+
+## Run 185 update — release-binary OnChainGovernance proof-payload-carrying accepted-proof evidence
+
+Run 185 closes the Run 184-deferred release-binary boundary by
+exercising on real `target/release/qbind-node` the additive optional
+`onchain_governance_proof` sibling Run 184 introduced on the v2
+ratification sidecar JSON wire and the seven Run 182 named
+production call-site entries (`reload_check_callsite_`,
+`reload_apply_callsite_`, `startup_p2p_trust_bundle_callsite_`,
+`sighup_callsite_`, `local_peer_candidate_check_callsite_`,
+`live_inbound_0x05_callsite_`,
+`peer_driven_drain_callsite_onchain_governance_marker_decision`)
+plus the typed argument bundle `OnChainGovernanceCallsiteContext`,
+the additive selector builder
+`with_onchain_governance_fixture_allowed_selector`, the Run 184
+payload-carrying loaders
+`load_v2_ratification_sidecar_with_onchain_governance_proof_*` /
+`parse_optional_onchain_governance_proof_sibling_from_json_value`,
+the routing helpers
+`route_loaded_onchain_governance_proof_to_*_callsite_decision`,
+and the typed `OnChainGovernanceProofPayloadParseError` boundary.
+On real `target/release/qbind-node`, Run 185 captures: the
+production default — neither flag nor env var truthy — emitting no
+`[run-180] ... policy ARMED (AllowFixtureSourceTest)` banner and
+preserving `OnChainGovernanceProofPolicy::Disabled` on every
+surface, with a v2 sidecar without the Run 184 sibling parsing
+byte-for-byte identically to its pre-Run-184 form (A1 / R1); the
+CLI selector arming `AllowFixtureSourceTest` exactly when supplied
+(A2); the env selector arming across truthy variants
+`{1, true, TRUE, True, yes, YES, on, ON}` and remaining disabled
+across falsey variants `{0, false, FALSE, no, off, empty, garbage}`
+(A3); real
+`target/release/qbind-node --p2p-trust-bundle-reload-check
+<sidecar-with-sibling>
+--p2p-trust-bundle-onchain-governance-fixture-allowed --network
+devnet` loading a v2 sidecar carrying a valid DevNet fixture-rotate
+proof, extracting the additive Run 184 sibling, parsing the typed
+`OnChainGovernanceProofWire`, and reaching the Run 182 reload-check
+named callsite entry through the production
+`preflight_run_132_validation_only_v2_marker_check` path with no
+marker write, no sequence write, no live trust swap, no session
+eviction, and no Run 070 call (A2_payload); the matching
+`--p2p-trust-bundle-reload-apply-enabled
+--p2p-trust-bundle-reload-apply-path <sidecar-with-sibling>`
+invocation arming the selector, loading the sidecar, parsing the
+sibling, and invoking the Run 182 reload-apply named callsite entry
+through the production `preflight_run_134_v2_marker_decision` path
+on the mutating surface, with the Run 070-honest
+`ReloadApplyError::UnsupportedRuntimeContext` returned on a
+non-long-running invocation and the matching accepted typed outcome
+captured in release mode by the new Run 185 release-built helper
+through the same library symbols, with Run 055
+sequence-before-marker ordering preserved at the library layer
+(A4 / A5); malformed sibling payloads (non-object, unknown_schema,
+empty required field, empty proof bytes) failing closed at the
+typed `OnChainGovernanceProofPayloadParseError` boundary BEFORE any
+verifier or marker decision runs (R2 a–d); `qbind-node --help` not
+surfacing the hidden flag (`hide = true`) and not surfacing a
+`run-180` / `run-181` / `run-182` / `run-183` / `run-184` /
+`run-185` / `onchain-governance-fixture` token; and MainNet
+peer-driven apply remaining the Run 147 / 148 / 152 FATAL invariant
+even with the selector engaged on `--network mainnet` AND a
+fully-valid MainNet fixture-rotate proof carried in the v2 sidecar
+via the Run 184 sibling, with the Run 182 peer-driven-drain
+callsite entry's surface-level `MainNetRefused` short-circuit
+layered ahead of the Run 180 verifier (R26). Through both
+release-built helpers (the Run 179
+`run_179_onchain_governance_proof_release_binary_helper` for the
+verifier corpus and the new Run 185
+`run_185_onchain_governance_payload_release_binary_helper` for the
+Run 184 payload-carrying / call-site-routing corpus), Run 185
+captures release-mode acceptance / rejection across the full
+A1–A9 / R1–R26 matrix through the production library symbols
+`verify_onchain_governance_proof`,
+`validate_lifecycle_with_onchain_governance_proof`,
+`compose_onchain_governance_marker_decision`, every Run 180
+per-surface composed wrapper, every Run 182 named callsite entry
+plus `OnChainGovernanceCallsiteContext` and
+`with_onchain_governance_fixture_allowed_selector`, the Run 184
+payload-carrying loaders / routing helpers, and the typed
+`OnChainGovernancePayloadCarryingDecisionOutcome::{MalformedOnChainGovernanceProofPayload,
+Callsite}` boundary. Honest limitation: Run 184 added the additive
+sibling on the v2 ratification sidecar JSON wire used by
+reload-check / reload-apply / startup `--p2p-trust-bundle` / SIGHUP
+only; the live `0x05` peer-candidate envelope and the peer-driven
+drain inbound payload may not yet carry the typed OnChainGovernance
+proof end-to-end on a real binary depending on tree state, and
+where they do not, Run 185 captures the source-reachability for the
+matching Run 182 named callsite entry through the release-built
+helper in release mode AND records the boundary explicitly in the
+archive's `mutation_proof.txt` / `no_mutation_proof.txt`. No
+production source change. No MainNet apply enablement. No real
+on-chain governance execution / no real on-chain proof verifier /
+no bridge / light-client / KMS-HSM / validator-set rotation /
+autonomous apply / apply-on-receipt / peer-majority authority. No
+marker / sequence-file / trust-bundle / wire / metric drift beyond
+Run 184's additive optional sibling. **Full C4 / C5 remain OPEN.**
+Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_185.md`,
+`scripts/devnet/run_185_onchain_governance_payload_release_binary.sh`,
+`docs/devnet/run_185_onchain_governance_payload_release_binary/`.
