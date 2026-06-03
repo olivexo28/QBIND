@@ -1,0 +1,86 @@
+Run 183 — release-binary OnChainGovernance production call-site evidence
+git_commit: not-yet-run
+
+verdict: NOT-YET-RUN — this committed summary.txt is the placeholder canonical
+evidence-archive copy. The harness wipes and rewrites this file on every
+invocation under OUTDIR. Until the release builds + harness are run in an
+environment that can compile and exercise the full Run 183 corpus, this file
+remains the deferred placeholder.
+
+Reproducibility:
+  cargo build --release -p qbind-node --bin qbind-node
+  cargo build --release -p qbind-node --example run_179_onchain_governance_proof_release_binary_helper
+  bash scripts/devnet/run_183_onchain_governance_callsite_release_binary.sh
+
+Scenario matrix (defined by task/RUN_183_TASK.txt; verdicts are populated by
+the harness in release mode against the Run 182 named callsite entries that
+now wrap every production v2 marker-decision call site, with the Run 180
+per-surface wrappers as the underlying preflight):
+
+  A1_default_disabled_no_flag_no_env                          (reject — selector disabled)
+  A2_cli_selector_arms_allow_fixture_source_test              (accept — banner armed)
+  A3_env_selector_arms_allow_fixture_source_test              (accept — banner armed)
+  A3_env_selector_truthy_variants_{1|true|TRUE|True|yes|YES|on|ON}  (accept — banner armed)
+  A3_env_selector_falsey_variants_{0|false|FALSE|no|off|empty|garbage}  (reject — selector disabled)
+  A4_cli_selector_reload_apply_accept                         (accept — via callsite entry)
+  A5_env_selector_reload_apply_accept                         (accept — via callsite entry)
+  A6_local_peer_candidate_check_accept                        (accept — via callsite entry, validation-only)
+  A7_live_inbound_0x05_accept                                 (accept — via callsite entry, no apply on receipt)
+  A8_peer_driven_drain_devnet_accept_mainnet_refused          (accept DevNet / MainNetRefused on MainNet)
+  A9_genesis_bound_emergency_council_unchanged                (accept-roundtrip — via helper)
+  R1_selector_unset_disabled_rejects_proof                    (reject)
+  R2_wrong_environment_rejected                               (reject)
+  R3_wrong_chain_rejected                                     (reject)
+  R4_wrong_genesis_rejected                                   (reject)
+  R5_wrong_authority_root_rejected                            (reject)
+  R6_wrong_governance_domain_rejected                         (reject)
+  R7_wrong_proposal_digest_rejected                           (reject)
+  R8_wrong_proposal_outcome_rejected                          (reject)
+  R9_wrong_lifecycle_action_rejected                          (reject)
+  R10_wrong_candidate_digest_rejected                         (reject)
+  R11_wrong_authority_domain_sequence_rejected                (reject)
+  R12_expired_governance_proof_rejected                       (reject)
+  R13_replayed_governance_decision_rejected                   (reject)
+  R14_quorum_not_met_rejected                                 (reject)
+  R15_threshold_not_met_rejected                              (reject)
+  R16_invalid_proof_bytes_rejected                            (reject)
+  R17_unsupported_proof_suite_rejected                        (reject)
+  R18_malformed_proof_rejected                                (reject)
+  R19_local_operator_config_rejected                          (reject)
+  R20_peer_majority_gossip_count_rejected                     (reject)
+  R21_proof_valid_lifecycle_invalid_rejected                  (reject)
+  R22_lifecycle_valid_proof_invalid_rejected                  (reject)
+  R23_mainnet_peer_driven_apply_refused_with_armed_selector   (reject — Run 147 FATAL; surface-level MainNetRefused)
+  R24_validation_only_rejection_non_mutating                  (reject — no marker / no sequence)
+  R25_mutating_preflight_rejection_non_mutating               (reject — no marker / no sequence)
+  R26_invalid_live_0x05_not_propagated                        (reject — staging short-circuits)
+
+honest limitations:
+  * Run 182 wired every Run 180 per-surface preflight wrapper into its
+    matching production v2 marker-decision call site through the new
+    pqc_onchain_governance_callsite_wiring module (seven named entries +
+    OnChainGovernanceCallsiteContext + with_onchain_governance_fixture_
+    allowed_selector builder). Run 182 also recorded an honest wire/schema
+    blocker: no current peer-candidate, SIGHUP-trigger, reload-apply
+    trigger, startup-bundle, or live 0x05 payload format carries a typed
+    OnChainGovernanceProof. Adding that field is explicitly OUT OF SCOPE
+    for Run 183 (no schema bump, no wire field, no sidecar field, no
+    metric). Therefore production callers in real target/release/
+    qbind-node invoke the Run 182 callsite entries with proof: None; the
+    Run 180 wrapper short-circuits on NoOnChainGovernanceProofSupplied
+    (or PolicyDisabled under the default), and call-site behaviour is
+    preserved bit-for-bit. Run 183 captures honest production CALL-SITE
+    REACHABILITY release-binary evidence on real qbind-node and exercises
+    the typed-proof acceptance path A1-A9 / R1-R26 in release mode through
+    the production library symbols by the release-built helper, which is
+    linked into the same qbind-node library surface.
+  * MainNet peer-driven apply remains FATAL refusal (Run 147 invariant);
+    Run 183 does NOT weaken this. R23 captures this on the real qbind-node
+    binary AND through the helper (including the peer-driven-drain
+    callsite entry's surface-level MainNetRefused short-circuit layered
+    ahead of the Run 180 verifier).
+  * no real on-chain governance / execution / bridge / light client /
+    KMS-HSM / validator-set rotation is introduced.
+  * no schema / wire / metric drift beyond the Run 178 additive shape and
+    the Run 180 hidden selector.
+  * full Whitepaper contradiction C4 and C5 closure remain open.
