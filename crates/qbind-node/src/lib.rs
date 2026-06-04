@@ -280,6 +280,25 @@ pub mod pqc_onchain_governance_callsite_wiring;
 // verification, no KMS/HSM, no validator-set rotation. Release-binary
 // OnChainGovernance accepted-proof evidence is deferred to Run 185.
 pub mod pqc_onchain_governance_payload_carrying;
+// Run 186 — source/test production OnChainGovernance verifier
+// boundary and fail-closed MainNet policy. Adds a typed
+// `OnChainGovernanceVerifierKind` (`Disabled` /
+// `FixtureSourceTest` / `ProductionUnavailable` / `ProductionVerifier`
+// placeholder), a typed `OnChainGovernanceProofClass` (`Fixture` /
+// `Production`) derived from `proof_suite_id`, a typed
+// `OnChainGovernanceVerifierPolicy` bundle, a typed
+// `OnChainGovernanceVerifierBoundaryOutcome`, an
+// `OnChainGovernanceVerifier` trait + four concrete
+// implementations, pure typed entry points
+// `verify_fixture_onchain_governance_proof` /
+// `verify_production_onchain_governance_proof`, and a pure
+// dispatcher
+// `dispatch_onchain_governance_proof_through_verifier_boundary`.
+// Default kind remains `Disabled`. Source/test only — no MainNet
+// apply, no governance execution, no real on-chain proof
+// verification, no KMS/HSM, no validator-set rotation. Release-
+// binary verifier-boundary evidence is deferred to Run 187.
+pub mod pqc_onchain_governance_verifier;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

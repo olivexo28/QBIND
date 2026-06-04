@@ -1677,3 +1677,61 @@ Run 184's additive optional sibling. **Full C4 / C5 remain OPEN.**
 Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_185.md`,
 `scripts/devnet/run_185_onchain_governance_payload_release_binary.sh`,
 `docs/devnet/run_185_onchain_governance_payload_release_binary/`.
+
+## Run 186 update — source/test typed production OnChainGovernance verifier boundary
+
+Run 186 introduces, at source/test level only, a typed verifier-kind
+boundary in the new
+[`pqc_onchain_governance_verifier`](
+  ../../crates/qbind-node/src/pqc_onchain_governance_verifier.rs)
+module that cleanly separates fixture OnChainGovernance proof
+verification (DevNet/TestNet evidence-only) from future real on-chain
+governance proof verification (declared unavailable and fail-closed).
+The boundary defines `OnChainGovernanceVerifierKind` (`Disabled` /
+`FixtureSourceTest` / `ProductionUnavailable` /
+`ProductionVerifierPlaceholder`), `OnChainGovernanceProofClass`
+(`Fixture` / `Production`, derived from the proof suite ID via
+`classify_onchain_governance_proof_class`),
+`OnChainGovernanceVerifierPolicy` carrying the kind plus the Run 178
+proof policy that the fixture path forwards to, and a typed
+`OnChainGovernanceVerifierBoundaryOutcome` surface
+(`AcceptedFixture(inner)` / `FixtureDisabled` /
+`ProductionVerifierUnavailable` / `ProductionProofUnsupported` /
+`ProductionProofMalformed{reason}` /
+`MainNetProductionVerifierUnavailable` /
+`FixtureProofRejectedAsMainNetProductionAuthority` /
+`Run178Rejection(inner)`). The `OnChainGovernanceVerifier` trait has
+four concrete implementations (`DisabledOnChainGovernanceVerifier`,
+`FixtureSourceTestOnChainGovernanceVerifier`,
+`ProductionUnavailableOnChainGovernanceVerifier`,
+`ProductionVerifierPlaceholderOnChainGovernanceVerifier`), and the
+pure entry points `verify_fixture_onchain_governance_proof` /
+`verify_production_onchain_governance_proof` are dispatched through
+`dispatch_onchain_governance_proof_through_verifier_boundary`. Default
+kind on every surface is `Disabled` and refuses every proof; the
+fixture path is reachable only under `FixtureSourceTest` plus the
+existing `AllowFixtureSourceTest` proof policy and short-circuits to
+`FixtureProofRejectedAsMainNetProductionAuthority` whenever the trust
+domain, candidate root, or proof environment is MainNet — so a fixture
+proof can never masquerade as a production governance authority. Both
+production verifier kinds always return `ProductionVerifierUnavailable`
+(or `MainNetProductionVerifierUnavailable` on MainNet) regardless of
+proof material. The boundary is purely additive: no wire, no v2 sidecar
+JSON, no `OnChainGovernanceProofWire`, no marker, no sequence file, no
+trust-bundle core schema, and no Run 070 / 130–185 invariant changes.
+Source/test acceptance and rejection are exercised by
+[`run_186_onchain_governance_production_verifier_boundary_tests`](
+  ../../crates/qbind-node/tests/run_186_onchain_governance_production_verifier_boundary_tests.rs)
+covering the full A1–A7 / R1–R29 matrix from `task/RUN_186_TASK.txt`
+plus extras for proof-class separation, all four verifier traits,
+MainNet masquerade refusal, dispatcher determinism, and call-site
+reachability (44 tests, all passing). MainNet peer-driven apply remains
+refused (Run 147 FATAL invariant). The release-binary boundary for the
+verifier kind is explicitly deferred to Run 187. Real on-chain
+governance proof verification, governance execution, KMS/HSM custody,
+validator-set rotation, bridge / light-client integration, autonomous
+apply, apply-on-receipt, and peer-majority authority all remain
+unimplemented. **Full C4 / C5 remain OPEN.** Evidence:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_186.md`,
+`crates/qbind-node/src/pqc_onchain_governance_verifier.rs`,
+`crates/qbind-node/tests/run_186_onchain_governance_production_verifier_boundary_tests.rs`.
