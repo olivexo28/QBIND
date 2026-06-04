@@ -6347,3 +6347,90 @@ unimplemented. **Full C4 / C5 remain OPEN.** Evidence:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_186.md`,
 `crates/qbind-node/src/pqc_onchain_governance_verifier.rs`,
 `crates/qbind-node/tests/run_186_onchain_governance_production_verifier_boundary_tests.rs`.
+## Run 187 update — release-binary OnChainGovernance production verifier-boundary evidence
+
+Run 187 closes the Run 186-deferred release-binary boundary for the
+typed production OnChainGovernance verifier surface added by
+[`pqc_onchain_governance_verifier`](
+  ../../crates/qbind-node/src/pqc_onchain_governance_verifier.rs).
+On real `target/release/qbind-node`, Run 187 captures: the production
+default — neither `--p2p-trust-bundle-onchain-governance-fixture-allowed`
+nor `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED` truthy —
+emitting no `[run-180]` armed banner and preserving
+`OnChainGovernanceVerifierKind::Disabled` on every production surface
+(A8 / R1); the CLI / env selectors each arming `AllowFixtureSourceTest`
+and **not** enabling any production verifier (A1 / A2); existing Run 185
+reload-check / reload-apply DevNet fixture-payload paths remaining
+compatible under the Run 186 typed verifier-boundary contract (A3 /
+A4); the Run 184 routing helpers continuing to short-circuit
+malformed-sibling payloads at the typed
+`OnChainGovernanceProofPayloadParseError` boundary BEFORE any Run 186
+verifier-boundary dispatch (R20 / R22); MainNet peer-driven apply
+remaining the Run 147 / 148 / 152 FATAL refusal even with the selector
+engaged AND a fully-valid MainNet fixture proof carried in the v2
+sidecar via the Run 184 sibling, with the Run 186
+`mainnet_peer_driven_apply_remains_refused_under_verifier_boundary`
+helper additionally encoding the rule at the typed verifier boundary
+regardless of policy kind (R27); and `qbind-node --help` not surfacing
+the hidden flag and not surfacing any `run-180`–`run-187` /
+`onchain-governance-fixture` / `ProductionVerifier` / `KMS-HSM` /
+`validator-set rotation` / `governance execution` token. Through both
+release-built helpers — the Run 185
+[`run_185_onchain_governance_payload_release_binary_helper`](
+  ../../crates/qbind-node/examples/run_185_onchain_governance_payload_release_binary_helper.rs)
+for sidecar minting / payload-carrying compatibility evidence and the
+new Run 187
+[`run_187_onchain_governance_verifier_boundary_release_binary_helper`](
+  ../../crates/qbind-node/examples/run_187_onchain_governance_verifier_boundary_release_binary_helper.rs)
+for the typed verifier-boundary corpus — Run 187 captures release-mode
+acceptance / rejection across the full A1–A8 / R1–R29 matrix from
+`task/RUN_187_TASK.txt` through the production library symbols
+`pqc_onchain_governance_verifier::*`, including all four
+`OnChainGovernanceVerifierKind` policy kinds dispatched against both
+fixture-class and production-class proofs across DevNet/TestNet and
+MainNet trust domains, all four `OnChainGovernanceVerifier` trait
+impls' `kind()` / `verify(...)` surfaces, the proof-class classifier
+and reserved-production-suite predicate, both pure entry points
+(`verify_fixture_onchain_governance_proof` /
+`verify_production_onchain_governance_proof`), the dispatcher
+(`dispatch_onchain_governance_proof_through_verifier_boundary`), and
+the MainNet refusal helper, with bit-equality non-mutation evidence
+captured for every rejected scenario by snapshotting candidate /
+persisted state before and after a rejecting dispatch and asserting
+bytewise equality. The release-binary harness
+[`scripts/devnet/run_187_onchain_governance_verifier_boundary_release_binary.sh`](
+  ../../scripts/devnet/run_187_onchain_governance_verifier_boundary_release_binary.sh)
+records full provenance (qbind-node + helper SHA-256 / ELF Build IDs,
+git commit, rustc / cargo versions), the source-reachability grep over
+every Run 186 verifier-boundary symbol, the denylist invariants proven
+empty (`MainNet apply ENABLED`, `production verifier enabled/active/wired`,
+`autonomous apply`, `apply on receipt`, `peer-majority authority`,
+`real on-chain governance proof claim`, `KMS/HSM enabled`,
+`validator-set rotation claim`, `DummySig` / `DummyKem` / `DummyAead`,
+`fallback to --p2p-trusted-root`, `schema/wire/metric drift`), and the
+no-mutation / mutation-proof scaffolds; and re-runs the targeted
+regression slice in release mode (run_186 / run_184 / run_182 /
+run_180 / run_178 / run_176 / run_173 / run_171 / run_169 / run_167 /
+run_165 / run_163 / run_161 / run_159 / run_157 / run_152 / run_150 /
+run_148 / run_142 / run_134 / run_138, plus `--lib pqc_authority` and
+`--lib pqc_onchain_governance_verifier`). Honest limitation: Run 187
+still wires no real on-chain governance proof verifier — both
+`OnChainGovernanceVerifierKind::ProductionUnavailable` and
+`OnChainGovernanceVerifierKind::ProductionVerifierPlaceholder`
+honestly route production-class proofs to
+`ProductionVerifierUnavailable` on DevNet/TestNet and to
+`MainNetProductionVerifierUnavailable` on MainNet, and route
+fixture-class proofs to `ProductionProofUnsupported` regardless of
+environment, encoding the honest unavailability and explicitly
+forbidding fixture-as-MainNet-production-authority. No production
+source change. No MainNet apply enablement. No real on-chain
+governance execution / no real on-chain proof verifier / no bridge /
+light-client / KMS-HSM / validator-set rotation / autonomous apply /
+apply-on-receipt / peer-majority authority. No marker /
+sequence-file / trust-bundle / wire / metric drift. No DummySig /
+DummyKem / DummyAead activation, no fallback to `--p2p-trusted-root`.
+No Run 050–186 invariant was changed. **Full C4 / C5 remain OPEN.**
+Evidence: `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_187.md`,
+`scripts/devnet/run_187_onchain_governance_verifier_boundary_release_binary.sh`,
+`docs/devnet/run_187_onchain_governance_verifier_boundary_release_binary/`,
+`crates/qbind-node/examples/run_187_onchain_governance_verifier_boundary_release_binary_helper.rs`.
