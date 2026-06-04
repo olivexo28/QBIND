@@ -6634,3 +6634,107 @@ See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_190.md` and
 for the full A1–A10 / R1–R32 acceptance matrix, the serde / parse
 compatibility evidence, the source-reachability invariants, and the
 canonical PASS verdict.
+
+## Run 191 update — release-binary authority-custody metadata carrying evidence
+
+Run 191 closes the Run 190-deferred release-binary boundary for the
+typed authority-custody payload-carrying surface in
+`crates/qbind-node/src/pqc_authority_custody_payload_carrying.rs`,
+composed over the Run 188 typed authority-custody boundary in
+`pqc_authority_custody.rs`. Run 191 is release-binary evidence only:
+no production source line is changed, no new CLI flag / env var /
+schema bump / wire shape / sidecar field / metric / exit code is
+introduced beyond Run 190's additive optional custody sibling. Run
+190 added no operator-visible selector, so the operator-facing CLI
+surface from Run 189 is preserved bit-identically —
+`target/release/qbind-node --help` surfaces no `authority-custody` /
+`kms-hsm` / `remote-signer` / `production custody` token, and the
+default `--print-genesis-hash --env {devnet,testnet,mainnet}`
+invocations emit no Run 190 custody enablement banner and no MainNet
+peer-driven apply enablement claim. The existing Run 187 hidden
+fixture selector `--p2p-trust-bundle-onchain-governance-fixture-allowed`
+(and the matching `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`
+env var), armed on MainNet, still refuses MainNet peer-driven apply
+and emits no Run 190 custody payload-carrying enablement banner.
+
+The new release-built helper
+`crates/qbind-node/examples/run_191_authority_custody_payload_release_binary_helper.rs`
+exercises the Run 190 A1–A10 / R1–R32 corpus end-to-end in **release
+mode** through the production library symbols
+`pqc_authority_custody_payload_carrying::*` —
+`AuthorityCustodyAttestationWire`, `AuthorityCustodyClassWire`,
+`GovernanceAuthorityClassWire`, `AuthorityCustodyLoadStatus`
+(`Loaded` / `Absent` / `Malformed { … }`),
+`parse_optional_authority_custody_attestation_sibling_from_json_value`,
+`AuthorityCustodyCallsiteContext`,
+`callsite_context_for_authority_custody`,
+`AuthorityCustodyPayloadCarryingDecisionOutcome`, the seven
+per-surface routing helpers
+(`route_loaded_authority_custody_attestation_to_reload_check_callsite_decision`,
+`..._reload_apply_callsite_decision`,
+`..._startup_p2p_trust_bundle_callsite_decision`,
+`..._sighup_callsite_decision`,
+`..._local_peer_candidate_check_callsite_decision`,
+`..._live_inbound_0x05_callsite_decision`,
+`..._peer_driven_drain_callsite_decision`),
+and `mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying`,
+composed with the Run 188 typed-boundary symbols
+`validate_authority_custody_attestation`,
+`validate_lifecycle_governance_and_custody`,
+`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`,
+`peer_majority_cannot_satisfy_custody`, and
+`local_operator_config_alone_cannot_satisfy_mainnet_production_custody`.
+Every `RemoteSigner` / `Kms` / `Hsm` attestation — whether
+constructed in-process or wire-carried through the Run 190 sibling
+and parsed back — fails closed with the typed `RemoteSignerUnavailable`
+/ `KmsUnavailable` / `HsmUnavailable` outcome regardless of policy or
+environment; every `ProductionCustodyRequired` /
+`MainnetProductionCustodyRequired` policy fails closed with the typed
+`ProductionCustodyUnavailable` / `MainNetProductionCustodyUnavailable`;
+every fixture / local-operator class on MainNet routes to
+`FixtureCustodyRejectedForMainNet` / `LocalCustodyRejectedForMainNet`
+ahead of the policy gate even when wire-carried. Legacy / no-custody
+payloads (sibling absent) under default `Disabled` route through the
+seven Run 190 routing helpers without producing schema or wire drift.
+Malformed sibling JSON (non-object, missing-field, unknown-class,
+expired, unknown-schema) is parsed to
+`AuthorityCustodyLoadStatus::Malformed { … }` and routed by every
+per-surface helper to `Callsite { custody_outcome:
+CustodyAttestationMalformed }` (or to peer-driven-drain
+`MainNetPeerDrivenApplyRefused` where applicable) without panic,
+allocation surprise, or drift. Every rejected scenario is captured
+with bit-equal candidate / persisted snapshots before and after the
+rejecting routing call; a deterministic re-evaluation pass is
+asserted across the corpus.
+
+Run 191 captures, on every run, a source-reachability proof under
+`docs/devnet/run_191_authority_custody_payload_release_binary/reachability/source_reachability.txt`
+that records every production caller of every Run 188 / Run 190
+authority-custody and payload-carrying symbol under
+`crates/qbind-node/src/`, plus a denylist proof showing no
+`KMS/HSM enabled`, no `remote signer enabled`, no `production custody
+enabled/active/wired`, no `validator-set rotation`, no `autonomous
+apply`, no `MainNet peer-driven apply ENABLED`, no `apply on receipt`,
+no `peer-majority authority`, no `DummySig` / `DummyKem` / `DummyAead`,
+and no `fallback to --p2p-trusted-root` token is present in any
+captured log.
+
+Honest limitation: Run 191 still wires no real KMS / HSM / cloud KMS
+/ PKCS#11 / remote-signer backend, no real on-chain governance proof
+verifier, no governance execution engine, no validator-set rotation,
+no autonomous apply, no apply-on-receipt, and no peer-majority
+authority. The Run 147 / 148 / 152 FATAL MainNet peer-driven apply
+refusal is preserved bit-identically at the binary surface AND at the
+typed Run 190 payload-carrying boundary via
+`mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying`
+(which composes
+`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`).
+**Full C4 remains OPEN; C5 remains OPEN.**
+
+See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_191.md`,
+`scripts/devnet/run_191_authority_custody_payload_release_binary.sh`,
+`crates/qbind-node/examples/run_191_authority_custody_payload_release_binary_helper.rs`,
+and `docs/devnet/run_191_authority_custody_payload_release_binary/`
+for the full release-binary scenario matrix, the regression test
+slice, and the canonical PASS verdict.
