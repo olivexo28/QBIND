@@ -4120,3 +4120,77 @@ See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_190.md` and
 `crates/qbind-node/tests/run_190_authority_custody_payload_callsite_tests.rs`
 for the full A1–A10 / R1–R32 acceptance matrix and the canonical
 PASS verdict.
+
+## Run 191 update — release-binary authority-custody metadata carrying evidence
+
+Run 191 closes the Run 190-deferred release-binary boundary for the
+typed authority-custody payload-carrying surface in
+`crates/qbind-node/src/pqc_authority_custody_payload_carrying.rs`,
+composed over the Run 188 typed authority-custody boundary in
+`pqc_authority_custody.rs`. Run 191 is release-binary evidence only:
+no production source line is changed, no new CLI flag / env var /
+schema bump / wire shape / sidecar field / metric / exit code is
+introduced beyond Run 190's additive optional custody sibling. Run
+190 added no operator-visible selector, so the operator-facing CLI
+surface from Run 189 is preserved bit-identically — `target/release/
+qbind-node --help` surfaces no `authority-custody` / `kms-hsm` /
+`remote-signer` / `production custody` token; the default
+`--print-genesis-hash --env {devnet,testnet,mainnet}` invocations
+emit no Run 190 enablement banner and no `MainNet peer-driven apply
+ENABLED` claim; and the existing Run 187 hidden
+`--p2p-trust-bundle-onchain-governance-fixture-allowed` selector
+(and the matching
+`QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED` env var),
+armed on MainNet, still refuses MainNet peer-driven apply.
+
+Through the release-built helper
+`crates/qbind-node/examples/run_191_authority_custody_payload_release_binary_helper.rs`,
+Run 191 exercises the Run 190 A1–A10 / R1–R32 corpus end-to-end in
+**release mode** through the production library symbols
+`pqc_authority_custody_payload_carrying::*` (every wire type, the
+optional-sibling parser, the typed `AuthorityCustodyLoadStatus` /
+`AuthorityCustodyCallsiteContext` /
+`AuthorityCustodyPayloadCarryingDecisionOutcome`, the seven
+per-surface routing helpers, and
+`mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying`)
+composed with the Run 188 typed-boundary symbols
+`pqc_authority_custody::*`. Every `RemoteSigner` / `Kms` / `Hsm`
+attestation — whether in-process or wire-carried and parsed back —
+fails closed with the typed `RemoteSignerUnavailable` /
+`KmsUnavailable` / `HsmUnavailable` outcome regardless of policy or
+environment; every `ProductionCustodyRequired` /
+`MainnetProductionCustodyRequired` policy fails closed with the typed
+`ProductionCustodyUnavailable` / `MainNetProductionCustodyUnavailable`;
+every fixture / local-operator class on MainNet routes to
+`FixtureCustodyRejectedForMainNet` / `LocalCustodyRejectedForMainNet`
+ahead of the policy gate even when wire-carried; legacy / no-custody
+payloads (sibling absent) under default `Disabled` route through the
+seven Run 190 routing helpers without producing schema or wire drift;
+malformed sibling JSON is parsed to
+`AuthorityCustodyLoadStatus::Malformed { … }` and routed by every
+per-surface helper to `Callsite { custody_outcome:
+CustodyAttestationMalformed }` (or to peer-driven-drain
+`MainNetPeerDrivenApplyRefused` where applicable) without drift. The
+Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal is
+preserved bit-identically at the binary surface AND at the typed Run
+190 payload-carrying boundary via
+`mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying`
+(which composes
+`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`).
+
+Honest limitation: Run 191 wires no real KMS / HSM / cloud KMS /
+PKCS#11 / remote-signer backend, no real on-chain governance proof
+verifier, no governance execution engine, no validator-set rotation,
+no autonomous apply, no apply-on-receipt, and no peer-majority
+authority. Existing no-custody payloads remain compatible under
+default `Disabled`; existing Run 184 / 185 / 187 governance fixture
+proof paths remain compatible alongside the Run 190 optional custody
+sibling. **Full C4 remains OPEN; C5 remains OPEN.**
+
+See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_191.md`,
+`scripts/devnet/run_191_authority_custody_payload_release_binary.sh`,
+`crates/qbind-node/examples/run_191_authority_custody_payload_release_binary_helper.rs`,
+and `docs/devnet/run_191_authority_custody_payload_release_binary/`
+for the full release-binary scenario matrix, the regression test
+slice, and the canonical PASS verdict.
