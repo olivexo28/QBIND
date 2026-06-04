@@ -1,8 +1,97 @@
 Run 189 — release-binary KMS/HSM authority-custody boundary evidence
-git_commit: <placeholder, overwritten by harness>
+git_commit: c0cfcf3a17c7e411afb83837877e062cf128a589
 
-This file is a committed placeholder. Running
-  bash scripts/devnet/run_189_authority_custody_boundary_release_binary.sh
-overwrites it with a canonical verdict block (build provenance,
-release-binary scenario verdicts, release-helper verdicts, regression
-test verdicts, honest_limits, and the final positive verdict).
+build:
+  rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
+  cargo_version:      cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+  qbind_node_sha256:  bc5bf8eafcea742fc9a5b14f274f2aa2034dc68cfa6ef3285fc25001d6c2da82
+  qbind_node_buildid: BuildID[sha1]=ea6cb8fe41b01e4696ed8e583207fed142d7e84b
+  helper_189_sha256:  08f3eda23065e10e36d75da4223f1dc9a41e8de3b31f65dfb835f72e5b24be3e
+  helper_189_buildid: BuildID[sha1]=5a2ba4bc885d5922c135a03c8e7beece1c7e3827
+
+release-binary scenario verdicts:
+  S1_help	rc=0
+  S2_default_devnet	rc=0
+  S3_default_testnet	rc=0
+  S4_default_mainnet	rc=0
+  S5_mainnet_fixture_selector	rc=0
+
+release-helper verdicts:
+  helper_run_189	rc=0	verdict: PASS
+
+regression test verdicts:
+  test:run_188_authority_custody_boundary_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_184_onchain_governance_payload_carrying_tests	rc=0
+  test:run_182_onchain_governance_production_callsite_wiring_tests	rc=0
+  test:run_180_onchain_governance_marker_integration_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_176_live_0x05_governance_proof_carrier_tests	rc=0
+  test:run_173_validation_only_governance_required_policy_tests	rc=0
+  test:run_171_governance_required_policy_selector_tests	rc=0
+  test:run_169_governance_proof_loader_surface_integration_tests	rc=0
+  test:run_167_governance_proof_carrier_tests	rc=0
+  test:run_165_governance_marker_integration_tests	rc=0
+  test:run_163_governance_authority_verifier_tests	rc=0
+  test:run_161_lifecycle_marker_integration_tests	rc=0
+  test:run_159_authority_signing_key_lifecycle_tests	rc=0
+  test:run_157_unified_testnet_fixture_universe_tests	rc=0
+  test:run_152_binary_reachable_peer_drain_plumbing_tests	rc=0
+  test:run_150_peer_driven_apply_drain_tests	rc=0
+  test:run_148_peer_driven_apply_devnet_tests	rc=0
+  test:run_142_live_inbound_0x05_v2_validation_tests	rc=0
+  test:run_134_reload_apply_v2_authority_marker_tests	rc=0
+  test:run_138_sighup_v2_authority_marker_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:pqc_authority_custody	rc=0
+
+honest_limits:
+  * default AuthorityCustodyPolicy::Disabled preserved on every surface;
+  * FixtureLocalKey / LocalOperatorKey custody remain DevNet/TestNet
+    evidence-only under explicit FixtureOnly / DevnetLocalAllowed /
+    TestnetLocalAllowed policies;
+  * fixture / local custody refused on MainNet at the typed
+    boundary (FixtureCustodyRejectedForMainNet /
+    LocalCustodyRejectedForMainNet) AHEAD of the policy gate;
+  * RemoteSigner / Kms / Hsm placeholders fail closed at the typed
+    validator (RemoteSignerUnavailable / KmsUnavailable /
+    HsmUnavailable) regardless of policy or environment;
+  * ProductionCustodyRequired / MainnetProductionCustodyRequired
+    always fail closed (ProductionCustodyUnavailable /
+    MainNetProductionCustodyUnavailable / placeholder-specific
+    Unavailable) in Run 189;
+  * MainNet peer-driven apply remains refused (Run 147 FATAL
+    invariant) at every binary surface — including with the
+    Run 187 hidden fixture selector armed — and at the typed
+    custody boundary via
+    mainnet_peer_driven_apply_remains_refused_under_custody_boundary;
+  * no real KMS / HSM / cloud KMS / PKCS#11 / remote-signer backend
+    wired in Run 189;
+  * no real on-chain governance proof verifier / no governance
+    execution / no validator-set rotation / no autonomous apply /
+    no apply-on-receipt / no peer-majority authority;
+  * no schema/wire/metric drift (Run 189 is release-binary
+    evidence only);
+  * no marker write / no sequence write on validation-only surfaces;
+  * no fallback to --p2p-trusted-root;
+  * no active DummySig / DummyKem / DummyAead.
+
+verdict:
+  positive: real target/release/qbind-node preserves the Run 188
+  typed authority-custody boundary contract end-to-end. Default
+  AuthorityCustodyPolicy::Disabled fail-closes on every surface.
+  No Run 188 selector is exposed at the binary surface (no new
+  CLI flag, no new env var). The Run 187 hidden fixture selector
+  remains DevNet/TestNet evidence-only and does not enable any
+  KMS/HSM/remote-signer backend. The Run 189 release-built helper
+  exercises the full Run 188 A1-A8 / R1-R29 corpus end-to-end
+  through the production library symbols pqc_authority_custody::*,
+  returning the expected typed custody-boundary outcomes. MainNet
+  peer-driven apply remains the Run 147 FATAL refusal; fixture /
+  local custody can never satisfy MainNet production custody;
+  RemoteSigner / Kms / Hsm placeholders fail closed regardless of
+  policy or environment. Real KMS / HSM / cloud KMS / PKCS#11 /
+  remote-signer backends, real on-chain governance proof
+  verification, governance execution, validator-set rotation,
+  autonomous apply, apply-on-receipt, and peer-majority authority
+  all remain unimplemented. Full C4 and C5 remain OPEN.

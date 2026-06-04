@@ -236,6 +236,18 @@ enum Expect {
     UnsupportedCustodySuite,
     FixtureCustodyRejectedForMainNet,
     LocalCustodyRejectedForMainNet,
+    /// MainnetProductionCustodyRequired policy reaches its
+    /// MainNet-specific "production custody unavailable" arm only
+    /// on a non-MainNet trust domain (since MainNet itself rejects
+    /// fixture/local custody by symbol earlier — see
+    /// `pqc_authority_custody.rs` step 16). The Run 188 A1–A8 /
+    /// R1–R29 corpus does not synthesise that DevNet/TestNet +
+    /// MainnetProductionCustodyRequired combination, but the
+    /// matcher arm and label intentionally stay wired so the
+    /// production outcome remains symmetrical with this `Expect`
+    /// enum. `#[allow(dead_code)]` is therefore a deliberate,
+    /// documented assertion of that symmetry.
+    #[allow(dead_code)]
     MainNetProductionCustodyUnavailable,
     PolicyRefusesCustodyClass,
     /// Combined helper surface accept.
@@ -1522,6 +1534,7 @@ fn main() {
     )
     .unwrap();
     writeln!(summary, "verdict: {}", verdict).unwrap();
+    writeln!(summary, "total_pass: {}\ntotal_fail: {}", total_pass, total_fail).unwrap();
     writeln!(summary, "boundary_pass: {}\nboundary_fail: {}", b_pass, b_fail).unwrap();
     writeln!(summary, "combo_pass: {}\ncombo_fail: {}", c_pass, c_fail).unwrap();
     writeln!(

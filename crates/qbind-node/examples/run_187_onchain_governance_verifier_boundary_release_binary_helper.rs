@@ -70,7 +70,7 @@ use qbind_node::pqc_governance_authority::GovernanceThreshold;
 use qbind_node::pqc_onchain_governance_proof::{
     fixture_onchain_governance_proof_bytes, EmptyOnChainGovernanceReplaySet,
     OnChainGovernanceFreshnessWindow, OnChainGovernanceProof, OnChainGovernanceProofPolicy,
-    OnChainGovernanceProofVerificationOutcome, OnChainGovernanceProposalOutcome,
+    OnChainGovernanceProposalOutcome,
     OnChainGovernanceQuorum, ONCHAIN_GOVERNANCE_PROOF_SUITE_FIXTURE_MOCK_V1,
     ONCHAIN_GOVERNANCE_PROOF_SUITE_RESERVED_PRODUCTION,
 };
@@ -1748,6 +1748,7 @@ fn main() {
     )
     .unwrap();
     writeln!(summary, "verdict: {}", verdict).unwrap();
+    writeln!(summary, "total_pass: {}\ntotal_fail: {}", total_pass, total_fail).unwrap();
     writeln!(
         summary,
         "boundary_scenarios_pass: {}\nboundary_scenarios_fail: {}",
