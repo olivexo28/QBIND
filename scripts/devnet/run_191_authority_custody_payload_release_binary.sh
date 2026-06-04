@@ -623,6 +623,29 @@ log "writing summary -> ${SUMMARY}"
   echo "release-helper verdicts:"
   echo "  helper_run_191	rc=$(cat "${EXIT_DIR}/helper_run_191.rc" 2>/dev/null || echo 'na')	$(grep -E 'verdict:' "${HELPER_191_OUT}/helper_summary.txt" 2>/dev/null | head -n1 || true)"
   echo
+  echo "helper A1-A10 / R1-R32 corpus verdicts (release mode, production library symbols):"
+  for k in total_pass total_fail scenarios_pass scenarios_fail \
+           wire_pass wire_fail sibling_pass sibling_fail \
+           routing_pass routing_fail named_helpers_pass named_helpers_fail \
+           no_mutation_pass no_mutation_fail determinism_pass determinism_fail
+  do
+    v="$(grep -E "^${k}: " "${HELPER_191_OUT}/helper_summary.txt" 2>/dev/null | head -n1 | awk '{print $2}')"
+    echo "  ${k}: ${v:-na}"
+  done
+  echo
+  echo "denylist result:"
+  if [[ -s "${DENYLIST}" ]]; then
+    if grep -q "^FAIL " "${DENYLIST}"; then
+      echo "  verdict: FAIL"
+      grep "^FAIL " "${DENYLIST}" | sed 's/^/  /'
+    else
+      ok="$(grep -c '^ok-empty: ' "${DENYLIST}" 2>/dev/null || echo 0)"
+      echo "  verdict: PASS (all ${ok} forbidden patterns proven empty across captured logs)"
+    fi
+  else
+    echo "  verdict: na (denylist file empty)"
+  fi
+  echo
   echo "regression test verdicts:"
   for v in "${TEST_VERDICTS[@]}"; do echo "  ${v}"; done
   echo
