@@ -3943,3 +3943,93 @@ Operational rules surfaced at the typed Run 188 boundary:
 
 See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_188.md` for the full A1–A8 /
 R1–R29 acceptance matrix and validation-command list.
+## Run 189 update — release-binary KMS/HSM authority-custody boundary evidence
+
+Run 189 closes the Run 188-deferred release-binary boundary for the
+typed authority-custody surface in
+`crates/qbind-node/src/pqc_authority_custody.rs`, **preserving every
+trust-anchor authority-model invariant from Runs 070, 130–188 bit-
+identically**. The trust-anchor authority-model invariants captured
+by Run 189 are:
+
+* **Custody is a property of the bundle-signing key holder, not of
+  the peer-gossip path.** The Run 188 typed
+  `AuthorityCustodyAttestation` binds an explicit
+  `bundle_signing_key_fingerprint` (and `authority_root_fingerprint`,
+  `governance_authority_class`, `lifecycle_action`,
+  `candidate_digest`, `authority_domain_sequence`, environment,
+  chain id, genesis hash) to the custody class and key id; a
+  custody attestation that does not bind the active bundle-signing
+  key fingerprint is rejected by symbol with
+  `WrongSigningKeyFingerprint`.
+* **Fixture / local-operator custody remains DevNet/TestNet
+  evidence-only.** It is reachable only under the explicit
+  `FixtureOnly` / `DevnetLocalAllowed` / `TestnetLocalAllowed`
+  policies; it is rejected by symbol whenever the trust-domain
+  environment is MainNet
+  (`FixtureCustodyRejectedForMainNet` /
+  `LocalCustodyRejectedForMainNet`) ahead of the policy gate. The
+  release-binary helper exercises every fixture / local-operator
+  scenario across DevNet / TestNet / MainNet and asserts the
+  expected typed outcome in release mode through the production
+  library symbols.
+* **Production custody is fail-closed unavailable.** Real KMS /
+  HSM / cloud KMS / PKCS#11 / remote signer backends are not
+  implemented in this tree; every `RemoteSigner` / `Kms` / `Hsm`
+  attestation routes to the typed `RemoteSignerUnavailable` /
+  `KmsUnavailable` / `HsmUnavailable` outcome regardless of
+  policy or environment, and every `ProductionCustodyRequired` /
+  `MainnetProductionCustodyRequired` policy routes to
+  `ProductionCustodyUnavailable` /
+  `MainNetProductionCustodyUnavailable` (or the placeholder-
+  specific `*Unavailable`).
+* **Peer-majority is not custody.** Encoded at the typed boundary
+  via the named helper `peer_majority_cannot_satisfy_custody`. No
+  count of peer attestations can satisfy any
+  `*ProductionCustodyRequired` policy.
+* **Local-operator config alone is not MainNet production
+  custody.** Encoded at the typed boundary via the named helper
+  `local_operator_config_alone_cannot_satisfy_mainnet_production_custody`.
+* **MainNet peer-driven apply remains refused** at every surface
+  (Run 147 / 148 / 152 FATAL invariant) and at the typed Run 188
+  boundary via the named helper
+  `mainnet_peer_driven_apply_remains_refused_under_custody_boundary`,
+  regardless of attestation contents or active policy.
+* **Governance authority class and custody are independent
+  invariants.** A custody attestation whose
+  `governance_authority_class` does not match the calling-surface
+  expectation routes to the typed `CustodyAttestationMalformed`
+  outcome; conversely, a fully-valid custody attestation does not
+  satisfy any governance-required gate on its own — the combined
+  helper `validate_lifecycle_governance_and_custody` requires both
+  the lifecycle and the governance class to be accepted by the
+  calling surface before custody is checked. R23 / R24 capture
+  this separation in release mode.
+
+Through the release-built helper
+`crates/qbind-node/examples/run_189_authority_custody_boundary_release_binary_helper.rs`
+and the harness
+`scripts/devnet/run_189_authority_custody_boundary_release_binary.sh`,
+Run 189 captures release-binary acceptance / rejection across the
+full Run 188 A1–A8 / R1–R29 corpus through the production library
+symbols `pqc_authority_custody::*`, plus a per-class / per-policy
+fail-closed table, the three named helpers, no-mutation bit-
+equality across the rejected corpus, and a deterministic re-
+evaluation pass.
+
+Honest limitation: Run 189 still wires no real KMS / HSM / cloud
+KMS / PKCS#11 / remote-signer backend, no real on-chain governance
+proof verifier, no governance execution engine, no validator-set
+rotation, no autonomous apply, no apply-on-receipt, and no
+peer-majority authority. Run 189 introduces no production source
+change, no new CLI flag, no new env var, no new schema bump, no new
+wire shape, no new sidecar field, no new metric, and no new exit
+code. **Full C4 is NOT claimed by Run 189; C5 remains OPEN.**
+
+See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_189.md`,
+`scripts/devnet/run_189_authority_custody_boundary_release_binary.sh`,
+`crates/qbind-node/examples/run_189_authority_custody_boundary_release_binary_helper.rs`,
+and `docs/devnet/run_189_authority_custody_boundary_release_binary/`
+for the full release-binary scenario matrix and the canonical PASS
+verdict.
