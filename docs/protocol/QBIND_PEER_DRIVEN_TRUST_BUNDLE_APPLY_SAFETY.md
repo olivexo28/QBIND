@@ -1847,3 +1847,64 @@ Operational rules surfaced at the typed Run 188 boundary:
 
 See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_188.md` for the full A1–A8 /
 R1–R29 acceptance matrix and validation-command list.
+## Run 189 update — release-binary KMS/HSM authority-custody boundary evidence
+
+Run 189 closes the Run 188-deferred release-binary boundary for the
+typed authority-custody surface in
+`crates/qbind-node/src/pqc_authority_custody.rs`, **without
+weakening peer-driven apply safety**. The Run 147 / 148 / 152 FATAL
+MainNet peer-driven apply refusal is preserved bit-identically:
+
+* At the **binary surface**: real `target/release/qbind-node
+  --print-genesis-hash --env mainnet`, with or without the Run 187
+  hidden fixture selector
+  `--p2p-trust-bundle-onchain-governance-fixture-allowed` armed and
+  the matching env var truthy, never declares `MainNet peer-driven
+  apply ENABLED` and never declares `KMS/HSM enabled` /
+  `production custody enabled` / `remote signer enabled`.
+* At the **typed Run 188 boundary**: the grep-verifiable named
+  helper
+  `mainnet_peer_driven_apply_remains_refused_under_custody_boundary`
+  encodes the rule regardless of attestation contents or active
+  policy, including in the presence of a fully-formed `Kms` / `Hsm`
+  / `RemoteSigner` attestation under
+  `MainnetProductionCustodyRequired`. The matching combined-helper
+  outcome is the typed
+  `LifecycleGovernanceCustodyOutcome::MainNetPeerDrivenApplyRefused`.
+* **Peer-majority is not custody.** The named helper
+  `peer_majority_cannot_satisfy_custody` encodes that no count of
+  peer attestations can satisfy any
+  `*ProductionCustodyRequired` policy.
+* **Local-operator config alone is not MainNet production custody.**
+  The named helper
+  `local_operator_config_alone_cannot_satisfy_mainnet_production_custody`
+  encodes that a local-operator attestation routes to
+  `LocalCustodyRejectedForMainNet` ahead of the policy gate, even
+  when the caller asks for `MainnetProductionCustodyRequired`.
+
+The release-binary boundary preserves every Run 070 / 084 / 085 /
+094 / 130–187 peer-driven apply invariant: the Run 189 helper is a
+pure validation driver — it never calls
+`pqc_trust_reload::apply_validated_candidate{,_with_previous}`,
+never swaps `LivePqcTrustState`, never invokes
+`P2pSessionEvictor::*`, never calls
+`pqc_trust_sequence::commit_sequence`, never writes the v2
+authority-marker, never propagates / rebroadcasts, and never
+weakens validation-only or propagation-only behaviour. The
+non-mutation evidence captured by the helper (bit-equal candidate /
+persisted snapshots before and after every rejecting custody
+validation) is the typed `R28` / `R29` proof at the release-binary
+boundary.
+
+Run 189 introduces no production source change, no new CLI flag, no
+new env var, no new schema bump, no new wire shape, no new sidecar
+field, no new metric, and no new exit code. **Full C4 is NOT
+claimed by Run 189; C5 remains OPEN.**
+
+See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_189.md`,
+`scripts/devnet/run_189_authority_custody_boundary_release_binary.sh`,
+`crates/qbind-node/examples/run_189_authority_custody_boundary_release_binary_helper.rs`,
+and `docs/devnet/run_189_authority_custody_boundary_release_binary/`
+for the full release-binary scenario matrix and the canonical PASS
+verdict.

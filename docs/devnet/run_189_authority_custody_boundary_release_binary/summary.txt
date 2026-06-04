@@ -1,0 +1,8 @@
+Run 189 — release-binary KMS/HSM authority-custody boundary evidence
+git_commit: <placeholder, overwritten by harness>
+
+This file is a committed placeholder. Running
+  bash scripts/devnet/run_189_authority_custody_boundary_release_binary.sh
+overwrites it with a canonical verdict block (build provenance,
+release-binary scenario verdicts, release-helper verdicts, regression
+test verdicts, honest_limits, and the final positive verdict).

@@ -6481,3 +6481,76 @@ Operational rules surfaced at the typed Run 188 boundary:
 
 See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_188.md` for the full A1–A8 /
 R1–R29 acceptance matrix and validation-command list.
+## Run 189 update — release-binary KMS/HSM authority-custody boundary evidence
+
+Run 189 closes the Run 188-deferred release-binary boundary for the
+typed authority-custody surface in
+`crates/qbind-node/src/pqc_authority_custody.rs`. Run 189 is
+release-binary evidence only: no production source line is changed,
+no new CLI flag / env var / schema bump / wire shape / sidecar field
+/ metric / exit code is introduced. Run 188 added no operator-visible
+selector, so the operator-facing CLI surface from Run 187 is
+preserved bit-identically — `target/release/qbind-node --help`
+surfaces no `authority-custody` / `kms-hsm` / `remote-signer` /
+`production custody` token, and the default
+`--print-genesis-hash --env {devnet,testnet,mainnet}` invocations
+emit no Run 188 custody enablement banner and no MainNet peer-driven
+apply enablement claim. The existing Run 187 hidden fixture selector
+`--p2p-trust-bundle-onchain-governance-fixture-allowed` (and the
+matching `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`
+env var), armed on MainNet, still refuses MainNet peer-driven apply
+and emits no Run 188 custody enablement banner.
+
+The new release-built helper
+`crates/qbind-node/examples/run_189_authority_custody_boundary_release_binary_helper.rs`
+exercises the Run 188 A1–A8 / R1–R29 corpus end-to-end in **release
+mode** through the production library symbols
+`pqc_authority_custody::*` —
+`AuthorityCustodyClass`, `AuthorityCustodyPolicy`,
+`AuthorityCustodyAttestation`, `AuthorityCustodyValidationOutcome`,
+`LifecycleGovernanceCustodyOutcome`,
+`validate_authority_custody_attestation`,
+`validate_lifecycle_governance_and_custody`,
+`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`,
+`peer_majority_cannot_satisfy_custody`, and
+`local_operator_config_alone_cannot_satisfy_mainnet_production_custody`.
+Every `RemoteSigner` / `Kms` / `Hsm` attestation routes to the typed
+`RemoteSignerUnavailable` / `KmsUnavailable` / `HsmUnavailable`
+outcome regardless of policy or environment; every
+`ProductionCustodyRequired` / `MainnetProductionCustodyRequired`
+policy routes to `ProductionCustodyUnavailable` /
+`MainNetProductionCustodyUnavailable` (or the placeholder-specific
+`*Unavailable`); every fixture / local-operator class on MainNet
+routes to `FixtureCustodyRejectedForMainNet` /
+`LocalCustodyRejectedForMainNet` ahead of the policy gate. Every
+rejected scenario is captured with bit-equal candidate / persisted
+snapshots before and after the rejecting custody validation; a
+deterministic re-evaluation pass is asserted across the corpus.
+
+Run 189 captures, on every run, a source-reachability proof under
+`docs/devnet/run_189_authority_custody_boundary_release_binary/reachability/source_reachability.txt`
+that records every production caller of every Run 188 custody symbol
+under `crates/qbind-node/src/`, plus a denylist proof showing
+no `KMS/HSM enabled`, no `remote signer enabled`, no `production
+custody enabled/active/wired`, no `validator-set rotation`, no
+`autonomous apply`, no `MainNet peer-driven apply ENABLED`, no
+`apply on receipt`, no `peer-majority authority`, no `DummySig` /
+`DummyKem` / `DummyAead`, and no `fallback to --p2p-trusted-root`
+token is present in any captured log.
+
+Honest limitation: Run 189 still wires no real KMS / HSM / cloud
+KMS / PKCS#11 / remote-signer backend, no real on-chain governance
+proof verifier, no governance execution engine, no validator-set
+rotation, no autonomous apply, no apply-on-receipt, and no
+peer-majority authority. The Run 147 / 148 / 152 FATAL MainNet
+peer-driven apply refusal is preserved bit-identically at the
+binary surface AND at the typed Run 188 boundary via the named
+helper. **Full C4 is NOT claimed by Run 189; C5 remains OPEN.**
+
+See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_189.md`,
+`scripts/devnet/run_189_authority_custody_boundary_release_binary.sh`,
+`crates/qbind-node/examples/run_189_authority_custody_boundary_release_binary_helper.rs`,
+and `docs/devnet/run_189_authority_custody_boundary_release_binary/`
+for the full release-binary scenario matrix, the regression test
+slice, and the canonical PASS verdict.
