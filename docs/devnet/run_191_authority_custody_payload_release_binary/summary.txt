@@ -1,5 +1,5 @@
 Run 191 — release-binary KMS/HSM authority-custody boundary evidence
-git_commit: b998fe12826b8c7a52d843b9ac0df56191e955d1
+git_commit: 77a35a2617d1fe6d0f1b159f20d7de29cda0c767
 
 build:
   rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
