@@ -1800,3 +1800,50 @@ remain OPEN.** Evidence:
 `scripts/devnet/run_187_onchain_governance_verifier_boundary_release_binary.sh`,
 `docs/devnet/run_187_onchain_governance_verifier_boundary_release_binary/`,
 `crates/qbind-node/examples/run_187_onchain_governance_verifier_boundary_release_binary_helper.rs`.
+## Run 188 — source/test KMS/HSM custody boundary
+
+Run 188 introduces, at source/test level only, a typed authority-custody boundary
+in the new `crates/qbind-node/src/pqc_authority_custody.rs` module:
+`AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey` / `RemoteSigner` /
+`Kms` / `Hsm` / `Unknown`), `AuthorityCustodyPolicy` (`Disabled` (default) /
+`FixtureOnly` / `DevnetLocalAllowed` / `TestnetLocalAllowed` /
+`ProductionCustodyRequired` / `MainnetProductionCustodyRequired`),
+`AuthorityCustodyAttestation` (binds environment, chain_id, genesis_hash,
+authority_root_fingerprint, bundle_signing_key_fingerprint,
+governance_authority_class, lifecycle_action, candidate_digest,
+authority_domain_sequence, custody_class, custody_key_id,
+custody_attestation_digest, and optional freshness/expiry),
+`AuthorityCustodyValidationOutcome` (typed accept-fixture /
+accept-local-operator / production-custody-unavailable / KMS / HSM /
+RemoteSigner unavailable / unknown / wrong-binding / malformed / expired /
+key-id-mismatch / unsupported-suite / MainNet refusals / policy refusal),
+the pure validator `validate_authority_custody_attestation`, and the pure
+composition helper `validate_lifecycle_governance_and_custody`.
+
+Operational rules surfaced at the typed Run 188 boundary:
+
+* **No real KMS/HSM backend is implemented.** RemoteSigner / Kms / Hsm
+  are placeholder symbols only; the validator fails them closed as
+  unavailable regardless of policy or environment.
+* **Fixture/local custody remains DevNet/TestNet evidence-only.** It is
+  reachable only under the explicit `FixtureOnly` / `DevnetLocalAllowed` /
+  `TestnetLocalAllowed` policies.
+* **Fixture/local custody cannot satisfy MainNet production custody.**
+  Trust-domain MainNet rejects fixture custody as
+  `FixtureCustodyRejectedForMainNet` and local-operator custody as
+  `LocalCustodyRejectedForMainNet`, ahead of the policy gate.
+* **MainNet peer-driven apply remains refused** (Run 147 FATAL invariant)
+  regardless of any custody attestation contents; encoded by the
+  grep-verifiable helper
+  `mainnet_peer_driven_apply_remains_refused_under_custody_boundary`.
+* **Governance execution remains unimplemented.** Run 188 does not call
+  the Run 163 / 178 / 186 governance verifier; the calling surface threads
+  the already-validated governance class into the composition helper.
+* **Real on-chain proof verification remains unimplemented.** Run 186's
+  `OnChainGovernanceVerifierKind::Disabled` default is preserved.
+* **Validator-set rotation remains open.**
+* **Release-binary custody-boundary evidence is deferred to Run 189.**
+* **Full C4 remains open. C5 remains open.**
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_188.md` for the full A1–A8 /
+R1–R29 acceptance matrix and validation-command list.
