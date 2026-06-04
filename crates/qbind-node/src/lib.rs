@@ -317,6 +317,26 @@ pub mod pqc_onchain_governance_verifier;
 // validator-set rotation. Release-binary custody-boundary evidence is
 // deferred to Run 189.
 pub mod pqc_authority_custody;
+// Run 190 — source/test authority-custody metadata carrying and
+// production call-site wiring. Adds a strictly additive optional
+// `authority_custody_attestation` sibling on the v2 ratification
+// sidecar JSON (alongside the Run 167 `governance_authority_proof`
+// and Run 184 `onchain_governance_proof` siblings), exposes a typed
+// `AuthorityCustodyAttestationWire` with explicit `schema_version`,
+// a typed `AuthorityCustodyLoadStatus` (`Absent` / `Available` /
+// `Malformed`), pure non-mutating loaders, a typed
+// `AuthorityCustodyCallsiteContext`, and seven per-surface routing
+// helpers that drive the Run 188 lifecycle + governance + custody
+// validator with typed `MalformedAuthorityCustodyAttestationPayload`,
+// `CustodyAttestationRequiredButAbsent`, `NoCustodyAttestationSupplied`,
+// and `MainNetPeerDrivenApplyRefused` short-circuits placed in front
+// of the Run 188 outcome. Default policy remains
+// `AuthorityCustodyPolicy::Disabled`. Source/test only — no MainNet
+// apply, no real KMS/HSM/cloud-KMS/PKCS#11/remote-signer backend, no
+// governance execution, no real on-chain proof verification, no
+// validator-set rotation. Release-binary custody-metadata evidence is
+// deferred to Run 191.
+pub mod pqc_authority_custody_payload_carrying;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
