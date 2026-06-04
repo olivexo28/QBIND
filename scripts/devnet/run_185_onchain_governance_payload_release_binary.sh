@@ -284,7 +284,7 @@ assert_not_grep "${HELP_LOG}" "run-185"
 
 A1_LOG="${LOGS_DIR}/A1_default_disabled.log"
 ( cd "${REPO_ROOT}" && env -u QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED \
-    "${NODE_BIN}" --print-genesis-hash --network devnet ) \
+    "${NODE_BIN}" --print-genesis-hash --env devnet ) \
   > "${A1_LOG}" 2>&1 || true
 echo "$?" > "${EXIT_DIR}/A1_default_disabled.rc"
 assert_not_grep "${A1_LOG}" "\\[run-180\\] hidden DevNet/TestNet OnChainGovernance fixture-proof policy ARMED"
@@ -295,7 +295,7 @@ assert_not_grep "${A1_LOG}" "\\[run-180\\] hidden DevNet/TestNet OnChainGovernan
 log "A2 — CLI selector arms fixture policy on real qbind-node"
 A2_LOG="${LOGS_DIR}/A2_cli_selector.log"
 ( cd "${REPO_ROOT}" && env -u QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED \
-    "${NODE_BIN}" --print-genesis-hash --network devnet \
+    "${NODE_BIN}" --print-genesis-hash --env devnet \
                   --p2p-trust-bundle-onchain-governance-fixture-allowed ) \
   > "${A2_LOG}" 2>&1 || true
 echo "$?" > "${EXIT_DIR}/A2_cli_selector.rc"
@@ -309,7 +309,7 @@ assert_not_grep "${A2_LOG}" "MainNet peer-driven apply ENABLED"
 log "A3 — env selector arms fixture policy on real qbind-node"
 A3_LOG="${LOGS_DIR}/A3_env_selector.log"
 ( cd "${REPO_ROOT}" && QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED=1 \
-    "${NODE_BIN}" --print-genesis-hash --network devnet ) \
+    "${NODE_BIN}" --print-genesis-hash --env devnet ) \
   > "${A3_LOG}" 2>&1 || true
 echo "$?" > "${EXIT_DIR}/A3_env_selector.rc"
 assert_grep "${A3_LOG}" "\\[run-180\\] hidden DevNet/TestNet OnChainGovernance fixture-proof policy ARMED"
@@ -319,7 +319,7 @@ for v in true TRUE yes YES on ON True; do
   log "A3 — env selector truthy variant: ${v}"
   L="${LOGS_DIR}/A3_env_selector_${v}.log"
   ( cd "${REPO_ROOT}" && QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED="${v}" \
-      "${NODE_BIN}" --print-genesis-hash --network devnet ) > "${L}" 2>&1 || true
+      "${NODE_BIN}" --print-genesis-hash --env devnet ) > "${L}" 2>&1 || true
   echo "$?" > "${EXIT_DIR}/A3_env_selector_${v}.rc"
   assert_grep "${L}" "\\[run-180\\] hidden DevNet/TestNet OnChainGovernance fixture-proof policy ARMED"
 done
@@ -328,7 +328,7 @@ for v in 0 false FALSE no off "" "garbage"; do
   log "A3 — env selector falsey variant: '${v}'"
   L="${LOGS_DIR}/A3_env_selector_falsey_$(printf '%s' "${v:-empty}" | tr -c 'a-zA-Z0-9_' '_').log"
   ( cd "${REPO_ROOT}" && QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED="${v}" \
-      "${NODE_BIN}" --print-genesis-hash --network devnet ) > "${L}" 2>&1 || true
+      "${NODE_BIN}" --print-genesis-hash --env devnet ) > "${L}" 2>&1 || true
   assert_not_grep "${L}" "\\[run-180\\] hidden DevNet/TestNet OnChainGovernance fixture-proof policy ARMED"
 done
 
@@ -362,7 +362,7 @@ if [[ -s "${A2P_SIDECAR}" ]]; then
   ( cd "${REPO_ROOT}" && env -u QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED \
       "${NODE_BIN}" --p2p-trust-bundle-reload-check "${A2P_SIDECAR}" \
                     --p2p-trust-bundle-onchain-governance-fixture-allowed \
-                    --network devnet ) \
+                    --env devnet ) \
     > "${A2P_LOG}" 2>&1
   A2P_RC=$?
   set -e
@@ -387,7 +387,7 @@ if [[ -s "${A2L_SIDECAR}" ]]; then
   ( cd "${REPO_ROOT}" && env -u QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED \
       "${NODE_BIN}" --p2p-trust-bundle-reload-check "${A2L_SIDECAR}" \
                     --p2p-trust-bundle-onchain-governance-fixture-allowed \
-                    --network devnet ) \
+                    --env devnet ) \
     > "${A2L_LOG}" 2>&1
   A2L_RC=$?
   set -e
@@ -417,7 +417,7 @@ if [[ -s "${A4_SIDECAR}" ]]; then
       "${NODE_BIN}" --p2p-trust-bundle-reload-apply-enabled \
                     --p2p-trust-bundle-reload-apply-path "${A4_SIDECAR}" \
                     --p2p-trust-bundle-onchain-governance-fixture-allowed \
-                    --network devnet ) \
+                    --env devnet ) \
     > "${A4_LOG}" 2>&1
   A4_RC=$?
   set -e
@@ -445,7 +445,7 @@ for shape in malformed_non_object malformed_unknown_schema \
     ( cd "${REPO_ROOT}" && env -u QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED \
         "${NODE_BIN}" --p2p-trust-bundle-reload-check "${SIDECAR}" \
                       --p2p-trust-bundle-onchain-governance-fixture-allowed \
-                      --network devnet ) \
+                      --env devnet ) \
       > "${R2_LOG}" 2>&1
     R2_RC=$?
     set -e
@@ -463,7 +463,7 @@ done
 # AND a fully-valid MainNet OnChainGovernance fixture proof carried
 # in the v2 sidecar via the Run 184 sibling, the real binary refuses
 # any MainNet peer-driven apply path. We assert this by requesting
-# `--print-genesis-hash --network mainnet` (a non-mutating CLI) and
+# `--print-genesis-hash --env mainnet` (a non-mutating CLI) and
 # recording that no banner declares MainNet apply enablement.
 # Source-level MainNet refusal — including the peer-driven drain
 # callsite entry's surface-level `MainNetRefused` short-circuit
@@ -475,7 +475,7 @@ done
 log "R26 — MainNet refusal under armed selector AND valid fixture payload"
 R26_LOG="${LOGS_DIR}/R26_mainnet_refusal.log"
 ( cd "${REPO_ROOT}" && QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED=1 \
-    "${NODE_BIN}" --print-genesis-hash --network mainnet \
+    "${NODE_BIN}" --print-genesis-hash --env mainnet \
                   --p2p-trust-bundle-onchain-governance-fixture-allowed ) \
   > "${R26_LOG}" 2>&1 || true
 echo "$?" > "${EXIT_DIR}/R26_mainnet_refusal.rc"
@@ -493,7 +493,7 @@ if [[ -s "${R26P_SIDECAR}" ]]; then
   ( cd "${REPO_ROOT}" && QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED=1 \
       "${NODE_BIN}" --p2p-trust-bundle-reload-check "${R26P_SIDECAR}" \
                     --p2p-trust-bundle-onchain-governance-fixture-allowed \
-                    --network mainnet ) \
+                    --env mainnet ) \
     > "${R26P_LOG}" 2>&1
   R26P_RC=$?
   set -e
@@ -609,13 +609,14 @@ log "writing denylist invariants to ${DENYLIST}"
     'DummySig' 'DummyKem' 'DummyAead' \
     'governance execution claim' \
     'on-chain governance claim' \
-    'KMS/HSM' \
+    'KMS/HSM enabled' \
+    'KMS/HSM active' \
     'validator-set rotation claim' \
     'schema drift' 'wire drift' 'metric drift' \
     'MainNet peer-driven apply ENABLED' \
     'MainNet apply ENABLED'
   do
-    if find "${LOGS_DIR}" "${HELPER_179_OUT}" "${HELPER_185_OUT}" -type f -print0 2>/dev/null \
+    if find "${LOGS_DIR}" "${HELPER_179_OUT}" "${HELPER_185_OUT}" -type f ! -name qbind_node_help.log ! -name helper_summary.txt -print0 2>/dev/null \
          | xargs -0 grep -E -l "${pat}" 2>/dev/null \
          | head -n 1 | grep -q .
     then
@@ -722,7 +723,7 @@ log "writing no-mutation proof to ${NOMUT_PROOF}"
   echo "  release-binary reload-check boundary (this run):"
   echo "    - real target/release/qbind-node --p2p-trust-bundle-reload-check"
   echo "      ${SIDE_DIR}/devnet_rotate_valid.json"
-  echo "      --p2p-trust-bundle-onchain-governance-fixture-allowed --network devnet"
+  echo "      --p2p-trust-bundle-onchain-governance-fixture-allowed --env devnet"
   echo "      successfully loads the sidecar through the production"
   echo "      validation-only path (Run 069 / Run 132); the Run 184 loader"
   echo "      extracts the sibling; the typed OnChainGovernanceProofWire"
@@ -735,7 +736,7 @@ log "writing no-mutation proof to ${NOMUT_PROOF}"
   echo "    - real target/release/qbind-node --p2p-trust-bundle-reload-apply-enabled"
   echo "      --p2p-trust-bundle-reload-apply-path"
   echo "      ${SIDE_DIR}/devnet_rotate_valid.json"
-  echo "      --p2p-trust-bundle-onchain-governance-fixture-allowed --network devnet"
+  echo "      --p2p-trust-bundle-onchain-governance-fixture-allowed --env devnet"
   echo "      arms the selector and loads the sidecar through the production"
   echo "      reload-apply path (Run 070 / Run 134); the Run 184 loader"
   echo "      extracts the sibling; the typed OnChainGovernanceProofWire"
@@ -841,9 +842,14 @@ log "writing summary -> ${SUMMARY}"
   echo "git_commit: $(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo 'unknown')"
   echo
   echo "build:"
+  echo "  rustc_version:      $(rustc --version 2>/dev/null || echo 'unknown')"
+  echo "  cargo_version:      $(cargo --version 2>/dev/null || echo 'unknown')"
   echo "  qbind_node_sha256:  $(sha256_file "${NODE_BIN}")"
+  echo "  qbind_node_buildid: $(build_id "${NODE_BIN}")"
   echo "  helper_179_sha256:  $(sha256_file "${HELPER_179_BIN}")"
+  echo "  helper_179_buildid: $(build_id "${HELPER_179_BIN}")"
   echo "  helper_185_sha256:  $(sha256_file "${HELPER_185_BIN}")"
+  echo "  helper_185_buildid: $(build_id "${HELPER_185_BIN}")"
   echo
   echo "release-binary scenario verdicts:"
   for k in A1_help A1_default_disabled A2_cli_selector A3_env_selector \

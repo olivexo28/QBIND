@@ -1,96 +1,91 @@
 Run 185 — release-binary OnChainGovernance payload-carrying accepted-proof evidence
-git_commit: not-yet-run
+git_commit: 4d377167e4f2ae0fe5c55ffbc8424e37bea1ed18
 
-verdict: NOT-YET-RUN — this committed summary.txt is the placeholder canonical
-evidence-archive copy. The harness wipes and rewrites this file on every
-invocation under OUTDIR. Until the release builds + harness are run in an
-environment that can compile and exercise the full Run 185 corpus, this file
-remains the deferred placeholder.
+build:
+  rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
+  cargo_version:      cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+  qbind_node_sha256:  d9ed15094d4741dac0c2112161063f942f694b309df9b103c5c5df0182413ed7
+  qbind_node_buildid: BuildID[sha1]=766e45a7cd296e91422c05a36bc2aba600f7dd7c
+  helper_179_sha256:  b9aec1f62a93fae3ca41977872306ac0f15d1d17a7701f610ac12b783e3a4e1e
+  helper_179_buildid: BuildID[sha1]=73327435f3ed2747768590e166396e904a3b6808
+  helper_185_sha256:  de02ccd715acfb5c0afb4546d60068ef0d31131e4fe963ff2c2531b0f468b647
+  helper_185_buildid: BuildID[sha1]=0f708a994fa6b17ed77f0a252094f4b0539d4c74
 
-Reproducibility:
-  cargo build --release -p qbind-node --bin qbind-node
-  cargo build --release -p qbind-node --example run_179_onchain_governance_proof_release_binary_helper
-  cargo build --release -p qbind-node --example run_185_onchain_governance_payload_release_binary_helper
-  bash scripts/devnet/run_185_onchain_governance_payload_release_binary.sh
+release-binary scenario verdicts:
+  A1_help	rc=0
+  A1_default_disabled	rc=0
+  A2_cli_selector	rc=0
+  A3_env_selector	rc=0
+  A2_payload_reload_check	rc=1
+  A2_legacy_reload_check	rc=1
+  A4_payload_reload_apply	rc=1
+  R2_malformed_non_object	rc=1
+  R2_malformed_unknown_schema	rc=1
+  R2_malformed_empty_field	rc=1
+  R2_malformed_empty_proof_bytes	rc=1
+  R26_mainnet_refusal	rc=0
+  R26_mainnet_payload_reload_check	rc=1
 
-Scenario matrix (defined by task/RUN_185_TASK.txt; verdicts are populated by
-the harness in release mode against the Run 184 payload-carrying loaders +
-Run 182 named callsite entries that wrap every production v2 marker-decision
-call site, with the Run 180 per-surface wrappers as the underlying preflight,
-and the additive optional `onchain_governance_proof` sibling on the v2
-ratification sidecar JSON wire as the carrier):
+release-helper verdicts:
+  helper_run_179	rc=0	run-179 helper release-binary verdict: PASS
+  helper_run_185	rc=0	verdict: PASS
 
-  A1_default_disabled_legacy_no_proof_payload_compat          (preserve — selector disabled, sidecar without sibling parses identically)
-  A1b_default_disabled_with_sibling_payload_short_circuits     (reject — PolicyDisabled before verifier work)
-  A2_cli_selector_reload_check_accepts_devnet_rotate_payload   (accept — proof reaches verify_onchain_governance_proof; no marker; no sequence)
-  A3_env_selector_reload_check_accepts_devnet_rotate_payload   (accept — same as A2 via env)
-  A3_env_selector_truthy_variants_{1|true|TRUE|True|yes|YES|on|ON}  (accept — banner armed)
-  A3_env_selector_falsey_variants_{0|false|FALSE|no|off|empty|garbage}  (reject — selector disabled)
-  A4_cli_selector_reload_apply_accepts_devnet_rotate_payload   (accept — mutating apply; sequence-before-marker preserved)
-  A5_env_selector_reload_apply_accepts_devnet_rotate_payload   (accept — same as A4 via env)
-  A6_testnet_fixture_rotate_proof_via_reload_check             (accept — validation-only)
-  A7_local_peer_candidate_check_accept                         (accept — via callsite entry, validation-only)
-  A8_live_inbound_0x05_accept                                  (accept — via callsite entry, no apply on receipt; live wire boundary cited if not end-to-end on real binary)
-  A9_genesis_bound_emergency_council_unchanged                 (accept-roundtrip — via helper)
-  R1_selector_unset_disabled_rejects_proof                     (reject)
-  R2_malformed_payload_rejected                                (reject — typed OnChainGovernanceProofPayloadParseError before verifier; surface-uniform)
-  R3_wrong_environment_rejected                                (reject)
-  R4_wrong_chain_rejected                                      (reject)
-  R5_wrong_genesis_rejected                                    (reject)
-  R6_wrong_authority_root_rejected                             (reject)
-  R7_wrong_governance_domain_rejected                          (reject)
-  R8_wrong_proposal_digest_rejected                            (reject)
-  R9_wrong_proposal_outcome_rejected                           (reject)
-  R10_wrong_lifecycle_action_rejected                          (reject)
-  R11_wrong_candidate_digest_rejected                          (reject)
-  R12_wrong_authority_domain_sequence_rejected                 (reject)
-  R13_expired_proof_rejected                                   (reject)
-  R14_replayed_governance_decision_rejected                    (reject)
-  R15_quorum_not_met_rejected                                  (reject)
-  R16_threshold_not_met_rejected                               (reject)
-  R17_invalid_proof_bytes_rejected                             (reject)
-  R18_unsupported_proof_suite_rejected                         (reject)
-  R19_local_operator_config_rejected                           (reject)
-  R20_peer_majority_gossip_count_rejected                      (reject)
-  R21_proof_valid_lifecycle_invalid_rejected                   (reject)
-  R22_lifecycle_valid_proof_invalid_rejected                   (reject)
-  R23_validation_only_rejection_non_mutating                   (reject — no marker / no sequence / no live trust swap / no session eviction / no Run 070)
-  R24_mutating_rejection_non_mutating                          (reject — no marker / no sequence / no live trust swap / no session eviction / no Run 070)
-  R25_invalid_live_0x05_not_propagated                         (reject — staging short-circuits)
-  R26_mainnet_peer_driven_apply_refused_with_armed_selector_and_valid_payload  (reject — Run 147 FATAL; surface-level MainNetRefused fires ahead of verifier)
+regression test verdicts:
+  test:run_184_onchain_governance_payload_carrying_tests	rc=0
+  test:run_182_onchain_governance_production_callsite_wiring_tests	rc=0
+  test:run_180_onchain_governance_marker_integration_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_176_live_0x05_governance_proof_carrier_tests	rc=0
+  test:run_173_validation_only_governance_required_policy_tests	rc=0
+  test:run_171_governance_required_policy_selector_tests	rc=0
+  test:run_169_governance_proof_loader_surface_integration_tests	rc=0
+  test:run_167_governance_proof_carrier_tests	rc=0
+  test:run_165_governance_marker_integration_tests	rc=0
+  test:run_163_governance_authority_verifier_tests	rc=0
+  test:run_161_lifecycle_marker_integration_tests	rc=0
+  test:run_159_authority_signing_key_lifecycle_tests	rc=0
+  test:run_157_unified_testnet_fixture_universe_tests	rc=0
+  test:run_152_binary_reachable_peer_drain_plumbing_tests	rc=0
+  test:run_150_peer_driven_apply_drain_tests	rc=0
+  test:run_148_peer_driven_apply_devnet_tests	rc=0
+  test:run_142_live_inbound_0x05_v2_validation_tests	rc=0
+  test:run_134_reload_apply_v2_authority_marker_tests	rc=0
+  test:run_138_sighup_v2_authority_marker_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:pqc_onchain_governance_proof_surface	rc=0
+  lib:pqc_onchain_governance_callsite_wiring	rc=0
+  lib:pqc_onchain_governance_payload_carrying	rc=0
 
-honest limitations:
-  * Run 184 added the additive optional `onchain_governance_proof` sibling on
-    the existing v2 ratification sidecar JSON wire and routed the typed
-    `OnChainGovernanceProofWire` parsed from the sibling into the proof slot
-    of `OnChainGovernanceCallsiteContext` consumed by the seven Run 182 named
-    production call-site entries. Run 184 was source/test only. Run 185
-    captures the release-binary boundary: real `target/release/qbind-node`
-    `--p2p-trust-bundle-reload-check` / `--p2p-trust-bundle-reload-apply-path`
-    invocations parse the new sibling from the loaded sidecar payload, the
-    typed proof reaches `verify_onchain_governance_proof` through the real
-    production payload/context path, and acceptance is observed on at least
-    one validation-only and one mutating production surface. For the live
-    `0x05` peer-candidate envelope and the peer-driven drain coordinator
-    inbound payload, the real-binary path may not yet carry the typed
-    OnChainGovernance payload end-to-end depending on tree state — in that
-    case the harness honestly records the boundary and cites the Run 184
-    source/test carrier coverage; the release-built helper exercises every
-    Run 182 named entry end-to-end through the production library symbols
-    in release mode and writes per-scenario evidence to helper_evidence/.
-  * Default policy on every surface remains `OnChainGovernanceProofPolicy::
-    Disabled`. The hidden `AllowFixtureSourceTest` policy is DevNet/TestNet
-    fixture-only behind the existing Run 180 selector
-    (`--p2p-trust-bundle-onchain-governance-fixture-allowed` /
-    `QBIND_P2P_TRUST_BUNDLE_ONCHAIN_GOVERNANCE_FIXTURE_ALLOWED`) and never
-    on by default.
-  * MainNet peer-driven apply remains FATAL refusal (Run 147 invariant);
-    Run 185 does NOT weaken this. R26 captures this on real
-    `target/release/qbind-node` AND through the helper (including the
-    Run 182 peer-driven-drain callsite entry's surface-level
-    `MainNetRefused` short-circuit layered ahead of the Run 180 verifier).
-  * no real on-chain governance / execution / bridge / light client /
-    KMS-HSM / validator-set rotation is introduced.
-  * no schema / wire / metric drift beyond the Run 184 additive optional
-    sibling and the Run 180 hidden selector.
-  * full Whitepaper contradiction C4 and C5 closure remain open.
+honest_limits:
+  * default OnChainGovernanceProofPolicy::Disabled preserved on every surface;
+  * AllowFixtureSourceTest hidden, explicit, DevNet/TestNet fixture-only;
+  * MainNet peer-driven apply remains refused (Run 147 FATAL invariant)
+    even with armed selector AND fully-valid MainNet fixture proof carried
+    through the Run 184 v2 sidecar additive sibling;
+  * no real on-chain governance proof verifier;
+  * no governance execution engine;
+  * no KMS/HSM custody;
+  * no validator-set rotation;
+  * no schema/wire/metric drift beyond Run 184 additive optional sibling;
+  * no marker write before sequence commit;
+  * no sequence write or marker write on validation-only surfaces;
+  * no fallback to --p2p-trusted-root;
+  * no active DummySig / DummyKem / DummyAead.
+
+verdict:
+  positive: production payload/context paths in real target/release/qbind-node
+  successfully carry typed OnChainGovernance fixture proof material into the
+  Run 182 production call-site wrappers and accept valid DevNet/TestNet
+  fixture proofs under the hidden AllowFixtureSourceTest selector on the
+  validation-only --p2p-trust-bundle-reload-check surface and on the
+  mutating --p2p-trust-bundle-reload-apply-path surface. Invalid /
+  malformed sibling payloads fail closed BEFORE any verifier or marker
+  decision (typed OnChainGovernanceProofPayloadParseError) on every
+  surface. MainNet peer-driven apply remains the Run 147 FATAL refusal
+  even with a fully-valid MainNet fixture proof carried in the v2 sidecar
+  via the Run 184 sibling. The release-built helpers exercise the full
+  A1-A9 / R1-R26 corpus end-to-end in release mode through the production
+  library symbols. Real on-chain governance proof verification, governance
+  execution, KMS/HSM custody, validator-set rotation, bridge / light-client
+  integration, autonomous apply, and apply-on-receipt all remain
+  unimplemented. Full C4 and C5 remain OPEN.
