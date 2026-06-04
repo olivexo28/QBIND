@@ -68,9 +68,9 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUTDIR="${OUTDIR:-${REPO_ROOT}/docs/devnet/run_191_authority_custody_boundary_release_binary}"
+OUTDIR="${OUTDIR:-${REPO_ROOT}/docs/devnet/run_191_authority_custody_payload_release_binary}"
 NODE_BIN="${REPO_ROOT}/target/release/qbind-node"
-HELPER_191_BIN="${REPO_ROOT}/target/release/examples/run_191_authority_custody_boundary_release_binary_helper"
+HELPER_191_BIN="${REPO_ROOT}/target/release/examples/run_191_authority_custody_payload_release_binary_helper"
 
 HELPER_191_OUT="${OUTDIR}/helper_evidence/run_191"
 LOGS_DIR="${OUTDIR}/logs"
@@ -151,9 +151,9 @@ log "cargo build --release -p qbind-node --bin qbind-node"
   > "${LOGS_DIR}/build_qbind_node.log" 2>&1 \
   || fail "release build of qbind-node failed (see ${LOGS_DIR}/build_qbind_node.log)"
 
-log "cargo build --release -p qbind-node --example run_191_authority_custody_boundary_release_binary_helper"
+log "cargo build --release -p qbind-node --example run_191_authority_custody_payload_release_binary_helper"
 ( cd "${REPO_ROOT}" && cargo build --release -p qbind-node \
-    --example run_191_authority_custody_boundary_release_binary_helper ) \
+    --example run_191_authority_custody_payload_release_binary_helper ) \
   > "${LOGS_DIR}/build_helper_run_191.log" 2>&1 \
   || fail "release build of run_191 helper failed (see ${LOGS_DIR}/build_helper_run_191.log)"
 
