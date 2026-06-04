@@ -1,0 +1,8 @@
+Run 187 — release-binary OnChainGovernance production verifier-boundary evidence
+git_commit: <placeholder, overwritten by harness>
+
+This file is a committed placeholder. Running
+  bash scripts/devnet/run_187_onchain_governance_verifier_boundary_release_binary.sh
+overwrites it with a canonical verdict block (build provenance,
+release-binary scenario verdicts, release-helper verdicts, regression
+test verdicts, honest_limits, and the final positive verdict).
