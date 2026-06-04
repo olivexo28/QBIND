@@ -299,6 +299,24 @@ pub mod pqc_onchain_governance_payload_carrying;
 // verification, no KMS/HSM, no validator-set rotation. Release-
 // binary verifier-boundary evidence is deferred to Run 187.
 pub mod pqc_onchain_governance_verifier;
+// Run 188 — source/test-only KMS/HSM custody boundary for bundle-
+// signing authority and governance authority operations. Defines the
+// typed `AuthorityCustodyClass` (`FixtureLocalKey` / `LocalOperatorKey`
+// / `RemoteSigner` / `Kms` / `Hsm` / `Unknown`), the typed
+// `AuthorityCustodyPolicy` (`Disabled` / `FixtureOnly` /
+// `DevnetLocalAllowed` / `TestnetLocalAllowed` /
+// `ProductionCustodyRequired` / `MainnetProductionCustodyRequired`),
+// the typed `AuthorityCustodyAttestation` binding, the typed
+// `AuthorityCustodyValidationOutcome` surface, the pure validator
+// `validate_authority_custody_attestation`, the pure composition
+// helper `validate_lifecycle_governance_and_custody`, and the typed
+// `LifecycleGovernanceCustodyOutcome`. RemoteSigner / Kms / Hsm
+// remain placeholder symbols only — Run 188 has no real KMS/HSM
+// backend and fails them closed. Source/test only — no MainNet apply
+// enablement, no real KMS/HSM, no governance execution, no
+// validator-set rotation. Release-binary custody-boundary evidence is
+// deferred to Run 189.
+pub mod pqc_authority_custody;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
