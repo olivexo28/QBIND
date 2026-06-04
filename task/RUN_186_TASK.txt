@@ -1,0 +1,267 @@
+Task: Run 186 — Source/Test Production OnChainGovernance Verifier Boundary and Fail-Closed MainNet Policy
+
+Current accepted state:
+
+* Run 178: source/test typed OnChainGovernance proof verifier landed.
+* Run 180: hidden fixture selector and OnChainGovernance surface wrappers landed.
+* Run 182: all seven v2 marker-decision call sites wired to the OnChainGovernance wrappers at source/test level.
+* Run 184: source/test OnChainGovernance proof payload/carrying landed:
+
+  * additive optional `onchain_governance_proof` sibling on v2 sidecar JSON;
+  * parsed into `OnChainGovernanceProofWire`;
+  * routed into all seven Run 182 call-site entries.
+* Run 185: release-binary OnChainGovernance payload accepted-proof evidence landed:
+
+  * real `target/release/qbind-node` loads typed OnChainGovernance fixture proof payloads;
+  * hidden `AllowFixtureSourceTest` selector works;
+  * valid DevNet/TestNet fixture proofs pass through real validation-only and mutating production surfaces;
+  * malformed payloads fail closed;
+  * MainNet peer-driven apply remains refused even with valid MainNet fixture proof;
+  * no real on-chain governance verifier exists;
+  * no governance execution engine exists;
+  * no KMS/HSM custody exists;
+  * no validator-set rotation exists;
+  * full C4 remains open;
+  * C5 remains open.
+* Current limitation:
+  OnChainGovernance remains fixture-only. There is no production verifier boundary for real on-chain governance proofs, no typed distinction between fixture verifier and future production verifier, and no MainNet-safe policy path for real governance proof verification.
+
+Objective:
+Add a source/test production OnChainGovernance verifier boundary that cleanly separates:
+
+1. fixture OnChainGovernance proof verification used for DevNet/TestNet evidence; and
+2. future production on-chain governance proof verification, which remains unavailable and fail-closed.
+
+This run must create the typed verifier interface and policy boundary required before any real governance execution or MainNet authority claim can be considered.
+
+It must not implement real on-chain governance verification. It must not enable MainNet peer-driven apply.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary harness in this run.
+* No MainNet peer-driven apply enablement.
+* No real governance execution engine.
+* No real on-chain governance proof verifier.
+* No bridge/light-client integration.
+* No KMS/HSM implementation.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No schema/wire change unless strictly additive and required to distinguish fixture vs production proof kind.
+* Prefer no payload schema change if current `OnChainGovernanceProofWire` can carry verifier kind safely.
+* No authority-marker schema change.
+* No sequence-file schema change.
+* No trust-bundle core schema change.
+* Do not weaken Runs 070, 130–185.
+* Do not claim full C4 or C5 closure.
+
+Required design:
+Introduce a typed production verifier boundary, preferably in or near:
+
+* `crates/qbind-node/src/pqc_onchain_governance_proof.rs`
+* or a new module:
+  `crates/qbind-node/src/pqc_onchain_governance_verifier.rs`
+
+The design must include:
+
+1. Verifier class / mode:
+
+   * `Disabled`
+   * `FixtureSourceTest`
+   * `ProductionUnavailable`
+   * future placeholder `ProductionVerifier`, if useful, but it must fail closed unless actually implemented.
+
+2. Verifier trait or enum-based dispatcher:
+   Example shape:
+
+   * `OnChainGovernanceVerifier`
+   * `verify_fixture_onchain_governance_proof`
+   * `verify_production_onchain_governance_proof`
+   * `OnChainGovernanceVerifierPolicy`
+
+3. Typed outcome surface:
+   Must distinguish at least:
+
+   * fixture accepted;
+   * fixture disabled;
+   * production verifier unavailable;
+   * production proof unsupported;
+   * production proof malformed;
+   * wrong environment;
+   * wrong chain;
+   * wrong genesis;
+   * wrong authority root;
+   * wrong governance domain;
+   * wrong proposal digest;
+   * wrong proposal outcome;
+   * wrong lifecycle action;
+   * wrong candidate digest;
+   * wrong authority-domain sequence;
+   * expired proof;
+   * replayed proof;
+   * quorum not met;
+   * threshold not met;
+   * invalid proof bytes;
+   * unsupported proof suite;
+   * MainNet production verifier unavailable.
+
+Names can differ, but outcomes must be typed and testable.
+
+4. Explicit MainNet policy:
+
+   * DevNet/TestNet may allow fixture proof verification only under hidden fixture selector.
+   * MainNet must not accept fixture proof as production governance authority.
+   * MainNet production verifier must remain unavailable/fail-closed until a future run implements a real verifier.
+   * MainNet peer-driven apply remains refused regardless of verifier outcome.
+
+5. Explicit non-authorities:
+   These must remain rejected:
+
+   * local operator config alone;
+   * peer majority / gossip count;
+   * ad hoc JSON proof without supported verifier class;
+   * fixture proof presented as MainNet production proof.
+
+Required source behavior:
+
+* Existing Run 185 fixture accepted-proof paths must remain compatible for DevNet/TestNet under `AllowFixtureSourceTest`.
+* Production verifier path must be callable in source/tests, but must return fail-closed `ProductionVerifierUnavailable` or equivalent.
+* If an OnChainGovernance proof declares itself production-class, it must fail closed unless a real production verifier is explicitly implemented in a future run.
+* The Run 182/184/185 call-site path must be able to distinguish fixture proof acceptance from production proof refusal.
+* No mutation occurs during verifier selection or proof validation.
+* Validation-only paths remain non-mutating.
+* Mutating paths preserve sequence-before-marker ordering.
+
+Required accepted scenarios:
+A1. DevNet fixture OnChainGovernance Rotate proof still accepted under fixture policy.
+A2. TestNet fixture OnChainGovernance Rotate proof still accepted under fixture policy.
+A3. Existing Run 185 reload-check fixture proof path remains source/test compatible.
+A4. Existing Run 185 reload-apply fixture proof path remains source/test compatible.
+A5. GenesisBound and EmergencyCouncil governance proof behavior remains unchanged.
+A6. Production verifier boundary is callable and returns typed `ProductionVerifierUnavailable` for production-class proof.
+A7. Disabled default remains fail-closed.
+
+Required rejection scenarios:
+R1. fixture proof rejected under Disabled policy.
+R2. fixture proof rejected if presented as MainNet production proof.
+R3. production-class proof rejected because production verifier is unavailable.
+R4. production-class proof rejected on DevNet unless explicitly allowed by a future production verifier policy.
+R5. production-class proof rejected on TestNet unless explicitly allowed by a future production verifier policy.
+R6. wrong environment rejected.
+R7. wrong chain rejected.
+R8. wrong genesis rejected.
+R9. wrong authority root rejected.
+R10. wrong governance domain rejected.
+R11. wrong proposal digest rejected.
+R12. wrong proposal outcome rejected.
+R13. wrong lifecycle action rejected.
+R14. wrong candidate digest rejected.
+R15. wrong authority-domain sequence rejected.
+R16. expired proof rejected.
+R17. replayed proof rejected.
+R18. quorum not met rejected.
+R19. threshold not met rejected.
+R20. invalid proof bytes rejected.
+R21. unsupported proof suite rejected.
+R22. malformed production proof rejected.
+R23. local operator config rejected.
+R24. peer-majority / gossip-count proof rejected.
+R25. valid fixture proof but lifecycle invalid rejected.
+R26. lifecycle valid but production verifier unavailable rejected.
+R27. MainNet peer-driven apply remains refused even if fixture proof or production-class proof is present.
+R28. validation-only rejection remains non-mutating.
+R29. mutating preflight rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_186_onchain_governance_production_verifier_boundary_tests.rs`
+
+Minimum coverage:
+
+* A1–A7.
+* R1–R29.
+* explicit fixture-vs-production proof-class separation.
+* default Disabled fail-closed.
+* production verifier unavailable fail-closed.
+* MainNet fixture proof cannot masquerade as production governance authority.
+* old Run 185 fixture paths remain compatible.
+* no-I/O guarantee for verifier boundary.
+* validation-only non-mutation.
+* mutating rejection no-mutation.
+* source reachability for the new verifier boundary from the Run 182/184 call-site path.
+
+Required documentation:
+Add:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_186.md`
+
+Update:
+
+* `docs/whitepaper/contradiction.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+
+* Run 186 is source/test production OnChainGovernance verifier-boundary work.
+* Fixture OnChainGovernance remains DevNet/TestNet evidence-only.
+* Production OnChainGovernance verifier remains unavailable/fail-closed.
+* MainNet peer-driven apply remains refused.
+* governance execution remains unimplemented.
+* real on-chain proof verification remains unimplemented.
+* bridge/light-client integration remains unimplemented.
+* KMS/HSM remains unimplemented.
+* validator-set rotation remains open.
+* release-binary verifier-boundary evidence is deferred to Run 187.
+* full C4 remains open.
+* C5 remains open.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_184_onchain_governance_payload_carrying_tests`
+* `cargo test -p qbind-node --test run_182_onchain_governance_production_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_180_onchain_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
+* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
+* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
+* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Acceptance criteria:
+Run 186 is acceptable only if:
+
+1. A typed production OnChainGovernance verifier boundary exists.
+2. Fixture proof verification remains explicitly DevNet/TestNet evidence-only.
+3. Production-class proof verification is fail-closed as unavailable.
+4. Fixture proof cannot satisfy MainNet production governance authority.
+5. Existing Run 185 fixture paths remain compatible.
+6. GenesisBound and EmergencyCouncil behavior remains unchanged.
+7. Validation-only surfaces remain non-mutating.
+8. Mutating rejection paths produce no mutation.
+9. MainNet peer-driven apply remains refused.
+10. Docs defer release-binary verifier-boundary evidence to Run 187.
+11. No real governance execution / real on-chain proof / KMS-HSM / validator-set rotation claim is made.
+12. No full C4 or C5 closure is claimed.
