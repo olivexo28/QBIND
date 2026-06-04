@@ -6554,3 +6554,83 @@ See
 and `docs/devnet/run_189_authority_custody_boundary_release_binary/`
 for the full release-binary scenario matrix, the regression test
 slice, and the canonical PASS verdict.
+
+## Run 190 — source/test authority-custody metadata carrying and production call-site wiring
+
+Run 190 makes typed authority-custody attestation metadata reach
+production payload / context paths and the production v2
+marker-decision preflight composition at source / test level, while
+preserving every Run 050–189 invariant byte-for-byte. The new module
+`crates/qbind-node/src/pqc_authority_custody_payload_carrying.rs`
+adds:
+
+* `AuthorityCustodyAttestationWire` — an additive optional JSON
+  sibling beside the existing v2 ratification sidecar material,
+  bound to `AUTHORITY_CUSTODY_ATTESTATION_WIRE_SCHEMA_VERSION = 1`,
+  parsed via the Run 167 / Run 184 sibling-extraction pattern so old
+  no-custody payloads remain byte / parse compatible and a malformed
+  custody sibling never poisons strict v2 parsing or the Run 167 /
+  Run 184 sibling outcomes;
+* `AuthorityCustodyLoadStatus::{Absent, Available, Malformed}` —
+  the typed sibling load status returned to every call site;
+* `load_v2_sidecar_with_governance_and_custody` — the combined
+  Run 167 + Run 184 + Run 190 sidecar loader that returns the typed
+  v2 ratification, governance-proof, OnChainGovernance, and custody
+  load statuses each independently;
+* `AuthorityCustodyCallsiteContext` — pairs the parsed (or absent /
+  malformed) custody attestation with the active
+  `AuthorityCustodyPolicy` (default `Disabled`), the expected
+  lifecycle / governance class / candidate digest /
+  authority-domain sequence / custody-key-id, the trust-domain
+  environment, and `now_unix`;
+* seven named per-surface routing helpers — reload-check,
+  reload-apply preflight, startup `--p2p-trust-bundle` preflight,
+  SIGHUP preflight, local peer-candidate-check, live inbound
+  `0x05`, peer-driven drain coordinator — each driving the Run 188
+  `validate_lifecycle_governance_and_custody` composition;
+* `AuthorityCustodyPayloadCarryingDecisionOutcome::{Accepted,
+  MalformedPayload, RequiredButAbsent,
+  NoCustodyAttestationSupplied, MainNetPeerDrivenApplyRefused,
+  Callsite(...)}` with `is_accept()` / `is_bypassed()` /
+  `is_reject()` predicates;
+* grep-verifiable named helpers
+  `mainnet_peer_driven_apply_remains_refused_under_run_190`,
+  `peer_majority_cannot_satisfy_run_190_custody`, and
+  `local_operator_config_alone_cannot_satisfy_mainnet_run_190_custody`.
+
+Operationally the Run 190 carrier is **invisible by default**. There
+is no new operator-visible CLI flag, env var, or selector. The
+active `AuthorityCustodyPolicy` is supplied by the calling surface
+and defaults to `Disabled` on every surface, exactly as in Run 188 /
+Run 189. Old v2 ratification sidecars without an
+`authority_custody_attestation` sibling continue to parse exactly as
+before and produce the typed `NoCustodyAttestationSupplied` bypass,
+which is deliberately distinct from `Accepted` so it cannot be
+confused with a successful custody validation in operator runbooks
+or audit logs.
+
+Honest limitation: Run 190 wires no real KMS / HSM / cloud KMS /
+PKCS#11 / remote-signer backend; every `RemoteSigner`, `Kms`, and
+`Hsm` custody class still fails closed at the typed Run 188
+validator with `RemoteSignerUnavailable` / `KmsUnavailable` /
+`HsmUnavailable` regardless of attestation contents, schema
+version, or sibling shape. Fixture / local-operator custody remains
+DevNet/TestNet evidence-only and is rejected by symbol whenever the
+trust-domain environment is MainNet, inheriting the Run 188
+short-circuit. The Run 147 / 148 / 152 FATAL MainNet peer-driven
+apply refusal is preserved bit-identically; the
+peer-driven-drain routing helper layers a surface-level MainNet
+check ahead of the Run 188 validator and returns
+`MainNetPeerDrivenApplyRefused` even when a custody attestation
+claims `Kms` or `Hsm`. Real on-chain governance proof verification,
+governance execution, validator-set rotation, autonomous apply,
+apply-on-receipt, and peer-majority authority all remain
+unimplemented. **Release-binary custody-metadata evidence is
+deferred to Run 191. Full C4 is NOT claimed by Run 190; C5 remains
+OPEN.**
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_190.md` and
+`crates/qbind-node/tests/run_190_authority_custody_payload_callsite_tests.rs`
+for the full A1–A10 / R1–R32 acceptance matrix, the serde / parse
+compatibility evidence, the source-reachability invariants, and the
+canonical PASS verdict.

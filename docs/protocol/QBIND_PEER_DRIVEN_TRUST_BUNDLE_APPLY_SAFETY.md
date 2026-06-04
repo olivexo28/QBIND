@@ -1908,3 +1908,56 @@ See
 and `docs/devnet/run_189_authority_custody_boundary_release_binary/`
 for the full release-binary scenario matrix and the canonical PASS
 verdict.
+
+## Run 190 — source/test authority-custody metadata carrying through peer-driven apply preflight
+
+Run 190 wires typed authority-custody attestation metadata into the
+peer-driven apply drain coordinator's preflight composition path at
+source / test level, preserving every Run 050–189 invariant
+byte-for-byte. The peer-driven-drain routing helper
+`peer_driven_drain_callsite` in
+`crates/qbind-node/src/pqc_authority_custody_payload_carrying.rs`
+layers a surface-level MainNet refusal **ahead of** the Run 188
+custody validator (the Run 152 pattern), so the Run 147 / 148 / 152
+FATAL MainNet peer-driven apply refusal continues to hold even when
+the optional `authority_custody_attestation` JSON sibling on the v2
+ratification sidecar claims `Kms` or `Hsm` and the
+`MainnetProductionCustodyRequired` policy is engaged. The grep-verifiable
+named helpers `mainnet_peer_driven_apply_remains_refused_under_run_190`,
+`peer_majority_cannot_satisfy_run_190_custody`, and
+`local_operator_config_alone_cannot_satisfy_mainnet_run_190_custody`
+re-state, by symbol, that no peer-driven path — peer majority,
+gossip count, fixture custody, local-operator custody, or a custody
+attestation alone claiming KMS / HSM — can satisfy MainNet
+production custody.
+
+The Run 190 sibling is purely additive: old peer-candidate v2
+ratification sidecars without an `authority_custody_attestation`
+field parse byte-for-byte through the Run 167 + Run 184 + Run 190
+combined sidecar loader, return the typed
+`AuthorityCustodyLoadStatus::Absent`, and short-circuit to
+`NoCustodyAttestationSupplied` under the default
+`AuthorityCustodyPolicy::Disabled`. A malformed custody sibling
+fails closed at the typed payload boundary
+(`AuthorityCustodyPayloadCarryingDecisionOutcome::MalformedPayload`)
+before any Run 188 validator work runs, and never poisons the
+strict v2 parse or the Run 167 governance-proof / Run 184
+OnChainGovernance sibling outcomes. R29 / R30 / R31 / R32 in
+`crates/qbind-node/tests/run_190_authority_custody_payload_callsite_tests.rs`
+assert validation-only and mutating rejections produce no Run 070
+call, no live trust swap, no session eviction, no sequence write,
+and no marker write, including for the live-inbound `0x05` path,
+and that MainNet peer-driven apply remains refused even with a
+KMS / HSM custody claim.
+
+Honest limitation: Run 190 is **source / test only**. No real KMS /
+HSM / cloud KMS / PKCS#11 / remote-signer backend is wired into the
+peer-driven path; every production custody class still fails closed
+as unavailable at the Run 188 validator. Fixture / local-operator
+custody remains DevNet/TestNet evidence-only and is rejected by
+symbol on MainNet. **Release-binary custody-metadata evidence
+covering the peer-driven apply path is deferred to Run 191. Full C4
+is NOT claimed by Run 190; C5 remains OPEN.**
+
+See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_190.md` for the canonical
+verdict.
