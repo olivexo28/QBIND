@@ -1,0 +1,340 @@
+Task: Run 195 — Release-Binary RemoteSigner Production-Custody Boundary Evidence
+
+Current accepted state:
+
+* Run 188: source/test authority-custody boundary landed.
+* Run 189: release-binary authority custody-boundary evidence fully closed.
+* Run 190: source/test custody metadata carrying and production-context routing landed.
+* Run 191: release-binary custody metadata carrying evidence fully closed.
+* Run 192: source/test hidden authority-custody policy selector landed.
+* Run 193: release-binary authority-custody policy selector evidence fully closed.
+* Run 194: source/test RemoteSigner production-custody interface boundary landed:
+
+  * `pqc_remote_authority_signer.rs`;
+  * `RemoteSignerPolicy::{Disabled, FixtureLoopbackAllowed, ProductionRemoteSignerRequired, MainnetProductionRemoteSignerRequired}`;
+  * `RemoteSignerIdentity`;
+  * `RemoteSignerRequest` with deterministic domain-separated SHA3-256 canonical digest;
+  * `RemoteSignerResponse`;
+  * `RemoteSignerExpectations`;
+  * pure `RemoteAuthoritySigner` trait;
+  * DevNet/TestNet-only `FixtureLoopbackRemoteSigner`;
+  * fail-closed `ProductionRemoteSigner`;
+  * pure `validate_remote_signer`;
+  * `validate_remote_signer_for_custody_class`;
+  * `validate_lifecycle_governance_custody_and_remote_signer`;
+  * named MainNet / local-operator / peer-majority refusal helpers;
+  * 44 tests covering A1–A7 / R1–R31;
+  * full lib suite 1316 passed.
+* Run 194 preserves:
+
+  * no real RemoteSigner backend;
+  * no real KMS;
+  * no real HSM;
+  * no cloud KMS;
+  * no PKCS#11;
+  * no MainNet peer-driven apply enablement;
+  * no governance execution;
+  * no real on-chain proof verifier;
+  * no validator-set rotation;
+  * full C4 open;
+  * C5 open.
+* Release-binary RemoteSigner boundary evidence is deferred to Run 195.
+
+Objective:
+Produce release-binary evidence for the Run 194 RemoteSigner production-custody interface boundary.
+
+This run must prove on release binaries:
+
+1. fixture loopback RemoteSigner remains DevNet/TestNet evidence-only;
+2. production RemoteSigner remains unavailable/fail-closed;
+3. MainNet production RemoteSigner remains unavailable/fail-closed;
+4. RemoteSigner request/response binding is deterministic and domain-bound;
+5. local operator keys and peer-majority/gossip cannot satisfy RemoteSigner policy;
+6. RemoteSigner integrates with custody composition at release-helper/library level;
+7. MainNet peer-driven apply remains refused;
+8. no real RemoteSigner/KMS/HSM/governance execution/validator-set rotation is claimed.
+
+Strict scope:
+
+* Release-binary evidence only.
+* Use real `target/release/qbind-node`.
+* Use release-built helper(s) to exercise the Run 194 RemoteSigner boundary.
+* No production source change unless a tiny harness-only fix is required.
+* No real RemoteSigner backend.
+* No networked signer service.
+* No real KMS implementation.
+* No real HSM implementation.
+* No cloud KMS integration.
+* No PKCS#11 integration.
+* No MainNet peer-driven apply enablement.
+* No governance execution engine.
+* No real on-chain proof verifier.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No marker schema change.
+* No sequence-file schema change.
+* No trust-bundle core schema change.
+* No wire/schema change.
+* Do not weaken Runs 070, 130–194.
+* Do not claim full C4 or C5 closure.
+
+Required deliverables:
+
+1. Add release-binary helper:
+   `crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`
+
+2. Add release-binary harness:
+   `scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh`
+
+3. Add evidence archive:
+   `docs/devnet/run_195_remote_authority_signer_boundary_release_binary/`
+
+4. Add canonical evidence report:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_195.md`
+
+5. Update narrowly:
+
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+6. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md` before finalizing.
+
+Required release-built helper matrix:
+The helper must exercise the Run 194 RemoteSigner corpus in release mode.
+
+Accepted / compatible cases:
+A1. fixture loopback RemoteSigner accepted under explicit fixture policy on DevNet.
+
+A2. fixture loopback RemoteSigner accepted under explicit fixture policy on TestNet.
+
+A3. RemoteSigner request/response binds environment, chain, genesis, authority root, lifecycle action, candidate digest, authority-domain sequence.
+
+A4. custody metadata with `AuthorityCustodyClass::RemoteSigner` routes into the RemoteSigner boundary.
+
+A5. combined lifecycle + governance + custody + fixture RemoteSigner accepted for DevNet helper path.
+
+A6. GenesisBound / EmergencyCouncil / OnChainGovernance proof behavior remains unchanged when RemoteSigner policy is Disabled.
+
+A7. production RemoteSigner boundary callable and returns typed unavailable outcome.
+
+Required rejection cases:
+R1. RemoteSigner rejected under Disabled policy.
+
+R2. fixture loopback rejected under ProductionRemoteSignerRequired.
+
+R3. fixture loopback rejected under MainnetProductionRemoteSignerRequired.
+
+R4. production RemoteSigner rejected as unavailable.
+
+R5. MainNet production RemoteSigner rejected as unavailable.
+
+R6. wrong environment rejected.
+
+R7. wrong chain rejected.
+
+R8. wrong genesis rejected.
+
+R9. wrong authority root rejected.
+
+R10. wrong custody key id rejected.
+
+R11. wrong signing-key fingerprint rejected.
+
+R12. wrong lifecycle action rejected.
+
+R13. wrong candidate digest rejected.
+
+R14. wrong authority-domain sequence rejected.
+
+R15. wrong request digest rejected.
+
+R16. stale/replayed request rejected.
+
+R17. stale/replayed response rejected.
+
+R18. expired attestation rejected.
+
+R19. expired response rejected.
+
+R20. unsupported suite rejected.
+
+R21. invalid signature / placeholder signature rejected.
+
+R22. malformed request rejected.
+
+R23. malformed response rejected.
+
+R24. local operator key cannot satisfy RemoteSigner policy.
+
+R25. peer majority / gossip count cannot satisfy RemoteSigner policy.
+
+R26. RemoteSigner valid but custody metadata invalid rejected.
+
+R27. custody valid but RemoteSigner response invalid rejected.
+
+R28. lifecycle valid + governance valid + custody valid + production RemoteSigner unavailable rejected.
+
+R29. MainNet peer-driven apply remains refused even with fixture loopback RemoteSigner.
+
+R30. validation-only rejection remains non-mutating.
+
+R31. mutating preflight rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+Required real binary checks:
+Use real `target/release/qbind-node` to prove:
+
+* MainNet peer-driven apply remains refused.
+* Default behavior does not expose or enable production RemoteSigner.
+* No `remote signer production active` / `RemoteSigner enabled` / `RemoteSigner backend connected` claim is emitted.
+* No KMS/HSM active claim is emitted.
+* Existing custody policy selector behavior from Run 193 remains compatible.
+* Existing governance fixture proof paths remain compatible.
+* No governance execution claim is emitted.
+* No validator-set rotation claim is emitted.
+
+Required source/release reachability proof:
+The report must include source grep/call-site proof for:
+
+* `pqc_remote_authority_signer`;
+* `RemoteSignerPolicy`;
+* `RemoteSignerIdentity`;
+* `RemoteSignerRequest`;
+* `RemoteSignerResponse`;
+* `RemoteAuthoritySigner`;
+* `FixtureLoopbackRemoteSigner`;
+* `ProductionRemoteSigner`;
+* `validate_remote_signer`;
+* `validate_remote_signer_for_custody_class`;
+* `validate_lifecycle_governance_custody_and_remote_signer`;
+* MainNet / local-operator / peer-majority refusal helpers;
+* deterministic canonical digest entry points.
+
+Required mutation / no-mutation proof:
+For rejected RemoteSigner-boundary scenarios:
+
+* no Run 070 apply call;
+* no live trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* marker bytes unchanged where present;
+* sequence bytes unchanged where present;
+* no `.tmp` residue;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead.
+
+For accepted fixture RemoteSigner mutating compatibility scenarios, if any mutating compatibility path is exercised:
+
+* RemoteSigner request validation occurs before apply/mutation;
+* RemoteSigner response validation occurs before apply/mutation;
+* custody validation occurs before apply/mutation;
+* lifecycle validation occurs before apply/mutation;
+* governance validation occurs before apply/mutation where applicable;
+* Run 055 sequence commit succeeds if a mutating path is exercised;
+* v2 marker persists strictly after sequence commit.
+
+Required denylist:
+Across the run prove:
+
+* no MainNet apply;
+* no autonomous apply;
+* no apply on receipt;
+* no peer-majority authority;
+* no real RemoteSigner backend claim;
+* no RemoteSigner production active claim;
+* no real governance execution claim;
+* no real on-chain governance proof claim;
+* no KMS/HSM enabled or active claim;
+* no remote signer production active claim;
+* no validator-set rotation claim;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead;
+* no schema/wire/metric drift;
+* no marker write before sequence commit;
+* no sequence write on validation-only surfaces;
+* no marker write on validation-only surfaces.
+
+Required captured metadata:
+
+* qbind-node SHA-256 and ELF Build ID;
+* helper SHA-256 and ELF Build ID;
+* git commit hash;
+* rustc/cargo versions;
+* exact commands;
+* stdout/stderr logs;
+* per-scenario exit codes;
+* RemoteSigner fixture request/response paths and hashes;
+* marker/sequence JSON and SHA before/after where applicable;
+* data-dir inventories;
+* denylist grep results.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build --release -p qbind-node --bin qbind-node`
+* `cargo build --release -p qbind-node --example run_195_remote_authority_signer_boundary_release_binary_helper`
+* `bash scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_192_authority_custody_policy_selector_tests`
+* `cargo test -p qbind-node --test run_190_authority_custody_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_184_onchain_governance_payload_carrying_tests`
+* `cargo test -p qbind-node --test run_182_onchain_governance_production_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_180_onchain_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
+* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
+* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
+* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If exact test names differ, locate nearest existing targets and document exact commands/results.
+
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_195.md` must state:
+
+* Run 195 is release-binary RemoteSigner production-custody boundary evidence.
+* No real RemoteSigner backend is implemented.
+* Fixture loopback RemoteSigner is DevNet/TestNet evidence-only.
+* Production RemoteSigner remains unavailable/fail-closed.
+* RemoteSigner cannot enable MainNet peer-driven apply.
+* KMS/HSM remain unimplemented.
+* governance execution remains unimplemented.
+* real on-chain proof verification remains unimplemented.
+* validator-set rotation remains open.
+* existing custody/governance proof paths remain compatible.
+* full C4 remains open.
+* C5 remains open.
+
+Acceptance criteria:
+Run 195 is acceptable only if:
+
+1. Release-built helper proves the Run 194 RemoteSigner corpus.
+2. Real `target/release/qbind-node` confirms MainNet peer-driven apply remains refused.
+3. Fixture loopback RemoteSigner remains DevNet/TestNet evidence-only.
+4. Production RemoteSigner remains unavailable/fail-closed.
+5. RemoteSigner request/response binding is deterministic and domain-bound.
+6. Local operator / peer majority cannot satisfy RemoteSigner policy.
+7. RemoteSigner integrates with custody composition at release-helper/library level.
+8. Rejected RemoteSigner-boundary cases produce no mutation.
+9. Existing custody/governance paths remain compatible.
+10. No real RemoteSigner / KMS / HSM / governance execution / validator-set rotation claim is made.
+11. No full C4 or C5 closure is claimed.

@@ -4317,3 +4317,61 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`,
 `docs/devnet/run_193_authority_custody_policy_release_binary/`,
 `scripts/devnet/run_193_authority_custody_policy_release_binary.sh`,
 and `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`.
+
+## Run 194 — source/test RemoteSigner production-custody interface boundary
+
+Run 194 is **source/test RemoteSigner production-custody interface
+boundary** work. It replaces the vague Run 188
+`AuthorityCustodyClass::RemoteSigner` placeholder — until now failed
+closed as `RemoteSignerUnavailable` — with a precise, typed
+remote-signer custody boundary that a later run can implement safely.
+The new module `crates/qbind-node/src/pqc_remote_authority_signer.rs`
+defines a `RemoteSignerIdentity`, a domain-bound `RemoteSignerRequest`
+/ `RemoteSignerResponse` pair (deterministic domain-separated SHA3-256
+`canonical_digest` binding environment / chain / genesis / authority
+root / lifecycle action / candidate digest / authority-domain sequence
+/ signing-key fingerprints / governance proof digest / custody
+attestation digest / anti-replay nonces / timestamp), a
+`RemoteSignerPolicy` (`Disabled` default / `FixtureLoopbackAllowed` /
+`ProductionRemoteSignerRequired` /
+`MainnetProductionRemoteSignerRequired`), a precise
+`RemoteSignerOutcome` reject taxonomy, a pure `RemoteAuthoritySigner`
+trait, a DevNet/TestNet-only `FixtureLoopbackRemoteSigner`, a
+fail-closed `ProductionRemoteSigner`, the pure `validate_remote_signer`
+verifier, the `validate_remote_signer_for_custody_class` router that
+dispatches `AuthorityCustodyClass::RemoteSigner` into the boundary, and
+the pure `validate_lifecycle_governance_custody_and_remote_signer`
+composition helper layered over the Run 188 custody validator.
+
+In the trust-anchor authority model, the remote signer is a
+custody-held bundle-signing authority: it is never satisfiable by a
+local operator key (`LocalOperatorKeyCannotSatisfyRemoteSigner`) or by
+a peer majority / gossip count
+(`peer_majority_cannot_satisfy_remote_signer`). The default policy is
+`RemoteSignerPolicy::Disabled` and fails every request closed. The
+fixture loopback remote signer is DevNet/TestNet source/test only and
+is rejected on a MainNet trust domain
+(`FixtureLoopbackRejectedForMainNet`). Production RemoteSigner remains
+unavailable / fail-closed. RemoteSigner does not enable MainNet
+peer-driven apply: the Run 147 / 148 / 152 FATAL refusal remains intact
+even when a fixture loopback remote signer signs successfully, via
+`mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary`.
+
+Run 194 introduces no production source change, no CLI / env / sidecar
+/ authority-marker / sequence-file / trust-bundle core / wire / metric
+/ schema change. No real RemoteSigner backend is implemented; no
+networked signer service; KMS / HSM remain unimplemented; no real
+on-chain governance proof verifier; no governance execution; no
+validator-set rotation; no MainNet peer-driven apply enablement; no
+autonomous apply; no apply-on-receipt; no peer-majority authority; no
+cloud-KMS / PKCS#11 integration; and no weakening of Runs 070,
+130–193. Static production source-code anchors remain rejected. Local
+config alone remains insufficient for MainNet bundle-signing
+authority. Local peer majority remains insufficient for MainNet
+bundle-signing authority. Release-binary RemoteSigner boundary
+evidence is deferred to **Run 195**. Full C4 remains OPEN. C5 remains
+OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_194.md`,
+`crates/qbind-node/src/pqc_remote_authority_signer.rs`, and
+`crates/qbind-node/tests/run_194_remote_authority_signer_boundary_tests.rs`.

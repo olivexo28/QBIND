@@ -358,6 +358,28 @@ pub mod pqc_authority_custody_payload_carrying;
 // on-chain proof verification, no validator-set rotation. Release-
 // binary custody-policy selector evidence is deferred to Run 193.
 pub mod pqc_authority_custody_policy_surface;
+// Run 194 — source/test RemoteSigner production-custody interface
+// boundary. Replaces the vague Run 188
+// `AuthorityCustodyClass::RemoteSigner` placeholder with a precise,
+// typed remote-signer custody boundary: `RemoteSignerIdentity`,
+// `RemoteSignerRequest` (with a deterministic SHA3-256
+// `canonical_digest`), `RemoteSignerResponse`, a `RemoteSignerPolicy`
+// (`Disabled` default / `FixtureLoopbackAllowed` /
+// `ProductionRemoteSignerRequired` /
+// `MainnetProductionRemoteSignerRequired`), a precise
+// `RemoteSignerOutcome` reject taxonomy, a pure `RemoteAuthoritySigner`
+// trait with a DevNet/TestNet-only `FixtureLoopbackRemoteSigner` and a
+// fail-closed `ProductionRemoteSigner`, a pure `validate_remote_signer`
+// verifier, custody-class routing
+// (`validate_remote_signer_for_custody_class`), and a pure
+// `validate_lifecycle_governance_custody_and_remote_signer` composition
+// helper. Default policy is `RemoteSignerPolicy::Disabled`. Source/test
+// only — no real remote signer backend, no networked signer service, no
+// real KMS/HSM/cloud-KMS/PKCS#11 backend, no MainNet apply enablement,
+// no governance execution, no real on-chain proof verification, no
+// validator-set rotation. Release-binary RemoteSigner boundary evidence
+// is deferred to Run 195.
+pub mod pqc_remote_authority_signer;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
