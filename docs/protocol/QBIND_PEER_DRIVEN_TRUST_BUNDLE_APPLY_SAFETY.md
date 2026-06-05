@@ -2198,3 +2198,52 @@ OPEN.
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_194.md`,
 `crates/qbind-node/src/pqc_remote_authority_signer.rs`, and
 `crates/qbind-node/tests/run_194_remote_authority_signer_boundary_tests.rs`.
+
+## Run 195 — release-binary RemoteSigner production-custody boundary evidence
+
+Run 195 is **release-binary evidence** for the Run 194 RemoteSigner
+production-custody interface boundary. It exercises the Run 194 typed
+RemoteSigner surface on real `target/release/qbind-node` (seven
+release-binary scenarios) and through the release-built helper
+`crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`,
+which drives the Run 194 A1–A7 / R1–R31 corpus end-to-end in **release
+mode** through the production library symbols
+`pqc_remote_authority_signer::*` layered above the Run 192 / 190 / 188
+custody surfaces. Reproduce with
+`bash scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh`.
+
+Relative to the peer-driven trust-bundle apply safety contract, Run 195
+changes nothing: it adds no production call site, no wire format, no
+schema, and no apply path; the helper only **reads** the typed surface
+and is a Cargo example that is dead code in the release binary's runtime.
+Run 194 added no new CLI flag and no new env var, so real
+`target/release/qbind-node --help` and
+`--print-genesis-hash --env {devnet,testnet,mainnet}` expose no
+RemoteSigner / KMS / HSM / governance-execution / validator-set-rotation
+enablement claim and no MainNet peer-driven apply enablement claim. The
+Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal remains
+intact even with the Run 193 `mainnet-production-custody-required`
+selector and the governance fixture selector armed on MainNet (S4, S7),
+and at the typed boundary via
+`mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary`.
+Local operator keys and a peer majority can never satisfy a remote signer
+policy. Rejected RemoteSigner / custody / lifecycle / routing scenarios
+produce no Run 070 call, no live trust swap, no session eviction, no
+sequence write, and no marker write (no_mutation_evidence.txt).
+
+No real RemoteSigner backend is implemented; the fixture loopback remote
+signer remains DevNet/TestNet evidence-only; production RemoteSigner
+remains unavailable / fail-closed; RemoteSigner does not enable MainNet
+peer-driven apply; KMS / HSM remain unimplemented; governance execution
+remains unimplemented; real on-chain proof verification remains
+unimplemented; validator-set rotation remains open. No autonomous apply,
+no apply-on-receipt, no peer-majority authority, no cloud-KMS / PKCS#11
+integration, no DummySig / DummyKem / DummyAead activation, no fallback to
+`--p2p-trusted-root`, and no weakening of Runs 070, 130–194. Full C4
+remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_195.md`,
+`docs/devnet/run_195_remote_authority_signer_boundary_release_binary/`,
+`scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh`,
+and
+`crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`.
