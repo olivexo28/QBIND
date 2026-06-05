@@ -6847,3 +6847,58 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`,
 `docs/devnet/run_193_authority_custody_policy_release_binary/`,
 `scripts/devnet/run_193_authority_custody_policy_release_binary.sh`,
 and `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`.
+
+## Run 194 — source/test RemoteSigner production-custody interface boundary
+
+Run 194 is **source/test RemoteSigner production-custody interface
+boundary** work. It replaces the vague Run 188
+`AuthorityCustodyClass::RemoteSigner` placeholder with a precise,
+typed remote-signer custody boundary in
+`crates/qbind-node/src/pqc_remote_authority_signer.rs`:
+`RemoteSignerIdentity`, `RemoteSignerRequest` (deterministic
+domain-separated SHA3-256 `canonical_digest`), `RemoteSignerResponse`,
+a `RemoteSignerPolicy` (`Disabled` default / `FixtureLoopbackAllowed`
+/ `ProductionRemoteSignerRequired` /
+`MainnetProductionRemoteSignerRequired`), a precise
+`RemoteSignerOutcome` reject taxonomy, a pure `RemoteAuthoritySigner`
+trait, a DevNet/TestNet-only `FixtureLoopbackRemoteSigner`, a
+fail-closed `ProductionRemoteSigner`, the pure `validate_remote_signer`
+verifier, custody-class routing
+(`validate_remote_signer_for_custody_class`), and the pure
+`validate_lifecycle_governance_custody_and_remote_signer` composition
+helper layered over the Run 188 boundary.
+
+Operator-relevant invariants:
+
+* The default policy is `RemoteSignerPolicy::Disabled`; every request
+  fails closed until a policy is explicitly selected.
+* **No real RemoteSigner backend is implemented.** There is no
+  networked signer service, no real KMS, no real HSM, no cloud-KMS
+  integration, and no PKCS#11 integration.
+* The fixture loopback remote signer is **DevNet/TestNet source/test
+  only**; it is rejected on a MainNet trust domain
+  (`FixtureLoopbackRejectedForMainNet`).
+* Production RemoteSigner remains **unavailable / fail-closed**: the
+  `ProductionRemoteSigner` is callable but always returns
+  `ProductionRemoteSignerUnavailable`.
+* A local operator key and a peer majority can never satisfy a remote
+  signer policy.
+* RemoteSigner does **not** enable MainNet peer-driven apply. The
+  Run 147 / 148 / 152 FATAL MainNet refusal remains intact even when a
+  fixture loopback remote signer signs successfully, via
+  `mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary`
+  and the composition helper's MainNet preflight short-circuit.
+* Validation-only and mutating-preflight rejection paths produce no
+  mutation: no Run 070 call, no live trust swap, no session eviction,
+  no sequence write, and no marker write.
+* KMS/HSM remain unimplemented. Governance execution remains
+  unimplemented. Real on-chain proof verification remains
+  unimplemented. Validator-set rotation remains open.
+* Release-binary RemoteSigner boundary evidence is deferred to
+  **Run 195**. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_194.md`,
+`crates/qbind-node/src/pqc_remote_authority_signer.rs`, and
+`crates/qbind-node/tests/run_194_remote_authority_signer_boundary_tests.rs`
+for the full A1–A7 / R1–R31 source/test scenario matrix and the
+canonical PASS verdict.

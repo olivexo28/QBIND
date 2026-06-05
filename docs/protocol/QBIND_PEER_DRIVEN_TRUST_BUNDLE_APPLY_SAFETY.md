@@ -2148,3 +2148,53 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`,
 `docs/devnet/run_193_authority_custody_policy_release_binary/`,
 `scripts/devnet/run_193_authority_custody_policy_release_binary.sh`,
 and `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`.
+
+## Run 194 — source/test RemoteSigner production-custody interface boundary
+
+Run 194 is **source/test RemoteSigner production-custody interface
+boundary** work. It replaces the vague Run 188
+`AuthorityCustodyClass::RemoteSigner` placeholder with a precise,
+typed remote-signer custody boundary in
+`crates/qbind-node/src/pqc_remote_authority_signer.rs` — a
+`RemoteSignerIdentity`, a domain-bound `RemoteSignerRequest` /
+`RemoteSignerResponse` pair (deterministic SHA3-256 `canonical_digest`),
+a `RemoteSignerPolicy` (`Disabled` default / `FixtureLoopbackAllowed`
+/ `ProductionRemoteSignerRequired` /
+`MainnetProductionRemoteSignerRequired`), a precise
+`RemoteSignerOutcome` reject taxonomy, a pure `RemoteAuthoritySigner`
+trait with a DevNet/TestNet-only `FixtureLoopbackRemoteSigner` and a
+fail-closed `ProductionRemoteSigner`, the pure `validate_remote_signer`
+verifier, custody-class routing, and a pure
+`validate_lifecycle_governance_custody_and_remote_signer` composition
+helper layered over the Run 188 boundary.
+
+Relative to the peer-driven trust-bundle apply safety contract, Run 194
+changes nothing: it adds no production call site, no wire format, no
+schema, and no apply path. The Run 147 / 148 / 152 FATAL MainNet
+peer-driven apply refusal remains intact even when a fixture loopback
+remote signer signs successfully — a fixture loopback signer is
+rejected on a MainNet trust domain (`FixtureLoopbackRejectedForMainNet`)
+and the composition helper short-circuits a MainNet peer-driven-apply
+preflight to `MainNetPeerDrivenApplyRefused` via
+`mainnet_peer_driven_apply_remains_refused_under_remote_signer_boundary`.
+A local operator key and a peer majority can never satisfy a remote
+signer policy. Validation-only and mutating-preflight rejection paths
+produce no Run 070 call, no live trust swap, no session eviction, no
+sequence write, and no marker write.
+
+No real RemoteSigner backend is implemented; the fixture loopback
+remote signer is DevNet/TestNet source/test only; production
+RemoteSigner remains unavailable / fail-closed; RemoteSigner does not
+enable MainNet peer-driven apply; KMS / HSM remain unimplemented;
+governance execution remains unimplemented; real on-chain proof
+verification remains unimplemented; validator-set rotation remains
+open. No autonomous apply, no apply-on-receipt, no peer-majority
+authority, no cloud-KMS / PKCS#11 integration, no DummySig / DummyKem /
+DummyAead activation, no fallback to `--p2p-trusted-root`, and no
+weakening of Runs 070, 130–193. Release-binary RemoteSigner boundary
+evidence is deferred to **Run 195**. Full C4 remains OPEN. C5 remains
+OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_194.md`,
+`crates/qbind-node/src/pqc_remote_authority_signer.rs`, and
+`crates/qbind-node/tests/run_194_remote_authority_signer_boundary_tests.rs`.
