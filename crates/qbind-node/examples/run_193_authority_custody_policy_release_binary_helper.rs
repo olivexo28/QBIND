@@ -701,7 +701,7 @@ fn corpus() -> Vec<Scenario> {
         },
         Scenario {
             id: "A9_env_mainnet_production_required_refusal",
-            note: "env=mainnet-production-custody-required + MainNet trust domain => MainNet refusal/unavailable; peer-drain refuses MainNet ahead",
+            note: "env=mainnet-production-custody-required + MainNet trust domain + Kms placeholder => Kms validator fail-closes ahead of the policy gate (refusal preserved); peer-drain refuses MainNet ahead",
             selector: Selector::EnvOnly("mainnet-production-custody-required"),
             expected_policy: Some(MainnetProductionCustodyRequired),
             expected_parse_error: false,
@@ -711,7 +711,7 @@ fn corpus() -> Vec<Scenario> {
                 attestation_env: Mainnet,
             },
             surfaces: SurfaceSet::All,
-            expected: Some(Expect::CallsiteCustodyRejectedMainNetProductionUnavailable),
+            expected: Some(Expect::CallsiteCustodyRejectedKmsUnavailable),
             peer_drain_mainnet: true,
         },
         Scenario {
