@@ -1,4 +1,137 @@
-Run 193 — release-binary authority-custody policy selector evidence (placeholder)
-This file is overwritten by `scripts/devnet/run_193_authority_custody_policy_release_binary.sh`
-on every successful run. The committed copy is a placeholder so the
-evidence directory has a stable tracked file.
+Run 193 — release-binary authority-custody policy selector evidence
+git_commit: 6693b75ff573632167aa171ca350a96bbd38bd05
+
+build:
+  rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
+  cargo_version:      cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+  qbind_node_sha256:  3ed3f0910a442b5a912c86929bc2fc1670419afa4c2572c83020dc125bf6296a
+  qbind_node_buildid: BuildID[sha1]=0b68a14b7260f7c0e092a852210bb00d6b516248
+  helper_193_sha256:  bdb1c5cb7b586b96dc87453194bb5ebb8438f663073a2c462b110f3ea4ecb30e
+  helper_193_buildid: BuildID[sha1]=9c5fa589a23d24f25bcb6c7efcde897301564596
+
+release-binary scenario verdicts:
+  S1_help	rc=0
+  S2_default_devnet	rc=0
+  S3_env_devnet_fixture_only	rc=0
+  S4_cli_devnet_local_allowed	rc=0
+  S5_cli_over_env_precedence	rc=0
+  S6_invalid_selector	rc=1
+  S7_mainnet_production_custody_required	rc=0
+  S8_mainnet_fixture_and_policy_selector	rc=0
+
+release-helper verdicts:
+  helper_run_193	rc=0	verdict: PASS
+
+helper A1-A12 / R1-R29 corpus verdicts (release mode, production library symbols):
+  total_pass: 268
+  total_fail: 0
+  scenarios_pass: 212
+  scenarios_fail: 0
+  parser_pass: 12
+  parser_fail: 0
+  precedence_pass: 9
+  precedence_fail: 0
+  wrappers_pass: 12
+  wrappers_fail: 0
+  binding_mismatch_pass: 10
+  binding_mismatch_fail: 0
+  no_mutation_pass: 6
+  no_mutation_fail: 0
+  determinism_pass: 7
+  determinism_fail: 0
+
+denylist result:
+  verdict: PASS (all 26 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_192_authority_custody_policy_selector_tests	rc=0
+  test:run_190_authority_custody_payload_callsite_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_184_onchain_governance_payload_carrying_tests	rc=0
+  test:run_182_onchain_governance_production_callsite_wiring_tests	rc=0
+  test:run_180_onchain_governance_marker_integration_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_176_live_0x05_governance_proof_carrier_tests	rc=0
+  test:run_173_validation_only_governance_required_policy_tests	rc=0
+  test:run_171_governance_required_policy_selector_tests	rc=0
+  test:run_169_governance_proof_loader_surface_integration_tests	rc=0
+  test:run_167_governance_proof_carrier_tests	rc=0
+  test:run_165_governance_marker_integration_tests	rc=0
+  test:run_163_governance_authority_verifier_tests	rc=0
+  test:run_161_lifecycle_marker_integration_tests	rc=0
+  test:run_159_authority_signing_key_lifecycle_tests	rc=0
+  test:run_157_unified_testnet_fixture_universe_tests	rc=0
+  test:run_152_binary_reachable_peer_drain_plumbing_tests	rc=0
+  test:run_150_peer_driven_apply_drain_tests	rc=0
+  test:run_148_peer_driven_apply_devnet_tests	rc=0
+  test:run_142_live_inbound_0x05_v2_validation_tests	rc=0
+  test:run_134_reload_apply_v2_authority_marker_tests	rc=0
+  test:run_138_sighup_v2_authority_marker_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:pqc_authority_custody	rc=0
+  lib:pqc_authority_custody_policy_surface	rc=0
+
+honest_limits:
+  * default AuthorityCustodyPolicy::Disabled preserved when neither
+    CLI nor env selector is set;
+  * hidden CLI flag --p2p-trust-bundle-authority-custody-policy is
+    not advertised in normal --help (clap hide=true);
+  * env QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY activates
+    the selector when set; CLI-over-env precedence is deterministic;
+  * invalid selector values surface as typed
+    AuthorityCustodyPolicySelectorParseError (fail-closed);
+  * FixtureLocalKey / LocalOperatorKey custody remain DevNet/TestNet
+    evidence-only under explicit FixtureOnly / DevnetLocalAllowed /
+    TestnetLocalAllowed policies;
+  * fixture / local custody refused on MainNet at the typed
+    boundary (FixtureCustodyRejectedForMainNet /
+    LocalCustodyRejectedForMainNet) AHEAD of the policy gate;
+  * RemoteSigner / Kms / Hsm placeholders fail closed at the typed
+    validator (RemoteSignerUnavailable / KmsUnavailable /
+    HsmUnavailable) regardless of policy or environment;
+  * ProductionCustodyRequired / MainnetProductionCustodyRequired
+    always fail closed (ProductionCustodyUnavailable /
+    MainNetProductionCustodyUnavailable / placeholder-specific
+    Unavailable) in Run 193;
+  * MainNet peer-driven apply remains refused (Run 147 FATAL
+    invariant) at every binary surface — including with the
+    Run 192 hidden selector set to mainnet-production-custody-required
+    on both env and CLI and the Run 187 hidden fixture selector
+    armed — and at the typed custody boundary via
+    mainnet_peer_driven_apply_remains_refused_under_custody_boundary;
+  * no real KMS / HSM / cloud KMS / PKCS#11 / remote-signer backend
+    wired in Run 193;
+  * no real on-chain governance proof verifier / no governance
+    execution / no validator-set rotation / no autonomous apply /
+    no apply-on-receipt / no peer-majority authority;
+  * no schema/wire/metric drift (Run 193 is release-binary
+    evidence only);
+  * no marker write / no sequence write on validation-only surfaces;
+  * no fallback to --p2p-trusted-root;
+  * no active DummySig / DummyKem / DummyAead.
+
+verdict:
+  positive: real target/release/qbind-node preserves the Run 192
+  hidden authority-custody policy selector contract end-to-end.
+  Default AuthorityCustodyPolicy::Disabled is preserved when neither
+  CLI nor env selector is set. The hidden CLI flag is present in
+  the production CLI surface but not advertised in --help; the env
+  selector activates the typed policy when set; CLI-over-env
+  precedence is deterministic at the binary surface; an invalid
+  selector value is rejected fail-closed. The Run 193 release-built
+  helper exercises the full Run 192 A1-A12 / R1-R29 selector +
+  preflight wrapper corpus end-to-end through the production library
+  symbols pqc_authority_custody_policy_surface::* layered above
+  pqc_authority_custody_payload_carrying::* and
+  pqc_authority_custody::*, returning the expected typed outcomes.
+  MainNet peer-driven apply remains the Run 147 FATAL refusal even
+  with mainnet-production-custody-required armed on env+CLI and
+  with the Run 187 fixture selector armed; fixture / local custody
+  can never satisfy MainNet production custody; RemoteSigner / Kms /
+  Hsm placeholders fail closed regardless of policy or environment.
+  Real KMS / HSM / cloud KMS / PKCS#11 / remote-signer backends,
+  real on-chain governance proof verification, governance execution,
+  validator-set rotation, autonomous apply, apply-on-receipt, and
+  peer-majority authority all remain unimplemented. Full C4 and C5
+  remain OPEN.
