@@ -337,6 +337,27 @@ pub mod pqc_authority_custody;
 // validator-set rotation. Release-binary custody-metadata evidence is
 // deferred to Run 191.
 pub mod pqc_authority_custody_payload_carrying;
+// Run 192 — source/test hidden authority-custody policy selector and
+// production preflight integration. Adds typed selector parsers
+// (`authority_custody_policy_from_selector`,
+// `authority_custody_policy_env_selector`,
+// `authority_custody_policy_from_cli_or_env`) that resolve the hidden
+// CLI flag (`--p2p-trust-bundle-authority-custody-policy`, `hide =
+// true`) and the equivalent
+// `QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY` environment
+// variable into a Run 188 `AuthorityCustodyPolicy`, plus seven thin
+// per-surface preflight wrappers
+// (`preflight_v2_marker_authority_custody_for_*`) that bind the
+// resolved policy into the Run 190 callsite context for each of the
+// seven production v2 marker-decision preflight contexts (reload-
+// check, reload-apply, startup `--p2p-trust-bundle`, SIGHUP, local
+// peer-candidate-check, live inbound `0x05`, peer-driven drain).
+// Default policy remains `AuthorityCustodyPolicy::Disabled`. Source/
+// test only — no MainNet apply enablement, no real KMS/HSM/cloud-KMS/
+// PKCS#11/remote-signer backend, no governance execution, no real
+// on-chain proof verification, no validator-set rotation. Release-
+// binary custody-policy selector evidence is deferred to Run 193.
+pub mod pqc_authority_custody_policy_surface;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

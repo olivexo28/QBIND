@@ -2035,3 +2035,60 @@ See
 and `docs/devnet/run_191_authority_custody_payload_release_binary/`
 for the full release-binary scenario matrix, the regression test
 slice, and the canonical PASS verdict.
+
+## Run 192 — source/test hidden authority-custody policy selector and production preflight integration
+
+Run 192 adds, at source/test level only, the smallest hidden selector
+surface that lets a DevNet/TestNet evidence preflight context
+explicitly choose an `AuthorityCustodyPolicy` variant and threads the
+resolved policy into the seven Run 190 production v2 marker-decision
+preflight contexts (reload-check, reload-apply, startup
+`--p2p-trust-bundle`, SIGHUP, local peer-candidate-check, live
+inbound `0x05`, peer-driven drain). The default
+`AuthorityCustodyPolicy::Disabled` is preserved bit-for-bit; legacy
+no-custody payloads remain accepted exactly as in Run 190 / Run 191.
+
+The new module
+`crates/qbind-node/src/pqc_authority_custody_policy_surface.rs`
+exposes the env-var name
+`QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY_ENV`, the canonical
+selector tags (`disabled` / `fixture-only` / `devnet-local-allowed` /
+`testnet-local-allowed` / `production-custody-required` /
+`mainnet-production-custody-required`), the typed
+`AuthorityCustodyPolicySelectorParseError`, the pure parsers
+`authority_custody_policy_from_selector` /
+`authority_custody_policy_env_selector` /
+`authority_custody_policy_from_cli_or_env`, and seven thin
+per-surface preflight wrappers
+(`preflight_v2_marker_authority_custody_for_*`) that bind the
+resolved policy into the Run 190 `AuthorityCustodyCallsiteContext`
+and dispatch to the matching Run 190
+`route_loaded_authority_custody_attestation_to_*_callsite_decision`
+helper. The matching hidden CLI flag
+`--p2p-trust-bundle-authority-custody-policy <POLICY>` (clap
+`hide = true`) is added on `crates/qbind-node/src/cli.rs` as
+`Option<String>`. Either source is sufficient to choose a non-default
+policy; CLI wins when both are present; both absent preserves
+`Disabled`; invalid values are surfaced as a typed parse error and
+never silently downgrade to `Disabled`.
+
+Run 192 is **source/test only**. No real KMS / HSM / cloud-KMS /
+PKCS#11 / remote-signer backend is implemented. KMS / HSM /
+RemoteSigner placeholders remain fail-closed via the Run 188
+validator regardless of selector. Fixture / local custody remains
+DevNet/TestNet evidence-only and cannot satisfy MainNet production
+custody. The Run 147 / 148 / 152 FATAL MainNet peer-driven apply
+refusal at the peer-driven apply surface remains intact regardless
+of selector, attestation contents, or policy — including with
+`mainnet-production-custody-required` and metadata claiming
+KMS/HSM/RemoteSigner. Governance execution remains unimplemented.
+Real on-chain proof verification remains unimplemented. Validator-set
+rotation remains open. Release-binary custody-policy selector
+evidence is deferred to **Run 193**. Full C4 remains OPEN. C5
+remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_192.md`,
+`crates/qbind-node/src/pqc_authority_custody_policy_surface.rs`, and
+`crates/qbind-node/tests/run_192_authority_custody_policy_selector_tests.rs`
+for the full A1–A10 / R1–R29 source/test scenario matrix and the
+canonical PASS verdict.

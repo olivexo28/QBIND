@@ -888,6 +888,61 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_onchain_governance_fixture_allowed: bool,
 
+    /// Run 192 — hidden, **disabled-by-default** authority-custody
+    /// policy selector for the seven production v2 marker-decision
+    /// preflight contexts (reload-check / reload-apply / startup
+    /// `--p2p-trust-bundle` / SIGHUP / local peer-candidate-check /
+    /// live inbound `0x05` / peer-driven drain).
+    ///
+    /// Recognized values (case-insensitive):
+    ///
+    /// * `disabled` — default. Refuses every custody class. Old
+    ///   no-custody payloads remain accepted exactly as before
+    ///   Run 192.
+    /// * `fixture-only` — DevNet/TestNet evidence only. MainNet
+    ///   rejects fixture custody before it can satisfy production
+    ///   custody.
+    /// * `devnet-local-allowed` — DevNet only.
+    /// * `testnet-local-allowed` — TestNet only.
+    /// * `production-custody-required` — fails closed because no
+    ///   real KMS/HSM/RemoteSigner backend is implemented.
+    /// * `mainnet-production-custody-required` — fails closed; in
+    ///   addition, MainNet peer-driven apply remains the
+    ///   Run 147/148/152 FATAL refusal regardless of this selector.
+    ///
+    /// **Default behavior unchanged:** when this flag and the
+    /// `QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY` environment
+    /// variable are both absent, the resolved policy is
+    /// [`qbind_node::pqc_authority_custody::AuthorityCustodyPolicy::Disabled`]
+    /// — old no-custody v2 ratification sidecars remain bit-for-bit
+    /// compatible (Runs 134/136/138/142/148/150/152/161/165/167/169/
+    /// 170/178/180/184/186/188/190 invariants).
+    ///
+    /// **Precedence:** when both this CLI flag and the env var are
+    /// supplied, the CLI flag wins. Either source is sufficient.
+    /// Invalid / unknown values are surfaced as a typed
+    /// [`qbind_node::pqc_authority_custody_policy_surface::AuthorityCustodyPolicySelectorParseError`]
+    /// — the resolver never silently falls back to `Disabled` when an
+    /// explicit value is present but invalid.
+    ///
+    /// **NOT** a real KMS/HSM/cloud-KMS/PKCS#11/remote-signer backend,
+    /// **NOT** a governance execution engine, **NOT** a real on-chain
+    /// proof verifier, **NOT** a validator-set rotation primitive,
+    /// **NOT** an autonomous-apply / apply-on-receipt / peer-majority
+    /// authority claim, and **NOT** sufficient to enable MainNet peer-
+    /// driven apply.
+    ///
+    /// Run 192 is source/test selector wiring only. Release-binary
+    /// custody-policy selector evidence is deferred to Run 193. See
+    /// `task/RUN_192_TASK.txt` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_192.md`.
+    #[arg(
+        long = "p2p-trust-bundle-authority-custody-policy",
+        value_name = "POLICY",
+        hide = true
+    )]
+    pub p2p_trust_bundle_authority_custody_policy: Option<String>,
+
     /// Run 151 — hidden, **disabled-by-default** DevNet/TestNet-only
     /// **explicit local one-shot drain trigger** for the Run 150
     /// peer-driven apply drain controller
