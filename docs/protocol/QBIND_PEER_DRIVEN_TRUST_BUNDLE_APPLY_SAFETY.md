@@ -2092,3 +2092,59 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_192.md`,
 `crates/qbind-node/tests/run_192_authority_custody_policy_selector_tests.rs`
 for the full A1–A10 / R1–R29 source/test scenario matrix and the
 canonical PASS verdict.
+
+## Run 193 — release-binary authority-custody policy selector evidence
+
+Run 193 closes the Run 192-deferred release-binary boundary for the
+hidden authority-custody policy selector. The peer-driven apply
+six-phase fail-closed pipeline is unchanged at the protocol level —
+Run 193 introduces no new CLI / env / sidecar / authority-marker /
+sequence-file / trust-bundle core / wire / metric / schema change.
+What Run 193 captures, in **release mode**, is: real
+`target/release/qbind-node` preserves the Run 192 selector contract
+end-to-end (default `AuthorityCustodyPolicy::Disabled` when neither
+CLI nor env selector is set; hidden CLI flag absent from normal
+`--help`; env-only and CLI-only selectors each activate the typed
+policy without drifting any banner; CLI-over-env precedence
+deterministic; invalid selector values fail closed). The
+release-built helper
+`crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`
+exercises the Run 192 A1–A12 / R1–R29 selector + preflight wrapper
+corpus through the production library symbols
+`pqc_authority_custody_policy_surface::*`, layered above the Run 190
+typed payload-carrying surface and the Run 188 typed authority-
+custody boundary, and proves at the typed boundary that the seven
+per-surface preflight wrappers (`reload_check`, `reload_apply`,
+`startup_p2p_trust_bundle`, `sighup`, `local_peer_candidate_check`,
+`live_inbound_0x05`, `peer_driven_drain`) each route the resolved
+policy into the matching Run 190 callsite-decision helper without
+mutating any marker, sequence, trust-bundle, or wire field.
+
+The Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal at
+the peer-driven apply surface remains intact in Run 193 regardless of
+selector contents — including with `mainnet-production-custody-
+required` armed on env+CLI together with the Run 187 hidden fixture
+selector and metadata claiming KMS / HSM / RemoteSigner — both at
+the binary surface (S7, S8) and at the typed boundary via
+`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`.
+Fixture / local-operator custody remains DevNet / TestNet evidence-
+only and cannot satisfy MainNet production custody
+(`FixtureCustodyRejectedForMainNet` /
+`LocalCustodyRejectedForMainNet`). KMS / HSM / RemoteSigner
+placeholders remain fail-closed under every policy regardless of
+environment. The validation-only / propagation-only behaviour on the
+peer-driven drain surface is preserved bit-for-bit. Run 193 is
+**release-binary evidence only**: no production source change, no
+new wire format, no schema change, no real KMS / HSM / cloud-KMS /
+PKCS#11 / remote-signer backend, no real on-chain governance proof
+verifier, no governance execution, no validator-set rotation, no
+MainNet peer-driven apply enablement, no autonomous apply, no
+apply-on-receipt, no peer-majority authority, no DummySig / DummyKem
+/ DummyAead activation, no fallback to `--p2p-trusted-root`, and no
+weakening of Runs 070, 130–192. Full C4 remains OPEN. C5 remains
+OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`,
+`docs/devnet/run_193_authority_custody_policy_release_binary/`,
+`scripts/devnet/run_193_authority_custody_policy_release_binary.sh`,
+and `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`.

@@ -1,355 +1,97 @@
-Task: Run 193 — Release-Binary Authority Custody Policy Selector Evidence
+Task: Complete Run 193 Release-Binary Evidence Closure
 
-Current accepted state:
+Current state:
+Run 193 helper, harness, canonical report, archive scaffold, and doc updates are committed and pushed.
 
-* Run 188: source/test authority-custody boundary landed.
-* Run 189: release-binary authority custody-boundary evidence fully closed.
-* Run 190: source/test authority-custody metadata carrying and production-context routing landed.
-* Run 191: release-binary authority-custody metadata carrying evidence fully closed:
+However, the uploaded archive summary still contains placeholder text:
 
-  * real `target/release/qbind-node` preserves default `AuthorityCustodyPolicy::Disabled`;
-  * no custody selector was exposed at that time;
-  * release-built helper proved Run 190 A1–A10 / R1–R32 corpus;
-  * KMS/HSM/RemoteSigner placeholders fail closed;
-  * fixture/local custody cannot satisfy MainNet production custody;
-  * MainNet peer-driven apply remains refused.
-* Run 192: source/test hidden authority-custody policy selector landed:
+`Run 193 — release-binary authority-custody policy selector evidence (placeholder)`
 
-  * module `pqc_authority_custody_policy_surface.rs`;
-  * hidden CLI flag:
-    `--p2p-trust-bundle-authority-custody-policy <POLICY>`;
-  * env var:
-    `QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY=<POLICY>`;
-  * supported values:
-    `disabled`;
-    `fixture-only`;
-    `devnet-local-allowed`;
-    `testnet-local-allowed`;
-    `production-custody-required`;
-    `mainnet-production-custody-required`;
-  * CLI-over-env precedence;
-  * invalid values surface as typed parse errors;
-  * default remains `AuthorityCustodyPolicy::Disabled`;
-  * seven per-surface preflight wrappers route the resolved policy into Run 190 routing helpers;
-  * 46 tests passed;
-  * release-binary custody-policy selector evidence deferred to Run 193.
-* No real KMS/HSM/cloud-KMS/PKCS#11/RemoteSigner backend exists.
-* governance execution remains unimplemented.
-* real on-chain proof verification remains unimplemented.
-* validator-set rotation remains open.
-* MainNet peer-driven apply remains refused.
-* full C4 remains open.
-* C5 remains open.
+and says:
+
+`This file is overwritten by scripts/devnet/run_193_authority_custody_policy_release_binary.sh on every successful run.`
+
+Therefore Run 193 is not release-binary-closed yet.
 
 Objective:
-Produce release-binary evidence that real `target/release/qbind-node` surfaces exercise the hidden authority-custody policy selector from Run 192 and route the selected policy into production preflight contexts.
-
-This run must prove:
-
-1. default behavior remains `AuthorityCustodyPolicy::Disabled`;
-2. hidden CLI selector works;
-3. env selector works;
-4. CLI-over-env precedence is deterministic;
-5. invalid selector values fail closed;
-6. selected policy reaches production preflight contexts;
-7. fixture/local custody metadata passes only where policy allows;
-8. KMS/HSM/RemoteSigner placeholders remain fail-closed;
-9. MainNet peer-driven apply remains refused even with `mainnet-production-custody-required` and metadata claiming KMS/HSM;
-10. no real KMS/HSM/RemoteSigner/governance execution/validator-set rotation is claimed.
+Execute the Run 193 release-binary harness in a build environment, overwrite the placeholder `summary.txt` with real build provenance and verdicts, and update the canonical report only if the actual run differs from the drafted claims.
 
 Strict scope:
 
-* Release-binary evidence only.
-* Use real `target/release/qbind-node`.
-* Use release-built helper(s) to mint custody-carrying sidecars / peer-candidate material.
-* No production source change unless a tiny harness-only fix is required.
-* No real KMS implementation.
-* No real HSM implementation.
-* No cloud KMS integration.
-* No PKCS#11 integration.
-* No remote signer production integration.
-* No MainNet peer-driven apply enablement.
-* No governance execution engine.
-* No real on-chain proof verifier.
-* No validator-set rotation.
-* No autonomous apply.
-* No automatic apply on receipt.
-* No peer-majority authority.
-* No schema/wire change.
-* No authority-marker schema change.
-* No sequence-file schema change.
-* No trust-bundle core schema change.
-* Do not weaken Runs 070, 130–192.
+* Execution/evidence closure only.
+* Do not add production source.
+* Do not change CLI behavior.
+* Do not change schema/wire/metric behavior.
+* Do not enable MainNet peer-driven apply.
+* Do not implement real KMS.
+* Do not implement real HSM.
+* Do not implement cloud KMS.
+* Do not implement PKCS#11.
+* Do not implement remote signer production integration.
+* Do not implement governance execution.
+* Do not implement real on-chain proof verification.
+* Do not implement validator-set rotation.
 * Do not claim full C4 or C5 closure.
 
-Required deliverables:
-
-1. Add release-binary helper:
-   `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`
-
-2. Add release-binary harness:
-   `scripts/devnet/run_193_authority_custody_policy_release_binary.sh`
-
-3. Add evidence archive:
-   `docs/devnet/run_193_authority_custody_policy_release_binary/`
-
-4. Add canonical evidence report:
-   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`
-
-5. Update narrowly:
-
-   * `docs/whitepaper/contradiction.md`
-   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
-   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
-   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
-
-6. Crosscheck all new/modified code and docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md` before finalizing.
-
-Required release-built helper matrix:
-The helper must exercise the Run 192 custody-policy selector and Run 190 custody payload/call-site routing in release mode.
-
-Accepted / compatible selector cases:
-A1. unset CLI/env resolves to `AuthorityCustodyPolicy::Disabled`.
-
-A2. CLI `disabled` resolves to Disabled.
-
-A3. env `disabled` resolves to Disabled.
-
-A4. CLI `fixture-only` resolves to FixtureOnly and accepts DevNet fixture custody metadata.
-
-A5. env `fixture-only` resolves to FixtureOnly and accepts TestNet fixture custody metadata.
-
-A6. CLI `devnet-local-allowed` resolves to DevnetLocalAllowed and accepts DevNet local-operator custody metadata.
-
-A7. env `testnet-local-allowed` resolves to TestnetLocalAllowed and accepts TestNet local-operator custody metadata.
-
-A8. CLI `production-custody-required` resolves to ProductionCustodyRequired and reaches KMS/HSM/RemoteSigner placeholder unavailable outcome.
-
-A9. env `mainnet-production-custody-required` resolves to MainnetProductionCustodyRequired and reaches MainNet production-custody unavailable / refusal outcome.
-
-A10. CLI-over-env precedence is deterministic:
-
-* env sets `fixture-only`;
-* CLI sets `disabled`;
-* resolved policy is Disabled.
-
-A11. no-custody payload remains compatible under default Disabled.
-
-A12. GenesisBound / EmergencyCouncil / OnChainGovernance proof paths remain compatible when custody policy is Disabled.
-
-Required rejection cases:
-R1. invalid CLI selector value rejected with typed parse error.
-
-R2. invalid env selector value rejected with typed parse error.
-
-R3. unrelated CLI/env does not enable custody policy.
-
-R4. no-custody payload rejected under FixtureOnly.
-
-R5. no-custody payload rejected under DevnetLocalAllowed.
-
-R6. fixture custody rejected under ProductionCustodyRequired.
-
-R7. local operator custody rejected under ProductionCustodyRequired.
-
-R8. fixture custody rejected on MainNet.
-
-R9. local custody rejected on MainNet.
-
-R10. DevNet local custody rejected under TestnetLocalAllowed.
-
-R11. TestNet local custody rejected under DevnetLocalAllowed.
-
-R12. KMS placeholder rejected as unavailable under ProductionCustodyRequired.
-
-R13. HSM placeholder rejected as unavailable under ProductionCustodyRequired.
-
-R14. RemoteSigner placeholder rejected as unavailable under ProductionCustodyRequired.
-
-R15. malformed custody metadata rejected.
-
-R16. wrong environment rejected.
-
-R17. wrong chain rejected.
-
-R18. wrong genesis rejected.
-
-R19. wrong authority root rejected.
-
-R20. wrong signing-key fingerprint rejected.
-
-R21. wrong candidate digest rejected.
-
-R22. wrong authority-domain sequence rejected.
-
-R23. expired attestation rejected.
-
-R24. custody key id mismatch rejected.
-
-R25. unsupported custody suite rejected.
-
-R26. validation-only rejection writes no marker and no sequence.
-
-R27. mutating rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
-
-R28. invalid live inbound `0x05` custody metadata candidate is not propagated, staged, or applied, if live surface is included.
-
-R29. MainNet peer-driven apply remains refused even with MainnetProductionCustodyRequired and metadata claiming KMS/HSM.
-
-Required real binary checks:
-Use real `target/release/qbind-node` to prove:
-
-* hidden CLI flag is present but hidden from normal help, if feasible to check.
-* env selector activates custody policy.
-* CLI selector activates custody policy.
-* CLI-over-env precedence works.
-* invalid selector value fails closed.
-* MainNet peer-driven apply remains refused.
-* default behavior does not expose or enable KMS/HSM/RemoteSigner custody.
-* no `KMS/HSM enabled` / `KMS/HSM active` / `remote signer production active` claim is emitted.
-* no real governance execution claim is emitted.
-* no validator-set rotation claim is emitted.
-* existing no-custody and existing governance fixture paths remain compatible.
-
-Required source/release reachability proof:
-The report must include source grep/call-site proof for:
-
-* `pqc_authority_custody_policy_surface`;
-* `QBIND_P2P_TRUST_BUNDLE_AUTHORITY_CUSTODY_POLICY`;
-* `p2p_trust_bundle_authority_custody_policy`;
-* `authority_custody_policy_from_selector`;
-* `authority_custody_policy_from_cli_or_env`;
-* seven per-surface custody-policy preflight wrappers;
-* `AuthorityCustodyPolicy::{Disabled, FixtureOnly, DevnetLocalAllowed, TestnetLocalAllowed, ProductionCustodyRequired, MainnetProductionCustodyRequired}`;
-* Run 190 custody payload routing helpers;
-* KMS/HSM/RemoteSigner unavailable variants;
-* MainNet custody refusal helper.
-
-Required mutation / no-mutation proof:
-For rejected custody-policy scenarios:
-
-* no Run 070 apply call;
-* no live trust swap;
-* no session eviction;
-* no sequence write;
-* no marker write;
-* marker bytes unchanged where present;
-* sequence bytes unchanged where present;
-* no `.tmp` residue;
-* no fallback to `--p2p-trusted-root`;
-* no active DummySig / DummyKem / DummyAead.
-
-For any accepted fixture/local mutating compatibility scenario:
-
-* selector resolution occurs before custody metadata parse;
-* custody metadata parse occurs before marker decision;
-* custody validation occurs before apply/mutation;
-* lifecycle validation occurs before apply/mutation;
-* governance validation occurs before apply/mutation where applicable;
-* Run 055 sequence commit succeeds if a mutating path is exercised;
-* v2 marker persists strictly after sequence commit.
-
-Required denylist:
-Across the run prove:
-
-* no MainNet apply;
-* no autonomous apply;
-* no apply on receipt;
-* no peer-majority authority;
-* no real governance execution claim;
-* no real on-chain governance proof claim;
-* no KMS/HSM enabled or active claim;
-* no remote signer production active claim;
-* no validator-set rotation claim;
-* no fallback to `--p2p-trusted-root`;
-* no active DummySig / DummyKem / DummyAead;
-* no schema/wire/metric drift;
-* no marker write before sequence commit;
-* no sequence write on validation-only surfaces;
-* no marker write on validation-only surfaces.
-
-Required captured metadata:
-
-* qbind-node SHA-256 and ELF Build ID;
-* helper SHA-256 and ELF Build ID;
-* git commit hash;
-* rustc/cargo versions;
-* exact commands;
-* stdout/stderr logs;
-* per-scenario exit codes;
-* custody policy values;
-* custody payload / sidecar fixture paths and hashes;
-* marker/sequence JSON and SHA before/after where applicable;
-* data-dir inventories;
-* denylist grep results.
-
-Validation commands:
+Required commands:
 Run at minimum:
 
-* `cargo build --release -p qbind-node --bin qbind-node`
-* `cargo build --release -p qbind-node --example run_193_authority_custody_policy_release_binary_helper`
-* `bash scripts/devnet/run_193_authority_custody_policy_release_binary.sh`
-* `cargo test -p qbind-node --test run_192_authority_custody_policy_selector_tests`
-* `cargo test -p qbind-node --test run_190_authority_custody_payload_callsite_tests`
-* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
-* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
-* `cargo test -p qbind-node --test run_184_onchain_governance_payload_carrying_tests`
-* `cargo test -p qbind-node --test run_182_onchain_governance_production_callsite_wiring_tests`
-* `cargo test -p qbind-node --test run_180_onchain_governance_marker_integration_tests`
-* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
-* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
-* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
-* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
-* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
-* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
-* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
-* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
-* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
-* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
-* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
-* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
-* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
-* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
-* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
-* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
-* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
-* `cargo test -p qbind-node --lib pqc_authority`
-* `cargo test -p qbind-node --lib`
+```bash
+cargo build --release -p qbind-node --bin qbind-node
+cargo build --release -p qbind-node --example run_193_authority_custody_policy_release_binary_helper
+bash scripts/devnet/run_193_authority_custody_policy_release_binary.sh
+```
 
-If exact test names differ, locate nearest existing targets and document exact commands/results.
+Then confirm the harness ran the required regression matrix, or run any missing regression commands manually and record them.
 
-Documentation requirements:
-`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md` must state:
+Required evidence updates:
 
-* Run 193 is release-binary authority-custody policy selector evidence.
-* Default remains `AuthorityCustodyPolicy::Disabled`.
-* Hidden CLI/env selectors activate custody policies.
-* CLI-over-env precedence is deterministic.
-* Invalid values fail closed.
-* Fixture/local custody remains DevNet/TestNet evidence-only.
-* Fixture/local custody cannot satisfy MainNet production custody.
-* KMS/HSM/RemoteSigner placeholders remain fail-closed.
-* MainNet peer-driven apply remains refused.
-* No real KMS/HSM/cloud-KMS/PKCS#11/remote-signer backend is implemented.
-* governance execution remains unimplemented.
-* real on-chain proof verification remains unimplemented.
-* validator-set rotation remains open.
-* existing no-custody and governance fixture paths remain compatible.
-* full C4 remains open.
-* C5 remains open.
+1. Ensure:
+   `docs/devnet/run_193_authority_custody_policy_release_binary/summary.txt`
+   no longer contains:
 
-Acceptance criteria:
+   * `(placeholder)`
+   * `This file is overwritten`
+   * `evidence directory has a stable tracked file`
+
+2. The real summary must include:
+
+   * git commit;
+   * qbind-node SHA-256;
+   * qbind-node ELF Build ID;
+   * helper SHA-256;
+   * helper ELF Build ID;
+   * rustc/cargo versions;
+   * real S1–S8 binary scenario verdicts;
+   * helper A1–A12 / R1–R29 verdicts;
+   * regression verdicts;
+   * denylist result;
+   * final verdict.
+
+3. Confirm:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`
+   matches the actual harness result.
+
+4. If any scenario fails or is skipped, update the report honestly:
+
+   * mark partial-positive if needed;
+   * identify exact blocker;
+   * do not claim release-binary closure if the real binary did not prove it.
+
+Required acceptance checks:
 Run 193 is acceptable only if:
 
-1. Real release binaries exercise the hidden authority-custody policy selector.
-2. Default Disabled remains proven.
-3. CLI selector and env selector both work.
-4. CLI-over-env precedence is proven.
-5. Invalid selector values fail closed.
-6. Valid DevNet/TestNet fixture/local custody metadata passes only where selected policy allows.
-7. KMS/HSM/RemoteSigner placeholders remain fail-closed.
-8. MainNet peer-driven apply remains refused even with MainnetProductionCustodyRequired and metadata claiming KMS/HSM.
-9. Rejected custody-policy cases produce no mutation.
-10. Existing governance proof paths remain compatible.
-11. No real KMS/HSM / governance execution / real on-chain proof / validator-set rotation claim is made.
-12. No full C4 or C5 closure is claimed.
+1. the real harness was executed;
+2. `summary.txt` contains a real verdict, not the placeholder;
+3. real release binaries exercise the hidden authority-custody policy selector;
+4. default Disabled remains proven;
+5. CLI selector and env selector both work;
+6. CLI-over-env precedence is proven;
+7. invalid selector values fail closed;
+8. valid DevNet/TestNet fixture/local custody metadata passes only where selected policy allows;
+9. KMS/HSM/RemoteSigner placeholders remain fail-closed;
+10. MainNet peer-driven apply remains refused even with MainnetProductionCustodyRequired and metadata claiming KMS/HSM;
+11. rejected custody-policy cases produce no mutation;
+12. existing governance proof paths remain compatible;
+13. no real KMS/HSM / governance execution / real on-chain proof / validator-set rotation claim is made;
+14. full C4 and C5 remain open.

@@ -1,0 +1,4 @@
+Run 193 — release-binary authority-custody policy selector evidence (placeholder)
+This file is overwritten by `scripts/devnet/run_193_authority_custody_policy_release_binary.sh`
+on every successful run. The committed copy is a placeholder so the
+evidence directory has a stable tracked file.

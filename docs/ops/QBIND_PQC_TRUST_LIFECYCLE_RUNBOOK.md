@@ -6795,3 +6795,55 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_192.md`,
 `crates/qbind-node/tests/run_192_authority_custody_policy_selector_tests.rs`
 for the full A1–A10 / R1–R29 source/test scenario matrix and the
 canonical PASS verdict.
+
+## Run 193 — release-binary authority-custody policy selector evidence
+
+Run 193 closes the Run 192-deferred release-binary boundary for the
+hidden authority-custody policy selector. Operators get **no new CLI
+surface** in Run 193: the selector and env var were already added in
+Run 192, the selector remains hidden in normal `--help`, and the
+default behaviour with neither selector set remains
+`AuthorityCustodyPolicy::Disabled` — bit-for-bit identical to Run
+191's surface contract. What changes in Run 193 is the **evidence**
+shape: real `target/release/qbind-node` is exercised across eight
+release-binary scenarios (S1 hidden flag absent from `--help`; S2
+default DevNet startup with neither CLI nor env selector set; S3 env
+`fixture-only` on DevNet; S4 CLI `devnet-local-allowed` on DevNet; S5
+CLI-over-env precedence env=`fixture-only` + CLI=`disabled` on DevNet;
+S6 invalid CLI value `garbage` rejected fail-closed by clap's typed
+parser; S7 env+CLI both `mainnet-production-custody-required` on
+MainNet startup; S8 Run 192 selector + Run 187 hidden fixture
+selector both armed on MainNet) and a new release-built helper
+`crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`
+drives the Run 192 A1–A12 / R1–R29 selector + preflight wrapper
+corpus end-to-end in **release mode** through the production library
+symbols `pqc_authority_custody_policy_surface::*` (including the env
+const, the typed `AuthorityCustodyPolicySelectorParseError`, the
+three parsers, and the seven `preflight_v2_marker_authority_custody_for_*`
+wrappers) layered above Run 190 `pqc_authority_custody_payload_carrying::*`
+and Run 188 `pqc_authority_custody::*`.
+
+Operationally, Run 193 reaffirms: hidden CLI flag remains hidden;
+either CLI or env selector activates a non-default
+`AuthorityCustodyPolicy` without drifting any existing banner; CLI
+wins when both selectors are present; invalid values fail closed at
+the typed parser; fixture / local-operator custody remains DevNet /
+TestNet evidence-only and cannot satisfy MainNet production custody;
+KMS / HSM / RemoteSigner placeholders remain fail-closed under every
+policy regardless of environment; MainNet peer-driven apply remains
+the Run 147 / 148 / 152 FATAL refusal even with
+`mainnet-production-custody-required` armed on env+CLI together with
+the Run 187 fixture selector and metadata claiming KMS/HSM. Run 193
+introduces no production source change, no CLI / env / sidecar /
+authority-marker / sequence-file / trust-bundle core / wire / metric
+/ schema change, no real KMS / HSM / cloud-KMS / PKCS#11 /
+remote-signer backend, no real on-chain governance proof verifier, no
+governance execution, no validator-set rotation, no MainNet
+peer-driven apply enablement, no autonomous apply, no apply-on-
+receipt, and no peer-majority authority. Full C4 remains OPEN. C5
+remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`,
+`docs/devnet/run_193_authority_custody_policy_release_binary/`,
+`scripts/devnet/run_193_authority_custody_policy_release_binary.sh`,
+and `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`.

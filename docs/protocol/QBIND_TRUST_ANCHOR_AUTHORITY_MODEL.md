@@ -4251,3 +4251,69 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_192.md`,
 `crates/qbind-node/tests/run_192_authority_custody_policy_selector_tests.rs`
 for the full A1–A10 / R1–R29 source/test scenario matrix and the
 canonical PASS verdict.
+
+## Run 193 — release-binary authority-custody policy selector evidence
+
+Run 193 closes the Run 192-deferred release-binary boundary for the
+hidden authority-custody policy selector. The trust-anchor authority
+model is unchanged: the typed `AuthorityCustodyPolicy` lattice from
+Run 188 (`Disabled` / `FixtureOnly` / `DevnetLocalAllowed` /
+`TestnetLocalAllowed` / `ProductionCustodyRequired` /
+`MainnetProductionCustodyRequired`), the typed `AuthorityCustodyClass`
+lattice (`FixtureLocalKey` / `LocalOperatorKey` / `RemoteSigner` /
+`Kms` / `Hsm` / `Unknown`), the typed authority-custody validator
+(`validate_authority_custody_attestation`), the typed combined
+helper (`validate_lifecycle_governance_and_custody`), and the three
+named refusal helpers
+(`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`,
+`peer_majority_cannot_satisfy_custody`,
+`local_operator_config_alone_cannot_satisfy_mainnet_production_custody`)
+all remain canonical. The Run 190 typed payload-carrying layer
+(`AuthorityCustodyAttestationWire`, `AuthorityCustodyLoadStatus`,
+`AuthorityCustodyCallsiteContext`,
+`AuthorityCustodyPayloadCarryingDecisionOutcome`, the seven per-
+surface routing helpers, the optional sibling JSON parser, and
+`mainnet_peer_driven_apply_remains_refused_under_custody_payload_carrying`)
+remains canonical. The Run 192 hidden selector
+(`pqc_authority_custody_policy_surface::*` — the env const, the
+typed `AuthorityCustodyPolicySelectorParseError`, the three parsers
+with CLI-over-env precedence, and the seven
+`preflight_v2_marker_authority_custody_for_*` per-surface preflight
+wrappers) remains canonical and is now exercised in **release mode**.
+
+Run 193's authority-model contribution is therefore narrow: real
+`target/release/qbind-node` is shown to preserve every Run 192
+selector / Run 190 payload-carrying / Run 188 boundary invariant
+end-to-end (default `Disabled` preserved when neither CLI nor env
+selector is set; hidden CLI flag absent from `--help`; env-only and
+CLI-only selectors each activate the typed policy without banner
+drift; CLI-over-env precedence deterministic at the binary surface;
+invalid selector values fail-closed at the typed parser). Fixture /
+local-operator custody continues to be DevNet/TestNet evidence-only
+and explicitly cannot satisfy MainNet production custody. KMS / HSM
+/ RemoteSigner placeholders continue to fail-closed at the typed
+validator under every policy regardless of environment. MainNet
+peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal even
+with `mainnet-production-custody-required` armed at both env and CLI
+together with the Run 187 hidden fixture selector and metadata
+claiming KMS/HSM, both at the binary surface (S7, S8) and at the
+typed boundary via
+`mainnet_peer_driven_apply_remains_refused_under_custody_boundary`.
+
+Run 193 introduces no production source change, no CLI / env /
+sidecar / authority-marker / sequence-file / trust-bundle core /
+wire / metric / schema change, no real KMS / HSM / cloud-KMS /
+PKCS#11 / remote-signer backend, no real on-chain governance proof
+verifier, no governance execution, no validator-set rotation, no
+MainNet peer-driven apply enablement, no autonomous apply, no
+apply-on-receipt, no peer-majority authority, and no weakening of
+Runs 070, 130–192. Static production source-code anchors remain
+rejected. Local config alone remains insufficient for MainNet bundle-
+signing authority. Local peer majority remains insufficient for
+MainNet bundle-signing authority. Full C4 remains OPEN. C5 remains
+OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_193.md`,
+`docs/devnet/run_193_authority_custody_policy_release_binary/`,
+`scripts/devnet/run_193_authority_custody_policy_release_binary.sh`,
+and `crates/qbind-node/examples/run_193_authority_custody_policy_release_binary_helper.rs`.
