@@ -6902,3 +6902,60 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_194.md`,
 `crates/qbind-node/tests/run_194_remote_authority_signer_boundary_tests.rs`
 for the full A1–A7 / R1–R31 source/test scenario matrix and the
 canonical PASS verdict.
+
+## Run 195 — release-binary RemoteSigner production-custody boundary evidence
+
+Run 195 is **release-binary evidence** for the Run 194 RemoteSigner
+production-custody interface boundary. It exercises the Run 194 typed
+RemoteSigner surface on real `target/release/qbind-node` and through the
+release-built helper
+`crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`,
+which drives the Run 194 A1–A7 / R1–R31 corpus end-to-end in **release
+mode** through the production library symbols
+`pqc_remote_authority_signer::*` layered above
+`pqc_authority_custody_policy_surface::*`,
+`pqc_authority_custody_payload_carrying::*`, and
+`pqc_authority_custody::*`. Reproduce with:
+
+```
+bash scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh
+```
+
+Operator-relevant invariants (release-binary):
+
+* Run 194 added **no new CLI flag and no new env var** — it is a pure
+  library boundary. Real `target/release/qbind-node --help` exposes no
+  `RemoteSigner enabled` / `RemoteSigner backend connected` / `remote
+  signer production active` claim, no KMS/HSM active claim, no
+  governance execution claim, and no validator-set rotation claim (S1).
+* `--print-genesis-hash --env {devnet,testnet,mainnet}` emits no
+  RemoteSigner enablement banner and no MainNet peer-driven apply
+  enablement claim (S2–S4).
+* The Run 193 hidden authority-custody policy selector and the
+  governance fixture proof path remain compatible at the binary surface
+  (S5, S6).
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with the Run 193 `mainnet-production-custody-required`
+  selector and the governance fixture selector both armed (S4, S7).
+* The release-built helper records `verdict: PASS` (`total_fail: 0`)
+  across the scenario corpus, the canonical-digest binding table, the
+  policy-mode table, the custody-class routing table, the composition
+  table, the refusal-helper table, the no-mutation snapshot table, and
+  the determinism re-evaluation table.
+* **No real RemoteSigner backend is implemented**; no networked signer
+  service; fixture loopback RemoteSigner remains DevNet/TestNet
+  evidence-only; production RemoteSigner remains unavailable/fail-closed;
+  local operator keys and peer-majority/gossip cannot satisfy
+  RemoteSigner policy.
+* KMS/HSM remain unimplemented (no cloud KMS, no PKCS#11). Governance
+  execution remains unimplemented. Real on-chain proof verification
+  remains unimplemented. Validator-set rotation remains open. Full C4
+  remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_195.md`,
+`docs/devnet/run_195_remote_authority_signer_boundary_release_binary/`,
+`scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh`,
+and
+`crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`
+for the captured release-binary scenarios, provenance, denylist, and the
+canonical PASS verdict.

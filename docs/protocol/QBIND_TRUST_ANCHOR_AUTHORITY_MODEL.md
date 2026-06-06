@@ -4375,3 +4375,50 @@ OPEN.
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_194.md`,
 `crates/qbind-node/src/pqc_remote_authority_signer.rs`, and
 `crates/qbind-node/tests/run_194_remote_authority_signer_boundary_tests.rs`.
+
+## Run 195 — release-binary RemoteSigner production-custody boundary evidence
+
+Run 195 is **release-binary evidence** for the Run 194 RemoteSigner
+production-custody interface boundary. It exercises the Run 194 typed
+RemoteSigner surface on real `target/release/qbind-node` and through the
+release-built helper
+`crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`,
+which drives the Run 194 A1–A7 / R1–R31 corpus end-to-end in **release
+mode** through the production library symbols
+`pqc_remote_authority_signer::*` (`RemoteSignerPolicy`,
+`RemoteSignerIdentity`, `RemoteSignerRequest` with deterministic
+domain-separated SHA3-256 `canonical_digest`, `RemoteSignerResponse`,
+`RemoteSignerExpectations`, the pure `RemoteAuthoritySigner` trait, the
+DevNet/TestNet-only `FixtureLoopbackRemoteSigner`, the fail-closed
+`ProductionRemoteSigner`, `validate_remote_signer`,
+`validate_remote_signer_for_custody_class`,
+`validate_lifecycle_governance_custody_and_remote_signer`, and the named
+refusal helpers) layered above the Run 192 / 190 / 188 custody surfaces.
+
+Relative to the trust-anchor authority model, Run 195 changes nothing: it
+adds no production source change, no CLI / env / sidecar /
+authority-marker / sequence-file / trust-bundle core / wire / metric /
+schema change; the helper only **reads** the typed surface. The
+RemoteSigner request/response binding is deterministic and domain-bound
+(environment, chain, genesis, authority root, lifecycle action, candidate
+digest, authority-domain sequence). Fixture loopback RemoteSigner remains
+DevNet/TestNet evidence-only; production RemoteSigner remains
+unavailable / fail-closed; local config alone and a local peer majority
+remain insufficient to satisfy a remote signer policy or MainNet
+bundle-signing authority. Static production source-code anchors remain
+rejected. MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+refusal even with the Run 193 `mainnet-production-custody-required`
+selector and the governance fixture selector armed.
+
+No real RemoteSigner backend is implemented; no networked signer service;
+KMS / HSM remain unimplemented; no real on-chain governance proof
+verifier; no governance execution; no validator-set rotation; no MainNet
+peer-driven apply enablement; no autonomous apply; no apply-on-receipt;
+no peer-majority authority; no cloud-KMS / PKCS#11 integration; and no
+weakening of Runs 070, 130–194. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_195.md`,
+`docs/devnet/run_195_remote_authority_signer_boundary_release_binary/`,
+`scripts/devnet/run_195_remote_authority_signer_boundary_release_binary.sh`,
+and
+`crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`.

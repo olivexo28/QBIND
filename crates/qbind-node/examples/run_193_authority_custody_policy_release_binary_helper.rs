@@ -839,6 +839,18 @@ fn corpus() -> Vec<Scenario> {
             peer_drain_mainnet: false,
         },
         Scenario {
+            id: "R7c_fixture_under_mainnet_production_required_on_devnet_domain_unavailable",
+            note: "env=mainnet-production-custody-required resolves MainnetProductionCustodyRequired; on a DevNet trust domain the production gate fails closed with MainNetProductionCustodyUnavailable (the DevNet domain keeps the MainNet fixture/local reject from firing first)",
+            selector: Selector::EnvOnly("mainnet-production-custody-required"),
+            expected_policy: Some(MainnetProductionCustodyRequired),
+            expected_parse_error: false,
+            env: Devnet,
+            carrier: Present(FixtureLocalKey),
+            surfaces: SurfaceSet::All,
+            expected: Some(Expect::CallsiteCustodyRejectedMainNetProductionUnavailable),
+            peer_drain_mainnet: false,
+        },
+        Scenario {
             id: "R8_fixture_on_mainnet_rejected",
             note: "fixture custody on MainNet => FixtureCustodyRejectedForMainNet (peer-drain refuses ahead)",
             selector: Selector::CliOnly("fixture-only"),
