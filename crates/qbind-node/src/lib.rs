@@ -397,6 +397,26 @@ pub mod pqc_remote_authority_signer;
 // verification, no validator-set rotation. Release-binary RemoteSigner
 // payload/carrying evidence is deferred to Run 197.
 pub mod pqc_remote_signer_payload_carrying;
+// Run 198 — source/test hidden RemoteSigner policy selector and
+// production preflight integration. Adds a hidden, disabled-by-default
+// selector (CLI `--p2p-trust-bundle-remote-signer-policy` +
+// `QBIND_P2P_TRUST_BUNDLE_REMOTE_SIGNER_POLICY` env var) with typed
+// parsers (`remote_signer_policy_from_selector` /
+// `remote_signer_policy_env_selector` /
+// `remote_signer_policy_from_cli_or_env`), CLI-over-env precedence, and
+// seven per-surface preflight wrappers
+// (`preflight_v2_marker_remote_signer_for_*`) that bind the resolved
+// `RemoteSignerPolicy` into the Run 196 `RemoteSignerCallsiteContext`
+// for each production v2 marker-decision surface. Default remains
+// `RemoteSignerPolicy::Disabled`. Fixture loopback remains
+// DevNet/TestNet evidence-only and cannot satisfy MainNet production
+// RemoteSigner; production RemoteSigner remains unavailable/fail-closed;
+// MainNet peer-driven apply remains refused. Source/test only — no real
+// RemoteSigner/KMS/HSM/cloud-KMS/PKCS#11 backend, no governance
+// execution, no real on-chain proof verification, no validator-set
+// rotation. Release-binary RemoteSigner-policy selector evidence is
+// deferred to Run 199.
+pub mod pqc_remote_signer_policy_surface;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

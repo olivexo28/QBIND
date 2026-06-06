@@ -7055,3 +7055,60 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_197.md`,
 `docs/devnet/run_197_remote_signer_payload_release_binary/`,
 `crates/qbind-node/examples/run_197_remote_signer_payload_release_binary_helper.rs`,
 and `scripts/devnet/run_197_remote_signer_payload_release_binary.sh`.
+## Run 198 — source/test hidden RemoteSigner policy selector and production preflight integration
+
+Run 198 is **source/test hidden RemoteSigner policy selector and
+production preflight integration**. It adds a hidden,
+disabled-by-default RemoteSigner policy selector and wires the resolved
+`RemoteSignerPolicy` into all seven production v2 marker-decision
+preflight contexts through the Run 196 RemoteSigner payload/call-site
+routing layer. The selector module is
+`crates/qbind-node/src/pqc_remote_signer_policy_surface.rs` with tests in
+`crates/qbind-node/tests/run_198_remote_signer_policy_selector_tests.rs`.
+
+Reproduce with:
+
+```
+cargo build -p qbind-node --lib
+cargo test -p qbind-node --test run_198_remote_signer_policy_selector_tests
+cargo test -p qbind-node --lib pqc_remote_signer_policy_surface
+```
+
+Operator-relevant invariants:
+
+* The selector is exposed via one **hidden** clap flag
+  `--p2p-trust-bundle-remote-signer-policy` (`hide = true`, not shown in
+  `--help`) and the `QBIND_P2P_TRUST_BUNDLE_REMOTE_SIGNER_POLICY`
+  environment variable. Recognized case-insensitive values: `disabled`,
+  `fixture-loopback-allowed`, `production-remote-signer-required`,
+  `mainnet-production-remote-signer-required`.
+* **Default remains `RemoteSignerPolicy::Disabled`.** When both the flag
+  and env var are absent, the resolved policy is `Disabled` and legacy
+  no-RemoteSigner payloads remain accepted exactly as before (Run 196
+  compatibility).
+* **Precedence:** when both sources are supplied, the CLI flag wins. An
+  invalid/unknown value is surfaced as a typed
+  `RemoteSignerPolicySelectorParseError` — the resolver never silently
+  falls back to `Disabled` when an explicit value is present but invalid.
+* Fixture loopback RemoteSigner remains **DevNet/TestNet evidence-only**
+  and cannot satisfy MainNet production RemoteSigner. Production
+  RemoteSigner remains unavailable/fail-closed under
+  `production-remote-signer-required` /
+  `mainnet-production-remote-signer-required`.
+* Missing / malformed / invalid RemoteSigner material fails closed under
+  any explicit (non-`Disabled`) policy. Validation-only surfaces remain
+  non-mutating; mutating-preflight rejection produces no mutation (no
+  Run 070 apply, no sequence/marker write).
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with `mainnet-production-remote-signer-required` and
+  fixture loopback material.
+* **No real RemoteSigner backend is implemented.** No networked signer
+  service. KMS / HSM / cloud-KMS / PKCS#11 remain unimplemented.
+  Governance execution remains unimplemented. Real on-chain proof
+  verification remains unimplemented. Validator-set rotation remains
+  open. Release-binary RemoteSigner-policy selector evidence is deferred
+  to **Run 199**. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_198.md`,
+`crates/qbind-node/src/pqc_remote_signer_policy_surface.rs`, and
+`crates/qbind-node/tests/run_198_remote_signer_policy_selector_tests.rs`.

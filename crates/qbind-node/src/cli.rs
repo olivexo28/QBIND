@@ -943,6 +943,58 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_authority_custody_policy: Option<String>,
 
+    /// Run 198 — hidden, **disabled-by-default** RemoteSigner policy
+    /// selector for the seven production v2 marker-decision preflight
+    /// contexts (reload-check / reload-apply / startup
+    /// `--p2p-trust-bundle` / SIGHUP / local peer-candidate-check /
+    /// live inbound `0x05` / peer-driven drain).
+    ///
+    /// Recognized values (case-insensitive):
+    ///
+    /// * `disabled` — default. Refuses every RemoteSigner attempt. Old
+    ///   no-RemoteSigner payloads remain accepted exactly as before
+    ///   Run 198 (Run 196 compatibility).
+    /// * `fixture-loopback-allowed` — DevNet/TestNet evidence only.
+    ///   MainNet rejects fixture loopback material before it can satisfy
+    ///   production RemoteSigner.
+    /// * `production-remote-signer-required` — fails closed because no
+    ///   real RemoteSigner backend is implemented.
+    /// * `mainnet-production-remote-signer-required` — fails closed; in
+    ///   addition, MainNet peer-driven apply remains the
+    ///   Run 147/148/152 FATAL refusal regardless of this selector.
+    ///
+    /// **Default behavior unchanged:** when this flag and the
+    /// `QBIND_P2P_TRUST_BUNDLE_REMOTE_SIGNER_POLICY` environment
+    /// variable are both absent, the resolved policy is
+    /// [`qbind_node::pqc_remote_authority_signer::RemoteSignerPolicy::Disabled`]
+    /// — old no-RemoteSigner v2 ratification sidecars remain bit-for-bit
+    /// compatible (Run 196 invariants).
+    ///
+    /// **Precedence:** when both this CLI flag and the env var are
+    /// supplied, the CLI flag wins. Either source is sufficient.
+    /// Invalid / unknown values are surfaced as a typed
+    /// [`qbind_node::pqc_remote_signer_policy_surface::RemoteSignerPolicySelectorParseError`]
+    /// — the resolver never silently falls back to `Disabled` when an
+    /// explicit value is present but invalid.
+    ///
+    /// **NOT** a real RemoteSigner / KMS / HSM / cloud-KMS / PKCS#11
+    /// backend, **NOT** a networked signer service, **NOT** a governance
+    /// execution engine, **NOT** a real on-chain proof verifier, **NOT**
+    /// a validator-set rotation primitive, **NOT** an autonomous-apply /
+    /// apply-on-receipt / peer-majority authority claim, and **NOT**
+    /// sufficient to enable MainNet peer-driven apply.
+    ///
+    /// Run 198 is source/test selector wiring only. Release-binary
+    /// RemoteSigner-policy selector evidence is deferred to Run 199. See
+    /// `task/RUN_198_TASK.txt` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_198.md`.
+    #[arg(
+        long = "p2p-trust-bundle-remote-signer-policy",
+        value_name = "POLICY",
+        hide = true
+    )]
+    pub p2p_trust_bundle_remote_signer_policy: Option<String>,
+
     /// Run 151 — hidden, **disabled-by-default** DevNet/TestNet-only
     /// **explicit local one-shot drain trigger** for the Run 150
     /// peer-driven apply drain controller
