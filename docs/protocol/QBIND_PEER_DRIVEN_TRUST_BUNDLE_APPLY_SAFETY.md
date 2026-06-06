@@ -2337,3 +2337,52 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_197.md`,
 `docs/devnet/run_197_remote_signer_payload_release_binary/`,
 `crates/qbind-node/examples/run_197_remote_signer_payload_release_binary_helper.rs`,
 and `scripts/devnet/run_197_remote_signer_payload_release_binary.sh`.
+## Run 198 — source/test hidden RemoteSigner policy selector and production preflight integration
+
+Run 198 is **source/test hidden RemoteSigner policy selector and
+production preflight integration**. It adds a hidden,
+disabled-by-default RemoteSigner policy selector (hidden clap flag
+`--p2p-trust-bundle-remote-signer-policy` plus the
+`QBIND_P2P_TRUST_BUNDLE_REMOTE_SIGNER_POLICY` env var) in
+`crates/qbind-node/src/pqc_remote_signer_policy_surface.rs` and wires the
+resolved `RemoteSignerPolicy` into all seven production v2
+marker-decision preflight contexts through the Run 196 RemoteSigner
+payload/call-site routing layer. Tests:
+`crates/qbind-node/tests/run_198_remote_signer_policy_selector_tests.rs`.
+Reproduce with
+`cargo test -p qbind-node --test run_198_remote_signer_policy_selector_tests`.
+
+Relative to the peer-driven trust-bundle apply safety contract, Run 198
+preserves every existing invariant. The default resolved policy is
+`RemoteSignerPolicy::Disabled`; legacy no-RemoteSigner payloads remain
+compatible. The seven per-surface preflight wrappers
+(`preflight_v2_marker_remote_signer_for_{reload_check, reload_apply,
+startup_p2p_trust_bundle, sighup, local_peer_candidate_check,
+live_inbound_0x05, peer_driven_drain}`) are pure: no Run 070 call, no
+live trust swap, no session eviction, no sequence write, no marker write.
+Missing / malformed / invalid RemoteSigner material fails closed under
+any explicit (non-`Disabled`) policy in front of the verifier;
+validation-only surfaces remain non-mutating; mutating-preflight
+rejection produces no mutation. An invalid live inbound `0x05`
+RemoteSigner candidate is not propagated, staged, or applied.
+
+Crucially, the peer-driven drain surface preserves the **Run 147 / 148 /
+152 FATAL MainNet refusal**: a MainNet candidate is refused
+unconditionally even with `MainnetProductionRemoteSignerRequired` and
+fully-valid fixture loopback material — the selector cannot weaken this
+refusal. Fixture loopback RemoteSigner remains DevNet/TestNet
+evidence-only and cannot satisfy MainNet production RemoteSigner;
+production RemoteSigner remains unavailable / fail-closed.
+
+No real RemoteSigner backend is implemented; no networked signer
+service; KMS / HSM / cloud-KMS / PKCS#11 remain unimplemented; governance
+execution remains unimplemented; real on-chain proof verification remains
+unimplemented; validator-set rotation remains open; existing custody /
+governance proof paths remain compatible. No autonomous apply, no
+apply-on-receipt, no peer-majority authority, and no weakening of
+Runs 070, 130–197. Release-binary RemoteSigner-policy selector evidence
+is deferred to **Run 199**. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_198.md`,
+`crates/qbind-node/src/pqc_remote_signer_policy_surface.rs`, and
+`crates/qbind-node/tests/run_198_remote_signer_policy_selector_tests.rs`.
