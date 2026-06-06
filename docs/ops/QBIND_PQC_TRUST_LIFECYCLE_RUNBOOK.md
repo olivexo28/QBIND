@@ -7006,3 +7006,52 @@ Operator-relevant invariants (source/test):
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_196.md`,
 `crates/qbind-node/src/pqc_remote_signer_payload_carrying.rs`, and
 `crates/qbind-node/tests/run_196_remote_signer_payload_callsite_tests.rs`.
+## Run 197 — release-binary RemoteSigner attestation payload/carrying and production-context evidence
+
+Run 197 is **release-binary evidence** for the Run 196 RemoteSigner
+attestation payload/carrying and production-context wiring. It exercises
+the Run 196 module
+`crates/qbind-node/src/pqc_remote_signer_payload_carrying.rs` against real
+`target/release/qbind-node` and through the release-built helper
+`crates/qbind-node/examples/run_197_remote_signer_payload_release_binary_helper.rs`,
+driven by the harness
+`scripts/devnet/run_197_remote_signer_payload_release_binary.sh`.
+Reproduce with:
+
+```
+cargo build --release -p qbind-node --bin qbind-node
+bash scripts/devnet/run_197_remote_signer_payload_release_binary.sh
+```
+
+Operator-relevant invariants (release-binary):
+
+* Run 197 makes **no production source change** (release example helper +
+  release harness + docs only) and **no new CLI flag and no new env var** —
+  the `--help` surface advertises no RemoteSigner / KMS / HSM /
+  governance-execution / validator-set-rotation claim and no
+  `remote_signer_attestation` field. Legacy no-RemoteSigner payloads remain
+  byte-compatible and parse as `Absent`.
+* The release-built helper drives the Run 196 A1–A10 / R1–R34 corpus in
+  release mode through the seven per-surface routing helpers and asserts a
+  typed `RemoteSignerPayloadCarryingDecisionOutcome` for every scenario,
+  ending in `verdict: PASS`.
+* Malformed / invalid / unsupported-schema RemoteSigner material fails
+  closed in front of the verifier; validation-only surfaces remain
+  non-mutating and mutating-preflight rejection produces no mutation
+  (no Run 070 apply, no sequence/marker write, no `.tmp` residue, no
+  fallback to `--p2p-trusted-root`, no DummySig/DummyKem/DummyAead).
+* Fixture loopback RemoteSigner remains DevNet/TestNet evidence-only;
+  production RemoteSigner remains unavailable/fail-closed.
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with fixture loopback RemoteSigner material and with the
+  Run 193 `mainnet-production-custody-required` selector armed.
+* **No real RemoteSigner backend is implemented.** KMS/HSM remain
+  unimplemented. Governance execution remains unimplemented. Real on-chain
+  proof verification remains unimplemented. Validator-set rotation remains
+  open. Existing custody/governance proof paths remain compatible. Full C4
+  remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_197.md`,
+`docs/devnet/run_197_remote_signer_payload_release_binary/`,
+`crates/qbind-node/examples/run_197_remote_signer_payload_release_binary_helper.rs`,
+and `scripts/devnet/run_197_remote_signer_payload_release_binary.sh`.

@@ -4466,3 +4466,46 @@ Release-binary RemoteSigner payload/carrying evidence is deferred to
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_196.md`,
 `crates/qbind-node/src/pqc_remote_signer_payload_carrying.rs`, and
 `crates/qbind-node/tests/run_196_remote_signer_payload_callsite_tests.rs`.
+
+## Run 197 — release-binary RemoteSigner attestation payload/carrying and production-context evidence
+
+Run 197 is **release-binary evidence** for the Run 196 RemoteSigner
+attestation payload/carrying and production-context wiring. It exercises
+the Run 196 module `crates/qbind-node/src/pqc_remote_signer_payload_carrying.rs`
+against real `target/release/qbind-node` and through the release-built
+helper
+`crates/qbind-node/examples/run_197_remote_signer_payload_release_binary_helper.rs`,
+driven by the harness
+`scripts/devnet/run_197_remote_signer_payload_release_binary.sh`. Reproduce
+with `bash scripts/devnet/run_197_remote_signer_payload_release_binary.sh`.
+
+Relative to the trust-anchor authority model, Run 197 changes nothing
+operationally: it makes no production source change (release example helper
++ release harness + docs only), no production call-site mutation, no new
+CLI flag, no new env var, and no authority-marker / sequence-file /
+trust-bundle core / wire / metric / schema change beyond Run 196's additive
+optional `remote_signer_attestation` sibling. Legacy no-RemoteSigner
+payloads remain byte-compatible and parse as `Absent`; malformed / invalid
+/ unsupported-schema material fails closed in front of the verifier. The
+release-built helper drives the Run 196 A1–A10 / R1–R34 corpus in release
+mode and ends in `verdict: PASS`. Fixture loopback RemoteSigner remains
+DevNet/TestNet evidence-only; production RemoteSigner remains unavailable /
+fail-closed; local config alone and a local peer majority remain
+insufficient to satisfy a remote signer policy or MainNet bundle-signing
+authority. Static production source-code anchors remain rejected. MainNet
+peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal even with
+fixture loopback RemoteSigner material supplied and with the Run 193
+`mainnet-production-custody-required` selector armed.
+
+No real RemoteSigner backend is implemented; no networked signer service;
+KMS / HSM remain unimplemented; no real on-chain governance proof verifier;
+no governance execution; no validator-set rotation; no MainNet peer-driven
+apply enablement; no autonomous apply; no apply-on-receipt; no
+peer-majority authority; existing custody / governance proof paths remain
+compatible; and no weakening of Runs 070, 130–196. Full C4 remains OPEN.
+C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_197.md`,
+`docs/devnet/run_197_remote_signer_payload_release_binary/`,
+`crates/qbind-node/examples/run_197_remote_signer_payload_release_binary_helper.rs`,
+and `scripts/devnet/run_197_remote_signer_payload_release_binary.sh`.
