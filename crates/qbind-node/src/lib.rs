@@ -380,6 +380,23 @@ pub mod pqc_authority_custody_policy_surface;
 // validator-set rotation. Release-binary RemoteSigner boundary evidence
 // is deferred to Run 195.
 pub mod pqc_remote_authority_signer;
+// Run 196 — source/test RemoteSigner attestation payload carrying and
+// production-context custody composition wiring. Adds an additive,
+// optional `remote_signer_attestation` sibling on the v2 ratification
+// sidecar JSON (alongside the Run 167 / 184 / 190 siblings) carrying
+// wire forms of the Run 194 `RemoteSignerIdentity` / `RemoteSignerRequest`
+// / `RemoteSignerResponse`, a typed `RemoteSignerLoadStatus`
+// (`Absent` / `Available` / `Malformed`), a pure sibling extractor, a
+// combined v2 sidecar loader, a `RemoteSignerCallsiteContext`, and seven
+// per-surface routing helpers that bind a parsed carrier into the
+// Run 194 `validate_lifecycle_governance_custody_and_remote_signer`
+// composition. Default policy is `RemoteSignerPolicy::Disabled`.
+// Source/test only — no real remote signer backend, no networked signer
+// service, no real KMS/HSM/cloud-KMS/PKCS#11 backend, no MainNet apply
+// enablement, no governance execution, no real on-chain proof
+// verification, no validator-set rotation. Release-binary RemoteSigner
+// payload/carrying evidence is deferred to Run 197.
+pub mod pqc_remote_signer_payload_carrying;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
