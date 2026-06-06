@@ -1,0 +1,240 @@
+Task: Run 200 — Authority Lifecycle C4/C5 Consolidation, Closure Criteria, and Remaining-Work Spec
+
+Current accepted state:
+
+* Runs 130–143: v2 authority marker / governance proof / live `0x05` validation and release-binary evidence series landed.
+* Runs 144–158: peer-driven apply safety, staging, drain, DevNet/TestNet release-binary apply evidence, and unified fixture universe landed.
+* Runs 159–162: authority signing-key lifecycle validator + marker integration + release-binary enforcement evidence landed.
+* Runs 163–177: governance authority verifier, proof carrier, Required-policy selector, validation-only and live `0x05` proof-carrying evidence landed.
+* Runs 178–187: OnChainGovernance fixture verifier, production verifier boundary, production call-site wiring, payload carrying, release-binary accepted-proof evidence, and production-class fail-closed evidence landed.
+* Runs 188–193: authority custody boundary, custody metadata carrying, custody policy selector, and release-binary custody-policy evidence landed.
+* Runs 194–199: RemoteSigner boundary, RemoteSigner payload carrying, RemoteSigner policy selector, and release-binary RemoteSigner policy evidence landed.
+* Run 199 final accepted state:
+
+  * real `target/release/qbind-node` exercises hidden RemoteSigner policy selector behavior;
+  * default remains `RemoteSignerPolicy::Disabled`;
+  * CLI/env selector behavior works;
+  * CLI-over-env precedence proven;
+  * invalid values fail closed;
+  * fixture loopback RemoteSigner remains DevNet/TestNet evidence-only;
+  * production RemoteSigner remains unavailable/fail-closed;
+  * MainNet peer-driven apply remains refused;
+  * no real RemoteSigner/KMS/HSM/cloud-KMS/PKCS#11 backend exists;
+  * governance execution remains unimplemented;
+  * real on-chain proof verification remains unimplemented;
+  * validator-set rotation remains open;
+  * full C4 remains open;
+  * C5 remains open.
+
+Objective:
+Produce a precise Run 200 consolidation/specification pass that defines:
+
+1. exactly what has been closed across Runs 130–199;
+2. exactly why full C4 remains open;
+3. exactly why C5 remains open;
+4. what minimum criteria must be met before C4 can be closed;
+5. what minimum criteria must be met before C5 can be closed;
+6. the next implementation sequence after Run 200.
+
+This is a docs/spec/crosscheck run only. Do not implement a backend in Run 200.
+
+Strict scope:
+
+* Documentation/specification/crosscheck only.
+* No production source changes.
+* No helper implementation unless strictly needed to generate static reports.
+* No release-binary harness required.
+* No MainNet peer-driven apply enablement.
+* No real RemoteSigner backend.
+* No real KMS implementation.
+* No real HSM implementation.
+* No cloud KMS integration.
+* No PKCS#11 integration.
+* No governance execution engine.
+* No real on-chain proof verifier.
+* No validator-set rotation.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No marker schema change.
+* No sequence-file schema change.
+* No trust-bundle core schema change.
+* No wire/schema change.
+* Do not weaken Runs 070, 130–199.
+* Do not claim full C4 or C5 closure.
+
+Required deliverables:
+
+1. Add canonical consolidation report:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`
+
+2. Add or update a formal closure checklist:
+   Preferred path:
+   `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+
+3. Append Run 200 sections to:
+
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+4. Optionally add a static run index:
+   `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`
+
+5. Crosscheck all new/modified docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md` before finalizing.
+
+Required content in `QBIND_DEVNET_EVIDENCE_RUN_200.md`:
+The report must include:
+
+1. Scope statement:
+
+* Run 200 is docs/spec/crosscheck only.
+* It does not implement any backend.
+* It does not close C4 or C5.
+
+2. Accepted evidence map:
+   Summarize Runs 130–199 by phase:
+
+* v2 authority marker;
+* reload-check / reload-apply / startup / SIGHUP / snapshot/restore / local peer-candidate-check;
+* live inbound `0x05`;
+* peer-driven staging/apply/drain;
+* authority lifecycle;
+* governance authority;
+* OnChainGovernance fixture and production-boundary;
+* custody boundary;
+* RemoteSigner boundary.
+
+3. Current safety properties proven:
+   Include at minimum:
+
+* anti-rollback v2 marker enforcement;
+* sequence-before-marker ordering;
+* validation-only non-mutation;
+* rejected-candidate no-mutation;
+* invalid live `0x05` no-propagation/no-staging/no-apply where evidenced;
+* MainNet peer-driven apply refusal;
+* fixture/local/loopback evidence-only status;
+* production-class proof fail-closed;
+* KMS/HSM/RemoteSigner placeholders fail-closed;
+* default Disabled selector behavior;
+* hidden selector CLI/env behavior;
+* CLI-over-env precedence where applicable;
+* release-binary evidence boundaries.
+
+4. Why C4 remains open:
+   Must explicitly list unresolved blockers:
+
+* real production RemoteSigner backend unavailable;
+* real KMS/HSM backend unavailable;
+* real custody attestation unavailable;
+* real on-chain governance proof verifier unavailable;
+* governance execution engine unavailable;
+* validator-set rotation unavailable;
+* MainNet governance policy artifacts incomplete;
+* MainNet production custody policy not satisfiable;
+* emergency governance / recovery ceremony not production-real;
+* end-to-end MainNet authority rotation/revocation under production custody not proven.
+
+5. Why C5 remains open:
+   Must explicitly list unresolved blockers:
+
+* production key custody unavailable;
+* production CA/root/authority rotation ceremony incomplete;
+* hardware or remote signing attestation unavailable;
+* operational signing audit trail unavailable;
+* validator-set rotation / cryptographic reconfiguration incomplete;
+* long-term crypto-agility activation policy incomplete;
+* production incident-response and key-compromise procedure incomplete;
+* no full MainNet release-binary evidence under production custody.
+
+6. Minimum C4 closure criteria:
+   Define precise criteria, such as:
+
+* real production custody backend implemented or explicitly accepted alternative;
+* real production on-chain governance proof verifier implemented or explicitly accepted alternative;
+* governance execution policy implemented;
+* MainNet policy allows only production-authenticated lifecycle transitions;
+* authority lifecycle rotate/retire/revoke/emergency revoke proven under production custody;
+* rejected production lifecycle updates produce no mutation;
+* recovery / rollback / sequence replay protections release-binary evidenced;
+* MainNet peer-driven apply policy explicitly specified and either remains refused or is safely enabled under production criteria;
+* release-binary evidence covers startup, reload-check, reload-apply, SIGHUP, snapshot/restore, local peer-candidate-check, live `0x05`, and peer-driven drain/apply where applicable.
+
+7. Minimum C5 closure criteria:
+   Define precise criteria, such as:
+
+* production custody backend with attestation;
+* no raw local production signing keys;
+* key rotation / revocation / emergency revoke ceremonies;
+* validator-set rotation / authority-set synchronization;
+* operational audit logs and reproducible evidence;
+* crypto-agility policy for future PQC algorithm changes;
+* incident-response runbook;
+* release-binary evidence and negative-invariant corpus.
+
+8. Run 201+ proposed sequence:
+   Define the next implementation sequence without overclaiming. Preferred sequence:
+
+* Run 201: Source/Test production RemoteSigner backend interface transport boundary.
+* Run 202: Release-binary production RemoteSigner transport-boundary evidence.
+* Run 203: Source/Test KMS/HSM backend abstraction boundary.
+* Run 204: Release-binary KMS/HSM backend-boundary evidence.
+* Run 205: Source/Test real custody attestation verifier skeleton.
+* Run 206: Release-binary custody attestation verifier-boundary evidence.
+* Run 207+: real governance verifier / governance execution / validator-set rotation planning, depending on readiness.
+
+Do not claim these runs are final; they are the proposed next branch.
+
+Required content in `QBIND_C4_C5_CLOSURE_CRITERIA.md`:
+Must include:
+
+* Definitions of C4 and C5.
+* Current status.
+* Green/yellow/red matrix.
+* Required closure evidence.
+* Explicit non-closure statements.
+* MainNet readiness gates.
+* Negative-invariant list.
+* Release-binary evidence requirements.
+
+Required contradiction checks:
+In `contradiction.md`, Run 200 must state:
+
+* no contradiction found, or list contradictions if found;
+* C4/C5 are intentionally still open;
+* fixture/local/loopback evidence must not be described as production MainNet authority;
+* production RemoteSigner/KMS/HSM remain unavailable;
+* MainNet peer-driven apply remains refused;
+* no real governance execution exists.
+
+Validation commands:
+Run at minimum:
+
+* `grep -R "Full C4.*closed\\|C5.*closed\\|MainNet.*enabled\\|RemoteSigner.*production active\\|KMS/HSM.*active\\|validator-set rotation.*complete" docs/ crates/qbind-node/src crates/qbind-node/examples || true`
+* `grep -R "Run 200" docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md docs/whitepaper/contradiction.md docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `cargo test -p qbind-node --test run_198_remote_signer_policy_selector_tests`
+* `cargo test -p qbind-node --test run_196_remote_signer_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_192_authority_custody_policy_selector_tests`
+* `cargo test -p qbind-node --test run_190_authority_custody_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+If docs-only scope makes full tests too expensive, at minimum run the grep checks and the newest custody/RemoteSigner test slice. Record exact commands and results.
+
+Acceptance criteria:
+Run 200 is acceptable only if:
+
+1. It clearly consolidates Runs 130–199.
+2. It defines C4 and C5 closure criteria.
+3. It explicitly states C4 remains open.
+4. It explicitly states C5 remains open.
+5. It identifies the remaining production blockers.
+6. It proposes the next implementation sequence.
+7. It prevents fixture/local/loopback evidence from being misrepresented as MainNet production authority.
+8. It records contradiction checks.
+9. It makes no production source changes.
+10. It makes no MainNet enablement claim.
