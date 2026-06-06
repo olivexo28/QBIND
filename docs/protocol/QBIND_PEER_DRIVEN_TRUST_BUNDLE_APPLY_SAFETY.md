@@ -2438,3 +2438,40 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_199.md`,
 `docs/devnet/run_199_remote_signer_policy_release_binary/`,
 `crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
 and `scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.
+## Run 200 — authority lifecycle C4/C5 consolidation, closure criteria, and remaining-work specification
+
+Run 200 is a **docs/spec/crosscheck-only** consolidation pass over
+Runs 130–199. It introduces the consolidation report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`, the formal closure
+checklist `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and the static
+run index `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
+
+Relative to the peer-driven trust-bundle apply safety contract, Run 200
+changes nothing: it makes no production source change and adds no new CLI
+flag, env var, wire format, or schema change. The peer-driven staging /
+apply / drain safety properties accepted in Runs 144–158 remain in force,
+including the **Run 147 / 148 / 152 FATAL MainNet peer-driven apply
+refusal**, validation-only non-mutation, rejected-candidate no-mutation,
+and the Run 070 `validate → swap → evict_sessions → commit_sequence`
+ordering.
+
+Run 200 documents the C4/C5 closure criteria and the MainNet readiness
+gates in `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`. The
+apply-policy gate is explicit: the MainNet peer-driven apply policy must
+be specified and remains refused unless a production custody backend,
+a real on-chain governance proof verifier, a governance execution policy,
+a production-authenticated authority set, and the supporting recovery /
+rollback / sequence-replay protections are all satisfied and
+release-binary evidenced. Until then, MainNet peer-driven apply remains
+refused.
+
+No real RemoteSigner / KMS / HSM backend is implemented; no real on-chain
+governance proof verifier; no governance execution; no validator-set
+rotation; no autonomous apply; no apply-on-receipt; no peer-majority
+authority; fixture / local / loopback evidence remains DevNet/TestNet
+evidence-only; and no weakening of Runs 070, 130–199. Full C4 remains
+OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`,
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and
+`docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
