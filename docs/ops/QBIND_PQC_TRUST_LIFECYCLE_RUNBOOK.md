@@ -6959,3 +6959,50 @@ and
 `crates/qbind-node/examples/run_195_remote_authority_signer_boundary_release_binary_helper.rs`
 for the captured release-binary scenarios, provenance, denylist, and the
 canonical PASS verdict.
+
+## Run 196 — source/test RemoteSigner attestation payload/carrying and production-context wiring
+
+Run 196 is **source/test RemoteSigner attestation payload/carrying and
+production-context wiring**. It adds source- and test-level support for
+carrying RemoteSigner identity / request / response attestation material
+through the production payload and production-context paths and routing it
+into the Run 194 lifecycle + governance + custody + RemoteSigner
+composition, via the new module
+`crates/qbind-node/src/pqc_remote_signer_payload_carrying.rs` and the test
+suite `crates/qbind-node/tests/run_196_remote_signer_payload_callsite_tests.rs`.
+The carrier is an **additive optional** JSON sibling
+(`remote_signer_attestation`) on the v2 ratification sidecar, mirroring
+the Run 190 authority-custody payload/carrying pattern. Reproduce with:
+
+```
+cargo test -p qbind-node --test run_196_remote_signer_payload_callsite_tests
+```
+
+Operator-relevant invariants (source/test):
+
+* Run 196 adds **no new CLI flag and no new env var** — it is a pure
+  library boundary. Legacy no-RemoteSigner payloads remain
+  byte-compatible and parse as `Absent`.
+* RemoteSigner material can be carried through the production payload and
+  production-context paths at source/test level and routed into the seven
+  per-surface helpers (`reload_check`, `reload_apply`,
+  `startup_p2p_trust_bundle`, `sighup`, `local_peer_candidate_check`,
+  `live_inbound_0x05`, `peer_driven_drain`).
+* Malformed / invalid / unsupported-schema RemoteSigner material fails
+  closed (`RemoteSignerLoadStatus::Malformed`) in front of the verifier;
+  validation-only surfaces remain non-mutating and mutating-preflight
+  rejection produces no mutation.
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with fixture loopback RemoteSigner material supplied.
+* **No real RemoteSigner backend is implemented**; fixture loopback
+  RemoteSigner remains DevNet/TestNet source/test only; production
+  RemoteSigner remains unavailable/fail-closed.
+* KMS/HSM remain unimplemented. Governance execution remains
+  unimplemented. Real on-chain proof verification remains unimplemented.
+  Validator-set rotation remains open. Release-binary RemoteSigner
+  payload/carrying evidence is deferred to **Run 197**. Full C4 remains
+  OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_196.md`,
+`crates/qbind-node/src/pqc_remote_signer_payload_carrying.rs`, and
+`crates/qbind-node/tests/run_196_remote_signer_payload_callsite_tests.rs`.
