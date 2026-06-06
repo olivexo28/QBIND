@@ -4555,3 +4555,50 @@ is deferred to **Run 199**. Full C4 remains OPEN. C5 remains OPEN.
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_198.md`,
 `crates/qbind-node/src/pqc_remote_signer_policy_surface.rs`, and
 `crates/qbind-node/tests/run_198_remote_signer_policy_selector_tests.rs`.
+## Run 199 — release-binary hidden RemoteSigner policy selector and production preflight routing evidence
+
+Run 199 is **release-binary evidence** for the Run 198 hidden
+RemoteSigner policy selector and production preflight routing. It
+exercises the Run 198 module
+`crates/qbind-node/src/pqc_remote_signer_policy_surface.rs` against real
+`target/release/qbind-node` and through the release-built helper
+`crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
+driven by the harness
+`scripts/devnet/run_199_remote_signer_policy_release_binary.sh`. Reproduce
+with `bash scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.
+
+Relative to the trust-anchor authority model, Run 199 changes nothing: it
+makes no production source change (release example helper + release
+harness + docs only) and adds no authority-marker / sequence-file /
+trust-bundle core / wire / metric / schema change beyond the Run 198
+hidden selector. The real binary accepts the hidden
+`--p2p-trust-bundle-remote-signer-policy` flag and the
+`QBIND_P2P_TRUST_BUNDLE_REMOTE_SIGNER_POLICY` env var while keeping the
+flag hidden from `--help`; default resolution remains
+`RemoteSignerPolicy::Disabled`. The release-built helper resolves the
+selector (default / CLI / env / CLI-over-env precedence / invalid
+fail-closed with a typed `RemoteSignerPolicySelectorParseError`) and
+routes the resolved policy through the seven
+`preflight_v2_marker_remote_signer_for_*` wrappers, ending in
+`verdict: PASS` (125/0 on this checkout).
+
+Fixture loopback RemoteSigner remains DevNet/TestNet evidence-only and
+cannot satisfy MainNet production RemoteSigner; production RemoteSigner
+remains unavailable / fail-closed; a local operator key and a local peer
+majority remain insufficient to satisfy a RemoteSigner policy or MainNet
+bundle-signing authority. MainNet peer-driven apply remains the Run 147 /
+148 / 152 FATAL refusal even with `mainnet-production-remote-signer-required`
+and fixture loopback material.
+
+No real RemoteSigner backend is implemented; no networked signer service;
+KMS / HSM / cloud-KMS / PKCS#11 remain unimplemented; no real on-chain
+governance proof verifier; no governance execution; no validator-set
+rotation; no MainNet peer-driven apply enablement; no autonomous apply;
+no apply-on-receipt; no peer-majority authority; existing custody /
+governance proof paths remain compatible; and no weakening of
+Runs 070, 130–198. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_199.md`,
+`docs/devnet/run_199_remote_signer_policy_release_binary/`,
+`crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
+and `scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.

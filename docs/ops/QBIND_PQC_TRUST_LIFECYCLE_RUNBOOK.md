@@ -7112,3 +7112,56 @@ Operator-relevant invariants:
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_198.md`,
 `crates/qbind-node/src/pqc_remote_signer_policy_surface.rs`, and
 `crates/qbind-node/tests/run_198_remote_signer_policy_selector_tests.rs`.
+## Run 199 — release-binary hidden RemoteSigner policy selector and production preflight routing evidence
+
+Run 199 is **release-binary evidence** for the Run 198 hidden
+RemoteSigner policy selector and production preflight routing. It
+exercises the Run 198 module
+`crates/qbind-node/src/pqc_remote_signer_policy_surface.rs` against real
+`target/release/qbind-node` and through the release-built helper
+`crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
+driven by the harness
+`scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.
+Reproduce with:
+
+```
+cargo build --release -p qbind-node --bin qbind-node
+bash scripts/devnet/run_199_remote_signer_policy_release_binary.sh
+```
+
+Operator-relevant invariants (release-binary):
+
+* Run 199 makes **no production source change** (release example helper +
+  release harness + docs only). The real binary accepts the hidden
+  `--p2p-trust-bundle-remote-signer-policy` flag and the
+  `QBIND_P2P_TRUST_BUNDLE_REMOTE_SIGNER_POLICY` env var, but `--help`
+  advertises neither the flag nor any RemoteSigner / KMS / HSM /
+  governance-execution / validator-set-rotation claim.
+* **Default resolution remains `RemoteSignerPolicy::Disabled`** when both
+  the flag and env var are absent.
+* The release-built helper resolves the selector (default / CLI / env /
+  CLI-over-env precedence / invalid fail-closed) and routes the resolved
+  policy through the seven `preflight_v2_marker_remote_signer_for_*`
+  wrappers into the Run 196 routing helpers, asserting a typed outcome
+  for every scenario and ending in `verdict: PASS` (125/0 on this
+  checkout).
+* CLI-over-env precedence is deterministic; empty/unknown selector values
+  fail closed with the typed `RemoteSignerPolicySelectorParseError`.
+* Fixture loopback RemoteSigner remains DevNet/TestNet evidence-only and
+  cannot satisfy MainNet production RemoteSigner; production RemoteSigner
+  remains unavailable/fail-closed. Rejected cases produce no mutation
+  (no Run 070 apply, no sequence/marker write, no `.tmp` residue, no
+  fallback to `--p2p-trusted-root`, no DummySig/DummyKem/DummyAead).
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with `mainnet-production-remote-signer-required` and
+  fixture loopback material.
+* **No real RemoteSigner backend is implemented.** KMS / HSM / cloud-KMS /
+  PKCS#11 remain unimplemented. Governance execution remains
+  unimplemented. Real on-chain proof verification remains unimplemented.
+  Validator-set rotation remains open. Existing custody/governance proof
+  paths remain compatible. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_199.md`,
+`docs/devnet/run_199_remote_signer_policy_release_binary/`,
+`crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
+and `scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.
