@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 210:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 211:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -458,3 +458,39 @@ violation is a regression:
   Run 209 CLI flag is parsed by the binary but its resolved policy is not yet
   wired into a long-running node runtime. **Full C4 remains OPEN; C5 remains
   OPEN.**
+* **Run 211** — Source/test governance execution policy boundary
+  (`crates/qbind-node/src/pqc_governance_execution_policy.rs`,
+  `crates/qbind-node/tests/run_211_governance_execution_policy_tests.rs`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_211.md`). Adds a typed
+  `GovernanceExecutionClass` (`Disabled` default / `FixtureGovernance` /
+  `EmergencyCouncilFixture` / `OnChainGovernanceUnavailable` /
+  `ProductionGovernanceUnavailable` / `MainnetGovernanceUnavailable` /
+  `Unknown`), a typed `GovernanceExecutionPolicy` (`Disabled` default /
+  `FixtureGovernanceAllowed` / `EmergencyCouncilFixtureAllowed` /
+  `ProductionGovernanceRequired` / `MainnetGovernanceRequired`), a typed
+  `GovernanceAction` (authority signing-key initial activation / rotate /
+  retire / revoke / emergency revoke plus policy-change, custody-policy,
+  remote-signer-policy, custody-attestation-policy, and validator-set-rotation
+  request placeholders and unknown), typed `GovernanceExecutionInput`,
+  `GovernanceExecutionDecision`, and `GovernanceExecutionExpectations`,
+  deterministic domain-separated digest helpers (`input_digest`,
+  `decision_digest`, `governance_execution_transcript_digest`, optional
+  `governance_execution_policy_digest`), a pure/mockable
+  `GovernanceExecutionEvaluator` trait with `evaluate_governance_execution_policy`,
+  a DevNet/TestNet source/test-only `FixtureGovernanceExecutionEvaluator`, and
+  production/on-chain/MainNet evaluators that are callable but fail closed as
+  unavailable, plus a typed `GovernanceExecutionOutcome` and a
+  peer-driven-apply guard. Governance execution authorizes a lifecycle action
+  only when the action, candidate digest, and sequence match; emergency action
+  is separate and explicit; production and MainNet governance execution remain
+  unavailable/fail-closed; fixture governance is DevNet/TestNet source-test
+  only and is refused on MainNet; MainNet peer-driven apply remains the Run
+  147 / 148 / 152 FATAL refusal even with fixture governance approval; the
+  boundary is pure (no marker/sequence write, no live trust swap, no session
+  eviction, no Run 070 call); Run 163/178/205 governance / on-chain / custody
+  material is bound only as opaque digests and changed in no way. Source/test
+  only; no real governance execution engine, no real on-chain governance proof
+  verifier, no MainNet governance, no real KMS/HSM/RemoteSigner backend, and no
+  validator-set rotation is implemented; release-binary governance execution
+  policy-boundary evidence deferred to **Run 212**. **Full C4 remains OPEN; C5
+  remains OPEN.**

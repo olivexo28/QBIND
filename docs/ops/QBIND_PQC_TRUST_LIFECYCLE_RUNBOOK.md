@@ -7708,3 +7708,47 @@ source change** (helper + harness + docs only).
 * **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
   even with `mainnet-production-attestation-required` and a carried fixture
   attestation. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 211 — source/test governance execution policy boundary
+
+Run 211 is a **source/test** pass that adds a typed governance execution
+policy boundary modeling how an approved governance decision authorizes an
+authority lifecycle action. It adds the module
+`crates/qbind-node/src/pqc_governance_execution_policy.rs` and the test
+target `crates/qbind-node/tests/run_211_governance_execution_policy_tests.rs`.
+
+* **No operator action required.** Run 211 changes no runtime behavior.
+  The boundary defaults to `GovernanceExecutionPolicy::Disabled`, under
+  which `evaluate_governance_execution_policy` returns
+  `GovernanceExecutionDisabled` and existing GenesisBound /
+  EmergencyCouncil / OnChainGovernance proof-carrier and custody /
+  RemoteSigner / KMS-HSM / custody-attestation paths are unchanged.
+* **Fixture governance is DevNet/TestNet source/test only.** A fixture or
+  emergency-council fixture governance decision is accepted only under the
+  matching explicit fixture policy on a DevNet/TestNet trust domain; it is
+  refused on a MainNet trust domain (`FixtureRejectedForMainNet`).
+* **Production / on-chain / MainNet governance execution fail closed.** The
+  `ProductionGovernanceExecutionEvaluator`,
+  `OnChainGovernanceExecutionEvaluator`, and
+  `MainnetGovernanceExecutionEvaluator` are callable but return the
+  matching typed unavailable outcome.
+* **Action authorization.** Governance execution authorizes a lifecycle
+  action only when the governance action, lifecycle action, candidate
+  digest, and authority-domain sequence match the decision; emergency
+  revoke is accepted only under the explicit emergency fixture policy;
+  validator-set rotation and the policy-change requests are rejected as
+  unsupported.
+* **No mutation.** The evaluator and the
+  `evaluate_governance_execution_with_peer_driven_guard` composition helper
+  are pure: no marker write, no sequence write, no live trust swap, no
+  session eviction, no Run 070 call.
+* Run 211 implements **no real governance execution engine**, **no real
+  on-chain governance proof verifier**, **no MainNet governance**, **no
+  real KMS/HSM backend**, **no real RemoteSigner backend**, **no production
+  signing-key custody**, and **no validator-set rotation**; it adds **no
+  new metric, no new exit code, no CLI flag**, and makes no authority-marker
+  / sequence-file / trust-bundle core / wire / schema change; it does not
+  weaken Runs 070, 130–210.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal** even with fixture governance approval. Release-binary
+  governance execution policy-boundary evidence is deferred to **Run 212**.
+  **Full C4 remains OPEN; C5 remains OPEN.**

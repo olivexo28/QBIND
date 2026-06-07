@@ -2882,3 +2882,37 @@ canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_210.md`. It makes
 * Run 210 adds no new exit code and no new metric, and makes no CLI / env /
   marker / sequence-file / trust-bundle core / wire / schema change. **Full
   C4 remains OPEN; C5 remains OPEN.**
+
+## Run 211 — governance execution policy boundary (source/test)
+
+Run 211 adds a typed governance execution policy boundary
+(`crates/qbind-node/src/pqc_governance_execution_policy.rs`,
+`crates/qbind-node/tests/run_211_governance_execution_policy_tests.rs`)
+modeling how an approved governance decision authorizes an authority
+lifecycle action. It is **source/test only** and changes no apply path.
+
+* Run 211 performs **no apply**. The `evaluate_governance_execution_policy`
+  evaluator, the `GovernanceExecutionEvaluator` trait implementations, and
+  the `evaluate_governance_execution_with_peer_driven_guard` composition
+  helper are pure: they write no marker, write no sequence, swap no live
+  trust, evict no sessions, and never invoke Run 070.
+* The boundary defaults to `GovernanceExecutionPolicy::Disabled`; under the
+  default, prior proof-carrier, custody, RemoteSigner, KMS-HSM, and
+  custody-attestation behavior is unchanged.
+* **Fixture governance is DevNet/TestNet source/test only** and is refused
+  on a MainNet trust domain; production / on-chain / MainNet governance
+  execution evaluators are callable but fail closed as unavailable.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal** even with a fixture governance approval —
+  `mainnet_peer_driven_apply_remains_refused_under_governance_execution`
+  returns the refusal, and `local_operator_cannot_satisfy_governance_execution`
+  / `peer_majority_cannot_satisfy_governance_execution` /
+  `validator_set_rotation_remains_unsupported` hold. Governance execution
+  grants no apply authority.
+* Run 211 implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM
+  backend, no real RemoteSigner backend, and no validator-set rotation**;
+  it adds **no new exit code and no new metric**, and makes no CLI / env /
+  marker / sequence-file / trust-bundle core / wire / schema change; it does
+  not weaken Runs 070, 130–210. Release-binary evidence is deferred to
+  **Run 212**. **Full C4 remains OPEN; C5 remains OPEN.**
