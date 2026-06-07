@@ -7165,3 +7165,41 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_199.md`,
 `docs/devnet/run_199_remote_signer_policy_release_binary/`,
 `crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
 and `scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.
+## Run 200 — authority lifecycle C4/C5 consolidation, closure criteria, and remaining-work specification
+
+Run 200 is a **docs/spec/crosscheck-only** consolidation pass over
+Runs 130–199. It introduces no operational change. It adds the
+consolidation report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`, the
+formal closure checklist
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and the static run
+index `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
+
+Operator-relevant points (no behavior change):
+
+* Run 200 makes **no production source change** and implements **no
+  backend** (no RemoteSigner, KMS, HSM, cloud-KMS, PKCS#11, governance
+  execution, or on-chain proof verifier). No CLI flag, env var, marker,
+  sequence-file, trust-bundle core, wire, or schema changes.
+* The accepted Runs 130–199 safety properties remain in force:
+  anti-rollback v2 marker enforcement, validation-only non-mutation,
+  rejected-candidate no-mutation, the Run 070
+  `validate → swap → evict_sessions → commit_sequence` ordering, and the
+  **Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal**.
+* **Default custody / RemoteSigner selector resolution remains
+  `Disabled`.** Fixture / local / loopback custody, governance, and
+  RemoteSigner material is DevNet/TestNet evidence-only and cannot
+  satisfy MainNet production authority; production material fails closed.
+* C4 and C5 closure criteria, the MainNet readiness gates, and the
+  negative-invariant list are now documented in
+  `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`. Until every MainNet
+  readiness gate passes, MainNet peer-driven apply remains refused and no
+  MainNet enablement claim may be made.
+* **No real RemoteSigner backend is implemented.** KMS / HSM / cloud-KMS /
+  PKCS#11 remain unimplemented. Governance execution remains
+  unimplemented. Real on-chain proof verification remains unimplemented.
+  Validator-set rotation remains open. Full C4 remains OPEN. C5 remains
+  OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`,
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and
+`docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.

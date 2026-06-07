@@ -4602,3 +4602,55 @@ Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_199.md`,
 `docs/devnet/run_199_remote_signer_policy_release_binary/`,
 `crates/qbind-node/examples/run_199_remote_signer_policy_release_binary_helper.rs`,
 and `scripts/devnet/run_199_remote_signer_policy_release_binary.sh`.
+## Run 200 — authority lifecycle C4/C5 consolidation, closure criteria, and remaining-work specification
+
+Run 200 is a **docs/spec/crosscheck-only** consolidation pass over
+Runs 130–199. It introduces the consolidation report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`, the formal closure
+checklist `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and the static
+run index `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
+
+Relative to the trust-anchor authority model, Run 200 changes nothing: it
+makes no production source change and adds no authority-marker /
+sequence-file / trust-bundle core / wire / metric / schema change. It
+consolidates the authority-lifecycle evidence (typed v2 marker, lifecycle
+transition validation, governance authority / proof carrier / Required
+policy, OnChainGovernance fixture verifier and production boundary,
+custody boundary, and RemoteSigner boundary) and records exactly which
+production pieces remain unavailable.
+
+Full C4 remains OPEN because the real production custody backend
+(RemoteSigner / KMS / HSM), the real custody attestation verifier, the
+real on-chain governance proof verifier, the governance execution engine,
+validator-set rotation, the MainNet governance policy artifacts, the
+satisfiable MainNet production custody policy, a production-real emergency
+governance / recovery ceremony, and end-to-end MainNet authority
+rotation/revocation under production custody are all unavailable or
+unproven. C5 remains OPEN because production key custody, the production
+CA/root/authority rotation ceremony, hardware/remote signing attestation,
+the operational signing audit trail, validator-set rotation /
+cryptographic reconfiguration, the long-term crypto-agility activation
+policy, the production incident-response / key-compromise procedure, and
+full MainNet release-binary evidence under production custody are all
+incomplete.
+
+Fixture / local / loopback custody, governance, and RemoteSigner material
+remains DevNet/TestNet evidence-only and cannot satisfy MainNet
+production authority; production material fails closed. A local operator
+key and a local peer majority remain insufficient to satisfy a custody /
+RemoteSigner policy or MainNet bundle-signing authority. MainNet
+peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal. The
+C4/C5 closure criteria and MainNet readiness gates are now specified in
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`.
+
+No real RemoteSigner backend is implemented; no networked signer service;
+KMS / HSM / cloud-KMS / PKCS#11 remain unimplemented; no real on-chain
+governance proof verifier; no governance execution; no validator-set
+rotation; no MainNet peer-driven apply enablement; no autonomous apply;
+no apply-on-receipt; no peer-majority authority; existing custody /
+governance proof paths remain compatible; and no weakening of
+Runs 070, 130–199. Full C4 remains OPEN. C5 remains OPEN.
+
+Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`,
+`docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and
+`docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
