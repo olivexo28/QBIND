@@ -2847,3 +2847,38 @@ CLI flag `--p2p-trust-bundle-custody-attestation-policy` and env var
   beyond the additive hidden flag and module. Release-binary
   custody-attestation policy selector evidence is deferred to **Run 210**.
   **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 210 — release-binary custody-attestation policy selector evidence
+
+Run 210 closes the Run 209-deferred release-binary boundary for the hidden
+custody-attestation policy selector. It adds the release helper
+`crates/qbind-node/examples/run_210_custody_attestation_policy_release_binary_helper.rs`,
+the harness
+`scripts/devnet/run_210_custody_attestation_policy_release_binary.sh`, the
+evidence archive
+`docs/devnet/run_210_custody_attestation_policy_release_binary/`, and the
+canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_210.md`. It makes
+**no production source change** (helper + harness + docs only).
+
+* Run 210 performs **no apply**. The release helper drives the Run 209
+  selector resolver and the seven per-surface preflight wrappers
+  `preflight_v2_marker_custody_attestation_for_*` in release mode through the
+  production library symbols; they write no marker, write no sequence, swap
+  no live trust, evict no sessions, and never invoke Run 070. Mutating
+  callers continue to honor sequence-before-marker ordering AFTER acceptance.
+* On the real `target/release/qbind-node`, `--help` hides the Run 209
+  selector flag `--p2p-trust-bundle-custody-attestation-policy` (`hide =
+  true`), and arming the hidden CLI/env selector enables no production
+  custody attestation and no MainNet peer-driven apply on any captured
+  surface (S1–S10).
+* Default remains `CustodyAttestationPolicy::Disabled`; CLI wins over env;
+  invalid values fail closed with a typed parse error before any
+  custody-attestation material parse.
+* An invalid live inbound `0x05` custody-attestation candidate is **not
+  propagated, staged, or applied** in release mode either — the rejection
+  short-circuits at the underlying Run 207 routing helper.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with `mainnet-production-attestation-required` and a fixture
+  attestation; the selector cannot weaken this refusal.
+* Run 210 adds no new exit code and no new metric, and makes no CLI / env /
+  marker / sequence-file / trust-bundle core / wire / schema change. **Full
+  C4 remains OPEN; C5 remains OPEN.**

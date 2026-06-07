@@ -5024,3 +5024,37 @@ contexts through the Run 207 routing layer.
   change and does not weaken Runs 070, 130–208. Release-binary
   custody-attestation policy selector evidence is deferred to **Run 210**.
   **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 210 — release-binary custody-attestation policy selector evidence
+
+Run 210 supplies the release-binary evidence deferred by Run 209 for the
+hidden custody-attestation policy selector. It adds the release helper
+`crates/qbind-node/examples/run_210_custody_attestation_policy_release_binary_helper.rs`,
+the harness
+`scripts/devnet/run_210_custody_attestation_policy_release_binary.sh`, the
+evidence archive
+`docs/devnet/run_210_custody_attestation_policy_release_binary/`, and the
+canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_210.md`. It makes
+**no production source change** (helper + harness + docs only).
+
+* Run 210 grants **no new authority**. It implements no real cloud-KMS /
+  PKCS#11 / HSM-vendor attestation verifier, no real KMS/HSM backend, no real
+  RemoteSigner backend, no governance execution, no real on-chain proof
+  verifier, and no validator-set rotation; it only proves, in release mode,
+  that the existing Run 209 selector and the seven preflight wrappers behave
+  as specified.
+* On the real `target/release/qbind-node`, `--help` hides the Run 209
+  selector flag `--p2p-trust-bundle-custody-attestation-policy` (`hide =
+  true`); arming the hidden CLI/env selector confers no new
+  authority-bearing capability and enables no production attestation backend.
+* Default remains `CustodyAttestationPolicy::Disabled`; legacy no-attestation
+  payloads remain compatible. CLI wins over env when both are set; invalid
+  values fail closed with a typed parse error. Fixture attestation remains
+  **DevNet/TestNet evidence-only** and cannot satisfy MainNet production
+  attestation; production / cloud-KMS / PKCS#11 / HSM / RemoteSigner
+  attestation reaches the Run 205 verifier and fails closed as unavailable.
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL refusal**
+  even with a carried fixture attestation and
+  `mainnet-production-attestation-required`. Run 210 makes no
+  authority-marker / sequence-file / trust-bundle core / wire / schema change
+  and does not weaken Runs 070, 130–209. **Full C4 remains OPEN; C5 remains
+  OPEN.**
