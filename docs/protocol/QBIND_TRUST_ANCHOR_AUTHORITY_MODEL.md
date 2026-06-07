@@ -4923,3 +4923,35 @@ Authority-model invariants (unchanged):
   Governance execution, real on-chain proof verification, and validator-set
   rotation remain unimplemented/open.
 * **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 207 — source/test custody-attestation payload carrying and production preflight integration
+
+Run 207 makes the Run 205 typed custody-attestation evidence/input
+reachable from production call-site contexts
+(`crates/qbind-node/src/pqc_custody_attestation_payload_carrying.rs`,
+`crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_tests.rs`).
+
+* Run 207 grants **no new authority**. It implements no real cloud-KMS /
+  PKCS#11 / HSM-vendor attestation verifier and no real RemoteSigner
+  backend; the default `CustodyAttestationPolicy::Disabled` is unchanged.
+* The wire types (`CustodyAttestationClassWire`,
+  `CustodyAttestationEvidenceWire`, `CustodyAttestationInputWire`,
+  `CustodyAttestationPayloadWire`) convert into the Run 205 internal
+  attestation types and **bind the full authority tuple** — environment,
+  chain_id, genesis_hash, authority-root fingerprint, bundle-signing-key
+  fingerprint, Run 188 custody class, backend / provider / signer id,
+  custody key id / label, suite id, lifecycle action, candidate digest,
+  authority-domain sequence, and the optional governance / request /
+  response / transcript digests — through the Run 205
+  `verify_custody_attestation` boundary. A mismatch on any bound field is
+  rejected as the matching typed Run 205 outcome.
+* The carried fixture attestation is **DevNet/TestNet evidence-only** and is
+  refused on a MainNet trust domain; production / cloud-KMS / PKCS#11 / HSM
+  / RemoteSigner attestation remains unavailable/fail-closed; neither a
+  local operator nor a peer majority can satisfy a production attestation.
+* The **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend path
+  (Runs 203–204)** remain separate, unchanged backend-boundary options.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal** even with a carried fixture attestation. Run 207 makes no
+  authority-marker / sequence-file / trust-bundle core / schema change and
+  does not weaken Runs 070, 130–206. Release-binary evidence is deferred to
+  **Run 208**. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -2733,3 +2733,38 @@ Apply-safety invariants (unchanged):
   safety property. Governance execution, real on-chain proof verification,
   and validator-set rotation remain unimplemented/open. **Full C4 remains
   OPEN; C5 remains OPEN.**
+## Run 207 — source/test custody-attestation payload carrying and production preflight integration
+
+Run 207 carries the Run 205 typed custody-attestation evidence/input
+through production payload/context paths at the source/test level
+(`crates/qbind-node/src/pqc_custody_attestation_payload_carrying.rs`,
+`crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_tests.rs`).
+
+* Run 207 performs **no apply**. The seven routing helpers
+  (`route_loaded_custody_attestation_to_{reload_check, reload_apply,
+  startup_p2p_trust_bundle, sighup, local_peer_candidate_check,
+  live_inbound_0x05, peer_driven_drain}_callsite_decision`) are pure: they
+  write no marker or sequence, swap no live trust, evict no sessions, and
+  never invoke Run 070.
+* The `custody_attestation` sidecar sibling is **additive and optional**.
+  A v2 sidecar without it parses exactly as before
+  (`CustodyAttestationLoadStatus::Absent`); a malformed sibling is
+  extracted **before** the strict v2 parse and fails closed
+  (`Malformed`) while the ratification still parses — it cannot poison the
+  ratification and never reaches an apply path.
+* A malformed carrier short-circuits to
+  `MalformedCustodyAttestationPayload` BEFORE the Run 205 verifier; an
+  absent carrier under a required policy yields
+  `CustodyAttestationRequiredButAbsent`; both fail closed without mutation.
+* The peer-driven drain helper refuses MainNet unconditionally
+  (`MainNetPeerDrivenApplyRefused`), preserving the Run 147 / 148 / 152
+  FATAL refusal even when a fixture attestation is carried and verifies.
+* The fixture attestation is DevNet/TestNet source/test only; production /
+  cloud-KMS / PKCS#11 / HSM / RemoteSigner attestation remains
+  unavailable/fail-closed; the RemoteSigner path (Runs 194–202) and the
+  KMS/HSM backend path (Runs 203–204) remain separate, unchanged
+  backend-boundary options.
+* Run 207 adds no new exit code and no new metric, and makes no CLI / env /
+  authority-marker / sequence-file / trust-bundle core / schema change; it
+  does not weaken Runs 070, 130–206. Release-binary evidence is deferred to
+  **Run 208**. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -335,4 +335,31 @@ violation is a regression:
   real KMS/HSM attestation / cloud-KMS / PKCS#11 / RemoteSigner backend,
   governance execution, or validator-set rotation; RemoteSigner and KMS/HSM
   remain backend-boundary only and unchanged; no MainNet apply. **Full C4
-  remains OPEN; C5 remains OPEN.**
+  remains OPEN; C5 remains OPEN.*** **Run 207** — Source/test custody-attestation payload carrying and
+  production preflight integration
+  (`crates/qbind-node/src/pqc_custody_attestation_payload_carrying.rs`,
+  `crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_tests.rs`).
+  Makes the Run 205 typed custody-attestation evidence/input reachable from
+  production call-site contexts via an additive, optional
+  `custody_attestation` sibling on the v2 ratification sidecar, wire types
+  that convert into the Run 205 internal types, a typed
+  `CustodyAttestationLoadStatus`, a pure sibling parser, a combined v2
+  sidecar loader, a typed `CustodyAttestationCallsiteContext`, and seven
+  per-surface routing helpers (reload-check, reload-apply, startup
+  `--p2p-trust-bundle`, SIGHUP, local peer-candidate-check, live inbound
+  `0x05`, peer-driven drain) that drive the carrier into the Run 205
+  `verify_custody_attestation` /
+  `validate_custody_metadata_and_attestation` /
+  `validate_lifecycle_custody_and_attestation` boundary. Additive/optional
+  payload-context fields only; legacy/no-attestation payload compatibility
+  preserved; default `CustodyAttestationPolicy::Disabled` unchanged.
+  Fixture attestation is DevNet/TestNet source-test only; production /
+  cloud-KMS / PKCS#11 / HSM-vendor / RemoteSigner attestation remains
+  unavailable/fail-closed; the RemoteSigner path (Runs 194–202) and the
+  KMS/HSM backend path (Runs 203–204) remain separate, unchanged
+  backend-boundary options; a malformed carrier short-circuits before the
+  verifier and before any sequence/marker write, live trust swap, session
+  eviction, or Run 070 call; MainNet peer-driven apply remains the Run 147
+  / 148 / 152 FATAL refusal even with a fixture attestation. Source/test
+  only; release-binary custody-attestation payload/carrying evidence
+  deferred to **Run 208**. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -7490,3 +7490,62 @@ Operator-relevant points (no behavior change):
 * Governance execution, real on-chain proof verification, and validator-set
   rotation all remain unimplemented/open. **Full C4 remains OPEN; C5
   remains OPEN.**
+## Run 207 — source/test custody-attestation payload carrying and production preflight integration
+
+Run 207 is a **source/test-only** pass that makes the Run 205 typed
+custody-attestation evidence/input reachable from production call-site
+contexts. It adds the module
+`crates/qbind-node/src/pqc_custody_attestation_payload_carrying.rs` and the
+suite `crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_tests.rs`
+(64 tests, all PASS).
+
+* Run 207 adds an **additive, optional** `custody_attestation` sibling on
+  the v2 ratification sidecar JSON
+  (`CUSTODY_ATTESTATION_PAYLOAD_SIBLING_FIELD`, wire schema version `1`).
+  A v2 sidecar without the sibling parses exactly as before and yields
+  `CustodyAttestationLoadStatus::Absent`; **legacy/no-attestation payload
+  compatibility is preserved**.
+* Wire types (`CustodyAttestationClassWire`,
+  `CustodyAttestationEvidenceWire`, `CustodyAttestationInputWire`,
+  `CustodyAttestationPayloadWire`, `CustodyAttestationParts`) convert into
+  the Run 205 internal `CustodyAttestationEvidence` /
+  `CustodyAttestationInput`, **failing closed** via
+  `CustodyAttestationWireParseError` on an unknown schema version or an
+  empty required field. `CustodyAttestationLoadStatus` distinguishes
+  `Absent` / `Available` / `Malformed`, and
+  `CustodyAttestationPayloadParseError` separates JSON-shape from
+  wire-structural failures.
+* The combined loader
+  `load_v2_ratification_sidecar_with_custody_attestation_from_path` /
+  `_from_bytes` extracts the sibling **before** the strict v2 sidecar
+  parse, so a malformed sibling cannot poison the ratification.
+* The typed `CustodyAttestationCallsiteContext` bundles the in-process
+  Run 188 custody attestation, the candidate / persisted v2 records, the
+  trust domain, the lifecycle / governance / custody / suite bindings, the
+  Run 188 custody policy, the Run 205 attestation policy, and `now_unix`.
+* Seven per-surface routing helpers
+  `route_loaded_custody_attestation_to_{reload_check, reload_apply,
+  startup_p2p_trust_bundle, sighup, local_peer_candidate_check,
+  live_inbound_0x05, peer_driven_drain}_callsite_decision` drive the
+  carrier into the Run 205 `verify_custody_attestation` /
+  `validate_custody_metadata_and_attestation` /
+  `validate_lifecycle_custody_and_attestation` boundary. A **malformed
+  carrier short-circuits** before the verifier and before any
+  sequence/marker write, live trust swap, session eviction, or Run 070
+  call; the peer-driven drain helper refuses MainNet unconditionally.
+* The fixture attestation is **DevNet/TestNet source/test only**; the
+  production / cloud-KMS / PKCS#11 / HSM / RemoteSigner attestation paths
+  remain **unavailable/fail-closed**; the default
+  `CustodyAttestationPolicy::Disabled` is unchanged.
+* The **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend path
+  (Runs 203–204)** remain separate, unchanged backend-boundary options.
+* Run 207 implements **no real cloud-KMS / PKCS#11 / HSM-vendor attestation
+  verifier** and **no real RemoteSigner backend**, adds **no new metric, no
+  new exit code**, and makes no authority-marker / sequence-file /
+  trust-bundle core / schema change; it does not weaken Runs 070, 130–206.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal** even with a carried fixture attestation. Release-binary
+  custody-attestation payload/carrying evidence is deferred to **Run 208**.
+  Governance execution, real on-chain proof verification, and validator-set
+  rotation all remain unimplemented/open. **Full C4 remains OPEN; C5
+  remains OPEN.**
