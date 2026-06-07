@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 208:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 209:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -389,3 +389,43 @@ violation is a regression:
   attestation remains unavailable/fail-closed; MainNet peer-driven apply
   remains the Run 147 / 148 / 152 FATAL refusal even with a fixture
   attestation. **Full C4 remains OPEN; C5 remains OPEN.**
+* **Run 209** — Source/test hidden custody-attestation policy selector and
+  production preflight integration
+  (`crates/qbind-node/src/pqc_custody_attestation_policy_surface.rs`,
+  `crates/qbind-node/tests/run_209_custody_attestation_policy_selector_tests.rs`).
+  Adds a hidden, disabled-by-default custody-attestation policy selector —
+  one hidden clap flag `--p2p-trust-bundle-custody-attestation-policy`
+  (`hide = true`) plus the env var
+  `QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY` — sharing one
+  case-insensitive value grammar
+  (`disabled` | `fixture-attestation-allowed` |
+  `remote-signer-attestation-required` | `kms-attestation-required` |
+  `hsm-attestation-required` | `production-attestation-required` |
+  `mainnet-production-attestation-required`), a typed
+  `CustodyAttestationPolicySelectorParseError`, the pure parsers
+  `custody_attestation_policy_from_selector` /
+  `custody_attestation_policy_env_selector` /
+  `custody_attestation_policy_from_cli_or_env`, and seven per-surface
+  preflight wrappers `preflight_v2_marker_custody_attestation_for_*` that
+  bind the resolved Run 205 `CustodyAttestationPolicy` into the Run 207
+  `CustodyAttestationCallsiteContext` and dispatch to the matching Run 207
+  routing helper for each of the seven production v2 marker-decision
+  preflight contexts (reload-check, reload-apply, startup
+  `--p2p-trust-bundle`, SIGHUP, local peer-candidate-check, live inbound
+  `0x05`, peer-driven drain). Unset CLI/env resolves to
+  `CustodyAttestationPolicy::Disabled`; CLI wins over env when both are
+  set; invalid values fail closed with a typed parse error. Default
+  remains `Disabled` with legacy/no-attestation payload compatibility;
+  fixture attestation is DevNet/TestNet evidence-only and cannot satisfy
+  MainNet production attestation; production / cloud-KMS / PKCS#11 / HSM /
+  RemoteSigner attestation reaches the Run 205 verifier and fails closed as
+  unavailable; the wrappers are pure (no marker/sequence write, no live
+  trust swap, no session eviction, no Run 070 call); MainNet peer-driven
+  apply remains the Run 147 / 148 / 152 FATAL refusal even with
+  `MainnetProductionAttestationRequired` and fixture attestation.
+  Source/test only; no real cloud-KMS / PKCS#11 / HSM-vendor attestation
+  verifier, no real KMS/HSM backend, no real RemoteSigner backend, no
+  governance execution, no real on-chain proof verifier, and no
+  validator-set rotation is implemented; release-binary custody-attestation
+  policy selector evidence deferred to **Run 210**. **Full C4 remains
+  OPEN; C5 remains OPEN.**

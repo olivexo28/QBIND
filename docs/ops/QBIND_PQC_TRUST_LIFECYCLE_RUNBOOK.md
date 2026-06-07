@@ -7606,3 +7606,58 @@ source change** (helper + harness + docs only).
 * **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
   even with a carried fixture attestation. **Full C4 remains OPEN; C5 remains
   OPEN.**
+## Run 209 — source/test hidden custody-attestation policy selector and production preflight integration
+
+Run 209 is a **source/test-only** pass that adds a hidden,
+disabled-by-default custody-attestation policy selector and wires the
+resolved Run 205 `CustodyAttestationPolicy` into all seven production v2
+marker-decision preflight contexts through the Run 207 payload-carrying /
+routing layer. It adds the module
+`crates/qbind-node/src/pqc_custody_attestation_policy_surface.rs`, the
+hidden CLI flag in `crates/qbind-node/src/cli.rs`, the test target
+`crates/qbind-node/tests/run_209_custody_attestation_policy_selector_tests.rs`,
+and the canonical report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_209.md`.
+
+* **Selector (hidden, disabled by default).** One hidden clap flag
+  `--p2p-trust-bundle-custody-attestation-policy` (`hide = true`) plus the
+  env var `QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY`, sharing one
+  case-insensitive value grammar
+  (`disabled` | `fixture-attestation-allowed` |
+  `remote-signer-attestation-required` | `kms-attestation-required` |
+  `hsm-attestation-required` | `production-attestation-required` |
+  `mainnet-production-attestation-required`). Operators reading `--help`
+  see no new surface.
+* **Default unchanged.** When both the CLI flag and the env var are
+  absent the resolved policy is `CustodyAttestationPolicy::Disabled` —
+  legacy no-attestation payloads remain bit-for-bit compatible (Run 207).
+* **Deterministic precedence.** When both sources are supplied the **CLI
+  flag wins** (mirroring the Run 192 custody and Run 198 RemoteSigner
+  selectors). Invalid / unknown values fail closed with a typed
+  `CustodyAttestationPolicySelectorParseError`; the resolver never
+  silently downgrades an explicit-but-invalid value to `Disabled`.
+* **Reachability.** The resolved policy reaches all seven production
+  preflight contexts (reload-check, reload-apply, startup
+  `--p2p-trust-bundle`, SIGHUP, local peer-candidate-check, live inbound
+  `0x05`, peer-driven drain) through the per-surface wrappers
+  `preflight_v2_marker_custody_attestation_for_*`, which are **pure**: no
+  marker write, no sequence write, no live trust swap, no session
+  eviction, no Run 070 call.
+* **Fail-closed behavior.** Fixture attestation is **DevNet/TestNet
+  evidence-only** and cannot satisfy MainNet production attestation;
+  production / cloud-KMS / PKCS#11 / HSM / RemoteSigner attestation
+  reaches the Run 205 verifier and fails closed as unavailable; missing
+  attestation under a required policy fails closed; malformed material
+  fails closed before the verifier.
+* Run 209 implements **no real cloud-KMS / PKCS#11 / HSM-vendor
+  attestation verifier**, **no real KMS/HSM backend**, **no real
+  RemoteSigner backend**, **no governance execution**, **no real on-chain
+  proof verifier**, and **no validator-set rotation**; it adds **no new
+  metric, no new exit code**, and makes no authority-marker / sequence-file
+  / trust-bundle core / wire / schema change; it does not weaken Runs 070,
+  130–208.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal** even with `MainnetProductionAttestationRequired` and a carried
+  fixture attestation. Release-binary custody-attestation policy selector
+  evidence is deferred to **Run 210**. **Full C4 remains OPEN; C5 remains
+  OPEN.**

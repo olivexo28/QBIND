@@ -4997,3 +4997,30 @@ change (helper + harness + docs only).
   sequence-file / trust-bundle core / wire / schema change beyond Run 207's
   additive optional sibling and does not weaken Runs 070, 130–207. **Full C4
   remains OPEN; C5 remains OPEN.**
+## Run 209 — source/test hidden custody-attestation policy selector and production preflight integration
+
+Run 209 makes the Run 205 typed `CustodyAttestationPolicy` selectable at
+source/test call sites via a hidden, disabled-by-default selector (one
+hidden CLI flag `--p2p-trust-bundle-custody-attestation-policy` plus the
+env var `QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY`) and wires the
+resolved policy into the seven production v2 marker-decision preflight
+contexts through the Run 207 routing layer.
+
+* Run 209 grants **no new authority**. It implements no real cloud-KMS /
+  PKCS#11 / HSM-vendor attestation verifier, no real KMS/HSM backend, no
+  real RemoteSigner backend, no governance execution, no real on-chain
+  proof verifier, and no validator-set rotation.
+* Default remains `CustodyAttestationPolicy::Disabled`; legacy
+  no-attestation payloads remain compatible. CLI wins over env when both
+  are set; invalid values fail closed with a typed parse error.
+* Fixture attestation remains **DevNet/TestNet evidence-only** and cannot
+  satisfy MainNet production attestation; production / cloud-KMS / PKCS#11
+  / HSM / RemoteSigner attestation reaches the Run 205 verifier and fails
+  closed as unavailable.
+* MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with a carried fixture attestation and
+  `MainnetProductionAttestationRequired`. Run 209 makes no
+  authority-marker / sequence-file / trust-bundle core / wire / schema
+  change and does not weaken Runs 070, 130–208. Release-binary
+  custody-attestation policy selector evidence is deferred to **Run 210**.
+  **Full C4 remains OPEN; C5 remains OPEN.**
