@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 206:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 207:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -335,7 +335,8 @@ violation is a regression:
   real KMS/HSM attestation / cloud-KMS / PKCS#11 / RemoteSigner backend,
   governance execution, or validator-set rotation; RemoteSigner and KMS/HSM
   remain backend-boundary only and unchanged; no MainNet apply. **Full C4
-  remains OPEN; C5 remains OPEN.*** **Run 207** — Source/test custody-attestation payload carrying and
+  remains OPEN; C5 remains OPEN.**
+* **Run 207** — Source/test custody-attestation payload carrying and
   production preflight integration
   (`crates/qbind-node/src/pqc_custody_attestation_payload_carrying.rs`,
   `crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_tests.rs`).
@@ -361,5 +362,8 @@ violation is a regression:
   verifier and before any sequence/marker write, live trust swap, session
   eviction, or Run 070 call; MainNet peer-driven apply remains the Run 147
   / 148 / 152 FATAL refusal even with a fixture attestation. Source/test
-  only; release-binary custody-attestation payload/carrying evidence
-  deferred to **Run 208**. **Full C4 remains OPEN; C5 remains OPEN.**
+  only; no real KMS/HSM attestation / cloud-KMS / PKCS#11 / RemoteSigner
+  attestation verifier or backend, governance execution, or validator-set
+  rotation is implemented; release-binary custody-attestation
+  payload/carrying evidence deferred to **Run 208**. **Full C4 remains
+  OPEN; C5 remains OPEN.**
