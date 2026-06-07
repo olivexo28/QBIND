@@ -2555,3 +2555,44 @@ Apply-safety invariants (unchanged):
 * Run 202 adds no new exit code and no new metric, and does not weaken any
   Runs 070 / 130–201 safety property. **Full C4 remains OPEN; C5 remains
   OPEN.**
+
+## Run 203 — source/test KMS/HSM backend abstraction boundary
+
+Run 203 adds the typed, provider-neutral KMS/HSM backend abstraction
+(`crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs`) over the Run
+188 `AuthorityCustodyClass::{Kms, Hsm}` custody classes, with focused
+tests `crates/qbind-node/tests/run_203_kms_hsm_backend_boundary_tests.rs`
+and the evidence report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_203.md`.
+It is **source/test only**; the only production-source change is the
+additive new module plus its `lib.rs` registration.
+
+Apply-safety invariants (unchanged):
+
+* Run 203 performs **no apply**. Every public function and trait method in
+  the new module is pure: it performs no network or file I/O, writes no
+  marker or sequence, swaps no live trust, evicts no sessions, and never
+  invokes the Run 070 `validate → swap → evict_sessions → commit_sequence`
+  ordering.
+* **No real KMS backend, no real HSM backend, no cloud-KMS integration,
+  and no PKCS#11 integration** are implemented. The fixture KMS/HSM
+  backends are DevNet/TestNet source/test only and refused on MainNet; the
+  production / cloud / PKCS#11 backends are callable but fail closed
+  (`ProductionKmsUnavailable` / `ProductionHsmUnavailable` /
+  `CloudKmsUnavailable` / `Pkcs11HsmUnavailable`).
+* The **RemoteSigner path (Runs 194–202) remains separate and unchanged**:
+  the KMS/HSM custody-class router refuses a `RemoteSigner` custody class
+  as `NotKmsHsmCustodyClass`. Local-operator and peer-majority material
+  cannot satisfy a backend policy.
+* There is **no autonomous apply**, no apply-on-receipt, and no
+  peer-majority authority. The **Run 147 / 148 / 152 FATAL MainNet
+  peer-driven apply refusal** is preserved: the composition
+  `validate_lifecycle_governance_custody_and_backend` short-circuits a
+  MainNet peer-driven-apply preflight to `MainNetPeerDrivenApplyRefused`
+  even with a valid fixture KMS/HSM response.
+* Run 203 adds no new exit code and no new metric, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change, and does not weaken any Runs 070 / 130–202
+  safety property. Governance execution, real on-chain proof verification,
+  and validator-set rotation remain unimplemented/open; release-binary
+  KMS/HSM backend-boundary evidence is deferred to **Run 204**. **Full C4
+  remains OPEN; C5 remains OPEN.**
