@@ -4828,3 +4828,50 @@ Authority-model invariants (unchanged):
   performed. Governance execution, real on-chain proof verification, and
   validator-set rotation remain unimplemented/open.
 * **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 205 — source/test production custody attestation verifier skeleton
+
+Run 205 adds a typed, mockable verifier skeleton for a production custody
+attestation chain
+(`crates/qbind-node/src/pqc_custody_attestation_verifier.rs`) layered over
+the Run 188 custody classes, establishing that the attestation framing
+grants no new authority. It is **source/test only**, adding the new module
+(plus its `lib.rs` registration), the tests
+`crates/qbind-node/tests/run_205_custody_attestation_verifier_tests.rs`,
+and the report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_205.md`.
+
+Authority-model invariants (unchanged):
+
+* Run 205 grants **no new authority**. It implements no real cloud-KMS
+  attestation verifier, no real PKCS#11 attestation verifier, no real HSM
+  vendor attestation verifier, and no real RemoteSigner attestation
+  verifier; the fixture attestation remains DevNet/TestNet evidence-only
+  and refused on MainNet, while the production / cloud / PKCS#11 /
+  HSM-vendor / RemoteSigner attestation verifiers fail closed as the
+  matching typed unavailable outcome.
+* The `verify_custody_attestation` verifier binds the **full authority
+  tuple** (environment, chain id, genesis hash, authority-root and
+  bundle-signing-key fingerprints, the Run 188 custody class, the backend
+  / provider / signer id, the custody key id, the suite id, the lifecycle
+  action, the candidate digest, the authority-domain sequence, and the
+  optional governance / request / response / transcript digests) plus the
+  attestation commitment, anti-replay nonce, replay window, and
+  freshness/expiry window over deterministic domain-separated digests; it
+  returns a typed `CustodyAttestationOutcome` rather than mutating trust,
+  and rejected cases leave inputs byte-identical.
+* The **RemoteSigner authority path (Runs 194–202)** and the **KMS/HSM
+  backend authority path (Runs 203–204)** remain separate and unchanged:
+  the attestation verifier refuses a production / RemoteSigner / unknown
+  attestation class as the matching typed unavailable/unknown outcome,
+  and local-operator / peer-majority material cannot satisfy a production
+  attestation policy. The attestation boundary confers **no autonomous
+  apply**, no apply-on-receipt, and no peer-majority authority.
+* MainNet peer-driven apply remains **refused**: the composition helpers
+  short-circuit a MainNet peer-driven-apply preflight to
+  `MainNetPeerDrivenApplyRefused` even with a valid fixture attestation,
+  and the fixture attestation is itself refused on a MainNet trust
+  domain. No Run 070 ordering, marker, sequence, or live-trust swap is
+  performed. Governance execution, real on-chain proof verification, and
+  validator-set rotation remain unimplemented/open. Release-binary
+  custody-attestation verifier-boundary evidence is deferred to **Run
+  206**.
+* **Full C4 remains OPEN; C5 remains OPEN.**

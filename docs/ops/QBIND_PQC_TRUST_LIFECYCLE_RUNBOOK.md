@@ -7385,3 +7385,54 @@ Operator-relevant points (no behavior change):
   Governance execution, real on-chain proof verification, and
   validator-set rotation all remain unimplemented/open. **Full C4 remains
   OPEN; C5 remains OPEN.**
+## Run 205 — source/test production custody attestation verifier skeleton
+
+Run 205 is a **source/test-only** pass that adds a typed, mockable
+verifier skeleton for a production custody attestation chain. It makes a
+single additive production-source change — the new module
+`crates/qbind-node/src/pqc_custody_attestation_verifier.rs` plus its
+`lib.rs` registration — and adds the tests
+`crates/qbind-node/tests/run_205_custody_attestation_verifier_tests.rs`
+and the canonical report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_205.md`.
+
+Operator-relevant points (no behavior change):
+
+* Run 205 implements **no real cloud-KMS attestation verifier**, **no
+  real PKCS#11 attestation verifier**, **no real HSM vendor attestation
+  verifier**, and **no real RemoteSigner attestation verifier**. The
+  fixture attestation remains **DevNet/TestNet evidence-only** and is
+  refused on a MainNet trust domain.
+* The new `CustodyAttestationVerifier` trait is pure and mockable: the
+  `FixtureCustodyAttestationVerifier` accepts only well-formed fixture
+  attestations on DevNet/TestNet, and the production / cloud-KMS /
+  PKCS#11 / HSM / RemoteSigner verifiers are callable but **fail closed**
+  as the matching typed unavailable outcome.
+* The verifier binds the full authority tuple (environment, chain id,
+  genesis hash, authority-root and bundle-signing-key fingerprints, the
+  Run 188 custody class, the backend / provider / signer id, the custody
+  key id, the suite id, the lifecycle action, the candidate digest, the
+  authority-domain sequence, the optional governance / request / response
+  / transcript digests), the attestation commitment, the anti-replay
+  nonce and replay window, and the freshness/expiry window, all over
+  deterministic domain-separated digests.
+* The composition helpers `validate_custody_metadata_and_attestation` /
+  `validate_lifecycle_custody_and_attestation` layer the attestation over
+  the Run 188 `validate_lifecycle_governance_and_custody` composition and
+  short-circuit to a MainNet peer-driven-apply refusal before consulting
+  custody or attestation. **MainNet peer-driven apply remains refused
+  even with a fixture attestation.**
+* The **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend
+  path (Runs 203–204)** remain separate, unchanged backend-boundary
+  options. Run 205 makes no real backend, networked signer daemon, or
+  attestation service claim.
+* Run 205 adds **no new metric, no new exit code**, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change, and does not weaken Runs 070, 130–204.
+* The accepted Runs 130–204 safety properties remain in force, including
+  validation-only non-mutation, rejected-candidate no-mutation, and the
+  **Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal**.
+  Governance execution, real on-chain proof verification, and
+  validator-set rotation all remain unimplemented/open. Release-binary
+  custody-attestation verifier-boundary evidence is deferred to **Run
+  206**. **Full C4 remains OPEN; C5 remains OPEN.**

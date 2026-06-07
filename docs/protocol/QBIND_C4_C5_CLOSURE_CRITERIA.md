@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 204:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 205:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -286,4 +286,29 @@ violation is a regression:
   KMS/HSM / cloud-KMS / PKCS#11 / RemoteSigner backend, governance
   execution, or validator-set rotation; RemoteSigner path remains separate
   and unchanged; no MainNet apply. **Full C4 remains OPEN; C5 remains
+  OPEN.**
+* **Run 205** — Source/test production custody attestation verifier
+  skeleton (`crates/qbind-node/src/pqc_custody_attestation_verifier.rs`).
+  Advances the C4 "production custody attestation" criterion toward a
+  future implementation without implementing one: no real cloud-KMS
+  attestation verifier, no real PKCS#11 attestation verifier, no real HSM
+  vendor attestation verifier, no real RemoteSigner attestation verifier.
+  Adds a typed `CustodyAttestationClass` / `CustodyAttestationPolicy`,
+  typed `CustodyAttestationEvidence` / `CustodyAttestationInput`,
+  deterministic domain-bound evidence / input / transcript /
+  provider-identity digests, a pure/mockable `CustodyAttestationVerifier`
+  trait with a DevNet/TestNet `FixtureCustodyAttestationVerifier` and
+  fail-closed production / cloud-KMS / PKCS#11 / HSM / RemoteSigner
+  verifiers, a typed `CustodyAttestationOutcome`, the pure verifier
+  `verify_custody_attestation`, and composition helpers
+  (`validate_custody_metadata_and_attestation` /
+  `validate_lifecycle_custody_and_attestation`) layering attestation over
+  the Run 188 custody validator. Fixture attestation is DevNet/TestNet
+  source-test only; production / cloud / PKCS#11 / HSM-vendor /
+  RemoteSigner attestation remains unavailable/fail-closed; the
+  RemoteSigner path (Runs 194–202) and the KMS/HSM backend path (Runs
+  203–204) remain separate, unchanged backend-boundary options; MainNet
+  peer-driven apply remains refused even with a fixture attestation.
+  Source/test only; release-binary custody-attestation verifier-boundary
+  evidence deferred to **Run 206**. **Full C4 remains OPEN; C5 remains
   OPEN.**

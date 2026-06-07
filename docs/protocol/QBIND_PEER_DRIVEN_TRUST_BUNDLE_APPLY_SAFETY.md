@@ -2640,3 +2640,46 @@ Apply-safety invariants (unchanged):
   property. Governance execution, real on-chain proof verification, and
   validator-set rotation remain unimplemented/open. **Full C4 remains
   OPEN; C5 remains OPEN.**
+## Run 205 — source/test production custody attestation verifier skeleton
+
+Run 205 adds a typed, mockable verifier skeleton for a production custody
+attestation chain
+(`crates/qbind-node/src/pqc_custody_attestation_verifier.rs`) layered over
+the Run 188 custody classes. It is **source/test only**, adding the new
+module (plus its `lib.rs` registration), the tests
+`crates/qbind-node/tests/run_205_custody_attestation_verifier_tests.rs`,
+and the report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_205.md`.
+
+Apply-safety invariants (unchanged):
+
+* Run 205 performs **no apply**. The new module is pure: no public
+  function or trait method performs network or file I/O, writes a marker
+  or sequence, swaps live trust, evicts sessions, or invokes the Run 070
+  `validate → swap → evict_sessions → commit_sequence` ordering.
+* **No real cloud-KMS attestation verifier, no real PKCS#11 attestation
+  verifier, no real HSM vendor attestation verifier, and no real
+  RemoteSigner attestation verifier** are implemented. The fixture
+  attestation remains DevNet/TestNet evidence-only and is refused on
+  MainNet; the production / cloud / PKCS#11 / HSM-vendor / RemoteSigner
+  attestation verifiers are callable but fail closed as the matching
+  typed unavailable outcome.
+* The **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend path
+  (Runs 203–204)** remain separate and unchanged.
+* There is **no autonomous apply**, no apply-on-receipt, and no
+  peer-majority authority. The **Run 147 / 148 / 152 FATAL MainNet
+  peer-driven apply refusal** is preserved — the composition helpers
+  `validate_custody_metadata_and_attestation` /
+  `validate_lifecycle_custody_and_attestation` short-circuit a MainNet
+  peer-driven-apply preflight to `MainNetPeerDrivenApplyRefused` before
+  consulting custody or attestation, even with a valid fixture
+  attestation, and rejected attestation cases produce no mutation. The
+  fixture attestation cannot satisfy a production attestation policy, and
+  neither a local operator nor a peer majority can satisfy production
+  attestation.
+* Run 205 adds no new exit code and no new metric, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change, and does not weaken any Runs 070 / 130–204
+  safety property. Governance execution, real on-chain proof
+  verification, and validator-set rotation remain unimplemented/open.
+  Release-binary custody-attestation verifier-boundary evidence is
+  deferred to **Run 206**. **Full C4 remains OPEN; C5 remains OPEN.**
