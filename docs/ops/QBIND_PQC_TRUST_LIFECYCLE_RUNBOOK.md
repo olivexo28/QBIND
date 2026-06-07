@@ -7340,3 +7340,48 @@ Operator-relevant points (no behavior change):
   validator-set rotation all remain unimplemented/open.
 * Release-binary KMS/HSM backend-boundary evidence is deferred to
   **Run 204**. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 204 — release-binary KMS/HSM backend abstraction boundary evidence
+
+Run 204 is a **release-binary evidence-only** pass that closes the
+Run 203-deferred release-binary boundary for the production KMS/HSM
+custody backend abstraction. It makes **no production-source change**: it
+adds the release example helper
+`crates/qbind-node/examples/run_204_kms_hsm_backend_release_binary_helper.rs`,
+the release harness
+`scripts/devnet/run_204_kms_hsm_backend_release_binary.sh`, the evidence
+archive `docs/devnet/run_204_kms_hsm_backend_release_binary/`, and the
+canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_204.md`.
+
+Operator-relevant points (no behavior change):
+
+* Run 204 implements **no real KMS backend**, **no real HSM backend**,
+  **no cloud-KMS integration**, and **no PKCS#11 integration**. The
+  fixture KMS/HSM backends remain **DevNet/TestNet evidence-only** and are
+  refused on a MainNet trust domain.
+* The harness drives the **real `target/release/qbind-node`**: every
+  existing Run 070 / 130–203 surface (`--help`, `--print-genesis-hash
+  --env {devnet,testnet,mainnet}`, the Run 193 custody selector, the
+  Run 198 RemoteSigner selector, the governance fixture flag) emits no
+  KMS / HSM / cloud-KMS / PKCS#11 / RemoteSigner backend enablement
+  banner and no MainNet peer-driven apply enablement — even with the
+  custody and RemoteSigner selectors armed on `--env mainnet`.
+* The release-built helper exercises the Run 203 A1–A15 / R1–R41 corpus
+  in **release mode** through the production library symbols (six tables;
+  total_pass 71, total_fail 0, verdict PASS): fixture KMS/HSM accepted on
+  DevNet/TestNet only; production / cloud / PKCS#11 backends fail-closed
+  as unavailable; identity / request / response / transcript digests
+  deterministic and domain-bound; backend boundary composes with the
+  Run 188 custody classes; rejected cases produce no mutation; MainNet
+  peer-driven apply remains refused even with fixture KMS/HSM material.
+* The **RemoteSigner path (Runs 194–202) remains a separate, unchanged
+  custody option**. Run 204 makes no real RemoteSigner backend or
+  networked signer daemon claim.
+* Run 204 adds **no new metric, no new exit code**, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change, and does not weaken Runs 070, 130–203.
+* The accepted Runs 130–203 safety properties remain in force, including
+  validation-only non-mutation, rejected-candidate no-mutation, and the
+  **Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal**.
+  Governance execution, real on-chain proof verification, and
+  validator-set rotation all remain unimplemented/open. **Full C4 remains
+  OPEN; C5 remains OPEN.**
