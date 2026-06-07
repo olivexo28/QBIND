@@ -7661,3 +7661,50 @@ and the canonical report
   fixture attestation. Release-binary custody-attestation policy selector
   evidence is deferred to **Run 210**. **Full C4 remains OPEN; C5 remains
   OPEN.**
+## Run 210 — release-binary custody-attestation policy selector evidence
+
+Run 210 is a **release-binary evidence** pass that closes the Run
+209-deferred release-binary boundary for the hidden custody-attestation
+policy selector. It adds the release helper
+`crates/qbind-node/examples/run_210_custody_attestation_policy_release_binary_helper.rs`,
+the harness
+`scripts/devnet/run_210_custody_attestation_policy_release_binary.sh`, the
+evidence archive
+`docs/devnet/run_210_custody_attestation_policy_release_binary/` (tracks
+`README.md`, `summary.txt`, `.gitignore`; all per-run artifacts are
+`.gitignore`d), and the canonical report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_210.md`. It makes **no production
+source change** (helper + harness + docs only).
+
+* **Real-binary surface.** On the real `target/release/qbind-node`, `--help`
+  hides the Run 209 selector flag
+  `--p2p-trust-bundle-custody-attestation-policy` (`hide = true`); the hidden
+  CLI/env selector is accepted without enabling any production custody
+  attestation, KMS/HSM/cloud-KMS/PKCS#11/RemoteSigner backend, governance
+  execution, validator-set rotation, or MainNet peer-driven apply; and every
+  Run 070 / 130–209 surface stays custody-attestation-silent (S1–S10).
+* **Release-mode selector corpus.** The release-built helper exercises the
+  Run 209 selector resolver (`custody_attestation_policy_from_selector` /
+  `custody_attestation_policy_env_selector` /
+  `custody_attestation_policy_from_cli_or_env`) and the seven per-surface
+  preflight wrappers through the production library symbols: unset resolves to
+  `Disabled`; CLI/env tags resolve; CLI-over-env precedence is deterministic;
+  invalid values fail closed with typed parse errors; the resolved policy
+  reaches all seven preflight contexts; fixture attestation is accepted on
+  DevNet/TestNet only where the policy allows; production / cloud-KMS /
+  PKCS#11 / HSM / RemoteSigner attestation reaches the Run 205 verifier and
+  fails closed as unavailable; rejected cases produce no mutation.
+* **Honest limitation.** The Run 209 CLI flag is parsed by the release binary
+  (hidden) but its resolved policy is not yet wired into a long-running node
+  runtime, so the full env/CLI → resolved-policy → preflight-context chain is
+  proven in release mode through the production library symbols by the helper
+  rather than by deep binary runtime behavior.
+* Run 210 implements **no real cloud-KMS / PKCS#11 / HSM-vendor attestation
+  verifier**, **no real KMS/HSM backend**, **no real RemoteSigner backend**,
+  **no governance execution**, **no real on-chain proof verifier**, and **no
+  validator-set rotation**; it adds **no new metric, no new exit code**, and
+  makes no authority-marker / sequence-file / trust-bundle core / wire /
+  schema change; it does not weaken Runs 070, 130–209.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with `mainnet-production-attestation-required` and a carried fixture
+  attestation. **Full C4 remains OPEN; C5 remains OPEN.**
