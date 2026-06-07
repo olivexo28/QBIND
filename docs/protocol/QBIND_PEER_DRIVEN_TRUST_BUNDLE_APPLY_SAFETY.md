@@ -2596,3 +2596,47 @@ Apply-safety invariants (unchanged):
   and validator-set rotation remain unimplemented/open; release-binary
   KMS/HSM backend-boundary evidence is deferred to **Run 204**. **Full C4
   remains OPEN; C5 remains OPEN.**
+## Run 204 — release-binary KMS/HSM backend abstraction boundary evidence
+
+Run 204 closes the Run 203-deferred release-binary boundary for the
+production KMS/HSM custody backend abstraction
+(`crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs`) over the Run 188
+custody classes. It is **release-binary evidence only**, adding the release
+helper
+`crates/qbind-node/examples/run_204_kms_hsm_backend_release_binary_helper.rs`,
+the release harness
+`scripts/devnet/run_204_kms_hsm_backend_release_binary.sh`, the evidence
+archive `docs/devnet/run_204_kms_hsm_backend_release_binary/`, and the
+report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_204.md`. It makes **no
+production-source change** (helper + harness + docs only).
+
+Apply-safety invariants (unchanged):
+
+* Run 204 performs **no apply**. The release helper and harness only link
+  and exercise the already-pure Run 203 module in release mode; no public
+  function or trait method performs network or file I/O, writes a marker or
+  sequence, swaps live trust, evicts sessions, or invokes the Run 070
+  `validate → swap → evict_sessions → commit_sequence` ordering.
+* The real `target/release/qbind-node` is observed to emit **no KMS / HSM /
+  cloud-KMS / PKCS#11 / RemoteSigner backend enablement** banner and **no
+  MainNet peer-driven apply enablement** on every captured surface
+  (`--help`, `--print-genesis-hash --env {devnet,testnet,mainnet}`, with
+  the Run 193 custody selector, the Run 198 RemoteSigner selector, and the
+  governance fixture flag armed — including on `--env mainnet`).
+* **No real KMS backend, no real HSM backend, no cloud-KMS integration, and
+  no PKCS#11 integration** are implemented. The fixture KMS/HSM backends
+  remain DevNet/TestNet evidence-only and refused on MainNet; the
+  production / cloud / PKCS#11 backends fail closed as unavailable.
+* The **RemoteSigner path (Runs 194–202) remains separate and unchanged**.
+* There is **no autonomous apply**, no apply-on-receipt, and no
+  peer-majority authority. The **Run 147 / 148 / 152 FATAL MainNet
+  peer-driven apply refusal** is preserved — the release helper confirms a
+  MainNet peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a valid fixture KMS/HSM
+  response, and rejected backend-boundary cases produce no mutation.
+* Run 204 adds no new exit code and no new metric, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change, and does not weaken any Runs 070 / 130–203 safety
+  property. Governance execution, real on-chain proof verification, and
+  validator-set rotation remain unimplemented/open. **Full C4 remains
+  OPEN; C5 remains OPEN.**

@@ -4784,3 +4784,47 @@ Authority-model invariants (unchanged):
   verification, and validator-set rotation remain unimplemented/open;
   release-binary evidence is deferred to **Run 204**.
 * **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 204 — release-binary KMS/HSM backend abstraction boundary evidence
+
+Run 204 closes the Run 203-deferred release-binary boundary for the
+production KMS/HSM custody backend abstraction
+(`crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs`) over the Run 188
+custody classes, capturing release-binary evidence that the framing grants
+no new authority. It is **release-binary evidence only**, adding the release
+helper
+`crates/qbind-node/examples/run_204_kms_hsm_backend_release_binary_helper.rs`,
+the release harness
+`scripts/devnet/run_204_kms_hsm_backend_release_binary.sh`, the evidence
+archive `docs/devnet/run_204_kms_hsm_backend_release_binary/`, and the
+report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_204.md`. It makes **no
+production-source change** (helper + harness + docs only).
+
+Authority-model invariants (unchanged):
+
+* Run 204 grants **no new authority**. It implements no real KMS backend,
+  no real HSM backend, no cloud-KMS integration, and no PKCS#11
+  integration; the fixture KMS/HSM backends remain DevNet/TestNet
+  evidence-only and refused on MainNet, while the production / cloud /
+  PKCS#11 backends fail closed as unavailable.
+* The real `target/release/qbind-node` emits **no KMS / HSM / cloud-KMS /
+  PKCS#11 / RemoteSigner backend enablement** banner and **no MainNet
+  peer-driven apply enablement** on every captured surface, and the
+  release-built helper confirms in release mode (through the production
+  library symbols) that a backend response binds the **full authority
+  tuple** plus deterministic request/response/transcript digests,
+  anti-replay nonces, suite, attestation/signature placeholders, and
+  freshness windows; the verifier returns a typed `BackendOutcome` rather
+  than mutating trust, and rejected cases leave inputs byte-identical.
+* The **RemoteSigner authority path (Runs 194–202) remains separate and
+  unchanged**: the KMS/HSM router refuses a `RemoteSigner` custody class as
+  `NotKmsHsmCustodyClass`, and local-operator / peer-majority material
+  cannot satisfy a backend policy. The backend boundary confers **no
+  autonomous apply**, no apply-on-receipt, and no peer-majority authority.
+* MainNet peer-driven apply remains **refused**: the release helper
+  confirms a MainNet peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a valid fixture KMS/HSM
+  response. No Run 070 ordering, marker, sequence, or live-trust swap is
+  performed. Governance execution, real on-chain proof verification, and
+  validator-set rotation remain unimplemented/open.
+* **Full C4 remains OPEN; C5 remains OPEN.**

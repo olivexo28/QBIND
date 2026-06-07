@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 203:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 204:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -266,3 +266,24 @@ violation is a regression:
   peer-driven apply remains refused. Source/test only; release-binary
   KMS/HSM backend-boundary evidence deferred to **Run 204**. **Full C4
   remains OPEN; C5 remains OPEN.**
+* **Run 204** — Release-binary KMS/HSM backend-boundary evidence
+  (`scripts/devnet/run_204_kms_hsm_backend_release_binary.sh`,
+  `crates/qbind-node/examples/run_204_kms_hsm_backend_release_binary_helper.rs`).
+  Closes the Run 203-deferred release-binary boundary: the real
+  `target/release/qbind-node` keeps every existing Run 070 / 130–203
+  surface KMS/HSM-backend-silent (no KMS / HSM / cloud-KMS / PKCS#11 /
+  RemoteSigner backend banner, no MainNet peer-driven apply enablement),
+  and a release-built helper exercises the Run 203 A1–A15 / R1–R41 corpus
+  in release mode through the production library symbols
+  (`pqc_authority_kms_hsm_backend::*` over `pqc_authority_custody::*`):
+  fixture KMS/HSM accepted on DevNet/TestNet only; production / cloud /
+  PKCS#11 backends fail-closed as unavailable; identity / request /
+  response / transcript digests deterministic and domain-bound; backend
+  boundary composes with the Run 188 custody classes; rejected cases
+  produce no mutation; MainNet peer-driven apply remains the Run 147 FATAL
+  refusal even with fixture KMS/HSM material. Release-binary evidence
+  only; no production source change (helper + harness + docs); no real
+  KMS/HSM / cloud-KMS / PKCS#11 / RemoteSigner backend, governance
+  execution, or validator-set rotation; RemoteSigner path remains separate
+  and unchanged; no MainNet apply. **Full C4 remains OPEN; C5 remains
+  OPEN.**
