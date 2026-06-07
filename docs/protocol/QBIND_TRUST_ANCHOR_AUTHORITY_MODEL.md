@@ -4742,3 +4742,45 @@ Authority-model invariants (unchanged):
   070 ordering, marker, sequence, or live-trust swap is performed by the
   helper.
 * **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 203 — source/test KMS/HSM backend abstraction boundary
+
+Run 203 adds the typed, provider-neutral KMS/HSM backend abstraction
+(`crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs`) over the Run
+188 `AuthorityCustodyClass::{Kms, Hsm}` custody classes, framing how a
+future production KMS/HSM signer would bind to the trust-anchor authority
+model without granting any new authority. It is **source/test only**; the
+only production-source change is the additive new module plus its
+`lib.rs` registration, with tests
+`crates/qbind-node/tests/run_203_kms_hsm_backend_boundary_tests.rs` and
+the report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_203.md`.
+
+Authority-model invariants (unchanged):
+
+* Run 203 grants **no new authority**. It implements no real KMS backend,
+  no real HSM backend, no cloud-KMS integration, and no PKCS#11
+  integration; the fixture KMS/HSM backends are DevNet/TestNet source/test
+  only and refused on MainNet, while the production / cloud / PKCS#11
+  backends are callable but fail closed (`ProductionKmsUnavailable` /
+  `ProductionHsmUnavailable` / `CloudKmsUnavailable` /
+  `Pkcs11HsmUnavailable`).
+* A backend response binds the **full authority tuple** (environment /
+  chain / genesis / authority-root / lifecycle-action / candidate-digest /
+  authority-domain-sequence / custody-class / key-id / signing-key
+  fingerprints) plus deterministic request/response/transcript digests,
+  anti-replay nonces, suite, attestation/signature placeholders, and
+  freshness windows; the verifier returns a typed `BackendOutcome` rather
+  than mutating trust, and rejected cases leave inputs byte-identical.
+* The **RemoteSigner authority path (Runs 194–202) remains separate and
+  unchanged**: the KMS/HSM router refuses a `RemoteSigner` custody class
+  as `NotKmsHsmCustodyClass`, and local-operator / peer-majority material
+  cannot satisfy a backend policy. The backend boundary confers **no
+  autonomous apply**, no apply-on-receipt, and no peer-majority authority.
+* MainNet peer-driven apply remains **refused**: a MainNet
+  peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a valid fixture KMS/HSM
+  response. No Run 070 ordering, marker, sequence, or live-trust swap is
+  performed by the module. Governance execution, real on-chain proof
+  verification, and validator-set rotation remain unimplemented/open;
+  release-binary evidence is deferred to **Run 204**.
+* **Full C4 remains OPEN; C5 remains OPEN.**

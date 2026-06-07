@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 202:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 203:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -239,3 +239,30 @@ violation is a regression:
   backend, networked signer daemon, KMS/HSM, governance execution, or
   validator-set rotation; no MainNet apply. **Full C4 remains OPEN; C5
   remains OPEN.**
+* **Run 203** — Source/test KMS/HSM backend abstraction boundary
+  (`crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs`). Adds a
+  typed, provider-neutral KMS/HSM backend abstraction: a `BackendKind`
+  (`Disabled`, `FixtureKms`, `FixtureHsm`, `CloudKmsUnavailable`,
+  `Pkcs11HsmUnavailable`, `ProductionKmsUnavailable`,
+  `ProductionHsmUnavailable`, `Unknown`), a `BackendPolicy` (`Disabled`
+  default, `FixtureKmsAllowed`, `FixtureHsmAllowed`,
+  `ProductionKmsRequired`, `ProductionHsmRequired`,
+  `MainnetProductionCustodyRequired`), a `BackendIdentity` config,
+  `BackendRequest` / `BackendResponse`, deterministic
+  identity/request/response/transcript digests, a pure/mockable
+  `AuthorityCustodyBackend` trait (`sign_authority_lifecycle_request`)
+  with DevNet/TestNet-only `FixtureKmsBackend` / `FixtureHsmBackend` and
+  fail-closed `ProductionKmsBackend` / `ProductionHsmBackend` /
+  `CloudKmsBackend` / `Pkcs11HsmBackend`, a pure verifier
+  `verify_authority_custody_backend_response`, a custody-class router
+  composing the Run 188 `AuthorityCustodyClass::{Kms, Hsm}` classes, and
+  a `validate_lifecycle_governance_custody_and_backend` composition.
+  Advances the C4 "production KMS/HSM backend" criterion toward a future
+  implementation without implementing one: no real KMS backend, no real
+  HSM backend, no cloud-KMS integration, no PKCS#11 integration. Fixture
+  KMS/HSM are DevNet/TestNet source-test only; production / cloud /
+  PKCS#11 backends remain unavailable/fail-closed; the RemoteSigner path
+  (Runs 194–202) remains a separate, unchanged custody option; MainNet
+  peer-driven apply remains refused. Source/test only; release-binary
+  KMS/HSM backend-boundary evidence deferred to **Run 204**. **Full C4
+  remains OPEN; C5 remains OPEN.**

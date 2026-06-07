@@ -7295,3 +7295,48 @@ Operator-relevant points (no behavior change):
 * Default custody / RemoteSigner selector resolution remains **Disabled**;
   Run 202 changes no default and enables no MainNet apply. **Full C4
   remains OPEN; C5 remains OPEN.**
+
+## Run 203 — source/test KMS/HSM backend abstraction boundary
+
+Run 203 is a **source/test-only** pass that adds the typed,
+provider-neutral KMS/HSM backend abstraction the Run 188
+`AuthorityCustodyClass::{Kms, Hsm}` placeholders previously lacked. The
+only production-source change is the additive new module
+`crates/qbind-node/src/pqc_authority_kms_hsm_backend.rs` plus its
+`lib.rs` registration; the focused tests are
+`crates/qbind-node/tests/run_203_kms_hsm_backend_boundary_tests.rs` and
+the evidence report is `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_203.md`.
+
+Operator-relevant points (no behavior change):
+
+* Run 203 implements **no real KMS backend**, **no real HSM backend**,
+  **no cloud-KMS integration**, and **no PKCS#11 integration**. The
+  fixture KMS/HSM backends (`FixtureKmsBackend` / `FixtureHsmBackend`)
+  are **DevNet/TestNet source/test only** and are refused on a MainNet
+  trust domain.
+* The production / cloud / PKCS#11 backends (`ProductionKmsBackend`,
+  `ProductionHsmBackend`, `CloudKmsBackend`, `Pkcs11HsmBackend`) are
+  callable but **fail closed** with `ProductionKmsUnavailable` /
+  `ProductionHsmUnavailable` / `CloudKmsUnavailable` /
+  `Pkcs11HsmUnavailable`, performing no real network, cloud, PKCS#11, or
+  hardware call.
+* The **RemoteSigner path (Runs 194–202) remains a separate, unchanged
+  custody option** — the KMS/HSM router refuses a `RemoteSigner` custody
+  class as `NotKmsHsmCustodyClass`. KMS/HSM does not replace RemoteSigner
+  and does not enable a MainNet apply.
+* The default backend policy resolution is **`BackendPolicy::Disabled`**,
+  which refuses every backend request regardless of contents.
+* Run 203 adds **no new metric, no new exit code**, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change. Every public function and trait method performs
+  no network or file I/O, writes no marker or sequence, swaps no live
+  trust, evicts no sessions, and never invokes the Run 070 ordering.
+* The accepted Runs 130–202 safety properties remain in force, including
+  validation-only non-mutation, rejected-candidate no-mutation, and the
+  **Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal** — a
+  MainNet peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a valid fixture KMS/HSM
+  response. Governance execution, real on-chain proof verification, and
+  validator-set rotation all remain unimplemented/open.
+* Release-binary KMS/HSM backend-boundary evidence is deferred to
+  **Run 204**. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -443,6 +443,35 @@ pub mod pqc_remote_signer_policy_surface;
 // unavailable/fail-closed. Release-binary RemoteSigner transport-boundary
 // evidence is deferred to Run 202.
 pub mod pqc_remote_signer_transport;
+// Run 203 — source/test KMS/HSM backend abstraction boundary for
+// production authority custody. Defines provider-neutral typed
+// interfaces for a future KMS/HSM backend: a `BackendKind` (`Disabled`,
+// `FixtureKms`, `FixtureHsm`, `CloudKmsUnavailable`,
+// `Pkcs11HsmUnavailable`, `ProductionKmsUnavailable`,
+// `ProductionHsmUnavailable`, `Unknown`), a `BackendPolicy` (`Disabled`
+// default, `FixtureKmsAllowed`, `FixtureHsmAllowed`,
+// `ProductionKmsRequired`, `ProductionHsmRequired`,
+// `MainnetProductionCustodyRequired`), a `BackendIdentity` config, a
+// `BackendRequest` / `BackendResponse`, deterministic domain-separated
+// `identity_digest` / `request_digest` / `response_digest` /
+// `backend_transcript_digest` helpers, a pure/mockable
+// `AuthorityCustodyBackend` trait (`sign_authority_lifecycle_request`)
+// with DevNet/TestNet-only `FixtureKmsBackend` / `FixtureHsmBackend` and
+// fail-closed `ProductionKmsBackend` / `ProductionHsmBackend` /
+// `CloudKmsBackend` / `Pkcs11HsmBackend`, a typed `BackendOutcome`, a
+// pure verifier `verify_authority_custody_backend_response`, a
+// custody-class router `validate_backend_for_custody_class` composing the
+// Run 188 `AuthorityCustodyClass::{Kms, Hsm}` classes, and a
+// `validate_lifecycle_governance_custody_and_backend` composition.
+// Default policy is `BackendPolicy::Disabled`. Source/test only — no real
+// KMS backend, no real HSM backend, no cloud-KMS integration, no PKCS#11
+// integration, no networked signer daemon, no real RemoteSigner backend,
+// no MainNet apply enablement, no governance execution, no real on-chain
+// proof verification, no validator-set rotation. The RemoteSigner path
+// (Runs 194–202) remains a separate, unchanged custody option. Production
+// KMS/HSM remain unavailable/fail-closed. Release-binary KMS/HSM
+// backend-boundary evidence is deferred to Run 204.
+pub mod pqc_authority_kms_hsm_backend;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
