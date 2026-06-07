@@ -1,402 +1,78 @@
-Task: Run 207 — Source/Test Custody Attestation Payload Carrying and Production Preflight Integration
+Task: Complete Run 207 Documentation Consistency Closure
 
-Current accepted state:
+Current state:
+Run 207 source/test evidence executed successfully.
 
-* Run 205: source/test production custody attestation verifier skeleton landed:
+Confirmed:
 
-  * `pqc_custody_attestation_verifier.rs`;
-  * `CustodyAttestationClass`;
-  * `CustodyAttestationPolicy`;
-  * `CustodyAttestationEvidence`;
-  * `CustodyAttestationInput`;
-  * deterministic evidence/input/transcript/provider-identity digests;
-  * `CustodyAttestationVerifier`;
-  * DevNet/TestNet-only `FixtureCustodyAttestationVerifier`;
-  * fail-closed production/cloud-KMS/PKCS#11/HSM/RemoteSigner attestation verifiers;
-  * `verify_custody_attestation`;
-  * `validate_custody_metadata_and_attestation`;
-  * `validate_lifecycle_custody_and_attestation`;
-  * MainNet peer-driven apply short-circuit;
-  * 59 tests passed.
-* Run 206: release-binary custody-attestation verifier-boundary evidence fully closed:
-
-  * release-built helper proves the Run 205 A1–A15 / R1–R40 corpus;
-  * fixture attestation remains DevNet/TestNet evidence-only;
-  * production/cloud-KMS/PKCS#11/HSM/RemoteSigner attestation remains unavailable/fail-closed;
-  * evidence/input/transcript/provider-identity digests are deterministic and domain-bound;
-  * attestation verifier composes with Run 188 custody metadata;
-  * attestation verifier composes with Run 201 RemoteSigner transport and Run 203 KMS/HSM backend boundaries where feasible;
-  * rejected attestation cases produce no mutation;
-  * MainNet peer-driven apply remains refused;
-  * no real KMS/HSM attestation verifier, RemoteSigner backend, governance execution, or validator-set rotation exists.
-* Current limitation:
-  Custody attestation evidence is not yet carried through production payload/context paths and is not yet routed into production v2 marker-decision preflight contexts.
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_207.md` records PASS.
+* Run 207 adds custody-attestation payload/carrying and production-context wiring.
+* Release-binary custody-attestation payload/carrying evidence is deferred to Run 208.
 * Full C4 remains OPEN.
 * C5 remains OPEN.
 
+Blocking doc inconsistency:
+The uploaded `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` still says:
+
+`Status as of Run 206`
+
+Even though it contains Run 207 references, the top status line must be updated for consistency.
+
 Objective:
-Add source/test support for carrying custody-attestation evidence through production payload/context paths and routing it into lifecycle + governance + custody + backend/RemoteSigner preflight composition.
-
-This run must make custody-attestation material available to production source call-site contexts at source/test level, while preserving disabled/fail-closed defaults and MainNet refusal.
-
-Release-binary custody-attestation payload/carrying evidence is deferred to Run 208.
+Fix the Run 207 documentation consistency issue only.
 
 Strict scope:
 
-* Source/test only.
-* No release-binary harness in this run.
-* No real KMS implementation.
-* No real HSM implementation.
-* No real cloud KMS attestation verifier.
-* No real PKCS#11 attestation verifier.
-* No real HSM vendor attestation verifier.
+* Documentation consistency only.
+* No production source changes.
+* No helper/harness changes unless needed to regenerate docs.
+* No CLI/env/metric/schema/wire changes.
+* No MainNet enablement.
+* No real cloud-KMS / PKCS#11 / HSM-vendor attestation verifier.
 * No real RemoteSigner backend.
-* No networked signer daemon.
-* No production signing key custody.
-* No MainNet peer-driven apply enablement.
-* No governance execution engine.
-* No real on-chain proof verifier.
+* No governance execution.
 * No validator-set rotation.
-* No autonomous apply.
-* No automatic apply on receipt.
-* No peer-majority authority.
-* Prefer additive optional payload/context fields.
-* Preserve legacy/no-attestation payload compatibility.
-* No authority-marker schema change.
-* No sequence-file schema change.
-* No trust-bundle core schema change.
-* No authority lifecycle semantics change.
-* Do not weaken Runs 070, 130–206.
-* Do not claim full C4 or C5 closure.
-
-Required payload/carrying design:
-Add additive, optional custody-attestation evidence to the production payload/context layer used by v2 authority marker-decision surfaces.
-
-Preferred shape:
-
-* Add optional JSON sibling beside v2 ratification sidecar material, such as:
-
-  * `custody_attestation_evidence`
-  * or one combined optional sibling:
-  * `custody_attestation`
-* Follow the Run 167 / Run 184 / Run 190 / Run 196 sibling-extraction pattern:
-
-  * extract optional custody-attestation sibling before strict v2 sidecar parse;
-  * old no-attestation sidecars remain compatible;
-  * malformed custody-attestation sibling fails closed;
-  * absent custody-attestation sibling maps to typed absent/unavailable status.
-
-Required wire/context representation:
-Define wire types such as:
-
-* `CustodyAttestationEvidenceWire`
-* `CustodyAttestationInputWire`
-* `CustodyAttestationPayloadWire`
-* `CustodyAttestationLoadStatus::{Absent, Available, Malformed}`
-
-Names may differ, but the representation must cover:
-
-* attestation class;
-* attestation policy context;
-* environment;
-* chain_id;
-* genesis_hash;
-* authority root fingerprint;
-* bundle-signing key fingerprint;
-* custody class;
-* backend kind / provider id / signer id where applicable;
-* custody key id / key label;
-* suite id;
-* lifecycle action;
-* candidate digest;
-* authority-domain sequence;
-* governance proof digest where applicable;
-* request digest where applicable;
-* response digest where applicable;
-* transcript digest where applicable;
-* attestation nonce;
-* issuance timestamp / epoch;
-* expiry / freshness window;
-* evidence digest / certificate digest / placeholder commitment.
-
-Required source behavior:
-
-1. Convert wire custody-attestation material into internal Run 205 types:
-
-   * `CustodyAttestationEvidence`;
-   * `CustodyAttestationInput`;
-   * policy/context values.
-
-2. Route custody-attestation material into:
-
-   * `verify_custody_attestation`;
-   * `validate_custody_metadata_and_attestation`;
-   * `validate_lifecycle_custody_and_attestation`.
-
-3. Integrate with existing composition paths where feasible:
-
-   * Run 188 custody metadata;
-   * Run 201 RemoteSigner transport;
-   * Run 203 KMS/HSM backend;
-   * Run 205 custody-attestation verifier.
-
-4. Preserve compatibility:
-
-   * no-attestation payload remains accepted under default Disabled where previously accepted;
-   * existing fixture/local custody paths remain compatible;
-   * existing RemoteSigner/KMS/HSM boundary paths remain compatible;
-   * production attestation paths remain fail-closed.
-
-5. Surface coverage at source/test level:
-   Route custody-attestation payload context through the seven production-context helpers where representable:
-
-   * reload-check;
-   * reload-apply;
-   * startup `--p2p-trust-bundle`;
-   * SIGHUP;
-   * local peer-candidate-check;
-   * live inbound `0x05`;
-   * peer-driven drain.
-
-6. No mutation:
-
-   * no marker write;
-   * no sequence write;
-   * no live trust swap;
-   * no session eviction;
-   * no Run 070 call.
-
-Required accepted scenarios:
-A1. no-attestation payload remains compatible under default Disabled.
-
-A2. DevNet fixture attestation carried through reload-check context and accepted under explicit fixture policy.
-
-A3. TestNet fixture attestation carried through reload-check context and accepted under explicit fixture policy.
-
-A4. DevNet fixture attestation carried through reload-apply preflight and accepted under explicit fixture policy.
-
-A5. custody-attestation evidence digest preserved through wire conversion.
-
-A6. custody-attestation input digest preserved through wire conversion.
-
-A7. custody-attestation transcript digest preserved through wire conversion.
-
-A8. provider identity digest preserved through wire conversion.
-
-A9. fixture attestation routes to Run 205 verifier when attestation material is present.
-
-A10. combined lifecycle + custody + fixture attestation accepted for DevNet source/test production-context path.
-
-A11. fixture attestation composes with Run 203 fixture KMS backend context.
-
-A12. fixture attestation composes with Run 203 fixture HSM backend context.
-
-A13. fixture attestation composes with Run 201 fixture RemoteSigner transport context.
-
-A14. GenesisBound / EmergencyCouncil / OnChainGovernance proof behavior remains unchanged when attestation policy is Disabled.
-
-A15. production/cloud-KMS/PKCS#11/HSM/RemoteSigner attestation material reaches verifier and returns typed unavailable outcome under production-required policy.
-
-Required rejection scenarios:
-R1. custody attestation absent where attestation policy requires it rejected fail-closed.
-
-R2. malformed custody-attestation evidence rejected.
-
-R3. malformed custody-attestation input rejected.
-
-R4. malformed combined custody-attestation payload rejected.
-
-R5. unsupported future custody-attestation schema version rejected.
-
-R6. fixture attestation rejected under ProductionAttestationRequired.
-
-R7. fixture attestation rejected under MainnetProductionAttestationRequired.
-
-R8. RemoteSigner attestation rejected as unavailable.
-
-R9. KMS attestation rejected as unavailable.
-
-R10. HSM attestation rejected as unavailable.
-
-R11. cloud KMS attestation rejected as unavailable.
-
-R12. PKCS#11 HSM attestation rejected as unavailable.
-
-R13. production attestation rejected as unavailable.
-
-R14. MainNet production attestation rejected as unavailable.
-
-R15. unknown attestation class rejected.
-
-R16. wrong environment rejected.
-
-R17. wrong chain rejected.
-
-R18. wrong genesis rejected.
-
-R19. wrong authority root rejected.
-
-R20. wrong signing-key fingerprint rejected.
-
-R21. wrong custody class rejected.
-
-R22. wrong backend/provider/signer id rejected.
-
-R23. wrong key id / key label rejected.
-
-R24. wrong suite rejected.
-
-R25. wrong lifecycle action rejected.
-
-R26. wrong candidate digest rejected.
-
-R27. wrong authority-domain sequence rejected.
-
-R28. wrong governance proof digest rejected.
-
-R29. wrong request digest rejected.
-
-R30. wrong response digest rejected.
-
-R31. wrong transcript digest rejected.
-
-R32. stale/replayed attestation rejected.
-
-R33. expired attestation rejected.
-
-R34. invalid attestation commitment rejected.
-
-R35. local operator cannot satisfy production attestation.
-
-R36. peer majority cannot satisfy production attestation.
-
-R37. attestation valid but custody metadata invalid rejected.
-
-R38. custody valid but attestation invalid rejected.
-
-R39. lifecycle + governance + custody valid but production attestation unavailable rejected.
-
-R40. validation-only rejection writes no marker and no sequence.
-
-R41. mutating rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
-
-R42. invalid live `0x05` custody-attestation candidate is not propagated, staged, or applied.
-
-R43. MainNet peer-driven apply remains refused even with fixture attestation.
-
-Required tests:
-Add focused tests, preferably:
-
-`crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_tests.rs`
-
-Minimum coverage:
-
-* A1–A15 where representable.
-* R1–R43.
-* serde/parse compatibility:
-
-  * old no-attestation payload parses;
-  * attestation-carrying payload parses;
-  * malformed evidence/input/payload fails closed;
-  * unsupported future schema version fails closed.
-* digest determinism through wire conversion:
-
-  * evidence digest;
-  * input digest;
-  * transcript digest;
-  * provider identity digest.
-* source reachability:
-
-  * custody-attestation material reaches production call-site context;
-  * `verify_custody_attestation` reached outside helper/example modules;
-  * `validate_custody_metadata_and_attestation` reached outside helper/example modules;
-  * `validate_lifecycle_custody_and_attestation` reached outside helper/example modules.
-* no-mutation invariants.
-* MainNet refusal invariants.
-
-Required documentation:
-Add:
-
-* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_207.md`
-
-Update:
-
-* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
-* `docs/whitepaper/contradiction.md`
-* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
-* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
-* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
-
-Documentation must state:
-
-* Run 207 is source/test custody-attestation payload/carrying and production-context wiring.
-* No real cloud KMS attestation verifier is implemented.
-* No real PKCS#11 attestation verifier is implemented.
-* No real HSM vendor attestation verifier is implemented.
-* Fixture attestation remains DevNet/TestNet source/test only.
-* Production attestation remains unavailable/fail-closed.
-* Custody-attestation payload/carrying evidence is source/test only.
-* MainNet peer-driven apply remains refused.
-* RemoteSigner and KMS/HSM remain backend-boundary only.
-* governance execution remains unimplemented.
-* real on-chain proof verification remains unimplemented.
-* validator-set rotation remains open.
-* release-binary custody-attestation payload/carrying evidence is deferred to Run 208.
-* full C4 remains open.
-* C5 remains open.
+* Do not claim C4 or C5 closure.
+
+Required edits:
+
+1. Update `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md` top status line from Run 206 to Run 207.
+
+2. Ensure it contains a Run 207 timeline/status entry stating:
+
+   * Run 207 is source/test custody-attestation payload/carrying and production-context wiring.
+   * Custody-attestation material can be carried through production payload/context paths at source/test level.
+   * Legacy no-attestation payloads remain compatible.
+   * Fixture attestation remains DevNet/TestNet source/test only.
+   * Production/cloud-KMS/PKCS#11/HSM/RemoteSigner attestation remains unavailable/fail-closed.
+   * MainNet peer-driven apply remains refused.
+   * Release-binary custody-attestation payload/carrying evidence is deferred to Run 208.
+   * No real KMS/HSM attestation verifier, RemoteSigner backend, governance execution, or validator-set rotation is implemented.
+   * Full C4 remains OPEN.
+   * C5 remains OPEN.
+
+3. Confirm the other Run 207 docs remain aligned:
+
+   * `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_207.md`
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
 
 Validation commands:
 Run at minimum:
 
-* `cargo build -p qbind-node --lib`
-* `cargo test -p qbind-node --test run_207_custody_attestation_payload_callsite_tests`
-* `cargo test -p qbind-node --test run_205_custody_attestation_verifier_tests`
-* `cargo test -p qbind-node --test run_203_kms_hsm_backend_boundary_tests`
-* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
-* `cargo test -p qbind-node --test run_198_remote_signer_policy_selector_tests`
-* `cargo test -p qbind-node --test run_196_remote_signer_payload_callsite_tests`
-* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
-* `cargo test -p qbind-node --test run_192_authority_custody_policy_selector_tests`
-* `cargo test -p qbind-node --test run_190_authority_custody_payload_callsite_tests`
-* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
-* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
-* `cargo test -p qbind-node --test run_184_onchain_governance_payload_carrying_tests`
-* `cargo test -p qbind-node --test run_182_onchain_governance_production_callsite_wiring_tests`
-* `cargo test -p qbind-node --test run_180_onchain_governance_marker_integration_tests`
-* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
-* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
-* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
-* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
-* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
-* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
-* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
-* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
-* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
-* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
-* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
-* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
-* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
-* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
-* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
-* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
-* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
-* `cargo test -p qbind-node --lib pqc_authority`
-* `cargo test -p qbind-node --lib`
-
-If exact test names differ, locate nearest existing targets and document exact commands/results.
+```bash
+grep -R "Status as of Run 207" docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+grep -R "Run 207" docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+grep -R "Full C4 remains OPEN\|C5 remains OPEN" docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+```
 
 Acceptance criteria:
-Run 207 is acceptable only if:
+Run 207 is fully closed only if:
 
-1. Custody-attestation material can be carried through production payload/context paths at source/test level.
-2. Legacy no-attestation payloads remain compatible.
-3. Fixture attestation reaches and passes production-context path where policy allows.
-4. Production/cloud-KMS/PKCS#11/HSM/RemoteSigner attestation reaches verifier and fails closed as unavailable.
-5. Malformed/invalid custody-attestation material fails closed.
-6. Custody attestation integrates with custody/backend/RemoteSigner composition at source/test level.
-7. Validation-only surfaces remain non-mutating.
-8. Mutating rejection paths produce no mutation.
-9. MainNet peer-driven apply remains refused even with fixture attestation.
-10. Docs defer release-binary custody-attestation payload/carrying evidence to Run 208.
-11. No real KMS/HSM attestation / RemoteSigner backend / governance execution / validator-set rotation claim is made.
-12. No full C4 or C5 closure is claimed.
+1. `QBIND_C4_C5_CLOSURE_CRITERIA.md` says Status as of Run 207.
+2. It contains a Run 207 entry.
+3. It still says C4 and C5 remain OPEN.
+4. No production source changed.
+5. No new MainNet enablement or real backend claim is introduced.
