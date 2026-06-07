@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 211:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 212:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -494,3 +494,24 @@ violation is a regression:
   validator-set rotation is implemented; release-binary governance execution
   policy-boundary evidence deferred to **Run 212**. **Full C4 remains OPEN; C5
   remains OPEN.**
+* **Run 212** — Release-binary governance execution policy-boundary evidence
+  for Run 211 (`crates/qbind-node/examples/run_212_governance_execution_policy_release_binary_helper.rs`,
+  `scripts/devnet/run_212_governance_execution_policy_release_binary.sh`,
+  `docs/devnet/run_212_governance_execution_policy_release_binary/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_212.md`). Proves on the real
+  `target/release/qbind-node` plus a release-built helper linking the
+  production library symbols that the Run 211 governance execution policy
+  corpus holds in release mode: fixture governance execution accepted on
+  DevNet/TestNet only under the explicit fixture policy; emergency council
+  fixture accepted only under the explicit emergency fixture policy;
+  production / on-chain / MainNet governance execution unavailable/fail-closed;
+  input/decision/transcript/policy digests deterministic and domain-bound; a
+  lifecycle action authorized only when the action, candidate digest, and
+  sequence match; validator-set rotation unsupported; rejected cases produce no
+  mutation; and MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal even with a fixture governance approval. Release-binary evidence only;
+  no production source change; no real governance execution engine, on-chain
+  proof verifier, KMS/HSM backend, RemoteSigner backend, or validator-set
+  rotation is implemented; existing custody / KMS-HSM / RemoteSigner /
+  custody-attestation / governance proof paths remain compatible. **Full C4
+  remains OPEN; C5 remains OPEN.**
