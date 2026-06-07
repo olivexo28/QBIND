@@ -4875,3 +4875,51 @@ Authority-model invariants (unchanged):
   custody-attestation verifier-boundary evidence is deferred to **Run
   206**.
 * **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 206 — release-binary custody attestation verifier boundary evidence
+
+Run 206 closes the Run 205-deferred release-binary boundary for the
+production custody attestation verifier skeleton
+(`crates/qbind-node/src/pqc_custody_attestation_verifier.rs`) layered over
+the Run 188 custody classes, the Run 203 KMS/HSM backend boundary, and the
+Run 201 RemoteSigner transport boundary, establishing on release binaries
+that the attestation framing grants no new authority. It is
+**release-binary evidence only**, adding a release example helper
+`crates/qbind-node/examples/run_206_custody_attestation_release_binary_helper.rs`,
+a release harness
+`scripts/devnet/run_206_custody_attestation_release_binary.sh`, the
+evidence archive `docs/devnet/run_206_custody_attestation_release_binary/`,
+and the report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_206.md`. It makes
+**no production-source change** (helper + harness + docs only).
+
+Authority-model invariants (unchanged):
+
+* Run 206 grants **no new authority**. Real `target/release/qbind-node` is
+  observed to emit no custody attestation / KMS / HSM / cloud-KMS /
+  PKCS#11 attestation enablement and no MainNet peer-driven apply
+  enablement on every captured surface (S1–S8), even with the custody and
+  RemoteSigner selectors armed on `--env mainnet`.
+* It implements no real cloud-KMS attestation verifier, no real PKCS#11
+  attestation verifier, no real HSM vendor attestation verifier, no real
+  RemoteSigner backend, and no real KMS/HSM backend; the fixture
+  attestation remains DevNet/TestNet evidence-only and refused on MainNet,
+  while the production / cloud / PKCS#11 / HSM-vendor / RemoteSigner
+  attestation verifiers fail closed as the matching typed unavailable
+  outcome (release helper `total_pass 69, total_fail 0, verdict PASS`).
+* The release-built helper confirms `verify_custody_attestation` binds the
+  full authority tuple over deterministic domain-separated digests and
+  returns a typed `CustodyAttestationOutcome` rather than mutating trust;
+  rejected cases leave inputs byte-identical.
+* The **RemoteSigner authority path (Runs 194–202)** and the **KMS/HSM
+  backend authority path (Runs 203–204)** remain separate and unchanged;
+  local-operator / peer-majority material cannot satisfy a production
+  attestation policy. The attestation boundary confers **no autonomous
+  apply**, no apply-on-receipt, and no peer-majority authority.
+* MainNet peer-driven apply remains **refused**: the release helper proves
+  the composition short-circuits a MainNet peer-driven-apply preflight to
+  `MainNetPeerDrivenApplyRefused` even with a valid fixture attestation,
+  and the fixture attestation is itself refused on a MainNet trust domain.
+  No Run 070 ordering, marker, sequence, or live-trust swap is performed.
+  Governance execution, real on-chain proof verification, and validator-set
+  rotation remain unimplemented/open.
+* **Full C4 remains OPEN; C5 remains OPEN.**

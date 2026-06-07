@@ -7436,3 +7436,57 @@ Operator-relevant points (no behavior change):
   validator-set rotation all remain unimplemented/open. Release-binary
   custody-attestation verifier-boundary evidence is deferred to **Run
   206**. **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 206 — release-binary custody attestation verifier boundary evidence
+
+Run 206 is a **release-binary evidence-only** pass that closes the
+Run 205-deferred release-binary boundary for the production custody
+attestation verifier skeleton
+`crates/qbind-node/src/pqc_custody_attestation_verifier.rs`, layered over
+the Run 188 authority-custody boundary, the Run 203 KMS/HSM backend
+boundary, and the Run 201 RemoteSigner transport boundary. It adds a
+release example helper
+`crates/qbind-node/examples/run_206_custody_attestation_release_binary_helper.rs`,
+a release harness
+`scripts/devnet/run_206_custody_attestation_release_binary.sh`, the
+evidence archive `docs/devnet/run_206_custody_attestation_release_binary/`,
+and the canonical report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_206.md`. It makes **no
+production-source change** (helper + harness + docs only).
+
+Operator-relevant points (no behavior change):
+
+* Run 206 proves on the real `target/release/qbind-node` that every
+  existing Run 070 / 130–205 surface (`--help`,
+  `--print-genesis-hash --env {devnet,testnet,mainnet}`, the Run 193
+  custody policy selector, the Run 198 RemoteSigner policy selector, the
+  governance fixture flag) stays **custody-attestation-silent**: no custody
+  attestation / KMS / HSM / cloud-KMS / PKCS#11 attestation enablement
+  banner, no governance-execution or validator-set-rotation claim, and no
+  MainNet peer-driven apply enablement — even with the custody and
+  RemoteSigner selectors armed on `--env mainnet`.
+* The release-built helper exercises the Run 205 A1–A15 / R1–R40 corpus in
+  release mode through the production library symbols
+  (`total_pass 69, total_fail 0, verdict PASS`): fixture custody
+  attestation accepted on **DevNet/TestNet only**; the production /
+  cloud-KMS / PKCS#11 / HSM / RemoteSigner attestation verifiers callable
+  and **fail closed** as the matching typed unavailable outcome;
+  evidence / input / transcript / provider-identity digests deterministic
+  and domain-bound; the attestation boundary composes with the Run 188
+  custody classes and the Run 203 / Run 201 backend / RemoteSigner
+  transport evidence; rejected cases produce no mutation; and **MainNet
+  peer-driven apply remains the Run 147 FATAL refusal** even with a fixture
+  attestation response.
+* Run 206 implements **no real cloud-KMS attestation verifier**, **no real
+  PKCS#11 attestation verifier**, **no real HSM vendor attestation
+  verifier**, **no real RemoteSigner backend**, and **no real KMS/HSM
+  backend**. Fixture custody attestation remains DevNet/TestNet
+  evidence-only and is refused on a MainNet trust domain.
+* The **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend path
+  (Runs 203–204)** remain separate, unchanged backend-boundary options.
+* Run 206 adds **no new metric, no new exit code**, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change, and does not weaken Runs 070, 130–205.
+* Governance execution, real on-chain proof verification, and validator-set
+  rotation all remain unimplemented/open. **Full C4 remains OPEN; C5
+  remains OPEN.**

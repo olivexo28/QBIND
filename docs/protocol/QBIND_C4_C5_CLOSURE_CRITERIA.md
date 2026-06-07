@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 205:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 206:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -312,3 +312,27 @@ violation is a regression:
   Source/test only; release-binary custody-attestation verifier-boundary
   evidence deferred to **Run 206**. **Full C4 remains OPEN; C5 remains
   OPEN.**
+* **Run 206** — Release-binary custody-attestation verifier-boundary
+  evidence (`scripts/devnet/run_206_custody_attestation_release_binary.sh`,
+  `crates/qbind-node/examples/run_206_custody_attestation_release_binary_helper.rs`).
+  Closes the Run 205-deferred release-binary boundary: the real
+  `target/release/qbind-node` keeps every existing Run 070 / 130–205
+  surface custody-attestation-silent (no custody-attestation / KMS / HSM /
+  cloud-KMS / PKCS#11 attestation banner, no MainNet peer-driven apply
+  enablement), and a release-built helper exercises the Run 205 A1–A15 /
+  R1–R40 corpus in release mode through the production library symbols
+  (`pqc_custody_attestation_verifier::*` over `pqc_authority_custody::*`,
+  `pqc_authority_kms_hsm_backend::*`, and the Run 201 RemoteSigner
+  transport boundary): fixture custody attestation accepted on
+  DevNet/TestNet only; production / cloud-KMS / PKCS#11 / HSM / RemoteSigner
+  attestation verifiers fail-closed as unavailable; evidence / input /
+  transcript / provider-identity digests deterministic and domain-bound;
+  attestation boundary composes with the Run 188 custody classes and the
+  Run 203 / Run 201 backend / RemoteSigner transport evidence; rejected
+  cases produce no mutation; MainNet peer-driven apply remains the Run 147
+  FATAL refusal even with fixture attestation material. Release-binary
+  evidence only; no production source change (helper + harness + docs); no
+  real KMS/HSM attestation / cloud-KMS / PKCS#11 / RemoteSigner backend,
+  governance execution, or validator-set rotation; RemoteSigner and KMS/HSM
+  remain backend-boundary only and unchanged; no MainNet apply. **Full C4
+  remains OPEN; C5 remains OPEN.**
