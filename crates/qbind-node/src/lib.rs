@@ -472,6 +472,39 @@ pub mod pqc_remote_signer_transport;
 // KMS/HSM remain unavailable/fail-closed. Release-binary KMS/HSM
 // backend-boundary evidence is deferred to Run 204.
 pub mod pqc_authority_kms_hsm_backend;
+// Run 205 — source/test production custody attestation verifier skeleton.
+// Defines a typed `CustodyAttestationClass` (`Disabled`,
+// `FixtureAttestation`, `RemoteSignerAttestation`, `KmsAttestation`,
+// `HsmAttestation`, `CloudKmsAttestationUnavailable`,
+// `Pkcs11HsmAttestationUnavailable`, `ProductionAttestationUnavailable`,
+// `Unknown`), a typed `CustodyAttestationPolicy` (`Disabled` default,
+// `FixtureAttestationAllowed`, `RemoteSignerAttestationRequired`,
+// `KmsAttestationRequired`, `HsmAttestationRequired`,
+// `ProductionAttestationRequired`, `MainnetProductionAttestationRequired`),
+// a `CustodyAttestationEvidence`, a `CustodyAttestationInput`,
+// deterministic domain-separated `evidence_digest` / `input_digest` /
+// `attestation_transcript_digest` / `provider_identity_digest` helpers, a
+// pure/mockable `CustodyAttestationVerifier` trait
+// (`verify_custody_attestation`) with a DevNet/TestNet-only
+// `FixtureCustodyAttestationVerifier` and fail-closed
+// `RemoteSignerAttestationVerifier` / `KmsAttestationVerifier` /
+// `HsmAttestationVerifier` / `CloudKmsAttestationVerifier` /
+// `Pkcs11HsmAttestationVerifier` / `ProductionAttestationVerifier`, a typed
+// `CustodyAttestationOutcome`, a pure verifier `verify_custody_attestation`,
+// and composition helpers `validate_custody_metadata_and_attestation` /
+// `validate_lifecycle_custody_and_attestation` layering attestation on top
+// of the Run 188 custody validator while preserving the MainNet
+// peer-driven-apply refusal. Default policy is
+// `CustodyAttestationPolicy::Disabled`. Source/test only — no real cloud-KMS
+// attestation verifier, no real PKCS#11 attestation verifier, no real HSM
+// vendor attestation verifier, no real RemoteSigner attestation verifier, no
+// MainNet apply enablement, no governance execution, no real on-chain proof
+// verification, no validator-set rotation. RemoteSigner (Runs 194–202) and
+// KMS/HSM (Runs 203–204) remain separate, unchanged backend-boundary
+// options. Production attestation remains unavailable/fail-closed.
+// Release-binary custody-attestation verifier-boundary evidence is deferred
+// to Run 206.
+pub mod pqc_custody_attestation_verifier;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
