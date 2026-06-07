@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 200:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 201:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -204,3 +204,17 @@ violation is a regression:
   negative invariants, and release-binary evidence requirements.
   Docs/spec/crosscheck only; no backend implemented; C4 and C5 remain
   OPEN.
+* **Run 201** — Source/test production RemoteSigner transport boundary
+  (`crates/qbind-node/src/pqc_remote_signer_transport.rs`). Adds a typed
+  transport identity/endpoint config, request/response envelopes wrapping
+  the Run 194 RemoteSigner request/response, deterministic
+  transcript-binding digests, a pure/mockable `RemoteSignerTransport`
+  trait with a DevNet/TestNet-only fixture loopback transport and a
+  fail-closed `ProductionRemoteSignerTransport`, and a typed outcome
+  taxonomy. Advances the C4 "production RemoteSigner backend" criterion
+  toward a future implementation without implementing one: no real
+  RemoteSigner backend, no networked signer daemon, no production signing
+  custody, no KMS/HSM, no MainNet apply. Production transport remains
+  unavailable/fail-closed; MainNet peer-driven apply remains refused.
+  Source/test only; release-binary transport-boundary evidence deferred to
+  **Run 202**. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -4654,3 +4654,43 @@ Runs 070, 130–199. Full C4 remains OPEN. C5 remains OPEN.
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`,
 `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and
 `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
+
+## Run 201 — source/test production RemoteSigner transport boundary
+
+Run 201 adds, in **source/test only**, the typed transport boundary that
+the Run 194–199 RemoteSigner authority model lacked: a network/service
+protocol boundary between the trust-anchor authority lifecycle and a
+future remote signer backend. The new module
+`crates/qbind-node/src/pqc_remote_signer_transport.rs` wraps the Run 194
+`RemoteSignerRequest` / `RemoteSignerResponse` in request/response
+envelopes bound to the authority trust domain (environment, chain id,
+genesis hash, authority-root fingerprint, signer id, custody key id,
+bundle signing-key fingerprint, signature suite) with deterministic
+domain-separated transcript digests, a pure/mockable
+`RemoteSignerTransport` trait, a DevNet/TestNet-only fixture loopback
+transport, a fail-closed production transport, and a typed outcome
+taxonomy. The verifier `validate_remote_signer_transport` composes the
+Run 194 `validate_remote_signer` over the wrapped request/response and
+then binds the transport transcript, and
+`validate_lifecycle_custody_remote_signer_and_transport` layers the
+transport over the Run 194 governance/custody/RemoteSigner composition.
+
+Authority-model invariants (unchanged):
+
+* Run 201 grants **no new authority**. It implements no real RemoteSigner
+  backend, no networked signer daemon, and no production signing custody;
+  the fixture loopback transport is DevNet/TestNet evidence only and the
+  production transport is unavailable/fail-closed. KMS / HSM / cloud-KMS /
+  PKCS#11, governance execution, and real on-chain proof verification
+  remain unimplemented; validator-set rotation remains open.
+* The transport boundary confers **no autonomous apply**, no
+  apply-on-receipt, and no peer-majority authority; local-operator and
+  peer-majority paths that cannot satisfy the transport return typed
+  cannot-satisfy outcomes rather than mutating trust.
+* MainNet peer-driven apply remains **refused**: a MainNet
+  peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a fixture loopback transport
+  configured. No Run 070 ordering, marker, sequence, or live-trust swap is
+  performed by the new module.
+* Release-binary transport-boundary evidence is deferred to **Run 202**.
+  **Full C4 remains OPEN; C5 remains OPEN.**

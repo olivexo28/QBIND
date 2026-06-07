@@ -2475,3 +2475,39 @@ OPEN. C5 remains OPEN.
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`,
 `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and
 `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
+## Run 201 — source/test production RemoteSigner transport boundary
+
+Run 201 adds, in **source/test only**, a typed transport boundary for a
+future production RemoteSigner backend. It changes no apply-safety
+behavior. The new module
+`crates/qbind-node/src/pqc_remote_signer_transport.rs` wraps the Run 194
+RemoteSigner request/response in transport envelopes bound to the trust
+domain with deterministic transcript digests, a pure/mockable
+`RemoteSignerTransport` trait, a DevNet/TestNet-only fixture loopback
+transport, a fail-closed production transport, and a typed outcome
+taxonomy; the corpus lives in
+`crates/qbind-node/tests/run_201_remote_signer_transport_boundary_tests.rs`
+and the evidence in `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_201.md`.
+
+Apply-safety invariants (unchanged):
+
+* Run 201 performs **no apply**. The new module performs no network or
+  file I/O, writes no marker or sequence, swaps no live trust, evicts no
+  sessions, and never invokes the Run 070
+  `validate → swap → evict_sessions → commit_sequence` ordering.
+* No real RemoteSigner backend, no networked signer daemon, and no
+  production signing custody are implemented. The fixture loopback
+  transport is DevNet/TestNet evidence only; the production transport is
+  unavailable/fail-closed (`ProductionTransportUnavailable` /
+  `MainNetProductionTransportUnavailable`). KMS / HSM / cloud-KMS /
+  PKCS#11, governance execution, and on-chain proof verification remain
+  unimplemented; validator-set rotation remains open.
+* There is **no autonomous apply**, no apply-on-receipt, and no
+  peer-majority authority. The **Run 147 / 148 / 152 FATAL MainNet
+  peer-driven apply refusal** is reasserted: a MainNet peer-driven-apply
+  preflight short-circuits to `MainNetPeerDrivenApplyRefused` even with a
+  fixture loopback transport configured.
+* Run 201 adds no new exit code and no new metric, and does not weaken
+  any Runs 070 / 130–200 safety property. Release-binary
+  transport-boundary evidence is deferred to **Run 202**. **Full C4
+  remains OPEN; C5 remains OPEN.**
