@@ -555,6 +555,37 @@ pub mod pqc_custody_attestation_payload_carrying;
 // on-chain proof verification, no validator-set rotation. Release-binary
 // custody-attestation policy selector evidence is deferred to Run 210.
 pub mod pqc_custody_attestation_policy_surface;
+// Run 211 — source/test governance execution policy boundary. Adds a typed
+// `GovernanceExecutionClass` (Disabled default / FixtureGovernance /
+// EmergencyCouncilFixture / OnChainGovernanceUnavailable /
+// ProductionGovernanceUnavailable / MainnetGovernanceUnavailable / Unknown), a
+// typed `GovernanceExecutionPolicy` (Disabled default / FixtureGovernanceAllowed
+// / EmergencyCouncilFixtureAllowed / ProductionGovernanceRequired /
+// MainnetGovernanceRequired), a typed `GovernanceAction` (lifecycle activate/
+// rotate/retire/revoke/emergency-revoke plus policy-change, custody-policy,
+// remote-signer-policy, custody-attestation-policy, and validator-set-rotation
+// request placeholders and unknown), a typed `GovernanceExecutionInput`,
+// `GovernanceExecutionDecision`, and `GovernanceExecutionExpectations`,
+// deterministic domain-separated digest helpers (`input_digest`,
+// `decision_digest`, `governance_execution_transcript_digest`, optional
+// `governance_execution_policy_digest`), a pure/mockable
+// `GovernanceExecutionEvaluator` trait with `evaluate_governance_execution_policy`,
+// a DevNet/TestNet source/test-only `FixtureGovernanceExecutionEvaluator`, and
+// production/on-chain/MainNet evaluators that are callable but fail closed as
+// unavailable, plus a typed `GovernanceExecutionOutcome` distinguishing every
+// accept/reject case and a peer-driven-apply guard composition helper. Default
+// remains `GovernanceExecutionPolicy::Disabled`; fixture governance execution is
+// DevNet/TestNet evidence-only and cannot run on MainNet;
+// production/on-chain/MainNet governance execution fails closed as unavailable;
+// MainNet peer-driven apply remains refused even with fixture governance
+// approval; validator-set rotation remains unsupported. Source/test only — no
+// real governance execution engine, no real on-chain governance proof verifier,
+// no MainNet governance enablement, no MainNet apply enablement, no real
+// KMS/HSM backend, no real RemoteSigner backend, no production signing-key
+// custody. The boundary is pure: no marker write, no sequence write, no live
+// trust swap, no session eviction, no Run 070 call. Release-binary governance
+// execution policy-boundary evidence is deferred to Run 212.
+pub mod pqc_governance_execution_policy;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
