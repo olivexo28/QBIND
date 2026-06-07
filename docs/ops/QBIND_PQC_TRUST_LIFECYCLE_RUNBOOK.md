@@ -7203,3 +7203,44 @@ Operator-relevant points (no behavior change):
 Evidence: see `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_200.md`,
 `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, and
 `docs/devnet/QBIND_RUN_130_199_AUTHORITY_LIFECYCLE_INDEX.md`.
+
+## Run 201 — source/test production RemoteSigner transport boundary
+
+Run 201 is a **source/test-only** pass that adds the typed transport
+boundary for a future production RemoteSigner backend. It introduces no
+operational change for live nodes. The only production-source change is
+the additive module `crates/qbind-node/src/pqc_remote_signer_transport.rs`
+plus its `lib.rs` registration; the behavior corpus lives in
+`crates/qbind-node/tests/run_201_remote_signer_transport_boundary_tests.rs`,
+and the evidence report is
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_201.md`.
+
+Operator-relevant points (no behavior change):
+
+* Run 201 implements **no real RemoteSigner backend**, **no networked
+  signer daemon/service**, and **no production signing custody**. The
+  fixture loopback transport (`FixtureLoopbackRemoteSignerTransport`) is
+  **DevNet/TestNet source/test evidence only** and is refused on MainNet.
+* The `ProductionRemoteSignerTransport` is callable but **fail-closed**:
+  it returns `ProductionTransportUnavailable` (or
+  `MainNetProductionTransportUnavailable` for MainNet) and never performs
+  real network or signing I/O. KMS / HSM / cloud-KMS / PKCS#11 remain
+  unimplemented; governance execution and real on-chain proof
+  verification remain unimplemented; validator-set rotation remains open.
+* Run 201 adds **no new metric, no new exit code**, and no marker,
+  sequence-file, authority-marker, trust-bundle core, ratification-sidecar
+  wire, or schema change. The new module performs no network or file I/O,
+  writes no marker or sequence, swaps no live trust, evicts no sessions,
+  and never invokes the Run 070 ordering.
+* The accepted Runs 130–200 safety properties remain in force, including
+  anti-rollback v2 marker enforcement, validation-only non-mutation,
+  rejected-candidate no-mutation, the Run 070
+  `validate → swap → evict_sessions → commit_sequence` ordering, and the
+  **Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal** — Run
+  201 reasserts that a MainNet peer-driven-apply preflight short-circuits
+  to `MainNetPeerDrivenApplyRefused` even with a fixture loopback
+  transport configured.
+* Default custody / RemoteSigner selector resolution remains **Disabled**;
+  Run 201 changes no default and enables no MainNet apply.
+* Release-binary RemoteSigner transport-boundary evidence is deferred to
+  **Run 202**. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -417,6 +417,32 @@ pub mod pqc_remote_signer_payload_carrying;
 // rotation. Release-binary RemoteSigner-policy selector evidence is
 // deferred to Run 199.
 pub mod pqc_remote_signer_policy_surface;
+// Run 201 — source/test production RemoteSigner transport boundary. Adds
+// a typed transport identity/endpoint config
+// (`RemoteSignerTransportConfig` with endpoint, signer id, custody key
+// id, authority root / bundle-signing key fingerprints, environment,
+// chain id, genesis hash, suite id, expected signer identity digest,
+// optional transport-attestation placeholder, and a
+// `TransportTimeoutRetryPolicy`), typed request/response envelopes
+// (`RemoteSignerTransportRequestEnvelope` /
+// `RemoteSignerTransportResponseEnvelope`) wrapping the Run 194
+// `RemoteSignerRequest` / `RemoteSignerResponse`, deterministic
+// domain-separated transcript-binding digests
+// (`envelope_digest` + `transport_transcript_digest`), a pure/mockable
+// `RemoteSignerTransport` trait (`call_remote_signer` /
+// `send_remote_signer_request`) with a DevNet/TestNet-only
+// `FixtureLoopbackRemoteSignerTransport` and a fail-closed
+// `ProductionRemoteSignerTransport`, a typed `RemoteSignerTransportOutcome`,
+// a pure verifier `validate_remote_signer_transport`, and a
+// `validate_lifecycle_custody_remote_signer_and_transport` composition.
+// Default policy is `RemoteSignerPolicy::Disabled`. Source/test only — no
+// real remote signer backend, no networked signer daemon, no real
+// KMS/HSM/cloud-KMS/PKCS#11 backend, no MainNet apply enablement, no
+// governance execution, no real on-chain proof verification, no
+// validator-set rotation. Production transport remains
+// unavailable/fail-closed. Release-binary RemoteSigner transport-boundary
+// evidence is deferred to Run 202.
+pub mod pqc_remote_signer_transport;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
