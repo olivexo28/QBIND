@@ -7244,3 +7244,54 @@ Operator-relevant points (no behavior change):
   Run 201 changes no default and enables no MainNet apply.
 * Release-binary RemoteSigner transport-boundary evidence is deferred to
   **Run 202**. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 202 — release-binary RemoteSigner transport boundary evidence
+
+Run 202 is a **release-binary evidence-only** pass that proves the Run 201
+production RemoteSigner transport boundary behaves correctly on the real
+`target/release/qbind-node` plus a release-built helper. It makes **no
+production-source change** (a release example helper, a release harness,
+and documentation only) and introduces no operational change for live
+nodes. The deliverables are
+`crates/qbind-node/examples/run_202_remote_signer_transport_release_binary_helper.rs`,
+`scripts/devnet/run_202_remote_signer_transport_release_binary.sh`,
+`docs/devnet/run_202_remote_signer_transport_release_binary/`, and the
+evidence report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_202.md`.
+
+Operator-relevant points (no behavior change):
+
+* Run 202 implements **no real RemoteSigner backend**, **no networked
+  signer daemon/service**, and **no production signing custody**. The
+  release helper links the production library symbols
+  (`pqc_remote_signer_transport::*` over `pqc_remote_authority_signer::*`)
+  and exercises the Run 201 transport corpus in release mode; the fixture
+  loopback transport (`FixtureLoopbackRemoteSignerTransport`) remains
+  **DevNet/TestNet evidence only** and is refused on MainNet.
+* The release binary keeps every Run 070 / 130–201 surface
+  **RemoteSigner-transport-silent**: `--help` and the per-env
+  `--print-genesis-hash` flows emit no `RemoteSigner transport active`,
+  `RemoteSigner backend connected`, `networked signer daemon active`, KMS,
+  HSM, governance-execution, or validator-set-rotation banner. The Run 198
+  RemoteSigner policy selector, the Run 193 custody selector, and the
+  governance fixture flag remain compatible with no banner drift.
+* The `ProductionRemoteSignerTransport` reaches the boundary and **fails
+  closed** at the release binary, returning
+  `ProductionTransportUnavailable` /
+  `MainNetProductionTransportUnavailable` and performing no real network
+  or signing I/O. KMS / HSM / cloud-KMS / PKCS#11, governance execution,
+  real on-chain proof verification, and validator-set rotation all remain
+  unimplemented.
+* Run 202 adds **no new metric, no new exit code**, and no CLI / env /
+  sidecar / marker / sequence-file / authority-marker / trust-bundle core
+  / wire / schema change. The helper performs no network or file I/O
+  beyond writing evidence files under its output directory, writes no
+  marker or sequence, swaps no live trust, evicts no sessions, and never
+  invokes the Run 070 ordering.
+* The accepted Runs 130–201 safety properties remain in force, including
+  validation-only non-mutation, rejected-candidate no-mutation, and the
+  **Run 147 / 148 / 152 FATAL MainNet peer-driven apply refusal** — Run
+  202 reconfirms at the release binary that a MainNet peer-driven-apply
+  preflight short-circuits to `MainNetPeerDrivenApplyRefused` even with a
+  fixture loopback transport response.
+* Default custody / RemoteSigner selector resolution remains **Disabled**;
+  Run 202 changes no default and enables no MainNet apply. **Full C4
+  remains OPEN; C5 remains OPEN.**

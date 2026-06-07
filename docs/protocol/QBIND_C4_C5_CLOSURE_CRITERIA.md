@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 201:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 202:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -218,3 +218,24 @@ violation is a regression:
   unavailable/fail-closed; MainNet peer-driven apply remains refused.
   Source/test only; release-binary transport-boundary evidence deferred to
   **Run 202**. **Full C4 remains OPEN; C5 remains OPEN.**
+* **Run 202** — Release-binary evidence for the Run 201 production
+  RemoteSigner transport boundary
+  (`crates/qbind-node/examples/run_202_remote_signer_transport_release_binary_helper.rs`,
+  `scripts/devnet/run_202_remote_signer_transport_release_binary.sh`,
+  `docs/devnet/run_202_remote_signer_transport_release_binary/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_202.md`). Proves on the real
+  `target/release/qbind-node` plus a release-built helper linking the
+  production library symbols that the fixture loopback transport remains
+  DevNet/TestNet evidence-only, the production transport remains
+  unavailable/fail-closed (including the MainNet variant), the
+  request/response/transcript digests are deterministic and domain-bound,
+  the transport composes with the Run 194 RemoteSigner request/response
+  and the custody/RemoteSigner validation path, rejected
+  transport-boundary cases produce no mutation, and MainNet peer-driven
+  apply remains the Run 147 / 148 / 152 FATAL refusal. Provides the C4
+  "release-binary evidence for the production RemoteSigner backend
+  boundary" criterion for the transport boundary only. Release-binary
+  evidence only; no production source change; no real RemoteSigner
+  backend, networked signer daemon, KMS/HSM, governance execution, or
+  validator-set rotation; no MainNet apply. **Full C4 remains OPEN; C5
+  remains OPEN.**

@@ -4694,3 +4694,51 @@ Authority-model invariants (unchanged):
   performed by the new module.
 * Release-binary transport-boundary evidence is deferred to **Run 202**.
   **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 202 — release-binary RemoteSigner transport boundary evidence
+
+Run 202 proves, in **release-binary evidence only**, that the Run 201
+typed RemoteSigner transport boundary preserves the trust-anchor authority
+model on the real `target/release/qbind-node` plus a release-built helper.
+It grants no new authority and makes **no production-source change** (a
+release example helper, a release harness, and documentation only). The
+release helper
+`crates/qbind-node/examples/run_202_remote_signer_transport_release_binary_helper.rs`
+links the production library symbols
+(`pqc_remote_signer_transport::*` over the Run 194
+`pqc_remote_authority_signer::*`) and exercises the Run 201 transport
+corpus (accepted / rejection / separation / composition / determinism /
+refusal_helpers) in release mode; the harness
+`scripts/devnet/run_202_remote_signer_transport_release_binary.sh`, the
+archive `docs/devnet/run_202_remote_signer_transport_release_binary/`, and
+the report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_202.md` capture the
+evidence.
+
+Authority-model invariants (unchanged):
+
+* Run 202 grants **no new authority**. It implements no real RemoteSigner
+  backend, no networked signer daemon, and no production signing custody;
+  the release-built helper confirms in release mode that the fixture
+  loopback transport is DevNet/TestNet evidence only and refused on
+  MainNet, while the production transport is unavailable/fail-closed
+  (`ProductionTransportUnavailable` /
+  `MainNetProductionTransportUnavailable`). KMS / HSM / cloud-KMS /
+  PKCS#11, governance execution, and real on-chain proof verification
+  remain unimplemented; validator-set rotation remains open.
+* The transport boundary confers **no autonomous apply**, no
+  apply-on-receipt, and no peer-majority authority at the release binary;
+  the release helper confirms the transport request binds the full
+  authority tuple and that composition with the Run 194
+  `validate_remote_signer` and the custody/RemoteSigner path returns typed
+  outcomes rather than mutating trust, with rejected cases leaving inputs
+  byte-identical.
+* MainNet peer-driven apply remains **refused**: a MainNet
+  peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a fixture loopback transport
+  response. The real `target/release/qbind-node` keeps every Run 070 /
+  130–201 surface RemoteSigner-transport-silent (no transport /
+  networked-signer / KMS / HSM / governance-execution / validator-rotation
+  banner), with the Run 198 RemoteSigner policy selector, Run 193 custody
+  selector, and governance fixture flag all remaining compatible. No Run
+  070 ordering, marker, sequence, or live-trust swap is performed by the
+  helper.
+* **Full C4 remains OPEN; C5 remains OPEN.**

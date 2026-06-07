@@ -2511,3 +2511,47 @@ Apply-safety invariants (unchanged):
   any Runs 070 / 130–200 safety property. Release-binary
   transport-boundary evidence is deferred to **Run 202**. **Full C4
   remains OPEN; C5 remains OPEN.**
+## Run 202 — release-binary RemoteSigner transport boundary evidence
+
+Run 202 proves, in **release-binary evidence only**, that the Run 201
+production RemoteSigner transport boundary behaves correctly on the real
+`target/release/qbind-node` plus a release-built helper. It changes no
+apply-safety behavior and makes **no production-source change** (a release
+example helper, a release harness, and documentation only). The
+deliverables are
+`crates/qbind-node/examples/run_202_remote_signer_transport_release_binary_helper.rs`,
+`scripts/devnet/run_202_remote_signer_transport_release_binary.sh`,
+`docs/devnet/run_202_remote_signer_transport_release_binary/`, and the
+evidence report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_202.md`.
+
+Apply-safety invariants (unchanged):
+
+* Run 202 performs **no apply**. The release helper performs no network
+  or file I/O beyond writing evidence files under its output directory,
+  writes no marker or sequence, swaps no live trust, evicts no sessions,
+  and never invokes the Run 070
+  `validate → swap → evict_sessions → commit_sequence` ordering.
+* No real RemoteSigner backend, no networked signer daemon, and no
+  production signing custody are implemented. The release-built helper
+  links the production library symbols and confirms in release mode that
+  the fixture loopback transport is DevNet/TestNet evidence only and
+  refused on MainNet, while the production transport is
+  unavailable/fail-closed (`ProductionTransportUnavailable` /
+  `MainNetProductionTransportUnavailable`). KMS / HSM / cloud-KMS /
+  PKCS#11, governance execution, and on-chain proof verification remain
+  unimplemented; validator-set rotation remains open.
+* There is **no autonomous apply**, no apply-on-receipt, and no
+  peer-majority authority. The **Run 147 / 148 / 152 FATAL MainNet
+  peer-driven apply refusal** is reconfirmed at the release binary: a
+  MainNet peer-driven-apply preflight short-circuits to
+  `MainNetPeerDrivenApplyRefused` even with a fixture loopback transport
+  response.
+* The real `target/release/qbind-node` keeps every Run 070 / 130–201
+  surface RemoteSigner-transport-silent (no transport / networked-signer /
+  KMS / HSM / governance-execution / validator-rotation banner) across
+  `--help` and the per-env `--print-genesis-hash` flows, with the Run 198
+  RemoteSigner policy selector, Run 193 custody selector, and governance
+  fixture flag all remaining compatible.
+* Run 202 adds no new exit code and no new metric, and does not weaken any
+  Runs 070 / 130–201 safety property. **Full C4 remains OPEN; C5 remains
+  OPEN.**
