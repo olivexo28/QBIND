@@ -528,6 +528,33 @@ pub mod pqc_custody_attestation_verifier;
 // session eviction, no Run 070 call. Release-binary custody-attestation
 // payload/carrying evidence is deferred to Run 208.
 pub mod pqc_custody_attestation_payload_carrying;
+// Run 209 — source/test hidden custody-attestation policy selector and
+// production preflight integration. Adds the hidden env-var name
+// `QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY`, a typed
+// `CustodyAttestationPolicySelectorParseError`, pure selector parsers
+// (`custody_attestation_policy_from_selector` /
+// `custody_attestation_policy_env_selector` /
+// `custody_attestation_policy_from_cli_or_env`), and seven per-surface
+// preflight wrappers (`preflight_v2_marker_custody_attestation_for_*`) that
+// bind the resolved Run 205 `CustodyAttestationPolicy` into the Run 207
+// `CustodyAttestationCallsiteContext` and dispatch to the matching Run 207
+// `route_loaded_custody_attestation_to_*_callsite_decision` routing helper for
+// each of the seven production v2 marker-decision preflight contexts
+// (reload-check / reload-apply / startup `--p2p-trust-bundle` / SIGHUP / local
+// peer-candidate-check / live inbound `0x05` / peer-driven drain). Default
+// remains `CustodyAttestationPolicy::Disabled`; legacy no-attestation payloads
+// remain compatible. Fixture attestation is DevNet/TestNet evidence-only and
+// cannot satisfy MainNet production attestation;
+// production/cloud-KMS/PKCS#11/HSM/RemoteSigner attestation reaches the Run 205
+// verifier and fails closed as unavailable; MainNet peer-driven apply remains
+// refused. CLI flag wins over env var. The wrappers are pure: no marker write,
+// no sequence write, no live trust swap, no session eviction, no Run 070 call.
+// Source/test only — no real cloud-KMS/PKCS#11/HSM-vendor attestation verifier,
+// no real KMS/HSM backend, no real RemoteSigner backend, no networked signer
+// daemon, no MainNet apply enablement, no governance execution, no real
+// on-chain proof verification, no validator-set rotation. Release-binary
+// custody-attestation policy selector evidence is deferred to Run 210.
+pub mod pqc_custody_attestation_policy_surface;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
