@@ -505,6 +505,29 @@ pub mod pqc_authority_kms_hsm_backend;
 // Release-binary custody-attestation verifier-boundary evidence is deferred
 // to Run 206.
 pub mod pqc_custody_attestation_verifier;
+// Run 207 — source/test custody-attestation payload carrying and
+// production-context preflight wiring. Adds an additive, optional
+// `custody_attestation` sibling on the v2 ratification sidecar JSON carrying
+// the Run 205 `CustodyAttestationEvidenceWire` / `CustodyAttestationInputWire`
+// (combined as `CustodyAttestationPayloadWire`), a typed
+// `CustodyAttestationLoadStatus` (Absent/Available/Malformed), a sibling-
+// extraction parser, a combined v2 sidecar loader, a typed
+// `CustodyAttestationCallsiteContext`, and seven per-surface routing helpers
+// binding the parsed carrier into the Run 205
+// `validate_custody_metadata_and_attestation` /
+// `validate_lifecycle_custody_and_attestation` / `verify_custody_attestation`
+// boundary. Legacy no-attestation payloads remain compatible under the default
+// `CustodyAttestationPolicy::Disabled`; malformed/absent-required carriers
+// fail closed; fixture attestation reaches the production-context path on
+// DevNet/TestNet only; production/cloud-KMS/PKCS#11/HSM/RemoteSigner
+// attestation reaches the verifier and fails closed as unavailable. Source/test
+// only — no real cloud-KMS/PKCS#11/HSM-vendor attestation verifier, no real
+// RemoteSigner backend, no MainNet apply enablement, no governance execution,
+// no real on-chain proof verification, no validator-set rotation. The routing
+// helpers are pure: no marker write, no sequence write, no live trust swap, no
+// session eviction, no Run 070 call. Release-binary custody-attestation
+// payload/carrying evidence is deferred to Run 208.
+pub mod pqc_custody_attestation_payload_carrying;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
