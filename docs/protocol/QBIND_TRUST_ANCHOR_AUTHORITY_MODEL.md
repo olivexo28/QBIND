@@ -5137,3 +5137,39 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_212.md`.
   130–211. MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
   refusal** even with a fixture governance approval. **Full C4 remains OPEN; C5
   remains OPEN.**
+## Run 213 — governance-execution payload carrying and production-context wiring (source/test)
+
+Run 213 makes the Run 211 typed governance-execution input/decision material
+reachable from production call-site contexts via the new module
+`crates/qbind-node/src/pqc_governance_execution_payload_carrying.rs`, verified
+by `crates/qbind-node/tests/run_213_governance_execution_payload_callsite_tests.rs`.
+
+* **Run 213 grants no new authority.** It adds an additive, optional
+  `governance_execution` sibling on the v2 ratification sidecar and source/test
+  routing helpers that carry the Run 211 governance-execution material into the
+  seven production marker-decision call-site contexts where it reaches the
+  Run 211 evaluator. Accepting a fixture governance decision still produces only
+  a typed `GovernanceExecutionOutcome` — no real signing key is created,
+  rotated, retired, revoked, or activated, and there is no marker write,
+  sequence write, live trust swap, session eviction, or Run 070 call.
+* **Default stays compatible.** Under the default
+  `GovernanceExecutionPolicy::Disabled` a legacy no-governance-execution
+  payload is accepted unchanged; a present-but-malformed carrier or a
+  required-but-absent carrier under a non-`Disabled` policy fails closed before
+  the evaluator.
+* **Fixture governance execution remains DevNet/TestNet evidence-only** and is
+  refused on a MainNet trust domain; the production / on-chain / MainNet
+  governance execution evaluators remain callable but fail closed as
+  unavailable and confer no authority.
+* **Validator-set rotation remains unsupported** and the policy-change requests
+  are rejected as unsupported; emergency revoke remains gated behind the
+  explicit emergency fixture policy.
+* Run 213 implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM backend, no
+  real RemoteSigner backend, and no production signing-key custody**; the
+  existing custody / KMS-HSM / RemoteSigner / custody-attestation / governance
+  proof authority surfaces remain compatible; and it does not weaken Runs 070,
+  130–212. Release-binary governance-execution payload/carrying evidence is
+  deferred to **Run 214**. MainNet peer-driven apply remains the **Run 147 /
+  148 / 152 FATAL refusal** even with a fixture governance approval. **Full C4
+  remains OPEN; C5 remains OPEN.**
