@@ -2812,3 +2812,38 @@ change (helper + harness + docs only).
   verifier, no real RemoteSigner backend, no real KMS/HSM backend, no
   governance execution, no real on-chain proof verifier, and no validator-set
   rotation. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 209 — source/test hidden custody-attestation policy selector and production preflight integration
+
+Run 209 adds a hidden, disabled-by-default custody-attestation policy
+selector and threads the resolved Run 205 `CustodyAttestationPolicy` into
+the seven production v2 marker-decision preflight contexts through the
+Run 207 routing layer. Selector source:
+`crates/qbind-node/src/pqc_custody_attestation_policy_surface.rs`; hidden
+CLI flag `--p2p-trust-bundle-custody-attestation-policy` and env var
+`QBIND_P2P_TRUST_BUNDLE_CUSTODY_ATTESTATION_POLICY`.
+
+* Run 209 performs **no apply**. The seven per-surface wrappers
+  `preflight_v2_marker_custody_attestation_for_*` only build the Run 207
+  call-site context with the resolved policy and dispatch to the existing
+  Run 207 routing helpers; they write no marker, write no sequence, swap
+  no live trust, evict no sessions, and never invoke Run 070. Mutating
+  callers continue to honor sequence-before-marker ordering AFTER
+  acceptance.
+* Default remains `CustodyAttestationPolicy::Disabled` (legacy
+  no-attestation payload compatibility). When both CLI and env are set the
+  CLI flag wins; invalid values fail closed with a typed parse error.
+* Fixture attestation is **DevNet/TestNet evidence-only** and cannot
+  satisfy MainNet production attestation; production / cloud-KMS / PKCS#11
+  / HSM / RemoteSigner attestation reaches the Run 205 verifier and fails
+  closed as unavailable; missing/malformed material fails closed.
+* An invalid live inbound `0x05` custody-attestation candidate is **not
+  propagated, staged, or applied** — the rejection short-circuits at the
+  underlying Run 207 routing helper.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal** even with `MainnetProductionAttestationRequired` and a fixture
+  attestation; the selector cannot weaken this refusal.
+* Run 209 adds no new exit code and no new metric, and makes no CLI / env
+  / marker / sequence-file / trust-bundle core / wire / schema change
+  beyond the additive hidden flag and module. Release-binary
+  custody-attestation policy selector evidence is deferred to **Run 210**.
+  **Full C4 remains OPEN; C5 remains OPEN.**
