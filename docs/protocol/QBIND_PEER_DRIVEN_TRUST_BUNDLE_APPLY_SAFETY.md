@@ -2768,3 +2768,47 @@ through production payload/context paths at the source/test level
   authority-marker / sequence-file / trust-bundle core / schema change; it
   does not weaken Runs 070, 130–206. Release-binary evidence is deferred to
   **Run 208**. **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 208 — release-binary custody-attestation payload carrying and production-context routing evidence
+
+Run 208 is the release-binary evidence run for the Run 207 source/test
+custody-attestation payload carrying and production-context wiring
+(`crates/qbind-node/examples/run_208_custody_attestation_payload_release_binary_helper.rs`,
+`scripts/devnet/run_208_custody_attestation_payload_release_binary.sh`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_208.md`). It makes no production source
+change (helper + harness + docs only).
+
+* Run 208 performs **no apply**. The release-built helper exercises the seven
+  routing helpers in release mode through the production library symbols and
+  confirms they remain pure: they write no marker or sequence, swap no live
+  trust, evict no sessions, and never invoke Run 070.
+* The harness drives the **real `target/release/qbind-node`** and proves that
+  no captured surface (`--help`, `--print-genesis-hash --env
+  {devnet,testnet,mainnet}`, the Run 193 custody selector, the Run 198
+  RemoteSigner selector, the governance fixture flag) advertises any
+  custody-attestation-payload apply, MainNet peer-driven apply enablement,
+  autonomous apply, apply-on-receipt, or peer-majority authority — even with
+  the custody and RemoteSigner selectors armed on `--env mainnet` (S1–S8).
+* In release mode a malformed carrier short-circuits to
+  `MalformedCustodyAttestationPayload` BEFORE the Run 205 verifier and BEFORE
+  any marker/sequence write, live trust swap, session eviction, or Run 070
+  call; an absent carrier under a required policy yields
+  `CustodyAttestationRequiredButAbsent`; both fail closed without mutation,
+  and the no-mutation/denylist proofs are recorded empty.
+* The peer-driven drain helper refuses MainNet unconditionally
+  (`MainNetPeerDrivenApplyRefused` /
+  `mainnet_peer_driven_apply_remains_refused_under_custody_attestation_payload_carrying`),
+  preserving the Run 147 / 148 / 152 FATAL refusal even when a fixture
+  attestation is carried and verifies in release mode.
+* The fixture attestation is DevNet/TestNet evidence-only; production /
+  cloud-KMS / PKCS#11 / HSM / RemoteSigner attestation remains
+  unavailable/fail-closed; the RemoteSigner path (Runs 194–202) and the
+  KMS/HSM backend path (Runs 203–204) remain separate, unchanged
+  backend-boundary options.
+* Run 208 adds no new exit code and no new metric, and makes no CLI / env /
+  authority-marker / sequence-file / trust-bundle core / wire / schema change
+  beyond Run 207's additive optional sibling; it does not weaken Runs 070,
+  130–207. It implements no real cloud-KMS / PKCS#11 / HSM-vendor attestation
+  verifier, no real RemoteSigner backend, no real KMS/HSM backend, no
+  governance execution, no real on-chain proof verifier, and no validator-set
+  rotation. **Full C4 remains OPEN; C5 remains OPEN.**

@@ -1,0 +1,123 @@
+Run 208 — release-binary custody-attestation payload/carrying evidence
+git_commit: 57db848edd84116e289e00ae91edd25ccac01ece
+
+build:
+  rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
+  cargo_version:      cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+  qbind_node_sha256:  a1d2d42e971729b4c0f9646454c17e1bb792b0c0aa04570ea3ea0b0dea2d3821
+  qbind_node_buildid: BuildID[sha1]=d8a42c2263045d16008a16acdeb8f08e52a1e269
+  helper_208_sha256:  1348f04a288327c0a20e7dac48bc6307e6f9435fb757acc10e649a5786a75d8c
+  helper_208_buildid: BuildID[sha1]=f558c5c57a344fb02982b7786b2a5e15a4d4a2f8
+
+release-binary scenario verdicts:
+  S1_help	rc=0
+  S2_default_devnet	rc=0
+  S3_default_testnet	rc=0
+  S4_default_mainnet	rc=0
+  S5_custody_selector_compat	rc=0
+  S6_remote_signer_selector_compat	rc=0
+  S7_governance_fixture_compat	rc=0
+  S8_mainnet_armed	rc=0
+
+release-helper verdicts:
+  helper_run_208	rc=0	verdict: PASS
+
+helper A1-A15 / R1-R43 corpus verdicts (release mode, production library symbols):
+  table accepted: pass=20 fail=0
+  table rejection: pass=46 fail=0
+  table loader: pass=6 fail=0
+  table determinism: pass=3 fail=0
+  table refusal_reachability: pass=10 fail=0
+  total_pass: 85
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 36 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_207_custody_attestation_payload_callsite_tests	rc=0
+  test:run_205_custody_attestation_verifier_tests	rc=0
+  test:run_203_kms_hsm_backend_boundary_tests	rc=0
+  test:run_201_remote_signer_transport_boundary_tests	rc=0
+  test:run_198_remote_signer_policy_selector_tests	rc=0
+  test:run_196_remote_signer_payload_callsite_tests	rc=0
+  test:run_194_remote_authority_signer_boundary_tests	rc=0
+  test:run_192_authority_custody_policy_selector_tests	rc=0
+  test:run_190_authority_custody_payload_callsite_tests	rc=0
+  test:run_188_authority_custody_boundary_tests	rc=0
+  test:run_186_onchain_governance_production_verifier_boundary_tests	rc=0
+  test:run_184_onchain_governance_payload_carrying_tests	rc=0
+  test:run_182_onchain_governance_production_callsite_wiring_tests	rc=0
+  test:run_180_onchain_governance_marker_integration_tests	rc=0
+  test:run_178_onchain_governance_proof_tests	rc=0
+  test:run_176_live_0x05_governance_proof_carrier_tests	rc=0
+  test:run_173_validation_only_governance_required_policy_tests	rc=0
+  test:run_171_governance_required_policy_selector_tests	rc=0
+  test:run_169_governance_proof_loader_surface_integration_tests	rc=0
+  test:run_167_governance_proof_carrier_tests	rc=0
+  test:run_165_governance_marker_integration_tests	rc=0
+  test:run_163_governance_authority_verifier_tests	rc=0
+  test:run_161_lifecycle_marker_integration_tests	rc=0
+  test:run_159_authority_signing_key_lifecycle_tests	rc=0
+  test:run_157_unified_testnet_fixture_universe_tests	rc=0
+  test:run_152_binary_reachable_peer_drain_plumbing_tests	rc=0
+  test:run_150_peer_driven_apply_drain_tests	rc=0
+  test:run_148_peer_driven_apply_devnet_tests	rc=0
+  test:run_142_live_inbound_0x05_v2_validation_tests	rc=0
+  test:run_134_reload_apply_v2_authority_marker_tests	rc=0
+  test:run_138_sighup_v2_authority_marker_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits:
+  * no real KMS / HSM / cloud KMS / PKCS#11 / RemoteSigner attestation
+    verifier is wired; carried production-class attestation material
+    routes into the Run 205 verifier and returns the typed unavailable
+    outcome;
+  * fixture custody attestation remains DevNet/TestNet evidence-only and
+    cannot satisfy MainNet production attestation;
+  * legacy/no-attestation payloads remain compatible under default
+    Disabled; the custody_attestation sibling is additive and optional;
+  * evidence/input/transcript/provider-identity digests are deterministic
+    and domain-bound through wire conversion;
+  * a malformed carrier fails closed before the verifier and before any
+    marker/sequence write, live trust swap, session eviction, or Run 070
+    call;
+  * rejected custody-attestation-payload cases produce no mutation;
+  * MainNet peer-driven apply remains refused (Run 147 FATAL invariant)
+    even with a fixture attestation carrier;
+  * RemoteSigner and KMS/HSM remain backend-boundary only and unchanged;
+  * no real on-chain governance proof verifier / no governance
+    execution / no validator-set rotation / no autonomous apply /
+    no apply-on-receipt / no peer-majority authority;
+  * no schema/wire/metric drift beyond Run 207's additive optional
+    custody-attestation sibling;
+  * no marker write / no sequence write on validation-only surfaces;
+  * no fallback to --p2p-trusted-root;
+  * no active DummySig / DummyKem / DummyAead.
+
+verdict:
+  positive: real target/release/qbind-node keeps every existing Run 070
+  / 130–207 surface custody-attestation-silent (no custody attestation /
+  KMS / HSM / cloud KMS / PKCS#11 attestation enablement banner, MainNet
+  peer-driven apply refusal preserved), and the release-built Run 208
+  helper exercises the Run 207 custody-attestation payload/carrying
+  corpus end-to-end in release mode through the production library
+  symbols: legacy no-attestation payloads remain compatible; fixture
+  custody attestation carried through the production reload-check /
+  reload-apply / startup / SIGHUP / local peer-candidate-check / live
+  0x05 / peer-driven-drain contexts reaches the Run 205 verifier and is
+  accepted on DevNet/TestNet only; production / cloud-KMS / PKCS#11 / HSM
+  / RemoteSigner attestation material reaches the verifier and fails
+  closed as unavailable; malformed/invalid material fails closed;
+  evidence/input/transcript/provider-identity digests deterministic and
+  domain-bound through wire conversion; rejected cases produce no
+  mutation; and MainNet peer-driven apply remains the Run 147 FATAL
+  refusal even with fixture attestation material. Real KMS / HSM / cloud
+  KMS / PKCS#11 / RemoteSigner attestation verifiers, real RemoteSigner
+  backend, real on-chain governance proof verification, governance
+  execution, and validator-set rotation all remain unimplemented. Full
+  C4 and C5 remain OPEN.
+
+verdict: PASS
