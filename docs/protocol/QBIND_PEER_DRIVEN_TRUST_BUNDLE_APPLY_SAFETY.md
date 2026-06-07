@@ -2916,3 +2916,42 @@ lifecycle action. It is **source/test only** and changes no apply path.
   marker / sequence-file / trust-bundle core / wire / schema change; it does
   not weaken Runs 070, 130–210. Release-binary evidence is deferred to
   **Run 212**. **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 212 — release-binary governance execution policy-boundary evidence
+
+Run 212 closes the Run 211-deferred release-binary boundary for the source/test
+governance execution policy boundary
+(`crates/qbind-node/src/pqc_governance_execution_policy.rs`) with a release
+example helper
+(`crates/qbind-node/examples/run_212_governance_execution_policy_release_binary_helper.rs`),
+a release harness
+(`scripts/devnet/run_212_governance_execution_policy_release_binary.sh`), the
+evidence archive `docs/devnet/run_212_governance_execution_policy_release_binary/`,
+and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_212.md`.
+
+* Run 212 performs **no apply**. The release helper drives the Run 211
+  evaluators, digest helpers, peer-driven guard composition, and fail-closed
+  helpers in release mode through the production library symbols; every
+  rejected governance-execution scenario writes no marker, writes no sequence,
+  swaps no live trust, evicts no sessions, and never invokes Run 070.
+* On the real `target/release/qbind-node` no surface exposes or enables
+  governance execution: `--help`, the default DevNet/TestNet/MainNet surface,
+  the Run 193/198/209 selectors armed together, MainNet with the legacy
+  selectors armed, and the Run 180 governance on-chain fixture flag all stay
+  governance-execution-silent with no MainNet peer-driven apply enablement
+  (S1–S7); the denylist grep over the captured logs proves every forbidden
+  enablement claim empty.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a fixture governance approval —
+  `mainnet_peer_driven_apply_remains_refused_under_governance_execution`
+  returns the refusal in release mode. Governance execution grants no apply
+  authority.
+* Run 212 makes **no production source change** and implements **no real
+  governance execution engine, no real on-chain governance proof verifier, no
+  MainNet governance, no real KMS/HSM backend, no real RemoteSigner backend,
+  and no validator-set rotation**; fixture governance execution remains
+  DevNet/TestNet evidence-only and is refused on MainNet; production / on-chain
+  / MainNet governance execution remains unavailable/fail-closed; the existing
+  custody / KMS-HSM / RemoteSigner / custody-attestation / governance proof
+  paths remain compatible; and it does not weaken Runs 070, 130–211. **Full C4
+  remains OPEN; C5 remains OPEN.**
