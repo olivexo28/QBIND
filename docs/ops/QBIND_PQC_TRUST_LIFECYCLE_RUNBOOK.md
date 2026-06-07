@@ -7549,3 +7549,60 @@ suite `crates/qbind-node/tests/run_207_custody_attestation_payload_callsite_test
   Governance execution, real on-chain proof verification, and validator-set
   rotation all remain unimplemented/open. **Full C4 remains OPEN; C5
   remains OPEN.**
+
+## Run 208 — release-binary custody-attestation payload carrying and production-context routing evidence
+
+Run 208 is the **release-binary evidence** run for the Run 207 source/test
+custody-attestation payload carrying and production-context wiring
+(`crates/qbind-node/src/pqc_custody_attestation_payload_carrying.rs`). It adds
+the release helper
+`crates/qbind-node/examples/run_208_custody_attestation_payload_release_binary_helper.rs`,
+the harness `scripts/devnet/run_208_custody_attestation_payload_release_binary.sh`,
+the evidence archive `docs/devnet/run_208_custody_attestation_payload_release_binary/`
+(tracked: README.md, summary.txt, .gitignore), and the canonical report
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_208.md`. It makes **no production
+source change** (helper + harness + docs only).
+
+* The harness drives the **real `target/release/qbind-node`** and proves that
+  `--help`, `--print-genesis-hash --env {devnet,testnet,mainnet}`, the Run 193
+  custody policy selector, the Run 198 RemoteSigner policy selector, and the
+  governance fixture flag stay **custody-attestation-payload-silent**: no
+  custody-attestation / KMS / HSM / cloud-KMS / PKCS#11 / RemoteSigner-backend
+  enablement banner, no `run-205`..`run-208` token, no governance-execution or
+  validator-set-rotation claim, and no MainNet peer-driven apply enablement —
+  even with the custody and RemoteSigner selectors armed on `--env mainnet`
+  (S1–S8).
+* The **release-built helper** exercises the Run 207 A1–A15 / R1–R43
+  payload/carrying corpus in release mode through the production library
+  symbols `pqc_custody_attestation_payload_carrying::*` over
+  `pqc_custody_attestation_verifier::*` and `pqc_authority_custody::*` (five
+  tables: `accepted`, `rejection`, `loader`, `determinism`,
+  `refusal_reachability`; `verdict: PASS`).
+* It confirms in release mode that legacy/no-attestation payloads remain
+  compatible under the default `CustodyAttestationPolicy::Disabled`; that
+  DevNet/TestNet fixture attestation carried through the additive optional
+  `custody_attestation` sidecar sibling routes through the seven per-surface
+  helpers into the Run 205 verifier and is accepted under the explicit fixture
+  policy; that evidence / input / transcript / provider-identity digests stay
+  deterministic and domain-bound through wire conversion; that the production /
+  cloud-KMS / PKCS#11 / HSM / RemoteSigner attestation material routes into the
+  verifier and fails closed as the typed unavailable outcome; that a malformed
+  carrier short-circuits before the verifier and before any sequence/marker
+  write, live trust swap, session eviction, or Run 070 call; and that the
+  combined loader returns `Absent` / `Available` / `Malformed` while the
+  ratification still parses.
+* The fixture attestation remains **DevNet/TestNet evidence-only** and is
+  refused on MainNet; the production / cloud-KMS / PKCS#11 / HSM-vendor /
+  RemoteSigner attestation paths remain **unavailable/fail-closed**; the
+  **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend path (Runs
+  203–204)** remain separate, unchanged backend-boundary options.
+* Run 208 implements **no real cloud-KMS / PKCS#11 / HSM-vendor attestation
+  verifier**, **no real RemoteSigner backend**, **no real KMS/HSM backend**,
+  **no governance execution**, **no real on-chain proof verifier**, and **no
+  validator-set rotation**; it adds **no new metric, no new exit code**, and
+  makes no authority-marker / sequence-file / trust-bundle core / wire / schema
+  change beyond Run 207's additive optional sibling; it does not weaken Runs
+  070, 130–207.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a carried fixture attestation. **Full C4 remains OPEN; C5 remains
+  OPEN.**

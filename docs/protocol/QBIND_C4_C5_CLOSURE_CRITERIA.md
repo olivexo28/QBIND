@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 207:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 208:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -367,3 +367,25 @@ violation is a regression:
   rotation is implemented; release-binary custody-attestation
   payload/carrying evidence deferred to **Run 208**. **Full C4 remains
   OPEN; C5 remains OPEN.**
+* **Run 208** — Release-binary evidence for the Run 207 custody-attestation
+  payload carrying and production-context routing surface
+  (`crates/qbind-node/examples/run_208_custody_attestation_payload_release_binary_helper.rs`,
+  `scripts/devnet/run_208_custody_attestation_payload_release_binary.sh`,
+  `docs/devnet/run_208_custody_attestation_payload_release_binary/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_208.md`). Proves on the real
+  `target/release/qbind-node` plus a release-built helper linking the
+  production library symbols that the Run 207 typed custody-attestation
+  material can be carried through the v2 ratification sidecar
+  `custody_attestation` sibling and routed through the seven per-surface
+  helpers into the Run 205 verifier, while the default
+  `CustodyAttestationPolicy::Disabled` behavior, legacy/no-attestation
+  payload compatibility, and the MainNet peer-driven-apply refusal are all
+  preserved. Release-binary evidence only; no production source change
+  (helper + harness + docs only). No real cloud-KMS / PKCS#11 / HSM-vendor
+  attestation verifier, no real KMS/HSM backend, no real RemoteSigner
+  backend, no governance execution, no real on-chain proof verifier, and no
+  validator-set rotation is implemented; fixture attestation remains
+  DevNet/TestNet evidence-only and is refused on MainNet; production
+  attestation remains unavailable/fail-closed; MainNet peer-driven apply
+  remains the Run 147 / 148 / 152 FATAL refusal even with a fixture
+  attestation. **Full C4 remains OPEN; C5 remains OPEN.**

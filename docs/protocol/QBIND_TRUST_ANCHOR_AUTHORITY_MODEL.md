@@ -4955,3 +4955,45 @@ reachable from production call-site contexts
   authority-marker / sequence-file / trust-bundle core / schema change and
   does not weaken Runs 070, 130–206. Release-binary evidence is deferred to
   **Run 208**. **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 208 — release-binary custody-attestation payload carrying and production-context routing evidence
+
+Run 208 is the release-binary evidence run for the Run 207 source/test
+custody-attestation payload carrying and production-context wiring
+(`crates/qbind-node/examples/run_208_custody_attestation_payload_release_binary_helper.rs`,
+`scripts/devnet/run_208_custody_attestation_payload_release_binary.sh`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_208.md`). It makes no production source
+change (helper + harness + docs only).
+
+* Run 208 grants **no new authority**. It implements no real cloud-KMS /
+  PKCS#11 / HSM-vendor attestation verifier, no real RemoteSigner backend, no
+  real KMS/HSM backend, no governance execution, no real on-chain proof
+  verifier, and no validator-set rotation; the default
+  `CustodyAttestationPolicy::Disabled` is unchanged.
+* The release-built helper confirms in release mode, through the production
+  library symbols, that the wire types convert into the Run 205 internal
+  attestation types and **bind the full authority tuple** — environment,
+  chain_id, genesis_hash, authority-root fingerprint, bundle-signing-key
+  fingerprint, Run 188 custody class, backend / provider / signer id, custody
+  key id / label, suite id, lifecycle action, candidate digest,
+  authority-domain sequence, and the optional governance / request / response
+  / transcript digests — through the Run 205 `verify_custody_attestation`
+  boundary, with a mismatch on any bound field rejected as the matching typed
+  Run 205 outcome.
+* The harness drives the **real `target/release/qbind-node`** and proves that
+  no captured surface advertises any new custody-attestation-payload / KMS /
+  HSM / cloud-KMS / PKCS#11 / RemoteSigner-backend authority or MainNet apply
+  enablement — even with the custody and RemoteSigner selectors armed on
+  `--env mainnet` (S1–S8).
+* The carried fixture attestation is **DevNet/TestNet evidence-only** and is
+  refused on a MainNet trust domain; production / cloud-KMS / PKCS#11 / HSM /
+  RemoteSigner attestation remains unavailable/fail-closed; neither a local
+  operator nor a peer majority can satisfy a production attestation in release
+  mode.
+* The **RemoteSigner path (Runs 194–202)** and the **KMS/HSM backend path
+  (Runs 203–204)** remain separate, unchanged backend-boundary options.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a carried fixture attestation. Run 208 makes no authority-marker /
+  sequence-file / trust-bundle core / wire / schema change beyond Run 207's
+  additive optional sibling and does not weaken Runs 070, 130–207. **Full C4
+  remains OPEN; C5 remains OPEN.**
