@@ -7835,3 +7835,42 @@ test target
 * **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
   even with a fixture governance approval. **Full C4 remains OPEN; C5 remains
   OPEN.**
+## Run 214 — release-binary governance-execution payload/carrying evidence
+
+Run 214 is a **release-binary evidence** pass that closes the release-binary
+boundary deferred by Run 213 for the governance-execution payload/carrying and
+production-context wiring. It adds the release-built helper
+`crates/qbind-node/examples/run_214_governance_execution_payload_release_binary_helper.rs`,
+the harness `scripts/devnet/run_214_governance_execution_payload_release_binary.sh`,
+the evidence archive `docs/devnet/run_214_governance_execution_payload_release_binary/`,
+and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_214.md`.
+
+* **No operator action required.** Run 214 makes no production source change and
+  changes no runtime behavior. It only proves, on the real
+  `target/release/qbind-node` plus a release-built helper linking the production
+  library symbols, that the Run 213 payload/carrying boundary holds end-to-end in
+  release mode.
+* **Default stays compatible.** The real `target/release/qbind-node` exposes no
+  governance-execution surface; the default DevNet/TestNet/MainNet
+  `--print-genesis-hash` surfaces, including with the Run 193 custody / Run 198
+  RemoteSigner / Run 209 custody-attestation selectors and the Run 180 governance
+  on-chain fixture flag armed, emit no governance-execution enablement banner and
+  no MainNet peer-driven apply enablement.
+* **Reproduce.**
+  `bash scripts/devnet/run_214_governance_execution_payload_release_binary.sh`
+  builds the release node binary and the Run 214 helper, drives the A1–A16 /
+  R1–R40 corpus through the production library symbols (release helper
+  `verdict: PASS`, 73 checks, 0 fail), runs the S1–S7 real-binary surface
+  scenarios, records the source-reachability and no-mutation/denylist proofs, and
+  cross-checks the Run 134–213 regression target set.
+* Run 214 implements **no real governance execution engine**, **no real on-chain
+  governance proof verifier**, **no MainNet governance**, **no real KMS/HSM
+  backend**, **no real RemoteSigner backend**, and **no validator-set rotation**;
+  fixture governance execution remains DevNet/TestNet evidence-only and is refused
+  on MainNet; production / on-chain / MainNet governance execution remains
+  unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
+  custody-attestation / governance proof paths remain compatible; and it does not
+  weaken Runs 070, 130–213.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a fixture governance approval. **Full C4 remains OPEN; C5 remains
+  OPEN.**

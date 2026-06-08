@@ -5173,3 +5173,42 @@ by `crates/qbind-node/tests/run_213_governance_execution_payload_callsite_tests.
   deferred to **Run 214**. MainNet peer-driven apply remains the **Run 147 /
   148 / 152 FATAL refusal** even with a fixture governance approval. **Full C4
   remains OPEN; C5 remains OPEN.**
+## Run 214 — release-binary governance-execution payload/carrying evidence
+
+Run 214 provides the release-binary evidence deferred by Run 213 for the
+governance-execution payload/carrying and production-context wiring, on the real
+`target/release/qbind-node` plus a release-built helper linking the production
+library symbols
+(`crates/qbind-node/examples/run_214_governance_execution_payload_release_binary_helper.rs`,
+`scripts/devnet/run_214_governance_execution_payload_release_binary.sh`,
+`docs/devnet/run_214_governance_execution_payload_release_binary/`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_214.md`).
+
+* **Run 214 grants no new authority.** It makes no production source change and
+  only proves, in release mode, that the Run 213 routing helpers carry the
+  Run 211 governance-execution material into the Run 211 evaluator across the
+  seven production marker-decision call-site contexts. Accepting a fixture
+  governance decision still produces only a typed `GovernanceExecutionOutcome` —
+  no real signing key is created, rotated, retired, revoked, or activated, and
+  there is no marker write, sequence write, live trust swap, session eviction, or
+  Run 070 call.
+* **Default stays compatible.** The real `target/release/qbind-node` exposes no
+  governance-execution surface, and under the default
+  `GovernanceExecutionPolicy::Disabled` a legacy no-governance-execution payload
+  is accepted unchanged; a present-but-malformed carrier or a required-but-absent
+  carrier under a non-`Disabled` policy fails closed before the evaluator.
+* **Fixture governance execution remains DevNet/TestNet evidence-only** and is
+  refused on a MainNet trust domain; the production / on-chain / MainNet
+  governance execution evaluators remain callable but fail closed as unavailable
+  and confer no authority.
+* **Validator-set rotation remains unsupported** and the policy-change requests
+  are rejected as unsupported; emergency revoke remains gated behind the explicit
+  emergency fixture policy.
+* Run 214 implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM backend, no
+  real RemoteSigner backend, and no production signing-key custody**; the existing
+  custody / KMS-HSM / RemoteSigner / custody-attestation / governance proof
+  authority surfaces remain compatible; and it does not weaken Runs 070,
+  130–213. MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with a fixture governance approval. **Full C4 remains OPEN; C5
+  remains OPEN.**
