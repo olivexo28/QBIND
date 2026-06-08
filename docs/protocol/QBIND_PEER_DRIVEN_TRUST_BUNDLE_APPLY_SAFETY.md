@@ -3068,3 +3068,6 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`.
   unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
   custody-attestation / governance proof paths remain compatible; and it does
   not weaken Runs 070, 130–214. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 216 — release-binary governance-execution policy selector evidence
+
+Run 216 proves the Run 215 hidden governance-execution selector in release binaries. The helper drives the selected `GovernanceExecutionPolicy` into all seven preflight wrappers and proves MainNet peer-driven drain still returns the typed refusal even with `mainnet-governance-required` and fixture approval. Rejected scenarios produce no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write. Fixture and emergency governance remain DevNet/TestNet evidence-only; production/on-chain/MainNet governance remains unavailable; no real governance engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, validator-set rotation, autonomous apply, apply-on-receipt, or peer-majority authority is introduced. **Full C4 remains OPEN; C5 remains OPEN.**

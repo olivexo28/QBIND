@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 215:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 216:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -602,4 +602,4 @@ violation is a regression:
   Run 192 custody / Run 198 RemoteSigner / Run 209 custody-attestation policy
   selectors remain compatible. Release-binary governance-execution-policy
   selector evidence deferred to **Run 216**. **Full C4 remains OPEN; C5
-  remains OPEN.**
+  remains OPEN.*** **Run 216** — Release-binary governance-execution policy-selector evidence (`crates/qbind-node/examples/run_216_governance_execution_policy_release_binary_helper.rs`, `scripts/devnet/run_216_governance_execution_policy_release_binary.sh`, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_216.md`). Mirrors Run 210 for the Run 215 governance-execution selector: real `target/release/qbind-node` hides but accepts `--p2p-trust-bundle-governance-execution-policy` and `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY`; the release helper proves default `GovernanceExecutionPolicy::Disabled`, CLI/env selection, deterministic CLI-over-env precedence, typed invalid-value fail-closed behavior, all seven preflight wrappers, A1–A16 accepted/compatible cases, and R1–R40 rejection/no-mutation cases. Fixture / emergency-council fixture execution remains DevNet/TestNet evidence-only and non-production; production / on-chain / MainNet governance execution remains unavailable/fail-closed; MainNet peer-driven apply remains refused; existing custody / KMS-HSM / RemoteSigner / custody-attestation / governance-proof paths remain compatible. No real governance execution engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is implemented. **Full C4 remains OPEN; C5 remains OPEN.**
