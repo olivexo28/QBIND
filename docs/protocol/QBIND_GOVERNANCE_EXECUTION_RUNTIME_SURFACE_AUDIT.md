@@ -17,6 +17,31 @@ This document is the formal companion to the canonical audit report
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_219.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_219.md).
 
+## Run 220 update — consumption wiring landed (source/test)
+
+Run 220 acts on the central Run 219 finding above. The long-running
+runtime call sites no longer reach the armed surface while discarding the
+decision: the four binary runtime hooks (reload-apply, startup,
+reload-check, local-peer-candidate-check) and the SIGHUP runtime hook now
+**consume** the selected `GovernanceExecutionPolicy` and the **real**
+governance-execution sidecar load status. The previous
+`let _outcome = arm_surface(...)` discard and the forced
+`GovernanceExecutionLoadStatus::Absent` are removed on those surfaces; a
+rejected verdict fails closed before any mutation. This is **source/test
+only** — release-binary runtime-consumption evidence is deferred to
+**Run 221**. Default remains `GovernanceExecutionPolicy::Disabled` and the
+Run 214 no-governance-execution path is preserved bit-for-bit (Disabled +
+absent carrier proceeds as a legacy bypass). Binary/SIGHUP candidate
+metadata still lacks governance proposal/decision bindings, so a present
+carrier at the binary surface reaches the Run 211 evaluator and fails
+closed on the expectation mismatch; live inbound `0x05` and full positive
+binary acceptance remain deferred to Run 221. No real governance execution
+engine, on-chain proof verifier, KMS/HSM backend, RemoteSigner backend, or
+validator-set rotation is implemented. MainNet peer-driven apply remains
+refused. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md).
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

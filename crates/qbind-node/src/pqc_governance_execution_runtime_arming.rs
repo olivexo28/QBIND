@@ -59,10 +59,11 @@
 
 use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
 use crate::pqc_governance_execution_payload_carrying::{
-    GovernanceExecutionLoadStatus, GovernanceExecutionPayloadCarryingDecisionOutcome,
+    parse_optional_governance_execution_sibling_from_json_value, GovernanceExecutionLoadStatus,
+    GovernanceExecutionPayloadCarryingDecisionOutcome,
 };
 use crate::pqc_governance_execution_policy::{
-    GovernanceExecutionExpectations, GovernanceExecutionPolicy,
+    GovernanceExecutionExpectations, GovernanceExecutionOutcome, GovernanceExecutionPolicy,
 };
 use crate::pqc_governance_execution_policy_surface::{
     governance_execution_policy_from_cli_or_env,
@@ -396,9 +397,185 @@ impl GovernanceExecutionRuntimeArmingConfig {
 }
 
 // ===========================================================================
-// In-crate smoke tests (full A1–A15 / R1–R28 coverage lives in
-// `tests/run_217_governance_execution_runtime_arming_tests.rs`).
+// Run 220 — runtime consumption of the arming outcome
 // ===========================================================================
+
+/// Run 220 — typed consumption decision a long-running runtime call site
+/// derives from a Run 217 [`GovernanceExecutionPayloadCarryingDecisionOutcome`].
+///
+/// Run 217 wired the resolved policy into the seven per-surface preflight
+/// wrappers, but the long-running runtime call sites (`main.rs` reload-check
+/// / reload-apply / startup `--p2p-trust-bundle` / local
+/// peer-candidate-check, and the `pqc_live_trust_reload.rs` SIGHUP hook)
+/// **discarded** the returned outcome (`let _outcome = arming.arm_surface(..)`)
+/// and forced [`GovernanceExecutionLoadStatus::Absent`]. Run 220 closes that
+/// gap at the source/test level: a runtime call site now collapses the
+/// outcome into this decision and **must act on it** — proceeding only on
+/// `Proceed*`, and failing closed BEFORE any mutation on
+/// [`Self::FailClosed`].
+///
+/// The three variants partition the Run 213 outcome space exactly:
+///
+/// * [`Self::ProceedLegacyBypass`] — the policy was
+///   [`GovernanceExecutionPolicy::Disabled`] and the carrier was absent
+///   ([`GovernanceExecutionPayloadCarryingDecisionOutcome::NoGovernanceExecutionSupplied`]).
+///   The runtime path continues exactly as it did pre-Run-217 (Run 214
+///   no-governance-execution payload compatibility).
+/// * [`Self::ProceedAccepted`] — the armed policy routed a present carrier
+///   through the Run 211 evaluator and it accepted. Carries the typed Run
+///   211 [`GovernanceExecutionOutcome`].
+/// * [`Self::FailClosed`] — every other outcome (malformed carrier,
+///   required-but-absent, MainNet peer-driven apply refused, or any Run 211
+///   reject). The runtime call site MUST NOT mutate: no Run 070 apply, no
+///   live trust swap, no session eviction, no sequence write, no marker
+///   write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GovernanceExecutionRuntimeConsumption {
+    /// Disabled policy + absent carrier: legacy no-governance-execution
+    /// payload compatibility. The runtime path continues unchanged.
+    ProceedLegacyBypass,
+    /// The armed policy accepted the routed governance-execution material.
+    ProceedAccepted(GovernanceExecutionOutcome),
+    /// Fail closed before any mutation. Carries the rejecting Run 213
+    /// outcome so the caller can surface the precise operator reason.
+    FailClosed(GovernanceExecutionPayloadCarryingDecisionOutcome),
+}
+
+impl GovernanceExecutionRuntimeConsumption {
+    /// Run 220 — collapse a Run 217 per-surface outcome into the typed
+    /// consumption decision. Pure; performs no mutation.
+    pub fn from_outcome(outcome: GovernanceExecutionPayloadCarryingDecisionOutcome) -> Self {
+        if outcome.is_bypassed() {
+            Self::ProceedLegacyBypass
+        } else if let Some(inner) = outcome.callsite_outcome().filter(|_| outcome.is_accept()) {
+            Self::ProceedAccepted(inner.clone())
+        } else {
+            Self::FailClosed(outcome)
+        }
+    }
+
+    /// `true` iff the runtime call site may continue (legacy bypass or an
+    /// accepted policy outcome).
+    pub fn is_proceed(&self) -> bool {
+        matches!(self, Self::ProceedLegacyBypass | Self::ProceedAccepted(_))
+    }
+
+    /// `true` iff the runtime call site MUST fail closed before any
+    /// mutation.
+    pub fn is_fail_closed(&self) -> bool {
+        matches!(self, Self::FailClosed(_))
+    }
+
+    /// `true` iff this is the pre-Run-217 legacy no-governance-execution
+    /// payload bypass.
+    pub fn is_legacy_bypass(&self) -> bool {
+        matches!(self, Self::ProceedLegacyBypass)
+    }
+
+    /// Borrow the rejecting Run 213 outcome when this is a
+    /// [`Self::FailClosed`] decision.
+    pub fn rejecting_outcome(
+        &self,
+    ) -> Option<&GovernanceExecutionPayloadCarryingDecisionOutcome> {
+        match self {
+            Self::FailClosed(o) => Some(o),
+            Self::ProceedLegacyBypass | Self::ProceedAccepted(_) => None,
+        }
+    }
+
+    /// Operator-facing reason string for a [`Self::FailClosed`] decision;
+    /// `None` for the proceed variants.
+    pub fn fail_closed_reason(&self) -> Option<String> {
+        self.rejecting_outcome().map(|o| match o {
+            GovernanceExecutionPayloadCarryingDecisionOutcome::MalformedGovernanceExecutionPayload(
+                e,
+            ) => format!("malformed governance-execution carrier: {}", e),
+            GovernanceExecutionPayloadCarryingDecisionOutcome::GovernanceExecutionRequiredButAbsent {
+                policy,
+            } => format!(
+                "governance-execution material required by policy {:?} but the carrier is absent",
+                policy
+            ),
+            GovernanceExecutionPayloadCarryingDecisionOutcome::MainNetPeerDrivenApplyRefused => {
+                "MainNet peer-driven apply refused unconditionally".to_string()
+            }
+            GovernanceExecutionPayloadCarryingDecisionOutcome::Callsite(inner) => {
+                format!("governance-execution evaluation rejected: {:?}", inner)
+            }
+            GovernanceExecutionPayloadCarryingDecisionOutcome::NoGovernanceExecutionSupplied => {
+                // Not a reject; defensively reported for completeness.
+                "no governance-execution supplied".to_string()
+            }
+        })
+    }
+}
+
+impl GovernanceExecutionRuntimeArmingConfig {
+    /// Run 220 — drive the named runtime preflight surface under the armed
+    /// policy and **consume** the returned outcome into a typed
+    /// [`GovernanceExecutionRuntimeConsumption`].
+    ///
+    /// This is the Run 220 replacement for the discarded
+    /// `let _outcome = arming.arm_surface(..)` pattern at the long-running
+    /// runtime call sites. The caller MUST act on the decision: proceed on
+    /// `Proceed*`, fail closed BEFORE any mutation on `FailClosed`.
+    pub fn consume_surface(
+        &self,
+        surface: GovernanceExecutionRuntimeSurface,
+        trust_domain: &AuthorityTrustDomain,
+        expectations: &GovernanceExecutionExpectations,
+        loaded: &GovernanceExecutionLoadStatus,
+    ) -> GovernanceExecutionRuntimeConsumption {
+        GovernanceExecutionRuntimeConsumption::from_outcome(self.arm_surface(
+            surface,
+            trust_domain,
+            expectations,
+            loaded,
+        ))
+    }
+
+    /// Run 220 — resolve the real governance-execution sidecar status from
+    /// an optional in-memory sidecar JSON value (Run 213 parser) and
+    /// consume it through the named runtime preflight surface.
+    ///
+    /// This is the Run 220 replacement for the forced
+    /// [`GovernanceExecutionLoadStatus::Absent`] at runtime call sites that
+    /// hold a representable sidecar value. A `None` sidecar (no operator
+    /// sidecar supplied) remains `Absent`; a present sidecar becomes
+    /// [`GovernanceExecutionLoadStatus::Absent`] (no sibling),
+    /// [`GovernanceExecutionLoadStatus::Available`] (well-formed sibling),
+    /// or [`GovernanceExecutionLoadStatus::Malformed`] (broken sibling) per
+    /// the Run 213 sibling parser.
+    pub fn consume_surface_from_optional_sidecar_value(
+        &self,
+        surface: GovernanceExecutionRuntimeSurface,
+        trust_domain: &AuthorityTrustDomain,
+        expectations: &GovernanceExecutionExpectations,
+        sidecar: Option<&serde_json::Value>,
+    ) -> GovernanceExecutionRuntimeConsumption {
+        let loaded = governance_execution_load_status_from_optional_sidecar_value(sidecar);
+        self.consume_surface(surface, trust_domain, expectations, &loaded)
+    }
+}
+
+/// Run 220 — derive the real [`GovernanceExecutionLoadStatus`] from an
+/// optional sidecar JSON value using the Run 213 sibling parser.
+///
+/// * `None` (no operator sidecar supplied at this surface) ⇒ `Absent`.
+/// * `Some(value)` ⇒ the Run 213 sibling parse result (`Absent` /
+///   `Available` / `Malformed`).
+///
+/// Pure — performs no I/O and no mutation. This is the single helper a
+/// runtime call site uses instead of hardcoding
+/// [`GovernanceExecutionLoadStatus::Absent`].
+pub fn governance_execution_load_status_from_optional_sidecar_value(
+    sidecar: Option<&serde_json::Value>,
+) -> GovernanceExecutionLoadStatus {
+    match sidecar {
+        Some(value) => parse_optional_governance_execution_sibling_from_json_value(value),
+        None => GovernanceExecutionLoadStatus::Absent,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -436,5 +613,37 @@ mod tests {
             GovernanceExecutionRuntimeSurface::PeerDrivenDrain.tag(),
             "peer-driven-drain"
         );
+    }
+
+    #[test]
+    fn run_220_default_absent_consumes_legacy_bypass() {
+        // Run 220 — default Disabled + absent carrier collapses to the
+        // legacy no-governance-execution bypass (Run 214 compatibility).
+        let cfg = GovernanceExecutionRuntimeArmingConfig::disabled();
+        let consumption = GovernanceExecutionRuntimeConsumption::from_outcome(
+            GovernanceExecutionPayloadCarryingDecisionOutcome::NoGovernanceExecutionSupplied,
+        );
+        assert!(consumption.is_proceed());
+        assert!(consumption.is_legacy_bypass());
+        assert!(cfg.is_disabled());
+    }
+
+    #[test]
+    fn run_220_required_but_absent_consumes_fail_closed() {
+        let outcome =
+            GovernanceExecutionPayloadCarryingDecisionOutcome::GovernanceExecutionRequiredButAbsent {
+                policy: GovernanceExecutionPolicy::FixtureGovernanceAllowed,
+            };
+        let consumption = GovernanceExecutionRuntimeConsumption::from_outcome(outcome);
+        assert!(consumption.is_fail_closed());
+        assert!(consumption.fail_closed_reason().is_some());
+    }
+
+    #[test]
+    fn run_220_optional_sidecar_value_none_is_absent() {
+        assert!(matches!(
+            governance_execution_load_status_from_optional_sidecar_value(None),
+            GovernanceExecutionLoadStatus::Absent
+        ));
     }
 }
