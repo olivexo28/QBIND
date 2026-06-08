@@ -407,6 +407,22 @@ struct Run105ReloadCheckContextData {
     /// [`qbind_node::pqc_onchain_governance_proof::OnChainGovernanceProofPolicy::Disabled`].
     /// Source/test only — never enables MainNet peer-driven apply.
     onchain_governance_fixture_allowed_selector: bool,
+    /// Run 217 — captured value of the hidden
+    /// `--p2p-trust-bundle-governance-execution-policy` CLI flag at
+    /// `Run105ReloadCheckContext` build time.
+    ///
+    /// Resolved at preflight time (together with the
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var) into a
+    /// [`qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig`]
+    /// via the Run 215 resolver. Default (both sources absent) arms
+    /// [`qbind_node::pqc_governance_execution_policy::GovernanceExecutionPolicy::Disabled`]
+    /// and preserves the pre-Run-217 reload-check / reload-apply / startup
+    /// / peer-candidate-check flow bit-for-bit. The selector is validated
+    /// fail-closed at startup; storing the raw `Option<String>` lets a
+    /// TestNet/DevNet operator flip the env-source policy between
+    /// preflights without restarting. Source/test only — never enables
+    /// MainNet peer-driven apply.
+    governance_execution_policy_selector: Option<String>,
 }
 
 /// Run 105 — build the owned context the reload-check / peer-candidate-
@@ -521,6 +537,13 @@ fn build_run_105_reload_check_context(
         // peer-candidate-check flow bit-for-bit.
         onchain_governance_fixture_allowed_selector:
             args.p2p_trust_bundle_onchain_governance_fixture_allowed,
+        // Run 217 — capture the hidden governance-execution policy
+        // selector at context-build time. Resolved at preflight time via
+        // the Run 215 CLI/env resolver. Default (absent) arms
+        // `GovernanceExecutionPolicy::Disabled`.
+        governance_execution_policy_selector: args
+            .p2p_trust_bundle_governance_execution_policy
+            .clone(),
     })
 }
 
@@ -875,6 +898,15 @@ fn preflight_run_134_v2_marker_decision(
         ctx_data.onchain_governance_fixture_allowed_selector,
     );
 
+    // Run 217 — governance-execution runtime-arming call-site reachability
+    // for the `--p2p-trust-bundle-reload-apply-*` mutating-preflight path.
+    // Pure / non-mutating; preserves sequence-before-marker ordering.
+    invoke_run_217_callsite_governance_execution_marker_decision(
+        &decision,
+        ctx_data.governance_execution_policy_selector.as_deref(),
+        qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::ReloadApply,
+    );
+
     Ok(Some(decision))
 }
 
@@ -918,8 +950,73 @@ fn invoke_run_182_reload_apply_callsite_onchain_governance_marker_decision(
     let _outcome = reload_apply_callsite_onchain_governance_marker_decision(&ctx);
 }
 
-/// Run 136 — pre-mutation v2 authority-marker accept-and-persist preflight
-/// for the **startup `--p2p-trust-bundle`** acceptance path.
+/// Run 217 — shared production call-site reachability hook for the Run 215
+/// governance-execution per-surface preflight wrappers on the binary's
+/// reload-check / reload-apply / startup `--p2p-trust-bundle` / local
+/// peer-candidate-check runtime contexts.
+///
+/// Resolves the armed `GovernanceExecutionRuntimeArmingConfig` from the
+/// captured selector (Run 215 CLI/env resolver) and routes the resolved
+/// `GovernanceExecutionPolicy` into the named Run 217 runtime surface.
+/// Pure / non-mutating: no marker write, no sequence write, no live trust
+/// swap, no session eviction, no Run 070 invocation. The reload sidecar
+/// formats do not carry a typed governance-execution payload at these
+/// surfaces today (same wire blocker as the Run 182 on-chain governance
+/// hooks), so the carrier is `Absent`; under the default `Disabled` policy
+/// this is the legacy no-governance-execution bypass, preserving the
+/// pre-Run-217 flow bit-for-bit. The selector was already validated
+/// fail-closed at startup, so `from_cli_or_env` cannot error here; a
+/// defensive `Disabled` fallback keeps the hook non-mutating regardless.
+fn invoke_run_217_callsite_governance_execution_marker_decision(
+    decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    governance_execution_policy_selector: Option<&str>,
+    surface: qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface,
+) {
+    use qbind_node::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
+    use qbind_node::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus;
+    use qbind_node::pqc_governance_execution_policy::{
+        GovernanceAction, GovernanceExecutionExpectations,
+    };
+    use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let expectations = GovernanceExecutionExpectations {
+        expected_environment: candidate.environment,
+        expected_chain_id: candidate.chain_id.clone(),
+        expected_genesis_hash: candidate.genesis_hash.clone(),
+        expected_authority_root_fingerprint: candidate.authority_root_fingerprint.clone(),
+        expected_proposal_id: String::new(),
+        expected_decision_id: String::new(),
+        expected_governance_action: GovernanceAction::Rotate,
+        expected_lifecycle_action: LocalLifecycleAction::Rotate,
+        expected_candidate_digest: String::new(),
+        expected_authority_domain_sequence: candidate.latest_authority_domain_sequence,
+        expected_governance_proof_digest: String::new(),
+        expected_on_chain_proof_digest: None,
+        expected_custody_attestation_digest: None,
+        expected_suite_id: candidate.authority_root_suite_id,
+        expected_effective_epoch: 0,
+        expected_replay_nonce: String::new(),
+        now_epoch: 0,
+    };
+    let arming = GovernanceExecutionRuntimeArmingConfig::from_cli_or_env(
+        governance_execution_policy_selector,
+    )
+    .unwrap_or_default();
+    let _outcome = arming.arm_surface(
+        surface,
+        &trust_domain,
+        &expectations,
+        &GovernanceExecutionLoadStatus::Absent,
+    );
+}
 ///
 /// Mirrors [`preflight_run_134_v2_marker_decision`] but tags the
 /// persisted-record audit field with
@@ -1080,6 +1177,14 @@ fn preflight_run_136_v2_marker_decision_for_startup(
     invoke_run_182_startup_p2p_trust_bundle_callsite_onchain_governance_marker_decision(
         &decision,
         ctx_data.onchain_governance_fixture_allowed_selector,
+    );
+
+    // Run 217 — governance-execution runtime-arming call-site reachability
+    // for the startup `--p2p-trust-bundle` mutating-preflight path.
+    invoke_run_217_callsite_governance_execution_marker_decision(
+        &decision,
+        ctx_data.governance_execution_policy_selector.as_deref(),
+        qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::StartupP2pTrustBundle,
     );
 
     Ok(Some(decision))
@@ -1678,6 +1783,15 @@ fn preflight_run_132_validation_only_v2_marker_check(
         ctx_data.onchain_governance_fixture_allowed_selector,
     );
 
+    // Run 217 — governance-execution runtime-arming call-site reachability
+    // for the `--p2p-trust-bundle-reload-check` validation-only preflight.
+    // Validation-only: the returned outcome is dropped and never mutates.
+    invoke_run_217_callsite_governance_execution_marker_decision(
+        &decision,
+        ctx_data.governance_execution_policy_selector.as_deref(),
+        qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::ReloadCheck,
+    );
+
     Ok(Some(decision))
 }
 
@@ -1786,8 +1900,37 @@ async fn main() {
         }
     };
 
+    // Run 217 — resolve and validate the hidden, disabled-by-default
+    // governance-execution runtime policy selector
+    // (`--p2p-trust-bundle-governance-execution-policy` /
+    // `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY`) fail-closed at
+    // startup, BEFORE any runtime config is constructed or any preflight
+    // mutation can occur. An empty / unknown selector value from either
+    // source is rejected with exit code 1 — the resolver never silently
+    // downgrades an invalid value to `Disabled`. Both sources absent
+    // resolves to `GovernanceExecutionPolicy::Disabled` (Run 214
+    // compatible). Source/test wiring; never enables MainNet peer-driven
+    // apply, and never makes production/on-chain/MainNet governance
+    // execution available. See task/RUN_217_TASK.txt and
+    // docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_217.md.
+    let _run_217_governance_execution_runtime_arming =
+        match qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig::from_cli_or_env(
+            args.p2p_trust_bundle_governance_execution_policy.as_deref(),
+        ) {
+            Ok(arming) => arming,
+            Err(e) => {
+                eprintln!(
+                    "[binary] Run 217: FATAL: invalid governance-execution policy selector: {}. \
+                     No runtime config is armed; no preflight runs; no marker write; no sequence \
+                     write; no live trust swap; no session eviction; no Run 070 call. See \
+                     docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_217.md.",
+                    e
+                );
+                std::process::exit(1);
+            }
+        };
+
     // Run 147 — early MainNet refusal for the disabled-by-default
-    // peer-candidate staging arming flag. Positioned BEFORE the
     // Run 102 MainNet genesis-path requirement check so the operator
     // sees the precise Run 147 FATAL reason rather than a generic
     // MainNet startup error. Local peer majority is NOT authority on
@@ -2900,6 +3043,17 @@ async fn main() {
                                     invoke_run_182_local_peer_candidate_check_callsite_onchain_governance_marker_decision(
                                         &decision,
                                         ctx_data.onchain_governance_fixture_allowed_selector,
+                                    );
+                                    // Run 217 — governance-execution
+                                    // runtime-arming call-site reachability
+                                    // for the local
+                                    // `--p2p-trust-bundle-peer-candidate-check`
+                                    // validation-only path. Pure /
+                                    // non-mutating; outcome dropped.
+                                    invoke_run_217_callsite_governance_execution_marker_decision(
+                                        &decision,
+                                        ctx_data.governance_execution_policy_selector.as_deref(),
+                                        qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::LocalPeerCandidateCheck,
                                     );
                                 }
                                 Ok(None) => {
@@ -7837,6 +7991,20 @@ fn spawn_run074_live_reload_task(
         // `OnChainGovernanceProofPolicy` (default `Disabled`).
         onchain_governance_fixture_allowed_selector:
             args.p2p_trust_bundle_onchain_governance_fixture_allowed,
+        // Run 217 — arm the SIGHUP live-reload runtime config with the
+        // resolved governance-execution policy from the hidden
+        // `--p2p-trust-bundle-governance-execution-policy` CLI flag /
+        // `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var
+        // (Run 215 resolver). The selector was already validated
+        // fail-closed at startup (`resolve_run_217_governance_execution_runtime_arming`);
+        // re-resolving here is pure and yields the same policy. Default
+        // `Disabled` preserves the pre-Run-217 SIGHUP flow bit-for-bit and
+        // never enables MainNet peer-driven apply.
+        governance_execution_runtime_arming:
+            qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig::from_cli_or_env(
+                args.p2p_trust_bundle_governance_execution_policy.as_deref(),
+            )
+            .unwrap_or_default(),
     };
     let controller = LiveReloadController::new(
         Arc::new(live_state),
