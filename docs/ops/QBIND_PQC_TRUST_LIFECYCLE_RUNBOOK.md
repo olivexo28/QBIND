@@ -7926,3 +7926,6 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`.
 * **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
   even with `MainnetGovernanceRequired` and a fixture governance approval.
   **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 216 — release-binary governance-execution policy selector evidence
+
+Run 216 is the **release-binary** counterpart to Run 215. The real `target/release/qbind-node` hides but accepts `--p2p-trust-bundle-governance-execution-policy` and `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY`; the release helper proves default `GovernanceExecutionPolicy::Disabled`, CLI/env selectors, deterministic CLI-over-env precedence, invalid selector fail-closed behavior, all seven preflight wrappers, A1–A16 accepted/compatible cases, and R1–R40 rejection/no-mutation cases. Fixture governance remains DevNet/TestNet evidence-only, emergency council fixture execution remains explicit and non-production, production/on-chain/MainNet governance execution remains unavailable/fail-closed, MainNet peer-driven apply remains refused, existing custody/KMS-HSM/RemoteSigner/custody-attestation/governance-proof paths remain compatible, and no real governance engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is implemented. **Full C4 remains OPEN; C5 remains OPEN.**
