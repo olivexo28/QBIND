@@ -2955,3 +2955,43 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_212.md`.
   custody / KMS-HSM / RemoteSigner / custody-attestation / governance proof
   paths remain compatible; and it does not weaken Runs 070, 130–211. **Full C4
   remains OPEN; C5 remains OPEN.**
+## Run 213 — governance-execution payload carrying and production-context wiring (source/test)
+
+Run 213 makes the Run 211 typed governance-execution input/decision material
+reachable from production call-site contexts via the new module
+`crates/qbind-node/src/pqc_governance_execution_payload_carrying.rs` and the
+test target
+`crates/qbind-node/tests/run_213_governance_execution_payload_callsite_tests.rs`.
+
+* Run 213 performs **no apply**. The routing helpers
+  (`route_loaded_governance_execution_to_*_callsite_decision`) carry the
+  parsed governance-execution material into the Run 211
+  `evaluate_governance_execution_policy` /
+  `evaluate_governance_execution_with_peer_driven_guard` evaluator across the
+  seven production marker-decision surfaces (reload-check, reload-apply,
+  startup `--p2p-trust-bundle`, SIGHUP, local peer-candidate-check, live
+  inbound `0x05`, peer-driven drain); every rejected or malformed/absent
+  scenario writes no marker, writes no sequence, swaps no live trust, evicts
+  no sessions, and never invokes Run 070.
+* The `governance_execution` sidecar sibling is additive and optional. Under
+  the default `GovernanceExecutionPolicy::Disabled` a legacy
+  no-governance-execution payload is accepted unchanged; a present-but-
+  malformed carrier or a required-but-absent carrier under a non-`Disabled`
+  policy fails closed before the evaluator.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a fixture governance approval —
+  `mainnet_peer_driven_apply_remains_refused_under_governance_execution_payload_carrying`
+  returns the refusal and the peer-driven drain helper refuses MainNet
+  unconditionally. Governance-execution payload carrying grants no apply
+  authority.
+* Run 213 makes **no production source change beyond the additive module** and
+  implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM backend,
+  no real RemoteSigner backend, and no validator-set rotation**; fixture
+  governance execution remains DevNet/TestNet evidence-only and is refused on
+  MainNet; production / on-chain / MainNet governance execution remains
+  unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
+  custody-attestation / governance proof paths remain compatible; and it does
+  not weaken Runs 070, 130–212. Release-binary governance-execution
+  payload/carrying evidence is deferred to **Run 214**. **Full C4 remains
+  OPEN; C5 remains OPEN.**

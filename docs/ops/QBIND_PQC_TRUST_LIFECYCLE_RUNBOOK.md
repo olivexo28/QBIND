@@ -7792,3 +7792,46 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_212.md`.
 * **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
   even with a fixture governance approval. **Full C4 remains OPEN; C5 remains
   OPEN.**
+## Run 213 — source/test governance-execution payload carrying and production-context wiring
+
+Run 213 is a **source/test** pass that makes the Run 211 typed
+governance-execution input/decision material reachable from production
+call-site contexts. It adds the module
+`crates/qbind-node/src/pqc_governance_execution_payload_carrying.rs` and the
+test target
+`crates/qbind-node/tests/run_213_governance_execution_payload_callsite_tests.rs`.
+
+* **No operator action required.** Run 213 changes no runtime behavior. It
+  only adds an additive, optional `governance_execution` sibling on the v2
+  ratification sidecar and source/test routing helpers that carry the
+  Run 211 governance-execution material into the seven production
+  marker-decision call-site contexts (reload-check, reload-apply, startup
+  `--p2p-trust-bundle`, SIGHUP, local peer-candidate-check, live inbound
+  `0x05`, peer-driven drain) where it reaches the Run 211 evaluator.
+* **Default stays compatible.** Under the default
+  `GovernanceExecutionPolicy::Disabled`, a legacy no-governance-execution
+  payload is accepted unchanged; a present-but-malformed carrier or a
+  required-but-absent carrier under a non-`Disabled` policy fails closed
+  before the evaluator and before any sequence/marker write, live trust
+  swap, session eviction, or Run 070 call.
+* **Reproduce.**
+  `cargo test -p qbind-node --test run_213_governance_execution_payload_callsite_tests`
+  drives the A1–A16 / R1–R40 corpus representable at the payload-carrying
+  layer (61 tests): legacy compatibility, fixture governance carried and
+  accepted on DevNet/TestNet under the explicit fixture policy, the seven
+  surfaces reaching the Run 211 evaluator, production / on-chain / MainNet
+  governance carried and failing closed as unavailable, digest determinism
+  through wire conversion, malformed/absent fail-closed, and the MainNet
+  refusal invariant.
+* Run 213 implements **no real governance execution engine**, **no real
+  on-chain governance proof verifier**, **no MainNet governance**, **no real
+  KMS/HSM backend**, **no real RemoteSigner backend**, and **no validator-set
+  rotation**; fixture governance execution remains DevNet/TestNet
+  evidence-only and is refused on MainNet; production / on-chain / MainNet
+  governance execution remains unavailable/fail-closed; the existing custody
+  / KMS-HSM / RemoteSigner / custody-attestation / governance proof paths
+  remain compatible; and it does not weaken Runs 070, 130–212. Release-binary
+  governance-execution payload/carrying evidence is deferred to **Run 214**.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a fixture governance approval. **Full C4 remains OPEN; C5 remains
+  OPEN.**

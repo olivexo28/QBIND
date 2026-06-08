@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 212:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 213:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -515,3 +515,28 @@ violation is a regression:
   rotation is implemented; existing custody / KMS-HSM / RemoteSigner /
   custody-attestation / governance proof paths remain compatible. **Full C4
   remains OPEN; C5 remains OPEN.**
+* **Run 213** — Source/test governance-execution payload carrying and
+  production-context preflight wiring for Run 211
+  (`crates/qbind-node/src/pqc_governance_execution_payload_carrying.rs`,
+  `crates/qbind-node/tests/run_213_governance_execution_payload_callsite_tests.rs`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_213.md`). Makes the Run 211 typed
+  governance-execution input/decision material carryable through the production
+  v2 ratification sidecar via an additive optional `governance_execution`
+  sibling, and routable into the seven production v2 marker-decision call-site
+  contexts (reload-check, reload-apply, startup `--p2p-trust-bundle`, SIGHUP,
+  local peer-candidate-check, live inbound `0x05`, peer-driven drain) where it
+  reaches the Run 211 evaluator. Preserves legacy no-governance-execution
+  payload compatibility under the default `Disabled` policy; a present-but-
+  malformed or required-but-absent carrier fails closed before the evaluator;
+  fixture governance execution reaches and passes the production-context path on
+  DevNet/TestNet only under the explicit fixture policy; production / on-chain /
+  MainNet governance execution reaches the evaluator and fails closed as
+  unavailable; validator-set rotation unsupported; rejected cases produce no
+  mutation; and MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL
+  refusal even with a fixture governance approval. Source/test evidence only; no
+  schema change beyond the additive optional sibling; no real governance
+  execution engine, on-chain proof verifier, KMS/HSM backend, RemoteSigner
+  backend, or validator-set rotation is implemented; existing custody / KMS-HSM
+  / RemoteSigner / custody-attestation / governance proof paths remain
+  compatible. Release-binary governance-execution payload/carrying evidence
+  deferred to **Run 214**. **Full C4 remains OPEN; C5 remains OPEN.**

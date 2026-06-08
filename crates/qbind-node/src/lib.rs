@@ -586,6 +586,32 @@ pub mod pqc_custody_attestation_policy_surface;
 // trust swap, no session eviction, no Run 070 call. Release-binary governance
 // execution policy-boundary evidence is deferred to Run 212.
 pub mod pqc_governance_execution_policy;
+// Run 213 — source/test governance-execution payload carrying and
+// production-context preflight wiring. Adds an additive optional
+// `governance_execution` sibling on the v2 ratification sidecar JSON
+// (alongside the Run 167/184/190/196/207 siblings) carrying wire-form
+// `GovernanceExecutionInputWire` + `GovernanceExecutionDecisionWire`
+// behind a `schema_version`, a typed `GovernanceExecutionLoadStatus`
+// (Absent/Available/Malformed), a pure sibling-extraction parser and v2
+// sidecar loaders, a `GovernanceExecutionCallsiteContext`, and seven
+// per-surface routing helpers
+// (`route_loaded_governance_execution_to_*_callsite_decision`) plus
+// reachability helpers that route carried material into the Run 211
+// `evaluate_governance_execution_policy` /
+// `evaluate_governance_execution_with_peer_driven_guard` evaluators.
+// Legacy no-governance-execution payloads remain accepted under the
+// default `GovernanceExecutionPolicy::Disabled`; malformed/absent-required
+// carriers fail closed; fixture governance execution stays DevNet/TestNet
+// source/test only; production/on-chain/MainNet governance execution
+// reaches the evaluator and fails closed as unavailable; MainNet
+// peer-driven apply remains refused even with fixture governance approval.
+// Source/test only — no real governance execution engine, no real on-chain
+// governance proof verifier, no validator-set rotation, no MainNet
+// enablement. The routing helpers are pure: no marker write, no sequence
+// write, no live trust swap, no session eviction, no Run 070 call.
+// Release-binary governance-execution payload/carrying evidence is deferred
+// to Run 214.
+pub mod pqc_governance_execution_payload_carrying;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
