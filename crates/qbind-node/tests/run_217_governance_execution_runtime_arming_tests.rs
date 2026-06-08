@@ -1059,37 +1059,45 @@ fn revoke_action_authorized_through_runtime_config() {
 // default Disabled (Run 214 no-governance-execution payload) compatible.
 #[test]
 fn compatibility_with_sibling_run_selectors() {
-    let _g = EnvGuard::set(None);
+    // Each `EnvGuard` acquires the process-wide, non-reentrant `env_lock`
+    // mutex. Scope each guard so only one is alive at a time — holding the
+    // first guard while constructing a second would re-lock the same
+    // non-reentrant mutex on this thread and deadlock.
+    {
+        let _g = EnvGuard::set(None);
 
-    // Run 193 custody selector default.
-    assert_eq!(
-        qbind_node::pqc_authority_custody_policy_surface::authority_custody_policy_from_cli_or_env(
-            None
-        )
-        .unwrap(),
-        qbind_node::pqc_authority_custody::AuthorityCustodyPolicy::Disabled
-    );
-    // Run 199 RemoteSigner selector default.
-    assert_eq!(
-        qbind_node::pqc_remote_signer_policy_surface::remote_signer_policy_from_cli_or_env(None)
+        // Run 193 custody selector default.
+        assert_eq!(
+            qbind_node::pqc_authority_custody_policy_surface::authority_custody_policy_from_cli_or_env(
+                None
+            )
             .unwrap(),
-        qbind_node::pqc_remote_authority_signer::RemoteSignerPolicy::Disabled
-    );
-    // Run 210 custody-attestation selector default.
-    assert_eq!(
-        qbind_node::pqc_custody_attestation_policy_surface::custody_attestation_policy_from_cli_or_env(
-            None
-        )
-        .unwrap(),
-        qbind_node::pqc_custody_attestation_verifier::CustodyAttestationPolicy::Disabled
-    );
+            qbind_node::pqc_authority_custody::AuthorityCustodyPolicy::Disabled
+        );
+        // Run 199 RemoteSigner selector default.
+        assert_eq!(
+            qbind_node::pqc_remote_signer_policy_surface::remote_signer_policy_from_cli_or_env(None)
+                .unwrap(),
+            qbind_node::pqc_remote_authority_signer::RemoteSignerPolicy::Disabled
+        );
+        // Run 210 custody-attestation selector default.
+        assert_eq!(
+            qbind_node::pqc_custody_attestation_policy_surface::custody_attestation_policy_from_cli_or_env(
+                None
+            )
+            .unwrap(),
+            qbind_node::pqc_custody_attestation_verifier::CustodyAttestationPolicy::Disabled
+        );
+    }
 
     // Arming governance execution (env source) does not change the above
     // sibling defaults and itself resolves correctly.
-    let _g2 = EnvGuard::set(Some("fixture-governance-allowed"));
-    let arming = arming_from_cli(None);
-    assert_eq!(
-        arming.governance_execution_policy(),
-        GovernanceExecutionPolicy::FixtureGovernanceAllowed
-    );
+    {
+        let _g2 = EnvGuard::set(Some("fixture-governance-allowed"));
+        let arming = arming_from_cli(None);
+        assert_eq!(
+            arming.governance_execution_policy(),
+            GovernanceExecutionPolicy::FixtureGovernanceAllowed
+        );
+    }
 }
