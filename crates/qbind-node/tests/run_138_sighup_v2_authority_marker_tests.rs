@@ -375,6 +375,8 @@ fn make_controller(
         authority_marker,
     governance_proof_policy: qbind_node::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
     onchain_governance_fixture_allowed_selector: false,
+    governance_execution_runtime_arming:
+        qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig::disabled(),
 };
     let ctl = LiveReloadController::new(live.clone(), evictor, metrics.clone(), cfg);
     (ctl, live, mock, metrics)

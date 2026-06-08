@@ -627,6 +627,24 @@ pub mod pqc_governance_execution_payload_carrying;
 // rotation. Release-binary governance-execution-policy selector evidence
 // is deferred to Run 216.
 pub mod pqc_governance_execution_policy_surface;
+// Run 217 — source/test governance-execution runtime policy arming
+// wiring. Introduces `GovernanceExecutionRuntimeArmingConfig`, a typed
+// `Copy` runtime-config carrier that resolves the Run 215 hidden
+// governance-execution policy selector (CLI/env, fail-closed on invalid)
+// and routes the resolved `GovernanceExecutionPolicy` into all seven Run
+// 213 / Run 215 per-surface preflight wrappers (reload-check,
+// reload-apply, startup `--p2p-trust-bundle`, SIGHUP, local
+// peer-candidate-check, live inbound `0x05`, peer-driven drain). It is
+// embedded into the long-running `LiveReloadConfig` SIGHUP runtime config
+// and consumed by the binary's reload-check / reload-apply / startup /
+// peer-candidate-check / SIGHUP runtime contexts. Default remains
+// `GovernanceExecutionPolicy::Disabled`; fixture governance execution is
+// DevNet/TestNet evidence-only; production/on-chain/MainNet governance
+// execution remains fail-closed as unavailable; MainNet peer-driven apply
+// remains refused. No real governance execution engine, on-chain proof
+// verifier, KMS/HSM backend, RemoteSigner backend, or validator-set
+// rotation. Release-binary runtime-arming evidence is deferred to Run 218.
+pub mod pqc_governance_execution_runtime_arming;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

@@ -316,6 +316,24 @@ pub struct LiveReloadConfig {
     /// and preserves the pre-Run-182 SIGHUP preflight flow bit-for-bit.
     /// Source/test only — never enables MainNet peer-driven apply.
     pub onchain_governance_fixture_allowed_selector: bool,
+
+    /// Run 217 — armed governance-execution runtime policy for the SIGHUP
+    /// live reload v2 marker-decision preflight.
+    ///
+    /// Captures the [`crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig`]
+    /// resolved at controller-construction time from the hidden
+    /// `--p2p-trust-bundle-governance-execution-policy` CLI flag /
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var (Run
+    /// 215 resolver, CLI-over-env precedence, fail-closed on invalid).
+    /// Default
+    /// [`crate::pqc_governance_execution_policy::GovernanceExecutionPolicy::Disabled`]
+    /// preserves the pre-Run-217 SIGHUP preflight flow bit-for-bit — an
+    /// absent governance-execution carrier is accepted as a legacy
+    /// no-governance-execution payload (Run 214 compatible). Source/test
+    /// only; never enables MainNet peer-driven apply, and never makes
+    /// production/on-chain/MainNet governance execution available.
+    pub governance_execution_runtime_arming:
+        crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig,
 }
 
 /// Run 114 — owned ratification enforcement inputs the
@@ -1416,6 +1434,26 @@ impl LiveReloadController {
             self.config.onchain_governance_fixture_allowed_selector,
         );
 
+        // Run 217 — production call-site reachability for the Run 215
+        // governance-execution per-surface preflight wrapper for the
+        // SIGHUP live trust-bundle reload mutating-preflight. The armed
+        // `GovernanceExecutionRuntimeArmingConfig`
+        // (`LiveReloadConfig::governance_execution_runtime_arming`) routes
+        // the resolved `GovernanceExecutionPolicy` into the Run 215 SIGHUP
+        // preflight wrapper. Pure: no marker write, no sequence write, no
+        // live trust swap, no session eviction, no Run 070 invocation.
+        // Default `Disabled` accepts an absent governance-execution
+        // carrier as a legacy no-governance-execution payload, preserving
+        // the pre-Run-217 flow bit-for-bit. Live-config wire blocker:
+        // current SIGHUP-trigger sidecar formats do not carry a typed
+        // governance-execution payload, so the load status is `Absent` at
+        // this surface today. MainNet peer-driven apply remains refused
+        // upstream regardless of the armed policy.
+        invoke_run_217_sighup_callsite_governance_execution_marker_decision(
+            &decision,
+            self.config.governance_execution_runtime_arming,
+        );
+
         Ok(Some(decision))
     }
 }
@@ -1458,6 +1496,84 @@ fn invoke_run_182_sighup_callsite_onchain_governance_marker_decision(
         replay_set: &EmptyOnChainGovernanceReplaySet,
     };
     let _outcome = sighup_callsite_onchain_governance_marker_decision(&ctx);
+}
+
+/// Run 217 — SIGHUP production call-site reachability hook for the Run 215
+/// governance-execution per-surface preflight wrapper.
+///
+/// Routes the armed `GovernanceExecutionRuntimeArmingConfig` into the Run
+/// 215 SIGHUP preflight wrapper. Pure / non-mutating: no marker write, no
+/// sequence write, no live trust swap, no session eviction, no Run 070
+/// invocation. The live SIGHUP-trigger sidecar formats do not yet carry a
+/// typed governance-execution payload (same wire blocker as the Run 182
+/// on-chain governance hook), so the load status is
+/// [`GovernanceExecutionLoadStatus::Absent`] here. Under the default
+/// `Disabled` policy this resolves to the legacy
+/// no-governance-execution-payload bypass, preserving the pre-Run-217
+/// SIGHUP flow bit-for-bit. MainNet peer-driven apply remains refused
+/// upstream regardless of the armed policy.
+fn invoke_run_217_sighup_callsite_governance_execution_marker_decision(
+    decision: &crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
+    arming: crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig,
+) {
+    use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use crate::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus;
+
+    let candidate = decision.candidate();
+    let trust_domain = AuthorityTrustDomain::new(
+        candidate.environment,
+        candidate.chain_id.clone(),
+        candidate.genesis_hash.clone(),
+        candidate.authority_root_fingerprint.clone(),
+        candidate.authority_root_suite_id,
+    );
+    let expectations =
+        governance_execution_expectations_from_v2_candidate(candidate);
+    // Wire blocker: SIGHUP-trigger sidecars carry no governance-execution
+    // payload today, so the carrier is Absent. Under Disabled this is the
+    // legacy no-governance-execution bypass; under any non-Disabled armed
+    // policy it fails closed as required-but-absent — never mutating.
+    let _outcome = arming.preflight_sighup(
+        &trust_domain,
+        &expectations,
+        &GovernanceExecutionLoadStatus::Absent,
+    );
+}
+
+/// Run 217 — derive Run 211 `GovernanceExecutionExpectations` from the
+/// persisted v2 candidate metadata available at the SIGHUP marker-decision
+/// preflight. The proposal/decision/action/digest/quorum bindings are not
+/// present in the SIGHUP sidecar (no governance-execution carrier), so
+/// they are left empty/zero — they are never consulted because the live
+/// carrier is `Absent` at this surface. The trust-domain bindings are
+/// derived from the candidate so the expectations remain internally
+/// consistent for any future surface that does carry material.
+fn governance_execution_expectations_from_v2_candidate(
+    candidate: &crate::pqc_authority_state::PersistentAuthorityStateRecordV2,
+) -> crate::pqc_governance_execution_policy::GovernanceExecutionExpectations {
+    use crate::pqc_authority_lifecycle::LocalLifecycleAction;
+    use crate::pqc_governance_execution_policy::{
+        GovernanceAction, GovernanceExecutionExpectations,
+    };
+    GovernanceExecutionExpectations {
+        expected_environment: candidate.environment,
+        expected_chain_id: candidate.chain_id.clone(),
+        expected_genesis_hash: candidate.genesis_hash.clone(),
+        expected_authority_root_fingerprint: candidate.authority_root_fingerprint.clone(),
+        expected_proposal_id: String::new(),
+        expected_decision_id: String::new(),
+        expected_governance_action: GovernanceAction::Rotate,
+        expected_lifecycle_action: LocalLifecycleAction::Rotate,
+        expected_candidate_digest: String::new(),
+        expected_authority_domain_sequence: candidate.latest_authority_domain_sequence,
+        expected_governance_proof_digest: String::new(),
+        expected_on_chain_proof_digest: None,
+        expected_custody_attestation_digest: None,
+        expected_suite_id: candidate.authority_root_suite_id,
+        expected_effective_epoch: 0,
+        expected_replay_nonce: String::new(),
+        now_epoch: 0,
+    }
 }
 
 /// Run 121 — decode a 64-char lowercase-hex string into a `[u8; 32]`.
@@ -1580,6 +1696,8 @@ mod tests {
             governance_proof_policy:
                 crate::pqc_governance_authority::GovernanceProofPolicy::NotRequired,
             onchain_governance_fixture_allowed_selector: false,
+            governance_execution_runtime_arming:
+                crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig::disabled(),
         }
     }
 
