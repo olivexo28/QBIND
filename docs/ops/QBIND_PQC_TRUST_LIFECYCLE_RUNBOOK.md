@@ -7874,3 +7874,55 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_214.md`.
 * **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
   even with a fixture governance approval. **Full C4 remains OPEN; C5 remains
   OPEN.**
+## Run 215 — hidden governance-execution policy selector (source/test)
+
+Run 215 is a **source/test** pass that adds a hidden, disabled-by-default
+governance-execution policy selector and wires the resolved
+`GovernanceExecutionPolicy` into the seven production v2 marker-decision
+preflight contexts through the Run 213 routing helpers. It adds the new module
+`crates/qbind-node/src/pqc_governance_execution_policy_surface.rs`, the hidden
+CLI flag `--p2p-trust-bundle-governance-execution-policy` in
+`crates/qbind-node/src/cli.rs`, the tests
+`crates/qbind-node/tests/run_215_governance_execution_policy_selector_tests.rs`,
+and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`.
+
+* **Hidden, disabled-by-default selector.** Choose the policy with the hidden
+  CLI flag
+  `--p2p-trust-bundle-governance-execution-policy <disabled | fixture-governance-allowed | emergency-council-fixture-allowed | production-governance-required | mainnet-governance-required>`
+  or the `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var (same
+  grammar; case-insensitive). When both are absent the resolved policy is
+  `GovernanceExecutionPolicy::Disabled` and legacy no-governance-execution
+  payloads remain accepted (Run 213 compatibility).
+* **Deterministic precedence.** When both the CLI flag and the env var are
+  supplied, the CLI flag wins (mirrors the Run 192 custody / Run 198
+  RemoteSigner / Run 209 custody-attestation selectors). An empty / unknown
+  value fails closed with a typed `GovernanceExecutionPolicySelectorParseError`
+  — the resolver never silently downgrades an explicit-but-invalid value to
+  `Disabled`.
+* **Default stays compatible.** The selector is hidden via clap, so the real
+  binary `--help` and the default `--print-genesis-hash` surfaces are
+  unchanged; no governance-execution enablement banner is emitted by default.
+* **Policy semantics.** `fixture-governance-allowed` and
+  `emergency-council-fixture-allowed` are DevNet/TestNet evidence-only and
+  cannot satisfy MainNet production governance execution;
+  `production-governance-required` and `mainnet-governance-required` fail
+  closed as unavailable because no real governance execution engine exists.
+* **Reproduce.**
+  `cargo test -p qbind-node --test run_215_governance_execution_policy_selector_tests`
+  (55 tests) and
+  `cargo test -p qbind-node --lib pqc_governance_execution_policy_surface`
+  (7 tests).
+* **Live inbound `0x05` limitation.** The live `0x05` runtime config does not
+  yet thread the per-connection governance-execution policy; the source/test
+  wrapper exposes the injection and the limitation is documented. Release-binary
+  governance-execution-policy selector evidence is deferred to **Run 216**.
+* Run 215 implements **no real governance execution engine**, **no real
+  on-chain governance proof verifier**, **no MainNet governance**, **no real
+  KMS/HSM backend**, **no real RemoteSigner backend**, and **no validator-set
+  rotation**; production / on-chain / MainNet governance execution remains
+  unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
+  custody-attestation / governance proof paths remain compatible; and it does
+  not weaken Runs 070, 130–214.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with `MainnetGovernanceRequired` and a fixture governance approval.
+  **Full C4 remains OPEN; C5 remains OPEN.**

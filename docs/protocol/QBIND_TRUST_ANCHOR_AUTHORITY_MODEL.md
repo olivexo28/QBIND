@@ -5212,3 +5212,48 @@ library symbols
   130–213. MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
   refusal** even with a fixture governance approval. **Full C4 remains OPEN; C5
   remains OPEN.**
+
+## Run 215 — hidden governance-execution policy selector (source/test)
+
+Run 215 adds a hidden, disabled-by-default governance-execution policy selector
+and wires the resolved `GovernanceExecutionPolicy` into the seven production v2
+marker-decision preflight contexts through the Run 213 routing helpers. It adds
+the module `crates/qbind-node/src/pqc_governance_execution_policy_surface.rs`,
+the hidden CLI flag `--p2p-trust-bundle-governance-execution-policy`, the tests
+`crates/qbind-node/tests/run_215_governance_execution_policy_selector_tests.rs`,
+and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`.
+
+* **Run 215 grants no new authority.** It only adds an additive selector module
+  plus one hidden CLI flag that *choose* among the existing Run 211
+  `GovernanceExecutionPolicy` values; it does not change authority lifecycle
+  semantics, the authority-marker schema, the sequence-file schema, or the
+  trust-bundle core schema.
+* **Disabled by default.** When the CLI flag and the
+  `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var are both absent
+  the resolved policy is `GovernanceExecutionPolicy::Disabled`, preserving every
+  prior proof-carrier and custody authority surface bit-for-bit. The CLI flag
+  wins over the env var when both are supplied; an empty / unknown value fails
+  closed with a typed `GovernanceExecutionPolicySelectorParseError`.
+* **Authority binding preserved.** Under an explicit fixture policy a carried
+  governance decision authorizes a lifecycle action only when the action,
+  candidate digest, and authority-domain sequence match; rotate and revoke are
+  authorized only on matching candidate / revoked-key material and sequence;
+  validator-set rotation and policy-change requests are rejected as unsupported;
+  emergency revoke remains gated behind the explicit emergency-council fixture
+  policy and is non-production.
+* Fixture / emergency-council fixture governance execution remains
+  DevNet/TestNet evidence-only and cannot satisfy MainNet production governance
+  execution; production / on-chain / MainNet governance execution reaches the
+  Run 211 evaluator and fails closed as unavailable.
+* The live inbound `0x05` runtime config does not yet thread the per-connection
+  policy; the source/test wrapper exposes the injection and the limitation is
+  documented. Release-binary governance-execution-policy selector evidence is
+  deferred to **Run 216**.
+* Run 215 implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM backend, no
+  real RemoteSigner backend, and no production signing-key custody**; the
+  existing custody / KMS-HSM / RemoteSigner / custody-attestation / governance
+  proof authority surfaces remain compatible; and it does not weaken Runs 070,
+  130–214. MainNet peer-driven apply remains the **Run 147 / 148 / 152 FATAL
+  refusal** even with `MainnetGovernanceRequired` and a fixture governance
+  approval. **Full C4 remains OPEN; C5 remains OPEN.**

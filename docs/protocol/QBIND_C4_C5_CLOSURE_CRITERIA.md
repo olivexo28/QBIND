@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 214:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 215:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -565,3 +565,41 @@ violation is a regression:
   validator-set rotation is implemented; existing custody / KMS-HSM /
   RemoteSigner / custody-attestation / governance proof paths remain
   compatible. **Full C4 remains OPEN; C5 remains OPEN.**
+* **Run 215** — Source/test hidden governance-execution policy selector and
+  production preflight integration for Run 213
+  (`crates/qbind-node/src/pqc_governance_execution_policy_surface.rs`,
+  `crates/qbind-node/tests/run_215_governance_execution_policy_selector_tests.rs`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`). Adds a hidden,
+  disabled-by-default governance-execution policy selector — one hidden clap
+  flag (`--p2p-trust-bundle-governance-execution-policy`) plus the
+  `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var, with
+  deterministic CLI-over-env precedence — and seven per-surface preflight
+  wrappers (`preflight_v2_marker_governance_execution_for_*`) that bind the
+  resolved `GovernanceExecutionPolicy` into the Run 213 per-surface routing
+  helpers for all seven production v2 marker-decision contexts (reload-check,
+  reload-apply, startup `--p2p-trust-bundle`, SIGHUP, local
+  peer-candidate-check, live inbound `0x05`, peer-driven drain). When both the
+  flag and env var are absent the resolved policy is
+  `GovernanceExecutionPolicy::Disabled` bit-for-bit, so legacy
+  no-governance-execution payloads remain compatible (Run 213); an empty /
+  unknown selector value fails closed with a typed
+  `GovernanceExecutionPolicySelectorParseError` rather than silently
+  downgrading to `Disabled`. Fixture / emergency-council fixture governance
+  execution passes only under the matching explicit policy on DevNet/TestNet
+  and cannot satisfy MainNet production governance execution; production /
+  on-chain / MainNet governance execution reaches the Run 211 evaluator and
+  fails closed as unavailable; missing / malformed material fails closed;
+  validation-only surfaces remain non-mutating and mutating rejection paths
+  produce no mutation; validator-set rotation unsupported; and MainNet
+  peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal even with
+  `MainnetGovernanceRequired` and a fixture governance approval. The live
+  inbound `0x05` runtime config does not yet thread the per-connection policy;
+  the source/test wrapper exposes the injection and the limitation is
+  documented (deferred to Run 216). Source/test evidence only; no schema /
+  wire / authority-marker / sequence-file / trust-bundle core change; no real
+  governance execution engine, on-chain proof verifier, KMS/HSM backend,
+  RemoteSigner backend, or validator-set rotation is implemented; existing
+  Run 192 custody / Run 198 RemoteSigner / Run 209 custody-attestation policy
+  selectors remain compatible. Release-binary governance-execution-policy
+  selector evidence deferred to **Run 216**. **Full C4 remains OPEN; C5
+  remains OPEN.**
