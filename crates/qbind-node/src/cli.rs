@@ -1053,6 +1053,62 @@ pub struct CliArgs {
     )]
     pub p2p_trust_bundle_custody_attestation_policy: Option<String>,
 
+    /// Run 215 — hidden, **disabled-by-default** governance-execution
+    /// policy selector for the seven production v2 marker-decision
+    /// preflight contexts (reload-check / reload-apply / startup
+    /// `--p2p-trust-bundle` / SIGHUP / local peer-candidate-check / live
+    /// inbound `0x05` / peer-driven drain).
+    ///
+    /// Accepts (case-insensitive, surrounding whitespace trimmed):
+    ///
+    /// * `disabled` — refuses every governance execution. Legacy
+    ///   no-governance-execution payloads remain accepted (Run 213
+    ///   compatibility).
+    /// * `fixture-governance-allowed` — DevNet/TestNet evidence-only
+    ///   fixture governance execution. Cannot satisfy MainNet production
+    ///   governance execution.
+    /// * `emergency-council-fixture-allowed` — DevNet/TestNet
+    ///   evidence-only explicit emergency-council fixture governance
+    ///   execution. Cannot satisfy MainNet production governance
+    ///   execution.
+    /// * `production-governance-required` — fails closed because no real
+    ///   governance execution engine is implemented.
+    /// * `mainnet-governance-required` — fails closed; in addition,
+    ///   MainNet peer-driven apply remains the Run 147/148/152 FATAL
+    ///   refusal regardless of this selector.
+    ///
+    /// **Default behavior unchanged:** when this flag and the
+    /// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` environment
+    /// variable are both absent, the resolved policy is
+    /// [`qbind_node::pqc_governance_execution_policy::GovernanceExecutionPolicy::Disabled`]
+    /// — old no-governance-execution v2 ratification sidecars remain
+    /// bit-for-bit compatible (Run 213 invariants).
+    ///
+    /// **Precedence:** when both this CLI flag and the env var are
+    /// supplied, the CLI flag wins. Either source is sufficient. Invalid
+    /// / unknown values are surfaced as a typed
+    /// [`qbind_node::pqc_governance_execution_policy_surface::GovernanceExecutionPolicySelectorParseError`]
+    /// — the resolver never silently falls back to `Disabled` when an
+    /// explicit value is present but invalid.
+    ///
+    /// **NOT** a real governance execution engine, **NOT** a real
+    /// on-chain governance proof verifier, **NOT** a real KMS / HSM /
+    /// RemoteSigner backend, **NOT** a validator-set rotation primitive,
+    /// **NOT** an autonomous-apply / apply-on-receipt / peer-majority
+    /// authority claim, and **NOT** sufficient to enable MainNet
+    /// peer-driven apply.
+    ///
+    /// Run 215 is source/test selector wiring only. Release-binary
+    /// governance-execution-policy selector evidence is deferred to
+    /// Run 216. See `task/RUN_215_TASK.txt` and
+    /// `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`.
+    #[arg(
+        long = "p2p-trust-bundle-governance-execution-policy",
+        value_name = "POLICY",
+        hide = true
+    )]
+    pub p2p_trust_bundle_governance_execution_policy: Option<String>,
+
     /// Run 151 — hidden, **disabled-by-default** DevNet/TestNet-only
     /// **explicit local one-shot drain trigger** for the Run 150
     /// peer-driven apply drain controller

@@ -612,6 +612,21 @@ pub mod pqc_governance_execution_policy;
 // Release-binary governance-execution payload/carrying evidence is deferred
 // to Run 214.
 pub mod pqc_governance_execution_payload_carrying;
+// Run 215 — source/test hidden governance-execution policy selector and
+// production preflight integration. Adds a hidden, disabled-by-default
+// CLI flag (`--p2p-trust-bundle-governance-execution-policy`) plus the
+// `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var, pure
+// selector parsers, and seven per-surface preflight wrappers that bind
+// the resolved `GovernanceExecutionPolicy` into the Run 213
+// per-surface routing helpers. Default remains
+// `GovernanceExecutionPolicy::Disabled`; fixture governance execution is
+// DevNet/TestNet evidence-only; production/on-chain/MainNet governance
+// execution remains fail-closed as unavailable; MainNet peer-driven
+// apply remains refused. No real governance execution engine, on-chain
+// proof verifier, KMS/HSM backend, RemoteSigner backend, or validator-set
+// rotation. Release-binary governance-execution-policy selector evidence
+// is deferred to Run 216.
+pub mod pqc_governance_execution_policy_surface;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
