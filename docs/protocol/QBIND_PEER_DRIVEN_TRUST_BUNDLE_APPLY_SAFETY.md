@@ -2995,3 +2995,37 @@ test target
   not weaken Runs 070, 130–212. Release-binary governance-execution
   payload/carrying evidence is deferred to **Run 214**. **Full C4 remains
   OPEN; C5 remains OPEN.**
+
+## Run 214 — release-binary governance-execution payload/carrying evidence
+
+Run 214 provides the release-binary evidence deferred by Run 213 for the
+governance-execution payload/carrying and production-context wiring. It adds the
+release-built helper
+`crates/qbind-node/examples/run_214_governance_execution_payload_release_binary_helper.rs`,
+the harness `scripts/devnet/run_214_governance_execution_payload_release_binary.sh`,
+the evidence archive `docs/devnet/run_214_governance_execution_payload_release_binary/`,
+and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_214.md`.
+
+* Run 214 performs **no apply** and makes **no production source change**. It
+  proves on the real `target/release/qbind-node` plus a release-built helper
+  linking the production library symbols that the Run 213 routing helpers carry
+  governance-execution material into the Run 211 evaluator across the seven
+  production marker-decision surfaces in release mode, and that every rejected or
+  malformed/absent scenario writes no marker, writes no sequence, swaps no live
+  trust, evicts no sessions, and never invokes Run 070.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with a fixture governance approval —
+  `mainnet_peer_driven_apply_remains_refused_under_governance_execution_payload_carrying`
+  returns the refusal in release mode and the peer-driven drain helper refuses
+  MainNet unconditionally. Governance-execution payload carrying grants no apply
+  authority. The real `target/release/qbind-node` default DevNet/TestNet/MainNet
+  `--print-genesis-hash` surfaces emit no governance-execution enablement banner
+  and no MainNet peer-driven apply enablement.
+* Run 214 implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM backend, no
+  real RemoteSigner backend, and no validator-set rotation**; fixture governance
+  execution remains DevNet/TestNet evidence-only and is refused on MainNet;
+  production / on-chain / MainNet governance execution remains
+  unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
+  custody-attestation / governance proof paths remain compatible; and it does
+  not weaken Runs 070, 130–213. **Full C4 remains OPEN; C5 remains OPEN.**

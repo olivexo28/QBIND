@@ -1,6 +1,6 @@
 # QBIND C4 / C5 Closure Criteria
 
-**Status as of Run 213:** Full **C4 remains OPEN**. **C5 remains OPEN**.
+**Status as of Run 214:** Full **C4 remains OPEN**. **C5 remains OPEN**.
 This document is a formal closure checklist introduced by Run 200
 (docs/spec/crosscheck only). It defines C4 and C5, records their current
 status, provides a green/yellow/red matrix, enumerates the required
@@ -540,3 +540,28 @@ violation is a regression:
   / RemoteSigner / custody-attestation / governance proof paths remain
   compatible. Release-binary governance-execution payload/carrying evidence
   deferred to **Run 214**. **Full C4 remains OPEN; C5 remains OPEN.**
+* **Run 214** — Release-binary governance-execution payload/carrying evidence
+  for Run 213
+  (`crates/qbind-node/examples/run_214_governance_execution_payload_release_binary_helper.rs`,
+  `scripts/devnet/run_214_governance_execution_payload_release_binary.sh`,
+  `docs/devnet/run_214_governance_execution_payload_release_binary/`,
+  `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_214.md`). Proves on the real
+  `target/release/qbind-node` plus a release-built helper linking the
+  production library symbols that the Run 213 payload/carrying boundary holds
+  end-to-end in release mode: a legacy no-governance-execution payload remains
+  compatible under default `Disabled`; fixture governance execution carried
+  through the production-context routing helpers reaches the Run 211 evaluator
+  and is accepted on DevNet/TestNet only under the explicit fixture policy;
+  production / on-chain / MainNet governance execution material reaches the
+  evaluator and fails closed as unavailable; malformed/invalid material fails
+  closed; input/decision/transcript/policy digests are preserved through wire
+  conversion and remain deterministic and domain-bound; a carried lifecycle
+  action is authorized only when the action, candidate digest, and sequence
+  match; validator-set rotation unsupported; rejected cases produce no
+  mutation; and MainNet peer-driven apply remains the Run 147 / 148 / 152
+  FATAL refusal even with a fixture governance approval. Release-binary
+  evidence only; no production source change; no real governance execution
+  engine, on-chain proof verifier, KMS/HSM backend, RemoteSigner backend, or
+  validator-set rotation is implemented; existing custody / KMS-HSM /
+  RemoteSigner / custody-attestation / governance proof paths remain
+  compatible. **Full C4 remains OPEN; C5 remains OPEN.**
