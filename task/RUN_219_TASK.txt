@@ -1,0 +1,210 @@
+Task: Run 219 — Governance Execution Runtime Surface Gap Audit and Next-Closure Plan
+
+Current accepted state:
+
+* Run 211: source/test governance execution policy boundary landed.
+* Run 212: release-binary governance execution policy-boundary evidence fully closed.
+* Run 213: source/test governance execution payload/carrying and production-context wiring landed.
+* Run 214: release-binary governance execution payload/carrying evidence fully closed.
+* Run 215: source/test hidden governance execution policy selector landed.
+* Run 216: release-binary governance execution policy selector evidence fully closed.
+* Run 217: source/test governance execution runtime arming carrier landed.
+* Run 218: release-binary governance execution runtime-arming evidence fully closed:
+
+  * release-built helper proves the Run 217 carrier symbols;
+  * real `target/release/qbind-node` parses the hidden selector;
+  * default remains `GovernanceExecutionPolicy::Disabled`;
+  * invalid selector values fail closed;
+  * CLI/env/precedence evidence is recorded;
+  * MainNet peer-driven apply remains refused;
+  * fixture governance remains DevNet/TestNet evidence-only;
+  * emergency council fixture remains explicit and non-production;
+  * production/on-chain/MainNet governance execution remains unavailable/fail-closed;
+  * no real governance execution engine exists;
+  * no real on-chain governance proof verifier exists;
+  * no KMS/HSM backend exists;
+  * no RemoteSigner backend exists;
+  * validator-set rotation remains unsupported;
+  * Full C4 remains OPEN;
+  * C5 remains OPEN.
+* Run 218 honest limitation:
+  the release binary parses the hidden selector and helper/library runtime-arming paths exercise it, but before real governance implementation work, the project needs an explicit audit of exactly which long-running node surfaces truly consume governance-execution runtime policy and which are still helper/library-evidence only.
+
+Objective:
+Produce a source/docs audit that maps every governance-execution runtime surface and classifies it as:
+
+1. fully runtime-wired;
+2. runtime-wired but release-evidenced only through helper/library path;
+3. selector-parsed but not consumed by long-running node logic;
+4. intentionally not representable;
+5. blocked by missing real governance engine / real on-chain verifier / validator-set rotation.
+
+This run must not implement new behavior. It must define the next exact closure run sequence based on the audit.
+
+Strict scope:
+
+* Audit/spec/docs only.
+* No production source behavior changes.
+* No release-binary harness required.
+* No real governance execution engine.
+* No real on-chain governance proof verifier.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* No validator-set rotation.
+* No KMS/HSM backend implementation.
+* No RemoteSigner backend implementation.
+* No schema/wire/marker/sequence/trust-bundle changes.
+* No C4 or C5 closure claim.
+
+Required deliverables:
+
+1. Add canonical evidence/audit report:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_219.md`
+
+2. Add formal runtime-surface audit document:
+   `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+
+3. Update narrowly:
+
+   * `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+4. Crosscheck all new/modified docs against existing design/spec. If contradictions or inconsistencies are found, record them in `contradiction.md`.
+
+Required audit content:
+The audit must inspect and classify all relevant surfaces:
+
+A. selector and policy surfaces:
+
+* `pqc_governance_execution_policy_surface`;
+* `governance_execution_policy_from_selector`;
+* `governance_execution_policy_from_cli_or_env`;
+* CLI flag `--p2p-trust-bundle-governance-execution-policy`;
+* env var `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY`.
+
+B. runtime arming carrier:
+
+* `pqc_governance_execution_runtime_arming`;
+* `GovernanceExecutionRuntimeArmingConfig`;
+* `from_cli_or_env`;
+* `arm_surface`;
+* seven runtime/preflight wrappers.
+
+C. payload/carrying:
+
+* `pqc_governance_execution_payload_carrying`;
+* optional `governance_execution` sidecar sibling;
+* combined v2 loader;
+* seven callsite routing helpers.
+
+D. runtime call sites:
+
+* reload-check;
+* reload-apply;
+* startup `--p2p-trust-bundle`;
+* SIGHUP;
+* local peer-candidate-check;
+* live inbound `0x05`;
+* peer-driven drain.
+
+E. compatibility surfaces:
+
+* governance proof policy selector from Run 171/172;
+* OnChainGovernance boundary from Runs 178–187;
+* custody policy selector from Run 193;
+* RemoteSigner policy selector from Run 199;
+* custody-attestation policy selector from Run 210;
+* KMS/HSM boundary from Runs 203–204;
+* RemoteSigner transport boundary from Runs 201–202.
+
+Required classification table:
+For each surface, include:
+
+* Surface name.
+* Source file(s).
+* Current evidence level:
+
+  * source/test;
+  * release-helper;
+  * real-binary startup/CLI;
+  * real-binary long-running runtime;
+  * not representable.
+* Whether it consumes selected `GovernanceExecutionPolicy`.
+* Whether it can carry governance-execution payload material.
+* Whether rejection is non-mutating.
+* Whether MainNet peer-driven apply remains refused.
+* Remaining blocker.
+* Proposed next run if further work is needed.
+
+Required findings:
+The audit must explicitly state whether each of the seven surfaces is:
+
+1. fully wired and evidenced;
+2. partially wired;
+3. helper-evidenced only;
+4. intentionally out of scope;
+5. blocked by missing real governance engine.
+
+Required non-closure statements:
+The docs must state:
+
+* Run 219 is an audit/spec run only.
+* No new runtime behavior is implemented.
+* No real governance execution engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* Fixture governance remains DevNet/TestNet evidence-only.
+* Emergency council fixture remains explicit and non-production.
+* Production/on-chain/MainNet governance execution remains unavailable/fail-closed.
+* MainNet peer-driven apply remains refused.
+* Validator-set rotation remains unsupported.
+* KMS/HSM/RemoteSigner/custody-attestation remain boundary-only.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Required proposed next sequence:
+Based on findings, propose exact follow-up runs. If the audit confirms runtime long-running consumption is incomplete, propose:
+
+* Run 220: source/test long-running node governance-execution runtime consumption wiring.
+* Run 221: release-binary long-running node governance-execution runtime consumption evidence.
+
+If the audit confirms the long-running runtime is already sufficiently wired, propose:
+
+* Run 220: source/test production governance execution evaluator interface skeleton.
+* Run 221: release-binary production governance execution evaluator-boundary evidence.
+
+Do not guess. Choose based on actual source audit.
+
+Required validation commands:
+Run at minimum:
+
+```bash
+grep -R "governance_execution_policy" crates/qbind-node/src crates/qbind-node/tests docs | head -200
+grep -R "GovernanceExecutionRuntimeArmingConfig" crates/qbind-node/src crates/qbind-node/tests docs | head -200
+grep -R "governance_execution" crates/qbind-node/src crates/qbind-node/tests docs | head -200
+grep -R "Status as of Run 219" docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+grep -R "Run 219" docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_219.md docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md docs/whitepaper/contradiction.md
+cargo test -p qbind-node --test run_217_governance_execution_runtime_arming_tests
+cargo test -p qbind-node --test run_215_governance_execution_policy_selector_tests
+cargo test -p qbind-node --test run_213_governance_execution_payload_callsite_tests
+cargo test -p qbind-node --test run_211_governance_execution_policy_tests
+cargo test -p qbind-node --lib pqc_authority
+cargo test -p qbind-node --lib
+```
+
+If full tests are too expensive, at minimum run the grep audit commands plus the Run 217/215/213/211 test targets and document exact results.
+
+Acceptance criteria:
+Run 219 is acceptable only if:
+
+1. The audit report exists.
+2. The runtime-surface audit document exists.
+3. All seven surfaces are classified.
+4. The audit clearly identifies what is runtime-wired, helper-evidenced, real-binary evidenced, or still blocked.
+5. The next run sequence is chosen based on actual audit findings.
+6. C4/C5 closure criteria are updated to Run 219.
+7. Contradiction crosscheck is recorded.
+8. No new runtime behavior is implemented.
+9. No MainNet enablement, real governance engine, validator-set rotation, C4 closure, or C5 closure is claimed.
