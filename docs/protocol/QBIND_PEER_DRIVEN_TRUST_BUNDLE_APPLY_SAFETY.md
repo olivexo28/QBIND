@@ -3029,3 +3029,42 @@ and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_214.md`.
   unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
   custody-attestation / governance proof paths remain compatible; and it does
   not weaken Runs 070, 130–213. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 215 — hidden governance-execution policy selector (source/test)
+
+Run 215 adds a hidden, disabled-by-default governance-execution policy selector
+and wires the resolved `GovernanceExecutionPolicy` into the seven production v2
+marker-decision preflight contexts through the Run 213 routing helpers. It adds
+the module `crates/qbind-node/src/pqc_governance_execution_policy_surface.rs`,
+the hidden CLI flag `--p2p-trust-bundle-governance-execution-policy`, the tests
+`crates/qbind-node/tests/run_215_governance_execution_policy_selector_tests.rs`,
+and the canonical report `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_215.md`.
+
+* Run 215 performs **no apply** and adds only an additive selector module plus
+  one hidden CLI flag. The seven per-surface preflight wrappers
+  (`preflight_v2_marker_governance_execution_for_*`) inject the resolved policy
+  into the Run 213 routing helpers; they write no marker, write no sequence,
+  swap no live trust, evict no sessions, and never invoke Run 070, and a
+  malformed / required-but-absent carrier fails closed before any boundary.
+* **MainNet peer-driven apply remains the Run 147 / 148 / 152 FATAL refusal**
+  even with `MainnetGovernanceRequired` and a fully-valid fixture governance
+  approval — the peer-driven drain wrapper refuses MainNet unconditionally
+  regardless of the selected policy. The selector grants no apply authority.
+* **Default stays compatible.** When the CLI flag and the
+  `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` env var are both absent
+  the resolved policy is `GovernanceExecutionPolicy::Disabled` and legacy
+  no-governance-execution payloads remain accepted (Run 213). When both are
+  supplied the CLI flag wins; an empty / unknown value fails closed with a typed
+  parse error.
+* The live inbound `0x05` runtime config does not yet thread the per-connection
+  policy; the source/test wrapper exposes the injection and the limitation is
+  documented. Release-binary governance-execution-policy selector evidence is
+  deferred to **Run 216**.
+* Run 215 implements **no real governance execution engine, no real on-chain
+  governance proof verifier, no MainNet governance, no real KMS/HSM backend, no
+  real RemoteSigner backend, and no validator-set rotation**; fixture /
+  emergency-council fixture governance execution remains DevNet/TestNet
+  evidence-only and cannot satisfy MainNet production governance execution;
+  production / on-chain / MainNet governance execution remains
+  unavailable/fail-closed; the existing custody / KMS-HSM / RemoteSigner /
+  custody-attestation / governance proof paths remain compatible; and it does
+  not weaken Runs 070, 130–214. **Full C4 remains OPEN; C5 remains OPEN.**
