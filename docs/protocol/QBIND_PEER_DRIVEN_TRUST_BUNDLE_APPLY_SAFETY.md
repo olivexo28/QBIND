@@ -3168,3 +3168,30 @@ evidence is deferred to **Run 223**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 223 — release-binary governance-execution evaluator-interface evidence
+
+Run 223 is the release-binary evidence companion to the Run 222 source/test
+production governance-execution evaluator interface. It proves on real
+`target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_223_governance_execution_evaluator_release_binary_helper.rs`,
+driven by `scripts/devnet/run_223_governance_execution_evaluator_release_binary.sh`)
+that the release-built library exposes and exercises the Run 222 evaluator
+interface and that **the peer-driven apply safety posture is unchanged**. The
+release helper drives `evaluate_governance_evaluator_with_peer_driven_guard`
+to confirm that the MainNet peer-driven apply refusal holds even when a
+fixture evaluator would otherwise approve, that a local operator and a peer
+majority cannot satisfy the evaluator policy, and that the `Disabled`
+evaluator policy stays inert so the Run 221 runtime-consumption behaviour is
+unchanged. The helper records 111 typed checks (accepted 49 / rejection 42 /
+reachability 20) over A1–A18 / R1–R40, and the harness proves the release
+binary `--help` exposes no evaluator-interface surface and the default
+DevNet/TestNet/MainNet surfaces make no evaluator / MainNet-peer-driven-apply /
+autonomous-apply / apply-on-receipt / peer-majority enablement claim (22
+forbidden patterns proven empty). The evaluator module remains pure and
+exposes no mutation API: no Run 070 call, no live trust swap, no session
+eviction, no sequence write, no marker write. **MainNet peer-driven apply
+remains refused; no autonomous apply, no apply-on-receipt, and no
+peer-majority authority is introduced.** No real governance engine, on-chain
+verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is
+implemented. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.

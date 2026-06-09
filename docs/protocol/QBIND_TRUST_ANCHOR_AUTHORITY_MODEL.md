@@ -5359,3 +5359,33 @@ evidence is deferred to **Run 223**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 223 — release-binary governance-execution evaluator-interface evidence
+
+Run 223 is the release-binary evidence companion to the Run 222 source/test
+production governance-execution evaluator interface. It proves on real
+`target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_223_governance_execution_evaluator_release_binary_helper.rs`,
+driven by `scripts/devnet/run_223_governance_execution_evaluator_release_binary.sh`)
+that the release-built library exposes and exercises the Run 222 evaluator
+authority boundary: the fixture evaluator authority accepts only DevNet/TestNet
+decision sources under the explicit fixture policy; the emergency-council
+fixture evaluator authority accepts only an explicit emergency decision under
+the explicit emergency policy; an evaluator response authorizes a lifecycle
+action only when the authorized action, candidate digest, and sequence all
+match; and production/on-chain/MainNet evaluator authorities are callable but
+fail closed as unavailable. The helper records 111 typed checks (accepted 49 /
+rejection 42 / reachability 20) over A1–A18 / R1–R40, and the harness proves
+the release binary `--help` exposes no evaluator-interface surface and the
+default DevNet/TestNet/MainNet surfaces make no evaluator / production-governance /
+MainNet-governance / on-chain-verifier / validator-set-rotation enablement
+claim (22 forbidden patterns proven empty). The fixture evaluator authority is
+DevNet/TestNet evidence-only; the emergency fixture evaluator is explicit and
+non-production. **MainNet peer-driven apply remains refused**; validator-set
+rotation remains unsupported; the Run 193 custody, Run 199 RemoteSigner, and
+Run 210 custody-attestation sibling authority selectors remain independent and
+compatible; KMS/HSM, RemoteSigner, and production signing custody remain
+boundary-only. No real governance execution engine, on-chain verifier,
+KMS/HSM backend, RemoteSigner backend, production signing custody, or
+validator-set rotation is implemented. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.

@@ -1,0 +1,44 @@
+Run 223 — release-binary governance-execution evaluator-interface evidence
+git_commit: e3fea0dbb198d85f195f90b683aa3d2120e4494e
+
+build:
+  rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
+  cargo_version:      cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+  qbind_node_sha256:  73635007548ac499d41ba74b38254cd64bd237485ae9caea958a2faa4c3e7e20
+  qbind_node_buildid: BuildID[sha1]=f20fa81f1842736a1dcfe09a949bdd1865ef5b20
+  helper_223_sha256:  fb2dc772e739e2bc93721d1f57b59d90fd02add35490bfe876604748a9c594a0
+  helper_223_buildid: BuildID[sha1]=d6c2e6a7dac227f7388141c83534bd6156ad3f1d
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+
+release-helper verdicts:
+  helper_run_223rc=0verdict: PASS
+
+helper A1-A18 / R1-R40 corpus verdicts (release mode, Run 222 evaluator-interface symbols):
+  table accepted: pass=49 fail=0
+  table rejection: pass=42 fail=0
+  table reachability: pass=20 fail=0
+  total_pass: 111
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 22 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_222_governance_execution_evaluator_tests	rc=0
+  test:run_220_governance_execution_runtime_consumption_tests	rc=0
+  test:run_217_governance_execution_runtime_arming_tests	rc=0
+  test:run_215_governance_execution_policy_selector_tests	rc=0
+  test:run_213_governance_execution_payload_callsite_tests	rc=0
+  test:run_211_governance_execution_policy_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 222 evaluator interface is typed and release-evidenced through library symbols; it has no runtime CLI/env selector and no production call-site wiring (it composes with the Run 220 runtime consumption as a *future* production evaluator target, with the Disabled policy inert); no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.
+
+verdict: PASS
