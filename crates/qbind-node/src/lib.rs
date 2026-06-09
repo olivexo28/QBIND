@@ -645,6 +645,27 @@ pub mod pqc_governance_execution_policy_surface;
 // verifier, KMS/HSM backend, RemoteSigner backend, or validator-set
 // rotation. Release-binary runtime-arming evidence is deferred to Run 218.
 pub mod pqc_governance_execution_runtime_arming;
+// Run 222 — source/test production governance execution evaluator
+// interface boundary. Introduces the typed
+// `ProductionGovernanceExecutionEvaluator` trait and its
+// `evaluate_governance_decision_source` / `verify_governance_evaluator_response`
+// methods, the `EvaluatorSourceKind` / `EvaluatorPolicy` selectors, the
+// `DecisionSourceIdentity` / `EvaluatorRequest` / `EvaluatorResponse`
+// typed records, deterministic domain-separated digest helpers, and a
+// typed `EvaluatorOutcome`. Models how a future governance engine supplies
+// decisions from a decision source, validates provenance, tracks replay,
+// checks proposal/decision state, and returns fail-closed production
+// outcomes — WITHOUT implementing a real governance execution engine or
+// on-chain proof verifier. Composes with the Run 211 governance-execution
+// input/decision types and the Run 220 runtime consumption as a future
+// production evaluator target without changing runtime behaviour. Default
+// remains fail-closed; fixture evaluators are DevNet/TestNet source/test
+// only; the emergency fixture evaluator is explicit and non-production;
+// production/on-chain/MainNet evaluators remain unavailable/fail-closed;
+// MainNet peer-driven apply remains refused; validator-set rotation
+// remains unsupported. No real KMS/HSM/RemoteSigner/custody backend.
+// Release-binary evaluator-interface evidence is deferred to Run 223.
+pub mod pqc_governance_execution_evaluator;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

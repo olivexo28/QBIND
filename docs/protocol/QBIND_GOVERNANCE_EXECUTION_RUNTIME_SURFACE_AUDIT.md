@@ -63,6 +63,41 @@ validator-set rotation is implemented. **Full C4 remains OPEN. C5 remains
 OPEN.** See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md).
 
+## Run 222 update — production evaluator interface boundary landed (source/test)
+
+Run 222 is **source/test production governance execution evaluator
+interface boundary** work. Run 219 identified that the runtime can consume
+governance-execution policy and payload status, but the production
+governance execution evaluator was still only a boundary/fixture concept:
+there was no typed production evaluator interface modelling how a future
+governance engine supplies decisions from a decision source, validates
+decision provenance, tracks replay, checks proposal/decision state, and
+returns fail-closed production outcomes. Run 222 closes that interface gap
+by adding `crates/qbind-node/src/pqc_governance_execution_evaluator.rs`: the
+typed `ProductionGovernanceExecutionEvaluator` trait
+(`evaluate_governance_decision_source` /
+`verify_governance_evaluator_response`), the `EvaluatorSourceKind` /
+`EvaluatorPolicy` selectors, the `DecisionSourceIdentity` /
+`EvaluatorRequest` / `EvaluatorResponse` records, deterministic
+domain-separated digest helpers (source-identity / request / response /
+transcript), and a typed `EvaluatorOutcome`.
+
+**No real governance execution engine is implemented. No real on-chain
+governance proof verifier is implemented.** The fixture evaluator is
+DevNet/TestNet source/test only; the emergency fixture evaluator is
+explicit and non-production; production/on-chain/MainNet evaluators are
+callable but fail closed as unavailable. The interface composes with the
+Run 211 governance-execution input/decision types and the Run 220 runtime
+consumption as a *future* production evaluator target **without changing
+runtime behaviour** (the Run 220 consumption path is untouched and the
+`Disabled` evaluator policy remains inert). MainNet peer-driven apply
+remains refused even when a fixture evaluator approves; validator-set
+rotation remains unsupported; KMS/HSM/RemoteSigner/custody-attestation
+remain boundary-only. Release-binary evaluator-interface evidence is
+**deferred to Run 223**. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md).
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

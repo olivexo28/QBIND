@@ -5331,3 +5331,31 @@ production signing custody, or validator-set rotation is implemented. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 222 — production governance-execution evaluator interface boundary
+
+Run 222 is a source/test run that adds the typed production governance
+execution **evaluator interface**
+(`crates/qbind-node/src/pqc_governance_execution_evaluator.rs`). It grants
+**no new authority** and changes no lifecycle, marker, sequence,
+trust-bundle, schema, or wire semantics. The interface models how a *future*
+governance engine would supply decisions from a decision source, bind them
+to an `AuthorityTrustDomain`, validate provenance, track replay, and return
+fail-closed production outcomes — it is **not** a real governance engine and
+**not** a real on-chain governance proof verifier, and it touches no runtime
+call site. The evaluator is fail-closed by default
+(`EvaluatorPolicy::Disabled`); production/on-chain/MainNet evaluators are
+callable but fail closed as unavailable; the fixture evaluator is
+DevNet/TestNet source/test only and is refused on a MainNet trust domain;
+the emergency fixture evaluator is explicit and non-production. **MainNet
+peer-driven apply remains refused**; validator-set rotation remains
+unsupported; the Run 193 custody, Run 199 RemoteSigner, and Run 210
+custody-attestation sibling authority selectors remain independent and
+compatible; KMS/HSM, RemoteSigner, and production signing custody remain
+boundary-only. No real governance execution engine, on-chain verifier,
+KMS/HSM backend, RemoteSigner backend, production signing custody, or
+validator-set rotation is implemented. Release-binary evaluator-interface
+evidence is deferred to **Run 223**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
