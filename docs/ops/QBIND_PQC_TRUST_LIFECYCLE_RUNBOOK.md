@@ -7974,3 +7974,42 @@ implemented. Release-binary runtime-consumption evidence is deferred to
 **Run 221**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 221 — release-binary governance-execution runtime-consumption evidence
+
+Run 221 is the **release-binary** evidence run for the Run 220 long-running
+governance-execution runtime-consumption wiring; there is still **nothing
+for operators to enable or configure**, and default behavior is unchanged.
+With neither `--p2p-trust-bundle-governance-execution-policy` nor
+`QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` set, the resolved
+policy remains `GovernanceExecutionPolicy::Disabled` and the Disabled +
+absent-carrier path proceeds bit-for-bit as a legacy bypass (Run 214
+compatibility). Run 221 proves on real `target/release/qbind-node` plus a
+release-built helper (`crates/qbind-node/examples/run_221_governance_execution_runtime_consumption_release_binary_helper.rs`,
+driven by `scripts/devnet/run_221_governance_execution_runtime_consumption_release_binary.sh`)
+that the Run 220 consumption layer (`GovernanceExecutionRuntimeConsumption`,
+`consume_surface`, `consume_surface_from_optional_sidecar_value`,
+`governance_execution_load_status_from_optional_sidecar_value`) gates the
+long-running path: the consumed outcome proceeds on the legacy bypass, fails
+closed before any mutation on a rejected verdict, and reads the **real**
+governance-execution sidecar load status from the optional sidecar value
+rather than a forced `Absent` where representable. An invalid CLI or env
+selector value fails closed before any runtime mutation — the binary emits
+the Run 217 FATAL (`invalid governance-execution policy selector … No
+runtime config is armed …`) and exits non-zero before the unrelated
+`--print-genesis-hash` requirement is evaluated; operators should treat an
+invalid selector as a hard startup failure. The live inbound `0x05`
+per-connection policy threading and full positive binary acceptance remain
+the documented limitation (binary/SIGHUP candidate metadata carries no
+governance proposal/decision bindings). Across every surface, rejection
+remains non-mutating (no marker write, no sequence write, no live trust
+swap, no session eviction, no Run 070 apply call) and **MainNet peer-driven
+apply remains refused**. Fixture and emergency-council fixture execution
+remain DevNet/TestNet evidence-only and non-production;
+production/on-chain/MainNet governance execution remains
+unavailable/fail-closed; validator-set rotation remains unsupported;
+KMS/HSM, RemoteSigner, and custody-attestation remain boundary-only. No real
+governance execution engine, on-chain verifier, KMS/HSM backend,
+RemoteSigner backend, or validator-set rotation is implemented. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

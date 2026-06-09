@@ -1,0 +1,429 @@
+Task: Run 222 — Source/Test Production Governance Execution Evaluator Interface Boundary
+
+Current accepted state:
+
+* Run 211: source/test governance execution policy boundary landed.
+* Run 212: release-binary governance execution policy-boundary evidence fully closed.
+* Run 213: source/test governance execution payload/carrying and production-context wiring landed.
+* Run 214: release-binary governance execution payload/carrying evidence fully closed.
+* Run 215: source/test hidden governance execution policy selector landed.
+* Run 216: release-binary governance execution policy selector evidence fully closed.
+* Run 217: source/test governance execution runtime arming carrier landed.
+* Run 218: release-binary governance execution runtime-arming evidence fully closed.
+* Run 219: runtime surface audit landed and identified long-running runtime consumption as the next gap.
+* Run 220: source/test long-running governance execution runtime consumption wiring landed.
+* Run 221: release-binary long-running governance execution runtime-consumption evidence fully closed:
+
+  * real release binary consumes selected governance-execution policy where representable;
+  * real sidecar status is consumed where representable;
+  * default Disabled + absent carrier follows `ProceedLegacyBypass`;
+  * invalid selector values fail closed before mutation;
+  * fixture governance execution remains DevNet/TestNet evidence-only;
+  * emergency council fixture remains explicit and non-production;
+  * production/on-chain/MainNet governance execution remains unavailable/fail-closed;
+  * rejected runtime-consumption cases produce no mutation;
+  * MainNet peer-driven apply remains refused;
+  * no real governance execution engine exists;
+  * no real on-chain proof verifier exists;
+  * no real KMS/HSM backend exists;
+  * no real RemoteSigner backend exists;
+  * validator-set rotation remains unsupported;
+  * Full C4 remains OPEN;
+  * C5 remains OPEN.
+
+Current limitation:
+The runtime can now consume governance-execution policy and payload status, but the production governance execution evaluator is still only a boundary/fixture concept. There is no typed production evaluator interface that models how a future governance engine supplies decisions from a decision source, validates decision provenance, tracks replay, checks proposal/decision state, and returns fail-closed production outcomes.
+
+Objective:
+Add a source/test-only production governance execution evaluator interface boundary.
+
+This run must define the typed production evaluator interface for future governance execution without implementing a real governance engine or real on-chain proof verifier.
+
+Release-binary evaluator-interface evidence is deferred to Run 223.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary harness in this run.
+* No real governance execution engine.
+* No real on-chain governance proof verifier.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* No validator-set rotation.
+* No authority-set rotation beyond existing lifecycle boundary checks.
+* No real KMS implementation.
+* No real HSM implementation.
+* No real RemoteSigner backend.
+* No production signing key custody.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* No schema/wire/marker/sequence/trust-bundle change.
+* Do not weaken Runs 070, 130–221.
+* Do not claim full C4 or C5 closure.
+
+Required design:
+Add a typed production governance evaluator interface module, preferably:
+
+`crates/qbind-node/src/pqc_governance_execution_evaluator.rs`
+
+The module must define:
+
+1. Evaluator source kind:
+
+* `Disabled`;
+* `FixtureDecisionSource`;
+* `EmergencyCouncilFixtureSource`;
+* `OnChainDecisionSourceUnavailable`;
+* `ProductionDecisionSourceUnavailable`;
+* `MainnetDecisionSourceUnavailable`;
+* `Unknown`.
+
+2. Evaluator policy:
+
+* `Disabled` default;
+* `FixtureDecisionSourceAllowed`;
+* `EmergencyCouncilFixtureSourceAllowed`;
+* `ProductionDecisionSourceRequired`;
+* `MainnetDecisionSourceRequired`.
+
+3. Decision source identity:
+   Must bind:
+
+* source id;
+* governance class;
+* issuer/authority class;
+* environment;
+* chain_id;
+* genesis_hash;
+* authority root fingerprint;
+* governance proof digest;
+* on-chain proof digest where applicable;
+* custody attestation digest where applicable;
+* evaluator version;
+* freshness / replay window.
+
+4. Evaluator request:
+   Must bind:
+
+* governance execution input digest;
+* proposal id;
+* decision id;
+* lifecycle action;
+* candidate digest;
+* authority-domain sequence;
+* effective epoch;
+* expiry epoch;
+* replay nonce;
+* emergency flag;
+* decision source identity digest.
+
+5. Evaluator response:
+   Must bind:
+
+* request digest;
+* decision digest;
+* approved/rejected decision;
+* authorized lifecycle action;
+* authorized candidate digest;
+* authorized authority-domain sequence;
+* effective epoch;
+* expiry epoch;
+* replay nonce;
+* evaluator/source id;
+* response freshness / expiry;
+* response commitment placeholder.
+
+6. Deterministic digest helpers:
+
+* decision source identity digest;
+* evaluator request digest;
+* evaluator response digest;
+* evaluator transcript digest.
+
+7. Trait / interface:
+   Define a pure/mockable trait such as:
+
+* `ProductionGovernanceExecutionEvaluator`;
+* `evaluate_governance_decision_source`;
+* `verify_governance_evaluator_response`.
+
+For this run:
+
+* fixture evaluator may exist only for DevNet/TestNet source tests;
+* emergency fixture evaluator must be explicit and non-production;
+* production/on-chain/MainNet evaluators must be callable but fail closed as unavailable;
+* no real database, chain query, contract call, threshold vote execution, or validator-set update is allowed.
+
+8. Typed outcomes:
+   Must distinguish:
+
+* fixture decision source accepted;
+* emergency fixture accepted;
+* evaluator disabled;
+* production decision source unavailable;
+* on-chain decision source unavailable;
+* MainNet decision source unavailable;
+* fixture rejected under production policy;
+* emergency fixture rejected under production policy;
+* unknown source rejected;
+* wrong environment;
+* wrong chain;
+* wrong genesis;
+* wrong authority root;
+* wrong governance proof digest;
+* wrong on-chain proof digest;
+* wrong custody attestation digest;
+* wrong proposal id;
+* wrong decision id;
+* wrong lifecycle action;
+* wrong candidate digest;
+* wrong authority-domain sequence;
+* wrong effective epoch;
+* expired decision;
+* stale/replayed decision;
+* quorum/threshold insufficient;
+* emergency action not authorized;
+* validator-set rotation unsupported;
+* policy-change action unsupported;
+* malformed source identity;
+* malformed evaluator request;
+* malformed evaluator response;
+* unsupported evaluator version;
+* invalid response commitment;
+* local operator cannot satisfy evaluator policy;
+* peer majority cannot satisfy evaluator policy.
+
+Required source behavior:
+
+1. Evaluator interface must compose with Run 211 governance execution input/decision types.
+2. Evaluator interface must compose with Run 213 payload material where feasible.
+3. Evaluator interface must compose with Run 220 runtime consumption as a future production evaluator target, without changing runtime behavior yet.
+4. Production/on-chain/MainNet evaluator paths must return unavailable/fail-closed.
+5. Fixture evaluator must be DevNet/TestNet source/test only.
+6. Emergency fixture evaluator must be explicit and non-production.
+7. No marker write, sequence write, live trust swap, session eviction, or Run 070 call.
+8. MainNet peer-driven apply remains refused even if fixture evaluator approves.
+
+Required accepted scenarios:
+A1. fixture evaluator accepts DevNet governance decision source under explicit fixture policy.
+
+A2. fixture evaluator accepts TestNet governance decision source under explicit fixture policy.
+
+A3. emergency fixture evaluator accepts explicit emergency decision under explicit emergency policy.
+
+A4. decision source identity digest deterministic.
+
+A5. evaluator request digest deterministic.
+
+A6. evaluator response digest deterministic.
+
+A7. evaluator transcript digest deterministic.
+
+A8. evaluator request binds proposal id, decision id, lifecycle action, candidate digest, authority-domain sequence, effective epoch, expiry epoch, replay nonce, and source identity digest.
+
+A9. evaluator response binds request digest, decision digest, approved lifecycle action, candidate digest, sequence, effective epoch, expiry epoch, and replay nonce.
+
+A10. rotate authorization accepted only when evaluator response authorizes rotate with matching candidate digest and sequence.
+
+A11. revoke authorization accepted only when evaluator response authorizes revoke with matching revoked/candidate material and sequence.
+
+A12. emergency revoke accepted only under explicit emergency fixture policy.
+
+A13. production evaluator boundary callable and returns typed unavailable outcome.
+
+A14. on-chain evaluator boundary callable and returns typed unavailable outcome.
+
+A15. MainNet evaluator boundary callable and returns typed unavailable/refusal outcome.
+
+A16. Run 220 runtime-consumption behavior remains compatible when evaluator policy is Disabled.
+
+Required rejection scenarios:
+R1. evaluator rejected under Disabled policy.
+
+R2. fixture evaluator rejected under ProductionDecisionSourceRequired.
+
+R3. emergency fixture rejected under ProductionDecisionSourceRequired.
+
+R4. fixture evaluator rejected under MainnetDecisionSourceRequired.
+
+R5. production evaluator rejected as unavailable.
+
+R6. on-chain evaluator rejected as unavailable.
+
+R7. MainNet evaluator rejected as unavailable.
+
+R8. unknown source rejected.
+
+R9. wrong environment rejected.
+
+R10. wrong chain rejected.
+
+R11. wrong genesis rejected.
+
+R12. wrong authority root rejected.
+
+R13. wrong governance proof digest rejected.
+
+R14. wrong on-chain proof digest rejected.
+
+R15. wrong custody attestation digest rejected.
+
+R16. wrong proposal id rejected.
+
+R17. wrong decision id rejected.
+
+R18. wrong lifecycle action rejected.
+
+R19. wrong candidate digest rejected.
+
+R20. wrong authority-domain sequence rejected.
+
+R21. wrong effective epoch rejected.
+
+R22. expired decision rejected.
+
+R23. stale/replayed decision rejected.
+
+R24. quorum/threshold insufficient rejected.
+
+R25. emergency action not authorized rejected.
+
+R26. validator-set rotation unsupported rejected.
+
+R27. policy-change action unsupported rejected.
+
+R28. malformed source identity rejected.
+
+R29. malformed evaluator request rejected.
+
+R30. malformed evaluator response rejected.
+
+R31. unsupported evaluator version rejected.
+
+R32. invalid response commitment rejected.
+
+R33. local operator cannot satisfy evaluator policy.
+
+R34. peer majority cannot satisfy evaluator policy.
+
+R35. evaluator valid but governance execution decision invalid rejected.
+
+R36. governance execution valid but evaluator response invalid rejected.
+
+R37. lifecycle + governance proof + custody valid but production evaluator unavailable rejected.
+
+R38. validation-only rejection remains non-mutating.
+
+R39. mutating rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+R40. MainNet peer-driven apply remains refused even with fixture evaluator approval.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_222_governance_execution_evaluator_tests.rs`
+
+Minimum coverage:
+
+* A1–A16.
+* R1–R40.
+* deterministic digest tests.
+* evaluator source/request/response binding tests.
+* rotate/revoke/emergency action authorization tests.
+* fixture-vs-production evaluator separation.
+* no-I/O guarantee for production/on-chain/MainNet evaluator paths.
+* no-mutation guarantee.
+* MainNet refusal invariant.
+* compatibility with Run 211, Run 213, Run 220.
+
+Required documentation:
+Add:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md`
+
+Update:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/whitepaper/contradiction.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+
+* Run 222 is source/test production governance execution evaluator interface boundary work.
+* No real governance execution engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* Fixture evaluator is DevNet/TestNet source/test only.
+* Emergency fixture evaluator is explicit and non-production.
+* Production/on-chain/MainNet evaluator remains unavailable/fail-closed.
+* MainNet peer-driven apply remains refused.
+* Validator-set rotation remains unsupported.
+* KMS/HSM/RemoteSigner/custody-attestation remain boundary-only.
+* Release-binary evaluator-interface evidence is deferred to Run 223.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_222_governance_execution_evaluator_tests`
+* `cargo test -p qbind-node --test run_220_governance_execution_runtime_consumption_tests`
+* `cargo test -p qbind-node --test run_217_governance_execution_runtime_arming_tests`
+* `cargo test -p qbind-node --test run_215_governance_execution_policy_selector_tests`
+* `cargo test -p qbind-node --test run_213_governance_execution_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_211_governance_execution_policy_tests`
+* `cargo test -p qbind-node --test run_209_custody_attestation_policy_selector_tests`
+* `cargo test -p qbind-node --test run_207_custody_attestation_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_205_custody_attestation_verifier_tests`
+* `cargo test -p qbind-node --test run_203_kms_hsm_backend_boundary_tests`
+* `cargo test -p qbind-node --test run_201_remote_signer_transport_boundary_tests`
+* `cargo test -p qbind-node --test run_198_remote_signer_policy_selector_tests`
+* `cargo test -p qbind-node --test run_196_remote_signer_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_194_remote_authority_signer_boundary_tests`
+* `cargo test -p qbind-node --test run_192_authority_custody_policy_selector_tests`
+* `cargo test -p qbind-node --test run_190_authority_custody_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_188_authority_custody_boundary_tests`
+* `cargo test -p qbind-node --test run_186_onchain_governance_production_verifier_boundary_tests`
+* `cargo test -p qbind-node --test run_184_onchain_governance_payload_carrying_tests`
+* `cargo test -p qbind-node --test run_182_onchain_governance_production_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_180_onchain_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_178_onchain_governance_proof_tests`
+* `cargo test -p qbind-node --test run_176_live_0x05_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_173_validation_only_governance_required_policy_tests`
+* `cargo test -p qbind-node --test run_171_governance_required_policy_selector_tests`
+* `cargo test -p qbind-node --test run_169_governance_proof_loader_surface_integration_tests`
+* `cargo test -p qbind-node --test run_167_governance_proof_carrier_tests`
+* `cargo test -p qbind-node --test run_165_governance_marker_integration_tests`
+* `cargo test -p qbind-node --test run_163_governance_authority_verifier_tests`
+* `cargo test -p qbind-node --test run_161_lifecycle_marker_integration_tests`
+* `cargo test -p qbind-node --test run_159_authority_signing_key_lifecycle_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --test run_134_reload_apply_v2_authority_marker_tests`
+* `cargo test -p qbind-node --test run_138_sighup_v2_authority_marker_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Acceptance criteria:
+Run 222 is acceptable only if:
+
+1. A typed production governance execution evaluator interface exists.
+2. Fixture evaluator is DevNet/TestNet source-test only.
+3. Emergency fixture evaluator is explicit and non-production.
+4. Production/on-chain/MainNet evaluator remains unavailable/fail-closed.
+5. Evaluator source/request/response/transcript digests are deterministic and domain-bound.
+6. Evaluator authorizes lifecycle action only when action, candidate digest, and sequence match.
+7. Validator-set rotation remains unsupported.
+8. Validation-only surfaces remain non-mutating.
+9. Mutating rejection paths produce no mutation.
+10. MainNet peer-driven apply remains refused.
+11. Docs defer release-binary evaluator-interface evidence to Run 223.
+12. No real governance execution / on-chain proof verifier / KMS-HSM backend / RemoteSigner backend / validator-set rotation claim is made.
+13. No full C4 or C5 closure is claimed.

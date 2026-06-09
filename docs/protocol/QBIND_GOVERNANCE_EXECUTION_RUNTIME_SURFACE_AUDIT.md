@@ -42,6 +42,27 @@ refused. **Full C4 remains OPEN. C5 remains OPEN.** See
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md).
 
+## Run 221 update — release-binary runtime-consumption evidence landed
+
+Run 221 is the release-binary evidence companion to the Run 220 source/test
+consumption wiring. On the real `target/release/qbind-node` binary plus a
+release-built helper it proves that the Run 220 consumption layer
+(`GovernanceExecutionRuntimeConsumption`, `consume_surface`,
+`consume_surface_from_optional_sidecar_value`, and
+`governance_execution_load_status_from_optional_sidecar_value`) gates the
+long-running path: the consumed outcome proceeds on the Run 214 legacy
+bypass (Disabled + absent carrier), fails closed before any mutation on a
+rejected verdict, and reads the **real** governance-execution sidecar load
+status from the optional sidecar value rather than a forced `Absent`. This
+is **evidence only** — no production source, schema, wire, marker, sequence,
+or trust-bundle semantics change. Default remains
+`GovernanceExecutionPolicy::Disabled`; fixture DevNet/TestNet only; MainNet
+peer-driven apply remains refused; no real governance execution engine,
+on-chain proof verifier, KMS/HSM backend, RemoteSigner backend, or
+validator-set rotation is implemented. **Full C4 remains OPEN. C5 remains
+OPEN.** See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md).
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
@@ -68,6 +89,13 @@ refused. **Full C4 remains OPEN. C5 remains OPEN.** See
   `GovernanceExecutionRuntimeArmingConfig`, `from_cli_or_env`,
   `arm_surface`, and the seven runtime preflight wrappers.
 * **Run 218** — release-binary runtime-arming evidence.
+* **Run 220** — source/test governance-execution runtime **consumption**
+  wiring on the long-running call sites
+  (`crates/qbind-node/src/pqc_governance_execution_runtime_arming.rs`):
+  `GovernanceExecutionRuntimeConsumption`, `consume_surface`,
+  `consume_surface_from_optional_sidecar_value`, and
+  `governance_execution_load_status_from_optional_sidecar_value`.
+* **Run 221** — release-binary runtime-consumption evidence.
 
 **Run 218 honest limitation (the motivation for Run 219):** the release
 binary parses the hidden selector and the helper/library runtime-arming
