@@ -8038,3 +8038,44 @@ Release-binary evaluator-interface evidence is deferred to **Run 223**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 223 — release-binary governance-execution evaluator-interface evidence
+
+Run 223 is the **release-binary evidence** companion to the Run 222
+source/test production governance execution evaluator interface. There is
+still **nothing for operators to enable or configure**: the evaluator
+interface has no runtime CLI/env selector and no production call-site
+wiring, default behavior is unchanged, and the evaluator interface is
+fail-closed by default (`EvaluatorPolicy::Disabled`). Run 223 proves on real
+`target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_223_governance_execution_evaluator_release_binary_helper.rs`,
+driven by `scripts/devnet/run_223_governance_execution_evaluator_release_binary.sh`)
+that the release-built library code exposes and exercises the Run 222
+interface: the deterministic source-identity / request / response /
+transcript digests are stable and field-binding in release mode; the fixture
+evaluator accepts only DevNet/TestNet decision sources under the explicit
+fixture policy; the emergency-council fixture evaluator accepts only an
+explicit emergency decision under the explicit emergency policy; an evaluator
+response authorizes a lifecycle action only when the authorized action,
+candidate digest, and sequence all match; production/on-chain/MainNet
+evaluators are callable but fail closed as unavailable; the `Disabled` policy
+stays inert so the Run 221 runtime-consumption behavior is unchanged; and the
+peer-driven guard preserves the MainNet peer-driven apply refusal even with a
+fixture approval. The release helper records 111 typed checks across accepted
+(49) / rejection (42) / reachability (20) covering A1–A18 / R1–R40, and the
+harness proves the release binary `--help` exposes no evaluator-interface
+surface and the default DevNet/TestNet/MainNet surfaces make no
+evaluator / production-governance / MainNet-governance / on-chain-verifier /
+validator-set-rotation / KMS-HSM / RemoteSigner / autonomous-apply /
+apply-on-receipt / peer-majority / MainNet-peer-driven-apply enablement claim
+(22 forbidden patterns proven empty). It is **not** a real governance engine
+and **not** a real on-chain governance proof verifier. The fixture evaluator
+remains DevNet/TestNet evidence-only; the emergency fixture evaluator is
+explicit and non-production; production/on-chain/MainNet evaluators remain
+unavailable/fail-closed; **MainNet peer-driven apply remains refused**;
+validator-set rotation remains unsupported; KMS/HSM, RemoteSigner, and
+custody-attestation remain boundary-only. No real governance execution
+engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or
+validator-set rotation is implemented. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
