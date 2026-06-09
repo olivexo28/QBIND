@@ -8013,3 +8013,28 @@ RemoteSigner backend, or validator-set rotation is implemented. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 222 — production governance-execution evaluator interface boundary
+
+Run 222 is a **source/test** run that adds the typed production governance
+execution **evaluator interface**
+(`crates/qbind-node/src/pqc_governance_execution_evaluator.rs`). There is
+still **nothing for operators to enable or configure**, and default
+behavior is unchanged: the evaluator interface is fail-closed by default
+(`EvaluatorPolicy::Disabled`), and because it does not touch the runtime
+call sites, the Run 220 runtime-consumption behavior is unchanged. The
+interface models how a *future* governance engine would supply decisions
+from a decision source, validate decision provenance, track replay, check
+proposal/decision state, and return fail-closed production outcomes — it is
+**not** a real governance engine and **not** a real on-chain governance
+proof verifier. The fixture evaluator is DevNet/TestNet source/test only;
+the emergency fixture evaluator is explicit and non-production;
+production/on-chain/MainNet evaluators are callable but fail closed as
+unavailable. **MainNet peer-driven apply remains refused** even with a
+fixture evaluator approval; validator-set rotation remains unsupported;
+KMS/HSM, RemoteSigner, and custody-attestation remain boundary-only. No real
+governance execution engine, on-chain verifier, KMS/HSM backend,
+RemoteSigner backend, or validator-set rotation is implemented.
+Release-binary evaluator-interface evidence is deferred to **Run 223**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

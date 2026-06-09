@@ -3139,3 +3139,32 @@ KMS/HSM backend, RemoteSigner backend, or validator-set rotation is
 implemented. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 222 — production governance-execution evaluator interface boundary
+
+Run 222 is a source/test run that adds the typed production governance
+execution **evaluator interface**
+(`crates/qbind-node/src/pqc_governance_execution_evaluator.rs`) and confirms
+the peer-driven apply safety invariant at the new boundary. The interface
+models how a *future* governance engine would supply decisions from a
+decision source; it changes no runtime call site and is fail-closed by
+default (`EvaluatorPolicy::Disabled`). **MainNet peer-driven apply remains
+refused** even when a fixture evaluator approves: the composition helper
+`evaluate_governance_evaluator_with_peer_driven_guard` returns the typed
+`EvaluatorComposedOutcome::MainNetPeerDrivenApplyRefused` for any MainNet
+peer-driven-apply preflight regardless of evaluator approval, and the
+explicit helper `mainnet_peer_driven_apply_remains_refused_under_evaluator`
+encodes the same invariant. Production/on-chain/MainNet evaluators are
+callable but fail closed as unavailable; the fixture evaluator is
+DevNet/TestNet source/test only and is refused on a MainNet trust domain;
+the emergency fixture evaluator is explicit and non-production.
+Validation-only and mutating rejection paths remain non-mutating (the module
+exposes no mutation API: no Run 070 call, no live trust swap, no session
+eviction, no sequence write, no marker write). No autonomous apply, no
+apply-on-receipt, and no peer-majority authority is introduced; no real
+governance engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend,
+or validator-set rotation is implemented. Release-binary evaluator-interface
+evidence is deferred to **Run 223**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_222.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
