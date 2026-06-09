@@ -423,6 +423,22 @@ struct Run105ReloadCheckContextData {
     /// preflights without restarting. Source/test only — never enables
     /// MainNet peer-driven apply.
     governance_execution_policy_selector: Option<String>,
+    /// Run 220 — real governance-execution sidecar load status parsed from
+    /// the operator-supplied v2 ratification sidecar (Run 213 sibling
+    /// parser). Populated at context-build time from the same sidecar file
+    /// the v1/v2 dispatcher loads. A v1 sidecar, an absent sidecar, or a v2
+    /// sidecar without the optional `governance_execution` sibling all
+    /// yield
+    /// [`qbind_node::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus::Absent`],
+    /// preserving the pre-Run-220 forced-`Absent` behavior bit-for-bit for
+    /// legacy no-governance-execution payloads. A well-formed sibling
+    /// becomes `Available`; a broken sibling becomes `Malformed`. This is
+    /// the Run 220 replacement for the forced
+    /// `GovernanceExecutionLoadStatus::Absent` the Run 217 reachability
+    /// hooks hardcoded, so the runtime preflights now consume real sidecar
+    /// status where representable.
+    governance_execution_load:
+        qbind_node::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus,
 }
 
 /// Run 105 — build the owned context the reload-check / peer-candidate-
@@ -447,6 +463,9 @@ fn build_run_105_reload_check_context(
         VersionedRatificationSidecarWithGovernanceProof,
     };
     use qbind_node::pqc_governance_proof_wire::GovernanceProofLoadStatus;
+    use qbind_node::pqc_governance_execution_payload_carrying::{
+        parse_optional_governance_execution_sibling_from_json_value, GovernanceExecutionLoadStatus,
+    };
     use qbind_types::NetworkEnvironment;
 
     let genesis_path = config.genesis_source.genesis_path.as_ref().ok_or_else(|| {
@@ -500,6 +519,26 @@ fn build_run_105_reload_check_context(
             },
             None => (None, None, GovernanceProofLoadStatus::Absent),
         };
+    // Run 220 — parse the real governance-execution sidecar load status
+    // from the operator-supplied ratification sidecar JSON (Run 213
+    // sibling parser). A v1 sidecar, an absent sidecar, an unreadable /
+    // non-JSON sidecar, or a v2 sidecar without the optional
+    // `governance_execution` sibling all yield `Absent` (legacy
+    // no-governance-execution payload, bit-for-bit pre-Run-220). A
+    // well-formed sibling becomes `Available`; a broken sibling becomes
+    // `Malformed` and fails closed at the routing helper regardless of
+    // policy. No file write, no marker write, no sequence write, no live
+    // trust swap, no session eviction, no Run 070 call.
+    let governance_execution_load = match args.p2p_trust_bundle_ratification.as_ref() {
+        Some(path) => match std::fs::read(path) {
+            Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+                Ok(value) => parse_optional_governance_execution_sibling_from_json_value(&value),
+                Err(_) => GovernanceExecutionLoadStatus::Absent,
+            },
+            Err(_) => GovernanceExecutionLoadStatus::Absent,
+        },
+        None => GovernanceExecutionLoadStatus::Absent,
+    };
     let policy = match config.environment {
         NetworkEnvironment::Mainnet => qbind_ledger::RatificationEnforcementPolicy::Strict,
         NetworkEnvironment::Testnet | NetworkEnvironment::Devnet => {
@@ -544,6 +583,11 @@ fn build_run_105_reload_check_context(
         governance_execution_policy_selector: args
             .p2p_trust_bundle_governance_execution_policy
             .clone(),
+        // Run 220 — real governance-execution sidecar load status (Run 213
+        // sibling parser). Replaces the forced `Absent` the Run 217
+        // reachability hooks hardcoded so the runtime preflights consume
+        // real sidecar status where representable.
+        governance_execution_load,
     })
 }
 
@@ -898,16 +942,34 @@ fn preflight_run_134_v2_marker_decision(
         ctx_data.onchain_governance_fixture_allowed_selector,
     );
 
-    // Run 217 — governance-execution runtime-arming call-site reachability
+    // Run 220 — governance-execution runtime-arming call-site **consumption**
     // for the `--p2p-trust-bundle-reload-apply-*` mutating-preflight path.
-    // Pure / non-mutating; preserves sequence-before-marker ordering.
-    invoke_run_217_callsite_governance_execution_marker_decision(
+    // Consumes the armed policy + real sidecar load status; a fail-closed
+    // decision short-circuits BEFORE any mutation (preserving the
+    // sequence-before-marker ordering for accepted/bypass paths).
+    consume_run_220_governance_execution_runtime_outcome(
         &decision,
         ctx_data.governance_execution_policy_selector.as_deref(),
+        &ctx_data.governance_execution_load,
         qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::ReloadApply,
-    );
+    )
+    .map_err(run_220_governance_execution_consumption_marker_error)?;
 
     Ok(Some(decision))
+}
+
+/// Run 220 — map a governance-execution runtime-consumption fail-closed
+/// reason into the typed mutating-surface marker error so the calling v2
+/// marker-decision preflight fails closed BEFORE any mutation, exactly like
+/// the Run 159/165 lifecycle/governance rejections.
+fn run_220_governance_execution_consumption_marker_error(
+    reason: String,
+) -> qbind_node::pqc_authority_marker_acceptance::MutatingSurfaceMarkerV2Error {
+    qbind_node::pqc_authority_marker_acceptance::MutatingSurfaceMarkerV2Error::Conflict(
+        qbind_node::pqc_authority_state::AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+            reason,
+        },
+    )
 }
 
 /// Run 182 — reload-apply production call-site reachability hook.
@@ -950,30 +1012,53 @@ fn invoke_run_182_reload_apply_callsite_onchain_governance_marker_decision(
     let _outcome = reload_apply_callsite_onchain_governance_marker_decision(&ctx);
 }
 
-/// Run 217 — shared production call-site reachability hook for the Run 215
-/// governance-execution per-surface preflight wrappers on the binary's
+/// Run 220 — shared production call-site **consumption** hook for the Run
+/// 215 governance-execution per-surface preflight wrappers on the binary's
 /// reload-check / reload-apply / startup `--p2p-trust-bundle` / local
 /// peer-candidate-check runtime contexts.
 ///
-/// Resolves the armed `GovernanceExecutionRuntimeArmingConfig` from the
-/// captured selector (Run 215 CLI/env resolver) and routes the resolved
-/// `GovernanceExecutionPolicy` into the named Run 217 runtime surface.
-/// Pure / non-mutating: no marker write, no sequence write, no live trust
-/// swap, no session eviction, no Run 070 invocation. The reload sidecar
-/// formats do not carry a typed governance-execution payload at these
-/// surfaces today (same wire blocker as the Run 182 on-chain governance
-/// hooks), so the carrier is `Absent`; under the default `Disabled` policy
-/// this is the legacy no-governance-execution bypass, preserving the
-/// pre-Run-217 flow bit-for-bit. The selector was already validated
+/// Run 217 wired the resolved policy into these surfaces but **discarded**
+/// the returned outcome (`let _outcome = arming.arm_surface(..)`) and forced
+/// [`GovernanceExecutionLoadStatus::Absent`]. Run 220 closes that gap:
+///
+/// 1. resolves the armed
+///    [`qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig`]
+///    from the captured selector (Run 215 CLI/env resolver);
+/// 2. routes the **real** governance-execution sidecar load status
+///    (`ctx_data.governance_execution_load`, parsed by the Run 213 sibling
+///    parser) — no longer a forced `Absent`; and
+/// 3. **consumes** the outcome via
+///    [`qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig::consume_surface`]
+///    into a typed
+///    [`qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeConsumption`].
+///
+/// On a `FailClosed` consumption decision this returns `Err(reason)` so the
+/// caller fails closed **before** any mutation: no Run 070 apply, no live
+/// trust swap, no session eviction, no sequence write, no marker write. A
+/// `Proceed*` decision returns `Ok(())` and the caller continues.
+///
+/// Under the default `Disabled` policy with an absent carrier this is the
+/// legacy no-governance-execution bypass (`ProceedLegacyBypass`), preserving
+/// the pre-Run-217 flow bit-for-bit. The selector was already validated
 /// fail-closed at startup, so `from_cli_or_env` cannot error here; a
-/// defensive `Disabled` fallback keeps the hook non-mutating regardless.
-fn invoke_run_217_callsite_governance_execution_marker_decision(
+/// defensive `Disabled` fallback keeps the hook safe regardless.
+///
+/// **Representability limitation.** The binary's marker-decision candidate
+/// metadata does not carry the governance proposal/decision bindings, so the
+/// derived [`GovernanceExecutionExpectations`] leave those fields empty. A
+/// present, well-formed carrier under an explicit policy therefore reaches
+/// the Run 211 evaluator and fails closed on the expectation mismatch — full
+/// positive binary acceptance with real proposal binding is part of the
+/// release-binary runtime-consumption evidence deferred to Run 221. Default
+/// `Disabled` + absent carrier remains a clean bypass.
+fn consume_run_220_governance_execution_runtime_outcome(
     decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
     governance_execution_policy_selector: Option<&str>,
+    governance_execution_load:
+        &qbind_node::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus,
     surface: qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface,
-) {
+) -> Result<(), String> {
     use qbind_node::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
-    use qbind_node::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus;
     use qbind_node::pqc_governance_execution_policy::{
         GovernanceAction, GovernanceExecutionExpectations,
     };
@@ -1010,12 +1095,21 @@ fn invoke_run_217_callsite_governance_execution_marker_decision(
         governance_execution_policy_selector,
     )
     .unwrap_or_default();
-    let _outcome = arming.arm_surface(
-        surface,
-        &trust_domain,
-        &expectations,
-        &GovernanceExecutionLoadStatus::Absent,
-    );
+    let consumption =
+        arming.consume_surface(surface, &trust_domain, &expectations, governance_execution_load);
+    if consumption.is_fail_closed() {
+        return Err(format!(
+            "Run 220 governance-execution runtime consumption fail-closed on {} surface \
+             under policy {:?}: {}. No Run 070 apply, no live trust swap, no session \
+             eviction, no sequence write, no marker write.",
+            surface.tag(),
+            arming.governance_execution_policy(),
+            consumption
+                .fail_closed_reason()
+                .unwrap_or_else(|| "rejected".to_string()),
+        ));
+    }
+    Ok(())
 }
 ///
 /// Mirrors [`preflight_run_134_v2_marker_decision`] but tags the
@@ -1179,13 +1273,17 @@ fn preflight_run_136_v2_marker_decision_for_startup(
         ctx_data.onchain_governance_fixture_allowed_selector,
     );
 
-    // Run 217 — governance-execution runtime-arming call-site reachability
+    // Run 220 — governance-execution runtime-arming call-site **consumption**
     // for the startup `--p2p-trust-bundle` mutating-preflight path.
-    invoke_run_217_callsite_governance_execution_marker_decision(
+    // Consumes the armed policy + real sidecar load status; a fail-closed
+    // decision short-circuits BEFORE any mutation.
+    consume_run_220_governance_execution_runtime_outcome(
         &decision,
         ctx_data.governance_execution_policy_selector.as_deref(),
+        &ctx_data.governance_execution_load,
         qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::StartupP2pTrustBundle,
-    );
+    )
+    .map_err(run_220_governance_execution_consumption_marker_error)?;
 
     Ok(Some(decision))
 }
@@ -1783,14 +1881,17 @@ fn preflight_run_132_validation_only_v2_marker_check(
         ctx_data.onchain_governance_fixture_allowed_selector,
     );
 
-    // Run 217 — governance-execution runtime-arming call-site reachability
+    // Run 220 — governance-execution runtime-arming call-site **consumption**
     // for the `--p2p-trust-bundle-reload-check` validation-only preflight.
-    // Validation-only: the returned outcome is dropped and never mutates.
-    invoke_run_217_callsite_governance_execution_marker_decision(
+    // Validation-only: a fail-closed decision rejects the candidate BEFORE
+    // any marker/sequence write (the validation-only path never mutates).
+    consume_run_220_governance_execution_runtime_outcome(
         &decision,
         ctx_data.governance_execution_policy_selector.as_deref(),
+        &ctx_data.governance_execution_load,
         qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::ReloadCheck,
-    );
+    )
+    .map_err(run_220_governance_execution_consumption_marker_error)?;
 
     Ok(Some(decision))
 }
@@ -3044,17 +3145,35 @@ async fn main() {
                                         &decision,
                                         ctx_data.onchain_governance_fixture_allowed_selector,
                                     );
-                                    // Run 217 — governance-execution
-                                    // runtime-arming call-site reachability
+                                    // Run 220 — governance-execution
+                                    // runtime-arming call-site **consumption**
                                     // for the local
                                     // `--p2p-trust-bundle-peer-candidate-check`
-                                    // validation-only path. Pure /
-                                    // non-mutating; outcome dropped.
-                                    invoke_run_217_callsite_governance_execution_marker_decision(
+                                    // validation-only path. Consumes the armed
+                                    // policy + real sidecar load status. A
+                                    // fail-closed decision marks the candidate
+                                    // invalid WITHOUT any mutation (no marker
+                                    // persistence, no sequence write, no trust
+                                    // mutation); the local check is
+                                    // validation-only.
+                                    match consume_run_220_governance_execution_runtime_outcome(
                                         &decision,
                                         ctx_data.governance_execution_policy_selector.as_deref(),
+                                        &ctx_data.governance_execution_load,
                                         qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface::LocalPeerCandidateCheck,
-                                    );
+                                    ) {
+                                        Ok(()) => {}
+                                        Err(reason) => {
+                                            eprintln!(
+                                                "[run-220] VERDICT=invalid \
+                                                 (peer-candidate-check governance-execution \
+                                                 runtime consumption fail-closed; no marker \
+                                                 persistence; no sequence write; no trust \
+                                                 mutation). Reason: {}.",
+                                                reason
+                                            );
+                                        }
+                                    }
                                 }
                                 Ok(None) => {
                                     // Check not applicable

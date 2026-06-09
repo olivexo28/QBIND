@@ -941,11 +941,28 @@ impl LiveReloadController {
                             // governance gate sees the actual proof
                             // carrier (Available / Absent / Malformed)
                             // instead of a hardcoded `Unavailable`.
+                            // Run 220 — additionally parse the real Run
+                            // 213 governance-execution sibling from the same
+                            // SIGHUP-trigger sidecar so the SIGHUP preflight
+                            // consumes real sidecar load status (Absent /
+                            // Available / Malformed) instead of a forced
+                            // `Absent`. A v2 sidecar without the optional
+                            // `governance_execution` sibling yields `Absent`
+                            // (legacy no-governance-execution payload, pre-Run
+                            // 220 behaviour bit-for-bit).
+                            let governance_execution_load =
+                                crate::pqc_governance_execution_runtime_arming::governance_execution_load_status_from_optional_sidecar_value(
+                                    std::fs::read(path)
+                                        .ok()
+                                        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                                        .as_ref(),
+                                );
                             let marker_decision_v2 =
                                 match self.preflight_sighup_v2_marker_decision(
                                     rcfg,
                                     &r2,
                                     &governance_proof,
+                                    &governance_execution_load,
                                     now_unix_secs,
                                 ) {
                                     Ok(opt) => opt,
@@ -1334,6 +1351,7 @@ impl LiveReloadController {
         rcfg: &LiveReloadRatificationConfig,
         ratification_v2: &BundleSigningRatificationV2,
         governance_proof_load: &crate::pqc_governance_proof_wire::GovernanceProofLoadStatus,
+        governance_execution_load: &crate::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus,
         now_unix_secs: u64,
     ) -> Result<Option<MarkerAcceptDecisionV2>, MutatingSurfaceMarkerV2Error> {
         let marker_cfg = match &self.config.authority_marker {
@@ -1434,25 +1452,26 @@ impl LiveReloadController {
             self.config.onchain_governance_fixture_allowed_selector,
         );
 
-        // Run 217 — production call-site reachability for the Run 215
-        // governance-execution per-surface preflight wrapper for the
-        // SIGHUP live trust-bundle reload mutating-preflight. The armed
+        // Run 220 — production call-site **consumption** for the Run 215
+        // governance-execution per-surface preflight wrapper for the SIGHUP
+        // live trust-bundle reload mutating-preflight. The armed
         // `GovernanceExecutionRuntimeArmingConfig`
         // (`LiveReloadConfig::governance_execution_runtime_arming`) routes
         // the resolved `GovernanceExecutionPolicy` into the Run 215 SIGHUP
-        // preflight wrapper. Pure: no marker write, no sequence write, no
-        // live trust swap, no session eviction, no Run 070 invocation.
-        // Default `Disabled` accepts an absent governance-execution
-        // carrier as a legacy no-governance-execution payload, preserving
-        // the pre-Run-217 flow bit-for-bit. Live-config wire blocker:
-        // current SIGHUP-trigger sidecar formats do not carry a typed
-        // governance-execution payload, so the load status is `Absent` at
-        // this surface today. MainNet peer-driven apply remains refused
+        // preflight wrapper, and the **real** governance-execution sidecar
+        // load status (parsed from the SIGHUP-trigger sidecar by the Run 213
+        // sibling parser) is consumed — no longer a forced `Absent`. A
+        // fail-closed consumption short-circuits BEFORE any Run 070 apply,
+        // live trust swap, session eviction, sequence write, or marker
+        // persist. Default `Disabled` + absent carrier remains the legacy
+        // no-governance-execution bypass, preserving the pre-Run-217 SIGHUP
+        // flow bit-for-bit. MainNet peer-driven apply remains refused
         // upstream regardless of the armed policy.
-        invoke_run_217_sighup_callsite_governance_execution_marker_decision(
+        consume_run_220_sighup_governance_execution_marker_decision(
             &decision,
             self.config.governance_execution_runtime_arming,
-        );
+            governance_execution_load,
+        )?;
 
         Ok(Some(decision))
     }
@@ -1498,26 +1517,37 @@ fn invoke_run_182_sighup_callsite_onchain_governance_marker_decision(
     let _outcome = sighup_callsite_onchain_governance_marker_decision(&ctx);
 }
 
-/// Run 217 — SIGHUP production call-site reachability hook for the Run 215
-/// governance-execution per-surface preflight wrapper.
+/// Run 220 — SIGHUP production call-site **consumption** hook for the Run
+/// 215 governance-execution per-surface preflight wrapper.
 ///
 /// Routes the armed `GovernanceExecutionRuntimeArmingConfig` into the Run
-/// 215 SIGHUP preflight wrapper. Pure / non-mutating: no marker write, no
-/// sequence write, no live trust swap, no session eviction, no Run 070
-/// invocation. The live SIGHUP-trigger sidecar formats do not yet carry a
-/// typed governance-execution payload (same wire blocker as the Run 182
-/// on-chain governance hook), so the load status is
-/// [`GovernanceExecutionLoadStatus::Absent`] here. Under the default
-/// `Disabled` policy this resolves to the legacy
-/// no-governance-execution-payload bypass, preserving the pre-Run-217
-/// SIGHUP flow bit-for-bit. MainNet peer-driven apply remains refused
-/// upstream regardless of the armed policy.
-fn invoke_run_217_sighup_callsite_governance_execution_marker_decision(
+/// 215 SIGHUP preflight wrapper and **consumes** the outcome. The real
+/// governance-execution sidecar load status (parsed from the SIGHUP-trigger
+/// sidecar by the Run 213 sibling parser) is consumed — no longer a forced
+/// [`GovernanceExecutionLoadStatus::Absent`]. On a fail-closed consumption
+/// decision this returns
+/// `Err(MutatingSurfaceMarkerV2Error::Conflict(MalformedOrUnsupportedMarkerRejected{reason}))`
+/// so the SIGHUP preflight fails closed BEFORE any mutation: no marker
+/// write, no sequence write, no live trust swap, no session eviction, no Run
+/// 070 invocation. Under the default `Disabled` policy with an absent
+/// carrier this resolves to the legacy no-governance-execution bypass,
+/// preserving the pre-Run-217 SIGHUP flow bit-for-bit. MainNet peer-driven
+/// apply remains refused upstream regardless of the armed policy.
+///
+/// **Representability limitation.** The SIGHUP candidate metadata does not
+/// carry the governance proposal/decision bindings, so the derived
+/// [`GovernanceExecutionExpectations`] leave those fields empty; a present,
+/// well-formed carrier under an explicit policy reaches the Run 211
+/// evaluator and fails closed on the expectation mismatch. Full positive
+/// SIGHUP acceptance with real proposal binding is part of the
+/// release-binary runtime-consumption evidence deferred to Run 221.
+fn consume_run_220_sighup_governance_execution_marker_decision(
     decision: &crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
     arming: crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig,
-) {
+    governance_execution_load: &crate::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus,
+) -> Result<(), MutatingSurfaceMarkerV2Error> {
     use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
-    use crate::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus;
+    use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 
     let candidate = decision.candidate();
     let trust_domain = AuthorityTrustDomain::new(
@@ -1527,17 +1557,28 @@ fn invoke_run_217_sighup_callsite_governance_execution_marker_decision(
         candidate.authority_root_fingerprint.clone(),
         candidate.authority_root_suite_id,
     );
-    let expectations =
-        governance_execution_expectations_from_v2_candidate(candidate);
-    // Wire blocker: SIGHUP-trigger sidecars carry no governance-execution
-    // payload today, so the carrier is Absent. Under Disabled this is the
-    // legacy no-governance-execution bypass; under any non-Disabled armed
-    // policy it fails closed as required-but-absent — never mutating.
-    let _outcome = arming.preflight_sighup(
+    let expectations = governance_execution_expectations_from_v2_candidate(candidate);
+    let consumption = arming.consume_surface(
+        GovernanceExecutionRuntimeSurface::Sighup,
         &trust_domain,
         &expectations,
-        &GovernanceExecutionLoadStatus::Absent,
+        governance_execution_load,
     );
+    if consumption.is_fail_closed() {
+        let reason = format!(
+            "Run 220 SIGHUP governance-execution runtime consumption fail-closed under \
+             policy {:?}: {}. No Run 070 apply, no live trust swap, no session eviction, \
+             no sequence write, no marker write.",
+            arming.governance_execution_policy(),
+            consumption
+                .fail_closed_reason()
+                .unwrap_or_else(|| "rejected".to_string()),
+        );
+        return Err(MutatingSurfaceMarkerV2Error::Conflict(
+            AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected { reason },
+        ));
+    }
+    Ok(())
 }
 
 /// Run 217 — derive Run 211 `GovernanceExecutionExpectations` from the

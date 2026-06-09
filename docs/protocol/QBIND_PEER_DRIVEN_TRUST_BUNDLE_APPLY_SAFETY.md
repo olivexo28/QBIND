@@ -3081,3 +3081,34 @@ Run 218 is the release-binary evidence run for the Run 217 carrier `GovernanceEx
 ## Run 219 — governance-execution runtime-surface gap audit
 
 Run 219 is an **audit / spec / docs-only** run that confirms the peer-driven apply safety invariant across the governance-execution runtime surfaces without changing any behavior. The audit records that the governance-execution runtime arming carrier is only partially wired on the long-running path (the resolved outcome is discarded at every live call site and the payload load status is `Absent`), and that the **peer-driven drain** governance-execution surface is **helper-evidenced only**: no production call site invokes `preflight_peer_driven_drain`; the real drain path `PeerDrivenDrainPolicy::try_drain_once` (`crates/qbind-node/src/pqc_peer_candidate_drain.rs`) refuses MainNet independently via the typed `MainNetRefused` outcome. **MainNet peer-driven apply therefore remains refused** regardless of any armed `GovernanceExecutionPolicy`, including `MainnetGovernanceRequired` with a fully-valid fixture governance approval, and the `mainnet_peer_driven_apply_remains_refused_under_governance_execution_payload_carrying` helper continues to hold. Default selector resolution remains `GovernanceExecutionPolicy::Disabled`, so peer-driven apply behavior is unchanged unless a policy is explicitly armed; CLI-over-env precedence is preserved and invalid selectors fail closed before any mutation. Validation-only and mutating rejection surfaces remain non-mutating: no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write. The audit selects **Run 220** (source/test long-running consumption wiring) and **Run 221** (release-binary consumption evidence) as the next sequence; both preserve MainNet peer-driven apply refusal. No autonomous apply, no apply-on-receipt, and no peer-majority authority is introduced; no real governance engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is implemented. See `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_219.md`. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 220 — governance-execution runtime consumption wiring (source/test)
+
+Run 220 is **source/test** long-running governance-execution runtime
+consumption wiring that preserves the peer-driven apply safety invariant.
+The four binary runtime call sites and the SIGHUP runtime hook now
+**consume** the selected `GovernanceExecutionPolicy` and the **real**
+governance-execution sidecar load status (the Run 219-recorded discard of
+the resolved outcome and the forced `Absent` load status are removed on
+those surfaces, and a rejected verdict fails closed before any mutation).
+The **peer-driven drain** governance-execution surface remains
+consumed only at the source/test level; the real drain path
+`PeerDrivenDrainPolicy::try_drain_once`
+(`crates/qbind-node/src/pqc_peer_candidate_drain.rs`) continues to refuse
+MainNet independently via the typed `MainNetRefused` outcome.
+**MainNet peer-driven apply therefore remains refused** regardless of any
+consumed `GovernanceExecutionPolicy`, including `MainnetGovernanceRequired`
+with a fully-valid fixture governance approval. Default selector
+resolution remains `GovernanceExecutionPolicy::Disabled`, so peer-driven
+apply behavior is unchanged unless a policy is explicitly armed (Disabled +
+absent carrier proceeds as a legacy bypass, bit-for-bit); CLI-over-env
+precedence is preserved and invalid selectors fail closed before any
+mutation. Validation-only and mutating rejection surfaces remain
+non-mutating: no Run 070 call, no live trust swap, no session eviction, no
+sequence write, and no marker write. No autonomous apply, no
+apply-on-receipt, and no peer-majority authority is introduced; no real
+governance engine, on-chain verifier, KMS/HSM backend, RemoteSigner
+backend, or validator-set rotation is implemented. Release-binary
+runtime-consumption evidence is deferred to **Run 221**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

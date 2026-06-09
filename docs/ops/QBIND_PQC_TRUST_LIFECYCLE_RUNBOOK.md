@@ -7939,3 +7939,38 @@ Run 218 is the **release-binary** evidence run for the Run 217 governance-execut
 ## Run 219 — governance-execution runtime-surface gap audit
 
 Run 219 is an **audit / spec / docs-only** run; there is **no behavior change** and nothing for operators to enable or configure. It maps every governance-execution runtime surface from the Run 211–218 sequence and records that, by default (`--p2p-trust-bundle-governance-execution-policy` and `QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` both unset), `GovernanceExecutionRuntimeArmingConfig::from_cli_or_env` resolves `GovernanceExecutionPolicy::Disabled` and the live reload/SIGHUP/startup/local-peer-candidate paths run bit-for-bit as before. Operationally relevant findings: the hidden selector is parsed and fail-closed on invalid values at startup (unchanged from Run 216/218); the runtime arming carrier is constructed on the long-running path but its resolved outcome is not yet consumed to gate behavior, and the live sidecars carry no `governance_execution` payload (load status `Absent`), so an armed non-Disabled policy fails closed without mutating; the live inbound `0x05` per-connection policy is still not threaded and the peer-driven drain governance-execution wrapper has no production call site (the real drain path refuses MainNet independently). Across every surface, rejection remains non-mutating (no marker write, no sequence write, no live trust swap, no session eviction, no Run 070 apply call) and **MainNet peer-driven apply remains refused**. The audit selects the next closure sequence — **Run 220** (source/test long-running consumption wiring) and **Run 221** (release-binary consumption evidence) — without enabling any production behavior. Fixture and emergency-council fixture execution remain DevNet/TestNet evidence-only and non-production; production/on-chain/MainNet governance execution remains unavailable/fail-closed; validator-set rotation remains unsupported; KMS/HSM, RemoteSigner, and custody-attestation remain boundary-only. No real governance execution engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is implemented. See `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md` and `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_219.md`. **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 220 — governance-execution runtime consumption wiring (source/test)
+
+Run 220 is **source/test** long-running governance-execution runtime
+consumption wiring; there is still **nothing for operators to enable or
+configure**, and default behavior is unchanged. Acting on the Run 219
+finding, the four binary runtime call sites (reload-check, reload-apply,
+startup `--p2p-trust-bundle`, local peer-candidate-check) and the SIGHUP
+runtime hook now **consume** the selected `GovernanceExecutionPolicy` and
+the **real** governance-execution sidecar load status: the previous
+discard of the `arm_surface` outcome and the forced
+`GovernanceExecutionLoadStatus::Absent` are removed on those surfaces, and
+a rejected verdict fails closed **before** any mutation. By default
+(`--p2p-trust-bundle-governance-execution-policy` and
+`QBIND_P2P_TRUST_BUNDLE_GOVERNANCE_EXECUTION_POLICY` both unset) the
+resolved policy remains `GovernanceExecutionPolicy::Disabled` and the
+Disabled + absent-carrier path proceeds bit-for-bit as before Run 217 (a
+legacy bypass), so live reload/SIGHUP/startup/local-peer-candidate paths
+run exactly as before. Because binary/SIGHUP candidate metadata still
+carries no governance proposal/decision bindings, a present carrier at the
+binary surface reaches the Run 211 evaluator and fails closed on the
+expectation mismatch; the live inbound `0x05` per-connection policy is
+still not threaded, and full positive binary acceptance is deferred to
+**Run 221**. Across every surface, rejection remains non-mutating (no
+marker write, no sequence write, no live trust swap, no session eviction,
+no Run 070 apply call) and **MainNet peer-driven apply remains refused**.
+Fixture and emergency-council fixture execution remain DevNet/TestNet
+evidence-only and non-production; production/on-chain/MainNet governance
+execution remains unavailable/fail-closed; validator-set rotation remains
+unsupported; KMS/HSM, RemoteSigner, and custody-attestation remain
+boundary-only. No real governance execution engine, on-chain verifier,
+KMS/HSM backend, RemoteSigner backend, or validator-set rotation is
+implemented. Release-binary runtime-consumption evidence is deferred to
+**Run 221**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
