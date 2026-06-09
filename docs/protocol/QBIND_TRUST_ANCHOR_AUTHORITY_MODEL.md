@@ -5303,3 +5303,31 @@ is implemented. Release-binary runtime-consumption evidence is deferred to
 **Run 221**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 221 — release-binary governance-execution runtime-consumption evidence
+
+Run 221 is the release-binary evidence run for the Run 220 long-running
+governance-execution runtime-consumption wiring. It grants **no new
+authority** and changes no lifecycle, marker, sequence, trust-bundle,
+schema, or wire semantics. On real `target/release/qbind-node` plus a
+release-built helper it proves the Run 220 consumption layer
+(`GovernanceExecutionRuntimeConsumption`, `consume_surface`,
+`consume_surface_from_optional_sidecar_value`,
+`governance_execution_load_status_from_optional_sidecar_value`) gates the
+long-running path: the consumed outcome proceeds on the Disabled +
+absent-carrier legacy bypass (Run 214), fails closed before any mutation on
+a rejected verdict, and reads the **real** governance-execution sidecar load
+status from the optional sidecar value rather than a forced `Absent` where
+representable. Default resolution remains `GovernanceExecutionPolicy::Disabled`
+(no new authority active by default); CLI-over-env precedence is
+deterministic at the runtime config boundary and an invalid CLI or env
+selector fails closed before any runtime mutation. Fixture and
+emergency-council fixture execution remain DevNet/TestNet evidence-only and
+non-production; production/on-chain/MainNet governance execution remains
+unavailable/fail-closed; MainNet peer-driven apply remains refused; the Run
+193 custody, Run 199 RemoteSigner, and Run 210 custody-attestation sibling
+authority selectors remain independent and compatible. No real governance
+execution engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend,
+production signing custody, or validator-set rotation is implemented. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

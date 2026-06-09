@@ -3112,3 +3112,30 @@ runtime-consumption evidence is deferred to **Run 221**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_220.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+## Run 221 — release-binary governance-execution runtime-consumption evidence
+
+Run 221 is the release-binary evidence run for the Run 220 long-running
+governance-execution runtime-consumption wiring and confirms the
+peer-driven apply safety invariant on the real binary. On real
+`target/release/qbind-node` plus a release-built helper it proves the Run
+220 consumption layer (`GovernanceExecutionRuntimeConsumption`,
+`consume_surface`, `consume_surface_from_optional_sidecar_value`,
+`governance_execution_load_status_from_optional_sidecar_value`) gates the
+long-running path, and **MainNet peer-driven apply remains refused** even
+with `MainnetGovernanceRequired` armed and a fully-valid fixture governance
+approval — the typed `MainNetPeerDrivenApplyRefused` outcome is unchanged
+and maps to `FailClosed`. Default selector resolution remains
+`GovernanceExecutionPolicy::Disabled`, so peer-driven apply behavior is
+unchanged unless a policy is explicitly armed; the Disabled + absent-carrier
+path proceeds bit-for-bit as a legacy bypass (Run 214). CLI-over-env
+precedence is deterministic at the runtime config boundary and an invalid
+CLI or env selector fails closed before any mutation (the real binary emits
+the Run 217 FATAL and exits non-zero with no runtime config armed).
+Validation-only and mutating rejection surfaces remain non-mutating: no Run
+070 call, no live trust swap, no session eviction, no sequence write, and no
+marker write. No autonomous apply, no apply-on-receipt, and no peer-majority
+authority is introduced; no real governance engine, on-chain verifier,
+KMS/HSM backend, RemoteSigner backend, or validator-set rotation is
+implemented. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_221.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
