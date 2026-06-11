@@ -1,0 +1,290 @@
+Task: Run 228 — Source/Test Live 0x05 and Peer-Driven Evaluator Context Representation Boundary
+
+Current accepted state:
+
+* Run 220: source/test long-running governance-execution runtime consumption wiring landed.
+* Run 221: release-binary runtime-consumption evidence fully closed.
+* Run 222: source/test typed production governance execution evaluator interface boundary landed.
+* Run 223: release-binary evaluator-interface evidence fully closed.
+* Run 224: source/test governance evaluator runtime integration layer landed.
+* Run 225: release-binary governance evaluator runtime integration evidence fully closed.
+* Run 226: source/test governance evaluator runtime call-site wiring landed.
+* Run 227: release-binary governance evaluator runtime call-site wiring evidence fully closed:
+
+  * release-built helper exercises the Run 226 wiring symbols;
+  * helper matrix 144 checks PASS;
+  * real-binary scenarios S1–S6 PASS;
+  * invalid selector fails closed before mutation;
+  * representable runtime call-site paths route through the integration layer;
+  * default Disabled legacy bypass remains preserved;
+  * present carrier without evaluator context fails closed;
+  * production/on-chain/MainNet evaluators remain unavailable/fail-closed;
+  * fixture/emergency fixture evaluators remain non-production;
+  * MainNet peer-driven apply remains refused;
+  * validator-set rotation remains unsupported;
+  * no real governance engine exists;
+  * no real on-chain proof verifier exists;
+  * no KMS/HSM backend exists;
+  * no RemoteSigner backend exists;
+  * Full C4 remains OPEN;
+  * C5 remains OPEN.
+* Current remaining limitation:
+  live inbound `0x05` and peer-driven drain full positive evaluator-context binding are still not fully representable from the binary. They remain honestly documented as limited / not-yet-representable.
+
+Objective:
+Add a source/test-only representation boundary for evaluator context on live inbound `0x05` and peer-driven drain paths.
+
+This run must make those two previously-limited surfaces able to carry or reference evaluator context in source/test plumbing where representable, without changing the network wire schema, trust-bundle schema, authority-marker schema, sequence schema, or enabling MainNet peer-driven apply.
+
+Release-binary evidence is deferred to Run 229.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary harness in this run.
+* No real governance execution engine.
+* No real on-chain governance proof verifier.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* No validator-set rotation.
+* No KMS/HSM backend implementation.
+* No RemoteSigner backend implementation.
+* No schema/wire/marker/sequence/trust-bundle changes.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* Do not weaken Runs 070, 130–227.
+* Do not claim full C4 or C5 closure.
+
+Required source behavior:
+
+1. Inspect the current live inbound `0x05` and peer-driven drain data paths:
+
+   * candidate validation structure;
+   * peer-candidate staging structure;
+   * drain structure;
+   * any sidecar/path metadata already available;
+   * any local-only validation context already used by Runs 148–157 and 220–227.
+
+2. Add a local/source-test representation boundary, preferably in a new or existing focused module, for example:
+
+   * `pqc_governance_evaluator_peer_context.rs`
+   * or a similarly named module consistent with the codebase.
+
+3. The representation boundary must define typed local-only context that can bind:
+
+   * selected `GovernanceExecutionPolicy`;
+   * governance-execution load status;
+   * governance-execution payload digest;
+   * evaluator source identity digest;
+   * evaluator request digest;
+   * evaluator response digest;
+   * candidate trust-bundle digest;
+   * candidate v2 marker digest where present;
+   * authority-domain sequence;
+   * lifecycle action;
+   * environment;
+   * chain id;
+   * genesis hash;
+   * peer id / source class;
+   * validation surface: live inbound `0x05` or peer-driven drain.
+
+4. The boundary must explicitly classify carrier status:
+
+   * `Absent`;
+   * `Present`;
+   * `Malformed`;
+   * `UnsupportedSurface`;
+   * `WireSchemaUnavailable`;
+   * `PeerMajorityUnsupported`;
+   * `MainNetRefused`.
+
+5. The boundary must be local-only unless an existing source/test local sidecar path already exists.
+
+   * Do not invent a new network `0x05` wire format.
+   * Do not add fields to production wire messages.
+   * Do not alter trust-bundle schema.
+   * Do not alter marker or sequence schema.
+
+6. Integrate this local context into source/test validation plumbing where representable:
+
+   * live inbound `0x05` validation-only path;
+   * peer-driven drain validation path.
+
+7. Route the local context into the Run 226 call-site integration layer where representable.
+
+   * If the existing source path cannot yet call the full integration layer without schema/wire changes, return a typed unsupported/fail-closed outcome and document exactly why.
+   * Invalid or missing context under explicit evaluator policy must fail closed.
+
+8. Preserve safety:
+
+   * invalid live inbound `0x05` candidate is not propagated, not staged, not applied;
+   * peer-driven drain rejection produces no apply;
+   * validation-only rejection writes no marker and no sequence;
+   * mutating rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write;
+   * MainNet peer-driven apply remains refused unconditionally.
+
+Required accepted scenarios:
+A1. live inbound `0x05` with default Disabled and absent evaluator context preserves legacy validation behavior.
+
+A2. peer-driven drain with default Disabled and absent evaluator context preserves legacy validation behavior.
+
+A3. live inbound `0x05` local context binds selected policy, candidate digest, evaluator request digest, evaluator response digest, lifecycle action, sequence, environment, chain id, and genesis hash.
+
+A4. peer-driven drain local context binds selected policy, candidate digest, evaluator request digest, evaluator response digest, lifecycle action, sequence, environment, chain id, and genesis hash.
+
+A5. live inbound `0x05` with valid DevNet fixture evaluator context reaches the Run 226 integration layer where representable, or returns typed `UnsupportedSurface` without propagation/staging/apply if not representable.
+
+A6. peer-driven drain with valid DevNet fixture evaluator context reaches the Run 226 integration layer where representable, or returns typed `UnsupportedSurface` without apply if not representable.
+
+A7. explicit emergency fixture context is accepted only for explicit emergency action and only in non-production source/test context.
+
+A8. production evaluator context reaches production unavailable / fail-closed outcome.
+
+A9. on-chain evaluator context reaches on-chain unavailable / fail-closed outcome.
+
+A10. MainNet evaluator context reaches MainNet refused outcome.
+
+A11. MainNet peer-driven apply remains refused even with fixture evaluator approval.
+
+A12. invalid live inbound `0x05` context is not propagated, not staged, and not applied.
+
+A13. invalid peer-driven drain context produces no apply and no mutation.
+
+A14. absence of a wire/schema carrier is represented as typed `WireSchemaUnavailable`, not silently treated as approval.
+
+Required rejection scenarios:
+R1. malformed evaluator peer context rejected.
+
+R2. missing evaluator context rejected under explicit evaluator policy.
+
+R3. wrong environment rejected.
+
+R4. wrong chain rejected.
+
+R5. wrong genesis rejected.
+
+R6. wrong candidate digest rejected.
+
+R7. wrong evaluator source identity digest rejected.
+
+R8. wrong evaluator request digest rejected.
+
+R9. wrong evaluator response digest rejected.
+
+R10. wrong lifecycle action rejected.
+
+R11. wrong authority-domain sequence rejected.
+
+R12. expired evaluator request rejected.
+
+R13. stale/replayed evaluator request rejected.
+
+R14. quorum/threshold insufficient rejected.
+
+R15. emergency action not authorized rejected.
+
+R16. production evaluator unavailable rejected.
+
+R17. on-chain evaluator unavailable rejected.
+
+R18. MainNet evaluator unavailable/refused rejected.
+
+R19. validator-set rotation unsupported rejected.
+
+R20. policy-change action unsupported rejected.
+
+R21. peer majority cannot satisfy evaluator policy.
+
+R22. local operator cannot satisfy evaluator policy where policy requires evaluator authority.
+
+R23. live inbound `0x05` unsupported carrier rejected without propagation/staging/apply.
+
+R24. peer-driven drain unsupported carrier rejected without apply.
+
+R25. validation-only rejection writes no marker and no sequence.
+
+R26. mutating rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+R27. MainNet peer-driven apply remains refused even with fixture evaluator approval.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_228_peer_evaluator_context_representation_tests.rs`
+
+Minimum coverage:
+
+* A1–A14.
+* R1–R27.
+* deterministic context digest/binding tests.
+* local-only / no-wire-schema-change tests.
+* live inbound `0x05` no-propagation/no-staging/no-apply tests.
+* peer-driven drain no-apply tests.
+* MainNet refusal tests.
+* compatibility with Runs 226, 224, 222, 220, 157, 152, 150, 148, and 142 where relevant.
+
+Required documentation:
+Add:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md`
+
+Update:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/whitepaper/contradiction.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+
+* Run 228 is source/test representation-boundary work for live inbound `0x05` and peer-driven drain evaluator context.
+* The boundary is local/source-test and does not change wire/schema/marker/sequence/trust-bundle formats.
+* Missing unsupported carrier status is typed and fail-closed under explicit evaluator policy.
+* MainNet peer-driven apply remains refused.
+* No real governance engine or on-chain proof verifier is implemented.
+* Production/on-chain/MainNet evaluators remain unavailable/fail-closed.
+* Fixture/emergency fixture evaluators remain non-production.
+* Validator-set rotation remains unsupported.
+* Release-binary evidence is deferred to Run 229.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo build -p qbind-node --bin qbind-node`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_222_governance_execution_evaluator_tests`
+* `cargo test -p qbind-node --test run_220_governance_execution_runtime_consumption_tests`
+* `cargo test -p qbind-node --test run_217_governance_execution_runtime_arming_tests`
+* `cargo test -p qbind-node --test run_215_governance_execution_policy_selector_tests`
+* `cargo test -p qbind-node --test run_213_governance_execution_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_211_governance_execution_policy_tests`
+* `cargo test -p qbind-node --test run_157_unified_testnet_fixture_universe_tests`
+* `cargo test -p qbind-node --test run_152_binary_reachable_peer_drain_plumbing_tests`
+* `cargo test -p qbind-node --test run_150_peer_driven_apply_drain_tests`
+* `cargo test -p qbind-node --test run_148_peer_driven_apply_devnet_tests`
+* `cargo test -p qbind-node --test run_142_live_inbound_0x05_v2_validation_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Acceptance criteria:
+Run 228 is acceptable only if:
+
+1. Live inbound `0x05` and peer-driven drain have a typed evaluator-context representation boundary.
+2. The boundary is local/source-test and does not change network wire schema.
+3. Unsupported/no-carrier status is typed and fail-closed under explicit evaluator policy.
+4. Invalid live inbound `0x05` candidates are not propagated, staged, or applied.
+5. Invalid peer-driven drain candidates are not applied.
+6. MainNet peer-driven apply remains refused.
+7. Production/on-chain/MainNet evaluators remain unavailable/fail-closed.
+8. Fixture/emergency fixture evaluators remain non-production.
+9. Validator-set rotation remains unsupported.
+10. Release-binary evidence is deferred to Run 229.
+11. No full C4 or C5 closure is claimed.

@@ -5501,3 +5501,32 @@ implemented. Tests:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 227 — release-binary governance evaluator runtime call-site wiring evidence
+
+Run 227 is the release-binary evidence run for the Run 226 call-site wiring.
+On real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_227_governance_evaluator_runtime_callsite_wiring_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh`)
+it proves the release-built code exercises the Run 226 wiring entry points
+(`wire_governance_evaluator_runtime_callsite` and
+`wire_governance_evaluator_runtime_callsite_without_evaluator_context`): the
+representable runtime call sites consume the
+`GovernanceEvaluatorRuntimeIntegrationOutcome` (consumed, not discarded), the
+default Disabled + absent-carrier legacy bypass is preserved, a present
+carrier without evaluator context fails closed, production/on-chain/MainNet
+evaluators remain unavailable/fail-closed, and every rejection is
+non-mutating. The authority model is unchanged: the fixture evaluator remains
+DevNet/TestNet evidence-only, the emergency fixture evaluator is explicit and
+non-production, MainNet peer-driven apply remains refused, and no real
+governance execution engine, on-chain verifier, KMS/HSM backend, RemoteSigner
+backend, production signing custody, or validator-set rotation is
+implemented. The live inbound `0x05` and peer-driven drain surfaces remain
+wired but not fully representable from the binary (documented limitation);
+Run 221/223/225 release behaviour remains compatible. Tests:
+`crates/qbind-node/tests/run_226_governance_evaluator_runtime_callsite_wiring_tests.rs`
+(59, PASS) plus the Run 227 release helper corpus (144 checks, PASS). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_227.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

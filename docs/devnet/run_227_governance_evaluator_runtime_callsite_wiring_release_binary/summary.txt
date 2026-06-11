@@ -1,0 +1,49 @@
+Run 227 — release-binary governance evaluator runtime call-site wiring evidence
+git_commit: 55f1e43b00a2a5f24cce633cb213c8286bcec831
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  71387c73ea7efbc1b315a06a14463926f9015f8bb5c83d63d265515e837b929c
+  qbind_node_buildid: BuildID[sha1]=e2dca9f0283dc0c060d10f26fb44175ff252ccdf
+  helper_227_sha256:  6af137d8724faa54a7c01cf132c9a604ab5f7213516f9b382a58ab548a908a20
+  helper_227_buildid: BuildID[sha1]=f8db606f0077272cae3dcb0f8e09e03fedb46e88
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+  S5_selector_parsesrc=1
+  S6_selector_invalidrc=1
+  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).
+
+release-helper verdicts:
+  helper_run_227rc=0verdict: PASS
+
+helper A1-A23 / R1-R31 corpus verdicts (release mode, Run 226 call-site wiring symbols):
+  table accepted: pass=71 fail=0
+  table rejection: pass=46 fail=0
+  table reachability: pass=27 fail=0
+  total_pass: 144
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 26 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  test:run_222_governance_execution_evaluator_tests	rc=0
+  test:run_220_governance_execution_runtime_consumption_tests	rc=0
+  test:run_217_governance_execution_runtime_arming_tests	rc=0
+  test:run_215_governance_execution_policy_selector_tests	rc=0
+  test:run_213_governance_execution_payload_callsite_tests	rc=0
+  test:run_211_governance_execution_policy_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 226 call-site wiring routes the representable Run 220 runtime call sites (reload-check, reload-apply, startup --p2p-trust-bundle, SIGHUP, local peer-candidate-check) through the Run 224 integration layer; the binary marker/candidate metadata cannot yet carry a governance proposal/decision evaluator binding, so the live inbound 0x05 and peer-driven drain surfaces are wired but their full positive evaluator binding is not yet representable from the binary (only the Disabled + absent legacy bypass is Ok at those binary call sites; a present carrier fails closed); the default Disabled legacy bypass is preserved bit-for-bit; the integration outcome is consumed, not discarded; present carrier without evaluator context fails closed; no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption, Run 223 evaluator-interface, and Run 225 integration-layer behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.
+
+verdict: PASS
