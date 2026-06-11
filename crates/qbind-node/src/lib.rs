@@ -666,6 +666,25 @@ pub mod pqc_governance_execution_runtime_arming;
 // remains unsupported. No real KMS/HSM/RemoteSigner/custody backend.
 // Release-binary evaluator-interface evidence is deferred to Run 223.
 pub mod pqc_governance_execution_evaluator;
+// Run 224 — source/test governance evaluator-runtime integration.
+// Composes the Run 220 runtime consumption, the Run 222 evaluator
+// request/response/interface, the Run 211 governance execution decision
+// validation, and the Run 213 governance-execution payload material into a
+// single ordered pipeline (selector resolution -> sidecar/load-status
+// derivation -> runtime consumption -> evaluator request construction ->
+// evaluator evaluation -> governance execution decision validation ->
+// lifecycle/governance/custody checks -> mutation only after all checks
+// pass). The Run 222 evaluator interface is now the production evaluation
+// target inside the runtime-consumption path at the source/test level.
+// Production/on-chain/MainNet evaluators remain callable but fail closed as
+// unavailable; the fixture evaluator remains DevNet/TestNet source/test
+// only; the emergency fixture evaluator is explicit and non-production;
+// MainNet peer-driven apply remains refused even with fixture evaluator
+// approval; validator-set rotation remains unsupported. Pure: no marker,
+// no sequence, no live trust swap, no session eviction, no Run 070 call.
+// Release-binary evidence is deferred to Run 225. Full C4 remains OPEN; C5
+// remains OPEN.
+pub mod pqc_governance_execution_evaluator_runtime_integration;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

@@ -5389,3 +5389,36 @@ KMS/HSM backend, RemoteSigner backend, production signing custody, or
 validator-set rotation is implemented. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+
+## Run 224 — source/test governance evaluator runtime integration
+
+Run 224 is a source/test run that integrates the Run 222 governance evaluator
+authority interface into the Run 220 governance-execution runtime-consumption
+pipeline at the source/test level. The new pure integration layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+composes runtime consumption with the evaluator request/response/interface,
+Run 211 governance execution decision validation, and Run 213 payload
+material, so the evaluator authority is now consulted as the next evaluation
+stage inside runtime consumption — mutation authorization (`ProceedMutate`) is
+produced only when both the runtime-consumption stage and the evaluator
+authority agree on the same lifecycle action / candidate digest /
+authority-domain sequence, after the ordered checks (selector resolution →
+load-status derivation → runtime consumption → evaluator request construction
+→ evaluator evaluation → governance execution decision validation → mutation
+only after all required checks pass). The fixture evaluator authority remains
+DevNet/TestNet source-test only; the emergency fixture evaluator authority is
+explicit and non-production; production/on-chain/MainNet evaluator authorities
+are callable but fail closed as unavailable. **MainNet peer-driven apply
+remains refused** even where a fixture evaluator would otherwise approve;
+validator-set rotation remains unsupported; the Run 193 custody, Run 199
+RemoteSigner, and Run 210 custody-attestation sibling authority selectors
+remain independent and compatible; KMS/HSM, RemoteSigner, and production
+signing custody remain boundary-only. Every rejection path is non-mutating and
+the integration module exposes no mutation API. Coverage:
+`crates/qbind-node/tests/run_224_governance_evaluator_runtime_integration_tests.rs`
+(48 tests, A1–A12 / R1–R30, PASS). No real governance execution engine,
+on-chain verifier, KMS/HSM backend, RemoteSigner backend, production signing
+custody, or validator-set rotation is implemented. Release-binary evidence is
+deferred to **Run 225**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md`
+and `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

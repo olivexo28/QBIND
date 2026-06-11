@@ -3195,3 +3195,32 @@ peer-majority authority is introduced.** No real governance engine, on-chain
 verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is
 implemented. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+
+## Run 224 — source/test governance evaluator runtime integration
+
+Run 224 is a source/test run that integrates the Run 222 governance evaluator
+interface into the Run 220 governance-execution runtime-consumption pipeline,
+and proves **the peer-driven apply safety posture is unchanged**. The new pure
+integration layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+composes runtime consumption, the evaluator request/response/interface, Run
+211 governance execution decision validation, and Run 213 payload material,
+preserving the ordering selector resolution → load-status derivation →
+runtime consumption → evaluator request construction → evaluator evaluation →
+governance execution decision validation → mutation only after all required
+checks pass. The typed `GovernanceEvaluatorRuntimeIntegrationOutcome` carries
+a dedicated `MainNetPeerDrivenApplyRefused` outcome, and the tests
+(`crates/qbind-node/tests/run_224_governance_evaluator_runtime_integration_tests.rs`,
+48 tests, A1–A12 / R1–R30, PASS) confirm that **MainNet peer-driven apply
+remains refused even where a fixture evaluator would otherwise approve**. The
+integration module remains pure and exposes no mutation API: every rejection
+path is non-mutating — no Run 070 call, no live trust swap, no session
+eviction, no sequence write, no marker write — and mutation authorization
+(`ProceedMutate`) requires both the runtime-consumption stage and the
+evaluator stage to agree. **No autonomous apply, no apply-on-receipt, and no
+peer-majority authority is introduced.** No real governance engine, on-chain
+verifier, KMS/HSM backend, RemoteSigner backend, or validator-set rotation is
+implemented. Release-binary evidence is deferred to **Run 225**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
