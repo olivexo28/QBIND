@@ -1,0 +1,45 @@
+Run 225 — release-binary governance evaluator runtime integration evidence
+git_commit: b13f7f266142ff01091cf2ab0406ee5f5471dce6
+
+build:
+  rustc_version:      rustc 1.95.0 (59807616e 2026-04-14)
+  cargo_version:      cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+  qbind_node_sha256:  73fb84d450f4b3702a6f8a46c174ba8d7bf07f6301f96b1ae31e257e7ecc8e71
+  qbind_node_buildid: BuildID[sha1]=99f931a99ac65365efd6773fc7ce58ab05821f34
+  helper_225_sha256:  97e037f57a5e5862dd22bfdc8f74b14ba77913ad90fd5dbfb887141b958be9a6
+  helper_225_buildid: BuildID[sha1]=130731a89d30d4337a3c5f862c1462cc7f31b8d0
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+
+release-helper verdicts:
+  helper_run_225rc=0verdict: PASS
+
+helper A1-A15 / R1-R30 corpus verdicts (release mode, Run 224 integration symbols):
+  table accepted: pass=59 fail=0
+  table rejection: pass=37 fail=0
+  table reachability: pass=16 fail=0
+  total_pass: 112
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 24 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  test:run_222_governance_execution_evaluator_tests	rc=0
+  test:run_220_governance_execution_runtime_consumption_tests	rc=0
+  test:run_217_governance_execution_runtime_arming_tests	rc=0
+  test:run_215_governance_execution_policy_selector_tests	rc=0
+  test:run_213_governance_execution_payload_callsite_tests	rc=0
+  test:run_211_governance_execution_policy_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 224 evaluator-runtime integration layer is typed and release-evidenced through library symbols; it composes the Run 220 runtime consumption, the Run 222 evaluator interface, the Run 211 decision validation, and the Run 213 payload material as a *future* production evaluation pipeline, with no runtime CLI/env selector and no production call-site wiring (the Disabled policy / Disabled evaluator policy remain inert); no real governance execution engine; no real on-chain governance proof verifier; fixture evaluator DevNet/TestNet evidence-only; emergency fixture explicit non-production; production/on-chain/MainNet evaluator unavailable/fail-closed; default Disabled legacy bypass preserved; MainNet peer-driven apply refused; validator-set rotation unsupported; existing Run 221 runtime-consumption and Run 223 evaluator-interface behaviour compatible; no KMS/HSM/RemoteSigner backend; full C4 and C5 remain OPEN.
+
+verdict: PASS

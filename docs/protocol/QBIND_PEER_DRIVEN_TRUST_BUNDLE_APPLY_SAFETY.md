@@ -3224,3 +3224,36 @@ implemented. Release-binary evidence is deferred to **Run 225**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 225 — release-binary governance evaluator runtime integration evidence
+
+Run 225 is the release-binary evidence companion to the Run 224 source/test
+governance evaluator runtime integration, and proves **the peer-driven apply
+safety posture is unchanged in release mode**. Where Run 224 landed the pure
+integration layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+at the source/test level, Run 225 proves on real `target/release/qbind-node`
+plus a release-built helper
+(`crates/qbind-node/examples/run_225_governance_evaluator_runtime_integration_release_binary_helper.rs`,
+driven by `scripts/devnet/run_225_governance_evaluator_runtime_integration_release_binary.sh`)
+that the release-built code exposes and exercises the integration with the same
+safety guarantees. The release helper records 112 typed checks across accepted
+(59) / rejection (37) / reachability (16) covering the full A1–A15 / R1–R30
+matrix, including that the typed `MainNetPeerDrivenApplyRefused` outcome holds:
+**MainNet peer-driven apply remains refused even where a fixture evaluator would
+otherwise approve**. Mutation authorization (`ProceedMutate`) is produced only
+when both the runtime-consumption stage and the evaluator stage agree; every
+rejection path is non-mutating and the integration module exposes no mutation
+API. **No autonomous apply, no apply-on-receipt, and no peer-majority authority
+is introduced.** The harness drives the real release binary to prove `--help`
+exposes no integration surface and the default DevNet/TestNet/MainNet surfaces
+make no integration / governance-execution / MainNet-governance /
+on-chain-verifier / validator-set-rotation / KMS-HSM / RemoteSigner /
+autonomous-apply / apply-on-receipt / peer-majority / MainNet-peer-driven-apply
+enablement claim (24 forbidden patterns proven empty). No real governance
+engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or
+validator-set rotation is implemented; existing Run 221 and Run 223 release
+behaviour remains compatible. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
