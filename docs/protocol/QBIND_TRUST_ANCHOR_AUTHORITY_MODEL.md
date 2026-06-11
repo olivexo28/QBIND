@@ -5460,3 +5460,44 @@ production signing custody, or validator-set rotation is implemented. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 226 — source/test governance evaluator runtime call-site wiring
+
+Run 226 is a source/test run that wires the existing Run 220
+governance-execution runtime call sites through the Run 224 governance
+evaluator integration layer. Where Run 224 landed the pure integration layer
+and Run 225 proved it in release mode, the runtime call sites still called the
+Run 220 `consume_surface` path directly. Run 226 routes the representable call
+sites (`consume_run_220_governance_execution_runtime_outcome`,
+`consume_run_220_sighup_governance_execution_marker_decision`) through the
+integration layer via the new wiring entry points
+(`wire_governance_evaluator_runtime_callsite`,
+`wire_governance_evaluator_runtime_callsite_without_evaluator_context`), so
+mutation authorization (`ProceedMutate`) is produced only when both the
+runtime-consumption stage and the evaluator authority agree on the same
+lifecycle action / candidate digest / authority-domain sequence, after the
+ordered checks.
+
+The fixture evaluator authority remains DevNet/TestNet source-test only; the
+emergency fixture evaluator authority is explicit and non-production;
+production/on-chain/MainNet evaluator authorities remain unavailable/fail-closed;
+**MainNet peer-driven apply remains refused** even where a fixture evaluator
+would otherwise approve; validator-set rotation remains unsupported; the
+Run 193 custody, Run 199 RemoteSigner, and Run 210 custody-attestation sibling
+authority selectors remain independent and compatible; KMS/HSM, RemoteSigner,
+and production signing custody remain boundary-only. The default Disabled +
+absent-carrier `ProceedLegacyBypass` is preserved; any present carrier at the
+binary call sites fails closed, strictly stricter than the Run 220 behaviour
+it replaces; every rejection is non-mutating. The binary marker/candidate
+metadata cannot yet carry a governance proposal/decision evaluator binding, so
+the live inbound `0x05` and peer-driven drain surfaces are wired at the
+source/test level but their full positive evaluator binding is not yet
+representable from the binary (documented limitation; deferred to Run 227). No
+real governance execution engine, on-chain verifier, KMS/HSM backend,
+RemoteSigner backend, production signing custody, or validator-set rotation is
+implemented. Tests:
+`crates/qbind-node/tests/run_226_governance_evaluator_runtime_callsite_wiring_tests.rs`
+(59, A1–A17 / R1–R31, PASS). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
