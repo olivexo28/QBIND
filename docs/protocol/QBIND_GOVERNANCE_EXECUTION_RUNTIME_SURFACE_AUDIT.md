@@ -214,6 +214,45 @@ remains OPEN. C5 remains OPEN.** See
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md).
 
+## Run 226 update — source/test evaluator-runtime call-site wiring landed
+
+Run 226 is **source/test runtime call-site wiring** for the Run 224
+governance evaluator integration layer. Where Run 224 landed the integration
+layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+and Run 225 proved it in release mode, the Run 220 runtime call sites
+(reload-check, reload-apply, startup `--p2p-trust-bundle`, SIGHUP, local
+peer-candidate-check, live inbound `0x05`, peer-driven drain) still called the
+Run 220 `consume_surface` path directly. Run 226 adds the call-site wiring
+entry points (`wire_governance_evaluator_runtime_callsite` and
+`wire_governance_evaluator_runtime_callsite_without_evaluator_context`) to the
+integration module and routes the representable call sites
+(`consume_run_220_governance_execution_runtime_outcome` in `main.rs` and
+`consume_run_220_sighup_governance_execution_marker_decision` in
+`pqc_live_trust_reload.rs`) through the integration layer so the integration
+outcome — not the bare runtime consumption — gates each call site.
+
+The **default Disabled legacy bypass is preserved** (Disabled + absent carrier
+short-circuits to `ProceedLegacyBypass`); any present carrier at these binary
+call sites **fails closed** (production unavailable or runtime-consumption
+rejection), which is strictly stricter than — never weaker than — the Run 220
+behaviour it replaces. The binary marker/candidate metadata cannot yet carry a
+governance proposal/decision evaluator binding, so the **live inbound `0x05`**
+and **peer-driven drain** surfaces are wired at the source/test level but
+their full positive evaluator binding is not yet representable from the binary
+(documented honestly; full positive binary acceptance and release-binary
+call-site wiring evidence deferred to **Run 227**).
+Production/on-chain/MainNet evaluators remain unavailable/fail-closed; the
+fixture evaluator remains DevNet/TestNet source-test only; the emergency
+fixture evaluator is explicit and non-production; **MainNet peer-driven apply
+remains refused**; validator-set rotation remains unsupported; no real
+governance engine or on-chain proof verifier is implemented. Tests:
+`crates/qbind-node/tests/run_226_governance_evaluator_runtime_callsite_wiring_tests.rs`
+(59, A1–A17 / R1–R31, PASS). **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
