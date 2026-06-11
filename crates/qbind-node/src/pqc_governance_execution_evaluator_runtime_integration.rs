@@ -79,16 +79,20 @@
 //!   authorize the runtime path to continue.
 
 use crate::pqc_authority_lifecycle::{AuthorityTrustDomain, LocalLifecycleAction};
+use crate::pqc_governance_authority::GovernanceAuthorityClass;
 use crate::pqc_governance_execution_evaluator::{
     DecisionSourceIdentity, EvaluatorExpectations, EvaluatorOutcome, EvaluatorPolicy,
-    EvaluatorRequest, EvaluatorResponse, ProductionGovernanceExecutionEvaluator,
+    EvaluatorRequest, EvaluatorResponse, EvaluatorSourceKind,
+    ProductionDecisionSourceEvaluatorInterface, ProductionGovernanceExecutionEvaluator,
+    EVALUATOR_SUPPORTED_VERSION,
 };
 use crate::pqc_governance_execution_payload_carrying::{
     parse_optional_governance_execution_sibling_from_json_value, GovernanceExecutionLoadStatus,
     GovernanceExecutionPayloadCarryingDecisionOutcome,
 };
 use crate::pqc_governance_execution_policy::{
-    GovernanceExecutionExpectations, GovernanceExecutionOutcome,
+    GovernanceAction, GovernanceExecutionClass, GovernanceExecutionExpectations,
+    GovernanceExecutionOutcome, GovernanceQuorumThreshold,
 };
 use crate::pqc_governance_execution_runtime_arming::{
     GovernanceExecutionRuntimeArmingConfig, GovernanceExecutionRuntimeConsumption,
@@ -449,6 +453,275 @@ where
         is_peer_driven_apply_preflight,
     };
     integrate_governance_evaluator_runtime_consumption(&ctx)
+}
+
+// ===========================================================================
+// Run 226 — runtime call-site wiring
+// ===========================================================================
+
+/// Run 226 — non-mutating fail-closed signal a long-running runtime call
+/// site receives when the composed Run 224 integration outcome does **not**
+/// authorize the path to continue.
+///
+/// A call site that receives this MUST fail closed BEFORE any mutation: no
+/// Run 070 call, no live trust swap, no session eviction, no sequence write,
+/// no marker write. It carries the originating
+/// [`GovernanceExecutionRuntimeSurface`], the precise non-proceed
+/// [`GovernanceEvaluatorRuntimeIntegrationOutcome`], and an operator-facing
+/// reason string so the call site can surface a typed error exactly like the
+/// Run 220 runtime-consumption fail-closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GovernanceEvaluatorRuntimeCallsiteFailClosed {
+    /// The runtime preflight surface that failed closed.
+    pub surface: GovernanceExecutionRuntimeSurface,
+    /// The non-proceed integration outcome that triggered the fail-closed.
+    pub outcome: GovernanceEvaluatorRuntimeIntegrationOutcome,
+    /// Operator-facing reason string.
+    pub reason: String,
+}
+
+impl GovernanceEvaluatorRuntimeCallsiteFailClosed {
+    fn from_outcome(
+        surface: GovernanceExecutionRuntimeSurface,
+        outcome: GovernanceEvaluatorRuntimeIntegrationOutcome,
+    ) -> Self {
+        let detail = match &outcome {
+            GovernanceEvaluatorRuntimeIntegrationOutcome::RuntimeConsumptionFailClosed(inner) => {
+                format!("runtime consumption fail-closed: {:?}", inner)
+            }
+            GovernanceEvaluatorRuntimeIntegrationOutcome::EvaluatorRejected(inner) => {
+                format!("evaluator rejected: {:?}", inner)
+            }
+            GovernanceEvaluatorRuntimeIntegrationOutcome::MainNetPeerDrivenApplyRefused => {
+                "MainNet peer-driven apply refused unconditionally".to_string()
+            }
+            // The proceed variants never reach this constructor.
+            GovernanceEvaluatorRuntimeIntegrationOutcome::ProceedLegacyBypass
+            | GovernanceEvaluatorRuntimeIntegrationOutcome::ProceedMutate { .. } => {
+                "proceed".to_string()
+            }
+        };
+        let reason = format!(
+            "Run 226 governance-evaluator runtime call-site wiring fail-closed on {} surface: \
+             {}. No Run 070 apply, no live trust swap, no session eviction, no sequence write, \
+             no marker write.",
+            surface.tag(),
+            detail,
+        );
+        Self {
+            surface,
+            outcome,
+            reason,
+        }
+    }
+
+    /// `true` iff this fail-closed is the MainNet peer-driven-apply refusal.
+    pub fn is_mainnet_peer_driven_apply_refused(&self) -> bool {
+        self.outcome.is_mainnet_peer_driven_apply_refused()
+    }
+}
+
+/// Run 226 — route a runtime call site through the Run 224 integration layer
+/// and **consume** the composed outcome.
+///
+/// This is the source/test runtime call-site wiring entry point: a
+/// representable runtime call site that can construct the full Run 222
+/// evaluator request/response (selector resolution -> sidecar/load-status ->
+/// runtime consumption -> evaluator request/response -> evaluation ->
+/// decision validation) calls this with a fully-populated
+/// [`GovernanceEvaluatorRuntimeIntegrationContext`]. The outcome is consumed,
+/// not discarded:
+///
+/// * `Ok(ProceedLegacyBypass)` — default Disabled + absent carrier legacy
+///   bypass (Run 214 compatibility); the call site continues unchanged.
+/// * `Ok(ProceedMutate { .. })` — every composed stage passed; this is the
+///   **only** outcome that authorizes a mutation.
+/// * `Err(GovernanceEvaluatorRuntimeCallsiteFailClosed)` — every non-proceed
+///   integration outcome ([`GovernanceEvaluatorRuntimeIntegrationOutcome::RuntimeConsumptionFailClosed`],
+///   [`GovernanceEvaluatorRuntimeIntegrationOutcome::EvaluatorRejected`],
+///   [`GovernanceEvaluatorRuntimeIntegrationOutcome::MainNetPeerDrivenApplyRefused`]).
+///   The call site MUST fail closed BEFORE any mutation.
+///
+/// Pure — performs no I/O and no mutation (it only borrows the integration
+/// context and forwards to the pure integration entry point).
+pub fn wire_governance_evaluator_runtime_callsite<E>(
+    ctx: &GovernanceEvaluatorRuntimeIntegrationContext<'_, E>,
+) -> Result<GovernanceEvaluatorRuntimeIntegrationOutcome, GovernanceEvaluatorRuntimeCallsiteFailClosed>
+where
+    E: ProductionGovernanceExecutionEvaluator,
+{
+    let outcome = integrate_governance_evaluator_runtime_consumption(ctx);
+    if outcome.is_proceed() {
+        Ok(outcome)
+    } else {
+        Err(GovernanceEvaluatorRuntimeCallsiteFailClosed::from_outcome(
+            ctx.surface,
+            outcome,
+        ))
+    }
+}
+
+/// Run 226 — runtime call-site wiring for the long-running call sites that
+/// **cannot yet construct a full Run 222 evaluator request/response**.
+///
+/// **Representability limitation (honest).** The binary marker-decision
+/// metadata available at the reload-check / reload-apply / startup
+/// `--p2p-trust-bundle` / SIGHUP / local peer-candidate-check call sites does
+/// not carry the governance proposal/decision evaluator bindings (proposal
+/// id, decision id, candidate digest, replay nonce, decision-source
+/// identity), so these call sites cannot construct a valid
+/// [`EvaluatorRequest`] / [`EvaluatorResponse`] without a schema/wire change.
+/// Run 226 does **not** invent one. Instead this entry point still routes
+/// runtime consumption **through the Run 224 integration layer**, using the
+/// callable-but-unavailable [`ProductionDecisionSourceEvaluatorInterface`] as
+/// the evaluator stage so that:
+///
+/// * default Disabled + absent carrier short-circuits to
+///   `Ok(ProceedLegacyBypass)` BEFORE the evaluator stage is reached (Run 214
+///   compatibility, preserved bit-for-bit);
+/// * a MainNet peer-driven-apply preflight remains refused
+///   (`Err(.. MainNetPeerDrivenApplyRefused)`);
+/// * a present carrier that runtime consumption rejects fails closed as
+///   `Err(.. RuntimeConsumptionFailClosed)`;
+/// * a present carrier that runtime consumption *accepts* reaches the
+///   evaluator stage and fails closed as
+///   `Err(.. EvaluatorRejected(ProductionDecisionSourceUnavailable))` — the
+///   call site cannot satisfy the evaluator until the carrier can bind the
+///   evaluator context, so it never authorizes a mutation.
+///
+/// In every case the only `Ok` outcome at this call site is the legacy
+/// bypass; a present carrier always fails closed before mutation. Full
+/// positive call-site acceptance with a real evaluator request/response is
+/// part of the release-binary call-site wiring evidence deferred to Run 227.
+///
+/// Pure — performs no I/O and no mutation.
+pub fn wire_governance_evaluator_runtime_callsite_without_evaluator_context(
+    arming: &GovernanceExecutionRuntimeArmingConfig,
+    surface: GovernanceExecutionRuntimeSurface,
+    trust_domain: &AuthorityTrustDomain,
+    governance_execution_expectations: &GovernanceExecutionExpectations,
+    load_status: &GovernanceExecutionLoadStatus,
+    is_peer_driven_apply_preflight: bool,
+) -> Result<GovernanceEvaluatorRuntimeIntegrationOutcome, GovernanceEvaluatorRuntimeCallsiteFailClosed>
+{
+    // Placeholder evaluator material: never consulted under the representable
+    // legacy bypass (the integration short-circuits before the evaluator
+    // stage). For a present carrier the unavailable production evaluator
+    // ignores this material and fails closed, so its contents are immaterial.
+    let identity = unrepresentable_callsite_identity(trust_domain.environment);
+    let request = unrepresentable_callsite_request(&identity);
+    let response = unrepresentable_callsite_response(&request);
+    let evaluator_expectations =
+        unrepresentable_callsite_evaluator_expectations(trust_domain.environment);
+    let ctx = GovernanceEvaluatorRuntimeIntegrationContext {
+        arming,
+        surface,
+        trust_domain,
+        load_status,
+        governance_execution_expectations,
+        evaluator: &ProductionDecisionSourceEvaluatorInterface,
+        identity: &identity,
+        request: &request,
+        response: &response,
+        evaluator_expectations: &evaluator_expectations,
+        evaluator_policy: EvaluatorPolicy::ProductionDecisionSourceRequired,
+        is_peer_driven_apply_preflight,
+    };
+    wire_governance_evaluator_runtime_callsite(&ctx)
+}
+
+// --- placeholder evaluator material for the unrepresentable call sites ---
+//
+// These build structurally-shaped (but never-authorizing) evaluator material
+// for the call sites that cannot bind a real evaluator context. They are only
+// ever borrowed into the integration context above and never reached on the
+// representable legacy-bypass path; on the present-carrier path the
+// callable-but-unavailable production evaluator ignores them and fails closed.
+
+fn unrepresentable_callsite_identity(
+    environment: crate::pqc_trust_bundle::TrustBundleEnvironment,
+) -> DecisionSourceIdentity {
+    DecisionSourceIdentity {
+        evaluator_version: EVALUATOR_SUPPORTED_VERSION,
+        source_kind: EvaluatorSourceKind::ProductionDecisionSourceUnavailable,
+        source_id: String::new(),
+        governance_class: GovernanceExecutionClass::ProductionGovernanceUnavailable,
+        issuer_authority_class: GovernanceAuthorityClass::GenesisBound,
+        environment,
+        chain_id: String::new(),
+        genesis_hash: String::new(),
+        authority_root_fingerprint: String::new(),
+        governance_proof_digest: String::new(),
+        on_chain_proof_digest: None,
+        custody_attestation_digest: None,
+        freshness_replay_window: 0,
+    }
+}
+
+fn unrepresentable_callsite_request(identity: &DecisionSourceIdentity) -> EvaluatorRequest {
+    EvaluatorRequest {
+        evaluator_version: EVALUATOR_SUPPORTED_VERSION,
+        governance_execution_input_digest: String::new(),
+        proposal_id: String::new(),
+        decision_id: String::new(),
+        governance_action: GovernanceAction::Rotate,
+        lifecycle_action: LocalLifecycleAction::Rotate,
+        candidate_digest: String::new(),
+        authority_domain_sequence: 0,
+        effective_epoch: 0,
+        expiry_epoch: 0,
+        replay_nonce: String::new(),
+        quorum: GovernanceQuorumThreshold::new(0, 0, 0),
+        emergency_flag: false,
+        decision_source_identity_digest: identity.source_identity_digest(),
+    }
+}
+
+fn unrepresentable_callsite_response(request: &EvaluatorRequest) -> EvaluatorResponse {
+    EvaluatorResponse {
+        evaluator_version: EVALUATOR_SUPPORTED_VERSION,
+        request_digest: request.request_digest(),
+        decision_digest: String::new(),
+        approved: false,
+        authorized_governance_action: GovernanceAction::Rotate,
+        authorized_lifecycle_action: LocalLifecycleAction::Rotate,
+        authorized_candidate_digest: String::new(),
+        authorized_authority_domain_sequence: 0,
+        effective_epoch: 0,
+        expiry_epoch: 0,
+        replay_nonce: String::new(),
+        evaluator_source_id: String::new(),
+        response_effective_epoch: 0,
+        response_expiry_epoch: 0,
+        emergency_flag: false,
+        response_commitment: String::new(),
+    }
+}
+
+fn unrepresentable_callsite_evaluator_expectations(
+    environment: crate::pqc_trust_bundle::TrustBundleEnvironment,
+) -> EvaluatorExpectations {
+    EvaluatorExpectations {
+        expected_evaluator_version: EVALUATOR_SUPPORTED_VERSION,
+        expected_environment: environment,
+        expected_chain_id: String::new(),
+        expected_genesis_hash: String::new(),
+        expected_authority_root_fingerprint: String::new(),
+        expected_proposal_id: String::new(),
+        expected_decision_id: String::new(),
+        expected_governance_action: GovernanceAction::Rotate,
+        expected_lifecycle_action: LocalLifecycleAction::Rotate,
+        expected_candidate_digest: String::new(),
+        expected_authority_domain_sequence: 0,
+        expected_governance_proof_digest: String::new(),
+        expected_on_chain_proof_digest: None,
+        expected_custody_attestation_digest: None,
+        expected_effective_epoch: 0,
+        expected_expiry_epoch: 0,
+        expected_replay_nonce: String::new(),
+        expected_governance_execution_input_digest: String::new(),
+        now_epoch: 0,
+    }
 }
 
 #[cfg(test)]

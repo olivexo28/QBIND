@@ -1541,12 +1541,22 @@ fn invoke_run_182_sighup_callsite_onchain_governance_marker_decision(
 /// evaluator and fails closed on the expectation mismatch. Full positive
 /// SIGHUP acceptance with real proposal binding is part of the
 /// release-binary runtime-consumption evidence deferred to Run 221.
+///
+/// **Run 226 — call-site wiring.** This hook now routes the SIGHUP runtime
+/// consumption through the Run 224 governance evaluator integration layer via
+/// [`crate::pqc_governance_execution_evaluator_runtime_integration::wire_governance_evaluator_runtime_callsite_without_evaluator_context`]:
+/// the default `Disabled` + absent carrier short-circuits to the legacy
+/// bypass and a present carrier fails closed BEFORE any mutation. The SIGHUP
+/// candidate metadata cannot bind a full Run 222 evaluator request/response,
+/// so positive SIGHUP acceptance through the evaluator stage is part of the
+/// release-binary call-site wiring evidence deferred to Run 227.
 fn consume_run_220_sighup_governance_execution_marker_decision(
     decision: &crate::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
     arming: crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig,
     governance_execution_load: &crate::pqc_governance_execution_payload_carrying::GovernanceExecutionLoadStatus,
 ) -> Result<(), MutatingSurfaceMarkerV2Error> {
     use crate::pqc_authority_lifecycle::AuthorityTrustDomain;
+    use crate::pqc_governance_execution_evaluator_runtime_integration::wire_governance_evaluator_runtime_callsite_without_evaluator_context;
     use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 
     let candidate = decision.candidate();
@@ -1558,27 +1568,30 @@ fn consume_run_220_sighup_governance_execution_marker_decision(
         candidate.authority_root_suite_id,
     );
     let expectations = governance_execution_expectations_from_v2_candidate(candidate);
-    let consumption = arming.consume_surface(
+    // Run 226 — route SIGHUP runtime consumption through the Run 224 governance
+    // evaluator integration layer. The SIGHUP candidate metadata cannot bind a
+    // full Run 222 evaluator request/response, so the no-evaluator-context
+    // call-site wiring is used: the default Disabled + absent carrier
+    // short-circuits to the legacy bypass BEFORE the evaluator stage
+    // (preserving the pre-Run-217 SIGHUP flow bit-for-bit) and every present
+    // carrier fails closed BEFORE any mutation. Release-binary call-site
+    // wiring evidence is deferred to Run 227.
+    wire_governance_evaluator_runtime_callsite_without_evaluator_context(
+        &arming,
         GovernanceExecutionRuntimeSurface::Sighup,
         &trust_domain,
         &expectations,
         governance_execution_load,
-    );
-    if consumption.is_fail_closed() {
-        let reason = format!(
-            "Run 220 SIGHUP governance-execution runtime consumption fail-closed under \
-             policy {:?}: {}. No Run 070 apply, no live trust swap, no session eviction, \
-             no sequence write, no marker write.",
-            arming.governance_execution_policy(),
-            consumption
-                .fail_closed_reason()
-                .unwrap_or_else(|| "rejected".to_string()),
-        );
-        return Err(MutatingSurfaceMarkerV2Error::Conflict(
-            AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected { reason },
-        ));
-    }
-    Ok(())
+        false,
+    )
+    .map(|_outcome| ())
+    .map_err(|fail_closed| {
+        MutatingSurfaceMarkerV2Error::Conflict(
+            AuthorityMarkerV2ComparisonOutcome::MalformedOrUnsupportedMarkerRejected {
+                reason: fail_closed.reason,
+            },
+        )
+    })
 }
 
 /// Run 217 — derive Run 211 `GovernanceExecutionExpectations` from the

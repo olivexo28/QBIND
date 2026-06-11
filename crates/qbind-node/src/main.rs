@@ -1051,6 +1051,15 @@ fn invoke_run_182_reload_apply_callsite_onchain_governance_marker_decision(
 /// positive binary acceptance with real proposal binding is part of the
 /// release-binary runtime-consumption evidence deferred to Run 221. Default
 /// `Disabled` + absent carrier remains a clean bypass.
+///
+/// **Run 226 — call-site wiring.** The decision now routes through the Run
+/// 224 governance evaluator integration layer via
+/// [`wire_governance_evaluator_runtime_callsite_without_evaluator_context`]:
+/// the integration short-circuits to the legacy bypass for the default
+/// `Disabled` + absent carrier (preserving this hook bit-for-bit) and fails
+/// closed BEFORE any mutation for every present carrier (the binary cannot
+/// bind the evaluator context, so it never authorizes a mutation here).
+/// Release-binary call-site wiring evidence is deferred to Run 227.
 fn consume_run_220_governance_execution_runtime_outcome(
     decision: &qbind_node::pqc_authority_marker_acceptance::MarkerAcceptDecisionV2,
     governance_execution_policy_selector: Option<&str>,
@@ -1062,6 +1071,7 @@ fn consume_run_220_governance_execution_runtime_outcome(
     use qbind_node::pqc_governance_execution_policy::{
         GovernanceAction, GovernanceExecutionExpectations,
     };
+    use qbind_node::pqc_governance_execution_evaluator_runtime_integration::wire_governance_evaluator_runtime_callsite_without_evaluator_context;
     use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeArmingConfig;
 
     let candidate = decision.candidate();
@@ -1095,21 +1105,26 @@ fn consume_run_220_governance_execution_runtime_outcome(
         governance_execution_policy_selector,
     )
     .unwrap_or_default();
-    let consumption =
-        arming.consume_surface(surface, &trust_domain, &expectations, governance_execution_load);
-    if consumption.is_fail_closed() {
-        return Err(format!(
-            "Run 220 governance-execution runtime consumption fail-closed on {} surface \
-             under policy {:?}: {}. No Run 070 apply, no live trust swap, no session \
-             eviction, no sequence write, no marker write.",
-            surface.tag(),
-            arming.governance_execution_policy(),
-            consumption
-                .fail_closed_reason()
-                .unwrap_or_else(|| "rejected".to_string()),
-        ));
-    }
-    Ok(())
+    // Run 226 — route runtime consumption through the Run 224 governance
+    // evaluator integration layer. The binary marker-decision metadata cannot
+    // construct a full Run 222 evaluator request/response (no proposal/decision
+    // binding), so the no-evaluator-context call-site wiring is used: the
+    // default Disabled + absent carrier short-circuits to the legacy bypass
+    // BEFORE the evaluator stage, and every present carrier fails closed
+    // BEFORE any mutation. The Run 220 runtime-consumption semantics are
+    // preserved (Disabled bypass proceeds; present carrier fails closed) — the
+    // path now additionally composes the evaluator stage. Release-binary
+    // call-site wiring evidence is deferred to Run 227.
+    wire_governance_evaluator_runtime_callsite_without_evaluator_context(
+        &arming,
+        surface,
+        &trust_domain,
+        &expectations,
+        governance_execution_load,
+        false,
+    )
+    .map(|_outcome| ())
+    .map_err(|fail_closed| fail_closed.reason)
 }
 ///
 /// Mirrors [`preflight_run_134_v2_marker_decision`] but tags the
