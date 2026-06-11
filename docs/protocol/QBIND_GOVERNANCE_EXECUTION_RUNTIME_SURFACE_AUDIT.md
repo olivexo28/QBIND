@@ -282,6 +282,37 @@ behaviour remains compatible. **Full C4 remains OPEN. C5 remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_227.md).
 
 
+## Run 228 update — source/test peer evaluator-context representation boundary landed
+
+Run 228 adds a typed **evaluator-context representation boundary** for the two
+surfaces Run 226 recorded as not-yet-fully-representable: **live inbound
+`0x05`** peer-candidate validation and **peer-driven drain**. The boundary
+(`crates/qbind-node/src/pqc_governance_evaluator_peer_context.rs`,
+`crates/qbind-node/tests/run_228_peer_evaluator_context_representation_tests.rs`,
+48 tests A1–A14 / R1–R27, PASS) lets these surfaces carry or reference an
+evaluator context in source/test plumbing where representable and routes that
+context into the Run 226 call-site wiring → Run 224 integration layer →
+Run 222 evaluator interface. It is **source/test only** and changes no
+wire/schema/marker/sequence/trust-bundle format. The carrier taxonomy
+(`Absent`, `Present`, `Malformed`, `UnsupportedSurface`,
+`WireSchemaUnavailable`, `PeerMajorityUnsupported`, `MainNetRefused`) makes the
+live-wire path that cannot carry an evaluator binding a typed
+`WireSchemaUnavailable` fail-closed status — never an approval. The default
+Disabled + absent-carrier path preserves legacy validation; a present
+well-formed context routes through the integration layer; any
+unsupported/malformed/no-carrier status under an explicit evaluator policy is
+typed fail-closed. Only the routed `ProceedMutate` outcome authorizes apply;
+invalid live inbound `0x05` candidates are not propagated, staged, or applied,
+and invalid peer-driven drain candidates are not applied. MainNet peer-driven
+apply remains refused; production/on-chain/MainNet evaluators remain
+unavailable/fail-closed; fixture/emergency fixture evaluators remain
+non-production; validator-set rotation remains unsupported; no real governance
+engine or on-chain proof verifier is implemented. Release-binary evidence is
+deferred to **Run 229**. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

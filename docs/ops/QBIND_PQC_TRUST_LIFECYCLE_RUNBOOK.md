@@ -8228,4 +8228,38 @@ unsupported; no real governance engine or on-chain proof verifier is
 implemented; Run 221/223/225 release behaviour remains compatible. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_227.md` and
 `docs/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary/`.
+
+## Run 228 — source/test peer evaluator-context representation boundary
+
+Run 228 adds a typed **evaluator-context representation boundary** for the
+live inbound `0x05` peer-candidate validation and peer-driven drain surfaces
+(`crates/qbind-node/src/pqc_governance_evaluator_peer_context.rs`, registered
+in `crates/qbind-node/src/lib.rs`, with
+`crates/qbind-node/tests/run_228_peer_evaluator_context_representation_tests.rs`,
+48 tests A1–A14 / R1–R27, PASS). It lets these surfaces carry or reference an
+evaluator context in source/test plumbing where representable and routes that
+context into the Run 226 call-site wiring → Run 224 integration layer →
+Run 222 evaluator interface.
+
+**Operator impact: none.** Run 228 is source/test only, introduces no
+production source behavior change, no new runtime CLI/env surface, and no new
+mutation path, and changes no wire/schema/marker/sequence/trust-bundle format.
+The carrier taxonomy (`Absent`, `Present`, `Malformed`, `UnsupportedSurface`,
+`WireSchemaUnavailable`, `PeerMajorityUnsupported`, `MainNetRefused`)
+represents the live-wire path that cannot carry an evaluator binding as a
+typed `WireSchemaUnavailable` fail-closed status — never an approval. The
+default Disabled + absent-carrier path preserves legacy validation; a present
+well-formed context routes through the integration layer; any
+unsupported/malformed/no-carrier status under an explicit evaluator policy is
+typed fail-closed; only the routed `ProceedMutate` outcome authorizes apply.
+Invalid live inbound `0x05` candidates are not propagated, staged, or applied;
+invalid peer-driven drain candidates are not applied; every rejection is
+non-mutating (no marker write, no sequence write, no live trust swap, no
+session eviction, no Run 070 call). Production/on-chain/MainNet evaluators
+remain unavailable/fail-closed; the fixture evaluator remains DevNet/TestNet
+evidence-only; the emergency fixture evaluator is explicit and non-production;
+MainNet peer-driven apply remains refused; validator-set rotation remains
+unsupported; no real governance engine or on-chain proof verifier is
+implemented. Release-binary evidence is deferred to **Run 229**. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
