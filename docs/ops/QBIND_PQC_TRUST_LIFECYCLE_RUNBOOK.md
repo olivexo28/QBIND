@@ -8262,4 +8262,35 @@ MainNet peer-driven apply remains refused; validator-set rotation remains
 unsupported; no real governance engine or on-chain proof verifier is
 implemented. Release-binary evidence is deferred to **Run 229**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md`.
+
+## Run 229 — release-binary peer evaluator-context representation evidence
+
+Run 229 is the **release-binary evidence** run for the Run 228 peer
+evaluator-context representation boundary
+(`crates/qbind-node/examples/run_229_peer_evaluator_context_representation_release_binary_helper.rs`,
+`scripts/devnet/run_229_peer_evaluator_context_representation_release_binary.sh`,
+`docs/devnet/run_229_peer_evaluator_context_representation_release_binary/`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md`). It proves on real
+`target/release/qbind-node` plus a release-built helper using the production
+library symbols (170 typed checks across accepted/rejection/reachability,
+`verdict: PASS`) that the release-built code exposes and exercises the Run 228
+representation boundary.
+
+**Operator impact: none.** Run 229 is release-binary evidence only, introduces
+no production source behavior change, no new runtime CLI/env surface, and no
+new mutation path, and changes no wire/schema/marker/sequence/trust-bundle
+format. The release evidence reconfirms the default Disabled + absent-carrier
+path preserves legacy validation, a `Present` context routes through the
+Run 226 wiring into the Run 224 integration where representable,
+`WireSchemaUnavailable` is fail-closed and never an approval, invalid live
+inbound `0x05` is not propagated/staged/applied, invalid peer-driven drain is
+not applied, MainNet peer-driven apply remains refused, and production/on-chain/
+MainNet evaluators remain unavailable/fail-closed. The real release binary
+makes no peer evaluator-context claims and an invalid governance-execution
+selector fails closed before mutation; a 26-pattern denylist is proven empty;
+regression targets run_228/226/224/222/220/217/215/213/211/157/152/150/148/142,
+`--lib pqc_authority`, and `--lib` all PASS. Validator-set rotation remains
+unsupported; no real governance engine or on-chain proof verifier is
+implemented. **Full C4 remains OPEN; C5 remains OPEN.** See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**

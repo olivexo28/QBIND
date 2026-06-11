@@ -5559,4 +5559,35 @@ routed `ProceedMutate` outcome authorizes apply; every rejection is
 non-mutating. Release-binary evidence is deferred to **Run 229**. See
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+
+## Run 229 — release-binary peer evaluator-context representation evidence
+
+Run 229 is the **release-binary evidence** run for the Run 228 peer
+evaluator-context representation boundary
+(`crates/qbind-node/examples/run_229_peer_evaluator_context_representation_release_binary_helper.rs`,
+`scripts/devnet/run_229_peer_evaluator_context_representation_release_binary.sh`,
+`docs/devnet/run_229_peer_evaluator_context_representation_release_binary/`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md`). It proves on real
+`target/release/qbind-node` plus a release-built helper using the production
+library symbols (170 typed checks across accepted/rejection/reachability,
+`verdict: PASS`) that the release-built code exposes and exercises the Run 228
+representation boundary. The boundary is **local/source-test only and changes
+no wire/schema/marker/sequence/trust-bundle format**, with no production source
+behavior change. The authority model is unchanged: the carrier taxonomy
+represents the live-wire path that cannot carry an evaluator binding as a typed
+`WireSchemaUnavailable` fail-closed status — never an approval; missing/
+unsupported carrier status is typed and fail-closed under an explicit evaluator
+policy. The fixture evaluator remains DevNet/TestNet evidence-only, the
+emergency fixture evaluator is explicit and non-production, peer-majority
+gossip can never satisfy evaluator policy, **MainNet peer-driven apply remains
+refused**, production/on-chain/MainNet evaluators remain unavailable/fail-closed,
+validator-set rotation remains unsupported, and no real governance execution
+engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or production
+signing custody is implemented. Only the routed `RoutedProceedMutate` outcome
+authorizes apply; every rejection is non-mutating. Regression targets
+run_228/226/224/222/220/217/215/213/211/157/152/150/148/142,
+`--lib pqc_authority`, and `--lib` all PASS; a 26-pattern denylist is proven
+empty. **Full C4 remains OPEN; C5 remains OPEN.** See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
