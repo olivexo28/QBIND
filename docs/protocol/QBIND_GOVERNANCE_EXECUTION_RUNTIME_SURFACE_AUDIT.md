@@ -171,6 +171,49 @@ remains OPEN. C5 remains OPEN.** See
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md).
 
+## Run 225 update — release-binary evaluator-runtime integration evidence landed
+
+Run 225 is the release-binary evidence companion to the Run 224 source/test
+governance evaluator runtime integration layer. Where Run 224 landed the
+integration layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+at the source/test level and deferred release-binary evidence, Run 225 proves
+on real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_225_governance_evaluator_runtime_integration_release_binary_helper.rs`,
+driven by `scripts/devnet/run_225_governance_evaluator_runtime_integration_release_binary.sh`)
+that the release-built code exposes and exercises the integration:
+**runtime consumption composes with the evaluator interface in release mode**;
+the evaluator request/response binding is deterministic and field-checked;
+`ProceedMutate` is produced only when **both** the Run 220 runtime-consumption
+stage and the Run 222 evaluator stage agree, after the required ordering
+(selector resolution → sidecar/load-status derivation → runtime consumption →
+evaluator request construction → evaluator evaluation → governance execution
+decision validation → mutation only after all required checks pass); the
+default Disabled-policy + absent-carrier `ProceedLegacyBypass` is preserved;
+the production / on-chain / MainNet evaluator paths are reached and fail closed
+as unavailable; and **MainNet peer-driven apply remains refused** even with a
+fixture evaluator approval.
+
+The release helper records 112 typed checks across accepted (59) / rejection
+(37) / reachability (16) covering the full A1–A15 / R1–R30 matrix, and the
+harness drives the real release binary to prove `--help` exposes no
+evaluator-runtime integration surface and the default DevNet/TestNet/MainNet
+surfaces make no integration / governance-execution / MainNet-governance /
+on-chain-verifier / validator-set-rotation / KMS-HSM / RemoteSigner /
+autonomous-apply / apply-on-receipt / peer-majority / MainNet-peer-driven-apply
+enablement claim (24 forbidden patterns proven empty). **No real governance
+execution engine and no real on-chain governance proof verifier is
+implemented.** The fixture evaluator remains DevNet/TestNet evidence-only; the
+emergency fixture evaluator is explicit and non-production;
+production/on-chain/MainNet evaluators remain unavailable/fail-closed; the
+default legacy bypass is preserved; MainNet peer-driven apply remains refused;
+validator-set rotation remains unsupported; existing Run 221 runtime-consumption
+and Run 223 evaluator-interface behaviour remains compatible;
+KMS/HSM/RemoteSigner/custody-attestation remain boundary-only. **Full C4
+remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md).
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

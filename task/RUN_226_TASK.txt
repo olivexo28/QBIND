@@ -1,0 +1,289 @@
+Task: Run 226 — Source/Test Governance Evaluator Integration Runtime Call-Site Wiring
+
+Current accepted state:
+
+* Run 220: source/test long-running governance-execution runtime consumption wiring landed.
+* Run 221: release-binary runtime-consumption evidence fully closed.
+* Run 222: source/test typed production governance execution evaluator interface boundary landed.
+* Run 223: release-binary evaluator-interface evidence fully closed.
+* Run 224: source/test governance evaluator runtime integration layer landed.
+* Run 225: release-binary governance evaluator runtime integration evidence fully closed:
+
+  * release-built helper exercises the Run 224 integration layer;
+  * helper matrix 112/112 PASS;
+  * runtime consumption composes with evaluator interface in release mode;
+  * default Disabled legacy bypass remains preserved;
+  * production/on-chain/MainNet evaluators remain unavailable/fail-closed;
+  * fixture/emergency fixture evaluators remain evidence-only and non-production;
+  * MainNet peer-driven apply remains refused;
+  * validator-set rotation remains unsupported;
+  * no real governance engine exists;
+  * no real on-chain proof verifier exists;
+  * no KMS/HSM backend exists;
+  * no RemoteSigner backend exists;
+  * Full C4 remains OPEN;
+  * C5 remains OPEN.
+* Current honest limitation recorded by Run 225:
+  The Run 224 integration layer has no runtime CLI/env selector and no production call-site wiring. It is release-evidenced through the release-built helper using the same library symbols a future production call site would use.
+
+Objective:
+Wire the Run 224 governance evaluator runtime integration layer into the existing source/test runtime call-site paths that already consume governance-execution policy and sidecar status from Run 220.
+
+This run must make production source call sites route through the integration layer where representable, while keeping production/on-chain/MainNet evaluators unavailable/fail-closed and preserving default Disabled legacy bypass.
+
+Release-binary call-site wiring evidence is deferred to Run 227.
+
+Strict scope:
+
+* Source/test only.
+* No release-binary harness in this run.
+* No real governance execution engine.
+* No real on-chain governance proof verifier.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* No validator-set rotation.
+* No KMS/HSM backend implementation.
+* No RemoteSigner backend implementation.
+* No schema/wire/marker/sequence/trust-bundle changes.
+* No autonomous apply.
+* No automatic apply on receipt.
+* No peer-majority authority.
+* Do not weaken Runs 070, 130–225.
+* Do not claim full C4 or C5 closure.
+
+Required source behavior:
+
+1. Locate the Run 220 runtime consumption call sites:
+
+   * reload-check;
+   * reload-apply;
+   * startup `--p2p-trust-bundle`;
+   * SIGHUP;
+   * local peer-candidate-check;
+   * live inbound `0x05`, if representable;
+   * peer-driven drain, if representable.
+
+2. For representable surfaces, route runtime consumption through the Run 224 integration layer:
+
+   * use selected `GovernanceExecutionPolicy`;
+   * use real governance-execution sidecar load status;
+   * construct evaluator request/context where policy requires evaluator validation;
+   * call the Run 222 evaluator interface through the Run 224 integration entry point;
+   * consume `GovernanceEvaluatorRuntimeIntegrationOutcome`;
+   * fail closed before mutation on rejection.
+
+3. Preserve Disabled behavior:
+
+   * default unset CLI/env remains `GovernanceExecutionPolicy::Disabled`;
+   * absent governance-execution carrier under Disabled produces `ProceedLegacyBypass`;
+   * legacy no-governance-execution path remains compatible.
+
+4. Preserve explicit policy behavior:
+
+   * fixture evaluator remains DevNet/TestNet source-test only;
+   * emergency fixture evaluator remains explicit and non-production;
+   * production evaluator is callable but unavailable/fail-closed;
+   * on-chain evaluator is callable but unavailable/fail-closed;
+   * MainNet evaluator is callable but unavailable/fail-closed/refused;
+   * MainNet peer-driven apply remains refused even with fixture approval.
+
+5. Preserve ordering:
+
+   * selector resolution;
+   * sidecar/load-status derivation;
+   * runtime consumption;
+   * evaluator request construction;
+   * evaluator evaluation;
+   * governance execution decision validation;
+   * lifecycle/governance/custody/custody-attestation checks where applicable;
+   * mutation only after all required checks pass.
+
+6. Preserve non-mutation:
+   Rejected integration outcomes must produce:
+
+   * no Run 070 call;
+   * no live trust swap;
+   * no session eviction;
+   * no sequence write;
+   * no marker write;
+   * no marker-before-sequence regression.
+
+7. Honest limitations:
+   If live inbound `0x05` or peer-driven drain cannot yet carry enough evaluator context without a schema/wire change, do not invent one in Run 226. Document the limitation precisely and keep the path non-propagating / non-staging / non-applying for invalid candidates.
+
+Required accepted scenarios:
+A1. reload-check default Disabled + absent carrier preserves `ProceedLegacyBypass`.
+
+A2. reload-apply default Disabled + absent carrier preserves legacy behavior.
+
+A3. startup `--p2p-trust-bundle` default Disabled + absent carrier preserves legacy behavior.
+
+A4. SIGHUP default Disabled + absent carrier preserves legacy behavior.
+
+A5. local peer-candidate-check default Disabled + absent carrier preserves legacy behavior.
+
+A6. reload-check with DevNet fixture policy and valid sidecar routes through integration and accepts only when runtime consumption and evaluator both agree.
+
+A7. reload-apply with DevNet fixture policy and valid sidecar routes through integration and accepts only when runtime consumption and evaluator both agree.
+
+A8. SIGHUP with DevNet fixture policy and valid sidecar routes through integration where representable.
+
+A9. local peer-candidate-check with TestNet fixture policy and valid sidecar routes through integration where representable.
+
+A10. explicit emergency fixture policy accepts only explicit emergency action.
+
+A11. production evaluator path is reached from runtime call-site integration and fails closed as unavailable.
+
+A12. on-chain evaluator path is reached from runtime call-site integration and fails closed as unavailable.
+
+A13. MainNet evaluator path is reached from runtime call-site integration and fails closed/refused.
+
+A14. CLI-over-env precedence is preserved through call-site integration.
+
+A15. invalid selector fails closed before mutation.
+
+A16. live inbound `0x05` limitation is documented if not representable; invalid candidates are not propagated/staged/applied.
+
+A17. peer-driven drain limitation is documented if not representable; MainNet peer-driven apply remains refused.
+
+Required rejection scenarios:
+R1. missing governance-execution material rejected when explicit evaluator policy requires it.
+
+R2. malformed governance-execution material rejected.
+
+R3. wrong evaluator source rejected.
+
+R4. wrong environment rejected.
+
+R5. wrong chain rejected.
+
+R6. wrong genesis rejected.
+
+R7. wrong authority root rejected.
+
+R8. wrong governance proof digest rejected.
+
+R9. wrong on-chain proof digest rejected.
+
+R10. wrong custody attestation digest rejected.
+
+R11. wrong proposal id rejected.
+
+R12. wrong decision id rejected.
+
+R13. wrong lifecycle action rejected.
+
+R14. wrong candidate digest rejected.
+
+R15. wrong authority-domain sequence rejected.
+
+R16. expired evaluator request rejected.
+
+R17. stale/replayed evaluator request rejected.
+
+R18. quorum/threshold insufficient rejected.
+
+R19. emergency action not authorized rejected.
+
+R20. validator-set rotation unsupported rejected.
+
+R21. policy-change action unsupported rejected.
+
+R22. production evaluator unavailable rejected.
+
+R23. on-chain evaluator unavailable rejected.
+
+R24. MainNet evaluator unavailable/refused rejected.
+
+R25. local operator cannot satisfy evaluator policy.
+
+R26. peer majority cannot satisfy evaluator policy.
+
+R27. evaluator valid but governance execution decision invalid rejected.
+
+R28. governance execution decision valid but evaluator response invalid rejected.
+
+R29. validation-only rejection writes no marker and no sequence.
+
+R30. mutating rejection produces no Run 070 call, no live trust swap, no session eviction, no sequence write, and no marker write.
+
+R31. MainNet peer-driven apply remains refused even with fixture evaluator approval.
+
+Required tests:
+Add focused tests, preferably:
+
+`crates/qbind-node/tests/run_226_governance_evaluator_runtime_callsite_wiring_tests.rs`
+
+Minimum coverage:
+
+* A1–A17 where representable.
+* R1–R31.
+* source reachability from runtime call sites into the Run 224 integration layer.
+* proof that `GovernanceEvaluatorRuntimeIntegrationOutcome` is consumed, not discarded.
+* proof that `ProceedMutate` is the only mutation-authorizing integration outcome.
+* proof that `RuntimeConsumptionFailClosed`, `EvaluatorRejected`, and `MainNetPeerDrivenApplyRefused` fail closed before mutation.
+* ordering tests.
+* deterministic evaluator request/response digest binding tests.
+* default Disabled legacy compatibility tests.
+* MainNet refusal tests.
+* compatibility with Runs 220, 222, 224.
+
+Required documentation:
+Add:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md`
+
+Update:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/whitepaper/contradiction.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+
+Documentation must state:
+
+* Run 226 is source/test runtime call-site wiring for the governance evaluator integration layer.
+* Representable runtime call sites now route through the integration layer.
+* Default Disabled legacy bypass is preserved.
+* Production/on-chain/MainNet evaluators remain unavailable/fail-closed.
+* Fixture evaluator remains DevNet/TestNet source-test only.
+* Emergency fixture evaluator remains explicit and non-production.
+* Live inbound `0x05` and peer-driven drain limitations are documented honestly if still not fully representable.
+* MainNet peer-driven apply remains refused.
+* Validator-set rotation remains unsupported.
+* No real governance engine or on-chain proof verifier is implemented.
+* Release-binary call-site wiring evidence is deferred to Run 227.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo build -p qbind-node --bin qbind-node`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_222_governance_execution_evaluator_tests`
+* `cargo test -p qbind-node --test run_220_governance_execution_runtime_consumption_tests`
+* `cargo test -p qbind-node --test run_217_governance_execution_runtime_arming_tests`
+* `cargo test -p qbind-node --test run_215_governance_execution_policy_selector_tests`
+* `cargo test -p qbind-node --test run_213_governance_execution_payload_callsite_tests`
+* `cargo test -p qbind-node --test run_211_governance_execution_policy_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Acceptance criteria:
+Run 226 is acceptable only if:
+
+1. Representable runtime call sites route through the Run 224 integration layer at source/test level.
+2. Integration outcomes are consumed, not discarded.
+3. Default Disabled legacy bypass remains preserved.
+4. Production/on-chain/MainNet evaluators remain unavailable/fail-closed.
+5. Fixture/emergency fixture evaluators remain non-production.
+6. Rejections are non-mutating.
+7. MainNet peer-driven apply remains refused.
+8. Validator-set rotation remains unsupported.
+9. Release-binary call-site wiring evidence is deferred to Run 227.
+10. No full C4 or C5 closure is claimed.

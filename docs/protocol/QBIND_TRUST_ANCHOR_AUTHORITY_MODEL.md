@@ -5422,3 +5422,41 @@ custody, or validator-set rotation is implemented. Release-binary evidence is
 deferred to **Run 225**. See `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md`
 and `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 225 — release-binary governance evaluator runtime integration evidence
+
+Run 225 is the release-binary evidence companion to the Run 224 source/test
+governance evaluator runtime integration. Where Run 224 landed the pure
+integration layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+that consults the evaluator authority as the next evaluation stage inside Run
+220 runtime consumption, Run 225 proves on real `target/release/qbind-node`
+plus a release-built helper
+(`crates/qbind-node/examples/run_225_governance_evaluator_runtime_integration_release_binary_helper.rs`,
+driven by `scripts/devnet/run_225_governance_evaluator_runtime_integration_release_binary.sh`)
+that the release-built code exposes and exercises the integration: mutation
+authorization (`ProceedMutate`) is produced only when both the
+runtime-consumption stage and the evaluator authority agree on the same
+lifecycle action / candidate digest / authority-domain sequence, after the
+ordered checks. The release helper records 112 typed checks across accepted
+(59) / rejection (37) / reachability (16) covering the full A1–A15 / R1–R30
+matrix in release mode. The fixture evaluator authority remains DevNet/TestNet
+evidence-only; the emergency fixture evaluator authority is explicit and
+non-production; production/on-chain/MainNet evaluator authorities are reached
+and fail closed as unavailable; **MainNet peer-driven apply remains refused**
+even where a fixture evaluator would otherwise approve; validator-set rotation
+remains unsupported; the Run 193 custody, Run 199 RemoteSigner, and Run 210
+custody-attestation sibling authority selectors remain independent and
+compatible; KMS/HSM, RemoteSigner, and production signing custody remain
+boundary-only; existing Run 221 and Run 223 release behaviour remains
+compatible. The harness drives the real release binary to prove `--help`
+exposes no integration surface and the default DevNet/TestNet/MainNet surfaces
+make no integration / governance-execution / MainNet-governance /
+on-chain-verifier / validator-set-rotation / KMS-HSM / RemoteSigner /
+autonomous-apply / apply-on-receipt / peer-majority / MainNet-peer-driven-apply
+enablement claim (24 forbidden patterns proven empty). No real governance
+execution engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend,
+production signing custody, or validator-set rotation is implemented. See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_225.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**
