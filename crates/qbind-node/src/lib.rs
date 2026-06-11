@@ -685,6 +685,24 @@ pub mod pqc_governance_execution_evaluator;
 // Release-binary evidence is deferred to Run 225. Full C4 remains OPEN; C5
 // remains OPEN.
 pub mod pqc_governance_execution_evaluator_runtime_integration;
+// Run 228 — source/test evaluator-context representation boundary for live
+// inbound `0x05` and peer-driven drain. Adds a typed, local-only evaluator
+// peer context that can carry/reference evaluator context for those two
+// previously-limited surfaces in source/test plumbing where representable,
+// classifies the carrier status (Absent / Present / Malformed /
+// UnsupportedSurface / WireSchemaUnavailable / PeerMajorityUnsupported /
+// MainNetRefused), and routes a representable Present context through the Run
+// 226 call-site wiring into the Run 224 integration layer. Local-only: it
+// invents no `0x05` wire format and changes no wire/trust-bundle/marker/
+// sequence schema. A missing/unsupported carrier is typed and fail-closed
+// under an explicit evaluator policy (never a silent approval). MainNet
+// peer-driven apply remains refused; production/on-chain/MainNet evaluators
+// remain unavailable/fail-closed; fixture/emergency fixture evaluators remain
+// non-production; validator-set rotation remains unsupported. Pure: no marker,
+// no sequence, no live trust swap, no session eviction, no Run 070 call.
+// Release-binary evidence is deferred to Run 229. Full C4 remains OPEN; C5
+// remains OPEN.
+pub mod pqc_governance_evaluator_peer_context;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
