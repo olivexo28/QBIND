@@ -3293,3 +3293,33 @@ rotation is implemented. Tests:
 `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md` and
 `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
 **Full C4 remains OPEN; C5 remains OPEN.**
+
+## Run 227 — release-binary governance evaluator runtime call-site wiring evidence
+
+Run 227 is the release-binary evidence run for the Run 226 call-site wiring.
+On real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_227_governance_evaluator_runtime_callsite_wiring_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh`)
+it proves the release-built code exercises the Run 226 wiring entry points
+(`wire_governance_evaluator_runtime_callsite` and
+`wire_governance_evaluator_runtime_callsite_without_evaluator_context`): the
+representable runtime call sites consume the
+`GovernanceEvaluatorRuntimeIntegrationOutcome` (consumed, not discarded), the
+default Disabled + absent-carrier legacy bypass is preserved, a present
+carrier without evaluator context fails closed, and every rejection is
+non-mutating. **MainNet peer-driven apply remains refused** (Run 147 FATAL
+invariant) even with a fixture evaluator approval; the real binary scenarios
+confirm an invalid governance-execution selector fails closed before mutation
+and a 26-pattern denylist (including no MainNet apply, no autonomous apply, no
+apply on receipt, no peer-majority authority) is proven empty. The live
+inbound `0x05` and peer-driven drain surfaces remain wired but not fully
+representable from the binary (documented limitation). No real governance
+engine, on-chain verifier, KMS/HSM backend, RemoteSigner backend, or
+validator-set rotation is implemented; Run 221/223/225 release behaviour
+remains compatible. Tests:
+`crates/qbind-node/tests/run_226_governance_evaluator_runtime_callsite_wiring_tests.rs`
+(59, PASS) plus the Run 227 release helper corpus (144 checks, PASS). See
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_227.md` and
+`docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`.
+**Full C4 remains OPEN; C5 remains OPEN.**

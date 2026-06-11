@@ -253,6 +253,35 @@ governance engine or on-chain proof verifier is implemented. Tests:
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_226.md).
 
 
+## Run 227 update — release-binary evaluator-runtime call-site wiring evidence landed
+
+Run 227 is the **release-binary evidence** run for the Run 226 call-site
+wiring. Where Run 226 proved the wiring at the source/test level, Run 227
+proves on real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_227_governance_evaluator_runtime_callsite_wiring_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_227_governance_evaluator_runtime_callsite_wiring_release_binary.sh`)
+that the release-built code exposes and exercises the Run 226 wiring entry
+points (`wire_governance_evaluator_runtime_callsite` and
+`wire_governance_evaluator_runtime_callsite_without_evaluator_context`): the
+representable runtime call sites consume the
+`GovernanceEvaluatorRuntimeIntegrationOutcome` (consumed, not discarded), the
+call-site wiring outcome equals the underlying Run 224 integration outcome,
+the **default Disabled legacy bypass is preserved**, a present carrier
+without evaluator context **fails closed**, and production/on-chain/MainNet
+evaluators remain unavailable/fail-closed. The release helper PASSes an
+A1–A23 / R1–R31 / reachability corpus (144 checks); the real binary scenarios
+confirm an invalid governance-execution selector fails closed before
+mutation; a 26-pattern denylist is proven empty. The **live inbound `0x05`**
+and **peer-driven drain** surfaces remain wired but not fully representable
+from the binary (documented honestly). MainNet peer-driven apply remains
+refused; validator-set rotation remains unsupported; no real governance
+engine or on-chain proof verifier is implemented; Run 221/223/225 release
+behaviour remains compatible. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_227.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_227.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
