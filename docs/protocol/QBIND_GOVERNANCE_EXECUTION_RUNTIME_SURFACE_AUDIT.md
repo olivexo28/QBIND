@@ -312,6 +312,37 @@ deferred to **Run 229**. **Full C4 remains OPEN. C5 remains OPEN.** See
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_228.md).
 
+## Run 229 update — release-binary peer evaluator-context representation evidence landed
+
+Run 229 is the **release-binary evidence** run for the Run 228 peer
+evaluator-context representation boundary. Where Run 228 proved the boundary at
+the source/test level, Run 229 proves on real `target/release/qbind-node` plus
+a release-built helper
+(`crates/qbind-node/examples/run_229_peer_evaluator_context_representation_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_229_peer_evaluator_context_representation_release_binary.sh`)
+that the release-built code exposes and exercises the representation symbols
+(`GovernanceEvaluatorPeerContext`, `evaluate_peer_evaluator_context`,
+`evaluate_peer_evaluator_context_wire_only`, the full carrier taxonomy, and the
+`PeerEvaluatorContextOutcome` taxonomy) over an A1–A18 / R1–R27 corpus plus a
+reachability corpus (170 checks, 0 failures, `verdict: PASS`). It introduces
+**no** production source behavior change and changes no
+wire/schema/marker/sequence/trust-bundle format. The release evidence confirms
+the default Disabled + absent-carrier path preserves legacy validation, a
+`Present` context routes through the Run 226 wiring into the Run 224
+integration where representable, `WireSchemaUnavailable` is fail-closed and
+never an approval, invalid live inbound `0x05` is not propagated/staged/applied,
+invalid peer-driven drain is not applied, MainNet peer-driven apply remains
+refused, and production/on-chain/MainNet evaluators remain unavailable/
+fail-closed. The real `target/release/qbind-node` surfaces make no peer
+evaluator-context claims and an invalid governance-execution selector fails
+closed before mutation; a 26-pattern denylist is proven empty. Regression
+targets run_228/226/224/222/220/217/215/213/211/157/152/150/148/142,
+`--lib pqc_authority`, and `--lib` all PASS. Release-binary evidence only; no
+weakening of Runs 070, 130–228. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md).
+
 
 ## 1. Background and prior accepted state
 
