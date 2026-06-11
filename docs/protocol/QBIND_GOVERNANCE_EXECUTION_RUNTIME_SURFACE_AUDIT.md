@@ -141,6 +141,36 @@ unsupported; KMS/HSM/RemoteSigner/custody-attestation remain boundary-only.
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_223.md).
 
+## Run 224 update — source/test evaluator-runtime integration landed
+
+Run 224 is **source/test evaluator-runtime integration**. Where Run 220
+proved runtime consumption and Run 222 proved the typed evaluator interface,
+neither composed the evaluator interface into the runtime-consumption
+pipeline. Run 224 adds the integration layer
+(`crates/qbind-node/src/pqc_governance_execution_evaluator_runtime_integration.rs`)
+so that **the evaluator interface is now composed into runtime consumption
+at the source/test level**: the pipeline calls Run 220 runtime consumption,
+then constructs and evaluates the Run 222 evaluator request/response, then
+reconciles against Run 211 governance execution decision validation over the
+Run 213 payload material, preserving the required ordering (selector
+resolution → load-status derivation → runtime consumption → evaluator
+request construction → evaluator evaluation → governance execution decision
+validation → mutation only after all required checks pass). Mutation
+authorization is produced only when both the runtime-consumption stage and
+the evaluator stage agree; every rejection is non-mutating (no Run 070 call,
+no live trust swap, no session eviction, no sequence write, no marker write),
+proven by `crates/qbind-node/tests/run_224_governance_evaluator_runtime_integration_tests.rs`
+(48 tests, A1–A12 / R1–R30). **Production/on-chain/MainNet evaluator remains
+unavailable/fail-closed.** The fixture evaluator remains DevNet/TestNet
+source-test only; the emergency fixture evaluator is explicit and
+non-production; **MainNet peer-driven apply remains refused** even where a
+fixture evaluator would otherwise approve; **validator-set rotation remains
+unsupported**. **No real governance engine or on-chain proof verifier is
+implemented.** Release-binary evidence is deferred to **Run 225**. **Full C4
+remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_224.md).
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
