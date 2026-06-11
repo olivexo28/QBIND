@@ -361,13 +361,6 @@ impl Fixture {
         self.callsite_with(&FixtureGovernanceExecutionEvaluatorInterface)
     }
 
-    /// `true` iff the call-site wiring authorized a mutation (`ProceedMutate`).
-    fn is_mutate_authorized(&self) -> bool {
-        matches!(
-            self.callsite(),
-            Ok(GovernanceEvaluatorRuntimeIntegrationOutcome::ProceedMutate { .. })
-        )
-    }
 }
 
 fn rotate_fixture(env: TrustBundleEnvironment) -> Fixture {
