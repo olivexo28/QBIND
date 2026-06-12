@@ -703,6 +703,24 @@ pub mod pqc_governance_execution_evaluator_runtime_integration;
 // Release-binary evidence is deferred to Run 229. Full C4 remains OPEN; C5
 // remains OPEN.
 pub mod pqc_governance_evaluator_peer_context;
+// Run 230 — source/test governance evaluator replay and freshness state
+// boundary. Adds a typed, pure, fail-closed state boundary that decides whether
+// an evaluator decision is Fresh / FreshButNotYetEffective / Expired / Stale /
+// ReplayDetected / AlreadyConsumed / Superseded / wrong-binding / unavailable
+// BEFORE any lifecycle mutation can happen. Defines typed replay/freshness
+// inputs + expectations, the state classification and outcome enums,
+// deterministic digest helpers (state key / observation / consumed / freshness
+// transcript), and the GovernanceEvaluatorReplayStateReader/Writer boundary
+// traits. A DevNet/TestNet in-memory FixtureReplayStateStore is the only store
+// that records anything; the Production/MainNet readers/writers are callable
+// but always unavailable/fail-closed. No real governance engine, on-chain
+// proof verifier, or RocksDB/file/schema/migration/storage-format change is
+// implemented. MainNet peer-driven apply remains refused even when state is
+// fresh; validator-set rotation and policy-change actions remain unsupported.
+// Pure: no marker, no sequence, no live trust swap, no session eviction, no Run
+// 070 call. Release-binary replay/freshness evidence is deferred to Run 231.
+// Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_evaluator_replay_state;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
