@@ -509,6 +509,45 @@ Existing Run 231/229/227/225/223 release behaviour remains compatible.
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_233.md).
 
 
+## Run 234 update — source/test governance evaluator post-mutation replay consume boundary landed
+
+Run 234 is source/test governance evaluator **post-mutation replay consume
+boundary** work
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_consume_boundary.rs`).
+Run 230 proved a typed replay/freshness state boundary, Run 231 closed its
+release-binary evidence, Run 232 composed that boundary into the Run 224
+evaluator-runtime integration path as a mandatory pre-mutation gate, and Run 233
+closed that composition's release-binary evidence — but the consume step that
+records a decision as consumed was not yet modeled as a strict
+**after-success-only** step. Run 234 adds exactly that as a pure boundary that
+separates the four phases — pre-mutation freshness validation, mutation
+authorization (`MutationAuthorizationOutcome`), successful mutation completion
+(`MutationCompletionStatus`), and an explicit replay-state consume after success
+only — and resolves a typed `ConsumeBoundaryOutcome` (`DoNotConsume{LegacyBypass,
+Deferred, ValidationOnly, BeforeApply, ApplyFailed, RolledBack,
+UnsupportedSurface, MainNetRefused}` / `ConsumeFixtureAfterSuccess` /
+`FailClosed{ConsumeUnavailable, ProductionConsumeUnavailable,
+MainNetConsumeUnavailable, WrongBinding}`). Consume is modeled as
+after-success-only: only `ConsumeFixtureAfterSuccess` (after
+`AppliedSuccessfully`) authorizes a fixture consume, and deferred, validation-only,
+authorized-but-not-applied, failed-apply, rolled-back, unsupported-surface, and
+MainNet-refused outcomes never consume. The boundary composes with the Run 230
+reader/writer traits: the DevNet/TestNet fixture writer records consumed only
+after an explicit after-success call (`perform_post_mutation_consume`), and the
+production / MainNet consume writers are callable but fail closed unavailable.
+Fixture consume remains DevNet/TestNet source-test only; production/MainNet
+consume remains unavailable/fail-closed. No real governance engine or on-chain
+proof verifier is implemented, MainNet peer-driven apply remains refused and
+never consumes, and validator-set rotation remains unsupported. The boundary is
+pure: no marker, no sequence, no live trust swap, no session eviction, no Run
+070 call, and no RocksDB/file/schema/migration/storage-format change.
+Release-binary consume-boundary evidence is deferred to **Run 235**. Source/test
+evidence only; no weakening of Runs 070, 130–233. **Full C4 remains OPEN. C5
+remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_234.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_234.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
