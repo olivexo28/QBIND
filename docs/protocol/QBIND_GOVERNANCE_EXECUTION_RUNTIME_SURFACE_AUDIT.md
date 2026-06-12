@@ -548,6 +548,50 @@ remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_234.md).
 
 
+## Run 235 update — release-binary governance evaluator post-mutation replay consume boundary evidence
+
+Run 235 is the **release-binary** evidence run for the Run 234 source/test
+governance evaluator **post-mutation replay consume boundary**
+(`crates/qbind-node/examples/run_235_governance_evaluator_replay_consume_boundary_release_binary_helper.rs`,
+`scripts/devnet/run_235_governance_evaluator_replay_consume_boundary_release_binary.sh`,
+`docs/devnet/run_235_governance_evaluator_replay_consume_boundary_release_binary/`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_235.md`). Where Run 234 landed the consume
+boundary at the source/test level, Run 235 proves on real
+`target/release/qbind-node` plus a release-built helper using the production
+library symbols (`evaluate_post_mutation_consume`,
+`perform_post_mutation_consume`, the `MutationAuthorizationOutcome` /
+`MutationCompletionStatus` phase projections, the `ConsumeBoundaryOutcome`
+taxonomy `DoNotConsume{LegacyBypass, Deferred, ValidationOnly, BeforeApply,
+ApplyFailed, RolledBack, UnsupportedSurface, MainNetRefused}` /
+`ConsumeFixtureAfterSuccess` / `FailClosed{ConsumeUnavailable,
+ProductionConsumeUnavailable, MainNetConsumeUnavailable, WrongBinding}`, the
+consume authorization / transcript / record digest helpers, and the invariant
+guard functions) that the release-built code exposes and exercises the Run 234
+consume boundary. The release helper records 225 typed checks across accepted
+(A1–A21) / rejection (R1–R33) / reachability in release mode: consume is
+after-success-only — only `ConsumeFixtureAfterSuccess` (after
+`AppliedSuccessfully`) authorizes a fixture consume; deferred, validation-only,
+authorized-but-not-applied, failed-apply, rolled-back, unsupported-surface, and
+MainNet-refused outcomes never consume; the DevNet/TestNet fixture writer records
+consumed only after an explicit after-success `perform_post_mutation_consume`
+call; and the production/MainNet consume writers remain callable-but-unavailable/
+fail-closed. The harness drives the real release binary to prove the default
+surfaces make no consume-boundary claims and an invalid governance-execution
+selector fails closed before mutation (no marker/sequence write, no live trust
+swap, no session eviction, no Run 070 call); a denylist is proven empty.
+Validation: release helper corpus `pass=225`, `fail=0`; release builds of
+`--bin qbind-node` and the Run 235 example PASS; run_234, run_232, run_230,
+run_228, run_226, run_224, run_222, run_220, run_217, run_215, run_213, run_211,
+run_157, run_152, run_150, run_148, run_142, `--lib pqc_authority`, and `--lib`
+all PASS. No real governance execution engine, on-chain proof verifier, KMS/HSM
+backend, RemoteSigner backend, MainNet governance enablement, or validator-set
+rotation; no production source behavior change; existing Run 233/231/229/227/225
+release behaviour remains compatible; no weakening of Runs 070, 130–234. **Full
+C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_235.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_235.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
