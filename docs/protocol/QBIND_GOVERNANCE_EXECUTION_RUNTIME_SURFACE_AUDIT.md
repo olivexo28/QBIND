@@ -343,6 +343,44 @@ weakening of Runs 070, 130–228. **Full C4 remains OPEN. C5 remains OPEN.** See
 [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_229.md).
 
+## Run 230 update — source/test governance evaluator replay/freshness state boundary landed
+
+Run 230 is source/test governance evaluator replay/freshness state boundary
+work. It defines a typed, pure, fail-closed replay/freshness state boundary
+for evaluator decisions
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_state.rs`, registered
+in `lib.rs`, with `crates/qbind-node/tests/run_230_governance_evaluator_replay_state_tests.rs`,
+52 tests, PASS). Evaluator requests/responses already bind a replay nonce,
+freshness window, and expiry; Run 230 adds the typed state boundary that — before
+any lifecycle mutation — decides whether a decision is `Fresh`,
+`FreshButNotYetEffective`, `Expired`, `Stale`, `ReplayDetected`,
+`AlreadyConsumed`, `Superseded`, a wrong-binding (`WrongEpoch` /
+`WrongEnvironment` / `WrongChain` / `WrongGenesis` / `WrongSurface` /
+`MalformedState`), or unavailable (`StateUnavailable` /
+`ProductionStateUnavailable` / `MainNetStateUnavailable`). Only `ProceedFresh`
+authorizes a mutation; `ProceedDeferred` is not an approval. Deterministic
+digest helpers (replay state key / observation / consumed decision / freshness
+transcript) and the `GovernanceEvaluatorReplayStateReader` /
+`GovernanceEvaluatorReplayStateWriter` boundary traits are added. A
+DevNet/TestNet in-memory `FixtureReplayStateStore` is the only store that
+records anything and records a consumed decision only on an explicit consume
+call (read-only validation never consumes); the `ProductionReplayStateReader`
+and `MainnetReplayStateReader` are callable but always unavailable/fail-closed.
+No real governance engine or on-chain proof verifier is implemented and no
+RocksDB/file/schema/migration/storage-format/marker/sequence/wire/trust-bundle
+change is introduced. The boundary is pure (no marker, no sequence, no live
+trust swap, no session eviction, no Run 070 call), so rejection always happens
+before mutation. MainNet peer-driven apply remains refused even when state is
+fresh; validator-set rotation and policy-change actions remain unsupported; the
+Run 224 integration and Run 228 peer context remain compatible when the replay
+state policy is Disabled / not wired. Regression targets run_230 (52), run_228
+(48), run_226 (59), run_224 (48), run_222 (60), run_220 (30), `--lib
+pqc_authority` (164), and `--lib` (1353) all PASS. Release-binary
+replay/freshness evidence is deferred to **Run 231**. Source/test evidence only;
+no weakening of Runs 070, 130–229. **Full C4 remains OPEN. C5 remains OPEN.**
+See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_230.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_230.md).
+
 
 ## 1. Background and prior accepted state
 
