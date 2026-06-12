@@ -423,6 +423,49 @@ verifier is implemented. Release-binary evidence only; no weakening of Runs 070,
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_231.md).
 
 
+## Run 232 update — source/test governance evaluator replay/freshness runtime integration landed
+
+Run 232 is **source/test replay/freshness runtime integration**. Where Run 230
+proved the replay/freshness state boundary as a standalone module and Run 231
+closed its release-binary evidence, the boundary was not yet integrated into the
+runtime evaluator integration path as a mandatory pre-mutation gate. Run 232
+composes the Run 230 replay/freshness state boundary into the existing Run 224
+evaluator-runtime integration path (with the Run 226 runtime call-site wiring
+and the Run 228 peer evaluator context where relevant) via a new source module
+`crates/qbind-node/src/pqc_governance_evaluator_replay_runtime_integration.rs`
+(registered in `lib.rs`). The runtime integration path now calls
+replay/freshness validation **before any mutation authorization**: the composed
+entry point `integrate_governance_evaluator_replay_runtime` runs the Run 224
+integration first, and only a Run 224 `ProceedMutate` reaches the Run 230
+`gate_evaluator_replay_freshness` validation. Mutation is authorized only by the
+terminal `GovernanceEvaluatorReplayRuntimeOutcome::ProceedFresh`, produced only
+after the evaluator and the replay/freshness state both agree the decision is
+fresh. `ProceedDeferred` (a not-yet-effective decision) is **not** an approval
+for mutation; expired/stale/replayed/consumed/superseded/wrong-binding/
+unavailable replay states fail closed before any mutation
+(`ReplayFreshnessFailClosed`); a Run 224 / Run 226 fail-closed surfaces as
+`RuntimeIntegrationFailClosed`. The integration is pure — it performs no I/O,
+writes no marker, writes no sequence, swaps no live trust, evicts no sessions,
+never invokes Run 070, and never marks a decision consumed. Read-only validation
+does not consume; explicit consume remains fixture-only and is performed by the
+caller after a fresh authorization. Fixture replay state remains DevNet/TestNet
+source-test only; production/MainNet replay state remains
+unavailable/fail-closed. MainNet peer-driven apply remains refused even when the
+replay state is fresh; validator-set rotation and policy-change actions remain
+unsupported. No RocksDB/file/schema/migration/storage-format change and no
+wire/schema/marker/sequence/trust-bundle change is implemented. Tests
+(`crates/qbind-node/tests/run_232_governance_evaluator_replay_runtime_integration_tests.rs`,
+47 checks, PASS) cover A1–A10, R1–R27, ordering (replay/freshness validation
+occurs before mutation authorization), `ProceedDeferred` is not approval,
+read-only validation does not consume, explicit consume only after successful
+fixture authorization, non-mutation, MainNet refusal, and compatibility with the
+Run 230/228/226/224/222 layers. Release-binary evidence is deferred to **Run
+233**. Source/test only; no weakening of Runs 070, 130–231. **Full C4 remains
+OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_232.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_232.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

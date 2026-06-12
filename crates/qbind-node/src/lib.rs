@@ -721,6 +721,25 @@ pub mod pqc_governance_evaluator_peer_context;
 // 070 call. Release-binary replay/freshness evidence is deferred to Run 231.
 // Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_evaluator_replay_state;
+// Run 232 — source/test governance evaluator replay/freshness runtime
+// integration. Composes the Run 224 evaluator-runtime integration, the Run 226
+// runtime call-site wiring, the Run 228 peer evaluator context (where
+// relevant), and the Run 230 replay/freshness state boundary into a single
+// integration layer that applies replay/freshness validation as a mandatory
+// pre-mutation gate. Adds a typed outcome (ProceedLegacyBypass /
+// ProceedDeferred / ProceedFresh / ReplayFreshnessFailClosed /
+// RuntimeIntegrationFailClosed / MainNetPeerDrivenApplyRefused). Fresh is
+// required before mutation authorization; Deferred is not approval;
+// expired/stale/replayed/consumed/superseded decisions fail closed before
+// mutation. Read-only validation never marks consumed; explicit consume remains
+// fixture-only and is performed by the caller after a fresh authorization.
+// Production/MainNet replay state remains unavailable/fail-closed; MainNet
+// peer-driven apply remains refused even when state is fresh; validator-set
+// rotation and policy-change actions remain unsupported. Pure: no marker, no
+// sequence, no live trust swap, no session eviction, no Run 070 call. No
+// RocksDB/file/schema/migration/storage-format change. Release-binary evidence
+// is deferred to Run 233. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_evaluator_replay_runtime_integration;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
