@@ -466,6 +466,49 @@ OPEN. C5 remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_232.md).
 
 
+## Run 233 update — release-binary governance evaluator replay/freshness runtime integration evidence landed
+
+Run 233 is the **release-binary evidence** run for the Run 232 governance
+evaluator replay/freshness runtime integration. Where Run 232 proved the
+composed integration at the source/test level, Run 233 proves on real
+`target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_233_governance_evaluator_replay_runtime_integration_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_233_governance_evaluator_replay_runtime_integration_release_binary.sh`)
+that the release-built code exposes and exercises the runtime integration
+symbols (`integrate_governance_evaluator_replay_runtime`,
+`wire_governance_evaluator_replay_runtime_callsite`,
+`wire_governance_evaluator_replay_runtime_peer_context`, the
+`GovernanceEvaluatorReplayRuntimeOutcome` taxonomy — `ProceedLegacyBypass` /
+`ProceedDeferred` / `ProceedFresh` / `ReplayFreshnessFailClosed` /
+`RuntimeIntegrationFailClosed` / `MainNetPeerDrivenApplyRefused` — and the
+invariant guard functions) over an accepted/rejection/reachability corpus (184
+checks, 0 failures, `verdict: PASS`). It introduces **no** production source
+behavior change and changes no wire/schema/marker/sequence/trust-bundle or
+RocksDB/file/schema/migration/storage format. The release evidence confirms only
+`ProceedFresh` authorizes a mutation, produced only after the Run 224 layer
+authorized a mutate and the Run 230 replay/freshness state classified the
+decision fresh; `ProceedDeferred` (not-yet-effective) is **not** an approval;
+expired, stale, replayed, already-consumed, superseded, wrong-binding,
+malformed, and unavailable replay states fail closed before mutation; read-only
+validation never consumes; explicit consume marks consumed only in fixture
+evidence; and the production/MainNet replay-state readers remain
+callable-but-unavailable/fail-closed. The real `target/release/qbind-node`
+surfaces make no replay-runtime claims and an invalid governance-execution
+selector fails closed before mutation (no marker write, no sequence write, no
+live trust swap, no session eviction, no Run 070 call); a denylist is proven
+empty. Regression targets
+run_232/230/228/226/224/222/220/217/215/213/211/157/152/150/148/142,
+`--lib pqc_authority`, and `--lib` all PASS. MainNet peer-driven apply remains
+refused even when state is fresh; validator-set rotation and policy-change
+actions remain unsupported; no real governance engine or on-chain proof verifier
+is implemented. Release-binary evidence only; no weakening of Runs 070, 130–232.
+Existing Run 231/229/227/225/223 release behaviour remains compatible.
+**Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_233.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_233.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
