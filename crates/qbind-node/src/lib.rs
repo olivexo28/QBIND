@@ -740,6 +740,27 @@ pub mod pqc_governance_evaluator_replay_state;
 // RocksDB/file/schema/migration/storage-format change. Release-binary evidence
 // is deferred to Run 233. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_evaluator_replay_runtime_integration;
+// Run 234 — source/test governance evaluator post-mutation replay consume
+// boundary. Models a pure boundary that separates pre-mutation freshness
+// validation, mutation authorization, successful mutation completion, and an
+// explicit replay-state consume after success only. Adds typed consume inputs /
+// expectations, a MutationAuthorizationOutcome / MutationCompletionStatus phase
+// taxonomy, and a ConsumeBoundaryOutcome (DoNotConsume{LegacyBypass, Deferred,
+// ValidationOnly, BeforeApply, ApplyFailed, RolledBack, UnsupportedSurface,
+// MainNetRefused} / ConsumeFixtureAfterSuccess / FailClosed{ConsumeUnavailable,
+// ProductionConsumeUnavailable, MainNetConsumeUnavailable, WrongBinding}). Only
+// ConsumeFixtureAfterSuccess (after AppliedSuccessfully) authorizes a fixture
+// consume; deferred / validation-only / failed-apply / rolled-back /
+// unsupported-surface / MainNet-refused outcomes never consume. Composes with
+// the Run 230 reader/writer traits: the DevNet/TestNet fixture writer records
+// consumed only after success; production/MainNet writers are callable but
+// fail-closed unavailable. Pure: no marker, no sequence, no live trust swap, no
+// session eviction, no Run 070 call; no RocksDB/file/schema/migration/storage-
+// format change. MainNet peer-driven apply remains refused and never consumes;
+// validator-set rotation and policy-change actions remain unsupported.
+// Release-binary consume-boundary evidence is deferred to Run 235. Full C4
+// remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_evaluator_replay_consume_boundary;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
