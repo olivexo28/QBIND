@@ -786,6 +786,35 @@ pub mod pqc_governance_evaluator_replay_consume_boundary;
 // unsupported. Release-binary consume-runtime-integration evidence is deferred
 // to Run 237. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_evaluator_replay_consume_runtime_integration;
+// Run 238 — source/test governance evaluator durable replay state backend
+// boundary. Defines a typed, pure durable backend contract for replay/freshness
+// and consume state persistence — before any real storage is implemented. Adds
+// a typed DurableBackendDecisionInput/Expectations key binding, a
+// DurableRecordState classification (Missing / ObservedFresh / ObservedDeferred
+// / ObservedExpired / ObservedStale / Consumed / ReplayDetected / Superseded /
+// MalformedRecord / BackendUnavailable / Production/MainNetBackendUnavailable),
+// a DurableBackendOutcome (ProceedFirstSeen / ProceedKnownFresh /
+// ProceedDeferred / FailClosed{Expired, Stale, Replay, Consumed, Superseded,
+// MalformedRecord, BackendUnavailable, ProductionUnavailable,
+// MainNetUnavailable}), a DurableConsumeOutcome (ConsumedAfterSuccess plus typed
+// non-consuming rejections), an atomic operation boundary
+// (observe_decision_if_absent / mark_consumed_after_success / read_decision_state
+// / compare_and_mark_consumed) over GovernanceEvaluatorReplayDurableBackend
+// Reader/Writer/Atomic traits, a CrashWindow classification (BeforeObserve /
+// AfterObserveBeforeMutation / AfterMutationBeforeConsume / AfterConsume /
+// RollbackAfterObserve / ApplyFailedAfterObserve / UnknownCrashWindow /
+// Production/MainNetCrashWindowUnavailable), and deterministic digest helpers
+// (durable backend key / record / operation transcript / crash-window
+// transcript). Restart durability is modeled only through the DevNet/TestNet
+// FixtureDurableReplayBackend restart_snapshot/from_snapshot value clone — no
+// file format, database, or migration. Production/MainNet durable backends are
+// callable but always unavailable/fail-closed. Pure: no marker, no sequence, no
+// live trust swap, no session eviction, no Run 070 call; no
+// RocksDB/file/schema/migration/storage-format change. MainNet peer-driven apply
+// remains refused even when the fixture reads fresh; validator-set rotation and
+// policy-change actions remain unsupported. Release-binary durable-backend
+// evidence is deferred to Run 239. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_evaluator_replay_durable_backend;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,

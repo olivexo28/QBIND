@@ -677,6 +677,49 @@ Runs 070, 130–236. **Full C4 remains OPEN. C5 remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_237.md).
 
 
+## Run 238 update — source/test governance evaluator replay-state durable backend boundary
+
+Run 238 is **source/test only**. It defines a typed, pure **durable backend
+contract** for the governance evaluator replay/freshness state — the durability,
+atomicity, crash-window, and fail-closed semantics a real persistent replay-state
+store would have to honour — plus a DevNet/TestNet in-memory fixture that models
+those semantics
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_durable_backend.rs`,
+registered in `crates/qbind-node/src/lib.rs`,
+`crates/qbind-node/tests/run_238_governance_evaluator_replay_durable_backend_tests.rs`,
+68 tests PASS, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_238.md`). Where Run 230
+proved a typed replay/freshness state boundary and Runs 232/234/236 composed it
+into the runtime-integration and after-success-only consume layers, Run 238
+defines how that state must be **durably persisted**: `DurableBackendDecisionInput`
+/ `DurableBackendDecisionExpectations` (derived from a Run 230
+`EvaluatorReplayFreshnessInput` via `from_freshness_input`, carrying the Run 230
+`replay_state_key_digest`); the typed `DurableRecordState`, `DurableBackendOutcome`,
+`DurableConsumeOutcome`, `CrashWindow`, `DurableBackendKind`, and
+`DurableMutationCompletion` enums; reader/writer/atomic traits and the pure
+operations `read_decision_state`, `observe_decision_if_absent`,
+`mark_consumed_after_success`, and the compare-and-set primitive
+`compare_and_mark_consumed`. The fixture models observed/consumed/replayed/
+superseded states and **restart durability** via `restart_snapshot` /
+`from_snapshot` over a `DurableBackendSnapshot` value clone (no file format).
+Compare-and-mark-consumed consumes only on an exactly-`ObservedFresh` record after
+a successful mutation and fails closed on any non-fresh/superseded/already-consumed
+state; `classify_crash_window` maps an interrupted lifecycle to a typed window.
+Production and MainNet durable backends remain **unavailable/fail-closed**; the
+contract is pure (no Run 070 call, no live trust swap, no session eviction, no
+sequence/marker write), so every rejection is non-mutating; MainNet peer-driven
+apply remains refused and never observes or consumes even when the would-be state
+is fresh; validator-set rotation remains unsupported. **No RocksDB / file / schema
+/ migration / storage-format change is implemented or claimed**, and no real
+governance engine, mutation engine, or on-chain proof verifier is implemented.
+Validation: `cargo build -p qbind-node --lib` PASS; run_238 (68), run_236 (56),
+run_234 (58), run_232 (47), run_230 (52), run_228 (48), run_226 (59), run_224
+(48), `--lib pqc_authority` (164), and `--lib` (1357) all PASS. Release-binary
+durable-backend evidence is deferred to **Run 239**; no weakening of Runs 070,
+130–237. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_238.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_238.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
