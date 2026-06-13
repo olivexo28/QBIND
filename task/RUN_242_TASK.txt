@@ -1,0 +1,271 @@
+Run 242 — Source/test governance execution mutation-engine boundary
+
+You are continuing QBIND after Run 241.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–241.
+
+Current state:
+
+* Run 238 defined the typed durable replay-state backend contract.
+* Run 239 release-evidenced that durable backend boundary.
+* Run 240 wired the Run 238 durable backend into the Run 236 / 232 / 230 replay/freshness + after-success-only consume runtime path as the durable state provider.
+* Run 241 release-evidenced the Run 240 durable runtime integration.
+* The current durable runtime still models mutation completion via `DurableMutationCompletion::AppliedSuccessfully` / failure / rollback states.
+* No real governance execution engine is implemented.
+* No real mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No real persistent replay backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* Production/MainNet durable backend remains unavailable/fail-closed.
+* MainNet peer-driven apply remains refused.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+Implement the smallest source/test-only governance execution mutation-engine boundary that makes mutation completion explicit and typed, instead of leaving Run 240/241 to rely only on a modeled mutation-completion enum.
+
+This run should define how an already-authorized governance evaluator decision would be handed to a future mutation executor, how mutation success/failure/rollback is reported back to the durable replay runtime, and how every rejection remains non-mutating.
+
+The Run 242 boundary must be source/test only. It must not perform real live trust mutation, must not call Run 070 on production paths, and must not enable MainNet governance or peer-driven apply.
+
+Suggested implementation:
+
+1. Add a new module:
+   `crates/qbind-node/src/pqc_governance_execution_mutation_engine.rs`
+
+2. Register it in:
+   `crates/qbind-node/src/lib.rs`
+
+3. Define typed input/context structures, for example:
+
+   * `GovernanceMutationEngineInput`
+   * `GovernanceMutationEngineExpectations`
+   * `GovernanceMutationCandidate`
+   * `GovernanceMutationSurface`
+   * `GovernanceMutationPolicy`
+   * `GovernanceMutationEnvironmentBinding`
+   * `GovernanceMutationRuntimeBinding`
+
+4. Define mutation-engine kinds:
+
+   * `Disabled`
+   * `FixtureDevNet`
+   * `FixtureTestNet`
+   * `ProductionUnavailable`
+   * `MainNetUnavailable`
+
+5. Define mutation outcomes:
+
+   * `ProceedLegacyBypassNoMutation`
+   * `MutationAuthorized`
+   * `MutationAppliedSuccessfully`
+   * `MutationRejectedBeforeApply`
+   * `MutationApplyFailed`
+   * `MutationRolledBack`
+   * `MutationAmbiguousFailClosed`
+   * `ProductionMutationUnavailable`
+   * `MainNetMutationUnavailable`
+   * `MainNetPeerDrivenApplyRefused`
+   * `ValidatorSetRotationUnsupported`
+   * `PolicyChangeUnsupported`
+
+6. Define a pure/mockable trait boundary, for example:
+
+   * `GovernanceMutationExecutor`
+   * `execute_authorized_mutation(...)`
+   * `recover_mutation_window(...)`
+
+7. Provide source/test-only fixture executors:
+
+   * DevNet/TestNet fixture executor can return typed success/failure/rollback outcomes.
+   * Production/MainNet executors must return unavailable/fail-closed.
+   * MainNet peer-driven apply must refuse before any mutation attempt.
+
+8. Add a composition helper that maps mutation-engine outcomes into the Run 240 durable runtime’s mutation-completion semantics:
+
+   * successful fixture mutation maps to the after-success-only consume path;
+   * failed apply does not consume;
+   * rollback does not consume;
+   * ambiguous after-authorization windows fail closed;
+   * MainNet refusal happens before durable observe/consume where applicable;
+   * production unavailable never consumes.
+
+9. Preserve negative invariants:
+
+   * no Run 070 call on rejected cases;
+   * no live trust swap;
+   * no session eviction;
+   * no sequence write;
+   * no marker write;
+   * no persistent replay write beyond existing source/test fixture behavior;
+   * no RocksDB/file/schema/migration/storage-format change;
+   * no wire/schema/trust-bundle/authority-marker/sequence change;
+   * no autonomous apply;
+   * no apply-on-receipt;
+   * no peer-majority authority;
+   * no MainNet enablement.
+
+10. Add grep-verifiable invariant helpers, for example:
+
+* `mutation_engine_rejection_is_non_mutating`
+* `mutation_success_is_required_before_durable_consume`
+* `mutation_failure_never_consumes_durable_replay_state`
+* `mutation_rollback_never_consumes_durable_replay_state`
+* `production_mainnet_mutation_engine_unavailable`
+* `mainnet_peer_driven_apply_refused_by_mutation_engine`
+* `no_rocksdb_file_schema_migration_change_under_mutation_engine`
+* `validator_set_rotation_unsupported_by_mutation_engine`
+
+Tests:
+Add:
+`crates/qbind-node/tests/run_242_governance_execution_mutation_engine_tests.rs`
+
+Required test matrix:
+
+Accepted / compatible:
+
+* Disabled policy preserves legacy bypass and performs no mutation.
+* DevNet fixture mutation success returns `MutationAppliedSuccessfully`.
+* TestNet fixture mutation success returns `MutationAppliedSuccessfully`.
+* Mutation success composes into durable consume-after-success semantics.
+* Read-only validation never mutates.
+* Failed apply never consumes.
+* Rollback never consumes.
+* Ambiguous after-authorization / before-completion window fails closed.
+* Existing Run 240 durable runtime behavior remains compatible.
+* Existing Run 238/236/232/230 behavior remains compatible.
+* Production mutation path is reachable but unavailable/fail-closed.
+* MainNet mutation path is reachable but unavailable/fail-closed.
+* MainNet peer-driven apply refused before mutation.
+* Validator-set rotation unsupported.
+* Policy-change action unsupported.
+
+Rejected:
+
+* wrong environment;
+* wrong chain;
+* wrong genesis;
+* wrong governance surface;
+* wrong mutation surface;
+* wrong candidate digest;
+* wrong decision digest;
+* wrong proposal id;
+* wrong decision id;
+* wrong authority-domain sequence;
+* stale / expired / replay-detected durable state;
+* consumed durable state;
+* superseded durable state;
+* malformed durable record;
+* backend unavailable;
+* consume before mutation success;
+* consume after failed apply;
+* consume after rollback;
+* local operator key treated as MainNet authority;
+* peer-majority treated as MainNet authority;
+* production mutation engine unavailable;
+* MainNet mutation engine unavailable;
+* validator-set rotation attempt;
+* policy-change attempt;
+* any rejected path must produce no Run 070 call, no live trust swap, no session eviction, no sequence write, no marker write.
+
+Validation commands:
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Documentation:
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_242.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 242 is source/test only.
+* It introduces a typed mutation-engine boundary, not a real production mutation engine.
+* No production mutating behavior is enabled; any new production-source module must remain pure/source-test bounded and fail-closed.
+* No real governance execution engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No real persistent replay backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* No validator-set rotation.
+* Rejected mutation-engine paths are non-mutating.
+* Mutation success is required before durable consume.
+* Failed apply, rollback, and ambiguous windows never consume.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 242 against Runs 050–241.
+* If no contradiction is found, add a “no Run 242 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070 from production paths.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not implement a persistent replay backend.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–241.
+
+Expected verdict:
+Partial-positive / source-test positive.
+
+Run 242 should advance the mutation-engine boundary but must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 243 next step.
