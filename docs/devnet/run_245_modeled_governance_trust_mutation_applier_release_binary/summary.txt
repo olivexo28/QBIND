@@ -1,0 +1,55 @@
+Run 245 — release-binary modeled governance trust-state mutation applier evidence
+git_commit: d7ce586b8b9ce2e47d70c85d29dfd8a5cabeaa28
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  e6d3b9026db638c173a13e11da9ae5bbb303ae30cd187b194226e6c5318e7d22
+  qbind_node_buildid: BuildID[sha1]=a383a92c573c17c9c8e9f49eb81349598c0f45bd
+  helper_245_sha256:  5b93a3f04f0cf386d8685802573465b2818ebcba90338935a8cef8f26ae27dd6
+  helper_245_buildid: BuildID[sha1]=35164b12a33ec21bdeaddbe381be846ea0f3bdc2
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+  S5_selector_parsesrc=1
+  S6_selector_invalidrc=1
+  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).
+
+release-helper verdicts:
+  helper_run_245rc=0verdict: PASS
+
+helper corpus verdicts (release mode, Run 244 modeled-applier boundary symbols):
+  table accepted: pass=42 fail=0
+  table rejection: pass=92 fail=0
+  table recovery: pass=18 fail=0
+  table projection: pass=26 fail=0
+  table modeled_state: pass=23 fail=0
+  table reachability: pass=20 fail=0
+  total_pass: 221
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 36 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_244_modeled_governance_trust_mutation_applier_tests	rc=0
+  test:run_242_governance_execution_mutation_engine_tests	rc=0
+  test:run_240_governance_evaluator_replay_durable_runtime_integration_tests	rc=0
+  test:run_238_governance_evaluator_replay_durable_backend_tests	rc=0
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 244 governance modeled trust-state mutation applier boundary is a pure, typed function over its inputs plus a mockable applier that mutates ONLY the in-memory ModeledGovernanceTrustState, exercised here through release-built library symbols (the same symbols a future production call site would use); a Disabled policy / applier kind is a legacy bypass with no modeled mutation and no applier invocation; binding validation runs before any snapshot and a mismatch is a non-mutating reject-before-snapshot that never reaches the applier; a read-only validation surface never mutates; retiring/revoking a missing root snapshots then rejects-before-apply with modeled state unchanged; only a modeled ModeledMutationApplied maps to MutationAppliedSuccessfully and projects to the consume-eligible DurableMutationCompletion::AppliedSuccessfully, while rejected/failed/rolled-back/rollback-failed/ambiguous/unavailable/unsupported outcomes never consume; production/MainNet applier kinds are reachable but always unavailable/fail-closed; MainNet peer-driven apply is refused before any snapshot and before applier invocation; validator-set rotation and policy-change actions remain unsupported; rejections are pure and non-mutating (no marker/sequence write, no live trust swap, no session eviction, no durable consume, no Run 070 call, no LivePqcTrustState mutation); no real governance execution engine, mutation engine, or on-chain governance proof verifier; no real persistent replay backend; no KMS/HSM/RemoteSigner backend; no RocksDB schema change, no file format change, no database migration, no storage-format change, no persistent storage, and no wire/marker/sequence/trust-bundle schema change; existing Run 243, Run 241, Run 239, Run 237, Run 235, Run 233, and Run 231 release behaviour remains compatible; full C4 and C5 remain OPEN.
+
+verdict: PASS

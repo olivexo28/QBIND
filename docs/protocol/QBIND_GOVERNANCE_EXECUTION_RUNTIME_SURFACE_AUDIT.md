@@ -928,7 +928,7 @@ bindings (`ModeledGovernanceTrustMutationInput` / `Expectations` / `Policy` /
 (`ModeledTrustMutationOutcome`: `ModeledMutationNotAttempted` / `Applied` /
 `RejectedBeforeSnapshot` / `RejectedBeforeApply` / `ApplyFailed` / `RolledBack` /
 `RollbackFailedFatal` / `AmbiguousFailClosed` /
-`Production`/`MainNetModeledMutationUnavailable` / `MainNetPeerDrivenApplyRefused`
+`ProductionModeledMutationUnavailable` / `MainNetModeledMutationUnavailable` / `MainNetPeerDrivenApplyRefused`
 / `ValidatorSetRotationUnsupported` / `PolicyChangeUnsupported`), a pure/mockable
 `ModeledGovernanceTrustMutationApplier` trait (`apply_modeled_mutation` /
 `recover_modeled_mutation_window`) with a DevNet/TestNet
@@ -958,6 +958,57 @@ change; no MainNet governance or peer-driven apply enablement; no validator-set
 rotation; no weakening of Runs 070, 130–243.** Full C4 remains OPEN. C5 remains
 OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_244.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_244.md).
+
+## Run 245 update — release-binary governance modeled trust-state mutation applier evidence
+
+Run 245 is the **release-binary evidence** run for the Run 244 source/test
+governance modeled trust-state mutation applier boundary
+(`crates/qbind-node/src/pqc_governance_modeled_trust_mutation_applier.rs`). It
+proves on real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_245_modeled_governance_trust_mutation_applier_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_245_modeled_governance_trust_mutation_applier_release_binary.sh`)
+that the release-built code exposes and exercises the Run 244 boundary symbols
+(`evaluate_modeled_trust_mutation`, `recover_modeled_trust_mutation`,
+`map_modeled_outcome_to_mutation_engine_outcome`,
+`project_modeled_outcome_to_durable_completion`,
+`modeled_outcome_authorizes_durable_consume`, the
+`ModeledGovernanceTrustState` / `ModeledGovernanceTrustSnapshot` /
+`ModeledGovernanceTrustRoot` modeled state, the
+`ModeledGovernanceTrustMutationInput` / `Expectations` / `Policy` / `Surface` /
+`EnvironmentBinding` / `RuntimeBinding` bindings, the `ModeledTrustMutationAction`
+/ `ModeledTrustMutationOutcome` taxonomy, the
+`ModeledGovernanceTrustMutationApplier` trait with
+`FixtureModeledTrustMutationApplier` / `ProductionModeledTrustMutationApplier` /
+`MainNetModeledTrustMutationApplier`, and all grep-verifiable invariant helpers):
+a disabled policy / applier kind is a legacy no-mutation bypass with no applier
+invocation; binding validation runs before any snapshot and a mismatch is a
+non-mutating reject-before-snapshot that never reaches the applier; a read-only
+validation surface never mutates; retiring/revoking a missing root snapshots then
+rejects before apply with the modeled state unchanged; only a modeled
+`ModeledMutationApplied` projects through `MutationAppliedSuccessfully` to the
+consume-eligible `DurableMutationCompletion::AppliedSuccessfully`, while
+not-attempted, failed apply, rollback, rollback-failed, and ambiguous windows
+never consume; production / MainNet applier kinds are reachable but always
+unavailable / fail-closed; **MainNet peer-driven apply is refused before any
+snapshot and before applier invocation**; and validator-set rotation and
+policy-change actions remain unsupported. The release-helper corpus (221 checks:
+accepted / rejection / recovery / projection / modeled-state / reachability) and
+the real-binary surface scenarios (`--help` and default DevNet/TestNet/MainNet
+smoke surfaces emit no modeled-applier enablement claim; the hidden
+governance-execution selector still parses; an invalid selector fails closed
+before mutation) all PASS, with a 36-pattern denylist proven empty. Run 245 also
+narrowly fixed a Run 244 docs typo (`` `Production`/`MainNetModeledMutationUnavailable` ``
+→ `` `ProductionModeledMutationUnavailable` / `MainNetModeledMutationUnavailable` ``).
+Run 245 adds **no** production source behaviour change: only an example helper, a
+harness script, evidence, narrow doc updates, and the docs-only typo fix. **No
+real production mutation engine, governance execution engine, on-chain proof
+verifier, persistent replay backend, or KMS/HSM/RemoteSigner backend; no RocksDB /
+file / schema / migration / storage-format change; no wire / marker / sequence /
+trust-bundle change; no MainNet governance or peer-driven apply enablement; no
+validator-set rotation; no weakening of Runs 070, 130–244.** Full C4 remains OPEN.
+C5 remains OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_245.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_245.md).
 
 
 ## 1. Background and prior accepted state
