@@ -818,6 +818,49 @@ Runs 070, 130–240.** Full C4 remains OPEN. C5 remains OPEN. See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_241.md).
 
 
+## Run 242 update — source/test governance execution mutation-engine boundary
+
+Run 242 is **source/test only**. It makes the hand-off of an already-authorized
+governance evaluator decision to a future mutation executor explicit and typed
+(`crates/qbind-node/src/pqc_governance_execution_mutation_engine.rs`), instead of
+leaving Run 240/241 to rely only on a modeled mutation-completion enum. It
+introduces a typed mutation-engine **boundary**, **not** a real production
+mutation engine, and enables **no** production mutating behaviour. It defines the
+typed input/context structures (`GovernanceMutationEngineInput` /
+`GovernanceMutationEngineExpectations` / `GovernanceMutationCandidate` /
+`GovernanceMutationSurface` / `GovernanceMutationPolicy` /
+`GovernanceMutationEnvironmentBinding` / `GovernanceMutationRuntimeBinding`), the
+engine kinds (`Disabled` / `FixtureDevNet` / `FixtureTestNet` /
+`ProductionUnavailable` / `MainNetUnavailable`), the mutation outcomes
+(`ProceedLegacyBypassNoMutation` / `MutationAuthorized` /
+`MutationAppliedSuccessfully` / `MutationRejectedBeforeApply` /
+`MutationApplyFailed` / `MutationRolledBack` / `MutationAmbiguousFailClosed` /
+`Production`/`MainNetMutationUnavailable` / `MainNetPeerDrivenApplyRefused` /
+`ValidatorSetRotationUnsupported` / `PolicyChangeUnsupported`), a pure/mockable
+`GovernanceMutationExecutor` trait (`execute_authorized_mutation` /
+`recover_mutation_window`) with DevNet/TestNet fixture and production/MainNet
+unavailable executors, and a composition helper
+(`project_mutation_outcome_to_durable_completion`) that maps mutation-engine
+outcomes into the Run 240 durable runtime's `DurableMutationCompletion`
+semantics: only a successful fixture mutation reaches the after-success-only
+consume path; failed apply, rollback, and ambiguous after-authorization windows
+never consume; and refusal / unavailable / unsupported / rejected paths fail
+closed before any durable observe/consume. Binding validation runs before any
+apply (wrong environment / chain / genesis / governance surface / mutation
+surface / candidate digest / decision digest / proposal id / decision id /
+authority-domain sequence / lifecycle action, or a malformed candidate, are all
+rejected and never reach the executor); read-only validation never mutates;
+production/MainNet mutation engines remain callable-but-unavailable/fail-closed;
+**MainNet peer-driven apply is refused before any mutation attempt**; and
+validator-set rotation and policy-change actions remain unsupported. **No real
+governance execution engine, mutation engine, on-chain proof verifier, persistent
+replay backend, or KMS/HSM/RemoteSigner backend; no RocksDB / file / schema /
+migration / storage-format change; no wire / marker / sequence / trust-bundle
+change; no weakening of Runs 070, 130–241.** Full C4 remains OPEN. C5 remains
+OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_242.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_242.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
