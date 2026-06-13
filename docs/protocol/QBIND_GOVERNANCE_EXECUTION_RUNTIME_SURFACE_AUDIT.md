@@ -720,6 +720,45 @@ durable-backend evidence is deferred to **Run 239**; no weakening of Runs 070,
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_238.md).
 
 
+## Run 239 update — release-binary governance evaluator replay-state durable backend boundary evidence
+
+Run 239 is the **release-binary evidence** run for the Run 238 source/test
+durable replay-state backend boundary
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_durable_backend.rs`). It
+proves on real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_239_governance_evaluator_replay_durable_backend_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_239_governance_evaluator_replay_durable_backend_release_binary.sh`)
+that the release-built code exposes and exercises the durable backend contract:
+a first-seen DevNet/TestNet decision records `ObservedFresh` and reads
+`ProceedKnownFresh`; not-yet-effective reads deferred (not a mutation approval);
+expired/stale read fail-closed; an explicit consume after a successful mutation
+marks consumed, after which the decision reads `FailClosedConsumed`; read-only
+validation, rollback, and failed-apply never consume; observe-only and consumed
+state both survive an in-process fixture restart snapshot (a value clone, never a
+file format); `compare_and_mark_consumed` consumes only on an
+exactly-`ObservedFresh` record and rejects a wrong expected state (atomicity is
+release-evidenced); the crash-window classifier types every window and never
+silently approves an after-mutation-before-consume window; the durable
+key/record/operation-transcript/crash-window transcript digests are deterministic
+in release mode; production/MainNet durable backends are callable but always fail
+closed unavailable; MainNet peer-driven apply remains refused even when the
+fixture reads fresh; and validator-set rotation and policy-change actions remain
+unsupported. The release helper runs an A1–A25 / R1–R37 corpus (202 checks,
+`verdict: PASS`); the harness captures helper + `qbind-node` SHA-256 / ELF Build
+ID, runs real-binary surface scenarios, writes source-reachability grep proof for
+the Run 238 symbols, proves an empty denylist, and re-runs run_238 (68), run_236
+(56), run_234 (58), run_232 (47), run_230 (52), run_228 (48), run_226 (59),
+run_224 (48), the Run 222/220/217/215/213/211/157/152/150/148/142 regression
+targets, `--lib pqc_authority`, and `--lib`, all PASS. **No production source
+behavior change; no real persistent replay backend; no RocksDB / file / schema /
+migration / storage-format change; no real governance engine, mutation engine, or
+on-chain proof verifier; no weakening of Runs 070, 130–238. Full C4 remains OPEN.
+C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_239.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_239.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
