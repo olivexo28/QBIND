@@ -868,6 +868,35 @@ pub mod pqc_governance_evaluator_replay_durable_runtime_integration;
 // refused; rejected paths are non-mutating and never invoke Run 070. Full C4
 // remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_execution_mutation_engine;
+// Run 244 — source/test governance modeled trust-state mutation applier
+// boundary. Adds the smallest in-memory model of what a future governance
+// mutation applier would do after every Run 242 mutation-engine gate has already
+// passed: it snapshots a modeled trust state (ModeledGovernanceTrustState /
+// Snapshot / Root), applies a modeled trust-state update
+// (ModeledGovernanceTrustMutation with AddTrustRoot / RetireTrustRoot /
+// RevokeTrustRoot / EmergencyRevokeTrustRoot / Noop and unsupported
+// validator-set-rotation / policy-change actions), reports a typed outcome
+// (ModeledMutationNotAttempted / Applied / RejectedBeforeSnapshot /
+// RejectedBeforeApply / ApplyFailed / RolledBack / RollbackFailedFatal /
+// AmbiguousFailClosed / Production/MainNetModeledMutationUnavailable /
+// MainNetPeerDrivenApplyRefused / ValidatorSetRotationUnsupported /
+// PolicyChangeUnsupported), and projects the result back through the Run 242
+// mutation outcome into the Run 240 durable completion semantics so a durable
+// consume can only follow a modeled successful apply. Defines a pure/mockable
+// ModeledGovernanceTrustMutationApplier trait with DevNet/TestNet fixture +
+// production/MainNet unavailable appliers; the fixture applier exposes an
+// invocation counter so tests prove rejected-before-snapshot paths never invoke
+// it. Source/test only: the modeled applier mutates ONLY the in-memory
+// ModeledGovernanceTrustState in DevNet/TestNet fixture tests. It does NOT mutate
+// LivePqcTrustState, call Run 070, perform a real trust swap, evict sessions,
+// write sequence files, write authority markers, perform a durable consume by
+// itself, or touch RocksDB/file/schema/migration/storage-format. No real
+// governance execution engine, production mutation engine, on-chain proof
+// verifier, persistent replay backend, or KMS/HSM/RemoteSigner backend. MainNet
+// governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN;
+// C5 remains OPEN.
+pub mod pqc_governance_modeled_trust_mutation_applier;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
