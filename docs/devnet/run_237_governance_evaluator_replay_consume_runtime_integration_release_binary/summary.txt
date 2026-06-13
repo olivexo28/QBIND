@@ -1,0 +1,59 @@
+Run 237 — release-binary governance evaluator replay consume runtime integration evidence
+git_commit: 9e631a56cb38dddc64429969dc0e965a381fc3a6
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  59ee59828fd940ad2c04d83fc545580f4fbbe2d80b2872706d539d2f7c5ac297
+  qbind_node_buildid: BuildID[sha1]=e804e9eba0cb59b1d53fd7e4b96d791e893ed925
+  helper_237_sha256:  2ec45f13a0da01efa841cb6f94de676c741753d3fd42c58de4acdb4f1cb40076
+  helper_237_buildid: BuildID[sha1]=5ac1c6eaae4495c6448695f5b0de00fc57f54ad8
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+  S5_selector_parsesrc=1
+  S6_selector_invalidrc=1
+  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).
+
+release-helper verdicts:
+  helper_run_237rc=0verdict: PASS
+
+helper A1-A23 / R1-R35 corpus verdicts (release mode, Run 236 replay consume runtime integration symbols):
+  table accepted: pass=72 fail=0
+  table rejection: pass=141 fail=0
+  table reachability: pass=41 fail=0
+  total_pass: 254
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 31 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  test:run_222_governance_execution_evaluator_tests	rc=0
+  test:run_220_governance_execution_runtime_consumption_tests	rc=0
+  test:run_217_governance_execution_runtime_arming_tests	rc=0
+  test:run_215_governance_execution_policy_selector_tests	rc=0
+  test:run_213_governance_execution_payload_callsite_tests	rc=0
+  test:run_211_governance_execution_policy_tests	rc=0
+  test:run_157_unified_testnet_fixture_universe_tests	rc=0
+  test:run_152_binary_reachable_peer_drain_plumbing_tests	rc=0
+  test:run_150_peer_driven_apply_drain_tests	rc=0
+  test:run_148_peer_driven_apply_devnet_tests	rc=0
+  test:run_142_live_inbound_0x05_v2_validation_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 236 replay consume runtime integration is a local/source-test-only pure composition exercised here through release-built library symbols (the same symbols a future production call site would use); it runs the real Run 232 replay/freshness runtime integration first and the real Run 234 post-mutation consume boundary only on a ProceedFresh, over the Run 230 reader/writer traits; the replay/freshness runtime integration runs before consume and any non-ProceedFresh outcome maps to a non-consuming outcome without calling the writer; fresh is required before mutation authorization; consume is after-success-only — only ConsumeFixtureAfterMutationSuccess (after a modeled AppliedSuccessfully) authorizes a fixture consume; deferred, validation-only, before-apply, failed-apply, rolled-back, unsupported-surface, and MainNet-refused outcomes never consume; the DevNet/TestNet FixtureReplayStateStore is an in-process map only and DevNet/TestNet evidence-only; the fixture writer records consumed only on the explicit after-success path with a prior observation, and a re-validation then classifies the decision already-consumed through Run 230; production/MainNet consume writers are reached but always fail closed unavailable; rejections are pure and non-mutating and the writer is never called on a non-consume path; the consume authorization is overridden with the exact Run 232 freshness result; MainNet peer-driven apply remains refused and never consumes even when state is fresh; validator-set rotation and policy-change actions remain unsupported; no real governance execution engine, mutation engine, or on-chain governance proof verifier; no KMS/HSM/RemoteSigner backend; no RocksDB schema change, no file format change, no database migration, no persistent storage, and no wire/marker/sequence/trust-bundle schema change; existing Run 235, Run 233, Run 231, Run 229, and Run 227 release behaviour remains compatible; full C4 and C5 remain OPEN.
+
+verdict: PASS

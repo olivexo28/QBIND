@@ -639,6 +639,44 @@ C4 remains OPEN. C5 remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_236.md).
 
 
+## Run 237 update — release-binary governance evaluator replay consume runtime integration evidence
+
+Run 237 is the **release-binary** evidence run for the Run 236 source/test
+governance evaluator **replay consume runtime integration**
+(`crates/qbind-node/examples/run_237_governance_evaluator_replay_consume_runtime_integration_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_237_governance_evaluator_replay_consume_runtime_integration_release_binary.sh`,
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_237.md`). Where Run 236 composed the
+Run 232 replay/freshness runtime integration with the Run 234 post-mutation
+consume boundary at the source/test level, Run 237 proves on real
+`target/release/qbind-node` plus a release-built helper that the release-built
+code exposes and exercises the integration: the Run 232 replay/freshness runtime
+integration runs **before** consume; fresh is required before mutation
+authorization; consume is after-success-only (only
+`ConsumeFixtureAfterMutationSuccess` after `AppliedSuccessfully`); legacy-bypass,
+deferred, validation-only, before-apply, failed-apply, rolled-back,
+unsupported-surface, and MainNet-refused outcomes never consume; the
+DevNet/TestNet fixture writer records consumed only on the explicit after-success
+path with a prior observation, and a re-validation then classifies the decision
+already-consumed through the Run 230 state; the production / MainNet consume
+writers remain callable but always fail closed unavailable; MainNet peer-driven
+apply remains refused and never consumes even when the replay state would
+otherwise be fresh; and the consume authorization is overridden with the exact
+Run 232 freshness result. The helper A1–A23 / R1–R35 corpus reports
+`verdict: PASS` (254 checks). Validation: `cargo build --release -p qbind-node
+--bin qbind-node` and the Run 237 example PASS; the harness surface scenarios
+S1–S6 behave as expected (S6 invalid-selector fails closed before mutation); and
+run_236, run_234, run_232, run_230, run_228, run_226, run_224 (plus the
+run_222 / 220 / 217 / 215 / 213 / 211 / 157 / 152 / 150 / 148 / 142 regression
+targets), `--lib pqc_authority`, and `--lib` all PASS. Run 237 is release-binary
+evidence only: no production source behavior change, no real governance / mutation
+engine or on-chain proof verifier, no RocksDB/file/schema/migration/storage-format
+change, and no wire/schema/marker/sequence/trust-bundle change; no weakening of
+Runs 070, 130–236. **Full C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_237.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_237.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
