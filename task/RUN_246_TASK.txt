@@ -1,0 +1,385 @@
+Run 246 — Source/test governance evaluator → modeled applier → durable consume end-to-end pipeline
+
+You are continuing QBIND after Run 245.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
+Run 243 is fully closed as release-binary evidence for Run 242.
+Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
+Run 245 is fully closed as release-binary evidence for Run 244.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–245.
+* Source/test only.
+* No release-binary evidence in this run.
+
+Current state:
+
+* Run 224 introduced source/test governance evaluator runtime integration.
+* Run 225 release-evidenced the Run 224 evaluator-runtime integration.
+* Run 226 wired representable runtime call sites through the evaluator-runtime integration at source/test level.
+* Run 227 release-evidenced the Run 226 call-site wiring.
+* Run 230 / 232 / 234 / 236 / 238 / 240 built the replay/freshness, consume-after-success, durable replay-state backend, and durable runtime integration path.
+* Run 241 release-evidenced the Run 240 durable runtime integration.
+* Run 242 added the source/test governance execution mutation-engine boundary.
+* Run 243 release-evidenced the Run 242 mutation-engine boundary.
+* Run 244 added the source/test modeled governance trust-state mutation applier boundary.
+* Run 245 release-evidenced the Run 244 modeled applier boundary.
+* The current system has all pieces separately evidenced, but there is not yet one typed source/test end-to-end pipeline that composes:
+
+  * evaluator runtime call-site authorization;
+  * durable replay/freshness observation;
+  * mutation-engine authorization;
+  * modeled trust-state applier success/failure;
+  * durable consume-after-success projection.
+* No real governance execution engine is implemented.
+* No real production mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No real persistent replay backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+
+Implement the smallest source/test-only typed end-to-end governance runtime pipeline that composes the already-landed boundaries:
+
+1. Run 226 evaluator runtime call-site wiring;
+2. Run 240 durable replay-state runtime integration;
+3. Run 242 mutation-engine boundary;
+4. Run 244 modeled trust-state mutation applier;
+5. Run 240 consume-after-success durable completion semantics.
+
+The new pipeline must prove that durable consume is gated end-to-end on a modeled successful applier outcome, not merely on a modeled mutation-completion enum. Every rejection, unavailable production/MainNet boundary, rollback, rollback-failed, ambiguous window, read-only surface, validator-set rotation attempt, and policy-change attempt must remain non-mutating and non-consuming.
+
+This run must remain source/test only. It must not wire production runtime mutation. It must not call Run 070. It must not mutate `LivePqcTrustState`. It must not perform a real trust swap. It must not evict sessions. It must not write sequence files. It must not write authority markers. It must not add RocksDB/file/schema/migration/storage-format changes. It must not enable MainNet governance or MainNet peer-driven apply.
+
+Preflight docs hygiene:
+
+* In `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`, if the top status line still says:
+
+  * `Status as of Run 244`
+* change it narrowly to:
+
+  * `Status as of Run 245`
+* This is docs-only hygiene and must not be treated as a behavior change.
+
+Suggested implementation:
+
+1. Add a new source/test-only module:
+
+   `crates/qbind-node/src/pqc_governance_modeled_end_to_end_pipeline.rs`
+
+2. Register it in:
+
+   `crates/qbind-node/src/lib.rs`
+
+3. Define typed pipeline input/context structures, for example:
+
+   * `GovernanceModeledEndToEndPipelineInput`
+   * `GovernanceModeledEndToEndPipelineExpectations`
+   * `GovernanceModeledEndToEndPipelinePolicy`
+   * `GovernanceModeledEndToEndPipelineSurface`
+   * `GovernanceModeledEndToEndPipelineEnvironmentBinding`
+   * `GovernanceModeledEndToEndPipelineRuntimeBinding`
+   * `GovernanceModeledEndToEndPipelineCandidate`
+   * `GovernanceModeledEndToEndPipelineDecision`
+   * `GovernanceModeledEndToEndPipelineReplayBinding`
+   * `GovernanceModeledEndToEndPipelineMutationBinding`
+
+4. Define explicit stage records, for example:
+
+   * `EvaluatorCallsiteStage`
+   * `DurableReplayObserveStage`
+   * `MutationEngineStage`
+   * `ModeledApplierStage`
+   * `DurableProjectionStage`
+   * `DurableConsumeDecisionStage`
+
+5. Define a typed pipeline outcome enum, for example:
+
+   * `ProceedLegacyBypassNoMutation`
+   * `EvaluatorRejectedBeforeReplay`
+   * `DurableReplayRejectedBeforeMutation`
+   * `MutationEngineRejectedBeforeApplier`
+   * `ModeledApplierRejectedBeforeSnapshot`
+   * `ModeledApplierRejectedBeforeApply`
+   * `ModeledApplierAppliedAndDurableConsumeAuthorized`
+   * `ModeledApplierApplyFailedNoConsume`
+   * `ModeledApplierRolledBackNoConsume`
+   * `ModeledApplierRollbackFailedFatalNoConsume`
+   * `ModeledApplierAmbiguousFailClosedNoConsume`
+   * `ProductionUnavailableNoConsume`
+   * `MainNetUnavailableNoConsume`
+   * `MainNetPeerDrivenApplyRefusedNoConsume`
+   * `ValidatorSetRotationUnsupportedNoConsume`
+   * `PolicyChangeUnsupportedNoConsume`
+   * `BackendUnavailableNoConsume`
+   * `ReplayConsumedNoConsume`
+   * `ReplaySupersededNoConsume`
+   * `ReplayStaleOrExpiredNoConsume`
+
+6. Define a pure/mockable trait boundary if needed, for example:
+
+   * `GovernanceModeledEndToEndPipelineExecutor`
+   * `run_modeled_end_to_end_pipeline(...)`
+   * `recover_modeled_end_to_end_pipeline_window(...)`
+
+7. Compose existing boundaries, do not reimplement them:
+
+   * Use the Run 226 call-site wiring entry points where representable.
+   * Use Run 240 durable replay runtime semantics for replay observation and consume projection.
+   * Use Run 242 mutation-engine outcome semantics.
+   * Use Run 244 modeled applier outcome semantics.
+   * Use Run 244 `project_modeled_outcome_to_durable_completion` and `modeled_outcome_authorizes_durable_consume`.
+   * The new pipeline should be an ordering/composition layer, not a replacement for existing modules.
+
+8. Required ordering:
+
+   * MainNet peer-driven apply refusal must happen before any replay consume, modeled snapshot, or applier invocation.
+   * Evaluator/call-site authorization must complete before durable replay consume is considered.
+   * Durable replay/freshness observation must complete before mutation-engine authorization.
+   * Mutation-engine authorization must complete before modeled applier invocation.
+   * Modeled applier success must complete before durable consume is authorized.
+   * Durable consume must be represented only as a typed projection/decision in this source/test boundary; the pipeline itself must not perform persistent durable consume beyond existing fixture/test behavior.
+   * Failed apply, rollback, rollback-failed, ambiguous windows, production unavailable, MainNet unavailable, replay rejection, and unsupported actions must never authorize durable consume.
+
+9. Add grep-verifiable invariant helpers, for example:
+
+   * `modeled_end_to_end_pipeline_rejection_is_non_mutating`
+   * `modeled_end_to_end_pipeline_never_calls_run_070`
+   * `modeled_end_to_end_pipeline_never_mutates_live_pqc_trust_state`
+   * `modeled_end_to_end_pipeline_success_required_before_durable_consume`
+   * `modeled_end_to_end_pipeline_applier_success_required_before_consume`
+   * `modeled_end_to_end_pipeline_failed_apply_never_consumes`
+   * `modeled_end_to_end_pipeline_rollback_never_consumes`
+   * `modeled_end_to_end_pipeline_ambiguous_window_fails_closed`
+   * `modeled_end_to_end_pipeline_mainnet_peer_driven_apply_refused_first`
+   * `modeled_end_to_end_pipeline_production_mainnet_unavailable`
+   * `modeled_end_to_end_pipeline_validator_set_rotation_unsupported`
+   * `modeled_end_to_end_pipeline_policy_change_unsupported`
+   * `modeled_end_to_end_pipeline_no_rocksdb_file_schema_migration_change`
+   * `modeled_end_to_end_pipeline_local_operator_cannot_satisfy_mainnet_authority`
+   * `modeled_end_to_end_pipeline_peer_majority_cannot_satisfy_mainnet_authority`
+
+Tests:
+
+Add:
+
+`crates/qbind-node/tests/run_246_governance_modeled_end_to_end_pipeline_tests.rs`
+
+Required test matrix:
+
+Accepted / compatible:
+
+* Disabled policy preserves legacy bypass and performs no mutation and no consume.
+* Disabled evaluator/call-site policy preserves legacy bypass and performs no mutation and no consume.
+* DevNet fixture evaluator + durable replay fresh + mutation engine authorized + modeled add-root success authorizes durable consume.
+* TestNet fixture evaluator + durable replay fresh + mutation engine authorized + modeled add-root success authorizes durable consume.
+* Modeled retire-root success authorizes durable consume only after modeled success.
+* Modeled revoke-root success authorizes durable consume only after modeled success.
+* Modeled emergency-revoke-root success authorizes durable consume only after modeled success.
+* Modeled noop success authorizes durable consume only under explicit success semantics and no state drift.
+* Existing Run 226 call-site wiring behavior remains compatible.
+* Existing Run 240 durable runtime behavior remains compatible.
+* Existing Run 242 mutation-engine behavior remains compatible.
+* Existing Run 244 modeled applier behavior remains compatible.
+* Production pipeline path is reachable but unavailable/fail-closed and does not consume.
+* MainNet pipeline path is reachable but unavailable/fail-closed and does not consume.
+* MainNet peer-driven apply refused before replay consume, before modeled snapshot, and before applier invocation.
+* Validator-set rotation unsupported and does not consume.
+* Policy-change unsupported and does not consume.
+
+Rejected / fail-closed:
+
+* evaluator rejection before replay produces no mutation and no consume;
+* call-site rejection before replay produces no mutation and no consume;
+* wrong environment rejected before modeled snapshot and no consume;
+* wrong chain rejected before modeled snapshot and no consume;
+* wrong genesis rejected before modeled snapshot and no consume;
+* wrong governance surface rejected before modeled snapshot and no consume;
+* wrong mutation surface rejected before modeled snapshot and no consume;
+* wrong candidate digest rejected before modeled snapshot and no consume;
+* wrong decision digest rejected before modeled snapshot and no consume;
+* wrong proposal id rejected before modeled snapshot and no consume;
+* wrong decision id rejected before modeled snapshot and no consume;
+* wrong authority-domain sequence rejected before modeled snapshot and no consume;
+* wrong lifecycle action rejected before modeled snapshot and no consume;
+* malformed modeled mutation rejected before modeled snapshot and no consume;
+* read-only validation surface rejected before modeled snapshot and no consume;
+* stale durable replay state cannot reach mutation or consume;
+* expired durable replay state cannot reach mutation or consume;
+* consumed durable replay state cannot reach mutation or consume;
+* superseded durable replay state cannot reach mutation or consume;
+* backend unavailable cannot reach mutation or consume;
+* consume before modeled applier success is rejected;
+* consume after modeled apply failure is rejected;
+* consume after modeled rollback is rejected;
+* consume after rollback-failed is rejected;
+* consume after ambiguous window is rejected;
+* retiring missing root rejects before apply and does not consume;
+* revoking missing root rejects before apply and does not consume;
+* local operator key cannot satisfy MainNet authority;
+* peer majority cannot satisfy MainNet authority;
+* production unavailable does not consume;
+* MainNet unavailable does not consume;
+* validator-set rotation attempt unsupported and does not consume;
+* policy-change attempt unsupported and does not consume;
+* every rejected path produces no Run 070 call, no `LivePqcTrustState` mutation, no real trust swap, no session eviction, no sequence write, no marker write, no durable consume, and no applier invocation where rejection happens before the applier stage.
+
+Recovery / crash-window cases:
+
+* before evaluator decision window fails closed / no consume;
+* after evaluator authorization before replay observation fails closed / no consume;
+* after replay observation before mutation-engine authorization fails closed / no consume;
+* after mutation-engine authorization before modeled snapshot fails closed / no consume;
+* after modeled snapshot before apply rolls back modeled state / no consume;
+* after modeled apply before report fails closed unless explicit success report exists;
+* after modeled report success authorizes durable consume;
+* after modeled report ambiguous fails closed / no consume;
+* rollback-failed window is fatal/fail-closed / no consume;
+* unknown window fails closed / no consume;
+* production/MainNet recovery classification unavailable/fail-closed;
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection cases:
+
+* only modeled applier applied success reaches `ModeledApplierAppliedAndDurableConsumeAuthorized`;
+* only modeled applier applied success projects to consume-eligible durable completion;
+* evaluator success alone does not consume;
+* durable replay freshness alone does not consume;
+* mutation-engine authorization alone does not consume;
+* modeled `MutationAuthorized` / not-applied does not consume;
+* modeled apply failure does not consume;
+* modeled rollback does not consume;
+* modeled rollback-failed does not consume;
+* modeled ambiguous window does not consume;
+* production unavailable does not consume;
+* MainNet unavailable does not consume;
+* MainNet peer-driven refusal does not consume;
+* validator-set rotation unsupported does not consume;
+* policy-change unsupported does not consume.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_246.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 246 is source/test only.
+* It composes existing typed boundaries into one source/test end-to-end modeled governance pipeline.
+* It does not implement a real production mutation engine.
+* It does not implement a real governance execution engine.
+* It does not implement a real on-chain governance proof verifier.
+* It does not implement a real persistent replay backend.
+* It does not add RocksDB/file/schema/migration/storage-format changes.
+* It does not add KMS/HSM/RemoteSigner backend.
+* It does not enable MainNet governance.
+* It does not enable MainNet peer-driven apply.
+* It does not implement validator-set rotation.
+* It does not call Run 070.
+* It does not mutate `LivePqcTrustState`.
+* It does not perform a real trust swap.
+* It does not evict sessions.
+* It does not write sequence files.
+* It does not write authority markers.
+* It does not perform durable consume by itself beyond existing fixture/test projection semantics.
+* Durable consume is authorized only after evaluator/call-site authorization, durable replay freshness, mutation-engine authorization, and modeled applier success all agree.
+* Evaluator success alone is insufficient for consume.
+* Durable replay freshness alone is insufficient for consume.
+* Mutation-engine authorization alone is insufficient for consume.
+* Modeled applier success is required before durable consume.
+* Failed apply, rollback, rollback-failed, ambiguous windows, unavailable production/MainNet paths, rejected replay states, and unsupported actions never consume.
+* Rejected end-to-end pipeline paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 246 against Runs 050–245.
+* If no contradiction is found, add a “no Run 246 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not implement a real governance execution engine.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not implement a persistent replay backend.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–245.
+
+Expected verdict:
+
+Partial-positive / source-test positive.
+
+Run 246 should close the source/test end-to-end composition gap only. It must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 247 next step.
