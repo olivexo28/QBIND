@@ -908,6 +908,57 @@ validator-set rotation; no weakening of Runs 070, 130–242.** Full C4 remains
 OPEN. C5 remains OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_243.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_243.md).
 
+## Run 244 update — source/test governance modeled trust-state mutation applier boundary
+
+Run 244 is **source/test only**. It adds the smallest in-memory model of what a
+future governance mutation applier would do **after** every Run 242
+mutation-engine gate has already passed
+(`crates/qbind-node/src/pqc_governance_modeled_trust_mutation_applier.rs`,
+registered in `lib.rs`; tests in
+`crates/qbind-node/tests/run_244_modeled_governance_trust_mutation_applier_tests.rs`,
+45 tests). The Run 242/243 fixture executor only modeled *outcomes*; Run 244 adds
+a modeled in-memory state transition shape: a modeled trust state
+(`ModeledGovernanceTrustState` / `ModeledGovernanceTrustSnapshot` /
+`ModeledGovernanceTrustRoot`), a modeled mutation
+(`ModeledGovernanceTrustMutation` with `AddTrustRoot` / `RetireTrustRoot` /
+`RevokeTrustRoot` / `EmergencyRevokeTrustRoot` / `Noop` and unsupported
+`ValidatorSetRotationUnsupported` / `PolicyChangeUnsupported` actions), the typed
+bindings (`ModeledGovernanceTrustMutationInput` / `Expectations` / `Policy` /
+`Surface` / `EnvironmentBinding` / `RuntimeBinding`), the modeled outcomes
+(`ModeledTrustMutationOutcome`: `ModeledMutationNotAttempted` / `Applied` /
+`RejectedBeforeSnapshot` / `RejectedBeforeApply` / `ApplyFailed` / `RolledBack` /
+`RollbackFailedFatal` / `AmbiguousFailClosed` /
+`Production`/`MainNetModeledMutationUnavailable` / `MainNetPeerDrivenApplyRefused`
+/ `ValidatorSetRotationUnsupported` / `PolicyChangeUnsupported`), a pure/mockable
+`ModeledGovernanceTrustMutationApplier` trait (`apply_modeled_mutation` /
+`recover_modeled_mutation_window`) with a DevNet/TestNet
+`FixtureModeledTrustMutationApplier` (invocation-counted, mutates only the modeled
+in-memory state) plus `ProductionModeledTrustMutationApplier` /
+`MainNetModeledTrustMutationApplier` (always unavailable/fail-closed), and two
+composition helpers (`map_modeled_outcome_to_mutation_engine_outcome` → the Run
+242 `GovernanceMutationOutcome`; `project_modeled_outcome_to_durable_completion` /
+`modeled_outcome_authorizes_durable_consume` → the Run 240
+`DurableMutationCompletion`). The entry point
+`evaluate_modeled_trust_mutation` enforces the ordering MainNet peer-driven
+refusal → legacy bypass → binding validation (reject before snapshot) → read-only
+validation gating → unsupported-action gating → applier-kind routing → applier
+hand-off, and `recover_modeled_trust_mutation` fails closed on every ambiguous /
+unknown window. **The modeled applier mutates ONLY the in-memory
+`ModeledGovernanceTrustState` in DevNet/TestNet fixture tests; it does not mutate
+`LivePqcTrustState`, call Run 070, perform a real trust swap, evict sessions,
+write a sequence, write a marker, or perform a durable consume by itself.** Only a
+modeled `ModeledMutationApplied` becomes consume-eligible; rejected / failed /
+rollback / rollback-failed / ambiguous / unavailable / unsupported outcomes never
+consume. Validation: run_244 (45 tests) plus the regression corpus run_242 down to
+run_224, `--lib pqc_authority`, and `--lib` all PASS. **No real production
+mutation engine, governance execution engine, on-chain proof verifier, persistent
+replay backend, or KMS/HSM/RemoteSigner backend; no RocksDB / file / schema /
+migration / storage-format change; no wire / marker / sequence / trust-bundle
+change; no MainNet governance or peer-driven apply enablement; no validator-set
+rotation; no weakening of Runs 070, 130–243.** Full C4 remains OPEN. C5 remains
+OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_244.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_244.md).
+
 
 ## 1. Background and prior accepted state
 
