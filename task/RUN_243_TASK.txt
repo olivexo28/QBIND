@@ -1,0 +1,380 @@
+Run 243 — Release-binary governance execution mutation-engine boundary evidence
+
+You are continuing QBIND after Run 242.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–242.
+* Release-binary evidence only, unless a tiny docs-only typo fix is needed.
+
+Current state:
+
+* Run 238 defined the typed durable replay-state backend contract.
+* Run 239 release-evidenced the durable backend boundary.
+* Run 240 wired the Run 238 durable backend into the Run 236 / 232 / 230 replay/freshness + after-success-only consume runtime path as the durable state provider.
+* Run 241 release-evidenced the Run 240 durable runtime integration.
+* Run 242 added `crates/qbind-node/src/pqc_governance_execution_mutation_engine.rs`, registered it in `lib.rs`, and added `crates/qbind-node/tests/run_242_governance_execution_mutation_engine_tests.rs`.
+* Run 242 makes the hand-off of an already-authorized governance evaluator decision to a future mutation executor explicit and typed.
+* Run 242 introduces a pure/mockable `GovernanceMutationExecutor` trait, DevNet/TestNet fixture executors, production/MainNet unavailable executors, a mutation-window recovery helper, call-site wiring, and `project_mutation_outcome_to_durable_completion`.
+* Run 242 is source/test only. It has no release-binary evidence yet.
+* No real governance execution engine is implemented.
+* No real mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No real persistent replay backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+
+Produce release-binary evidence for the Run 242 governance execution mutation-engine boundary, mirroring the Run 239 / Run 241 evidence pattern.
+
+Run 243 must prove on real `target/release/qbind-node` plus a release-built helper that the Run 242 mutation-engine boundary is present in release-built code, that the helper can exercise the mutation-engine-composed durable runtime path through production library symbols, and that all fail-closed/non-mutating invariants remain true in release mode.
+
+Run 243 must not implement a real production mutation engine, must not wire production runtime mutation, must not call Run 070 from production paths, and must not enable MainNet governance or MainNet peer-driven apply.
+
+Preflight docs hygiene:
+
+* Search the updated Run 242 docs for the typo:
+
+  * `` `Production`/`MainNetMutationUnavailable` ``
+* If present, fix it narrowly to:
+
+  * `` `ProductionMutationUnavailable` / `MainNetMutationUnavailable` ``
+* This is docs-only hygiene and must not be treated as a behavior change.
+
+Required deliverables:
+
+1. Add a release helper:
+
+   `crates/qbind-node/examples/run_243_governance_execution_mutation_engine_release_binary_helper.rs`
+
+   The helper must link against release-built production library symbols and exercise:
+
+   * `pqc_governance_execution_mutation_engine`
+   * `GovernanceMutationEngineInput`
+   * `GovernanceMutationEngineExpectations`
+   * `GovernanceMutationCandidate`
+   * `GovernanceMutationSurface`
+   * `GovernanceMutationPolicy`
+   * `GovernanceMutationEnvironmentBinding`
+   * `GovernanceMutationRuntimeBinding`
+   * `GovernanceMutationEngineKind`
+   * `GovernanceMutationOutcome`
+   * `GovernanceMutationExecutor`
+   * `FixtureMutationExecutor`
+   * `ProductionMutationExecutor`
+   * `MainNetMutationExecutor`
+   * `evaluate_governance_mutation_engine`
+   * `recover_governance_mutation_window`
+   * `wire_governance_mutation_engine_callsite`
+   * `project_mutation_outcome_to_durable_completion`
+   * all grep-verifiable invariant helpers from Run 242
+
+2. Add a release harness:
+
+   `scripts/devnet/run_243_governance_execution_mutation_engine_release_binary.sh`
+
+   The harness must:
+
+   * build `target/release/qbind-node`;
+   * build the Run 243 release helper;
+   * capture git commit, rustc version, cargo version;
+   * capture SHA-256 and ELF Build ID for `target/release/qbind-node`;
+   * capture SHA-256 and ELF Build ID for the Run 243 helper;
+   * run real-binary surface scenarios;
+   * run the helper corpus in release mode;
+   * run source-reachability greps for the Run 242 symbols;
+   * run a denylist proving no active production/MainNet enablement claims;
+   * run the required regression test corpus;
+   * write generated evidence into an ignored evidence directory.
+
+3. Add evidence archive directory:
+
+   `docs/devnet/run_243_governance_execution_mutation_engine_release_binary/`
+
+   Track only:
+
+   * `README.md`
+   * `summary.txt`
+   * `.gitignore`
+
+   Generated artifacts should be ignored, following the Run 241 convention.
+
+4. Add canonical evidence report:
+
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_243.md`
+
+Release-helper corpus:
+
+The helper must include accepted/compatible, rejection, recovery, projection, and reachability tables.
+
+Accepted / compatible cases must prove at minimum:
+
+* Disabled policy preserves legacy bypass and performs no mutation.
+* Disabled engine kind preserves legacy bypass and performs no mutation.
+* DevNet fixture mutation success returns `MutationAppliedSuccessfully`.
+* TestNet fixture mutation success returns `MutationAppliedSuccessfully`.
+* Mutation success projects to `DurableMutationCompletion::AppliedSuccessfully`.
+* Authorized-not-applied does not consume.
+* Read-only validation never mutates.
+* Failed apply never consumes.
+* Rollback never consumes.
+* Ambiguous after-authorization / before-completion window fails closed.
+* Production mutation path is reachable but unavailable/fail-closed.
+* MainNet mutation path is reachable but unavailable/fail-closed.
+* MainNet peer-driven apply is refused before mutation.
+* MainNet peer-driven refusal happens before binding validation and before executor invocation.
+* Validator-set rotation remains unsupported.
+* Policy-change action remains unsupported.
+* Existing Run 240 durable runtime projection remains compatible.
+* Existing Run 238 / 236 / 232 / 230 behavior remains compatible.
+* Run 242 call-site wiring returns `Ok` only on success and `Err` on fail-closed outcomes.
+
+Rejected cases must prove at minimum:
+
+* wrong environment rejected before executor;
+* wrong chain rejected before executor;
+* wrong genesis rejected before executor;
+* wrong governance surface rejected before executor;
+* wrong mutation surface rejected before executor;
+* wrong candidate digest rejected before executor;
+* wrong decision digest rejected before executor;
+* wrong proposal id rejected before executor;
+* wrong decision id rejected before executor;
+* wrong authority-domain sequence rejected before executor;
+* wrong lifecycle action rejected before executor;
+* malformed candidate rejected before executor;
+* stale / expired / replay-detected durable state cannot reach consume;
+* consumed durable state cannot reach consume;
+* superseded durable state cannot reach consume;
+* backend unavailable cannot reach consume;
+* consume before mutation success rejected;
+* consume after failed apply rejected;
+* consume after rollback rejected;
+* local operator key cannot satisfy MainNet authority;
+* peer majority cannot satisfy MainNet authority;
+* production mutation engine unavailable;
+* MainNet mutation engine unavailable;
+* validator-set rotation attempt unsupported;
+* policy-change attempt unsupported;
+* every rejected path produces no Run 070 call, no live trust swap, no session eviction, no sequence write, no marker write, no durable consume, and no executor invocation.
+
+Recovery cases must prove at minimum:
+
+* before-authorization window recovers as rejected-before-apply / no consume;
+* after-authorization-before-executor window fails closed;
+* after-apply-before-report window fails closed;
+* after-report-ambiguous window fails closed;
+* unknown window fails closed;
+* production/MainNet recovery classification is unavailable/fail-closed;
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection cases must prove at minimum:
+
+* only `MutationAppliedSuccessfully` projects to consume-eligible durable completion;
+* `MutationAuthorized` does not consume;
+* `MutationApplyFailed` does not consume;
+* `MutationRolledBack` does not consume;
+* `MutationAmbiguousFailClosed` does not consume;
+* `ProductionMutationUnavailable` does not consume;
+* `MainNetMutationUnavailable` does not consume;
+* `MainNetPeerDrivenApplyRefused` does not consume;
+* `ValidatorSetRotationUnsupported` does not consume;
+* `PolicyChangeUnsupported` does not consume;
+* `MutationRejectedBeforeApply` does not consume.
+
+Real release-binary surface scenarios:
+
+The harness must run the real `target/release/qbind-node` for at least:
+
+* `--help` / default help surface: no mutation-engine enablement banner or visible public flag drift.
+* default DevNet startup parse/smoke surface: no mutation-engine enablement claim.
+* default TestNet startup parse/smoke surface: no mutation-engine enablement claim.
+* default MainNet startup parse/smoke surface: no mutation-engine enablement claim.
+* invalid governance-execution selector or equivalent hidden selector parse path remains fail-closed before mutation if applicable.
+* any Run 242/243 hidden selector or helper-only path must not appear as a public production enablement surface.
+
+Denylist:
+
+Prove the captured real-binary logs and helper logs do not contain active/enabled claims for:
+
+* real production mutation engine enabled;
+* MainNet mutation engine enabled;
+* MainNet governance enabled;
+* MainNet peer-driven apply enabled;
+* real governance execution engine enabled;
+* real on-chain governance proof verifier enabled;
+* real persistent replay backend enabled;
+* RocksDB replay backend enabled;
+* file replay backend enabled;
+* schema migration enabled;
+* storage-format migration enabled;
+* KMS/HSM backend enabled;
+* RemoteSigner backend enabled;
+* validator-set rotation enabled;
+* policy-change action enabled;
+* autonomous apply;
+* apply-on-receipt;
+* peer-majority authority;
+* Run 070 apply from the mutation-engine boundary;
+* live trust swap from the mutation-engine boundary;
+* session eviction from the mutation-engine boundary;
+* marker write from the mutation-engine boundary;
+* sequence write from the mutation-engine boundary;
+* DummySig / DummyKem / DummyAead active on production path.
+
+Source/release reachability proof:
+
+The harness must grep production source for the Run 242 symbols and prove the release helper exercises them in release mode.
+
+Required greps include:
+
+* `pqc_governance_execution_mutation_engine`
+* `GovernanceMutationEngineInput`
+* `GovernanceMutationEngineExpectations`
+* `GovernanceMutationCandidate`
+* `GovernanceMutationSurface`
+* `GovernanceMutationPolicy`
+* `GovernanceMutationEnvironmentBinding`
+* `GovernanceMutationRuntimeBinding`
+* `GovernanceMutationEngineKind`
+* `GovernanceMutationOutcome`
+* `GovernanceMutationExecutor`
+* `FixtureMutationExecutor`
+* `ProductionMutationExecutor`
+* `MainNetMutationExecutor`
+* `evaluate_governance_mutation_engine`
+* `recover_governance_mutation_window`
+* `wire_governance_mutation_engine_callsite`
+* `project_mutation_outcome_to_durable_completion`
+* `mutation_engine_rejection_is_non_mutating`
+* `mutation_success_is_required_before_durable_consume`
+* `mutation_failure_never_consumes_durable_replay_state`
+* `mutation_rollback_never_consumes_durable_replay_state`
+* `production_mainnet_mutation_engine_unavailable`
+* `mainnet_peer_driven_apply_refused_by_mutation_engine`
+* `no_rocksdb_file_schema_migration_change_under_mutation_engine`
+* `validator_set_rotation_unsupported_by_mutation_engine`
+* `policy_change_unsupported_by_mutation_engine`
+* `local_operator_cannot_satisfy_mutation_engine_authority`
+* `peer_majority_cannot_satisfy_mutation_engine_authority`
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --release --bin qbind-node`
+* `cargo build -p qbind-node --release --example run_243_governance_execution_mutation_engine_release_binary_helper`
+* `bash scripts/devnet/run_243_governance_execution_mutation_engine_release_binary.sh`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_243.md`
+* `docs/devnet/run_243_governance_execution_mutation_engine_release_binary/README.md`
+* `docs/devnet/run_243_governance_execution_mutation_engine_release_binary/summary.txt`
+* `docs/devnet/run_243_governance_execution_mutation_engine_release_binary/.gitignore`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 243 is release-binary evidence for Run 242.
+* No production mutating behavior is enabled.
+* Any production-source module remains pure/source-test bounded and fail-closed.
+* The mutation-engine boundary is release-evidenced, not production-enabled.
+* No real production mutation engine is implemented.
+* No real governance execution engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No real persistent replay backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* No validator-set rotation.
+* Rejected mutation-engine paths are non-mutating.
+* Mutation success is required before durable consume.
+* Failed apply, rollback, and ambiguous windows never consume.
+* MainNet peer-driven apply remains refused before any mutation attempt.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 243 against Runs 050–242.
+* If no contradiction is found, add a “no Run 243 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070 from production paths.
+* Do not implement a real governance execution engine.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not implement a persistent replay backend.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–242.
+
+Expected verdict:
+
+Positive for release-binary evidence, if the release helper/harness and regression corpus pass.
+
+Run 243 should close the Run 242 release-binary evidence gap only. It must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Release artifacts and hashes.
+4. Helper corpus results.
+5. Real-binary scenarios.
+6. Tests run and results.
+7. Security invariants preserved.
+8. Honest limitations.
+9. C4/C5 status.
+10. Suggested Run 244 next step.

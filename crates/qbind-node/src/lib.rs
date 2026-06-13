@@ -842,6 +842,32 @@ pub mod pqc_governance_evaluator_replay_durable_backend;
 // Release-binary durable-runtime integration evidence is deferred to Run 241.
 // Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_evaluator_replay_durable_runtime_integration;
+// Run 242 — source/test governance execution mutation-engine boundary. Makes the
+// hand-off of an already-authorized governance evaluator decision to a future
+// mutation executor explicit and typed, instead of leaving Run 240/241 to rely
+// only on a modeled mutation-completion enum. Defines the typed input/context
+// structures (GovernanceMutationEngineInput / Expectations / Candidate / Surface
+// / Policy / EnvironmentBinding / RuntimeBinding), the engine kinds
+// (Disabled / FixtureDevNet / FixtureTestNet / ProductionUnavailable /
+// MainNetUnavailable), the mutation outcomes (ProceedLegacyBypassNoMutation /
+// MutationAuthorized / MutationAppliedSuccessfully / MutationRejectedBeforeApply
+// / MutationApplyFailed / MutationRolledBack / MutationAmbiguousFailClosed /
+// Production/MainNetMutationUnavailable / MainNetPeerDrivenApplyRefused /
+// ValidatorSetRotationUnsupported / PolicyChangeUnsupported), a pure/mockable
+// GovernanceMutationExecutor trait (execute_authorized_mutation /
+// recover_mutation_window) with DevNet/TestNet fixture + production/MainNet
+// unavailable executors, and a composition helper that projects mutation-engine
+// outcomes into the Run 240 durable runtime's DurableMutationCompletion semantics
+// (success -> after-success-only consume; failed apply / rollback never consume;
+// ambiguous / refusal / unavailable / unsupported fail closed before durable
+// observe/consume). Source/test only: introduces a typed mutation-engine
+// boundary, NOT a real production mutation engine. No real governance execution
+// engine, on-chain proof verifier, persistent replay backend, KMS/HSM/
+// RemoteSigner backend, validator-set rotation, or RocksDB/file/schema/migration/
+// storage-format change. MainNet governance and peer-driven apply remain
+// refused; rejected paths are non-mutating and never invoke Run 070. Full C4
+// remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_execution_mutation_engine;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
