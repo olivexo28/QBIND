@@ -786,6 +786,38 @@ OPEN. C5 remains OPEN. See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_240.md).
 
 
+## Run 241 update — release-binary governance evaluator durable replay backend runtime integration evidence
+
+Run 241 is the **release-binary evidence** run for the Run 240 source/test
+governance evaluator durable replay backend runtime integration
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_durable_runtime_integration.rs`).
+It adds a release helper
+(`crates/qbind-node/examples/run_241_governance_evaluator_replay_durable_runtime_integration_release_binary_helper.rs`)
+and a harness
+(`scripts/devnet/run_241_governance_evaluator_replay_durable_runtime_integration_release_binary.sh`)
+that prove on real `target/release/qbind-node` plus the release-built helper that
+the release-built code exposes and exercises the Run 240 integration: the durable
+read/observe runs **before** mutation authorization, the Run 230 / 232
+replay/freshness runtime still gates authorization, a durable
+compare-and-mark-consumed runs **only** after a modeled `AppliedSuccessfully`
+mutation, every determinable crash window fails closed, the fixture restart
+snapshot models durability only for release evidence (an in-process value clone,
+never a file format), the production/MainNet durable backends remain
+callable-but-unavailable/fail-closed, and **MainNet peer-driven apply remains
+refused** even when the durable state reads fresh. The helper A1–A27 / R1–R38
+corpus passes 203/203 in release mode; the real-binary surface scenarios keep the
+durable-runtime integration off the help/DevNet/TestNet/MainNet surfaces; the
+denylist of forbidden "active/enabled" claims is proven empty; and the Run 240 /
+238 / 236 / 234 / 232 / 230 / 228 / 226 / 224 plus the broader regression corpus
+all pass. Run 241 adds **no** production source behaviour change: only an example
+helper, a harness, evidence, and narrow doc updates. **No real persistent replay
+backend; no RocksDB / file / schema / migration / storage-format change; no real
+governance engine, mutation engine, or on-chain proof verifier; no weakening of
+Runs 070, 130–240.** Full C4 remains OPEN. C5 remains OPEN. See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_241.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_241.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary
