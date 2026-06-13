@@ -592,6 +592,53 @@ C4 remains OPEN. C5 remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_235.md).
 
 
+## Run 236 update — source/test governance evaluator replay consume runtime integration
+
+Run 236 is **source/test only**. It composes the Run 232 replay/freshness
+**runtime integration** path with the Run 234 post-mutation **consume boundary**
+into a single lifecycle integration layer
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_consume_runtime_integration.rs`,
+registered in `crates/qbind-node/src/lib.rs`,
+`crates/qbind-node/tests/run_236_governance_evaluator_replay_consume_runtime_integration_tests.rs`,
+56 tests PASS, `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_236.md`). Where Run 232
+gated mutation authorization on a fresh replay state and Run 234 modeled the
+after-success-only consume step independently, Run 236 wires them together so the
+two layers cannot disagree: `integrate_replay_consume_runtime` runs the Run 232
+runtime integration first and maps any non-`ProceedFresh` outcome directly to the
+matching non-consuming Run 236 outcome (`ProceedLegacyBypassNoConsume`,
+`ProceedDeferredNoConsume`, `ReplayRuntimeFailClosed`,
+`MainNetPeerDrivenApplyRefused`) **without** calling the consume writer; only on
+`ProceedFresh` does it override the consume binding's mutation-authorization
+outcome with the Run 232-derived `AuthorizedFresh`, run
+`perform_post_mutation_consume`, and project the Run 234 `ConsumeBoundaryOutcome`
+into the composed `ReplayConsumeRuntimeOutcome` taxonomy
+(`ProceedValidationOnlyNoConsume`, `ProceedFreshMutationAuthorized`,
+`ConsumeFixtureAfterMutationSuccess`, `DoNotConsume{BeforeApply, ApplyFailed,
+RolledBack, UnsupportedSurface, MainNetRefused}`, `ConsumeFailClosed`,
+`ProductionConsumeUnavailable`, `MainNetConsumeUnavailable`). Consume is
+integrated as an after-success-only post-mutation step: only
+`ConsumeFixtureAfterMutationSuccess` authorizes a fixture consume, and only after
+a successful mutation completion; fresh is required before mutation
+authorization; deferred, validation-only, before-apply, failed-apply,
+rolled-back, unsupported-surface, and MainNet-refused outcomes never consume.
+Fixture consume remains DevNet/TestNet source-test only; production/MainNet
+consume remains unavailable/fail-closed. The composition is pure (no Run 070
+call, no live trust swap, no session eviction, no sequence/marker write), so a
+rejection is non-mutating and the writer is never called on a non-consume path;
+MainNet peer-driven apply remains refused and never consumes even when the replay
+state is fresh; validator-set rotation and policy-change actions remain
+unsupported. No real governance engine, mutation engine, or on-chain proof
+verifier is implemented. No RocksDB/file/schema/migration/storage-format change
+and no wire/schema/marker/sequence/trust-bundle change is implemented. Validation:
+`cargo build -p qbind-node --lib` PASS; run_236 (56), run_234 (58), run_232 (47),
+run_230 (52), run_228 (48), run_226 (59), run_224 (48), `--lib pqc_authority`
+(164), and `--lib` (1357) all PASS. Release-binary consume-runtime-integration
+evidence is deferred to **Run 237**; no weakening of Runs 070, 130–235. **Full
+C4 remains OPEN. C5 remains OPEN.** See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_236.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_236.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

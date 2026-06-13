@@ -761,6 +761,31 @@ pub mod pqc_governance_evaluator_replay_runtime_integration;
 // Release-binary consume-boundary evidence is deferred to Run 235. Full C4
 // remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_evaluator_replay_consume_boundary;
+// Run 236 — source/test governance evaluator replay consume runtime
+// integration. Composes the Run 232 replay/freshness runtime integration with
+// the Run 234 post-mutation consume boundary as a modeled after-success-only
+// post-mutation step, modeling the full source/test lifecycle: validate
+// replay/freshness, authorize mutation only on fresh, model mutation
+// completion, and consume only after successful mutation completion. Adds a
+// typed ReplayConsumeRuntimeIntegrationInput (Run 232 context + Run 234 consume
+// input/expectations + consume-writer policy) and a ReplayConsumeRuntimeOutcome
+// (ProceedLegacyBypassNoConsume / ProceedDeferredNoConsume /
+// ProceedValidationOnlyNoConsume / ProceedFreshMutationAuthorized /
+// ConsumeFixtureAfterMutationSuccess / DoNotConsume{BeforeApply, ApplyFailed,
+// RolledBack, UnsupportedSurface, MainNetRefused} / ReplayRuntimeFailClosed /
+// ConsumeFailClosed / ProductionConsumeUnavailable / MainNetConsumeUnavailable /
+// MainNetPeerDrivenApplyRefused). Only ConsumeFixtureAfterMutationSuccess
+// (Run 232 ProceedFresh + AppliedSuccessfully + wired DevNet/TestNet fixture
+// writer) authorizes a consume; deferred / validation-only / before-apply /
+// failed-apply / rolled-back / unsupported-surface / MainNet-refused outcomes
+// never consume; production/MainNet consume remains unavailable/fail-closed.
+// Pure: no marker, no sequence, no live trust swap, no session eviction, no Run
+// 070 call; no RocksDB/file/schema/migration/storage-format change. MainNet
+// peer-driven apply remains refused and never consumes even when fresh and
+// modeled successful; validator-set rotation and policy-change actions remain
+// unsupported. Release-binary consume-runtime-integration evidence is deferred
+// to Run 237. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_evaluator_replay_consume_runtime_integration;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
