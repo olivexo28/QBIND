@@ -1,42 +1,51 @@
-Task: Run 240 — Source/Test Durable Governance Evaluator Replay Backend Runtime Integration
+Task: Run 241 — Release-Binary Durable Governance Evaluator Replay Backend Runtime Integration Evidence
 
 Current accepted state:
 
 * Run 238: source/test durable replay state backend boundary landed.
-* Run 239: release-binary durable replay state backend boundary evidence fully closed:
+* Run 239: release-binary durable replay state backend boundary evidence fully closed.
+* Run 240: source/test durable replay backend runtime integration landed:
 
-  * release-built helper exercises Run 238 durable backend symbols;
-  * fixture backend observed/consumed/replayed/superseded states are release-evidenced;
-  * fixture restart snapshot durability is release-evidenced without real file format;
-  * compare-and-mark-consumed atomicity is release-evidenced;
+  * `crates/qbind-node/src/pqc_governance_evaluator_replay_durable_runtime_integration.rs`;
+  * `DurableReplayRuntimeIntegrationInput`;
+  * `DurableReplayRuntimeOutcome`;
+  * `integrate_durable_replay_runtime`;
+  * `recover_durable_replay_runtime_crash_window`;
+  * `wire_durable_replay_runtime_callsite`;
+  * durable read/observe happens before mutation authorization;
+  * Run 230/232 freshness gate is used;
+  * mutation authorization happens only on fresh / known-fresh;
+  * compare-and-mark-consumed happens only after `AppliedSuccessfully`;
+  * crash-window ambiguity is typed and fail-closed;
+  * fixture restart snapshot remains source/test-only durability modeling;
   * production/MainNet durable backend remains unavailable/fail-closed;
-  * no real persistent replay backend is implemented;
+  * MainNet peer-driven apply remains refused;
+  * no real persistent replay backend;
   * no RocksDB/file/schema/migration/storage-format change;
   * no wire/schema/marker/sequence/trust-bundle change;
-  * MainNet peer-driven apply remains refused;
-  * Full C4 remains OPEN;
-  * C5 remains OPEN.
-* Current remaining gap:
-  The durable backend boundary is proven standalone, but it is not yet integrated into the replay/freshness + consume runtime path as the durable state provider. Existing runtime replay/consume integration still relies on the non-durable fixture-style state boundary.
+  * release-binary durable-runtime integration evidence deferred to Run 241.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
 
 Objective:
-Integrate the Run 238 durable replay backend boundary into the governance evaluator replay/freshness and consume runtime path at source/test level.
+Produce release-binary evidence for the Run 240 durable governance evaluator replay backend runtime integration.
 
-This run must model the complete source/test runtime flow:
+This run must prove in release mode that the durable backend is exercised as the runtime state provider through release-built code:
 
-1. durable observe/read before mutation authorization;
-2. replay/freshness validation using durable state;
-3. mutation authorization only on fresh;
-4. compare-and-mark-consumed only after successful mutation completion;
-5. crash-window classification where mutation/consume ordering is ambiguous;
-6. production/MainNet durable backend unavailable/fail-closed.
-
-Release-binary durable-runtime integration evidence is deferred to Run 241.
+1. durable read/observe occurs before mutation authorization;
+2. replay/freshness gate is applied using durable state;
+3. mutation is authorized only on fresh / known-fresh;
+4. compare-and-mark-consumed occurs only after successful mutation completion;
+5. crash-window ambiguity is typed and fail-closed;
+6. fixture restart snapshot durability remains evidence-only;
+7. production/MainNet durable backend remains unavailable/fail-closed;
+8. no mutation side effects occur from the evidence boundary.
 
 Strict scope:
 
-* Source/test only.
-* No release-binary harness.
+* Release-binary evidence only.
+* Use release-built helper and real `target/release/qbind-node` where applicable.
+* No production source behavior change unless a tiny harness-only fix is required.
 * No real persistent replay backend.
 * No RocksDB schema.
 * No file format.
@@ -53,87 +62,38 @@ Strict scope:
 * No autonomous apply.
 * No automatic apply on receipt.
 * No peer-majority authority.
-* Do not weaken Runs 070, 130–239.
+* Do not weaken Runs 070, 130–240.
 * Do not claim full C4 or C5 closure.
 
-Required source behavior:
+Required deliverables:
 
-1. Add a focused pure integration module, preferably:
-   `crates/qbind-node/src/pqc_governance_evaluator_replay_durable_runtime_integration.rs`
+1. Add release-binary helper:
+   `crates/qbind-node/examples/run_241_governance_evaluator_replay_durable_runtime_integration_release_binary_helper.rs`
 
-2. Compose:
+2. Add release-binary harness:
+   `scripts/devnet/run_241_governance_evaluator_replay_durable_runtime_integration_release_binary.sh`
 
-   * Run 238 durable backend boundary;
-   * Run 236 replay consume runtime integration;
-   * Run 234 consume boundary;
-   * Run 232 replay/freshness runtime integration;
-   * Run 230 replay/freshness state boundary.
+3. Add evidence archive:
+   `docs/devnet/run_241_governance_evaluator_replay_durable_runtime_integration_release_binary/`
 
-3. Define typed runtime input:
+4. Add canonical evidence report:
+   `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_241.md`
 
-   * durable backend decision input;
-   * replay/freshness runtime input;
-   * consume runtime input;
-   * durable backend kind;
-   * mutation surface;
-   * mutation completion status;
-   * validation surface;
-   * current canonical epoch;
-   * environment;
-   * chain id;
-   * genesis hash.
+5. Update narrowly:
 
-4. Define typed runtime outcome:
+   * `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+   * `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+   * `docs/whitepaper/contradiction.md`
+   * `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+   * `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+   * `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
 
-   * `ProceedLegacyBypassNoDurableWrite`;
-   * `ProceedDeferredObserved`;
-   * `ProceedFreshObserved`;
-   * `ProceedKnownFresh`;
-   * `ProceedMutationAuthorized`;
-   * `ConsumeDurableAfterMutationSuccess`;
-   * `DoNotConsumeBeforeApply`;
-   * `DoNotConsumeApplyFailed`;
-   * `DoNotConsumeRolledBack`;
-   * `CrashWindowFailClosed`;
-   * `DurableReplayFailClosed`;
-   * `ReplayRuntimeFailClosed`;
-   * `ConsumeRuntimeFailClosed`;
-   * `ProductionDurableUnavailable`;
-   * `MainNetDurableUnavailable`;
-   * `MainNetPeerDrivenApplyRefused`.
+6. Crosscheck all new/modified code and docs against existing design/spec. If contradictions are found, record them in `contradiction.md`.
 
-5. Enforce ordering:
+Required release-helper matrix:
+The release-built helper must exercise Run 240 durable runtime integration symbols through production library code.
 
-   * selector / environment / chain / genesis binding;
-   * durable read/observe;
-   * replay/freshness classification;
-   * evaluator runtime authorization;
-   * mutation authorization only on fresh/known-fresh;
-   * mutation completion status;
-   * compare-and-mark-consumed only after `AppliedSuccessfully`;
-   * crash-window classification when runtime cannot prove post-mutation consume ordering;
-   * production/MainNet durable unavailable fail-closed.
-
-6. Preserve safety:
-
-   * read-only validation does not consume;
-   * observe-only does not consume;
-   * deferred does not authorize mutation;
-   * failed apply does not consume;
-   * rollback does not consume;
-   * crash-window ambiguous states fail closed;
-   * MainNet peer-driven apply remains refused even when durable state says fresh.
-
-7. Preserve non-mutation:
-   This integration layer must not itself perform:
-
-   * Run 070 call;
-   * live trust swap;
-   * session eviction;
-   * sequence write;
-   * marker write.
-
-Required accepted scenarios:
+Accepted / compatible cases:
 A1. default Disabled / legacy bypass performs no durable write.
 
 A2. first-seen DevNet fixture decision is observed as fresh.
@@ -176,7 +136,19 @@ A20. Run 236 replay consume runtime integration remains compatible.
 
 A21. Run 238 durable backend boundary remains compatible.
 
-Required rejection scenarios:
+A22. Run 239 release durable-backend behavior remains compatible.
+
+A23. Run 237 release consume-runtime behavior remains compatible.
+
+A24. Run 235 release consume-boundary behavior remains compatible.
+
+A25. `integrate_durable_replay_runtime` proves durable read/observe occurs before mutation authorization.
+
+A26. compare-and-mark-consumed is reachable only after `AppliedSuccessfully`.
+
+A27. crash-window recovery helper returns typed fail-closed outcomes for ambiguous windows.
+
+Required rejection cases:
 R1. expired durable state rejected before mutation.
 
 R2. stale durable state rejected before mutation.
@@ -253,58 +225,146 @@ R37. rejection produces no Run 070 call, no live trust swap, no session eviction
 
 R38. MainNet peer-driven apply remains refused even when durable backend says fresh.
 
-Required tests:
-Add focused tests, preferably:
+Required real release checks:
+Use release artifacts to prove:
 
-`crates/qbind-node/tests/run_240_governance_evaluator_replay_durable_runtime_integration_tests.rs`
+* helper binary SHA-256 and ELF Build ID captured;
+* `qbind-node` release binary SHA-256 and ELF Build ID captured if built;
+* Run 240 helper corpus passes;
+* durable read/observe happens before mutation authorization;
+* replay/freshness gate uses durable state;
+* fresh / known-fresh is required before mutation authorization;
+* compare-and-mark-consumed is after-success-only;
+* fixture restart snapshot preserves observed state;
+* fixture restart snapshot preserves consumed state;
+* crash-window ambiguity is typed and fail-closed;
+* production/MainNet durable backend unavailable is fail-closed;
+* no real persistent backend active claim;
+* no RocksDB schema drift;
+* no file format drift;
+* no database migration;
+* no marker/sequence write from runtime integration layer;
+* no Run 070 call from runtime integration layer;
+* MainNet peer-driven apply remains refused;
+* no real governance engine active claim;
+* no real mutation engine active claim;
+* no real on-chain proof verifier active claim;
+* no MainNet governance enabled claim;
+* no validator-set rotation claim;
+* no KMS/HSM backend active claim;
+* no RemoteSigner backend active claim;
+* no peer-majority authority claim;
+* no automatic apply / apply-on-receipt claim.
 
-Minimum coverage:
+Required source/release reachability proof:
+The report must include grep/call-site proof for:
 
-* A1–A21.
-* R1–R38.
-* ordering tests proving durable observe/read happens before mutation authorization.
-* compare-and-mark-consumed-after-success-only tests.
-* restart snapshot runtime-integration tests.
-* crash-window fail-closed tests.
-* production/MainNet durable unavailable tests.
-* non-mutation tests.
-* MainNet refusal tests.
-* compatibility with Runs 239, 238, 237, 236, 235, 234, 233, 232, 231, 230.
+* `pqc_governance_evaluator_replay_durable_runtime_integration`;
+* `DurableReplayRuntimeIntegrationInput`;
+* `DurableReplayRuntimeOutcome`;
+* `integrate_durable_replay_runtime`;
+* `recover_durable_replay_runtime_crash_window`;
+* `wire_durable_replay_runtime_callsite`;
+* `ProceedLegacyBypassNoDurableWrite`;
+* `ProceedDeferredObserved`;
+* `ProceedFreshObserved`;
+* `ProceedKnownFresh`;
+* `ProceedMutationAuthorized`;
+* `ConsumeDurableAfterMutationSuccess`;
+* `DoNotConsumeBeforeApply`;
+* `DoNotConsumeApplyFailed`;
+* `DoNotConsumeRolledBack`;
+* `CrashWindowFailClosed`;
+* `DurableReplayFailClosed`;
+* `ReplayRuntimeFailClosed`;
+* `ConsumeRuntimeFailClosed`;
+* `ProductionDurableUnavailable`;
+* `MainNetDurableUnavailable`;
+* `MainNetPeerDrivenApplyRefused`;
+* Run 238 durable backend usage;
+* Run 236 consume runtime usage;
+* Run 232 replay/freshness runtime usage;
+* Run 230 replay/freshness state usage;
+* production unavailable path;
+* MainNet unavailable/refused path;
+* MainNet peer-driven refusal guard.
 
-Required documentation:
-Add:
+Required mutation / no-mutation proof:
+For every rejected durable-runtime-integration case:
 
-* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_240.md`
+* no Run 070 apply call;
+* no live trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* no `.tmp` residue;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead;
+* read-only validation does not consume;
+* rollback does not consume;
+* failed apply does not consume;
+* MainNet refused does not consume.
 
-Update:
+Required denylist:
+Across the run prove:
 
-* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
-* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
-* `docs/whitepaper/contradiction.md`
-* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
-* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
-* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* no MainNet apply;
+* no autonomous apply;
+* no apply on receipt;
+* no peer-majority authority;
+* no real governance execution engine claim;
+* no real mutation engine claim;
+* no production governance active claim;
+* no MainNet governance enabled claim;
+* no real on-chain governance proof verifier claim;
+* no real persistent replay backend claim;
+* no real KMS backend claim;
+* no real HSM backend claim;
+* no real RemoteSigner backend claim;
+* no custody attestation production-active claim;
+* no validator-set rotation claim;
+* no fallback to `--p2p-trusted-root`;
+* no active DummySig / DummyKem / DummyAead;
+* no RocksDB schema change;
+* no file format change;
+* no database migration;
+* no network wire schema change;
+* no trust-bundle schema change;
+* no marker schema change;
+* no sequence schema change;
+* no marker write before sequence commit;
+* no sequence write on validation-only surfaces;
+* no marker write on validation-only surfaces.
 
-Documentation must state:
+Required captured metadata:
 
-* Run 240 is source/test durable replay backend runtime integration work.
-* Durable replay backend is integrated as a typed runtime state provider only.
-* Fixture durable backend remains DevNet/TestNet source-test only.
-* Production/MainNet durable backend remains unavailable/fail-closed.
-* Fixture restart snapshot models durability only for source/test evidence.
-* No real persistent replay backend is implemented.
-* No RocksDB/file/schema/migration/storage-format change is implemented.
-* No real governance engine, mutation engine, or on-chain proof verifier is implemented.
-* MainNet peer-driven apply remains refused.
-* Validator-set rotation remains unsupported.
-* Release-binary durable-runtime integration evidence is deferred to Run 241.
-* Full C4 remains OPEN.
-* C5 remains OPEN.
+* helper SHA-256 and ELF Build ID;
+* qbind-node SHA-256 and ELF Build ID if built;
+* git commit hash;
+* rustc/cargo versions;
+* exact commands;
+* stdout/stderr logs;
+* per-scenario exit codes;
+* durable runtime outcome values;
+* durable backend key digests;
+* durable record digests;
+* durable operation transcript digests;
+* crash-window transcript digests;
+* durable record state values;
+* durable backend outcome values;
+* durable consume outcome values;
+* crash-window values;
+* before/after fixture durable backend snapshots;
+* marker/sequence before/after hashes where applicable;
+* data-dir inventories;
+* denylist grep results.
 
 Validation commands:
 Run at minimum:
 
-* `cargo build -p qbind-node --lib`
+* `cargo build --release -p qbind-node --bin qbind-node`
+* `cargo build --release -p qbind-node --example run_241_governance_evaluator_replay_durable_runtime_integration_release_binary_helper`
+* `bash scripts/devnet/run_241_governance_evaluator_replay_durable_runtime_integration_release_binary.sh`
 * `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
 * `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
 * `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
@@ -317,17 +377,38 @@ Run at minimum:
 * `cargo test -p qbind-node --lib pqc_authority`
 * `cargo test -p qbind-node --lib`
 
-Acceptance criteria:
-Run 240 is acceptable only if:
+If exact test names differ, locate nearest existing targets and document exact commands/results.
 
-1. Durable replay backend is integrated into the runtime replay/consume path at source/test level.
-2. Durable observe/read happens before mutation authorization.
-3. Compare-and-mark-consumed happens only after successful mutation completion.
+Documentation requirements:
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_241.md` must state:
+
+* Run 241 is release-binary durable replay backend runtime integration evidence.
+* Durable replay backend is release-evidenced as the typed runtime state provider.
+* Durable read/observe happens before mutation authorization.
+* Compare-and-mark-consumed happens only after successful mutation completion.
+* Crash-window ambiguity is typed and fail-closed.
+* Fixture durable backend remains DevNet/TestNet evidence-only.
+* Fixture restart snapshot models durability only for release evidence.
+* Production/MainNet durable backend remains unavailable/fail-closed.
+* No real persistent replay backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No real governance engine, mutation engine, or on-chain proof verifier is implemented.
+* MainNet peer-driven apply remains refused.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Acceptance criteria:
+Run 241 is acceptable only if:
+
+1. Release-built helper exercises the Run 240 durable runtime integration.
+2. Durable read/observe-before-mutation ordering is release-evidenced.
+3. Compare-and-mark-consumed-after-success-only ordering is release-evidenced.
 4. Crash-window ambiguity is typed and fail-closed.
-5. Fixture restart snapshot remains source/test-only durability modeling.
+5. Fixture restart snapshot durability is release-evidenced without real file format.
 6. Production/MainNet durable backend remains unavailable/fail-closed.
 7. Rejections are non-mutating.
 8. MainNet peer-driven apply remains refused.
 9. No RocksDB/file/schema/migration/storage-format change is claimed.
-10. Release-binary evidence is deferred to Run 241.
+10. Existing Run 239, Run 237, Run 235, Run 233, and Run 231 release behavior remains compatible.
 11. No full C4 or C5 closure is claimed.
