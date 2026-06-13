@@ -897,6 +897,27 @@ pub mod pqc_governance_execution_mutation_engine;
 // refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN;
 // C5 remains OPEN.
 pub mod pqc_governance_modeled_trust_mutation_applier;
+// Run 246 — source/test governance modeled END-TO-END pipeline boundary.
+// Composes the already-landed typed boundaries (Run 226 evaluator call-site
+// wiring, Run 240 durable replay-state runtime integration, Run 242
+// mutation-engine boundary, Run 244 modeled trust-state mutation applier) into
+// ONE typed source/test end-to-end pipeline that orders MainNet peer-driven
+// refusal -> legacy bypass -> evaluator/call-site authorization -> durable replay
+// freshness observation -> mutation-engine authorization -> modeled applier
+// success -> durable consume decision. Proves durable consume is gated
+// end-to-end on a modeled SUCCESSFUL applier outcome, not merely a
+// mutation-completion enum; evaluator success, durable replay freshness, and
+// mutation-engine authorization are each individually insufficient. It is an
+// ordering/composition layer, NOT a replacement for any existing module.
+// Source/test only: no production runtime mutation, no real governance execution
+// engine, production mutation engine, on-chain proof verifier, persistent replay
+// backend, or KMS/HSM/RemoteSigner backend. It does NOT call Run 070, mutate
+// LivePqcTrustState, perform a real trust swap, evict sessions, write sequence
+// files, write authority markers, perform a durable consume by itself, or touch
+// RocksDB/file/schema/migration/storage-format. MainNet governance, MainNet
+// peer-driven apply, and validator-set rotation remain refused/unsupported;
+// rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_modeled_end_to_end_pipeline;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
