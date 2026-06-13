@@ -835,7 +835,7 @@ engine kinds (`Disabled` / `FixtureDevNet` / `FixtureTestNet` /
 (`ProceedLegacyBypassNoMutation` / `MutationAuthorized` /
 `MutationAppliedSuccessfully` / `MutationRejectedBeforeApply` /
 `MutationApplyFailed` / `MutationRolledBack` / `MutationAmbiguousFailClosed` /
-`Production`/`MainNetMutationUnavailable` / `MainNetPeerDrivenApplyRefused` /
+`ProductionMutationUnavailable` / `MainNetMutationUnavailable` / `MainNetPeerDrivenApplyRefused` /
 `ValidatorSetRotationUnsupported` / `PolicyChangeUnsupported`), a pure/mockable
 `GovernanceMutationExecutor` trait (`execute_authorized_mutation` /
 `recover_mutation_window`) with DevNet/TestNet fixture and production/MainNet
@@ -859,6 +859,54 @@ migration / storage-format change; no wire / marker / sequence / trust-bundle
 change; no weakening of Runs 070, 130–241.** Full C4 remains OPEN. C5 remains
 OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_242.md`](
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_242.md).
+
+
+## Run 243 update — release-binary governance execution mutation-engine boundary evidence
+
+Run 243 is the **release-binary evidence** run for the Run 242 source/test
+governance execution mutation-engine boundary
+(`crates/qbind-node/src/pqc_governance_execution_mutation_engine.rs`). It proves
+on real `target/release/qbind-node` plus a release-built helper
+(`crates/qbind-node/examples/run_243_governance_execution_mutation_engine_release_binary_helper.rs`,
+driven by
+`scripts/devnet/run_243_governance_execution_mutation_engine_release_binary.sh`)
+that the release-built code exposes and exercises the boundary symbols
+(`evaluate_governance_mutation_engine`, `recover_governance_mutation_window`,
+`wire_governance_mutation_engine_callsite`,
+`project_mutation_outcome_to_durable_completion`, the
+`GovernanceMutationEngineInput` / `GovernanceMutationEngineExpectations` /
+`GovernanceMutationCandidate` / `GovernanceMutationSurface` /
+`GovernanceMutationPolicy` / `GovernanceMutationEnvironmentBinding` /
+`GovernanceMutationRuntimeBinding` bindings, the `GovernanceMutationEngineKind` /
+`GovernanceMutationOutcome` taxonomy, the `GovernanceMutationExecutor` trait with
+`FixtureMutationExecutor` / `ProductionMutationExecutor` /
+`MainNetMutationExecutor`, and all grep-verifiable invariant helpers): a Disabled
+policy / engine kind is a legacy bypass with no mutation and no executor
+invocation; binding validation runs before any apply and a mismatch is a
+non-mutating reject-before-apply that never reaches the executor; a read-only
+validation surface never mutates; only a modeled `MutationAppliedSuccessfully`
+projects to the consume-eligible `DurableMutationCompletion::AppliedSuccessfully`,
+while authorized-not-applied, failed apply, rollback, and ambiguous
+after-authorization windows never consume; production / MainNet engine kinds are
+reachable but always unavailable / fail-closed; **MainNet peer-driven apply is
+refused before binding validation and before executor invocation**; and
+validator-set rotation and policy-change actions remain unsupported. The
+release-helper corpus (206 checks: accepted / rejection / recovery / projection /
+reachability) and the real-binary surface scenarios (`--help` and default
+DevNet/TestNet/MainNet smoke surfaces emit no mutation-engine enablement claim;
+the hidden governance-execution selector still parses; an invalid selector fails
+closed before mutation) all PASS, with a 32-pattern denylist proven empty. Run
+243 also narrowly fixed a Run 242 docs typo (`` `Production`/`MainNetMutationUnavailable` ``
+→ `` `ProductionMutationUnavailable` / `MainNetMutationUnavailable` ``). Run 243
+adds **no** production source behaviour change: only an example helper, a harness
+script, evidence, narrow doc updates, and the docs-only typo fix. **No real
+production mutation engine, governance execution engine, on-chain proof verifier,
+persistent replay backend, or KMS/HSM/RemoteSigner backend; no RocksDB / file /
+schema / migration / storage-format change; no wire / marker / sequence /
+trust-bundle change; no MainNet governance or peer-driven apply enablement; no
+validator-set rotation; no weakening of Runs 070, 130–242.** Full C4 remains
+OPEN. C5 remains OPEN. See [`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_243.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_243.md).
 
 
 ## 1. Background and prior accepted state
