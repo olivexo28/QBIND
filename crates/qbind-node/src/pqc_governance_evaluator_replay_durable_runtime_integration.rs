@@ -102,9 +102,8 @@ use crate::pqc_governance_evaluator_replay_durable_backend::{
     classify_crash_window, compare_and_mark_consumed, observe_decision_if_absent,
     read_decision_state, CrashWindow, CrashWindowObservation, DurableBackendDecisionExpectations,
     DurableBackendDecisionInput, DurableBackendKind, DurableBackendOutcome, DurableConsumeOutcome,
-    DurableMutationCompletion, DurableRecordState,
-    GovernanceEvaluatorReplayDurableBackendAtomic, GovernanceEvaluatorReplayDurableBackendReader,
-    GovernanceEvaluatorReplayDurableBackendWriter,
+    DurableMutationCompletion, DurableRecordState, GovernanceEvaluatorReplayDurableBackendAtomic,
+    GovernanceEvaluatorReplayDurableBackendReader, GovernanceEvaluatorReplayDurableBackendWriter,
 };
 use crate::pqc_governance_evaluator_replay_state::{
     evaluate_evaluator_replay_freshness, EvaluatorReplayFreshnessExpectations,
@@ -440,7 +439,8 @@ where
     // agreement. Mutation can only be authorized after the runtime classifies the
     // decision fresh; a deferral defers and any fail-closed rejects before
     // mutation.
-    let runtime = evaluate_evaluator_replay_freshness(input.freshness_input, input.freshness_expectations);
+    let runtime =
+        evaluate_evaluator_replay_freshness(input.freshness_input, input.freshness_expectations);
     match &runtime {
         EvaluatorReplayFreshnessOutcome::ProceedFresh => {}
         EvaluatorReplayFreshnessOutcome::ProceedDeferred => {
@@ -841,12 +841,16 @@ mod tests {
         assert!(consume_only_after_successful_mutation_under_durable_runtime());
         assert!(crash_window_ambiguity_fails_closed_under_durable_runtime());
         assert!(restart_snapshot_is_fixture_source_test_only_under_durable_runtime());
-        assert!(mainnet_peer_driven_apply_remains_refused_under_durable_runtime(
-            TrustBundleEnvironment::Mainnet
-        ));
-        assert!(!mainnet_peer_driven_apply_remains_refused_under_durable_runtime(
-            TrustBundleEnvironment::Devnet
-        ));
+        assert!(
+            mainnet_peer_driven_apply_remains_refused_under_durable_runtime(
+                TrustBundleEnvironment::Mainnet
+            )
+        );
+        assert!(
+            !mainnet_peer_driven_apply_remains_refused_under_durable_runtime(
+                TrustBundleEnvironment::Devnet
+            )
+        );
         assert!(production_mainnet_durable_remains_unavailable_under_durable_runtime());
         assert!(local_operator_cannot_satisfy_durable_runtime_policy());
         assert!(peer_majority_cannot_satisfy_durable_runtime_policy());

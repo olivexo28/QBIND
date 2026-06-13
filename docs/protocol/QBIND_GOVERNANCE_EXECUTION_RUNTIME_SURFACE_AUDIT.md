@@ -759,6 +759,33 @@ C5 remains OPEN.** See
   ../devnet/QBIND_DEVNET_EVIDENCE_RUN_239.md).
 
 
+## Run 240 update — source/test governance evaluator durable replay backend runtime integration
+
+Run 240 is **source/test only**. It wires the Run 238 typed durable replay-state
+backend boundary into the Run 236 / 232 / 230 replay/freshness +
+after-success-only consume runtime path as the **durable state provider**
+(`crates/qbind-node/src/pqc_governance_evaluator_replay_durable_runtime_integration.rs`).
+The durable replay backend is integrated as a typed runtime state provider only:
+the durable read/observe runs **before** mutation authorization, the Run 230 / 232
+replay/freshness runtime still gates authorization, a durable
+compare-and-mark-consumed runs **only** after a modeled `AppliedSuccessfully`
+mutation on an exactly-`ObservedFresh` record, a read-only validation surface
+observes but never consumes, every determinable crash window fails closed, and
+the runtime call-site wiring fails closed before any mutation. The fixture
+durable backend remains DevNet/TestNet source-test only; production/MainNet
+durable backends remain callable-but-unavailable/fail-closed; the fixture restart
+snapshot models durability only for source/test evidence (an in-process value
+clone, never a file format); MainNet peer-driven apply remains refused even when
+the durable state reads fresh; and validator-set rotation remains unsupported.
+**No real persistent replay backend; no RocksDB / file / schema / migration /
+storage-format change; no real governance engine, mutation engine, or on-chain
+proof verifier; no weakening of Runs 070, 130–239.** Release-binary
+durable-runtime integration evidence is deferred to **Run 241**. Full C4 remains
+OPEN. C5 remains OPEN. See
+[`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_240.md`](
+  ../devnet/QBIND_DEVNET_EVIDENCE_RUN_240.md).
+
+
 ## 1. Background and prior accepted state
 
 * **Run 211** — source/test governance execution policy boundary

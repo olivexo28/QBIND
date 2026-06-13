@@ -40,8 +40,9 @@ use qbind_node::pqc_governance_evaluator_replay_durable_backend::{
 use qbind_node::pqc_governance_evaluator_replay_durable_runtime_integration::{
     consume_only_after_successful_mutation_under_durable_runtime,
     crash_window_ambiguity_fails_closed_under_durable_runtime,
-    durable_observe_happens_before_mutation_authorization, durable_runtime_rejection_is_non_mutating,
-    integrate_durable_replay_runtime, local_operator_cannot_satisfy_durable_runtime_policy,
+    durable_observe_happens_before_mutation_authorization,
+    durable_runtime_rejection_is_non_mutating, integrate_durable_replay_runtime,
+    local_operator_cannot_satisfy_durable_runtime_policy,
     mainnet_peer_driven_apply_remains_refused_under_durable_runtime,
     no_rocksdb_file_schema_migration_change_under_durable_runtime,
     peer_majority_cannot_satisfy_durable_runtime_policy,
@@ -54,8 +55,8 @@ use qbind_node::pqc_governance_evaluator_replay_durable_runtime_integration::{
     DurableReplayRuntimeOutcome,
 };
 use qbind_node::pqc_governance_evaluator_replay_state::{
-    EvaluatorReplayFreshnessExpectations, EvaluatorReplayFreshnessInput,
-    PreviouslySeenState, ReplayStatePolicy, SeenDecisionRecord,
+    EvaluatorReplayFreshnessExpectations, EvaluatorReplayFreshnessInput, PreviouslySeenState,
+    ReplayStatePolicy, SeenDecisionRecord,
 };
 use qbind_node::pqc_governance_execution_evaluator::{
     DecisionSourceIdentity, EvaluatorRequest, EvaluatorResponse, EvaluatorSourceKind,
@@ -286,7 +287,10 @@ fn a1_default_disabled_legacy_bypass_no_durable_write() {
         outcome,
         DurableReplayRuntimeOutcome::ProceedLegacyBypassNoDurableWrite
     );
-    assert!(backend.is_empty(), "legacy bypass performs no durable write");
+    assert!(
+        backend.is_empty(),
+        "legacy bypass performs no durable write"
+    );
 }
 
 #[test]
@@ -348,7 +352,10 @@ fn a4_known_fresh_proceeds_as_known_fresh() {
         ),
         &mut backend,
     );
-    assert_eq!(first, DurableReplayRuntimeOutcome::ProceedMutationAuthorized);
+    assert_eq!(
+        first,
+        DurableReplayRuntimeOutcome::ProceedMutationAuthorized
+    );
     // Pass 2: known-fresh re-read.
     let second = integrate_durable_replay_runtime(
         &c.input(
@@ -381,7 +388,10 @@ fn a5_deferred_observed_does_not_authorize_mutation() {
         ),
         &mut backend,
     );
-    assert_eq!(outcome, DurableReplayRuntimeOutcome::ProceedDeferredObserved);
+    assert_eq!(
+        outcome,
+        DurableReplayRuntimeOutcome::ProceedDeferredObserved
+    );
     assert!(!outcome.authorizes_mutation());
     assert_eq!(
         backend.read_durable_state(&c.key()),
@@ -401,7 +411,10 @@ fn a6_fresh_observed_authorizes_mutation_after_agreement() {
         ),
         &mut backend,
     );
-    assert_eq!(outcome, DurableReplayRuntimeOutcome::ProceedMutationAuthorized);
+    assert_eq!(
+        outcome,
+        DurableReplayRuntimeOutcome::ProceedMutationAuthorized
+    );
     assert!(outcome.authorizes_mutation());
     // Durable observe happened before mutation authorization.
     assert_eq!(
@@ -551,7 +564,10 @@ fn a11_apply_failed_after_observe_does_not_consume() {
         ),
         &mut backend,
     );
-    assert_eq!(outcome, DurableReplayRuntimeOutcome::DoNotConsumeApplyFailed);
+    assert_eq!(
+        outcome,
+        DurableReplayRuntimeOutcome::DoNotConsumeApplyFailed
+    );
     assert!(!backend.is_consumed(&c.key()));
 }
 
@@ -601,9 +617,7 @@ fn a13_after_mutation_before_consume_crash_window_typed_fail_closed() {
     );
     assert_eq!(
         outcome,
-        DurableReplayRuntimeOutcome::CrashWindowFailClosed(
-            CrashWindow::AfterMutationBeforeConsume
-        )
+        DurableReplayRuntimeOutcome::CrashWindowFailClosed(CrashWindow::AfterMutationBeforeConsume)
     );
     assert!(outcome.is_fail_closed());
 }
@@ -777,16 +791,20 @@ fn a19_mainnet_peer_driven_apply_refused_even_if_durable_fresh() {
 fn a20_run236_consume_runtime_integration_remains_compatible() {
     assert!(consume_integrated_as_after_success_only_post_mutation_step());
     assert!(fresh_required_before_mutation_authorization_under_consume_runtime());
-    assert!(mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_consume_runtime(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
 }
 
 #[test]
 fn a21_run238_durable_backend_boundary_remains_compatible() {
-    assert!(mainnet_peer_driven_apply_remains_refused_under_durable_backend(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_durable_backend(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
     // The Run 238 boundary still classifies a fresh first-seen decision.
     let c = fresh_devnet_mutating();
     let mut backend = devnet_backend();
@@ -818,7 +836,10 @@ fn ordering_durable_observe_before_mutation_authorization() {
         ),
         &mut backend,
     );
-    assert_eq!(outcome, DurableReplayRuntimeOutcome::ProceedMutationAuthorized);
+    assert_eq!(
+        outcome,
+        DurableReplayRuntimeOutcome::ProceedMutationAuthorized
+    );
     // Authorization only occurs after the durable observe recorded the decision.
     assert_eq!(
         backend.read_durable_state(&c.key()),
@@ -1313,7 +1334,10 @@ fn r29_consume_before_successful_mutation_rejected() {
         ),
         &mut backend,
     );
-    assert_eq!(outcome, DurableReplayRuntimeOutcome::DoNotConsumeBeforeApply);
+    assert_eq!(
+        outcome,
+        DurableReplayRuntimeOutcome::DoNotConsumeBeforeApply
+    );
     assert!(!backend.is_consumed(&c.key()));
 }
 
@@ -1337,7 +1361,10 @@ fn r30_consume_after_failed_apply_rejected() {
         ),
         &mut backend,
     );
-    assert_eq!(outcome, DurableReplayRuntimeOutcome::DoNotConsumeApplyFailed);
+    assert_eq!(
+        outcome,
+        DurableReplayRuntimeOutcome::DoNotConsumeApplyFailed
+    );
     assert!(!backend.is_consumed(&c.key()));
 }
 
@@ -1470,8 +1497,10 @@ fn r38_mainnet_peer_driven_apply_refused_even_when_durable_says_fresh() {
         outcome,
         DurableReplayRuntimeOutcome::MainNetPeerDrivenApplyRefused
     );
-    assert!(mainnet_peer_driven_apply_remains_refused_under_durable_runtime(
-        TrustBundleEnvironment::Mainnet
-    ));
+    assert!(
+        mainnet_peer_driven_apply_remains_refused_under_durable_runtime(
+            TrustBundleEnvironment::Mainnet
+        )
+    );
     assert!(backend.is_empty());
 }
