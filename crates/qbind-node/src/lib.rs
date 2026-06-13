@@ -815,6 +815,33 @@ pub mod pqc_governance_evaluator_replay_consume_runtime_integration;
 // policy-change actions remain unsupported. Release-binary durable-backend
 // evidence is deferred to Run 239. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_evaluator_replay_durable_backend;
+// Run 240 — source/test governance evaluator durable replay backend runtime
+// integration. Composes the Run 238 durable backend boundary with the Run 236
+// replay consume runtime integration, Run 234 consume boundary, Run 232
+// replay/freshness runtime integration, and Run 230 replay/freshness state
+// boundary so the durable backend becomes the typed runtime state provider.
+// Defines DurableReplayRuntimeIntegrationInput (durable kind/input/expectations
+// + Run 230 replay/freshness input/expectations + replay policy + mutation
+// completion) and DurableReplayRuntimeOutcome (ProceedLegacyBypassNoDurableWrite
+// / ProceedDeferredObserved / ProceedFreshObserved / ProceedKnownFresh /
+// ProceedMutationAuthorized / ConsumeDurableAfterMutationSuccess /
+// DoNotConsume{BeforeApply,ApplyFailed,RolledBack} / CrashWindowFailClosed /
+// DurableReplayFailClosed / ReplayRuntimeFailClosed / ConsumeRuntimeFailClosed /
+// Production/MainNetDurableUnavailable / MainNetPeerDrivenApplyRefused). Enforces
+// ordering: selector/env/chain/genesis binding -> durable read/observe ->
+// replay/freshness classification -> evaluator runtime authorization -> mutation
+// authorization only on fresh -> mutation completion -> compare-and-mark-consumed
+// only after AppliedSuccessfully -> crash-window classification ->
+// production/MainNet durable unavailable fail-closed. Read-only validation and
+// observe-only never consume; deferred never authorizes mutation; failed apply /
+// rollback / ambiguous crash window never consume and fail closed; MainNet
+// peer-driven apply remains refused even when durable state is fresh. Pure: no
+// marker, no sequence, no live trust swap, no session eviction, no Run 070 call;
+// no RocksDB/file/schema/migration/storage-format change. Restart snapshot
+// durability remains the Run 238 fixture source/test-only value clone.
+// Release-binary durable-runtime integration evidence is deferred to Run 241.
+// Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_evaluator_replay_durable_runtime_integration;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
