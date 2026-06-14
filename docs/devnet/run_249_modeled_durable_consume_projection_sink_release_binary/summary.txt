@@ -1,0 +1,59 @@
+Run 249 — release-binary modeled governance durable-consume projection sink evidence
+git_commit: 1dc54968670b519d28d9a48a7eccdb19a747836b
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  51bc77c8b67ee1ba89a06e49bee8d34771564c461559a53de51f6e988673994e
+  qbind_node_buildid: BuildID[sha1]=7a89d5f3e59f0c0ed4f1f56bcae8d72189fa2319
+  helper_249_sha256:  c49302391be3251ad83b1efd9485a57eb59d61a08816253e17e53b040e60b824
+  helper_249_buildid: BuildID[sha1]=1d3128432562791a69d1543f949ba159e3de1455
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+  S5_selector_parsesrc=1
+  S6_selector_invalidrc=1
+  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).
+
+release-helper verdicts:
+  helper_run_249rc=0verdict: PASS
+
+helper corpus verdicts (release mode, Run 248 durable-consume-sink boundary symbols):
+  table accepted: pass=47 fail=0
+  table rejection: pass=116 fail=0
+  table recovery: pass=14 fail=0
+  table projection: pass=25 fail=0
+  table stage_ordering: pass=14 fail=0
+  table receipt_ledger: pass=23 fail=0
+  table non_mutation: pass=18 fail=0
+  table reachability: pass=23 fail=0
+  total_pass: 280
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 39 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_248_modeled_durable_consume_projection_sink_tests	rc=0
+  test:run_246_governance_modeled_end_to_end_pipeline_tests	rc=0
+  test:run_244_modeled_governance_trust_mutation_applier_tests	rc=0
+  test:run_242_governance_execution_mutation_engine_tests	rc=0
+  test:run_240_governance_evaluator_replay_durable_runtime_integration_tests	rc=0
+  test:run_238_governance_evaluator_replay_durable_backend_tests	rc=0
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 248 governance modeled durable-consume projection sink boundary is a pure, typed projection over the already-landed Run 246 modeled end-to-end pipeline outcome plus a mockable sink that records ONLY the in-memory ModeledDurableConsumeReceiptLedger, exercised here through release-built library symbols (the same symbols a future production call site would use); a disabled sink / pipeline / evaluator-call-site policy is a legacy no-receipt bypass with no sink invocation; MainNet peer-driven apply is refused before pipeline projection and before any sink invocation; only the Run 246 ModeledApplierAppliedAndDurableConsumeAuthorized outcome creates a sink intent; only ConsumeReceiptRecorded authorizes a new modeled receipt-recorded state; a duplicate identical receipt is idempotent (no second record) and the same receipt id with a different digest fails closed as equivocation; every non-success pipeline outcome, record failure, rollback, rollback-failed, ambiguous receipt window, unavailable production/MainNet sink path, and unsupported action never consumes, and a rejection before the sink stage leaves the sink invocation count at zero; production/MainNet paths are reachable but always unavailable/fail-closed; validator-set rotation and policy-change actions remain unsupported; rejections are pure and non-mutating (no marker/sequence write, no live trust swap, no session eviction, no durable consume, no Run 070 call, no LivePqcTrustState mutation); no real durable consume backend, persistent replay backend, production mutation engine, governance execution engine, or on-chain governance proof verifier; no KMS/HSM/RemoteSigner backend; no RocksDB schema change, no file format change, no database migration, no storage-format change, no persistent storage, and no wire/marker/sequence/trust-bundle schema change; existing Run 247, Run 245, Run 243, and Run 241 release behaviour remains compatible; full C4 and C5 remain OPEN.
+
+verdict: PASS
