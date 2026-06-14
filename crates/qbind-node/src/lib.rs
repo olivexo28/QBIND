@@ -918,6 +918,27 @@ pub mod pqc_governance_modeled_trust_mutation_applier;
 // peer-driven apply, and validator-set rotation remain refused/unsupported;
 // rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_modeled_end_to_end_pipeline;
+// Run 248 — source/test governance modeled DURABLE-CONSUME PROJECTION SINK
+// boundary. Extends the Run 246 modeled end-to-end pipeline with a mockable,
+// in-memory consume-receipt sink that models how a future production call site
+// would record an after-success-only durable consume receipt once the Run 246
+// pipeline has authorized consume. Only the Run 246
+// ModeledApplierAppliedAndDurableConsumeAuthorized outcome creates a sink intent;
+// every other pipeline outcome, every record failure / rollback / rollback-failed
+// / ambiguous window, every production / MainNet unavailable path, and every
+// unsupported action fails closed with no receipt and no consume. The
+// DevNet/TestNet fixture sink mutates only the in-memory
+// ModeledDurableConsumeReceiptLedger and exposes an invocation counter so tests
+// prove non-success paths never invoke it. Source/test only: no real persistent
+// replay backend, no real durable consume backend, no real production mutation
+// engine, no real governance execution engine, no real on-chain proof verifier,
+// no KMS/HSM/RemoteSigner backend. It does NOT call Run 070, mutate
+// LivePqcTrustState, perform a real trust swap, evict sessions, write sequence
+// files, write authority markers, or touch RocksDB/file/schema/migration/
+// storage-format. MainNet governance, MainNet peer-driven apply, and validator-set
+// rotation remain refused/unsupported; rejected paths are non-mutating. Full C4
+// remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_modeled_durable_consume_projection_sink;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
