@@ -939,6 +939,29 @@ pub mod pqc_governance_modeled_end_to_end_pipeline;
 // rotation remain refused/unsupported; rejected paths are non-mutating. Full C4
 // remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_modeled_durable_consume_projection_sink;
+// Run 250 — source/test governance modeled DURABLE-CONSUME RECEIPT-ACKNOWLEDGEMENT
+// / COMPLETION REPORTER boundary. Extends the Run 248 modeled durable-consume
+// projection sink with a mockable, in-memory completion reporter that models how a
+// future production call site would report an after-record-only consume
+// acknowledgement back to the Run 240 durable completion semantics. Only the Run
+// 248 ConsumeReceiptRecorded sink outcome creates a completion-report intent;
+// ConsumeReceiptDuplicateIdempotent may only match an already-recorded completion
+// report and never creates a new one. Every other sink outcome, every report
+// record failure / rollback / rollback-failed / ambiguous window, every production
+// / MainNet unavailable path, and every unsupported action fails closed with no
+// acknowledgement and no completion. The DevNet/TestNet fixture reporter mutates
+// only the in-memory ModeledDurableConsumeCompletionReportLedger and exposes an
+// invocation counter so tests prove non-recording sink paths never invoke it.
+// Source/test only: no real persistent replay backend, no real durable consume
+// backend, no real completion-report backend, no real production mutation engine,
+// no real governance execution engine, no real on-chain proof verifier, no
+// KMS/HSM/RemoteSigner backend. It does NOT call Run 070, mutate LivePqcTrustState,
+// perform a real trust swap, evict sessions, write sequence files, write authority
+// markers, or touch RocksDB/file/schema/migration/storage-format. MainNet
+// governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5
+// remains OPEN.
+pub mod pqc_governance_modeled_durable_consume_completion_reporter;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
