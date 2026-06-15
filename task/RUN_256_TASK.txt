@@ -1,0 +1,615 @@
+Run 256 — Source/test production durable-completion attestation backend interface boundary
+
+You are continuing QBIND after Run 255.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
+Run 243 is fully closed as release-binary evidence for Run 242.
+Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
+Run 245 is fully closed as release-binary evidence for Run 244.
+Run 246 is fully closed as source/test governance modeled end-to-end pipeline boundary work.
+Run 247 is fully closed as release-binary evidence for Run 246.
+Run 248 is fully closed as source/test modeled durable-consume projection sink boundary work.
+Run 249 is fully closed as release-binary evidence for Run 248.
+Run 250 is fully closed as source/test modeled durable-consume receipt-acknowledgement / completion reporter boundary work.
+Run 251 is fully closed as release-binary evidence for Run 250.
+Run 252 is fully closed as source/test modeled durable-completion finalization-projection boundary work.
+Run 253 is fully closed as release-binary evidence for Run 252.
+Run 254 is fully closed as source/test modeled durable-completion finalization attestation-projection boundary work.
+Run 255 is fully closed as release-binary evidence for Run 254.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–255.
+* Source/test only.
+* No release-binary evidence in this run.
+* No production runtime enablement.
+* No real backend implementation.
+
+Current state:
+
+* Run 246 models the end-to-end ordering from evaluator/call-site authorization through durable replay, mutation-engine authorization, modeled applier success, and durable consume authorization.
+* Run 248 models the durable-consume projection sink: only a Run 246 `ModeledApplierAppliedAndDurableConsumeAuthorized` outcome can create a sink intent, and only `ConsumeReceiptRecorded` records a modeled in-memory receipt.
+* Run 250 models the durable-consume completion reporter: only Run 248 `ConsumeReceiptRecorded` can create a completion-report intent, and only `CompletionReportRecorded` authorizes a new modeled completion-reported state.
+* Run 252 models durable-completion finalization projection: only Run 250 `CompletionReportRecorded` can create a finalization intent, and only `DurableCompletionFinalized` authorizes a new modeled durable-completion-finalized state.
+* Run 254 models durable-completion attestation projection: only Run 252 `DurableCompletionFinalized` can create an attestation intent, and only `DurableCompletionAttested` authorizes a new modeled durable-completion-attested state.
+* Run 255 release-evidenced Run 254 on real `target/release/qbind-node` plus a release-built helper.
+* The whole Run 246 → 248 → 250 → 252 → 254 chain is still modeled and in-memory only.
+* No real persistent replay backend is implemented.
+* No real durable consume backend is implemented.
+* No real completion-report backend is implemented.
+* No real finalization backend is implemented.
+* No real attestation backend is implemented.
+* No real audit ledger backend is implemented.
+* No real production mutation engine is implemented.
+* No real governance execution engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+
+Implement the smallest source/test-only production durable-completion attestation backend interface boundary.
+
+This run should stop extending the purely modeled internal chain and instead define the first typed interface a future production call site would use to submit or record a durable-completion attestation after the Run 254 modeled attestation stage has produced `DurableCompletionAttested`.
+
+This is an interface boundary only. It must not implement a real production attestation backend, real audit ledger, real external publication system, real settlement ledger, real persistent replay backend, real durable consume backend, real completion-report backend, real finalization backend, real governance execution engine, real on-chain proof verifier, real production mutation engine, KMS/HSM/RemoteSigner backend, or validator-set rotation.
+
+The production and MainNet backend implementations must be reachable but deliberately unavailable/fail-closed. The only positive backend implementation may be a DevNet/TestNet fixture that records into an in-memory fixture ledger for source/test evidence only.
+
+Key invariant:
+
+* Run 246 pipeline success is required before any Run 248 sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any Run 250 completion-report intent can exist.
+* Run 250 `CompletionReportRecorded` is required before any Run 252 finalization intent can exist.
+* Run 252 `DurableCompletionFinalized` is required before any Run 254 attestation intent can exist.
+* Run 254 `DurableCompletionAttested` is required before any Run 256 backend request can exist.
+* Run 256 may record only through a DevNet/TestNet in-memory fixture backend.
+* Production/MainNet backends must return typed unavailable/fail-closed outcomes and must not record.
+* Every non-attested / failed / rollback / rollback-failed / ambiguous / unavailable / unsupported Run 254 outcome must produce no backend request, no backend record, no external publication, no audit-ledger record, no persistent storage write, and no mutation.
+
+Suggested implementation:
+
+1. Add a new source/test-only module:
+
+   `crates/qbind-node/src/pqc_governance_durable_completion_attestation_backend.rs`
+
+   If there is an existing naming convention that fits better, use it, but keep the name explicit that this is a durable-completion attestation backend boundary.
+
+2. Register it in:
+
+   `crates/qbind-node/src/lib.rs`
+
+3. Define typed backend selector and policy types, for example:
+
+   * `DurableCompletionAttestationBackendKind`
+   * `DurableCompletionAttestationBackendPolicy`
+   * `DurableCompletionAttestationBackendIdentity`
+   * `DurableCompletionAttestationBackendEnvironment`
+   * `DurableCompletionAttestationBackendSurface`
+   * `DurableCompletionAttestationBackendBinding`
+   * `DurableCompletionAttestationBackendInput`
+   * `DurableCompletionAttestationBackendExpectations`
+
+   Required backend kinds:
+
+   * `Disabled`
+   * `FixtureInMemory`
+   * `ProductionUnavailable`
+   * `MainNetUnavailable`
+   * `ExternalPublicationUnavailable`
+   * `Unknown`
+
+   Required backend policies:
+
+   * `Disabled`
+   * `FixtureAllowed`
+   * `ProductionBackendRequired`
+   * `MainNetProductionBackendRequired`
+
+4. Define typed request / response / receipt records, for example:
+
+   * `DurableCompletionAttestationBackendRequest`
+   * `DurableCompletionAttestationBackendResponse`
+   * `DurableCompletionAttestationBackendReceipt`
+   * `DurableCompletionAttestationBackendRecord`
+   * `DurableCompletionAttestationBackendDigest`
+   * `DurableCompletionAttestationBackendTranscriptDigest`
+
+   The request must bind, at minimum:
+
+   * environment;
+   * chain id;
+   * genesis hash;
+   * governance surface id;
+   * mutation surface id;
+   * proposal id;
+   * decision id;
+   * candidate digest;
+   * authority-domain sequence;
+   * Run 246 pipeline decision digest;
+   * Run 248 sink decision digest;
+   * Run 250 reporter decision digest;
+   * Run 252 finalization decision digest;
+   * Run 254 attestation digest;
+   * Run 254 attestation id;
+   * backend identity;
+   * backend kind;
+   * backend policy;
+   * domain separation tag.
+
+5. Define deterministic digest helpers:
+
+   * backend identity digest;
+   * backend request digest;
+   * backend response digest;
+   * backend receipt digest;
+   * backend transcript digest.
+
+   Requirements:
+
+   * deterministic;
+   * domain-separated;
+   * field-binding;
+   * no parallel ad-hoc hashing scheme if existing project helpers already exist;
+   * rejects digest mismatch fail-closed;
+   * does not include unstable display text in canonical digests.
+
+6. Define a pure/mockable backend trait, for example:
+
+   * `GovernanceDurableCompletionAttestationBackend`
+   * `submit_durable_completion_attestation(...)`
+   * `recover_durable_completion_attestation_backend_window(...)`
+
+7. Provide source/test-only backend implementations:
+
+   * `FixtureDurableCompletionAttestationBackend`
+   * `ProductionDurableCompletionAttestationBackend`
+   * `MainNetDurableCompletionAttestationBackend`
+
+   Requirements:
+
+   * Fixture backend is DevNet/TestNet evidence-only.
+   * Fixture backend mutates only an in-memory `DurableCompletionAttestationBackendLedger`.
+   * Fixture backend exposes an invocation counter.
+   * Production backend is reachable but unavailable/fail-closed.
+   * MainNet backend is reachable but unavailable/fail-closed.
+   * MainNet peer-driven apply must be refused before pipeline, sink, reporter, finalizer, attestor, and backend invocation.
+   * No backend implementation may call Run 070.
+   * No backend implementation may mutate `LivePqcTrustState`.
+   * No backend implementation may write sequence files, authority markers, RocksDB, files, schemas, migrations, or storage formats.
+   * No backend implementation may perform network I/O, external publication, or real audit-ledger persistence.
+
+8. Define an in-memory fixture ledger:
+
+   * `DurableCompletionAttestationBackendLedger`
+   * `DurableCompletionAttestationBackendLedgerRecord`
+   * `DurableCompletionAttestationBackendLedgerSnapshot`
+   * `DurableCompletionAttestationBackendLedgerStatus`
+
+   Requirements:
+
+   * one valid backend submission inserts exactly one record;
+   * duplicate identical backend submission is idempotent;
+   * same backend record id with different digest fails closed as equivocation;
+   * rollback restores the in-memory snapshot;
+   * rollback failure never claims success;
+   * no files, RocksDB, markers, sequence files, schema writes, storage-format changes, or network writes.
+
+9. Define an explicit backend outcome enum, for example:
+
+   * `LegacyBypassNoBackendSubmission`
+   * `RejectedBeforeAttestationNoBackendSubmission`
+   * `AttestationDidNotAttestNoBackendSubmission`
+   * `BackendSubmissionRecorded`
+   * `BackendSubmissionDuplicateIdempotent`
+   * `BackendSubmissionRejectedBeforeRecord`
+   * `BackendSubmissionRecordFailedNoSubmission`
+   * `BackendSubmissionRolledBackNoSubmission`
+   * `BackendSubmissionRollbackFailedFatalNoSubmission`
+   * `BackendSubmissionAmbiguousFailClosedNoSubmission`
+   * `ProductionBackendUnavailableNoSubmission`
+   * `MainNetBackendUnavailableNoSubmission`
+   * `ExternalPublicationUnavailableNoSubmission`
+   * `MainNetPeerDrivenApplyRefusedNoSubmission`
+   * `ValidatorSetRotationUnsupportedNoSubmission`
+   * `PolicyChangeUnsupportedNoSubmission`
+
+   Required semantics:
+
+   * `BackendSubmissionRecorded` is the only new-submission authorizing outcome.
+   * `BackendSubmissionDuplicateIdempotent` is idempotent only if every identity/digest field matches exactly and must not count as a new submission.
+   * Same backend record id with different digest is equivocation and must fail closed.
+   * Every unavailable/failure/rollback/ambiguous/unsupported outcome must not submit.
+   * Production/MainNet unavailable outcomes must not submit.
+   * External-publication unavailable outcome must not submit.
+
+10. Add composition helpers:
+
+* `project_attestation_outcome_to_backend_request(...)`
+* `evaluate_durable_completion_attestation_backend(...)`
+* `recover_durable_completion_attestation_backend_window(...)`
+* `backend_outcome_authorizes_durable_attestation_submission(...)`
+* `backend_outcome_projects_to_backend_submission_recorded(...)`
+
+Required composition semantics:
+
+* Only Run 254 `DurableCompletionAttested` may create a backend request.
+* Run 254 duplicate-idempotent attestation may only match an already-recorded backend submission and must never create one by itself.
+* Every other Run 254 outcome maps to a no-backend-submission fail-closed outcome.
+* Backend request creation must validate environment / chain / genesis / governance surface / mutation surface / proposal id / decision id / candidate digest / authority-domain sequence / pipeline digest / sink digest / reporter digest / finalization digest / attestation digest before backend invocation.
+* Binding mismatch before backend invocation must leave backend invocation count zero.
+* Request/response digest mismatch after backend invocation must not record a backend submission.
+* Backend record failure must not submit.
+* Backend rollback success must not submit.
+* Backend rollback failure must be fatal/fail-closed and must not submit.
+* Ambiguous backend windows must fail closed and must not submit.
+
+11. Add grep-verifiable invariant helpers, for example:
+
+* `durable_completion_attestation_backend_rejection_is_non_mutating`
+* `durable_completion_attestation_backend_never_calls_run_070`
+* `durable_completion_attestation_backend_never_mutates_live_pqc_trust_state`
+* `durable_completion_attestation_backend_never_writes_sequence_or_marker`
+* `durable_completion_attestation_backend_no_rocksdb_file_schema_migration_change`
+* `durable_completion_attestation_backend_no_external_publication`
+* `durable_completion_attestation_backend_no_real_audit_ledger`
+* `durable_completion_attestation_backend_pipeline_success_required`
+* `durable_completion_attestation_backend_sink_receipt_required`
+* `durable_completion_attestation_backend_completion_report_required`
+* `durable_completion_attestation_backend_finalization_required`
+* `durable_completion_attestation_backend_attestation_required`
+* `durable_completion_attestation_backend_record_required_before_submission`
+* `durable_completion_attestation_backend_failed_record_never_submits`
+* `durable_completion_attestation_backend_rollback_never_submits`
+* `durable_completion_attestation_backend_ambiguous_window_fails_closed`
+* `durable_completion_attestation_backend_mainnet_peer_driven_apply_refused_first`
+* `durable_completion_attestation_backend_production_mainnet_unavailable`
+* `durable_completion_attestation_backend_validator_set_rotation_unsupported`
+* `durable_completion_attestation_backend_policy_change_unsupported`
+* `durable_completion_attestation_backend_local_operator_cannot_satisfy_mainnet_authority`
+* `durable_completion_attestation_backend_peer_majority_cannot_satisfy_mainnet_authority`
+
+Tests:
+
+Add:
+
+`crates/qbind-node/tests/run_256_durable_completion_attestation_backend_tests.rs`
+
+Required test matrix:
+
+Accepted / compatible:
+
+* Disabled backend policy preserves legacy bypass and performs no backend submission, no backend record, and no mutation.
+* Disabled attestor policy preserves legacy bypass and never invokes backend.
+* Disabled finalizer policy preserves legacy bypass and never invokes attestor or backend.
+* Disabled reporter policy preserves legacy bypass and never invokes finalizer, attestor, or backend.
+* Disabled sink policy preserves legacy bypass and never invokes reporter, finalizer, attestor, or backend.
+* Disabled pipeline policy preserves legacy bypass and never invokes sink, reporter, finalizer, attestor, or backend.
+* Disabled evaluator/call-site policy preserves legacy bypass and never invokes sink, reporter, finalizer, attestor, or backend.
+* DevNet fixture pipeline success + sink receipt recorded + completion report recorded + finalization recorded + attestation recorded + backend submission success records exactly one modeled in-memory backend ledger record.
+* TestNet fixture pipeline success + sink receipt recorded + completion report recorded + finalization recorded + attestation recorded + backend submission success records exactly one modeled in-memory backend ledger record.
+* Modeled add-root pipeline success records backend submission only after modeled applier success, sink receipt record, completion report record, finalization record, and attestation record.
+* Modeled retire-root pipeline success records backend submission only after modeled applier success, sink receipt record, completion report record, finalization record, and attestation record.
+* Modeled revoke-root pipeline success records backend submission only after modeled applier success, sink receipt record, completion report record, finalization record, and attestation record.
+* Modeled emergency-revoke-root pipeline success records backend submission only after modeled applier success, sink receipt record, completion report record, finalization record, and attestation record.
+* Modeled noop pipeline success records backend submission only under explicit success semantics, no trust-state drift, recorded receipt, recorded completion report, recorded finalization, and recorded attestation.
+* Duplicate identical backend submission is idempotent under an explicit typed outcome.
+* Run 254 duplicate-idempotent attestation can only match an already-recorded backend submission and never creates one by itself.
+* Existing Run 254 attestation behavior remains compatible.
+* Existing Run 252 finalization behavior remains compatible.
+* Existing Run 250 completion-reporter behavior remains compatible.
+* Existing Run 248 sink behavior remains compatible.
+* Existing Run 246 pipeline behavior remains compatible.
+* Existing Run 244 modeled applier behavior remains compatible.
+* Existing Run 242 mutation-engine behavior remains compatible.
+* Existing Run 240 durable completion behavior remains compatible.
+* Production backend path is reachable but unavailable/fail-closed and records no backend submission.
+* MainNet backend path is reachable but unavailable/fail-closed and records no backend submission.
+* External-publication backend path is reachable but unavailable/fail-closed and records no backend submission.
+* MainNet peer-driven apply refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, and backend invocation.
+* Validator-set rotation unsupported and records no backend submission.
+* Policy-change unsupported and records no backend submission.
+
+Rejected / fail-closed:
+
+* evaluator rejection produces no sink intent, no receipt, no reporter intent, no completion report, no finalizer intent, no finalization, no attestor intent, no attestation, no backend request, and no backend submission;
+* call-site rejection produces no backend request and no backend submission;
+* durable replay stale / expired / consumed / superseded / backend-unavailable produces no backend request and no backend submission;
+* mutation-engine rejection produces no backend request and no backend submission;
+* modeled applier rejected-before-snapshot / rejected-before-apply / apply failure / rollback / rollback-failed / ambiguous window produces no backend request and no backend submission;
+* sink did not record receipt / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no reporter/finalizer/attestor/backend invocation and no backend submission;
+* reporter did not record completion / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no finalizer/attestor/backend invocation and no backend submission;
+* finalizer did not finalize / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no attestor/backend invocation and no backend submission;
+* attestor did not attest / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no backend invocation and no backend submission;
+* backend submission before durable-completion attestation is rejected;
+* backend submission after modeled apply failure, sink record failure, reporter record failure, finalizer record failure, attestor record failure, attestor rollback, attestor rollback-failed, or attestor ambiguous window is rejected;
+* same backend record id with different digest is rejected as equivocation and records no second backend submission;
+* wrong environment / chain / genesis / governance surface / mutation surface rejected before backend invocation;
+* wrong backend identity rejected before backend record;
+* wrong backend policy rejected before backend record;
+* wrong backend kind rejected before backend record;
+* wrong request digest rejected before backend record;
+* wrong response digest rejected before backend record;
+* wrong receipt digest rejected before backend record;
+* wrong attestation digest rejected before backend record;
+* wrong finalization digest rejected before backend record;
+* wrong completion-report digest rejected before backend record;
+* wrong receipt/sink digest rejected before backend record;
+* wrong reporter decision digest rejected before backend record;
+* wrong finalization decision digest rejected before backend record;
+* wrong pipeline decision digest rejected before backend record;
+* wrong proposal id rejected before backend record;
+* wrong decision id rejected before backend record;
+* wrong candidate digest rejected before backend record;
+* wrong authority-domain sequence rejected before backend record;
+* malformed backend request rejected before record;
+* malformed backend response rejected before record;
+* local operator key cannot satisfy MainNet authority;
+* peer majority cannot satisfy MainNet authority;
+* production backend unavailable records no backend submission;
+* MainNet backend unavailable records no backend submission;
+* external-publication backend unavailable records no backend submission;
+* validator-set rotation attempt unsupported and records no backend submission;
+* policy-change attempt unsupported and records no backend submission;
+* every rejected path produces no Run 070 call, no `LivePqcTrustState` mutation, no real trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, no external publication, no real audit ledger write, and no backend invocation where rejection happens before the backend stage.
+
+Recovery / crash-window cases:
+
+* before-pipeline window fails closed / no backend submission;
+* after-pipeline-success-before-sink-intent window fails closed / no backend submission;
+* after-sink-intent-before-receipt-record window fails closed / no backend submission;
+* after-receipt-record-before-report-intent window fails closed / no backend submission;
+* after-report-intent-before-report-record window fails closed / no backend submission;
+* after-report-record-before-finalization-intent window fails closed / no backend submission;
+* after-finalization-intent-before-finalization-record window fails closed / no backend submission;
+* after-finalization-record-before-attestation-intent window fails closed / no backend submission;
+* after-attestation-intent-before-attestation-record window fails closed / no backend submission;
+* after-attestation-record-before-backend-request window fails closed / no backend submission;
+* after-backend-request-before-backend-record window fails closed / no backend submission;
+* after-backend-record-before-backend-success window fails closed unless an explicit matching backend success exists;
+* after-backend-success recovers as backend submission recorded;
+* after-backend-ambiguous fails closed / no backend submission;
+* backend record-failed window fails closed / no backend submission;
+* backend rollback-completed window fails closed / no backend submission;
+* backend rollback-failed window is fatal/fail-closed / no backend submission;
+* unknown window fails closed / no backend submission;
+* production/MainNet recovery classification unavailable/fail-closed;
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection cases:
+
+* only Run 254 `DurableCompletionAttested` creates a backend request;
+* Run 246 pipeline success alone creates no backend request;
+* Run 248 sink receipt record alone creates no backend request;
+* Run 250 completion-report record alone creates no backend request;
+* Run 252 finalization record alone creates no backend request;
+* Run 254 attestation intent alone creates no backend request;
+* Run 254 duplicate-idempotent attestation creates no new backend submission unless a matching backend submission already exists;
+* evaluator success alone creates no backend request;
+* durable replay freshness alone creates no backend request;
+* mutation-engine authorization alone creates no backend request;
+* modeled applier success without sink receipt, completion report, finalization, and attestation creates no backend request;
+* only `BackendSubmissionRecorded` authorizes modeled backend-submitted state;
+* `LegacyBypassNoBackendSubmission` does not submit;
+* `RejectedBeforeAttestationNoBackendSubmission` does not submit;
+* `AttestationDidNotAttestNoBackendSubmission` does not submit;
+* `BackendSubmissionDuplicateIdempotent` does not create a second backend submission and must not be counted as a new backend submission;
+* `BackendSubmissionRejectedBeforeRecord` does not submit;
+* `BackendSubmissionRecordFailedNoSubmission` does not submit;
+* `BackendSubmissionRolledBackNoSubmission` does not submit;
+* `BackendSubmissionRollbackFailedFatalNoSubmission` does not submit;
+* `BackendSubmissionAmbiguousFailClosedNoSubmission` does not submit;
+* `ProductionBackendUnavailableNoSubmission` does not submit;
+* `MainNetBackendUnavailableNoSubmission` does not submit;
+* `ExternalPublicationUnavailableNoSubmission` does not submit;
+* `MainNetPeerDrivenApplyRefusedNoSubmission` does not submit;
+* `ValidatorSetRotationUnsupportedNoSubmission` does not submit;
+* `PolicyChangeUnsupportedNoSubmission` does not submit.
+
+Stage-ordering cases:
+
+* MainNet peer-driven apply refusal happens before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, and backend invocation.
+* Evaluator/call-site authorization happens before durable replay freshness.
+* Durable replay freshness happens before mutation-engine authorization.
+* Mutation-engine authorization happens before modeled applier invocation.
+* Modeled applier success happens before sink intent.
+* Sink receipt recording happens after pipeline consume authorization.
+* Completion report recording happens after sink receipt-recorded state.
+* Finalization recording happens after completion-report recorded state.
+* Attestation recording happens after durable-completion-finalized state.
+* Backend request happens only after durable-completion-attested state.
+* Backend record happens only after durable-completion-attested state.
+* A rejection before the backend stage leaves backend invocation count at zero.
+* A backend record failure does not retroactively invalidate the modeled attestation record but does not authorize backend submission.
+* A backend rollback failure is fatal/fail-closed and does not authorize backend submission.
+* The backend itself performs no persistent durable completion beyond modeled in-memory fixture state.
+
+Backend-ledger cases:
+
+* one valid backend submission inserts exactly one modeled in-memory ledger record;
+* duplicate identical backend submission is idempotent and does not increase record count;
+* same backend record id with different digest is equivocation and does not increase record count;
+* wrong backend identity digest does not record;
+* wrong backend request digest does not record;
+* wrong backend response digest does not record;
+* wrong backend receipt digest does not record;
+* wrong attestation digest does not record;
+* wrong finalization digest does not record;
+* wrong completion-report digest does not record;
+* wrong sink decision digest does not record;
+* wrong reporter decision digest does not record;
+* wrong finalization decision digest does not record;
+* wrong pipeline decision digest does not record;
+* wrong proposal id does not record;
+* wrong decision id does not record;
+* wrong candidate digest does not record;
+* wrong authority-domain sequence does not record;
+* malformed backend request does not record;
+* malformed backend response does not record;
+* rollback restores modeled backend ledger snapshot;
+* rollback failure never claims success;
+* fixture backend ledger never writes files, RocksDB, markers, sequences, external publications, audit-ledger entries, or production durable state.
+
+Non-mutation cases:
+
+* no Run 070 call on any backend case;
+* no `LivePqcTrustState` mutation on any backend case;
+* no real trust swap on any backend case;
+* no session eviction on any backend case;
+* no sequence write on any backend case;
+* no marker write on any backend case;
+* no RocksDB/file/schema/migration/storage-format write or format change;
+* no wire/schema/marker/sequence/trust-bundle format change;
+* no external network publication;
+* no real audit-ledger write;
+* fixture backend mutates only `DurableCompletionAttestationBackendLedger`;
+* production/MainNet paths remain unavailable/fail-closed;
+* MainNet peer-driven apply remains refused first.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning if available and report the result.
+* Run CodeQL if available and report the result honestly.
+* If Rust CodeQL analysis is skipped because the database is too large, say that explicitly and do not overclaim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_256.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 256 is source/test only.
+* Run 256 adds a production durable-completion attestation backend interface boundary.
+* The boundary models the first backend-facing interface a future production call site would use after Run 254 `DurableCompletionAttested`.
+* The fixture backend is DevNet/TestNet evidence-only and in-memory only.
+* Production and MainNet backends are reachable but unavailable/fail-closed.
+* No real production attestation backend is implemented.
+* No real audit ledger backend is implemented.
+* No real external publication backend is implemented.
+* No real persistent replay backend is implemented.
+* No real durable consume backend is implemented.
+* No real completion-report backend is implemented.
+* No real finalization backend is implemented.
+* No real governance execution engine is implemented.
+* No real production mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No wire/schema/marker/sequence/trust-bundle change is implemented.
+* No MainNet governance is enabled.
+* No MainNet peer-driven apply is enabled.
+* No validator-set rotation is implemented.
+* Run 246 pipeline success is required before any sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any completion-report intent can exist.
+* Run 250 `CompletionReportRecorded` is required before any finalization intent can exist.
+* Run 252 `DurableCompletionFinalized` is required before any attestation intent can exist.
+* Run 254 `DurableCompletionAttested` is required before any backend request can exist.
+* Only `BackendSubmissionRecorded` authorizes a modeled backend-submitted state.
+* Every non-attested outcome produces no backend request and no backend submission.
+* Failed backend record, rollback, rollback-failed, ambiguous windows, unavailable production/MainNet/external-publication paths, rejected replay states, and unsupported actions never submit.
+* MainNet peer-driven apply remains refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, and backend invocation.
+* Rejected backend paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 256 against Runs 050–255.
+* If no contradiction is found, add a “no Run 256 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real persistent replay backend.
+* Do not implement a real durable consume backend.
+* Do not implement a real completion-report backend.
+* Do not implement a real finalization backend.
+* Do not implement a real production attestation backend.
+* Do not implement a real audit ledger backend.
+* Do not implement real external publication.
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not implement a real governance execution engine.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–255.
+
+Expected verdict:
+
+Partial-positive / source-test positive.
+
+Run 256 should close the source/test production durable-completion attestation backend interface gap only. It must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 257 next step.
