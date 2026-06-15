@@ -1,0 +1,482 @@
+Run 250 — Source/test modeled durable-consume receipt-acknowledgement completion reporter boundary
+
+You are continuing QBIND after Run 249.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
+Run 243 is fully closed as release-binary evidence for Run 242.
+Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
+Run 245 is fully closed as release-binary evidence for Run 244.
+Run 246 is fully closed as source/test governance modeled end-to-end pipeline boundary work.
+Run 247 is fully closed as release-binary evidence for Run 246.
+Run 248 is fully closed as source/test modeled durable-consume projection sink boundary work.
+Run 249 is fully closed as release-binary evidence for Run 248.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–249.
+* Source/test only.
+* No release-binary evidence in this run.
+
+Current state:
+
+* Run 224 introduced source/test governance evaluator runtime integration.
+* Run 225 release-evidenced the Run 224 evaluator-runtime integration.
+* Run 226 wired representable runtime call sites through the evaluator-runtime integration at source/test level.
+* Run 227 release-evidenced the Run 226 call-site wiring.
+* Run 230 / 232 / 234 / 236 / 238 / 240 built the replay/freshness, consume-after-success, durable replay-state backend, and durable runtime integration path.
+* Run 241 release-evidenced the Run 240 durable runtime integration.
+* Run 242 added the source/test governance execution mutation-engine boundary.
+* Run 243 release-evidenced the Run 242 mutation-engine boundary.
+* Run 244 added the source/test modeled governance trust-state mutation applier boundary.
+* Run 245 release-evidenced the Run 244 modeled applier boundary.
+* Run 246 added the source/test governance modeled end-to-end pipeline.
+* Run 247 release-evidenced the Run 246 modeled end-to-end pipeline boundary.
+* Run 248 added the source/test modeled durable-consume projection sink.
+* Run 249 release-evidenced the Run 248 modeled durable-consume projection sink boundary.
+* Run 248/249 prove that a modeled receipt is recorded only after the Run 246 pipeline yields `ModeledApplierAppliedAndDurableConsumeAuthorized`, and only `ConsumeReceiptRecorded` authorizes a new modeled receipt-recorded state.
+* What remains missing is a typed source/test boundary that models how a future production call site would report an after-record-only consume acknowledgement / completion report back to the Run 240 durable completion semantics.
+* No real persistent replay backend is implemented.
+* No real durable consume backend is implemented.
+* No real governance execution engine is implemented.
+* No real production mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+
+Implement the smallest source/test-only typed modeled durable-consume receipt-acknowledgement / completion reporter boundary.
+
+This run should extend the Run 248 modeled durable-consume projection sink with a mockable, in-memory completion reporter that models how a future production call site would report an after-record-only consume acknowledgement back into the Run 240 durable completion semantics.
+
+The reporter must be a model only. It must not implement a real persistent backend. It must not write RocksDB, files, schemas, migrations, storage formats, wire formats, authority markers, trust-bundle sequence files, or production durable state. It must not call Run 070, mutate `LivePqcTrustState`, perform a real trust swap, evict sessions, or enable MainNet governance / MainNet peer-driven apply.
+
+The key invariant is:
+
+* Run 246 pipeline success is required before a Run 248 sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before a Run 250 acknowledgement / completion report can exist.
+* The Run 250 reporter may record that acknowledgement only in modeled in-memory fixture state.
+* Every non-recorded sink outcome must produce no reporter invocation, no acknowledgement, no completion report, and no mutation.
+* A reporter failure, rollback, rollback failure, or ambiguous acknowledgement window must never retroactively claim durable consume completion.
+
+Suggested implementation:
+
+1. Add a new source/test-only module:
+
+   `crates/qbind-node/src/pqc_governance_modeled_durable_consume_completion_reporter.rs`
+
+2. Register it in:
+
+   `crates/qbind-node/src/lib.rs`
+
+3. Define typed reporter inputs and bindings, for example:
+
+   * `GovernanceModeledDurableConsumeCompletionReporterInput`
+   * `GovernanceModeledDurableConsumeCompletionReporterExpectations`
+   * `GovernanceModeledDurableConsumeCompletionReporterPolicy`
+   * `GovernanceModeledDurableConsumeCompletionReporterSurface`
+   * `GovernanceModeledDurableConsumeCompletionReporterEnvironmentBinding`
+   * `GovernanceModeledDurableConsumeCompletionReporterRuntimeBinding`
+   * `GovernanceModeledDurableConsumeCompletionReporterReplayBinding`
+   * `GovernanceModeledDurableConsumeCompletionReporterPipelineBinding`
+   * `GovernanceModeledDurableConsumeCompletionReporterSinkBinding`
+   * `GovernanceModeledDurableConsumeCompletionReport`
+
+4. Define modeled in-memory acknowledgement / report state, for example:
+
+   * `ModeledDurableConsumeCompletionReportLedger`
+   * `ModeledDurableConsumeCompletionReportRecord`
+   * `ModeledDurableConsumeCompletionReportSnapshot`
+   * `ModeledDurableConsumeCompletionReportStatus`
+   * `ModeledDurableConsumeCompletionReportDigest`
+
+5. Define an explicit reporter outcome enum, for example:
+
+   * `LegacyBypassNoCompletionReport`
+   * `RejectedBeforeSinkNoCompletionReport`
+   * `SinkDidNotRecordReceiptNoCompletionReport`
+   * `CompletionReportRecorded`
+   * `CompletionReportDuplicateIdempotent`
+   * `CompletionReportRejectedBeforeRecord`
+   * `CompletionReportRecordFailedNoCompletion`
+   * `CompletionReportRolledBackNoCompletion`
+   * `CompletionReportRollbackFailedFatalNoCompletion`
+   * `CompletionReportAmbiguousFailClosedNoCompletion`
+   * `ProductionReporterUnavailableNoCompletion`
+   * `MainNetReporterUnavailableNoCompletion`
+   * `MainNetPeerDrivenApplyRefusedNoCompletion`
+   * `ValidatorSetRotationUnsupportedNoCompletion`
+   * `PolicyChangeUnsupportedNoCompletion`
+
+6. Define a pure/mockable reporter trait, for example:
+
+   * `GovernanceModeledDurableConsumeCompletionReporter`
+   * `record_modeled_consume_completion_report(...)`
+   * `recover_modeled_consume_completion_report_window(...)`
+
+7. Provide source/test-only reporter implementations:
+
+   * `FixtureModeledDurableConsumeCompletionReporter`
+   * `ProductionModeledDurableConsumeCompletionReporter`
+   * `MainNetModeledDurableConsumeCompletionReporter`
+
+   Requirements:
+
+   * DevNet/TestNet fixture reporter may mutate only `ModeledDurableConsumeCompletionReportLedger`.
+   * Production/MainNet reporters must be reachable but unavailable/fail-closed.
+   * MainNet peer-driven apply must be refused before pipeline progression, before sink invocation, and before reporter invocation.
+   * The fixture reporter must expose an invocation counter so tests prove non-recorded sink paths never invoke it.
+   * The fixture report ledger must be in-memory only and must never touch RocksDB, files, markers, sequence files, or production durable state.
+
+8. Add composition helpers:
+
+   * `project_sink_outcome_to_completion_report_intent(...)`
+   * `evaluate_modeled_durable_consume_completion_reporter(...)`
+   * `recover_modeled_durable_consume_completion_reporter_window(...)`
+   * `completion_reporter_outcome_authorizes_modeled_completion(...)`
+   * `completion_reporter_outcome_projects_to_durable_completion(...)`
+
+9. Required composition semantics:
+
+   * `GovernanceModeledDurableConsumeSinkOutcome::ConsumeReceiptRecorded` is the only Run 248 sink outcome that may create a completion-report intent.
+   * `ConsumeReceiptDuplicateIdempotent` may be treated as already-recorded only if the original matching completion report already exists and all identity fields match exactly; it must not create a new completion report by itself.
+   * Every other Run 248 sink outcome maps to `SinkDidNotRecordReceiptNoCompletionReport` or a more specific no-completion fail-closed outcome.
+   * `CompletionReportRecorded` is the only reporter outcome that may project to a new modeled completion state.
+   * Duplicate completion report may be idempotent only if the report digest, receipt digest, proposal id, decision id, candidate digest, authority-domain sequence, sink decision digest, and modeled pipeline decision digest all match exactly.
+   * Same completion report id with different digest must fail closed as equivocation and must not complete.
+   * Reporter record failure must not complete.
+   * Reporter rollback success must not complete.
+   * Reporter rollback failure must be fatal/fail-closed and must not complete.
+   * Ambiguous acknowledgement windows must fail closed and must not complete.
+   * Production/MainNet reporter unavailable outcomes must not complete.
+   * Validator-set rotation and policy-change remain unsupported and must not complete.
+
+10. Add grep-verifiable invariant helpers, for example:
+
+* `modeled_completion_reporter_rejection_is_non_mutating`
+* `modeled_completion_reporter_never_calls_run_070`
+* `modeled_completion_reporter_never_mutates_live_pqc_trust_state`
+* `modeled_completion_reporter_never_writes_sequence_or_marker`
+* `modeled_completion_reporter_no_rocksdb_file_schema_migration_change`
+* `modeled_completion_reporter_pipeline_success_required_before_report`
+* `modeled_completion_reporter_sink_receipt_required_before_report`
+* `modeled_completion_reporter_report_record_required_before_completion`
+* `modeled_completion_reporter_failed_record_never_completes`
+* `modeled_completion_reporter_rollback_never_completes`
+* `modeled_completion_reporter_ambiguous_window_fails_closed`
+* `modeled_completion_reporter_mainnet_peer_driven_apply_refused_first`
+* `modeled_completion_reporter_production_mainnet_unavailable`
+* `modeled_completion_reporter_validator_set_rotation_unsupported`
+* `modeled_completion_reporter_policy_change_unsupported`
+* `modeled_completion_reporter_local_operator_cannot_satisfy_mainnet_authority`
+* `modeled_completion_reporter_peer_majority_cannot_satisfy_mainnet_authority`
+
+Tests:
+
+Add:
+
+`crates/qbind-node/tests/run_250_modeled_durable_consume_completion_reporter_tests.rs`
+
+Required test matrix:
+
+Accepted / compatible:
+
+* Disabled reporter policy preserves legacy bypass and performs no acknowledgement, no completion report, and no mutation.
+* Disabled sink policy preserves legacy bypass and never invokes the reporter.
+* Disabled pipeline policy preserves legacy bypass and never invokes the reporter.
+* Disabled evaluator/call-site policy preserves legacy bypass and never invokes the reporter.
+* DevNet fixture pipeline success + sink receipt recorded + reporter record success records one modeled in-memory completion report.
+* TestNet fixture pipeline success + sink receipt recorded + reporter record success records one modeled in-memory completion report.
+* Modeled add-root pipeline success records a completion report only after modeled applier success and sink receipt record.
+* Modeled retire-root pipeline success records a completion report only after modeled applier success and sink receipt record.
+* Modeled revoke-root pipeline success records a completion report only after modeled applier success and sink receipt record.
+* Modeled emergency-revoke-root pipeline success records a completion report only after modeled applier success and sink receipt record.
+* Modeled noop pipeline success records a completion report only under explicit success semantics, no trust-state drift, and a recorded receipt.
+* Duplicate identical completion report is idempotent under an explicit typed outcome.
+* Existing Run 248 sink behavior remains compatible.
+* Existing Run 246 pipeline behavior remains compatible.
+* Existing Run 244 modeled applier behavior remains compatible.
+* Existing Run 242 mutation-engine behavior remains compatible.
+* Existing Run 240 durable completion behavior remains compatible.
+* Production reporter path is reachable but unavailable/fail-closed and records no completion report.
+* MainNet reporter path is reachable but unavailable/fail-closed and records no completion report.
+* MainNet peer-driven apply refused before pipeline progression, before sink invocation, and before reporter invocation.
+* Validator-set rotation unsupported and records no completion report.
+* Policy-change unsupported and records no completion report.
+
+Rejected / fail-closed:
+
+* evaluator rejection produces no sink intent, no receipt, no reporter intent, and no completion report;
+* call-site rejection produces no sink intent, no receipt, no reporter intent, and no completion report;
+* durable replay stale produces no reporter intent and no completion report;
+* durable replay expired produces no reporter intent and no completion report;
+* durable replay consumed produces no reporter intent and no completion report;
+* durable replay superseded produces no reporter intent and no completion report;
+* durable replay backend unavailable produces no reporter intent and no completion report;
+* mutation-engine rejection produces no reporter intent and no completion report;
+* modeled applier rejected-before-snapshot produces no reporter intent and no completion report;
+* modeled applier rejected-before-apply produces no reporter intent and no completion report;
+* modeled apply failure produces no reporter intent and no completion report;
+* modeled rollback produces no reporter intent and no completion report;
+* modeled rollback-failed produces no reporter intent and no completion report;
+* modeled ambiguous window produces no reporter intent and no completion report;
+* sink did not record receipt produces no reporter invocation and no completion report;
+* sink rejected-before-record produces no reporter invocation and no completion report;
+* sink record failure produces no reporter invocation and no completion report;
+* sink rollback produces no reporter invocation and no completion report;
+* sink rollback-failed produces no reporter invocation and no completion report;
+* sink ambiguous window produces no reporter invocation and no completion report;
+* completion before sink receipt record is rejected;
+* completion after modeled apply failure is rejected;
+* completion after sink record failure is rejected;
+* completion after sink rollback is rejected;
+* completion after sink rollback-failed is rejected;
+* completion after sink ambiguous window is rejected;
+* same completion report id with different digest is rejected as equivocation and records no second report;
+* wrong environment rejected before reporter invocation;
+* wrong chain rejected before reporter invocation;
+* wrong genesis rejected before reporter invocation;
+* wrong governance surface rejected before reporter invocation;
+* wrong mutation surface rejected before reporter invocation;
+* wrong receipt digest rejected before report record;
+* wrong sink decision digest rejected before report record;
+* wrong pipeline decision digest rejected before report record;
+* wrong proposal id rejected before report record;
+* wrong decision id rejected before report record;
+* wrong candidate digest rejected before report record;
+* wrong authority-domain sequence rejected before report record;
+* malformed completion report rejected before record;
+* local operator key cannot satisfy MainNet authority;
+* peer majority cannot satisfy MainNet authority;
+* production reporter unavailable records no completion report;
+* MainNet reporter unavailable records no completion report;
+* validator-set rotation attempt unsupported and records no completion report;
+* policy-change attempt unsupported and records no completion report;
+* every rejected path produces no Run 070 call, no `LivePqcTrustState` mutation, no real trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, and no reporter invocation where rejection happens before the reporter stage.
+
+Recovery / crash-window cases:
+
+* before-pipeline window fails closed / no report;
+* after-pipeline-success-before-sink-intent window fails closed / no report;
+* after-sink-intent-before-receipt-record window fails closed / no report;
+* after-receipt-record-before-report-intent window fails closed / no report;
+* after-report-intent-before-report-record window fails closed / no completion;
+* after-report-record-before-report-success window fails closed unless an explicit matching completion report success exists;
+* after-report-success recovers as completion reported;
+* after-report-ambiguous fails closed / no completion;
+* reporter record-failed window fails closed / no completion;
+* reporter rollback-completed window fails closed / no completion;
+* reporter rollback-failed window is fatal/fail-closed / no completion;
+* unknown window fails closed / no completion;
+* production/MainNet recovery classification unavailable/fail-closed;
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection cases:
+
+* only Run 248 `ConsumeReceiptRecorded` creates a completion-report intent;
+* Run 246 pipeline success alone creates no completion-report intent;
+* sink intent alone creates no completion-report intent;
+* `ConsumeReceiptDuplicateIdempotent` creates no new completion report unless a matching completion report already exists;
+* evaluator success alone creates no completion-report intent;
+* durable replay freshness alone creates no completion-report intent;
+* mutation-engine authorization alone creates no completion-report intent;
+* modeled applier success without sink receipt record creates no completion-report intent;
+* only `CompletionReportRecorded` authorizes modeled completion-reported state;
+* `LegacyBypassNoCompletionReport` does not complete;
+* `RejectedBeforeSinkNoCompletionReport` does not complete;
+* `SinkDidNotRecordReceiptNoCompletionReport` does not complete;
+* `CompletionReportDuplicateIdempotent` does not create a second completion report and must not be counted as a new completion;
+* `CompletionReportRejectedBeforeRecord` does not complete;
+* `CompletionReportRecordFailedNoCompletion` does not complete;
+* `CompletionReportRolledBackNoCompletion` does not complete;
+* `CompletionReportRollbackFailedFatalNoCompletion` does not complete;
+* `CompletionReportAmbiguousFailClosedNoCompletion` does not complete;
+* `ProductionReporterUnavailableNoCompletion` does not complete;
+* `MainNetReporterUnavailableNoCompletion` does not complete;
+* `MainNetPeerDrivenApplyRefusedNoCompletion` does not complete;
+* `ValidatorSetRotationUnsupportedNoCompletion` does not complete;
+* `PolicyChangeUnsupportedNoCompletion` does not complete.
+
+Stage-ordering cases:
+
+* MainNet peer-driven apply refusal happens before pipeline progression, sink invocation, and reporter invocation.
+* Evaluator/call-site authorization happens before durable replay freshness.
+* Durable replay freshness happens before mutation-engine authorization.
+* Mutation-engine authorization happens before modeled applier invocation.
+* Modeled applier success happens before sink intent.
+* Sink receipt recording happens after pipeline consume authorization.
+* Completion report intent happens only after sink receipt recording.
+* Completion report recording happens after receipt-recorded state.
+* A rejection before the reporter stage leaves the reporter invocation count at zero.
+* A reporter record failure does not retroactively invalidate the sink-recorded receipt but does not authorize completion.
+* A reporter rollback failure is fatal/fail-closed and does not authorize completion.
+* The reporter itself performs no persistent durable consume beyond modeled in-memory fixture state.
+
+Completion-report ledger cases:
+
+* one valid completion report inserts exactly one modeled in-memory ledger record;
+* duplicate identical completion report is idempotent and does not increase record count;
+* same completion report id with different digest is equivocation and does not increase record count;
+* wrong receipt digest does not record;
+* wrong sink decision digest does not record;
+* wrong pipeline decision digest does not record;
+* wrong proposal id does not record;
+* wrong decision id does not record;
+* wrong candidate digest does not record;
+* wrong authority-domain sequence does not record;
+* malformed completion report does not record;
+* rollback restores modeled completion-report ledger snapshot;
+* rollback failure never claims success;
+* fixture completion ledger never writes files, RocksDB, markers, sequences, or production durable state.
+
+Non-mutation cases:
+
+* no Run 070 call on any reporter case;
+* no `LivePqcTrustState` mutation on any reporter case;
+* no real trust swap on any reporter case;
+* no session eviction on any reporter case;
+* no sequence write on any reporter case;
+* no marker write on any reporter case;
+* no RocksDB/file/schema/migration/storage-format write or format change;
+* no wire/schema/marker/sequence/trust-bundle format change;
+* fixture reporter mutates only `ModeledDurableConsumeCompletionReportLedger`;
+* production/MainNet paths remain unavailable/fail-closed;
+* MainNet peer-driven apply remains refused first.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning if available and report the result.
+* Run CodeQL if available and report the result honestly.
+* If Rust CodeQL analysis is skipped because the database is too large, say that explicitly and do not overclaim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_250.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 250 is source/test only.
+* It adds a modeled durable-consume receipt-acknowledgement / completion reporter boundary.
+* It models how a future production call site would report an after-record-only consume acknowledgement back to durable completion semantics.
+* It does not implement a real persistent replay backend.
+* It does not implement a real durable consume backend.
+* It does not implement a real completion-report backend.
+* It does not add RocksDB/file/schema/migration/storage-format changes.
+* It does not add wire/schema/marker/sequence/trust-bundle changes.
+* It does not write authority markers.
+* It does not write trust-bundle sequence files.
+* It does not call Run 070.
+* It does not mutate `LivePqcTrustState`.
+* It does not perform a real trust swap.
+* It does not evict sessions.
+* It does not implement a real production mutation engine.
+* It does not implement a real governance execution engine.
+* It does not implement a real on-chain governance proof verifier.
+* It does not add KMS/HSM/RemoteSigner backend.
+* It does not enable MainNet governance.
+* It does not enable MainNet peer-driven apply.
+* It does not implement validator-set rotation.
+* The fixture reporter mutates only modeled in-memory completion-report state.
+* Run 246 pipeline success is required before any sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any completion report can be recorded.
+* `CompletionReportRecorded` is required before any modeled completion-reported state.
+* Every non-recorded sink outcome produces no reporter invocation and no completion report.
+* Failed completion-report record, rollback, rollback-failed, ambiguous windows, unavailable production/MainNet paths, rejected replay states, and unsupported actions never complete.
+* Rejected reporter paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 250 against Runs 050–249.
+* If no contradiction is found, add a “no Run 250 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real persistent replay backend.
+* Do not implement a real durable consume backend.
+* Do not implement a real completion-report backend.
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not implement a real governance execution engine.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–249.
+
+Expected verdict:
+
+Partial-positive / source-test positive.
+
+Run 250 should close the source/test modeled durable-consume completion-reporter gap only. It must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 251 next step.
