@@ -1,78 +1,83 @@
-//! Run 260 — source/test durable-completion backend **audit-ledger /
-//! external-publication receipt boundary**.
+//! Run 260 — source/test durable-completion **audit-receipt acknowledgement /
+//! external-publication confirmation boundary**.
 //!
 //! Source/test only. Run 260 captures **no** release-binary evidence and enables
 //! **no** production mutating behavior. It does **not** implement a real audit
-//! ledger, a real external-publication system, a real production attestation
-//! backend, a real finalization backend, a real completion-report backend, a real
-//! durable consume backend, a real persistent replay backend, a real governance
-//! execution engine, a real production mutation engine, a real on-chain
-//! governance proof verifier, a KMS/HSM/RemoteSigner backend, MainNet governance
-//! enablement, MainNet peer-driven apply enablement, validator-set rotation, or
-//! any RocksDB / file / schema / migration / wire / marker / sequence /
-//! trust-bundle / storage-format change.
+//! ledger acknowledgement, a real external-publication confirmation, a real
+//! external-publication system, a real production attestation backend, a real
+//! finalization backend, a real completion-report backend, a real durable consume
+//! backend, a real persistent replay backend, a real governance execution engine, a
+//! real production mutation engine, a real on-chain governance proof verifier, a
+//! KMS/HSM/RemoteSigner backend, MainNet governance enablement, MainNet peer-driven
+//! apply enablement, validator-set rotation, or any RocksDB / file / schema /
+//! migration / wire / marker / sequence / trust-bundle / storage-format change.
 //!
 //! ## What this module adds
 //!
-//! Run 256
-//! ([`crate::pqc_governance_durable_completion_attestation_backend`]) proves that a
-//! modeled durable-completion attestation *backend submission* is recorded **only**
-//! after the Run 254 attestor recorded an attestation, terminating in the single
-//! submission-recording outcome
-//! [`DurableCompletionAttestationBackendOutcome::BackendSubmissionRecorded`].
+//! Run 258
+//! ([`crate::pqc_governance_durable_completion_audit_publication_receipt`]) proves
+//! that a modeled durable-completion *audit/publication receipt* is recorded **only**
+//! after the Run 256 backend stage recorded a submission, terminating in the single
+//! receipt-recording outcome
+//! [`DurableCompletionAuditPublicationReceiptOutcome::AuditReceiptRecorded`].
 //!
 //! Run 260 defines the **first typed interface** a future production audit ledger
-//! or external publication system would use to record an audit/publication receipt
-//! **after** the Run 256 backend stage produced `BackendSubmissionRecorded`. It is
-//! an **interface / projection boundary only**: production / MainNet audit-ledger
-//! and external-publication implementations are *reachable but deliberately
-//! unavailable / fail-closed*, and the only positive implementation is a
-//! DevNet/TestNet fixture that records into an in-memory fixture ledger for
-//! source/test evidence only.
+//! or external publication system would use to *acknowledge / confirm* an audit
+//! receipt **after** the Run 258 receipt stage produced `AuditReceiptRecorded`. It
+//! is an **interface / projection boundary only**: production / MainNet audit-ledger
+//! acknowledgement and external-publication confirmation implementations are
+//! *reachable but deliberately unavailable / fail-closed*, and the only positive
+//! implementation is a DevNet/TestNet fixture that records into an in-memory fixture
+//! ledger for source/test evidence only.
 //!
-//! The receipt layer is a **model only**. It does not implement a real audit
-//! ledger, a real external-publication system, or any real persistent storage. It
-//! does not write RocksDB, files, schemas, migrations, storage formats, wire
-//! formats, authority markers, trust-bundle sequence files, or any production
-//! durable state. It does not call Run 070, mutate `LivePqcTrustState`, perform a
-//! real trust swap, evict sessions, perform external publication / network I/O, or
-//! enable MainNet governance / MainNet peer-driven apply. The DevNet/TestNet
-//! fixture sink mutates only the in-memory
+//! The acknowledgement layer is a **model only**. It does not implement a real audit
+//! ledger acknowledgement, a real external-publication confirmation, a real
+//! external-publication system, or any real persistent storage. It does not write
+//! RocksDB, files, schemas, migrations, storage formats, wire formats, authority
+//! markers, trust-bundle sequence files, or any production durable state. It does
+//! not call Run 070, mutate `LivePqcTrustState`, perform a real trust swap, evict
+//! sessions, perform external publication / network I/O, or enable MainNet
+//! governance / MainNet peer-driven apply. The DevNet/TestNet fixture sink mutates
+//! only the in-memory
 //! [`DurableCompletionAuditReceiptAcknowledgementLedger`].
 //!
 //! ## Ordering / fail-closed contract
 //!
 //! 1. **MainNet peer-driven apply refusal** — refused *before* pipeline
 //!    progression, sink invocation, reporter invocation, finalizer invocation,
-//!    attestor invocation, backend invocation, and receipt sink invocation;
+//!    attestor invocation, backend invocation, receipt invocation, and
+//!    acknowledgement sink invocation;
 //! 2. **legacy bypass** — a
 //!    [`DurableCompletionAuditReceiptAcknowledgementPolicy::Disabled`] policy preserves
-//!    the legacy no-audit-receipt bypass and never invokes the receipt sink;
-//! 3. **backend-outcome projection** — only
-//!    [`DurableCompletionAttestationBackendOutcome::BackendSubmissionRecorded`]
-//!    creates an audit/publication receipt request; every other Run 256 outcome
-//!    maps to a no-audit-receipt fail-closed outcome and never invokes the receipt
+//!    the legacy no-acknowledgement bypass and never invokes the acknowledgement sink;
+//! 3. **receipt-outcome projection** — only
+//!    [`DurableCompletionAuditPublicationReceiptOutcome::AuditReceiptRecorded`]
+//!    creates an acknowledgement request; every other Run 258 outcome maps to a
+//!    no-acknowledgement fail-closed outcome and never invokes the acknowledgement
 //!    sink;
-//! 4. **pre-receipt binding validation** — environment / chain / genesis /
-//!    governance surface / mutation surface and the full digest binding must match
-//!    expectations *before* the receipt sink is invoked; a mismatch fails closed
-//!    and leaves the receipt sink invocation count at zero;
-//! 5. **receipt record** — only after every prior gate passes is the receipt sink
-//!    invoked; the receipt-record-identity fields must match exactly before any
-//!    modeled receipt is recorded;
-//! 6. **receipt authorization** — only
+//! 4. **pre-acknowledgement binding validation** — environment / chain / genesis /
+//!    governance surface / mutation surface and the full digest binding (including
+//!    the Run 256 backend digest set and the Run 258 receipt digest set) must match
+//!    expectations *before* the acknowledgement sink is invoked; a mismatch fails
+//!    closed and leaves the acknowledgement sink invocation count at zero;
+//! 5. **acknowledgement record** — only after every prior gate passes is the
+//!    acknowledgement sink invoked; the acknowledgement-record-identity fields must
+//!    match exactly before any modeled acknowledgement is recorded;
+//! 6. **acknowledgement authorization** — only
 //!    [`DurableCompletionAuditReceiptAcknowledgementOutcome::AcknowledgementRecorded`]
-//!    authorizes a new modeled audit/publication receipt state.
+//!    authorizes a new modeled acknowledgement state.
 //!
-//! A receipt record failure, rollback, rollback failure, or ambiguous receipt
-//! window never retroactively claims a durable receipt. A duplicate identical
-//! receipt is idempotent; the same receipt record id with a different digest fails
-//! closed as equivocation and records no second receipt. A Run 256
-//! [`DurableCompletionAttestationBackendOutcome::BackendSubmissionDuplicateIdempotent`]
-//! never creates a new receipt by itself — it can only match an already-recorded
-//! receipt.
+//! An acknowledgement record failure, rollback, rollback failure, or ambiguous
+//! acknowledgement window never retroactively claims a durable acknowledgement. A
+//! duplicate identical acknowledgement is idempotent; the same acknowledgement record
+//! id with a different digest fails closed as equivocation and records no second
+//! acknowledgement. A Run 258
+//! [`DurableCompletionAuditPublicationReceiptOutcome::AuditReceiptDuplicateIdempotent`]
+//! never creates a new acknowledgement by itself — it can only match an
+//! already-recorded acknowledgement.
 
 use crate::pqc_governance_durable_completion_attestation_backend::DurableCompletionAttestationBackendOutcome;
+use crate::pqc_governance_durable_completion_audit_publication_receipt::DurableCompletionAuditPublicationReceiptOutcome;
 use crate::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use crate::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
 use crate::pqc_governance_modeled_durable_completion_finalization_projection::GovernanceModeledDurableCompletionFinalizationOutcome;
@@ -129,11 +134,17 @@ pub type DurableCompletionAuditReceiptAcknowledgementFinalizationBinding =
 pub type DurableCompletionAuditReceiptAcknowledgementAttestationBinding =
     GovernanceModeledDurableCompletionAttestationOutcome;
 
-/// Run 260 — the Run 256 backend outcome the receipt projects to a receipt request.
-/// The receipt boundary never reimplements the backend; it only projects its
+/// Run 260 — the Run 256 backend outcome carried as backend-record context. The
+/// acknowledgement boundary never reimplements the backend; it only carries its
 /// terminal outcome.
 pub type DurableCompletionAuditReceiptAcknowledgementBackendBinding =
     DurableCompletionAttestationBackendOutcome;
+
+/// Run 260 — the Run 258 audit/publication receipt outcome the acknowledgement
+/// projects to an acknowledgement request. The acknowledgement boundary never
+/// reimplements the receipt; it only projects its terminal outcome.
+pub type DurableCompletionAuditReceiptAcknowledgementReceiptBinding =
+    DurableCompletionAuditPublicationReceiptOutcome;
 
 // ===========================================================================
 // Receipt kind
@@ -400,6 +411,12 @@ pub fn acknowledgement_request_digest(
         .str_field(&request.backend_receipt_digest)
         .str_field(&request.backend_transcript_digest)
         .str_field(&request.backend_record_id)
+        .str_field(&request.receipt_identity_digest)
+        .str_field(&request.receipt_request_digest)
+        .str_field(&request.receipt_response_digest)
+        .str_field(&request.receipt_record_digest)
+        .str_field(&request.receipt_transcript_digest)
+        .str_field(&request.receipt_record_id)
         .str_field(&request.domain_separation_tag)
         .str_field(acknowledgement_identity_digest(&request.identity).as_hex());
     DurableCompletionAuditReceiptAcknowledgementDigest(w.finish())
@@ -505,7 +522,19 @@ pub struct DurableCompletionAuditReceiptAcknowledgementRequest {
     pub backend_transcript_digest: String,
     /// Run 256 backend record id.
     pub backend_record_id: String,
-    /// Receipt identity.
+    /// Run 258 receipt identity digest.
+    pub receipt_identity_digest: String,
+    /// Run 258 receipt request digest.
+    pub receipt_request_digest: String,
+    /// Run 258 receipt response digest.
+    pub receipt_response_digest: String,
+    /// Run 258 receipt record digest.
+    pub receipt_record_digest: String,
+    /// Run 258 receipt transcript digest.
+    pub receipt_transcript_digest: String,
+    /// Run 258 receipt record id.
+    pub receipt_record_id: String,
+    /// Acknowledgement identity.
     pub identity: DurableCompletionAuditReceiptAcknowledgementIdentity,
     /// Domain separation tag.
     pub domain_separation_tag: String,
@@ -533,6 +562,12 @@ impl DurableCompletionAuditReceiptAcknowledgementRequest {
             && !self.backend_receipt_digest.is_empty()
             && !self.backend_transcript_digest.is_empty()
             && !self.backend_record_id.is_empty()
+            && !self.receipt_identity_digest.is_empty()
+            && !self.receipt_request_digest.is_empty()
+            && !self.receipt_response_digest.is_empty()
+            && !self.receipt_record_digest.is_empty()
+            && !self.receipt_transcript_digest.is_empty()
+            && !self.receipt_record_id.is_empty()
             && !self.domain_separation_tag.is_empty()
             && self.identity.is_well_formed()
     }
@@ -771,11 +806,23 @@ pub struct DurableCompletionAuditReceiptAcknowledgementExpectations {
     pub expected_backend_transcript_digest: String,
     /// Expected Run 256 backend record id.
     pub expected_backend_record_id: String,
-    /// Expected receipt identity.
+    /// Expected Run 258 receipt identity digest.
+    pub expected_receipt_identity_digest: String,
+    /// Expected Run 258 receipt request digest.
+    pub expected_receipt_request_digest: String,
+    /// Expected Run 258 receipt response digest.
+    pub expected_receipt_response_digest: String,
+    /// Expected Run 258 receipt record digest.
+    pub expected_receipt_record_digest: String,
+    /// Expected Run 258 receipt transcript digest.
+    pub expected_receipt_transcript_digest: String,
+    /// Expected Run 258 receipt record id.
+    pub expected_receipt_record_id: String,
+    /// Expected acknowledgement identity.
     pub expected_identity: DurableCompletionAuditReceiptAcknowledgementIdentity,
-    /// Expected receipt kind.
+    /// Expected acknowledgement kind.
     pub expected_acknowledgement_kind: DurableCompletionAuditReceiptAcknowledgementKind,
-    /// Expected receipt policy.
+    /// Expected acknowledgement policy.
     pub expected_acknowledgement_policy: DurableCompletionAuditReceiptAcknowledgementPolicy,
     /// Expected domain separation tag.
     pub expected_domain_separation_tag: String,
@@ -892,17 +939,35 @@ impl DurableCompletionAuditReceiptAcknowledgementExpectations {
         if request.backend_record_id != self.expected_backend_record_id {
             return Some("wrong backend record id");
         }
+        if request.receipt_identity_digest != self.expected_receipt_identity_digest {
+            return Some("wrong receipt identity digest");
+        }
+        if request.receipt_request_digest != self.expected_receipt_request_digest {
+            return Some("wrong receipt request digest");
+        }
+        if request.receipt_response_digest != self.expected_receipt_response_digest {
+            return Some("wrong receipt response digest");
+        }
+        if request.receipt_record_digest != self.expected_receipt_record_digest {
+            return Some("wrong receipt record digest");
+        }
+        if request.receipt_transcript_digest != self.expected_receipt_transcript_digest {
+            return Some("wrong receipt transcript digest");
+        }
+        if request.receipt_record_id != self.expected_receipt_record_id {
+            return Some("wrong receipt record id");
+        }
         if request.domain_separation_tag != self.expected_domain_separation_tag {
             return Some("wrong domain separation tag");
         }
         if request.identity != self.expected_identity {
-            return Some("wrong receipt identity");
+            return Some("wrong acknowledgement identity");
         }
         if request.identity.kind != self.expected_acknowledgement_kind {
-            return Some("wrong receipt kind");
+            return Some("wrong acknowledgement kind");
         }
         if request.identity.policy != self.expected_acknowledgement_policy {
-            return Some("wrong receipt policy");
+            return Some("wrong acknowledgement policy");
         }
         None
     }
@@ -943,9 +1008,12 @@ pub struct DurableCompletionAuditReceiptAcknowledgementInput {
     pub finalization_binding: DurableCompletionAuditReceiptAcknowledgementFinalizationBinding,
     /// The Run 254 attestation outcome.
     pub attestation_binding: DurableCompletionAuditReceiptAcknowledgementAttestationBinding,
-    /// The Run 256 backend outcome the receipt projects to a receipt request.
+    /// The Run 256 backend outcome carried as backend-record context.
     pub backend_binding: DurableCompletionAuditReceiptAcknowledgementBackendBinding,
-    /// The receipt request the call site would submit.
+    /// The Run 258 audit/publication receipt outcome the acknowledgement projects to
+    /// an acknowledgement request.
+    pub receipt_binding: DurableCompletionAuditReceiptAcknowledgementReceiptBinding,
+    /// The acknowledgement request the call site would submit.
     pub request: DurableCompletionAuditReceiptAcknowledgementRequest,
 }
 
@@ -993,6 +1061,10 @@ impl DurableCompletionAuditReceiptAcknowledgementInput {
             || matches!(
                 self.backend_binding,
                 DurableCompletionAttestationBackendOutcome::MainNetPeerDrivenApplyRefusedNoSubmission
+            )
+            || matches!(
+                self.receipt_binding,
+                DurableCompletionAuditPublicationReceiptOutcome::MainNetPeerDrivenApplyRefusedNoReceipt
             )
     }
 }
@@ -1128,71 +1200,74 @@ impl DurableCompletionAuditReceiptAcknowledgementOutcome {
 }
 
 // ===========================================================================
-// Backend-outcome -> receipt request projection
+// Receipt-outcome -> acknowledgement request projection
 // ===========================================================================
 
-/// Run 260 — the typed projection of a Run 256 backend outcome onto a receipt
-/// request.
+/// Run 260 — the typed projection of a Run 258 audit/publication receipt outcome
+/// onto an acknowledgement request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DurableCompletionAuditReceiptAcknowledgementRequestIntent {
-    /// The backend recorded a submission; the receipt sink may record a new receipt.
+    /// The receipt recorded an audit receipt; the acknowledgement sink may record a
+    /// new acknowledgement.
     CreateRequest,
-    /// The backend reported an idempotent-duplicate submission; the receipt sink may
-    /// only match an already-recorded receipt and must never create a new one.
+    /// The receipt reported an idempotent-duplicate audit receipt; the
+    /// acknowledgement sink may only match an already-recorded acknowledgement and
+    /// must never create a new one.
     IdempotentOnly,
-    /// The backend did not submit; no receipt request. Carries the typed
-    /// no-audit-receipt outcome the receipt evaluation returns directly (without
-    /// invoking the receipt sink).
+    /// The receipt did not record; no acknowledgement request. Carries the typed
+    /// no-acknowledgement outcome the acknowledgement evaluation returns directly
+    /// (without invoking the acknowledgement sink).
     NoAcknowledgement(DurableCompletionAuditReceiptAcknowledgementOutcome),
 }
 
 impl DurableCompletionAuditReceiptAcknowledgementRequestIntent {
-    /// `true` iff this projection creates a receipt request (i.e. the backend
-    /// recorded a submission).
+    /// `true` iff this projection creates an acknowledgement request (i.e. the
+    /// receipt recorded an audit receipt).
     pub fn creates_request(&self) -> bool {
         matches!(self, Self::CreateRequest)
     }
 }
 
-/// Run 260 — project a Run 256 backend outcome onto a receipt request.
+/// Run 260 — project a Run 258 audit/publication receipt outcome onto an
+/// acknowledgement request.
 ///
 /// Only
-/// [`DurableCompletionAttestationBackendOutcome::BackendSubmissionRecorded`]
-/// creates a receipt request.
-/// [`DurableCompletionAttestationBackendOutcome::BackendSubmissionDuplicateIdempotent`]
-/// may only match an already-recorded receipt and never creates a new one. Every
-/// other backend outcome maps to a no-audit-receipt fail-closed outcome (a more
-/// specific one where one exists, otherwise the generic
+/// [`DurableCompletionAuditPublicationReceiptOutcome::AuditReceiptRecorded`]
+/// creates an acknowledgement request.
+/// [`DurableCompletionAuditPublicationReceiptOutcome::AuditReceiptDuplicateIdempotent`]
+/// may only match an already-recorded acknowledgement and never creates a new one.
+/// Every other receipt outcome maps to a no-acknowledgement fail-closed outcome (a
+/// more specific one where one exists, otherwise the generic
 /// [`DurableCompletionAuditReceiptAcknowledgementOutcome::AuditReceiptDidNotRecordNoAcknowledgement`]).
 /// Pure: performs no work and never records.
-pub fn project_backend_submission_outcome_to_audit_receipt_request(
-    outcome: &DurableCompletionAttestationBackendOutcome,
+pub fn project_audit_receipt_outcome_to_acknowledgement_request(
+    outcome: &DurableCompletionAuditPublicationReceiptOutcome,
 ) -> DurableCompletionAuditReceiptAcknowledgementRequestIntent {
-    use DurableCompletionAttestationBackendOutcome as Backend;
-    use DurableCompletionAuditReceiptAcknowledgementOutcome as Receipt;
+    use DurableCompletionAuditPublicationReceiptOutcome as Receipt;
+    use DurableCompletionAuditReceiptAcknowledgementOutcome as Ack;
     use DurableCompletionAuditReceiptAcknowledgementRequestIntent as Intent;
     match outcome {
-        Backend::BackendSubmissionRecorded => Intent::CreateRequest,
-        Backend::BackendSubmissionDuplicateIdempotent => Intent::IdempotentOnly,
-        Backend::LegacyBypassNoBackendSubmission => {
-            Intent::NoAcknowledgement(Receipt::LegacyBypassNoAcknowledgement)
+        Receipt::AuditReceiptRecorded => Intent::CreateRequest,
+        Receipt::AuditReceiptDuplicateIdempotent => Intent::IdempotentOnly,
+        Receipt::LegacyBypassNoAuditReceipt => {
+            Intent::NoAcknowledgement(Ack::LegacyBypassNoAcknowledgement)
         }
-        Backend::RejectedBeforeAttestationNoBackendSubmission => {
-            Intent::NoAcknowledgement(Receipt::RejectedBeforeAuditReceiptNoAcknowledgement)
+        Receipt::RejectedBeforeBackendSubmissionNoAuditReceipt => {
+            Intent::NoAcknowledgement(Ack::RejectedBeforeAuditReceiptNoAcknowledgement)
         }
-        Backend::MainNetPeerDrivenApplyRefusedNoSubmission => {
-            Intent::NoAcknowledgement(Receipt::MainNetPeerDrivenApplyRefusedNoAcknowledgement)
+        Receipt::MainNetPeerDrivenApplyRefusedNoReceipt => {
+            Intent::NoAcknowledgement(Ack::MainNetPeerDrivenApplyRefusedNoAcknowledgement)
         }
-        Backend::ValidatorSetRotationUnsupportedNoSubmission => {
-            Intent::NoAcknowledgement(Receipt::ValidatorSetRotationUnsupportedNoAcknowledgement)
+        Receipt::ValidatorSetRotationUnsupportedNoReceipt => {
+            Intent::NoAcknowledgement(Ack::ValidatorSetRotationUnsupportedNoAcknowledgement)
         }
-        Backend::PolicyChangeUnsupportedNoSubmission => {
-            Intent::NoAcknowledgement(Receipt::PolicyChangeUnsupportedNoAcknowledgement)
+        Receipt::PolicyChangeUnsupportedNoReceipt => {
+            Intent::NoAcknowledgement(Ack::PolicyChangeUnsupportedNoAcknowledgement)
         }
-        // Every remaining backend outcome is a non-submitting rejection / failure /
+        // Every remaining receipt outcome is a non-recording rejection / failure /
         // rollback / ambiguous window / production / MainNet / external-publication
-        // unavailable: the backend did not submit, so no audit receipt may exist.
-        _ => Intent::NoAcknowledgement(Receipt::AuditReceiptDidNotRecordNoAcknowledgement),
+        // unavailable: the receipt did not record, so no acknowledgement may exist.
+        _ => Intent::NoAcknowledgement(Ack::AuditReceiptDidNotRecordNoAcknowledgement),
     }
 }
 
@@ -1241,7 +1316,7 @@ pub trait GovernanceDurableCompletionAuditReceiptAcknowledgementSink {
     /// `idempotent_only` is `true` when the projected backend outcome was an
     /// idempotent-duplicate submission: in that case the receipt sink may only match
     /// an already-recorded receipt and must never create a new one.
-    fn record_durable_completion_audit_ack_acknowledgement(
+    fn record_durable_completion_audit_receipt_acknowledgement(
         &mut self,
         request: &DurableCompletionAuditReceiptAcknowledgementRequest,
         expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
@@ -1251,14 +1326,14 @@ pub trait GovernanceDurableCompletionAuditReceiptAcknowledgementSink {
 
     /// Classify a modeled receipt crash/recovery window. Pure: performs no modeled
     /// mutation and never invokes Run 070.
-    fn recover_durable_completion_audit_ack_acknowledgement_window(
+    fn recover_durable_completion_audit_receipt_acknowledgement_window(
         &self,
         input: &DurableCompletionAuditReceiptAcknowledgementInput,
         window: DurableCompletionAuditReceiptAcknowledgementWindow,
         recovered_record: Option<&DurableCompletionAuditReceiptAcknowledgementLedgerRecord>,
         expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
     ) -> DurableCompletionAuditReceiptAcknowledgementOutcome {
-        recover_durable_completion_audit_ack_acknowledgement_window(
+        recover_durable_completion_audit_receipt_acknowledgement_window(
             input,
             window,
             self.kind(),
@@ -1319,7 +1394,7 @@ impl GovernanceDurableCompletionAuditReceiptAcknowledgementSink
         self.invocations
     }
 
-    fn record_durable_completion_audit_ack_acknowledgement(
+    fn record_durable_completion_audit_receipt_acknowledgement(
         &mut self,
         request: &DurableCompletionAuditReceiptAcknowledgementRequest,
         expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
@@ -1436,7 +1511,7 @@ impl GovernanceDurableCompletionAuditReceiptAcknowledgementSink
         self.invocations
     }
 
-    fn record_durable_completion_audit_ack_acknowledgement(
+    fn record_durable_completion_audit_receipt_acknowledgement(
         &mut self,
         _request: &DurableCompletionAuditReceiptAcknowledgementRequest,
         _expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
@@ -1466,7 +1541,7 @@ impl GovernanceDurableCompletionAuditReceiptAcknowledgementSink
         self.invocations
     }
 
-    fn record_durable_completion_audit_ack_acknowledgement(
+    fn record_durable_completion_audit_receipt_acknowledgement(
         &mut self,
         _request: &DurableCompletionAuditReceiptAcknowledgementRequest,
         _expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
@@ -1497,7 +1572,7 @@ impl GovernanceDurableCompletionAuditReceiptAcknowledgementSink
         self.invocations
     }
 
-    fn record_durable_completion_audit_ack_acknowledgement(
+    fn record_durable_completion_audit_receipt_acknowledgement(
         &mut self,
         _request: &DurableCompletionAuditReceiptAcknowledgementRequest,
         _expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
@@ -1536,7 +1611,7 @@ impl GovernanceDurableCompletionAuditReceiptAcknowledgementSink
 /// effect: performs no I/O, mutates no `LivePqcTrustState`, writes no marker,
 /// writes no sequence, swaps no live trust, evicts no sessions, performs no
 /// external publication / audit write, and never invokes Run 070.
-pub fn evaluate_durable_completion_audit_ack_acknowledgement<S>(
+pub fn evaluate_durable_completion_audit_receipt_acknowledgement<S>(
     input: &DurableCompletionAuditReceiptAcknowledgementInput,
     expectations: &DurableCompletionAuditReceiptAcknowledgementExpectations,
     sink: &mut S,
@@ -1561,26 +1636,26 @@ where
         return Receipt::LegacyBypassNoAcknowledgement;
     }
 
-    // Step 3: project the Run 256 backend outcome onto a receipt request. Every
-    // non-submitting outcome returns a no-audit-receipt outcome without invoking the
-    // receipt sink.
-    let idempotent_only = match project_backend_submission_outcome_to_audit_receipt_request(
-        &input.backend_binding,
+    // Step 3: project the Run 258 audit/publication receipt outcome onto an
+    // acknowledgement request. Every non-recording receipt outcome returns a
+    // no-acknowledgement outcome without invoking the acknowledgement sink.
+    let idempotent_only = match project_audit_receipt_outcome_to_acknowledgement_request(
+        &input.receipt_binding,
     ) {
         Intent::NoAcknowledgement(outcome) => return outcome,
         Intent::CreateRequest => false,
         Intent::IdempotentOnly => true,
     };
 
-    // Step 4: pre-receipt environment / surface binding validation. A mismatch fails
-    // closed before the receipt sink is invoked, leaving the receipt invocation count
-    // at zero.
+    // Step 4: pre-acknowledgement environment / surface binding validation. A
+    // mismatch fails closed before the acknowledgement sink is invoked, leaving the
+    // acknowledgement invocation count at zero.
     if !expectations.binding_matches(input) {
         return Receipt::RejectedBeforeAuditReceiptNoAcknowledgement;
     }
 
-    // Step 5: invoke the receipt sink to record the modeled receipt.
-    sink.record_durable_completion_audit_ack_acknowledgement(
+    // Step 5: invoke the acknowledgement sink to record the modeled acknowledgement.
+    sink.record_durable_completion_audit_receipt_acknowledgement(
         &input.request,
         expectations,
         idempotent_only,
@@ -1625,19 +1700,26 @@ pub enum DurableCompletionAuditReceiptAcknowledgementWindow {
     AfterBackendSuccessBeforeReceiptRequest,
     /// Crashed after a receipt request but before any receipt record.
     AfterReceiptRequestBeforeReceiptRecord,
-    /// Crashed after a receipt record but before receipt success — fails closed
-    /// unless an explicit matching receipt success exists.
+    /// Crashed after a receipt record but before receipt success.
     AfterReceiptRecordBeforeReceiptSuccess,
-    /// Recovered after a successful receipt record.
-    AfterReceiptSuccess,
-    /// Recovered after an ambiguous receipt window.
-    AfterReceiptAmbiguous,
-    /// The receipt record itself failed.
-    ReceiptRecordFailed,
-    /// The receipt record was rolled back.
-    ReceiptRollbackCompleted,
-    /// The receipt rollback itself failed — fatal.
-    ReceiptRollbackFailed,
+    /// Crashed after receipt success but before an acknowledgement request.
+    AfterReceiptSuccessBeforeAcknowledgementRequest,
+    /// Crashed after an acknowledgement request but before any acknowledgement
+    /// record.
+    AfterAcknowledgementRequestBeforeAcknowledgementRecord,
+    /// Crashed after an acknowledgement record but before acknowledgement success —
+    /// fails closed unless an explicit matching acknowledgement success exists.
+    AfterAcknowledgementRecordBeforeAcknowledgementSuccess,
+    /// Recovered after a successful acknowledgement record.
+    AfterAcknowledgementSuccess,
+    /// Recovered after an ambiguous acknowledgement window.
+    AfterAcknowledgementAmbiguous,
+    /// The acknowledgement record itself failed.
+    AcknowledgementRecordFailed,
+    /// The acknowledgement record was rolled back.
+    AcknowledgementRollbackCompleted,
+    /// The acknowledgement rollback itself failed — fatal.
+    AcknowledgementRollbackFailed,
     /// An unknown window — fails closed.
     Unknown,
 }
@@ -1652,7 +1734,7 @@ pub enum DurableCompletionAuditReceiptAcknowledgementWindow {
 /// matching record (or an explicit after-receipt-success window) recovers as
 /// [`DurableCompletionAuditReceiptAcknowledgementOutcome::AcknowledgementRecorded`]. Pure:
 /// performs no modeled mutation and never invokes Run 070.
-pub fn recover_durable_completion_audit_ack_acknowledgement_window(
+pub fn recover_durable_completion_audit_receipt_acknowledgement_window(
     input: &DurableCompletionAuditReceiptAcknowledgementInput,
     window: DurableCompletionAuditReceiptAcknowledgementWindow,
     kind: DurableCompletionAuditReceiptAcknowledgementKind,
@@ -1699,8 +1781,8 @@ pub fn recover_durable_completion_audit_ack_acknowledgement_window(
         };
 
     match window {
-        // Before the backend recorded a submission there is nothing to record a
-        // receipt for.
+        // Through receipt success but before an acknowledgement request there is
+        // nothing to record an acknowledgement for.
         Window::BeforePipeline
         | Window::AfterPipelineSuccessBeforeSinkIntent
         | Window::AfterSinkIntentBeforeSinkReceiptRecord
@@ -1712,30 +1794,40 @@ pub fn recover_durable_completion_audit_ack_acknowledgement_window(
         | Window::AfterAttestationIntentBeforeAttestationRecord
         | Window::AfterAttestationRecordBeforeBackendRequest
         | Window::AfterBackendRequestBeforeBackendRecord
-        | Window::AfterBackendRecordBeforeBackendSuccess => {
+        | Window::AfterBackendRecordBeforeBackendSuccess
+        | Window::AfterBackendSuccessBeforeReceiptRequest
+        | Window::AfterReceiptRequestBeforeReceiptRecord
+        | Window::AfterReceiptRecordBeforeReceiptSuccess
+        | Window::AfterReceiptSuccessBeforeAcknowledgementRequest => {
             Receipt::AuditReceiptDidNotRecordNoAcknowledgement
         }
-        // A recorded backend submission without a receipt request / record never
-        // records a receipt.
-        Window::AfterBackendSuccessBeforeReceiptRequest
-        | Window::AfterReceiptRequestBeforeReceiptRecord => {
+        // An acknowledgement request without a record never records an
+        // acknowledgement.
+        Window::AfterAcknowledgementRequestBeforeAcknowledgementRecord => {
             Receipt::AcknowledgementRejectedBeforeRecord
         }
-        // After a receipt record but before receipt success: fails closed unless an
-        // explicit matching, well-formed receipt record exists.
-        Window::AfterReceiptRecordBeforeReceiptSuccess => match recovered_record {
+        // After an acknowledgement record but before success: fails closed unless an
+        // explicit matching, well-formed acknowledgement record exists.
+        Window::AfterAcknowledgementRecordBeforeAcknowledgementSuccess => match recovered_record {
             Some(record) if recovered_matches(record) => Receipt::AcknowledgementRecorded,
             _ => Receipt::AcknowledgementRejectedBeforeRecord,
         },
-        // An explicit successful receipt recovers as recorded only if it matches.
-        Window::AfterReceiptSuccess => match recovered_record {
+        // An explicit successful acknowledgement recovers as recorded only if it
+        // matches.
+        Window::AfterAcknowledgementSuccess => match recovered_record {
             Some(record) if recovered_matches(record) => Receipt::AcknowledgementRecorded,
             _ => Receipt::AcknowledgementRejectedBeforeRecord,
         },
-        Window::AfterReceiptAmbiguous => Receipt::AcknowledgementAmbiguousFailClosedNoAcknowledgement,
-        Window::ReceiptRecordFailed => Receipt::AcknowledgementRecordFailedNoAcknowledgement,
-        Window::ReceiptRollbackCompleted => Receipt::AcknowledgementRolledBackNoAcknowledgement,
-        Window::ReceiptRollbackFailed => Receipt::AcknowledgementRollbackFailedFatalNoAcknowledgement,
+        Window::AfterAcknowledgementAmbiguous => {
+            Receipt::AcknowledgementAmbiguousFailClosedNoAcknowledgement
+        }
+        Window::AcknowledgementRecordFailed => Receipt::AcknowledgementRecordFailedNoAcknowledgement,
+        Window::AcknowledgementRollbackCompleted => {
+            Receipt::AcknowledgementRolledBackNoAcknowledgement
+        }
+        Window::AcknowledgementRollbackFailed => {
+            Receipt::AcknowledgementRollbackFailedFatalNoAcknowledgement
+        }
         // Any unknown window fails closed.
         Window::Unknown => Receipt::AcknowledgementAmbiguousFailClosedNoAcknowledgement,
     }
@@ -1824,8 +1916,13 @@ pub fn durable_completion_audit_ack_attestation_required() -> bool {
     true
 }
 
-/// Run 260 — a receipt requires a Run 256 backend submission upstream.
+/// Run 260 — an acknowledgement requires a Run 256 backend submission upstream.
 pub fn durable_completion_audit_ack_backend_submission_required() -> bool {
+    true
+}
+
+/// Run 260 — an acknowledgement requires a Run 258 audit receipt upstream.
+pub fn durable_completion_audit_ack_receipt_required() -> bool {
     true
 }
 
