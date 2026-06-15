@@ -1,0 +1,16 @@
+# Run 251 evidence archive — only README.md, summary.txt, and .gitignore are tracked.
+# All per-run artifacts contain absolute paths and ephemeral data.
+logs/
+data/
+exit_codes/
+grep_summaries/
+reachability/
+test_results/
+helper_evidence/
+fixtures/
+tables/
+scenarios/
+provenance.txt
+negative_invariants.txt
+mutation_proof.txt
+no_mutation_proof.txt
