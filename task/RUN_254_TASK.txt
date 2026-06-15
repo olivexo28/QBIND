@@ -1,0 +1,535 @@
+Run 254 — Source/test modeled durable-completion finalization attestation projection boundary
+
+You are continuing QBIND after Run 253.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
+Run 243 is fully closed as release-binary evidence for Run 242.
+Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
+Run 245 is fully closed as release-binary evidence for Run 244.
+Run 246 is fully closed as source/test governance modeled end-to-end pipeline boundary work.
+Run 247 is fully closed as release-binary evidence for Run 246.
+Run 248 is fully closed as source/test modeled durable-consume projection sink boundary work.
+Run 249 is fully closed as release-binary evidence for Run 248.
+Run 250 is fully closed as source/test modeled durable-consume receipt-acknowledgement / completion reporter boundary work.
+Run 251 is fully closed as release-binary evidence for Run 250.
+Run 252 is fully closed as source/test modeled durable-completion finalization-projection boundary work.
+Run 253 is fully closed as release-binary evidence for Run 252.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–253.
+* Source/test only.
+* No release-binary evidence in this run.
+
+Current state:
+
+* Run 246 models the end-to-end ordering from evaluator/call-site authorization through durable replay, mutation-engine authorization, modeled applier success, and durable consume authorization.
+* Run 248 models the durable-consume projection sink: only a Run 246 `ModeledApplierAppliedAndDurableConsumeAuthorized` outcome can create a sink intent, and only `ConsumeReceiptRecorded` records a modeled in-memory receipt.
+* Run 249 release-evidenced the Run 248 sink boundary.
+* Run 250 models the durable-consume completion reporter: only Run 248 `ConsumeReceiptRecorded` can create a completion-report intent, and only `CompletionReportRecorded` authorizes a new modeled completion-reported state.
+* Run 251 release-evidenced the Run 250 completion-reporter boundary.
+* Run 252 models durable-completion finalization projection: only Run 250 `CompletionReportRecorded` can create a finalization intent, and only `DurableCompletionFinalized` authorizes a new modeled durable-completion-finalized state.
+* Run 253 release-evidenced the Run 252 finalization-projection boundary.
+* What remains missing is a source/test-only typed boundary that models how a future production call site would emit an after-finalization-only durable-completion attestation / ledger-commit acknowledgement for auditability, without implementing any real attestation backend, audit backend, ledger backend, settlement backend, or production persistence.
+* No real persistent replay backend is implemented.
+* No real durable consume backend is implemented.
+* No real completion-report backend is implemented.
+* No real finalization backend is implemented.
+* No real attestation backend is implemented.
+* No real audit ledger backend is implemented.
+* No real governance execution engine is implemented.
+* No real production mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+
+Implement the smallest source/test-only typed modeled durable-completion finalization attestation projection boundary.
+
+This run should extend the Run 252 modeled durable-completion finalization projection with a mockable, in-memory attestation / ledger-commit acknowledgement layer that models how a future production call site would produce an audit-facing acknowledgement after, and only after, `DurableCompletionFinalized`.
+
+The attestation layer must be a model only. It must not implement a real attestation backend. It must not implement a real audit ledger. It must not implement a real settlement ledger. It must not write RocksDB, files, schemas, migrations, storage formats, wire formats, authority markers, trust-bundle sequence files, or production durable state. It must not call Run 070, mutate `LivePqcTrustState`, perform a real trust swap, evict sessions, or enable MainNet governance / MainNet peer-driven apply.
+
+The key invariant is:
+
+* Run 246 pipeline success is required before any Run 248 sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any Run 250 completion-report intent can exist.
+* Run 250 `CompletionReportRecorded` is required before any Run 252 finalization intent can exist.
+* Run 252 `DurableCompletionFinalized` is required before any Run 254 attestation intent can exist.
+* Run 254 may record attestation only in modeled in-memory fixture state.
+* Every non-finalized / failed / rollback / rollback-failed / ambiguous / unavailable / unsupported Run 252 finalization outcome must produce no attestation intent, no attestation record, no production audit event, no durable backend write, and no mutation.
+* Attestation failure, rollback, rollback failure, or ambiguous attestation window must never retroactively claim durable completion finality or production audit finality.
+
+Suggested implementation:
+
+1. Add a new source/test-only module:
+
+   `crates/qbind-node/src/pqc_governance_modeled_durable_completion_attestation_projection.rs`
+
+2. Register it in:
+
+   `crates/qbind-node/src/lib.rs`
+
+3. Define typed attestation inputs and bindings, for example:
+
+   * `GovernanceModeledDurableCompletionAttestationInput`
+   * `GovernanceModeledDurableCompletionAttestationExpectations`
+   * `GovernanceModeledDurableCompletionAttestationPolicy`
+   * `GovernanceModeledDurableCompletionAttestationSurface`
+   * `GovernanceModeledDurableCompletionAttestationEnvironmentBinding`
+   * `GovernanceModeledDurableCompletionAttestationRuntimeBinding`
+   * `GovernanceModeledDurableCompletionAttestationReplayBinding`
+   * `GovernanceModeledDurableCompletionAttestationPipelineBinding`
+   * `GovernanceModeledDurableCompletionAttestationSinkBinding`
+   * `GovernanceModeledDurableCompletionAttestationReporterBinding`
+   * `GovernanceModeledDurableCompletionAttestationFinalizationBinding`
+   * `GovernanceModeledDurableCompletionAttestationRecord`
+
+4. Define modeled in-memory attestation state, for example:
+
+   * `ModeledDurableCompletionAttestationLedger`
+   * `ModeledDurableCompletionAttestationRecord`
+   * `ModeledDurableCompletionAttestationSnapshot`
+   * `ModeledDurableCompletionAttestationStatus`
+   * `ModeledDurableCompletionAttestationDigest`
+
+5. Define an explicit attestation outcome enum, for example:
+
+   * `LegacyBypassNoAttestation`
+   * `RejectedBeforeFinalizationNoAttestation`
+   * `FinalizationDidNotFinalizeNoAttestation`
+   * `DurableCompletionAttested`
+   * `DurableCompletionAttestationDuplicateIdempotent`
+   * `DurableCompletionAttestationRejectedBeforeRecord`
+   * `DurableCompletionAttestationRecordFailedNoAttestation`
+   * `DurableCompletionAttestationRolledBackNoAttestation`
+   * `DurableCompletionAttestationRollbackFailedFatalNoAttestation`
+   * `DurableCompletionAttestationAmbiguousFailClosedNoAttestation`
+   * `ProductionAttestorUnavailableNoAttestation`
+   * `MainNetAttestorUnavailableNoAttestation`
+   * `MainNetPeerDrivenApplyRefusedNoAttestation`
+   * `ValidatorSetRotationUnsupportedNoAttestation`
+   * `PolicyChangeUnsupportedNoAttestation`
+
+6. Define a pure/mockable attestor trait, for example:
+
+   * `GovernanceModeledDurableCompletionAttestor`
+   * `record_modeled_durable_completion_attestation(...)`
+   * `recover_modeled_durable_completion_attestation_window(...)`
+
+7. Provide source/test-only attestor implementations:
+
+   * `FixtureModeledDurableCompletionAttestor`
+   * `ProductionModeledDurableCompletionAttestor`
+   * `MainNetModeledDurableCompletionAttestor`
+
+   Requirements:
+
+   * DevNet/TestNet fixture attestor may mutate only `ModeledDurableCompletionAttestationLedger`.
+   * Production/MainNet attestors must be reachable but unavailable/fail-closed.
+   * MainNet peer-driven apply must be refused before pipeline progression, before sink invocation, before reporter invocation, before finalizer invocation, and before attestor invocation.
+   * The fixture attestor must expose an invocation counter so tests prove non-finalized paths never invoke it.
+   * The fixture attestation ledger must be in-memory only and must never touch RocksDB, files, markers, sequence files, or production durable state.
+
+8. Add composition helpers:
+
+   * `project_finalization_outcome_to_attestation_intent(...)`
+   * `evaluate_modeled_durable_completion_attestation_projection(...)`
+   * `recover_modeled_durable_completion_attestation_window(...)`
+   * `attestation_outcome_authorizes_modeled_attestation(...)`
+   * `attestation_outcome_projects_to_durable_completion_attested(...)`
+
+9. Required composition semantics:
+
+   * `GovernanceModeledDurableCompletionFinalizationOutcome::DurableCompletionFinalized` is the only Run 252 finalization outcome that may create a durable-completion attestation intent.
+   * `DurableCompletionDuplicateIdempotent` may be treated as already-attested only if the original matching attestation record already exists and all identity fields match exactly; it must not create a new attestation record by itself.
+   * Every other Run 252 finalization outcome maps to `FinalizationDidNotFinalizeNoAttestation` or a more specific no-attestation fail-closed outcome.
+   * `DurableCompletionAttested` is the only attestor outcome that may project to a new modeled durable-completion-attested state.
+   * Duplicate durable-completion attestation may be idempotent only if the attestation digest, finalization digest, completion-report digest, receipt digest, proposal id, decision id, candidate digest, authority-domain sequence, sink decision digest, reporter decision digest, finalization decision digest, and modeled pipeline decision digest all match exactly.
+   * Same attestation id with different digest must fail closed as equivocation and must not attest.
+   * Attestation record failure must not attest.
+   * Attestation rollback success must not attest.
+   * Attestation rollback failure must be fatal/fail-closed and must not attest.
+   * Ambiguous attestation windows must fail closed and must not attest.
+   * Production/MainNet attestor unavailable outcomes must not attest.
+   * Validator-set rotation and policy-change remain unsupported and must not attest.
+
+10. Add grep-verifiable invariant helpers, for example:
+
+* `modeled_attestation_rejection_is_non_mutating`
+* `modeled_attestation_never_calls_run_070`
+* `modeled_attestation_never_mutates_live_pqc_trust_state`
+* `modeled_attestation_never_writes_sequence_or_marker`
+* `modeled_attestation_no_rocksdb_file_schema_migration_change`
+* `modeled_attestation_pipeline_success_required_before_attestation`
+* `modeled_attestation_sink_receipt_required_before_attestation`
+* `modeled_attestation_completion_report_required_before_attestation`
+* `modeled_attestation_finalization_required_before_attestation`
+* `modeled_attestation_record_required_before_durable_completion_attested`
+* `modeled_attestation_failed_record_never_attests`
+* `modeled_attestation_rollback_never_attests`
+* `modeled_attestation_ambiguous_window_fails_closed`
+* `modeled_attestation_mainnet_peer_driven_apply_refused_first`
+* `modeled_attestation_production_mainnet_unavailable`
+* `modeled_attestation_validator_set_rotation_unsupported`
+* `modeled_attestation_policy_change_unsupported`
+* `modeled_attestation_local_operator_cannot_satisfy_mainnet_authority`
+* `modeled_attestation_peer_majority_cannot_satisfy_mainnet_authority`
+
+Tests:
+
+Add:
+
+`crates/qbind-node/tests/run_254_modeled_durable_completion_attestation_projection_tests.rs`
+
+Required test matrix:
+
+Accepted / compatible:
+
+* Disabled attestor policy preserves legacy bypass and performs no attestation, no attestation record, and no mutation.
+* Disabled finalizer policy preserves legacy bypass and never invokes the attestor.
+* Disabled reporter policy preserves legacy bypass and never invokes the finalizer or attestor.
+* Disabled sink policy preserves legacy bypass and never invokes reporter, finalizer, or attestor.
+* Disabled pipeline policy preserves legacy bypass and never invokes sink/reporter/finalizer/attestor.
+* Disabled evaluator/call-site policy preserves legacy bypass and never invokes sink/reporter/finalizer/attestor.
+* DevNet fixture pipeline success + sink receipt recorded + completion report recorded + finalization recorded + attestor record success records one modeled in-memory attestation record.
+* TestNet fixture pipeline success + sink receipt recorded + completion report recorded + finalization recorded + attestor record success records one modeled in-memory attestation record.
+* Modeled add-root pipeline success records attestation only after modeled applier success, sink receipt record, completion report record, and finalization record.
+* Modeled retire-root pipeline success records attestation only after modeled applier success, sink receipt record, completion report record, and finalization record.
+* Modeled revoke-root pipeline success records attestation only after modeled applier success, sink receipt record, completion report record, and finalization record.
+* Modeled emergency-revoke-root pipeline success records attestation only after modeled applier success, sink receipt record, completion report record, and finalization record.
+* Modeled noop pipeline success records attestation only under explicit success semantics, no trust-state drift, a recorded receipt, a recorded completion report, and a recorded finalization.
+* Duplicate identical attestation record is idempotent under an explicit typed outcome.
+* `DurableCompletionDuplicateIdempotent` can only match an already-attested record and never creates one by itself.
+* Existing Run 252 finalization behavior remains compatible.
+* Existing Run 250 completion-reporter behavior remains compatible.
+* Existing Run 248 sink behavior remains compatible.
+* Existing Run 246 pipeline behavior remains compatible.
+* Existing Run 244 modeled applier behavior remains compatible.
+* Existing Run 242 mutation-engine behavior remains compatible.
+* Existing Run 240 durable completion behavior remains compatible.
+* Production attestor path is reachable but unavailable/fail-closed and records no attestation.
+* MainNet attestor path is reachable but unavailable/fail-closed and records no attestation.
+* MainNet peer-driven apply refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, and attestor invocation.
+* Validator-set rotation unsupported and records no attestation.
+* Policy-change unsupported and records no attestation.
+
+Rejected / fail-closed:
+
+* evaluator rejection produces no sink intent, no receipt, no reporter intent, no completion report, no finalizer intent, no finalization, no attestor intent, and no attestation;
+* call-site rejection produces no sink intent, no receipt, no reporter intent, no completion report, no finalizer intent, no finalization, no attestor intent, and no attestation;
+* durable replay stale produces no attestor intent and no attestation;
+* durable replay expired produces no attestor intent and no attestation;
+* durable replay consumed produces no attestor intent and no attestation;
+* durable replay superseded produces no attestor intent and no attestation;
+* durable replay backend unavailable produces no attestor intent and no attestation;
+* mutation-engine rejection produces no attestor intent and no attestation;
+* modeled applier rejected-before-snapshot produces no attestor intent and no attestation;
+* modeled applier rejected-before-apply produces no attestor intent and no attestation;
+* modeled apply failure produces no attestor intent and no attestation;
+* modeled rollback produces no attestor intent and no attestation;
+* modeled rollback-failed produces no attestor intent and no attestation;
+* modeled ambiguous window produces no attestor intent and no attestation;
+* sink did not record receipt produces no reporter/finalizer/attestor invocation and no attestation;
+* sink rejected-before-record produces no reporter/finalizer/attestor invocation and no attestation;
+* sink record failure produces no reporter/finalizer/attestor invocation and no attestation;
+* sink rollback produces no reporter/finalizer/attestor invocation and no attestation;
+* sink rollback-failed produces no reporter/finalizer/attestor invocation and no attestation;
+* sink ambiguous window produces no reporter/finalizer/attestor invocation and no attestation;
+* reporter did not record completion produces no finalizer/attestor invocation and no attestation;
+* reporter rejected-before-record produces no finalizer/attestor invocation and no attestation;
+* reporter record failure produces no finalizer/attestor invocation and no attestation;
+* reporter rollback produces no finalizer/attestor invocation and no attestation;
+* reporter rollback-failed produces no finalizer/attestor invocation and no attestation;
+* reporter ambiguous window produces no finalizer/attestor invocation and no attestation;
+* finalizer did not finalize produces no attestor invocation and no attestation;
+* finalizer rejected-before-record produces no attestor invocation and no attestation;
+* finalizer record failure produces no attestor invocation and no attestation;
+* finalizer rollback produces no attestor invocation and no attestation;
+* finalizer rollback-failed produces no attestor invocation and no attestation;
+* finalizer ambiguous window produces no attestor invocation and no attestation;
+* attestation before durable-completion finalization is rejected;
+* attestation after modeled apply failure is rejected;
+* attestation after sink record failure is rejected;
+* attestation after reporter record failure is rejected;
+* attestation after finalizer record failure is rejected;
+* attestation after finalizer rollback is rejected;
+* attestation after finalizer rollback-failed is rejected;
+* attestation after finalizer ambiguous window is rejected;
+* same attestation id with different digest is rejected as equivocation and records no second attestation;
+* wrong environment rejected before attestor invocation;
+* wrong chain rejected before attestor invocation;
+* wrong genesis rejected before attestor invocation;
+* wrong governance surface rejected before attestor invocation;
+* wrong mutation surface rejected before attestor invocation;
+* wrong attestation digest rejected before attestation record;
+* wrong finalization digest rejected before attestation record;
+* wrong completion-report digest rejected before attestation record;
+* wrong receipt digest rejected before attestation record;
+* wrong sink decision digest rejected before attestation record;
+* wrong reporter decision digest rejected before attestation record;
+* wrong finalization decision digest rejected before attestation record;
+* wrong pipeline decision digest rejected before attestation record;
+* wrong proposal id rejected before attestation record;
+* wrong decision id rejected before attestation record;
+* wrong candidate digest rejected before attestation record;
+* wrong authority-domain sequence rejected before attestation record;
+* malformed attestation record rejected before record;
+* local operator key cannot satisfy MainNet authority;
+* peer majority cannot satisfy MainNet authority;
+* production attestor unavailable records no attestation;
+* MainNet attestor unavailable records no attestation;
+* validator-set rotation attempt unsupported and records no attestation;
+* policy-change attempt unsupported and records no attestation;
+* every rejected path produces no Run 070 call, no `LivePqcTrustState` mutation, no real trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, and no attestor invocation where rejection happens before the attestor stage.
+
+Recovery / crash-window cases:
+
+* before-pipeline window fails closed / no attestation;
+* after-pipeline-success-before-sink-intent window fails closed / no attestation;
+* after-sink-intent-before-receipt-record window fails closed / no attestation;
+* after-receipt-record-before-report-intent window fails closed / no attestation;
+* after-report-intent-before-report-record window fails closed / no attestation;
+* after-report-record-before-finalization-intent window fails closed / no attestation;
+* after-finalization-intent-before-finalization-record window fails closed / no attestation;
+* after-finalization-record-before-attestation-intent window fails closed / no attestation;
+* after-attestation-intent-before-attestation-record window fails closed / no durable completion attestation;
+* after-attestation-record-before-attestation-success window fails closed unless an explicit matching attestation success exists;
+* after-attestation-success recovers as durable completion attested;
+* after-attestation-ambiguous fails closed / no attestation;
+* attestation record-failed window fails closed / no attestation;
+* attestation rollback-completed window fails closed / no attestation;
+* attestation rollback-failed window is fatal/fail-closed / no attestation;
+* unknown window fails closed / no attestation;
+* production/MainNet recovery classification unavailable/fail-closed;
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection cases:
+
+* only Run 252 `DurableCompletionFinalized` creates an attestation intent;
+* Run 246 pipeline success alone creates no attestation intent;
+* Run 248 sink receipt record alone creates no attestation intent;
+* Run 250 completion-report record alone creates no attestation intent;
+* Run 252 finalization intent alone creates no attestation intent;
+* `DurableCompletionDuplicateIdempotent` creates no new attestation unless a matching attestation already exists;
+* evaluator success alone creates no attestation intent;
+* durable replay freshness alone creates no attestation intent;
+* mutation-engine authorization alone creates no attestation intent;
+* modeled applier success without sink receipt, completion report, and finalization creates no attestation intent;
+* only `DurableCompletionAttested` authorizes modeled durable-completion-attested state;
+* `LegacyBypassNoAttestation` does not attest;
+* `RejectedBeforeFinalizationNoAttestation` does not attest;
+* `FinalizationDidNotFinalizeNoAttestation` does not attest;
+* `DurableCompletionAttestationDuplicateIdempotent` does not create a second attestation and must not be counted as a new attestation;
+* `DurableCompletionAttestationRejectedBeforeRecord` does not attest;
+* `DurableCompletionAttestationRecordFailedNoAttestation` does not attest;
+* `DurableCompletionAttestationRolledBackNoAttestation` does not attest;
+* `DurableCompletionAttestationRollbackFailedFatalNoAttestation` does not attest;
+* `DurableCompletionAttestationAmbiguousFailClosedNoAttestation` does not attest;
+* `ProductionAttestorUnavailableNoAttestation` does not attest;
+* `MainNetAttestorUnavailableNoAttestation` does not attest;
+* `MainNetPeerDrivenApplyRefusedNoAttestation` does not attest;
+* `ValidatorSetRotationUnsupportedNoAttestation` does not attest;
+* `PolicyChangeUnsupportedNoAttestation` does not attest.
+
+Stage-ordering cases:
+
+* MainNet peer-driven apply refusal happens before pipeline progression, sink invocation, reporter invocation, finalizer invocation, and attestor invocation.
+* Evaluator/call-site authorization happens before durable replay freshness.
+* Durable replay freshness happens before mutation-engine authorization.
+* Mutation-engine authorization happens before modeled applier invocation.
+* Modeled applier success happens before sink intent.
+* Sink receipt recording happens after pipeline consume authorization.
+* Completion report recording happens after sink receipt-recorded state.
+* Finalization recording happens after completion-report recorded state.
+* Attestation intent happens only after durable-completion-finalized state.
+* Durable-completion attestation recording happens after durable-completion-finalized state.
+* A rejection before the attestor stage leaves the attestor invocation count at zero.
+* An attestation record failure does not retroactively invalidate the finalization record but does not authorize durable-completion attestation.
+* An attestation rollback failure is fatal/fail-closed and does not authorize durable-completion attestation.
+* The attestor itself performs no persistent durable completion beyond modeled in-memory fixture state.
+
+Attestation-ledger cases:
+
+* one valid attestation record inserts exactly one modeled in-memory ledger record;
+* duplicate identical attestation is idempotent and does not increase record count;
+* same attestation id with different digest is equivocation and does not increase record count;
+* wrong attestation digest does not record;
+* wrong finalization digest does not record;
+* wrong completion-report digest does not record;
+* wrong receipt digest does not record;
+* wrong sink decision digest does not record;
+* wrong reporter decision digest does not record;
+* wrong finalization decision digest does not record;
+* wrong pipeline decision digest does not record;
+* wrong proposal id does not record;
+* wrong decision id does not record;
+* wrong candidate digest does not record;
+* wrong authority-domain sequence does not record;
+* malformed attestation does not record;
+* rollback restores modeled attestation ledger snapshot;
+* rollback failure never claims success;
+* fixture attestation ledger never writes files, RocksDB, markers, sequences, or production durable state.
+
+Non-mutation cases:
+
+* no Run 070 call on any attestor case;
+* no `LivePqcTrustState` mutation on any attestor case;
+* no real trust swap on any attestor case;
+* no session eviction on any attestor case;
+* no sequence write on any attestor case;
+* no marker write on any attestor case;
+* no RocksDB/file/schema/migration/storage-format write or format change;
+* no wire/schema/marker/sequence/trust-bundle format change;
+* fixture attestor mutates only `ModeledDurableCompletionAttestationLedger`;
+* production/MainNet paths remain unavailable/fail-closed;
+* MainNet peer-driven apply remains refused first.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning if available and report the result.
+* Run CodeQL if available and report the result honestly.
+* If Rust CodeQL analysis is skipped because the database is too large, say that explicitly and do not overclaim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_254.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 254 is source/test only.
+* It adds a modeled durable-completion finalization attestation projection boundary.
+* It models how a future production call site would project an after-finalization-only acknowledgement into a modeled durable-completion-attested state.
+* It does not implement a real persistent replay backend.
+* It does not implement a real durable consume backend.
+* It does not implement a real completion-report backend.
+* It does not implement a real finalization backend.
+* It does not implement a real attestation backend.
+* It does not implement a real audit ledger backend.
+* It does not add RocksDB/file/schema/migration/storage-format changes.
+* It does not add wire/schema/marker/sequence/trust-bundle changes.
+* It does not write authority markers.
+* It does not write trust-bundle sequence files.
+* It does not call Run 070.
+* It does not mutate `LivePqcTrustState`.
+* It does not perform a real trust swap.
+* It does not evict sessions.
+* It does not implement a real production mutation engine.
+* It does not implement a real governance execution engine.
+* It does not implement a real on-chain governance proof verifier.
+* It does not add KMS/HSM/RemoteSigner backend.
+* It does not enable MainNet governance.
+* It does not enable MainNet peer-driven apply.
+* It does not implement validator-set rotation.
+* The fixture attestor mutates only modeled in-memory attestation state.
+* Run 246 pipeline success is required before any sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any completion-report intent can exist.
+* Run 250 `CompletionReportRecorded` is required before any finalization intent can exist.
+* Run 252 `DurableCompletionFinalized` is required before any attestation intent can exist.
+* `DurableCompletionAttested` is required before any modeled durable-completion-attested state.
+* Every non-finalized outcome produces no attestor invocation and no attestation.
+* Failed attestation record, rollback, rollback-failed, ambiguous windows, unavailable production/MainNet paths, rejected replay states, and unsupported actions never attest.
+* Rejected attestor paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 254 against Runs 050–253.
+* If no contradiction is found, add a “no Run 254 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real persistent replay backend.
+* Do not implement a real durable consume backend.
+* Do not implement a real completion-report backend.
+* Do not implement a real finalization backend.
+* Do not implement a real attestation backend.
+* Do not implement a real audit ledger backend.
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not implement a real governance execution engine.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–253.
+
+Expected verdict:
+
+Partial-positive / source-test positive.
+
+Run 254 should close the source/test modeled durable-completion attestation projection gap only. It must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 255 next step.
