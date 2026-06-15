@@ -1,332 +1,97 @@
-Run 260 — Source/test durable-completion audit-receipt acknowledgement / external-publication confirmation boundary
+Run 260 continuation — Complete source/test durable-completion audit-receipt acknowledgement boundary evidence
 
-You are continuing QBIND after Run 259.
+You are continuing QBIND Run 260 after a partial source checkpoint.
 
-Run 240 is fully closed at source/test level.
-Run 241 is fully closed as release-binary evidence for Run 240.
-Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
-Run 243 is fully closed as release-binary evidence for Run 242.
-Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
-Run 245 is fully closed as release-binary evidence for Run 244.
-Run 246 is fully closed as source/test governance modeled end-to-end pipeline boundary work.
-Run 247 is fully closed as release-binary evidence for Run 246.
-Run 248 is fully closed as source/test modeled durable-consume projection sink boundary work.
-Run 249 is fully closed as release-binary evidence for Run 248.
-Run 250 is fully closed as source/test modeled durable-consume completion reporter boundary work.
-Run 251 is fully closed as release-binary evidence for Run 250.
-Run 252 is fully closed as source/test modeled durable-completion finalization-projection boundary work.
-Run 253 is fully closed as release-binary evidence for Run 252.
-Run 254 is fully closed as source/test modeled durable-completion attestation-projection boundary work.
-Run 255 is fully closed as release-binary evidence for Run 254.
-Run 256 is fully closed as source/test production durable-completion attestation backend interface boundary work.
-Run 257 is fully closed as release-binary evidence for Run 256.
-Run 258 is fully closed as source/test durable-completion backend audit-ledger / external-publication receipt boundary work.
-Run 259 is fully closed as release-binary evidence for Run 258.
+Current partial Run 260 state:
+
+The source module has already been created and compiles:
+
+* `crates/qbind-node/src/pqc_governance_durable_completion_audit_receipt_acknowledgement.rs`
+* `crates/qbind-node/src/lib.rs` module registration
+
+The module reportedly includes:
+
+* all Run 260 typed kinds / policies / identities / bindings;
+* deterministic domain-separated digest helpers;
+* request / response / record / transcript digest structures;
+* in-memory acknowledgement ledger with snapshot / restore;
+* fixture + production/MainNet/external-publication confirmation sinks;
+* 16 acknowledgement outcomes;
+* acknowledgement window / recovery mapping;
+* projection from Run 258 `DurableCompletionAuditPublicationReceiptOutcome`;
+* `project_audit_receipt_outcome_to_acknowledgement_request`;
+* binding of the Run 258 receipt digest set into request / expectations;
+* `receipt_binding` in input and MainNet peer-driven refusal checks;
+* 25 invariant helpers, including `durable_completion_audit_ack_receipt_required`.
+
+The module builds with:
+
+* `cargo build -p qbind-node --lib`
+
+But Run 260 is not yet closed. The following required items remain:
+
+* Run 260 test file.
+* Regression test run.
+* Run 260 evidence doc.
+* narrow updates to protocol / ops / trust docs.
+* `contradiction.md` “no Run 260 contradiction” entry.
+* secret scan.
+* CodeQL result, reported honestly.
 
 Strict workflow:
 
-* Execution-first.
-* Narrow scope only.
-* No broad redesign.
-* No silent regressions.
-* No hype or overclaiming.
-* Source/test only.
-* No release-binary evidence in this run.
-* No production runtime enablement.
-* No real audit ledger backend.
-* No real external publication backend.
-* No real external-publication confirmation.
-* No real production attestation backend.
-* No real finalization backend.
-* No real completion-report backend.
-* No real durable consume backend.
-* No real persistent replay backend.
-* No real governance execution engine.
-* No real production mutation engine.
-* No real on-chain governance proof verifier.
-* No KMS/HSM/RemoteSigner backend.
-* No RocksDB/file/schema/migration/storage-format change.
-* No wire/schema/marker/sequence/trust-bundle change.
-* No Run 070 call.
-* No `LivePqcTrustState` mutation.
-* No real trust swap.
-* No session eviction.
-* No sequence write.
-* No marker write.
-* No network I/O.
-* No external publication.
-* No real audit-ledger write.
-* No MainNet governance.
-* No MainNet peer-driven apply.
-* No validator-set rotation.
+* This is still Run 260, not Run 261.
+* Do not add a new feature boundary.
+* Do not implement release-binary evidence in this continuation.
+* Do not enable production runtime behavior.
+* Do not implement a real audit ledger acknowledgement.
+* Do not implement real external-publication confirmation.
+* Do not implement real external publication.
+* Do not implement real persistent storage.
+* Do not change RocksDB/file/schema/migration/storage format.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not implement validator-set rotation.
 * Keep Full C4 OPEN.
 * Keep C5 OPEN.
 
-Current state:
+Exact objective:
 
-Run 258 added the source/test durable-completion audit-ledger / external-publication receipt boundary.
+Complete the missing Run 260 source/test deliverables and documentation so Run 260 can be honestly accepted as source/test positive.
 
-Run 259 release-evidenced Run 258 on real `target/release/qbind-node` plus a release-built helper. The helper remains dead code from production runtime. The fixture receipt sink mutates only in-memory modeled state. Production audit-ledger, MainNet audit-ledger, and external-publication sinks remain reachable but unavailable/fail-closed.
+Primary task:
 
-Required existing ordering:
-
-1. Run 246 pipeline success is required before any Run 248 sink intent can exist.
-2. Run 248 `ConsumeReceiptRecorded` is required before any Run 250 completion-report intent can exist.
-3. Run 250 `CompletionReportRecorded` is required before any Run 252 finalization intent can exist.
-4. Run 252 `DurableCompletionFinalized` is required before any Run 254 attestation intent can exist.
-5. Run 254 `DurableCompletionAttested` is required before any Run 256 backend request can exist.
-6. Run 256 `BackendSubmissionRecorded` is required before any Run 258 audit/publication receipt request can exist.
-7. Run 258 `AuditReceiptRecorded` is required before any Run 260 acknowledgement / confirmation request can exist.
-
-Objective:
-
-Implement the smallest source/test-only durable-completion audit-receipt acknowledgement / external-publication confirmation boundary.
-
-This run must model the first post-Run-258 receipt-consumer acknowledgement interface that a future production audit ledger or external publication system might expose after a modeled Run 258 `AuditReceiptRecorded` outcome.
-
-This is a typed source/test projection boundary only. It must not implement a real audit ledger acknowledgement, real external-publication confirmation, real external publication, real network call, real persistent store, real production mutation, or MainNet governance.
-
-The only positive implementation may be a DevNet/TestNet fixture that records an acknowledgement into an in-memory fixture ledger. Production/MainNet/external-publication confirmation implementations must be reachable but deliberately unavailable/fail-closed.
-
-Suggested implementation:
-
-1. Add a new source/test-only module:
-
-   `crates/qbind-node/src/pqc_governance_durable_completion_audit_receipt_acknowledgement.rs`
-
-   If the repository naming convention strongly prefers another name, use it, but keep the purpose explicit: durable-completion audit-receipt acknowledgement / external-publication confirmation boundary.
-
-2. Register it in:
-
-   `crates/qbind-node/src/lib.rs`
-
-3. Define typed selector and policy types, for example:
-
-   * `DurableCompletionAuditReceiptAcknowledgementKind`
-   * `DurableCompletionAuditReceiptAcknowledgementPolicy`
-   * `DurableCompletionAuditReceiptAcknowledgementIdentity`
-   * `DurableCompletionAuditReceiptAcknowledgementEnvironment`
-   * `DurableCompletionAuditReceiptAcknowledgementSurface`
-   * `DurableCompletionAuditReceiptAcknowledgementBinding`
-   * `DurableCompletionAuditReceiptAcknowledgementInput`
-   * `DurableCompletionAuditReceiptAcknowledgementExpectations`
-
-   Required kinds:
-
-   * `Disabled`
-   * `FixtureInMemory`
-   * `ProductionAuditLedgerAckUnavailable`
-   * `MainNetAuditLedgerAckUnavailable`
-   * `ExternalPublicationConfirmationUnavailable`
-   * `Unknown`
-
-   Required policies:
-
-   * `Disabled`
-   * `FixtureAllowed`
-   * `ProductionAuditLedgerAckRequired`
-   * `MainNetAuditLedgerAckRequired`
-   * `ExternalPublicationConfirmationRequired`
-
-4. Define typed request / response / acknowledgement records:
-
-   * `DurableCompletionAuditReceiptAcknowledgementRequest`
-   * `DurableCompletionAuditReceiptAcknowledgementResponse`
-   * `DurableCompletionAuditReceiptAcknowledgementRecord`
-   * `DurableCompletionAuditReceiptAcknowledgementDigest`
-   * `DurableCompletionAuditReceiptAcknowledgementTranscriptDigest`
-
-   The request must bind at minimum:
-
-   * environment;
-   * chain id;
-   * genesis hash;
-   * governance surface id;
-   * mutation surface id;
-   * proposal id;
-   * decision id;
-   * candidate digest;
-   * authority-domain sequence;
-   * Run 246 pipeline decision digest;
-   * Run 248 sink decision digest;
-   * Run 250 reporter decision digest;
-   * Run 252 finalization decision digest;
-   * Run 254 attestation digest;
-   * Run 254 attestation id;
-   * Run 256 backend identity digest;
-   * Run 256 backend request digest;
-   * Run 256 backend response digest;
-   * Run 256 backend receipt digest;
-   * Run 256 backend transcript digest;
-   * Run 256 backend record id;
-   * Run 258 receipt identity digest;
-   * Run 258 receipt request digest;
-   * Run 258 receipt response digest;
-   * Run 258 receipt record digest;
-   * Run 258 receipt transcript digest;
-   * Run 258 receipt record id;
-   * acknowledgement identity;
-   * acknowledgement kind;
-   * acknowledgement policy;
-   * domain separation tag.
-
-5. Define deterministic digest helpers:
-
-   * acknowledgement identity digest;
-   * acknowledgement request digest;
-   * acknowledgement response digest;
-   * acknowledgement record digest;
-   * acknowledgement transcript digest.
-
-   Requirements:
-
-   * deterministic;
-   * domain-separated;
-   * field-binding;
-   * uses the existing project digest style where available;
-   * rejects digest mismatch fail-closed;
-   * does not include unstable display/debug text in canonical digests.
-
-6. Define a pure/mockable trait, for example:
-
-   * `GovernanceDurableCompletionAuditReceiptAcknowledgementSink`
-   * `record_durable_completion_audit_receipt_acknowledgement(...)`
-   * `recover_durable_completion_audit_receipt_acknowledgement_window(...)`
-
-7. Provide source/test-only implementations:
-
-   * `FixtureDurableCompletionAuditReceiptAcknowledgementSink`
-   * `ProductionAuditLedgerDurableCompletionAcknowledgementSink`
-   * `MainNetAuditLedgerDurableCompletionAcknowledgementSink`
-   * `ExternalPublicationDurableCompletionConfirmationSink`
-
-   Requirements:
-
-   * Fixture sink is DevNet/TestNet evidence-only.
-   * Fixture sink mutates only an in-memory `DurableCompletionAuditReceiptAcknowledgementLedger`.
-   * Fixture sink exposes an invocation counter.
-   * Production audit-ledger acknowledgement sink is reachable but unavailable/fail-closed.
-   * MainNet audit-ledger acknowledgement sink is reachable but unavailable/fail-closed.
-   * External-publication confirmation sink is reachable but unavailable/fail-closed.
-   * MainNet peer-driven apply must be refused before pipeline, sink, reporter, finalizer, attestor, backend, receipt, and acknowledgement invocation.
-   * No implementation may call Run 070.
-   * No implementation may mutate `LivePqcTrustState`.
-   * No implementation may write sequence files, authority markers, RocksDB, files, schemas, migrations, or storage formats.
-   * No implementation may perform network I/O, external publication, real confirmation, or real audit-ledger persistence.
-
-8. Define an in-memory fixture ledger:
-
-   * `DurableCompletionAuditReceiptAcknowledgementLedger`
-   * `DurableCompletionAuditReceiptAcknowledgementLedgerRecord`
-   * `DurableCompletionAuditReceiptAcknowledgementLedgerSnapshot`
-   * `DurableCompletionAuditReceiptAcknowledgementLedgerStatus`
-
-   Requirements:
-
-   * one valid acknowledgement inserts exactly one record;
-   * duplicate identical acknowledgement is idempotent;
-   * same acknowledgement record id with different digest fails closed as equivocation;
-   * rollback restores the in-memory snapshot;
-   * rollback failure never claims success;
-   * no files, RocksDB, markers, sequence files, schema writes, storage-format changes, external publication, network writes, or real audit-ledger writes.
-
-9. Define an explicit outcome enum, for example:
-
-   * `LegacyBypassNoAcknowledgement`
-   * `RejectedBeforeAuditReceiptNoAcknowledgement`
-   * `AuditReceiptDidNotRecordNoAcknowledgement`
-   * `AcknowledgementRecorded`
-   * `AcknowledgementDuplicateIdempotent`
-   * `AcknowledgementRejectedBeforeRecord`
-   * `AcknowledgementRecordFailedNoAcknowledgement`
-   * `AcknowledgementRolledBackNoAcknowledgement`
-   * `AcknowledgementRollbackFailedFatalNoAcknowledgement`
-   * `AcknowledgementAmbiguousFailClosedNoAcknowledgement`
-   * `ProductionAuditLedgerAckUnavailableNoAcknowledgement`
-   * `MainNetAuditLedgerAckUnavailableNoAcknowledgement`
-   * `ExternalPublicationConfirmationUnavailableNoAcknowledgement`
-   * `MainNetPeerDrivenApplyRefusedNoAcknowledgement`
-   * `ValidatorSetRotationUnsupportedNoAcknowledgement`
-   * `PolicyChangeUnsupportedNoAcknowledgement`
-
-   Required semantics:
-
-   * `AcknowledgementRecorded` is the only new-acknowledgement authorizing outcome.
-   * `AcknowledgementDuplicateIdempotent` is idempotent only if every identity/digest field matches exactly and must not count as a new acknowledgement.
-   * Same acknowledgement record id with different digest is equivocation and must fail closed.
-   * Every unavailable/failure/rollback/ambiguous/unsupported outcome must not record.
-   * Production/MainNet/external-publication unavailable outcomes must not record.
-   * External-publication confirmation unavailable outcome must not perform any external publication or network I/O.
-
-10. Add composition helpers:
-
-* `project_audit_receipt_outcome_to_acknowledgement_request(...)`
-* `evaluate_durable_completion_audit_receipt_acknowledgement(...)`
-* `recover_durable_completion_audit_receipt_acknowledgement_window(...)`
-* `acknowledgement_outcome_authorizes_acknowledgement_record(...)`
-* `acknowledgement_outcome_projects_to_acknowledgement_recorded(...)`
-
-Required composition semantics:
-
-* Only Run 258 `AuditReceiptRecorded` may create an acknowledgement / confirmation request.
-* Run 258 duplicate-idempotent audit receipt may only match an already-recorded acknowledgement and must never create one by itself.
-* Every other Run 258 outcome maps to a no-acknowledgement fail-closed outcome.
-* Acknowledgement request creation must validate environment / chain / genesis / governance surface / mutation surface / proposal id / decision id / candidate digest / authority-domain sequence / pipeline digest / sink digest / reporter digest / finalization digest / attestation digest / backend digest set / receipt digest set before acknowledgement sink invocation.
-* Binding mismatch before acknowledgement sink invocation must leave acknowledgement sink invocation count zero.
-* Request/response/record digest mismatch after acknowledgement sink invocation must not record an acknowledgement.
-* Acknowledgement record failure must not record.
-* Acknowledgement rollback success must not record.
-* Acknowledgement rollback failure must be fatal/fail-closed and must not record.
-* Ambiguous acknowledgement windows must fail closed and must not record.
-
-11. Add grep-verifiable invariant helpers, for example:
-
-* `durable_completion_audit_ack_rejection_is_non_mutating`
-* `durable_completion_audit_ack_never_calls_run_070`
-* `durable_completion_audit_ack_never_mutates_live_pqc_trust_state`
-* `durable_completion_audit_ack_never_writes_sequence_or_marker`
-* `durable_completion_audit_ack_no_rocksdb_file_schema_migration_change`
-* `durable_completion_audit_ack_no_external_publication`
-* `durable_completion_audit_ack_no_real_audit_ledger`
-* `durable_completion_audit_ack_pipeline_success_required`
-* `durable_completion_audit_ack_sink_receipt_required`
-* `durable_completion_audit_ack_completion_report_required`
-* `durable_completion_audit_ack_finalization_required`
-* `durable_completion_audit_ack_attestation_required`
-* `durable_completion_audit_ack_backend_submission_required`
-* `durable_completion_audit_ack_receipt_required`
-* `durable_completion_audit_ack_record_required_before_ack`
-* `durable_completion_audit_ack_failed_record_never_records`
-* `durable_completion_audit_ack_rollback_never_records`
-* `durable_completion_audit_ack_ambiguous_window_fails_closed`
-* `durable_completion_audit_ack_mainnet_peer_driven_apply_refused_first`
-* `durable_completion_audit_ack_production_mainnet_unavailable`
-* `durable_completion_audit_ack_external_confirmation_unavailable`
-* `durable_completion_audit_ack_validator_set_rotation_unsupported`
-* `durable_completion_audit_ack_policy_change_unsupported`
-* `durable_completion_audit_ack_local_operator_cannot_satisfy_mainnet_authority`
-* `durable_completion_audit_ack_peer_majority_cannot_satisfy_mainnet_authority`
-
-Tests:
-
-Add:
+Add the Run 260 test file:
 
 `crates/qbind-node/tests/run_260_durable_completion_audit_receipt_acknowledgement_tests.rs`
+
+The tests must consume the actual Run 260 module and must attach positive recording cases to the real Run 258 `AuditReceiptRecorded` path, which itself must be attached to the real Run 256 `BackendSubmissionRecorded` path and real Run 258 receipt digests.
+
+Do not fake an unattached acknowledgement path.
+
+If the existing Run 260 module has small compile/API issues discovered while writing tests, fix them minimally and document the exact change. Do not broaden the source boundary.
 
 Required test matrix:
 
 Accepted / compatible:
 
-* Disabled acknowledgement policy preserves legacy bypass and performs no acknowledgement record, no audit-ledger write, no external publication, no confirmation, and no mutation.
+* Disabled acknowledgement policy preserves legacy bypass: no acknowledgement record, no audit-ledger write, no external publication, no confirmation, no mutation.
 * Disabled receipt policy never invokes acknowledgement sink.
 * Disabled backend policy never invokes receipt or acknowledgement sink.
-* Disabled attestor/finalizer/reporter/sink/pipeline/evaluator-call-site policies never reach the acknowledgement sink.
+* Disabled attestor/finalizer/reporter/sink/pipeline/evaluator-call-site policy never reaches the acknowledgement sink.
 * DevNet fixture chain records exactly one modeled in-memory acknowledgement only after:
   Run 246 pipeline success → Run 248 sink receipt → Run 250 completion report → Run 252 finalization → Run 254 attestation → Run 256 backend submission → Run 258 audit receipt → Run 260 acknowledgement.
 * TestNet fixture chain does the same.
 * Add-root / retire-root / revoke-root / emergency-revoke-root / noop modeled action variants preserve ordering and acknowledge only after audit receipt recorded.
 * Duplicate identical acknowledgement is idempotent.
-* Run 258 duplicate-idempotent audit receipt can only match an already-recorded acknowledgement and never creates a new acknowledgement by itself.
+* Run 258 duplicate-idempotent audit receipt may only match an already-recorded acknowledgement and never creates a new acknowledgement by itself.
 * Existing Run 258 receipt behavior remains compatible.
 * Existing Run 256 backend behavior remains compatible.
 * Existing Run 254 attestation behavior remains compatible.
@@ -353,9 +118,9 @@ Rejected / fail-closed:
 * Same acknowledgement record id with different digest fails closed as equivocation.
 * Wrong environment / chain / genesis / governance surface / mutation surface fails before acknowledgement sink invocation.
 * Wrong acknowledgement identity / policy / kind / request digest / response digest / record digest fails closed.
-* Wrong receipt identity/request/response/record/transcript digest fails closed.
-* Wrong backend identity/request/response/receipt/transcript digest fails closed.
-* Wrong attestation/finalization/completion-report/sink/reporter/finalization/pipeline digest fails closed.
+* Wrong receipt identity / request / response / record / transcript digest fails closed.
+* Wrong backend identity / request / response / receipt / transcript digest fails closed.
+* Wrong attestation / finalization / completion-report / sink / reporter / finalization / pipeline digest fails closed.
 * Wrong proposal id / decision id / candidate digest / authority-domain sequence fails closed.
 * Malformed request / response fails closed.
 * Local operator key cannot satisfy MainNet authority.
@@ -365,7 +130,7 @@ Rejected / fail-closed:
 
 Recovery / crash-window:
 
-* before-pipeline through after-receipt-success-before-acknowledgement-request windows fail closed unless an explicit matching receipt success exists.
+* before-pipeline through after-receipt-success-before-acknowledgement-request windows fail closed unless explicit matching receipt success exists.
 * after-acknowledgement-request-before-acknowledgement-record fails closed.
 * after-acknowledgement-record-before-acknowledgement-success fails closed unless explicit matching acknowledgement success exists.
 * after-acknowledgement-success recovers as acknowledgement recorded.
@@ -409,7 +174,7 @@ Acknowledgement ledger:
 * One valid acknowledgement inserts one in-memory record.
 * Duplicate identical acknowledgement is idempotent and does not increase count.
 * Same record id with different digest is equivocation and does not increase count.
-* Wrong acknowledgement/receipt/backend/attestation/finalization/report/sink/pipeline/proposal/decision/candidate/sequence digest does not record.
+* Wrong acknowledgement / receipt / backend / attestation / finalization / report / sink / pipeline / proposal / decision / candidate / sequence digest does not record.
 * Malformed request / response does not record.
 * Rollback restores in-memory ledger snapshot.
 * Rollback failure never claims success.
@@ -460,7 +225,7 @@ Run at minimum:
 
 Security scanning:
 
-* Run secret scanning if available and report result.
+* Run secret scanning and report result.
 * Run CodeQL if available and report result honestly.
 * If Rust CodeQL analysis is skipped because the database is too large, say that explicitly and do not claim CodeQL coverage.
 
@@ -524,11 +289,13 @@ Contradiction handling:
 * If no contradiction is found, add a “no Run 260 contradiction” entry to `docs/whitepaper/contradiction.md`.
 * If any contradiction is found, record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
 
-Expected verdict:
+Expected verdict after continuation:
 
-Partial-positive / source-test positive.
+Source/test positive only if the Run 260 tests, regression corpus, docs, contradiction entry, and scans pass.
 
-Run 260 should close the source/test durable-completion audit-receipt acknowledgement / external-publication confirmation boundary gap only. It must not claim Full C4 or C5 closure.
+If completed, the suggested next step should be:
+
+Run 261 — release-binary evidence for the Run 260 durable-completion audit-receipt acknowledgement / external-publication confirmation boundary.
 
 Final response format:
 
