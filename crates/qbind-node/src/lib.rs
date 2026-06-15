@@ -962,6 +962,30 @@ pub mod pqc_governance_modeled_durable_consume_projection_sink;
 // refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5
 // remains OPEN.
 pub mod pqc_governance_modeled_durable_consume_completion_reporter;
+// Run 252 — source/test governance modeled DURABLE-COMPLETION FINALIZATION
+// PROJECTION boundary. Extends the Run 250 modeled durable-consume completion
+// reporter with a mockable, in-memory finalization projection layer that models
+// how a future production call site would project an after-completion-report-only
+// acknowledgement into a terminal modeled durable-completion-finalized state under
+// the Run 240 durable completion semantics. Only the Run 250 CompletionReportRecorded
+// reporter outcome creates a finalization intent; CompletionReportDuplicateIdempotent
+// may only match an already-finalized record and never creates a new one. Every
+// other reporter outcome, every finalization record failure / rollback /
+// rollback-failed / ambiguous window, every production / MainNet unavailable path,
+// and every unsupported action fails closed with no finalization. The
+// DevNet/TestNet fixture finalizer mutates only the in-memory
+// ModeledDurableCompletionFinalizationLedger and exposes an invocation counter so
+// tests prove non-recording reporter paths never invoke it. Source/test only: no
+// real persistent replay backend, no real durable consume backend, no real
+// completion-report backend, no real finalization backend, no real production
+// mutation engine, no real governance execution engine, no real on-chain proof
+// verifier, no KMS/HSM/RemoteSigner backend. It does NOT call Run 070, mutate
+// LivePqcTrustState, perform a real trust swap, evict sessions, write sequence
+// files, write authority markers, or touch RocksDB/file/schema/migration/storage-
+// format. MainNet governance, MainNet peer-driven apply, and validator-set rotation
+// remain refused/unsupported; rejected paths are non-mutating. Full C4 remains
+// OPEN; C5 remains OPEN.
+pub mod pqc_governance_modeled_durable_completion_finalization_projection;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
