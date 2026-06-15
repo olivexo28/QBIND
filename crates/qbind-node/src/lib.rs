@@ -1010,6 +1010,34 @@ pub mod pqc_governance_modeled_durable_completion_finalization_projection;
 // validator-set rotation remain refused/unsupported; rejected paths are
 // non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_modeled_durable_completion_attestation_projection;
+// Run 256 — source/test production DURABLE-COMPLETION ATTESTATION BACKEND
+// INTERFACE BOUNDARY. Defines the first typed interface a future production call
+// site would use to submit or record a durable-completion attestation after the
+// Run 254 modeled attestation stage produced DurableCompletionAttested. Interface
+// boundary only: production / MainNet / external-publication backends are reachable
+// but deliberately unavailable / fail-closed, and the only positive backend
+// implementation is a DevNet/TestNet fixture that records into an in-memory fixture
+// ledger for source/test evidence only. Only the Run 254 DurableCompletionAttested
+// outcome creates a backend request; DurableCompletionAttestationDuplicateIdempotent
+// may only match an already-recorded backend submission and never creates one. Every
+// other attestation outcome, every backend record failure / rollback / rollback-failed
+// / ambiguous window, every production / MainNet / external-publication unavailable
+// path, and every unsupported action fails closed with no backend submission. The
+// DevNet/TestNet fixture backend mutates only the in-memory
+// DurableCompletionAttestationBackendLedger and exposes an invocation counter so tests
+// prove non-attesting attestation paths and pre-backend rejections never invoke it.
+// Source/test only: no real production attestation backend, no real audit ledger
+// backend, no real external publication backend, no real persistent replay backend, no
+// real durable consume backend, no real completion-report backend, no real
+// finalization backend, no real governance execution engine, no real production
+// mutation engine, no real on-chain proof verifier, no KMS/HSM/RemoteSigner backend. It
+// does NOT call Run 070, mutate LivePqcTrustState, perform a real trust swap, evict
+// sessions, write sequence files, write authority markers, perform external
+// publication, or touch RocksDB/file/schema/migration/storage-format. MainNet
+// governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5
+// remains OPEN.
+pub mod pqc_governance_durable_completion_attestation_backend;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
