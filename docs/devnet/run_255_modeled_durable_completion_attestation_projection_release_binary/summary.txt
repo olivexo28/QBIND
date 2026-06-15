@@ -1,0 +1,62 @@
+Run 255 — release-binary modeled governance durable-completion attestation projection evidence
+git_commit: c88699231a9acf547f7592746ebc44942f273d85
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  6fcb8e72becc81922c9dbc2f0598e8178dcb05f0143515e7237596136328aaa1
+  qbind_node_buildid: BuildID[sha1]=53bd131bc435f852a37e67eb29b4142b6ae55036
+  helper_255_sha256:  d9e9cd709abed17cff13233ca0c485bc22d863ce21abb2417278d9b09bbc6e26
+  helper_255_buildid: BuildID[sha1]=21baf9173c1b977133dee6fbdc4fdc9a2c2d4766
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+  S5_selector_parsesrc=1
+  S6_selector_invalidrc=1
+  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).
+
+release-helper verdicts:
+  helper_run_255rc=0verdict: PASS
+
+helper corpus verdicts (release mode, Run 254 attestation-projection boundary symbols):
+  table accepted: pass=56 fail=0
+  table rejection: pass=125 fail=0
+  table recovery: pass=20 fail=0
+  table projection: pass=47 fail=0
+  table stage_ordering: pass=4 fail=0
+  table attestation_ledger: pass=18 fail=0
+  table non_mutation: pass=21 fail=0
+  table reachability: pass=24 fail=0
+  total_pass: 315
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 51 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_254_modeled_durable_completion_attestation_projection_tests	rc=0
+  test:run_252_modeled_durable_completion_finalization_projection_tests	rc=0
+  test:run_250_modeled_durable_consume_completion_reporter_tests	rc=0
+  test:run_248_modeled_durable_consume_projection_sink_tests	rc=0
+  test:run_246_governance_modeled_end_to_end_pipeline_tests	rc=0
+  test:run_244_modeled_governance_trust_mutation_applier_tests	rc=0
+  test:run_242_governance_execution_mutation_engine_tests	rc=0
+  test:run_240_governance_evaluator_replay_durable_runtime_integration_tests	rc=0
+  test:run_238_governance_evaluator_replay_durable_backend_tests	rc=0
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  test:run_224_governance_evaluator_runtime_integration_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 254 governance modeled durable-completion attestation projection boundary is a pure, typed projection over the already-landed Run 252 modeled durable-completion finalization plus a mockable attestor that records ONLY the in-memory ModeledDurableCompletionAttestationLedger, exercised here through release-built library symbols (the same symbols a future production call site would use); a disabled attestor / finalizer / reporter / sink / pipeline / evaluator-call-site policy is a legacy no-attestation bypass with no attestor invocation; MainNet peer-driven apply is refused before pipeline progression, before any sink invocation, before any reporter invocation, before any finalizer invocation, and before any attestor invocation; only the Run 252 DurableCompletionFinalized finalization outcome creates an attestation intent and DurableCompletionDuplicateIdempotent may only match an already-recorded attestation; only DurableCompletionAttested authorizes a new modeled durable-completion-attested state; a duplicate identical attestation is idempotent (no second attestation) and the same attestation id with a different digest fails closed as equivocation; every non-finalizing finalization outcome, record failure, rollback, rollback-failed, ambiguous attestation window, unavailable production/MainNet attestor path, and unsupported action never attests, and a rejection before the attestor stage leaves the attestor invocation count at zero; production/MainNet paths are reachable but always unavailable/fail-closed; validator-set rotation and policy-change actions remain unsupported; rejections are pure and non-mutating (no marker/sequence write, no live trust swap, no session eviction, no durable completion / audit write, no Run 070 call, no LivePqcTrustState mutation); no real attestation backend, audit ledger backend, finalization backend, completion-report backend, durable consume backend, persistent replay backend, production mutation engine, governance execution engine, or on-chain governance proof verifier; no KMS/HSM/RemoteSigner backend; no RocksDB schema change, no file format change, no database migration, no storage-format change, no persistent storage, and no wire/marker/sequence/trust-bundle schema change; existing Run 251, Run 249, Run 247, Run 245, Run 243, and Run 241 release behaviour remains compatible; full C4 and C5 remain OPEN.
+
+verdict: PASS
