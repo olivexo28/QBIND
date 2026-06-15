@@ -986,6 +986,30 @@ pub mod pqc_governance_modeled_durable_consume_completion_reporter;
 // remain refused/unsupported; rejected paths are non-mutating. Full C4 remains
 // OPEN; C5 remains OPEN.
 pub mod pqc_governance_modeled_durable_completion_finalization_projection;
+// Run 254 — source/test governance modeled DURABLE-COMPLETION FINALIZATION
+// ATTESTATION PROJECTION boundary. Extends the Run 252 modeled durable-completion
+// finalization projection with a mockable, in-memory attestation / ledger-commit
+// acknowledgement layer that models how a future production call site would emit an
+// after-finalization-only durable-completion attestation for auditability. Only the
+// Run 252 DurableCompletionFinalized finalization outcome creates an attestation
+// intent; DurableCompletionDuplicateIdempotent may only match an already-attested
+// record and never creates a new one. Every other finalization outcome, every
+// attestation record failure / rollback / rollback-failed / ambiguous window, every
+// production / MainNet unavailable path, and every unsupported action fails closed
+// with no attestation. The DevNet/TestNet fixture attestor mutates only the
+// in-memory ModeledDurableCompletionAttestationLedger and exposes an invocation
+// counter so tests prove non-finalizing finalization paths never invoke it.
+// Source/test only: no real persistent replay backend, no real durable consume
+// backend, no real completion-report backend, no real finalization backend, no real
+// attestation backend, no real audit ledger backend, no real settlement ledger
+// backend, no real production mutation engine, no real governance execution engine,
+// no real on-chain proof verifier, no KMS/HSM/RemoteSigner backend. It does NOT call
+// Run 070, mutate LivePqcTrustState, perform a real trust swap, evict sessions,
+// write sequence files, write authority markers, or touch RocksDB/file/schema/
+// migration/storage-format. MainNet governance, MainNet peer-driven apply, and
+// validator-set rotation remain refused/unsupported; rejected paths are
+// non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_modeled_durable_completion_attestation_projection;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
