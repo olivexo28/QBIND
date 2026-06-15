@@ -1062,6 +1062,31 @@ pub mod pqc_governance_durable_completion_attestation_backend;
 // apply, and validator-set rotation remain refused/unsupported; rejected paths are
 // non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_durable_completion_audit_publication_receipt;
+// Run 260 — modeled durable-completion audit-receipt acknowledgement / external-
+// publication confirmation boundary. SOURCE/TEST-ONLY INTERFACE BOUNDARY. Defines the
+// first typed interface a future production audit ledger or external-publication system
+// would use to acknowledge / confirm a receipt after the Run 258 modeled audit-ledger /
+// external-publication receipt stage produced AuditReceiptRecorded. Interface boundary
+// only: production / MainNet audit-ledger acknowledgement and external-publication
+// confirmation sinks are reachable but deliberately unavailable / fail-closed, and the
+// only positive acknowledgement implementation is a DevNet/TestNet fixture that records
+// into an in-memory fixture ledger for source/test evidence only. Only the Run 258
+// AuditReceiptRecorded outcome creates an acknowledgement request;
+// AuditReceiptDuplicateIdempotent may only match an already-recorded acknowledgement and
+// never creates one. Every other receipt outcome, every acknowledgement record failure /
+// rollback / rollback-failed / ambiguous window, every production / MainNet /
+// external-publication unavailable path, and every unsupported action fails closed with
+// no acknowledgement. The DevNet/TestNet fixture acknowledgement sink mutates only the
+// in-memory DurableCompletionAuditReceiptAcknowledgementLedger and exposes an invocation
+// counter so tests prove non-recording receipt paths and pre-acknowledgement rejections
+// never invoke it. Source/test only: no real audit ledger acknowledgement, no real
+// external-publication confirmation, no real external publication, no real persistent
+// backend. It does NOT call Run 070, mutate LivePqcTrustState, perform a real trust swap,
+// evict sessions, write sequence files, write authority markers, perform external
+// publication, or touch RocksDB/file/schema/migration/storage-format. MainNet governance,
+// MainNet peer-driven apply, and validator-set rotation remain refused/unsupported;
+// rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_audit_receipt_acknowledgement;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
