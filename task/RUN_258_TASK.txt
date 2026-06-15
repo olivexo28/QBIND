@@ -1,520 +1,183 @@
-Run 258 — Source/test durable-completion backend audit-ledger / external-publication receipt boundary
+Run 258 continuation — Complete source/test durable-completion audit-publication receipt boundary evidence
 
-You are continuing QBIND after Run 257.
+You are continuing QBIND Run 258 after a partial-positive checkpoint.
 
-Run 240 is fully closed at source/test level.
-Run 241 is fully closed as release-binary evidence for Run 240.
-Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
-Run 243 is fully closed as release-binary evidence for Run 242.
-Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
-Run 245 is fully closed as release-binary evidence for Run 244.
-Run 246 is fully closed as source/test governance modeled end-to-end pipeline boundary work.
-Run 247 is fully closed as release-binary evidence for Run 246.
-Run 248 is fully closed as source/test modeled durable-consume projection sink boundary work.
-Run 249 is fully closed as release-binary evidence for Run 248.
-Run 250 is fully closed as source/test modeled durable-consume completion reporter boundary work.
-Run 251 is fully closed as release-binary evidence for Run 250.
-Run 252 is fully closed as source/test modeled durable-completion finalization-projection boundary work.
-Run 253 is fully closed as release-binary evidence for Run 252.
-Run 254 is fully closed as source/test modeled durable-completion attestation-projection boundary work.
-Run 255 is fully closed as release-binary evidence for Run 254.
-Run 256 is fully closed as source/test production durable-completion attestation backend interface boundary work.
-Run 257 is fully closed as release-binary evidence for Run 256.
+Current partial Run 258 state:
+
+The core module has already landed and compiles:
+
+* `crates/qbind-node/src/pqc_governance_durable_completion_audit_publication_receipt.rs`
+* `crates/qbind-node/src/lib.rs` module registration
+
+The module reportedly includes:
+
+* typed Kind / Policy / Identity;
+* domain-separated digest helpers;
+* Request / Response / Record;
+* in-memory ledger with snapshot / restore;
+* Expectations and Input;
+* MainNet peer-driven refusal extended through the Run 256 backend binding;
+* 16-variant Outcome;
+* RequestIntent projection from Run 256 `BackendSubmissionRecorded`;
+* Fault;
+* sink trait;
+* fixture + production/MainNet/external sinks;
+* evaluate;
+* 21-variant recovery Window;
+* recover;
+* free helper functions;
+* grep-verifiable invariant helpers.
+
+The module builds with:
+
+* `cargo build -p qbind-node --lib`
+
+Secret scanning was clean.
+
+But Run 258 is not yet closed. The following required items were not completed:
+
+* Run 258 test file.
+* Run 258 regression corpus.
+* Run 258 evidence doc.
+* narrow updates to protocol/runbook/trust docs.
+* `contradiction.md` “no Run 258 contradiction” entry.
+* CodeQL result.
 
 Strict workflow:
 
-* Execution-first.
-* Narrow scope only.
-* No broad redesign.
-* No silent regressions.
-* No hype or overclaiming.
-* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
-* MainNet peer-driven apply remains refused.
-* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
-* Rejected paths must remain non-mutating.
-* Do not weaken Runs 070, 130–257.
-* Source/test only.
-* No release-binary evidence in this run.
-* No production runtime enablement.
-* No real audit-ledger implementation.
-* No real external-publication implementation.
+* This is still Run 258, not Run 259.
+* Do not add a new feature boundary.
+* Do not implement release-binary evidence in this continuation.
+* Do not enable production runtime behavior.
+* Do not implement a real audit ledger.
+* Do not implement real external publication.
+* Do not implement real persistent storage.
+* Do not change RocksDB/file/schema/migration/storage format.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not implement validator-set rotation.
+* Keep Full C4 OPEN.
+* Keep C5 OPEN.
 
-Current state:
+Exact objective:
 
-* Run 246 models the end-to-end ordering from evaluator/call-site authorization through durable replay, mutation-engine authorization, modeled applier success, and durable consume authorization.
-* Run 248 models the durable-consume projection sink: only a Run 246 `ModeledApplierAppliedAndDurableConsumeAuthorized` outcome can create a sink intent, and only `ConsumeReceiptRecorded` records a modeled in-memory receipt.
-* Run 250 models the durable-consume completion reporter: only Run 248 `ConsumeReceiptRecorded` can create a completion-report intent, and only `CompletionReportRecorded` authorizes a new modeled completion-reported state.
-* Run 252 models durable-completion finalization projection: only Run 250 `CompletionReportRecorded` can create a finalization intent, and only `DurableCompletionFinalized` authorizes a new modeled durable-completion-finalized state.
-* Run 254 models durable-completion attestation projection: only Run 252 `DurableCompletionFinalized` can create an attestation intent, and only `DurableCompletionAttested` authorizes a new modeled durable-completion-attested state.
-* Run 256 adds the source/test production durable-completion attestation backend interface boundary: only Run 254 `DurableCompletionAttested` creates a backend request, only `BackendSubmissionRecorded` authorizes a modeled backend-submitted state, fixture backend records only in memory, and Production/MainNet/external-publication backends remain reachable but unavailable/fail-closed.
-* Run 257 release-evidences Run 256 on real `target/release/qbind-node` plus a release-built helper.
-* No real persistent replay backend is implemented.
-* No real durable consume backend is implemented.
-* No real completion-report backend is implemented.
-* No real finalization backend is implemented.
-* No real production attestation backend is implemented.
-* No real audit ledger backend is implemented.
-* No real external publication backend is implemented.
-* No real production mutation engine is implemented.
-* No real governance execution engine is implemented.
-* No real on-chain governance proof verifier is implemented.
-* No RocksDB/file/schema/migration/storage-format change is implemented.
-* No KMS/HSM/RemoteSigner backend is implemented.
-* No MainNet governance enablement.
-* No MainNet peer-driven apply enablement.
-* Validator-set rotation remains unsupported.
-* Full C4 remains OPEN.
-* C5 remains OPEN.
+Complete the missing Run 258 source/test deliverables and documentation so Run 258 can be honestly accepted as source/test positive.
 
-Objective:
+Required implementation work:
 
-Implement the smallest source/test-only durable-completion backend audit-ledger / external-publication receipt boundary.
+1. Add the Run 258 test file:
 
-This run must model the first post-backend-submission receipt interface a future production audit ledger or external publication system would use after Run 256 `BackendSubmissionRecorded`.
+   `crates/qbind-node/tests/run_258_durable_completion_audit_publication_receipt_tests.rs`
 
-This is an interface/projection boundary only. It must not implement a real audit ledger, real external publication, real persistent storage, real production attestation backend, real durable consume backend, real completion-report backend, real finalization backend, real governance execution engine, real on-chain proof verifier, real production mutation engine, KMS/HSM/RemoteSigner backend, validator-set rotation, MainNet governance, or MainNet peer-driven apply.
+2. The tests must consume the actual Run 258 module and actual Run 256 `BackendSubmissionRecorded` path. Do not fake an unattached receipt path.
 
-The only positive implementation may be a DevNet/TestNet fixture that records into an in-memory fixture ledger for source/test evidence only. Production/MainNet/external-publication implementations must be reachable but deliberately unavailable/fail-closed.
-
-Key invariant:
-
-* Run 246 pipeline success is required before any Run 248 sink intent can exist.
-* Run 248 `ConsumeReceiptRecorded` is required before any Run 250 completion-report intent can exist.
-* Run 250 `CompletionReportRecorded` is required before any Run 252 finalization intent can exist.
-* Run 252 `DurableCompletionFinalized` is required before any Run 254 attestation intent can exist.
-* Run 254 `DurableCompletionAttested` is required before any Run 256 backend request can exist.
-* Run 256 `BackendSubmissionRecorded` is required before any Run 258 audit/publication receipt intent can exist.
-* Run 258 may record only through a DevNet/TestNet in-memory fixture receipt ledger.
-* Production/MainNet/external-publication receipt backends must return typed unavailable/fail-closed outcomes and must not record.
-* Every non-submitted / failed / rollback / rollback-failed / ambiguous / unavailable / unsupported Run 256 outcome must produce no audit/publication receipt request, no receipt record, no external publication, no audit-ledger write, no persistent storage write, and no mutation.
-
-Suggested implementation:
-
-1. Add a new source/test-only module:
-
-   `crates/qbind-node/src/pqc_governance_durable_completion_audit_publication_receipt.rs`
-
-   If the repo has a better established naming convention, use it, but keep the name explicit that this is a durable-completion audit-ledger / external-publication receipt boundary.
-
-2. Register it in:
-
-   `crates/qbind-node/src/lib.rs`
-
-3. Define typed selector and policy types, for example:
-
-   * `DurableCompletionAuditPublicationReceiptKind`
-   * `DurableCompletionAuditPublicationReceiptPolicy`
-   * `DurableCompletionAuditPublicationReceiptIdentity`
-   * `DurableCompletionAuditPublicationReceiptEnvironment`
-   * `DurableCompletionAuditPublicationReceiptSurface`
-   * `DurableCompletionAuditPublicationReceiptBinding`
-   * `DurableCompletionAuditPublicationReceiptInput`
-   * `DurableCompletionAuditPublicationReceiptExpectations`
-
-   Required kinds:
-
-   * `Disabled`
-   * `FixtureInMemory`
-   * `ProductionAuditLedgerUnavailable`
-   * `MainNetAuditLedgerUnavailable`
-   * `ExternalPublicationUnavailable`
-   * `Unknown`
-
-   Required policies:
-
-   * `Disabled`
-   * `FixtureAllowed`
-   * `ProductionAuditLedgerRequired`
-   * `MainNetAuditLedgerRequired`
-   * `ExternalPublicationRequired`
-
-4. Define typed request / response / receipt records, for example:
-
-   * `DurableCompletionAuditPublicationReceiptRequest`
-   * `DurableCompletionAuditPublicationReceiptResponse`
-   * `DurableCompletionAuditPublicationReceiptRecord`
-   * `DurableCompletionAuditPublicationReceiptDigest`
-   * `DurableCompletionAuditPublicationReceiptTranscriptDigest`
-
-   The request must bind, at minimum:
-
-   * environment;
-   * chain id;
-   * genesis hash;
-   * governance surface id;
-   * mutation surface id;
-   * proposal id;
-   * decision id;
-   * candidate digest;
-   * authority-domain sequence;
-   * Run 246 pipeline decision digest;
-   * Run 248 sink decision digest;
-   * Run 250 reporter decision digest;
-   * Run 252 finalization decision digest;
-   * Run 254 attestation digest;
-   * Run 254 attestation id;
-   * Run 256 backend identity digest;
-   * Run 256 backend request digest;
-   * Run 256 backend response digest;
-   * Run 256 backend receipt digest;
-   * Run 256 backend transcript digest;
-   * Run 256 backend record id;
-   * receipt identity;
-   * receipt kind;
-   * receipt policy;
-   * domain separation tag.
-
-5. Define deterministic digest helpers:
-
-   * receipt identity digest;
-   * receipt request digest;
-   * receipt response digest;
-   * receipt record digest;
-   * receipt transcript digest.
-
-   Requirements:
-
-   * deterministic;
-   * domain-separated;
-   * field-binding;
-   * no parallel ad-hoc hashing scheme if existing project helpers already exist;
-   * rejects digest mismatch fail-closed;
-   * does not include unstable display text in canonical digests.
-
-6. Define a pure/mockable trait, for example:
-
-   * `GovernanceDurableCompletionAuditPublicationReceiptSink`
-   * `record_durable_completion_audit_publication_receipt(...)`
-   * `recover_durable_completion_audit_publication_receipt_window(...)`
-
-7. Provide source/test-only implementations:
-
-   * `FixtureDurableCompletionAuditPublicationReceiptSink`
-   * `ProductionAuditLedgerDurableCompletionReceiptSink`
-   * `MainNetAuditLedgerDurableCompletionReceiptSink`
-   * `ExternalPublicationDurableCompletionReceiptSink`
-
-   Requirements:
-
-   * Fixture sink is DevNet/TestNet evidence-only.
-   * Fixture sink mutates only an in-memory `DurableCompletionAuditPublicationReceiptLedger`.
-   * Fixture sink exposes an invocation counter.
-   * Production audit-ledger sink is reachable but unavailable/fail-closed.
-   * MainNet audit-ledger sink is reachable but unavailable/fail-closed.
-   * External-publication sink is reachable but unavailable/fail-closed.
-   * MainNet peer-driven apply must be refused before pipeline, sink, reporter, finalizer, attestor, backend, and receipt invocation.
-   * No implementation may call Run 070.
-   * No implementation may mutate `LivePqcTrustState`.
-   * No implementation may write sequence files, authority markers, RocksDB, files, schemas, migrations, or storage formats.
-   * No implementation may perform network I/O, external publication, or real audit-ledger persistence.
-
-8. Define an in-memory fixture ledger:
-
-   * `DurableCompletionAuditPublicationReceiptLedger`
-   * `DurableCompletionAuditPublicationReceiptLedgerRecord`
-   * `DurableCompletionAuditPublicationReceiptLedgerSnapshot`
-   * `DurableCompletionAuditPublicationReceiptLedgerStatus`
-
-   Requirements:
-
-   * one valid receipt inserts exactly one record;
-   * duplicate identical receipt is idempotent;
-   * same receipt record id with different digest fails closed as equivocation;
-   * rollback restores the in-memory snapshot;
-   * rollback failure never claims success;
-   * no files, RocksDB, markers, sequence files, schema writes, storage-format changes, external publication, network writes, or real audit-ledger writes.
-
-9. Define an explicit outcome enum, for example:
-
-   * `LegacyBypassNoAuditReceipt`
-   * `RejectedBeforeBackendSubmissionNoAuditReceipt`
-   * `BackendDidNotSubmitNoAuditReceipt`
-   * `AuditReceiptRecorded`
-   * `AuditReceiptDuplicateIdempotent`
-   * `AuditReceiptRejectedBeforeRecord`
-   * `AuditReceiptRecordFailedNoReceipt`
-   * `AuditReceiptRolledBackNoReceipt`
-   * `AuditReceiptRollbackFailedFatalNoReceipt`
-   * `AuditReceiptAmbiguousFailClosedNoReceipt`
-   * `ProductionAuditLedgerUnavailableNoReceipt`
-   * `MainNetAuditLedgerUnavailableNoReceipt`
-   * `ExternalPublicationUnavailableNoReceipt`
-   * `MainNetPeerDrivenApplyRefusedNoReceipt`
-   * `ValidatorSetRotationUnsupportedNoReceipt`
-   * `PolicyChangeUnsupportedNoReceipt`
-
-   Required semantics:
-
-   * `AuditReceiptRecorded` is the only new-receipt authorizing outcome.
-   * `AuditReceiptDuplicateIdempotent` is idempotent only if every identity/digest field matches exactly and must not count as a new receipt.
-   * Same receipt record id with different digest is equivocation and must fail closed.
-   * Every unavailable/failure/rollback/ambiguous/unsupported outcome must not record.
-   * Production/MainNet/external-publication unavailable outcomes must not record.
-   * External-publication unavailable outcome must not perform any external publication.
-
-10. Add composition helpers:
-
-* `project_backend_submission_outcome_to_audit_receipt_request(...)`
-* `evaluate_durable_completion_audit_publication_receipt(...)`
-* `recover_durable_completion_audit_publication_receipt_window(...)`
-* `audit_receipt_outcome_authorizes_receipt_record(...)`
-* `audit_receipt_outcome_projects_to_audit_receipt_recorded(...)`
-
-Required composition semantics:
-
-* Only Run 256 `BackendSubmissionRecorded` may create an audit/publication receipt request.
-* Run 256 duplicate-idempotent backend submission may only match an already-recorded audit/publication receipt and must never create one by itself.
-* Every other Run 256 outcome maps to a no-audit-receipt fail-closed outcome.
-* Receipt request creation must validate environment / chain / genesis / governance surface / mutation surface / proposal id / decision id / candidate digest / authority-domain sequence / pipeline digest / sink digest / reporter digest / finalization digest / attestation digest / backend identity digest / backend request digest / backend response digest / backend receipt digest / backend transcript digest before receipt sink invocation.
-* Binding mismatch before receipt sink invocation must leave receipt sink invocation count zero.
-* Request/response/record digest mismatch after receipt sink invocation must not record a receipt.
-* Receipt record failure must not record.
-* Receipt rollback success must not record.
-* Receipt rollback failure must be fatal/fail-closed and must not record.
-* Ambiguous receipt windows must fail closed and must not record.
-
-11. Add grep-verifiable invariant helpers, for example:
-
-* `durable_completion_audit_receipt_rejection_is_non_mutating`
-* `durable_completion_audit_receipt_never_calls_run_070`
-* `durable_completion_audit_receipt_never_mutates_live_pqc_trust_state`
-* `durable_completion_audit_receipt_never_writes_sequence_or_marker`
-* `durable_completion_audit_receipt_no_rocksdb_file_schema_migration_change`
-* `durable_completion_audit_receipt_no_external_publication`
-* `durable_completion_audit_receipt_no_real_audit_ledger`
-* `durable_completion_audit_receipt_pipeline_success_required`
-* `durable_completion_audit_receipt_sink_receipt_required`
-* `durable_completion_audit_receipt_completion_report_required`
-* `durable_completion_audit_receipt_finalization_required`
-* `durable_completion_audit_receipt_attestation_required`
-* `durable_completion_audit_receipt_backend_submission_required`
-* `durable_completion_audit_receipt_record_required_before_receipt`
-* `durable_completion_audit_receipt_failed_record_never_records`
-* `durable_completion_audit_receipt_rollback_never_records`
-* `durable_completion_audit_receipt_ambiguous_window_fails_closed`
-* `durable_completion_audit_receipt_mainnet_peer_driven_apply_refused_first`
-* `durable_completion_audit_receipt_production_mainnet_unavailable`
-* `durable_completion_audit_receipt_external_publication_unavailable`
-* `durable_completion_audit_receipt_validator_set_rotation_unsupported`
-* `durable_completion_audit_receipt_policy_change_unsupported`
-* `durable_completion_audit_receipt_local_operator_cannot_satisfy_mainnet_authority`
-* `durable_completion_audit_receipt_peer_majority_cannot_satisfy_mainnet_authority`
-
-Tests:
-
-Add:
-
-`crates/qbind-node/tests/run_258_durable_completion_audit_publication_receipt_tests.rs`
-
-Required test matrix:
+3. The test matrix must prove, at minimum:
 
 Accepted / compatible:
 
-* Disabled receipt policy preserves legacy bypass and performs no receipt record, no audit ledger write, no external publication, and no mutation.
-* Disabled backend policy preserves legacy bypass and never invokes receipt sink.
-* Disabled attestor policy preserves legacy bypass and never invokes backend or receipt sink.
-* Disabled finalizer policy preserves legacy bypass and never invokes attestor, backend, or receipt sink.
-* Disabled reporter policy preserves legacy bypass and never invokes finalizer, attestor, backend, or receipt sink.
-* Disabled sink policy preserves legacy bypass and never invokes reporter, finalizer, attestor, backend, or receipt sink.
-* Disabled pipeline policy preserves legacy bypass and never invokes sink, reporter, finalizer, attestor, backend, or receipt sink.
-* Disabled evaluator/call-site policy preserves legacy bypass and never invokes sink, reporter, finalizer, attestor, backend, or receipt sink.
-* DevNet fixture chain records exactly one modeled in-memory receipt only after pipeline success, sink receipt, completion report, finalization, attestation, backend submission, and receipt record.
-* TestNet fixture chain records exactly one modeled in-memory receipt only after pipeline success, sink receipt, completion report, finalization, attestation, backend submission, and receipt record.
-* Modeled add-root pipeline success records receipt only after modeled applier success, sink receipt record, completion report record, finalization record, attestation record, and backend submission record.
-* Modeled retire-root pipeline success records receipt only after modeled applier success, sink receipt record, completion report record, finalization record, attestation record, and backend submission record.
-* Modeled revoke-root pipeline success records receipt only after modeled applier success, sink receipt record, completion report record, finalization record, attestation record, and backend submission record.
-* Modeled emergency-revoke-root pipeline success records receipt only after modeled applier success, sink receipt record, completion report record, finalization record, attestation record, and backend submission record.
-* Modeled noop pipeline success records receipt only under explicit success semantics, no trust-state drift, recorded sink receipt, recorded completion report, recorded finalization, recorded attestation, and recorded backend submission.
-* Duplicate identical receipt is idempotent under an explicit typed outcome.
-* Run 256 duplicate-idempotent backend submission can only match an already-recorded receipt and never creates one by itself.
-* Existing Run 256 backend behavior remains compatible.
-* Existing Run 254 attestation behavior remains compatible.
-* Existing Run 252 finalization behavior remains compatible.
-* Existing Run 250 completion-reporter behavior remains compatible.
-* Existing Run 248 sink behavior remains compatible.
-* Existing Run 246 pipeline behavior remains compatible.
-* Existing Run 244 modeled applier behavior remains compatible.
-* Existing Run 242 mutation-engine behavior remains compatible.
-* Existing Run 240 durable completion behavior remains compatible.
-* Production audit-ledger path is reachable but unavailable/fail-closed and records no receipt.
-* MainNet audit-ledger path is reachable but unavailable/fail-closed and records no receipt.
-* External-publication path is reachable but unavailable/fail-closed and performs no publication.
-* MainNet peer-driven apply refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, backend invocation, and receipt sink invocation.
-* Validator-set rotation unsupported and records no receipt.
-* Policy-change unsupported and records no receipt.
+* Disabled receipt policy preserves legacy bypass: no receipt record, no audit ledger write, no external publication, no mutation.
+* Disabled backend policy never invokes receipt sink.
+* Disabled attestor/finalizer/reporter/sink/pipeline/evaluator-call-site policy never reaches the receipt sink.
+* DevNet fixture chain records exactly one modeled in-memory receipt only after:
+  Run 246 pipeline success → Run 248 sink receipt → Run 250 completion report → Run 252 finalization → Run 254 attestation → Run 256 backend submission → Run 258 receipt.
+* TestNet fixture chain does the same.
+* Add-root / retire-root / revoke-root / emergency-revoke-root / noop cases preserve ordering and record only after backend submission.
+* Duplicate identical receipt is idempotent.
+* Run 256 duplicate-idempotent backend submission may only match an already-recorded receipt and never creates a new receipt by itself.
+* Existing Run 256 / 254 / 252 / 250 / 248 / 246 / 244 / 242 / 240 behavior remains compatible.
+* Production audit-ledger, MainNet audit-ledger, and external-publication paths are reachable but unavailable/fail-closed.
+* MainNet peer-driven apply is refused before pipeline, sink, reporter, finalizer, attestor, backend, and receipt sink invocation.
+* Validator-set rotation and policy-change actions remain unsupported.
 
 Rejected / fail-closed:
 
-* evaluator rejection produces no sink intent, no sink receipt, no reporter intent, no completion report, no finalizer intent, no finalization, no attestor intent, no attestation, no backend request, no backend submission, no audit/publication receipt request, and no receipt;
-* call-site rejection produces no audit/publication receipt request and no receipt;
-* durable replay stale / expired / consumed / superseded / backend-unavailable produces no audit/publication receipt request and no receipt;
-* mutation-engine rejection produces no audit/publication receipt request and no receipt;
-* modeled applier rejected-before-snapshot / rejected-before-apply / apply failure / rollback / rollback-failed / ambiguous window produces no receipt request and no receipt;
-* sink did not record receipt / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no reporter/finalizer/attestor/backend/receipt invocation and no receipt;
-* reporter did not record completion / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no finalizer/attestor/backend/receipt invocation and no receipt;
-* finalizer did not finalize / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no attestor/backend/receipt invocation and no receipt;
-* attestor did not attest / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no backend/receipt invocation and no receipt;
-* backend did not submit / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no receipt sink invocation and no receipt;
-* receipt before backend submission is rejected;
-* receipt after modeled apply failure, sink record failure, reporter record failure, finalizer record failure, attestor record failure, backend record failure, backend rollback, backend rollback-failed, or backend ambiguous window is rejected;
-* same receipt record id with different digest is rejected as equivocation and records no second receipt;
-* wrong environment / chain / genesis / governance surface / mutation surface rejected before receipt sink invocation;
-* wrong receipt identity rejected before record;
-* wrong receipt policy rejected before record;
-* wrong receipt kind rejected before record;
-* wrong request digest rejected before record;
-* wrong response digest rejected before record;
-* wrong receipt record digest rejected before record;
-* wrong backend identity digest rejected before record;
-* wrong backend request digest rejected before record;
-* wrong backend response digest rejected before record;
-* wrong backend receipt digest rejected before record;
-* wrong backend transcript digest rejected before record;
-* wrong attestation digest rejected before record;
-* wrong finalization digest rejected before record;
-* wrong completion-report digest rejected before record;
-* wrong sink decision digest rejected before record;
-* wrong reporter decision digest rejected before record;
-* wrong finalization decision digest rejected before record;
-* wrong pipeline decision digest rejected before record;
-* wrong proposal id rejected before record;
-* wrong decision id rejected before record;
-* wrong candidate digest rejected before record;
-* wrong authority-domain sequence rejected before record;
-* malformed receipt request rejected before record;
-* malformed receipt response rejected before record;
-* local operator key cannot satisfy MainNet authority;
-* peer majority cannot satisfy MainNet authority;
-* production audit-ledger unavailable records no receipt;
-* MainNet audit-ledger unavailable records no receipt;
-* external-publication unavailable records no receipt and performs no publication;
-* validator-set rotation attempt unsupported and records no receipt;
-* policy-change attempt unsupported and records no receipt;
-* every rejected path produces no Run 070 call, no `LivePqcTrustState` mutation, no real trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, no external publication, no real audit-ledger write, and no receipt sink invocation where rejection happens before the receipt stage.
+* Every rejection before Run 258 produces no receipt request and no receipt.
+* Backend did-not-submit / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no receipt sink invocation and no receipt.
+* Receipt before backend submission is rejected.
+* Receipt after modeled apply failure, sink failure, reporter failure, finalizer failure, attestor failure, backend failure, backend rollback, backend rollback-failed, or backend ambiguous window is rejected.
+* Same receipt record id with different digest fails closed as equivocation.
+* Wrong environment / chain / genesis / governance surface / mutation surface fails before receipt sink invocation.
+* Wrong receipt identity / policy / kind / request digest / response digest / record digest fails closed.
+* Wrong backend identity/request/response/receipt/transcript digest fails closed.
+* Wrong attestation/finalization/completion-report/sink/reporter/finalization/pipeline digest fails closed.
+* Wrong proposal id / decision id / candidate digest / authority-domain sequence fails closed.
+* Malformed request / response fails closed.
+* Local operator key cannot satisfy MainNet authority.
+* Peer majority cannot satisfy MainNet authority.
+* Production/MainNet/external-publication unavailable paths record no receipt and perform no publication.
+* Rejected paths produce no Run 070 call, no `LivePqcTrustState` mutation, no trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, no external publication, and no real audit-ledger write.
 
-Recovery / crash-window cases:
+Recovery / crash-window:
 
-* before-pipeline window fails closed / no receipt;
-* after-pipeline-success-before-sink-intent window fails closed / no receipt;
-* after-sink-intent-before-sink-receipt-record window fails closed / no receipt;
-* after-sink-receipt-record-before-report-intent window fails closed / no receipt;
-* after-report-intent-before-report-record window fails closed / no receipt;
-* after-report-record-before-finalization-intent window fails closed / no receipt;
-* after-finalization-intent-before-finalization-record window fails closed / no receipt;
-* after-finalization-record-before-attestation-intent window fails closed / no receipt;
-* after-attestation-intent-before-attestation-record window fails closed / no receipt;
-* after-attestation-record-before-backend-request window fails closed / no receipt;
-* after-backend-request-before-backend-record window fails closed / no receipt;
-* after-backend-record-before-backend-success window fails closed unless an explicit matching backend success exists;
-* after-backend-success-before-receipt-request window fails closed / no receipt;
-* after-receipt-request-before-receipt-record window fails closed / no receipt;
-* after-receipt-record-before-receipt-success window fails closed unless an explicit matching receipt success exists;
-* after-receipt-success recovers as receipt recorded;
-* after-receipt-ambiguous fails closed / no receipt;
-* receipt record-failed window fails closed / no receipt;
-* receipt rollback-completed window fails closed / no receipt;
-* receipt rollback-failed window is fatal/fail-closed / no receipt;
-* unknown window fails closed / no receipt;
-* production/MainNet/external-publication recovery classification unavailable/fail-closed;
+* before-pipeline through after-backend-success-before-receipt-request windows fail closed unless an explicit matching success exists.
+* after-receipt-request-before-receipt-record fails closed.
+* after-receipt-record-before-receipt-success fails closed unless explicit matching receipt success exists.
+* after-receipt-success recovers as receipt recorded.
+* ambiguous, record-failed, rollback-completed, rollback-failed, unknown, production/MainNet/external-publication windows fail closed.
 * MainNet peer-driven apply refusal precedes recovery classification where applicable.
 
-Projection cases:
+Projection:
 
-* only Run 256 `BackendSubmissionRecorded` creates an audit/publication receipt request;
-* Run 246 pipeline success alone creates no receipt request;
-* Run 248 sink receipt record alone creates no receipt request;
-* Run 250 completion-report record alone creates no receipt request;
-* Run 252 finalization record alone creates no receipt request;
-* Run 254 attestation record alone creates no receipt request;
-* Run 256 backend request alone creates no receipt request;
-* Run 256 backend duplicate-idempotent creates no new receipt unless a matching receipt already exists;
-* evaluator success alone creates no receipt request;
-* durable replay freshness alone creates no receipt request;
-* mutation-engine authorization alone creates no receipt request;
-* modeled applier success without sink receipt, completion report, finalization, attestation, and backend submission creates no receipt request;
-* only `AuditReceiptRecorded` authorizes modeled audit/publication receipt recorded state;
-* `LegacyBypassNoAuditReceipt` does not record;
-* `RejectedBeforeBackendSubmissionNoAuditReceipt` does not record;
-* `BackendDidNotSubmitNoAuditReceipt` does not record;
-* `AuditReceiptDuplicateIdempotent` does not create a second receipt and must not be counted as a new receipt;
-* `AuditReceiptRejectedBeforeRecord` does not record;
-* `AuditReceiptRecordFailedNoReceipt` does not record;
-* `AuditReceiptRolledBackNoReceipt` does not record;
-* `AuditReceiptRollbackFailedFatalNoReceipt` does not record;
-* `AuditReceiptAmbiguousFailClosedNoReceipt` does not record;
-* `ProductionAuditLedgerUnavailableNoReceipt` does not record;
-* `MainNetAuditLedgerUnavailableNoReceipt` does not record;
-* `ExternalPublicationUnavailableNoReceipt` does not record and performs no publication;
-* `MainNetPeerDrivenApplyRefusedNoReceipt` does not record;
-* `ValidatorSetRotationUnsupportedNoReceipt` does not record;
-* `PolicyChangeUnsupportedNoReceipt` does not record.
+* Only Run 256 `BackendSubmissionRecorded` creates a receipt request.
+* Pipeline success alone creates no receipt request.
+* Sink receipt alone creates no receipt request.
+* Completion report alone creates no receipt request.
+* Finalization alone creates no receipt request.
+* Attestation alone creates no receipt request.
+* Backend request alone creates no receipt request.
+* Backend duplicate-idempotent creates no new receipt unless a matching receipt already exists.
+* Only `AuditReceiptRecorded` authorizes modeled receipt-recorded state.
+* Every other outcome does not record.
 
-Stage-ordering cases:
+Stage-ordering:
 
-* MainNet peer-driven apply refusal happens before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, backend invocation, and receipt sink invocation.
-* Evaluator/call-site authorization happens before durable replay freshness.
-* Durable replay freshness happens before mutation-engine authorization.
-* Mutation-engine authorization happens before modeled applier invocation.
-* Modeled applier success happens before sink intent.
-* Sink receipt recording happens after pipeline consume authorization.
-* Completion report recording happens after sink receipt-recorded state.
-* Finalization recording happens after completion-report recorded state.
-* Attestation recording happens after durable-completion-finalized state.
-* Backend request happens only after durable-completion-attested state.
-* Backend record happens only after durable-completion-attested state.
-* Receipt request happens only after backend-submitted state.
+* MainNet peer-driven apply refusal happens before every later stage.
+* Evaluator/call-site authorization precedes durable replay.
+* Durable replay precedes mutation engine.
+* Mutation engine precedes modeled applier.
+* Modeled applier precedes sink intent.
+* Sink receipt precedes completion report.
+* Completion report precedes finalization.
+* Finalization precedes attestation.
+* Attestation precedes backend request.
+* Backend submission precedes receipt request.
 * Receipt record happens only after backend-submitted state.
-* A rejection before the receipt stage leaves receipt sink invocation count at zero.
-* A receipt record failure does not retroactively invalidate the modeled backend submission record but does not authorize receipt.
-* A receipt rollback failure is fatal/fail-closed and does not authorize receipt.
-* The receipt sink itself performs no persistent durable completion beyond modeled in-memory fixture state.
+* Rejection before receipt stage leaves receipt sink invocation count zero.
+* Receipt record failure does not invalidate backend submission but does not authorize receipt.
+* Receipt rollback failure is fatal/fail-closed and does not authorize receipt.
 
-Receipt-ledger cases:
+Receipt ledger:
 
-* one valid receipt inserts exactly one modeled in-memory ledger record;
-* duplicate identical receipt is idempotent and does not increase record count;
-* same receipt record id with different digest is equivocation and does not increase record count;
-* wrong receipt identity digest does not record;
-* wrong receipt request digest does not record;
-* wrong receipt response digest does not record;
-* wrong receipt record digest does not record;
-* wrong backend identity digest does not record;
-* wrong backend request digest does not record;
-* wrong backend response digest does not record;
-* wrong backend receipt digest does not record;
-* wrong backend transcript digest does not record;
-* wrong attestation digest does not record;
-* wrong finalization digest does not record;
-* wrong completion-report digest does not record;
-* wrong sink decision digest does not record;
-* wrong reporter decision digest does not record;
-* wrong finalization decision digest does not record;
-* wrong pipeline decision digest does not record;
-* wrong proposal id does not record;
-* wrong decision id does not record;
-* wrong candidate digest does not record;
-* wrong authority-domain sequence does not record;
-* malformed receipt request does not record;
-* malformed receipt response does not record;
-* rollback restores modeled receipt ledger snapshot;
-* rollback failure never claims success;
-* fixture receipt ledger never writes files, RocksDB, markers, sequences, external publications, audit-ledger entries, or production durable state.
+* One valid receipt inserts one in-memory record.
+* Duplicate identical receipt is idempotent and does not increase count.
+* Same record id with different digest is equivocation and does not increase count.
+* Wrong receipt/backend/attestation/finalization/report/sink/pipeline/proposal/decision/candidate/sequence digest does not record.
+* Malformed request / response does not record.
+* Rollback restores in-memory ledger snapshot.
+* Rollback failure never claims success.
+* Fixture ledger never writes files, RocksDB, markers, sequences, external publications, audit-ledger entries, or production durable state.
 
-Non-mutation cases:
+Non-mutation:
 
-* no Run 070 call on any receipt case;
-* no `LivePqcTrustState` mutation on any receipt case;
-* no real trust swap on any receipt case;
-* no session eviction on any receipt case;
-* no sequence write on any receipt case;
-* no marker write on any receipt case;
-* no RocksDB/file/schema/migration/storage-format write or format change;
-* no wire/schema/marker/sequence/trust-bundle format change;
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* no RocksDB/file/schema/migration/storage-format write;
+* no wire/schema/marker/sequence/trust-bundle change;
 * no external network publication;
 * no real audit-ledger write;
 * fixture receipt sink mutates only `DurableCompletionAuditPublicationReceiptLedger`;
-* production/MainNet/external-publication paths remain unavailable/fail-closed;
-* MainNet peer-driven apply remains refused first.
+* production/MainNet/external-publication paths remain unavailable/fail-closed.
 
 Validation commands:
 
@@ -544,9 +207,9 @@ Run at minimum:
 
 Security scanning:
 
-* Run secret scanning if available and report the result.
-* Run CodeQL if available and report the result honestly.
-* If Rust CodeQL analysis is skipped because the database is too large, say that explicitly and do not overclaim CodeQL coverage.
+* Run secret scanning and report result.
+* Run CodeQL if available.
+* If Rust CodeQL analysis is skipped because the database is too large, state that explicitly and do not claim CodeQL coverage.
 
 Documentation:
 
@@ -604,41 +267,15 @@ Contradiction handling:
 
 * Crosscheck Run 258 against Runs 050–257.
 * If no contradiction is found, add a “no Run 258 contradiction” entry to `docs/whitepaper/contradiction.md`.
-* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+* If any contradiction is found, record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
 
-Strict non-goals:
+Expected verdict after continuation:
 
-* Do not implement a real persistent replay backend.
-* Do not implement a real durable consume backend.
-* Do not implement a real completion-report backend.
-* Do not implement a real finalization backend.
-* Do not implement a real production attestation backend.
-* Do not implement a real audit ledger backend.
-* Do not implement real external publication.
-* Do not implement a real production mutation engine.
-* Do not wire production runtime mutation.
-* Do not call Run 070.
-* Do not mutate `LivePqcTrustState`.
-* Do not perform a real trust swap.
-* Do not evict sessions.
-* Do not write sequence files.
-* Do not write authority markers.
-* Do not implement a real governance execution engine.
-* Do not implement a real on-chain governance proof verifier.
-* Do not implement validator-set rotation.
-* Do not add RocksDB/file/schema/migration/storage-format changes.
-* Do not change wire/schema/marker/sequence/trust-bundle formats.
-* Do not enable MainNet governance.
-* Do not enable MainNet peer-driven apply.
-* Do not add autonomous apply or apply-on-receipt.
-* Do not let peer majority satisfy authority.
-* Do not weaken any fail-closed behavior from Runs 070 or 130–257.
+Source/test positive if the Run 258 tests, regression corpus, docs, evidence file, contradiction update, and scans pass.
 
-Expected verdict:
+If completed, the suggested next step should be:
 
-Partial-positive / source-test positive.
-
-Run 258 should close the source/test durable-completion backend audit-ledger / external-publication receipt boundary gap only. It must not claim Full C4 or C5 closure.
+Run 259 — release-binary evidence for the Run 258 durable-completion audit-ledger / external-publication receipt boundary.
 
 Final response format:
 

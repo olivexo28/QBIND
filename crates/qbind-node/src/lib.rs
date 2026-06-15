@@ -1038,6 +1038,30 @@ pub mod pqc_governance_modeled_durable_completion_attestation_projection;
 // refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5
 // remains OPEN.
 pub mod pqc_governance_durable_completion_attestation_backend;
+// Run 258 — modeled durable-completion audit/publication receipt boundary. SOURCE/
+// TEST-ONLY INTERFACE BOUNDARY. Defines the first typed interface a future production
+// call site would use to record an audit-ledger / external-publication receipt after
+// the Run 256 modeled attestation-backend stage produced BackendSubmissionRecorded.
+// Interface boundary only: production / MainNet audit-ledger / external-publication
+// receipt sinks are reachable but deliberately unavailable / fail-closed, and the only
+// positive receipt implementation is a DevNet/TestNet fixture that records into an
+// in-memory fixture ledger for source/test evidence only. Only the Run 256
+// BackendSubmissionRecorded outcome creates a receipt request;
+// BackendSubmissionDuplicateIdempotent may only match an already-recorded receipt and
+// never creates one. Every other backend outcome, every receipt record failure /
+// rollback / rollback-failed / ambiguous window, every production / MainNet /
+// external-publication unavailable path, and every unsupported action fails closed
+// with no audit receipt. The DevNet/TestNet fixture receipt sink mutates only the
+// in-memory DurableCompletionAuditPublicationReceiptLedger and exposes an invocation
+// counter so tests prove non-submitting backend paths and pre-receipt rejections never
+// invoke it. Source/test only: no real audit ledger, no real external publication, no
+// real production receipt sink, no real persistent backend. It does NOT call Run 070,
+// mutate LivePqcTrustState, perform a real trust swap, evict sessions, write sequence
+// files, write authority markers, perform external publication, or touch
+// RocksDB/file/schema/migration/storage-format. MainNet governance, MainNet peer-driven
+// apply, and validator-set rotation remain refused/unsupported; rejected paths are
+// non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_audit_publication_receipt;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
