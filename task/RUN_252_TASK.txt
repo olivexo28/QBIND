@@ -1,0 +1,503 @@
+Run 252 — Source/test modeled durable-completion finalization projection boundary
+
+You are continuing QBIND after Run 251.
+
+Run 240 is fully closed at source/test level.
+Run 241 is fully closed as release-binary evidence for Run 240.
+Run 242 is fully closed as source/test governance execution mutation-engine boundary work.
+Run 243 is fully closed as release-binary evidence for Run 242.
+Run 244 is fully closed as source/test modeled governance trust-state mutation applier boundary work.
+Run 245 is fully closed as release-binary evidence for Run 244.
+Run 246 is fully closed as source/test governance modeled end-to-end pipeline boundary work.
+Run 247 is fully closed as release-binary evidence for Run 246.
+Run 248 is fully closed as source/test modeled durable-consume projection sink boundary work.
+Run 249 is fully closed as release-binary evidence for Run 248.
+Run 250 is fully closed as source/test modeled durable-consume receipt-acknowledgement / completion reporter boundary work.
+Run 251 is fully closed as release-binary evidence for Run 250.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Keep Full C4 OPEN and C5 OPEN unless real production evidence closes them.
+* MainNet peer-driven apply remains refused.
+* Fixture/local/loopback material remains DevNet/TestNet evidence-only.
+* Rejected paths must remain non-mutating.
+* Do not weaken Runs 070, 130–251.
+* Source/test only.
+* No release-binary evidence in this run.
+
+Current state:
+
+* Run 246 models the end-to-end ordering from evaluator/call-site authorization through durable replay, mutation-engine authorization, modeled applier success, and durable consume authorization.
+* Run 248 models the durable-consume projection sink: only a Run 246 `ModeledApplierAppliedAndDurableConsumeAuthorized` outcome can create a sink intent, and only `ConsumeReceiptRecorded` records a modeled in-memory receipt.
+* Run 249 release-evidenced the Run 248 sink boundary.
+* Run 250 models the durable-consume completion reporter: only Run 248 `ConsumeReceiptRecorded` can create a completion-report intent, and only `CompletionReportRecorded` authorizes a new modeled completion-reported state.
+* Run 251 release-evidenced the Run 250 completion-reporter boundary.
+* What remains missing is a typed source/test boundary that models how a future production call site would project an after-completion-report-only acknowledgement into a terminal durable-completion finalization state under the Run 240 durable completion semantics.
+* No real persistent replay backend is implemented.
+* No real durable consume backend is implemented.
+* No real completion-report backend is implemented.
+* No real finalization backend is implemented.
+* No real governance execution engine is implemented.
+* No real production mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No MainNet governance enablement.
+* No MainNet peer-driven apply enablement.
+* Validator-set rotation remains unsupported.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Objective:
+
+Implement the smallest source/test-only typed modeled durable-completion finalization projection boundary.
+
+This run should extend the Run 250 modeled durable-consume completion reporter with a mockable, in-memory finalization projection layer that models how a future production call site would project an after-completion-report-only acknowledgement into a terminal modeled durable-completion-finalized state.
+
+The finalization layer must be a model only. It must not implement a real persistent backend. It must not write RocksDB, files, schemas, migrations, storage formats, wire formats, authority markers, trust-bundle sequence files, or production durable state. It must not call Run 070, mutate `LivePqcTrustState`, perform a real trust swap, evict sessions, or enable MainNet governance / MainNet peer-driven apply.
+
+The key invariant is:
+
+* Run 246 pipeline success is required before any Run 248 sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any Run 250 completion-report intent can exist.
+* Run 250 `CompletionReportRecorded` is required before any Run 252 finalization intent can exist.
+* Run 252 may record finalization only in modeled in-memory fixture state.
+* Every non-recorded / failed / rollback / ambiguous / unavailable / unsupported Run 250 reporter outcome must produce no finalization intent, no finalization record, no durable completion finalization, and no mutation.
+* A finalization failure, rollback, rollback failure, or ambiguous finalization window must never retroactively claim durable completion finality.
+
+Suggested implementation:
+
+1. Add a new source/test-only module:
+
+   `crates/qbind-node/src/pqc_governance_modeled_durable_completion_finalization_projection.rs`
+
+2. Register it in:
+
+   `crates/qbind-node/src/lib.rs`
+
+3. Define typed finalization inputs and bindings, for example:
+
+   * `GovernanceModeledDurableCompletionFinalizationInput`
+   * `GovernanceModeledDurableCompletionFinalizationExpectations`
+   * `GovernanceModeledDurableCompletionFinalizationPolicy`
+   * `GovernanceModeledDurableCompletionFinalizationSurface`
+   * `GovernanceModeledDurableCompletionFinalizationEnvironmentBinding`
+   * `GovernanceModeledDurableCompletionFinalizationRuntimeBinding`
+   * `GovernanceModeledDurableCompletionFinalizationReplayBinding`
+   * `GovernanceModeledDurableCompletionFinalizationPipelineBinding`
+   * `GovernanceModeledDurableCompletionFinalizationSinkBinding`
+   * `GovernanceModeledDurableCompletionFinalizationReporterBinding`
+   * `GovernanceModeledDurableCompletionFinalizationRecord`
+
+4. Define modeled in-memory finalization state, for example:
+
+   * `ModeledDurableCompletionFinalizationLedger`
+   * `ModeledDurableCompletionFinalizationRecord`
+   * `ModeledDurableCompletionFinalizationSnapshot`
+   * `ModeledDurableCompletionFinalizationStatus`
+   * `ModeledDurableCompletionFinalizationDigest`
+
+5. Define an explicit finalization outcome enum, for example:
+
+   * `LegacyBypassNoFinalization`
+   * `RejectedBeforeReporterNoFinalization`
+   * `ReporterDidNotRecordCompletionNoFinalization`
+   * `DurableCompletionFinalized`
+   * `DurableCompletionDuplicateIdempotent`
+   * `DurableCompletionRejectedBeforeRecord`
+   * `DurableCompletionRecordFailedNoFinalization`
+   * `DurableCompletionRolledBackNoFinalization`
+   * `DurableCompletionRollbackFailedFatalNoFinalization`
+   * `DurableCompletionAmbiguousFailClosedNoFinalization`
+   * `ProductionFinalizerUnavailableNoFinalization`
+   * `MainNetFinalizerUnavailableNoFinalization`
+   * `MainNetPeerDrivenApplyRefusedNoFinalization`
+   * `ValidatorSetRotationUnsupportedNoFinalization`
+   * `PolicyChangeUnsupportedNoFinalization`
+
+6. Define a pure/mockable finalizer trait, for example:
+
+   * `GovernanceModeledDurableCompletionFinalizer`
+   * `record_modeled_durable_completion_finalization(...)`
+   * `recover_modeled_durable_completion_finalization_window(...)`
+
+7. Provide source/test-only finalizer implementations:
+
+   * `FixtureModeledDurableCompletionFinalizer`
+   * `ProductionModeledDurableCompletionFinalizer`
+   * `MainNetModeledDurableCompletionFinalizer`
+
+   Requirements:
+
+   * DevNet/TestNet fixture finalizer may mutate only `ModeledDurableCompletionFinalizationLedger`.
+   * Production/MainNet finalizers must be reachable but unavailable/fail-closed.
+   * MainNet peer-driven apply must be refused before pipeline progression, before sink invocation, before reporter invocation, and before finalizer invocation.
+   * The fixture finalizer must expose an invocation counter so tests prove non-recorded reporter paths never invoke it.
+   * The fixture finalization ledger must be in-memory only and must never touch RocksDB, files, markers, sequence files, or production durable state.
+
+8. Add composition helpers:
+
+   * `project_completion_reporter_outcome_to_finalization_intent(...)`
+   * `evaluate_modeled_durable_completion_finalization_projection(...)`
+   * `recover_modeled_durable_completion_finalization_window(...)`
+   * `finalization_outcome_authorizes_modeled_durable_completion(...)`
+   * `finalization_outcome_projects_to_durable_completion(...)`
+
+9. Required composition semantics:
+
+   * `GovernanceModeledDurableConsumeCompletionReporterOutcome::CompletionReportRecorded` is the only Run 250 reporter outcome that may create a durable-completion finalization intent.
+   * `CompletionReportDuplicateIdempotent` may be treated as already-finalized only if the original matching finalization record already exists and all identity fields match exactly; it must not create a new finalization record by itself.
+   * Every other Run 250 reporter outcome maps to `ReporterDidNotRecordCompletionNoFinalization` or a more specific no-finalization fail-closed outcome.
+   * `DurableCompletionFinalized` is the only finalizer outcome that may project to a new modeled durable-completion-finalized state.
+   * Duplicate durable-completion finalization may be idempotent only if the finalization digest, completion-report digest, receipt digest, proposal id, decision id, candidate digest, authority-domain sequence, sink decision digest, reporter decision digest, and modeled pipeline decision digest all match exactly.
+   * Same finalization id with different digest must fail closed as equivocation and must not finalize.
+   * Finalization record failure must not finalize.
+   * Finalization rollback success must not finalize.
+   * Finalization rollback failure must be fatal/fail-closed and must not finalize.
+   * Ambiguous finalization windows must fail closed and must not finalize.
+   * Production/MainNet finalizer unavailable outcomes must not finalize.
+   * Validator-set rotation and policy-change remain unsupported and must not finalize.
+
+10. Add grep-verifiable invariant helpers, for example:
+
+* `modeled_finalization_rejection_is_non_mutating`
+* `modeled_finalization_never_calls_run_070`
+* `modeled_finalization_never_mutates_live_pqc_trust_state`
+* `modeled_finalization_never_writes_sequence_or_marker`
+* `modeled_finalization_no_rocksdb_file_schema_migration_change`
+* `modeled_finalization_pipeline_success_required_before_finalization`
+* `modeled_finalization_sink_receipt_required_before_finalization`
+* `modeled_finalization_completion_report_required_before_finalization`
+* `modeled_finalization_record_required_before_durable_completion`
+* `modeled_finalization_failed_record_never_finalizes`
+* `modeled_finalization_rollback_never_finalizes`
+* `modeled_finalization_ambiguous_window_fails_closed`
+* `modeled_finalization_mainnet_peer_driven_apply_refused_first`
+* `modeled_finalization_production_mainnet_unavailable`
+* `modeled_finalization_validator_set_rotation_unsupported`
+* `modeled_finalization_policy_change_unsupported`
+* `modeled_finalization_local_operator_cannot_satisfy_mainnet_authority`
+* `modeled_finalization_peer_majority_cannot_satisfy_mainnet_authority`
+
+Tests:
+
+Add:
+
+`crates/qbind-node/tests/run_252_modeled_durable_completion_finalization_projection_tests.rs`
+
+Required test matrix:
+
+Accepted / compatible:
+
+* Disabled finalizer policy preserves legacy bypass and performs no finalization, no finalization record, and no mutation.
+* Disabled reporter policy preserves legacy bypass and never invokes the finalizer.
+* Disabled sink policy preserves legacy bypass and never invokes the reporter or finalizer.
+* Disabled pipeline policy preserves legacy bypass and never invokes sink/reporter/finalizer.
+* Disabled evaluator/call-site policy preserves legacy bypass and never invokes sink/reporter/finalizer.
+* DevNet fixture pipeline success + sink receipt recorded + completion report recorded + finalizer record success records one modeled in-memory finalization record.
+* TestNet fixture pipeline success + sink receipt recorded + completion report recorded + finalizer record success records one modeled in-memory finalization record.
+* Modeled add-root pipeline success records finalization only after modeled applier success, sink receipt record, and completion report record.
+* Modeled retire-root pipeline success records finalization only after modeled applier success, sink receipt record, and completion report record.
+* Modeled revoke-root pipeline success records finalization only after modeled applier success, sink receipt record, and completion report record.
+* Modeled emergency-revoke-root pipeline success records finalization only after modeled applier success, sink receipt record, and completion report record.
+* Modeled noop pipeline success records finalization only under explicit success semantics, no trust-state drift, a recorded receipt, and a recorded completion report.
+* Duplicate identical finalization record is idempotent under an explicit typed outcome.
+* `CompletionReportDuplicateIdempotent` can only match an already-finalized record and never creates one by itself.
+* Existing Run 250 completion-reporter behavior remains compatible.
+* Existing Run 248 sink behavior remains compatible.
+* Existing Run 246 pipeline behavior remains compatible.
+* Existing Run 244 modeled applier behavior remains compatible.
+* Existing Run 242 mutation-engine behavior remains compatible.
+* Existing Run 240 durable completion behavior remains compatible.
+* Production finalizer path is reachable but unavailable/fail-closed and records no finalization.
+* MainNet finalizer path is reachable but unavailable/fail-closed and records no finalization.
+* MainNet peer-driven apply refused before pipeline progression, sink invocation, reporter invocation, and finalizer invocation.
+* Validator-set rotation unsupported and records no finalization.
+* Policy-change unsupported and records no finalization.
+
+Rejected / fail-closed:
+
+* evaluator rejection produces no sink intent, no receipt, no reporter intent, no completion report, no finalizer intent, and no finalization;
+* call-site rejection produces no sink intent, no receipt, no reporter intent, no completion report, no finalizer intent, and no finalization;
+* durable replay stale produces no finalizer intent and no finalization;
+* durable replay expired produces no finalizer intent and no finalization;
+* durable replay consumed produces no finalizer intent and no finalization;
+* durable replay superseded produces no finalizer intent and no finalization;
+* durable replay backend unavailable produces no finalizer intent and no finalization;
+* mutation-engine rejection produces no finalizer intent and no finalization;
+* modeled applier rejected-before-snapshot produces no finalizer intent and no finalization;
+* modeled applier rejected-before-apply produces no finalizer intent and no finalization;
+* modeled apply failure produces no finalizer intent and no finalization;
+* modeled rollback produces no finalizer intent and no finalization;
+* modeled rollback-failed produces no finalizer intent and no finalization;
+* modeled ambiguous window produces no finalizer intent and no finalization;
+* sink did not record receipt produces no reporter/finalizer invocation and no finalization;
+* sink rejected-before-record produces no reporter/finalizer invocation and no finalization;
+* sink record failure produces no reporter/finalizer invocation and no finalization;
+* sink rollback produces no reporter/finalizer invocation and no finalization;
+* sink rollback-failed produces no reporter/finalizer invocation and no finalization;
+* sink ambiguous window produces no reporter/finalizer invocation and no finalization;
+* reporter did not record completion produces no finalizer invocation and no finalization;
+* reporter rejected-before-record produces no finalizer invocation and no finalization;
+* reporter record failure produces no finalizer invocation and no finalization;
+* reporter rollback produces no finalizer invocation and no finalization;
+* reporter rollback-failed produces no finalizer invocation and no finalization;
+* reporter ambiguous window produces no finalizer invocation and no finalization;
+* finalization before completion-report record is rejected;
+* finalization after modeled apply failure is rejected;
+* finalization after sink record failure is rejected;
+* finalization after reporter record failure is rejected;
+* finalization after reporter rollback is rejected;
+* finalization after reporter rollback-failed is rejected;
+* finalization after reporter ambiguous window is rejected;
+* same finalization id with different digest is rejected as equivocation and records no second finalization;
+* wrong environment rejected before finalizer invocation;
+* wrong chain rejected before finalizer invocation;
+* wrong genesis rejected before finalizer invocation;
+* wrong governance surface rejected before finalizer invocation;
+* wrong mutation surface rejected before finalizer invocation;
+* wrong finalization digest rejected before finalization record;
+* wrong completion-report digest rejected before finalization record;
+* wrong receipt digest rejected before finalization record;
+* wrong sink decision digest rejected before finalization record;
+* wrong reporter decision digest rejected before finalization record;
+* wrong pipeline decision digest rejected before finalization record;
+* wrong proposal id rejected before finalization record;
+* wrong decision id rejected before finalization record;
+* wrong candidate digest rejected before finalization record;
+* wrong authority-domain sequence rejected before finalization record;
+* malformed finalization record rejected before record;
+* local operator key cannot satisfy MainNet authority;
+* peer majority cannot satisfy MainNet authority;
+* production finalizer unavailable records no finalization;
+* MainNet finalizer unavailable records no finalization;
+* validator-set rotation attempt unsupported and records no finalization;
+* policy-change attempt unsupported and records no finalization;
+* every rejected path produces no Run 070 call, no `LivePqcTrustState` mutation, no real trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, and no finalizer invocation where rejection happens before the finalizer stage.
+
+Recovery / crash-window cases:
+
+* before-pipeline window fails closed / no finalization;
+* after-pipeline-success-before-sink-intent window fails closed / no finalization;
+* after-sink-intent-before-receipt-record window fails closed / no finalization;
+* after-receipt-record-before-report-intent window fails closed / no finalization;
+* after-report-intent-before-report-record window fails closed / no finalization;
+* after-report-record-before-finalization-intent window fails closed / no finalization;
+* after-finalization-intent-before-finalization-record window fails closed / no durable completion finality;
+* after-finalization-record-before-finalization-success window fails closed unless an explicit matching finalization success exists;
+* after-finalization-success recovers as durable completion finalized;
+* after-finalization-ambiguous fails closed / no finalization;
+* finalization record-failed window fails closed / no finalization;
+* finalization rollback-completed window fails closed / no finalization;
+* finalization rollback-failed window is fatal/fail-closed / no finalization;
+* unknown window fails closed / no finalization;
+* production/MainNet recovery classification unavailable/fail-closed;
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection cases:
+
+* only Run 250 `CompletionReportRecorded` creates a finalization intent;
+* Run 246 pipeline success alone creates no finalization intent;
+* Run 248 sink receipt record alone creates no finalization intent;
+* Run 250 completion-report intent alone creates no finalization intent;
+* `CompletionReportDuplicateIdempotent` creates no new finalization unless a matching finalization already exists;
+* evaluator success alone creates no finalization intent;
+* durable replay freshness alone creates no finalization intent;
+* mutation-engine authorization alone creates no finalization intent;
+* modeled applier success without sink receipt and completion report creates no finalization intent;
+* only `DurableCompletionFinalized` authorizes modeled durable-completion-finalized state;
+* `LegacyBypassNoFinalization` does not finalize;
+* `RejectedBeforeReporterNoFinalization` does not finalize;
+* `ReporterDidNotRecordCompletionNoFinalization` does not finalize;
+* `DurableCompletionDuplicateIdempotent` does not create a second finalization and must not be counted as a new finalization;
+* `DurableCompletionRejectedBeforeRecord` does not finalize;
+* `DurableCompletionRecordFailedNoFinalization` does not finalize;
+* `DurableCompletionRolledBackNoFinalization` does not finalize;
+* `DurableCompletionRollbackFailedFatalNoFinalization` does not finalize;
+* `DurableCompletionAmbiguousFailClosedNoFinalization` does not finalize;
+* `ProductionFinalizerUnavailableNoFinalization` does not finalize;
+* `MainNetFinalizerUnavailableNoFinalization` does not finalize;
+* `MainNetPeerDrivenApplyRefusedNoFinalization` does not finalize;
+* `ValidatorSetRotationUnsupportedNoFinalization` does not finalize;
+* `PolicyChangeUnsupportedNoFinalization` does not finalize.
+
+Stage-ordering cases:
+
+* MainNet peer-driven apply refusal happens before pipeline progression, sink invocation, reporter invocation, and finalizer invocation.
+* Evaluator/call-site authorization happens before durable replay freshness.
+* Durable replay freshness happens before mutation-engine authorization.
+* Mutation-engine authorization happens before modeled applier invocation.
+* Modeled applier success happens before sink intent.
+* Sink receipt recording happens after pipeline consume authorization.
+* Completion report recording happens after sink receipt-recorded state.
+* Finalization intent happens only after completion-report recorded state.
+* Durable completion finalization recording happens after completion-report recorded state.
+* A rejection before the finalizer stage leaves the finalizer invocation count at zero.
+* A finalization record failure does not retroactively invalidate the completion-report record but does not authorize durable completion finality.
+* A finalization rollback failure is fatal/fail-closed and does not authorize durable completion finality.
+* The finalizer itself performs no persistent durable completion beyond modeled in-memory fixture state.
+
+Finalization-ledger cases:
+
+* one valid finalization record inserts exactly one modeled in-memory ledger record;
+* duplicate identical finalization is idempotent and does not increase record count;
+* same finalization id with different digest is equivocation and does not increase record count;
+* wrong finalization digest does not record;
+* wrong completion-report digest does not record;
+* wrong receipt digest does not record;
+* wrong sink decision digest does not record;
+* wrong reporter decision digest does not record;
+* wrong pipeline decision digest does not record;
+* wrong proposal id does not record;
+* wrong decision id does not record;
+* wrong candidate digest does not record;
+* wrong authority-domain sequence does not record;
+* malformed finalization does not record;
+* rollback restores modeled finalization ledger snapshot;
+* rollback failure never claims success;
+* fixture finalization ledger never writes files, RocksDB, markers, sequences, or production durable state.
+
+Non-mutation cases:
+
+* no Run 070 call on any finalizer case;
+* no `LivePqcTrustState` mutation on any finalizer case;
+* no real trust swap on any finalizer case;
+* no session eviction on any finalizer case;
+* no sequence write on any finalizer case;
+* no marker write on any finalizer case;
+* no RocksDB/file/schema/migration/storage-format write or format change;
+* no wire/schema/marker/sequence/trust-bundle format change;
+* fixture finalizer mutates only `ModeledDurableCompletionFinalizationLedger`;
+* production/MainNet paths remain unavailable/fail-closed;
+* MainNet peer-driven apply remains refused first.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning if available and report the result.
+* Run CodeQL if available and report the result honestly.
+* If Rust CodeQL analysis is skipped because the database is too large, say that explicitly and do not overclaim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_252.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 252 is source/test only.
+* It adds a modeled durable-completion finalization projection boundary.
+* It models how a future production call site would project an after-completion-report-only acknowledgement into a terminal durable-completion-finalized state.
+* It does not implement a real persistent replay backend.
+* It does not implement a real durable consume backend.
+* It does not implement a real completion-report backend.
+* It does not implement a real finalization backend.
+* It does not add RocksDB/file/schema/migration/storage-format changes.
+* It does not add wire/schema/marker/sequence/trust-bundle changes.
+* It does not write authority markers.
+* It does not write trust-bundle sequence files.
+* It does not call Run 070.
+* It does not mutate `LivePqcTrustState`.
+* It does not perform a real trust swap.
+* It does not evict sessions.
+* It does not implement a real production mutation engine.
+* It does not implement a real governance execution engine.
+* It does not implement a real on-chain governance proof verifier.
+* It does not add KMS/HSM/RemoteSigner backend.
+* It does not enable MainNet governance.
+* It does not enable MainNet peer-driven apply.
+* It does not implement validator-set rotation.
+* The fixture finalizer mutates only modeled in-memory finalization state.
+* Run 246 pipeline success is required before any sink intent can exist.
+* Run 248 `ConsumeReceiptRecorded` is required before any completion-report intent can exist.
+* Run 250 `CompletionReportRecorded` is required before any finalization intent can exist.
+* `DurableCompletionFinalized` is required before any modeled durable-completion-finalized state.
+* Every non-recorded reporter outcome produces no finalizer invocation and no finalization.
+* Failed finalization record, rollback, rollback-failed, ambiguous windows, unavailable production/MainNet paths, rejected replay states, and unsupported actions never finalize.
+* Rejected finalizer paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 252 against Runs 050–251.
+* If no contradiction is found, add a “no Run 252 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If any contradiction is found, do not hide it. Record it explicitly with the exact file/function/doc reference and recommend the smallest safe fix.
+
+Strict non-goals:
+
+* Do not implement a real persistent replay backend.
+* Do not implement a real durable consume backend.
+* Do not implement a real completion-report backend.
+* Do not implement a real finalization backend.
+* Do not implement a real production mutation engine.
+* Do not wire production runtime mutation.
+* Do not call Run 070.
+* Do not mutate `LivePqcTrustState`.
+* Do not perform a real trust swap.
+* Do not evict sessions.
+* Do not write sequence files.
+* Do not write authority markers.
+* Do not implement a real governance execution engine.
+* Do not implement a real on-chain governance proof verifier.
+* Do not implement validator-set rotation.
+* Do not add RocksDB/file/schema/migration/storage-format changes.
+* Do not change wire/schema/marker/sequence/trust-bundle formats.
+* Do not enable MainNet governance.
+* Do not enable MainNet peer-driven apply.
+* Do not add autonomous apply or apply-on-receipt.
+* Do not let peer majority satisfy authority.
+* Do not weaken any fail-closed behavior from Runs 070 or 130–251.
+
+Expected verdict:
+
+Partial-positive / source-test positive.
+
+Run 252 should close the source/test modeled durable-completion finalization projection gap only. It must not claim Full C4 or C5 closure.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 253 next step.
