@@ -1,361 +1,75 @@
-Run 261 continuation — Create release helper/harness first, no re-exploration
-
-You are continuing QBIND Run 261 after an incomplete attempt.
-
-Current status:
-
-* Run 260 is fully closed as source/test positive.
-* Run 261 is NOT complete.
-* No Run 261 files were created.
-* No Run 261 code was committed.
-* The repository is unchanged from the Run 260 baseline.
-* Baseline `cargo build -p qbind-node --release --bin qbind-node` reportedly passes.
-* The previous attempt completed exploration/API mapping only.
-
-Run 261 objective:
-
-Produce release-binary evidence for the Run 260 durable-completion audit-receipt acknowledgement / external-publication confirmation boundary.
-
-This run mirrors the Run 259 → Run 258 evidence pattern, but for Run 260.
-
-Strict instruction:
-
-Do not spend another session only reading. The first deliverable is the release helper file.
-
-Strict scope:
-
-* Release-binary evidence only.
-* No new production runtime behavior.
-* No new source/test feature boundary.
-* No real audit-ledger acknowledgement.
-* No real external-publication confirmation.
-* No real external publication.
-* No real network I/O.
-* No real persistent storage.
-* No RocksDB/file/schema/migration/storage-format change.
-* No wire/schema/marker/sequence/trust-bundle change.
-* No Run 070 call.
-* No `LivePqcTrustState` mutation.
-* No trust swap.
-* No session eviction.
-* No sequence write.
-* No marker write.
-* No MainNet governance.
-* No MainNet peer-driven apply.
-* No validator-set rotation.
-* Keep Full C4 OPEN.
-* Keep C5 OPEN.
-
-Files to create first:
-
-1. `crates/qbind-node/examples/run_261_durable_completion_audit_receipt_acknowledgement_release_binary_helper.rs`
-2. `scripts/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary.sh`
-3. `docs/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary/.gitignore`
-4. `docs/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary/README.md`
-5. `docs/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary/summary.txt`
-6. `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_261.md`
-
-Then update narrowly:
-
-* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
-* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
-* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
-* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
-* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
-* `docs/whitepaper/contradiction.md`
-
-Helper blueprint:
-
-Create `crates/qbind-node/examples/run_261_durable_completion_audit_receipt_acknowledgement_release_binary_helper.rs` by copying the Run 259 helper structure and adapting it to Run 260.
-
-Use the already-verified API mapping from the previous attempt:
-
-* Add a third attachment layer.
-* Copy `AttachedBackend` and `attach_run256_backend`.
-* Copy `AttachedReceipt`, `run258_receipt_identity`, and `attach_run258_receipt` from the Run 260 test.
-* Build `Ctx` with `receipt: AttachedReceipt`, not only backend.
-* Copy/adapt `ack_identity`, `ctx_action`, `ctx`, `input_with_receipt`, `input`, `recorded`, `devnet_ctx`, `testnet_ctx`, and `fixture_sink` from the Run 260 test.
-* Add `mainnet_peer_ctx` using MainNet / PeerDrivenDrain / `Policy::MainNetAuditLedgerAckRequired` / `Kind::MainNetAuditLedgerAckUnavailable`.
-
-Critical projection rule:
-
-The Run 261 helper must drive projection from the Run 258 receipt outcome:
-
-* `input.receipt_binding`
-* `project_audit_receipt_outcome_to_acknowledgement_request`
-
-Do NOT project from the Run 256 backend outcome directly.
-
-Verified projection mapping:
-
-* `AuditReceiptRecorded` → creates acknowledgement request.
-* `AuditReceiptDuplicateIdempotent` → idempotent-only, never creates a new acknowledgement by itself.
-* `LegacyBypassNoAuditReceipt` → legacy-bypass-no-acknowledgement.
-* `RejectedBeforeBackendSubmissionNoAuditReceipt` → rejected-before-audit-receipt-no-acknowledgement.
-* `MainNetPeerDrivenApplyRefusedNoReceipt` → MainNet peer-driven apply refused no acknowledgement.
-* `ValidatorSetRotationUnsupportedNoReceipt` → validator-set rotation unsupported no acknowledgement.
-* `PolicyChangeUnsupportedNoReceipt` → policy-change unsupported no acknowledgement.
-* All other receipt outcomes → audit-receipt-did-not-record-no-acknowledgement.
-
-Verified API notes:
-
-* Outcome `tag()` values exist and should be used for helper table output.
-* Fault variants include acknowledgement no-record / rollback-failed-fatal / ambiguous-after-record shapes.
-* Recovery window mapping is implemented in the Run 260 module.
-* Use:
-
-  * `FixtureDurableCompletionAuditReceiptAcknowledgementSink::new()`
-  * `FixtureDurableCompletionAuditReceiptAcknowledgementSink::with_fault(...)`
-  * `ProductionAuditLedgerDurableCompletionAcknowledgementSink::default()`
-  * `MainNetAuditLedgerDurableCompletionAcknowledgementSink`
-  * `ExternalPublicationDurableCompletionConfirmationSink`
-* Ledger API includes:
-
-  * `find`
-  * `contains`
-  * `len`
-  * `records`
-  * `snapshot`
-  * `restore`
-  * `clone`
-  * `DurableCompletionAuditReceiptAcknowledgementLedgerStatus::Recorded`
-* Request/response/record fields:
-
-  * `acknowledgement_record_id`
-  * response contains `acknowledgement_kind`
-  * record contains `{ acknowledgement_record_id, request_digest, identity_digest }`
-  * identity field is `acknowledgement_id`
-* Binding mismatch should produce `RejectedBeforeAuditReceiptNoAcknowledgement` with sink invocation count zero.
-* Request-field mutations that pass binding but fail inside fixture sink should produce `AcknowledgementRejectedBeforeRecord` with invocation count one and empty ledger.
-* Use the module’s request mismatch checks as the source of truth.
-
-Helper table rename:
-
-* Rename Run 259 `receipt_ledger` table to `acknowledgement_ledger`.
-
-Reachability table must include:
-
-* all Run 260 public type aliases from the module;
-* all 16 acknowledgement outcome variants;
-* all durable completion audit acknowledgement sink types;
-* all digest/request/response/record/ledger types;
-* all Run 260 invariant helper names.
-
-Known invariant helper notes:
-
-* include `durable_completion_audit_ack_record_required_before_ack`
-* include `durable_completion_audit_ack_external_confirmation_unavailable`
-* include `durable_completion_audit_ack_receipt_required`
-* `durable_completion_audit_ack_mainnet_peer_driven_apply_refused_first(env)` takes an argument.
-
-Helper corpus required tables:
-
-* accepted / compatible
-* rejection / fail-closed
-* recovery / crash-window
-* projection
-* stage-ordering
-* acknowledgement-ledger
-* non-mutation
-* reachability
-
-Harness blueprint:
-
-Create `scripts/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary.sh` by copying the Run 259 harness and replacing:
-
-* `run_259` → `run_261`
-* Run 258 symbol list → Run 260 symbol list
-* output directory → `docs/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary`
-* helper example name → `run_261_durable_completion_audit_receipt_acknowledgement_release_binary_helper`
-* evidence doc name → `QBIND_DEVNET_EVIDENCE_RUN_261.md`
-
-The harness must:
-
-* build `target/release/qbind-node`;
-* build the Run 261 release helper;
-* capture git commit, rustc version, cargo version;
-* capture SHA-256 and Build ID for `target/release/qbind-node`;
-* capture SHA-256 and Build ID for the Run 261 helper;
-* run the release helper and collect table counts;
-* run real-binary S1–S6 scenarios;
-* run symbol reachability greps;
-* run a denylist across captured logs;
-* run the regression corpus;
-* write summary into `docs/devnet/run_261_durable_completion_audit_receipt_acknowledgement_release_binary/summary.txt`.
-
-Run 261 real-binary scenarios:
-
-* S1 `--help`: no acknowledgement / audit-ledger / external-publication / confirmation production enablement banner or public flag drift.
-* S2 default DevNet startup parse/smoke: no acknowledgement/audit/publication/confirmation enablement claim.
-* S3 default TestNet startup parse/smoke: no acknowledgement/audit/publication/confirmation enablement claim.
-* S4 default MainNet startup parse/smoke: no acknowledgement/audit/publication/confirmation enablement claim.
-* S5 hidden governance-execution selector or equivalent hidden selector still parses as before, without exposing Run 260/261 helper-only path as public production enablement.
-* S6 invalid governance-execution selector or equivalent invalid selector fails closed before mutation where applicable: no Run 070 call, no marker write, no sequence write, no live trust swap, no session eviction, no receipt sink invocation, no acknowledgement sink invocation, no audit-ledger write, no external-publication confirmation, no external publication.
-
-Regression targets:
-
-Run exactly the corrected target list:
-
-* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
-* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
-* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
-* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
-* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
-* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
-* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
-* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
-* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
-* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
-* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
-* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
-* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
-* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
-* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
-* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
-* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
-* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
-* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
-* `cargo test -p qbind-node --lib pqc_authority`
-* `cargo test -p qbind-node --lib`
-
-Important correction:
-
-Do not use the nonexistent target `run_232_governance_evaluator_replay_state_tests`.
-The correct Run 232 target is:
-
-`run_232_governance_evaluator_replay_runtime_integration_tests`
-
-Run 230 is the replay-state target.
-
-Denylist must prove no active/enabled claims for:
-
-* real audit-ledger acknowledgement backend enabled;
-* real external-publication confirmation backend enabled;
-* durable-completion audit-receipt acknowledgement production enabled;
-* MainNet audit-ledger acknowledgement enabled;
-* MainNet external-publication confirmation enabled;
-* real audit ledger backend enabled;
-* real external publication backend enabled;
-* real production attestation backend enabled;
-* real finalization backend enabled;
-* real completion-report backend enabled;
-* real durable consume backend enabled;
-* real persistent replay backend enabled;
-* real production mutation engine enabled;
-* MainNet mutation engine enabled;
-* MainNet governance enabled;
-* MainNet peer-driven apply enabled;
-* real governance execution engine enabled;
-* real on-chain governance proof verifier enabled;
-* KMS/HSM backend enabled;
-* RemoteSigner backend enabled;
-* validator-set rotation enabled;
-* policy-change action enabled;
-* autonomous apply;
-* apply-on-receipt;
-* apply-on-acknowledgement;
-* peer-majority authority;
-* Run 070 apply from acknowledgement boundary;
-* `LivePqcTrustState` mutation from acknowledgement boundary;
-* real trust swap from acknowledgement boundary;
-* session eviction from acknowledgement boundary;
-* marker write from acknowledgement boundary;
-* sequence write from acknowledgement boundary;
-* RocksDB write from acknowledgement boundary;
-* file write from acknowledgement boundary;
-* external publication by fixture acknowledgement sink;
-* external-publication confirmation by fixture acknowledgement sink;
-* audit-ledger write by fixture acknowledgement sink;
-* DummySig / DummyKem / DummyAead active on production path.
-
-Docs:
-
-Create `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_261.md` with:
-
-* title;
-* status PASS if and only if helper/harness/regressions pass;
-* exact release artifacts and hashes;
-* helper corpus table counts;
-* S1–S6 scenario results;
-* denylist result;
-* regression corpus result;
-* symbol substitutions section;
-* security invariants;
-* honest limitations;
-* C4/C5 status.
-
-Symbol substitutions section must mention any exact-name differences, including:
-
-* projection function uses acknowledgement request projection from Run 258 receipt outcome;
-* table is `acknowledgement_ledger`, not `receipt_ledger`;
-* invariant helper names are the Run 260 `durable_completion_audit_ack_*` helpers;
-* document exact substitutions honestly if compiler iteration finds more.
-
-Docs must state:
-
-* Run 261 is release-binary evidence for Run 260.
-* No production mutating behavior is enabled.
-* The acknowledgement / external-publication confirmation boundary is release-evidenced, not production-enabled.
-* The release helper exercises Run 260 production library symbols in release mode.
-* The release helper remains dead code from production runtime.
-* Fixture acknowledgement sink mutates only modeled in-memory `DurableCompletionAuditReceiptAcknowledgementLedger`.
-* Production audit-ledger acknowledgement, MainNet audit-ledger acknowledgement, and external-publication confirmation sinks remain reachable but unavailable/fail-closed.
-* Run 258 `AuditReceiptRecorded` is required before acknowledgement / confirmation request.
-* Only `AcknowledgementRecorded` authorizes a new modeled acknowledgement state.
-* Duplicate identical acknowledgement is idempotent.
-* Same acknowledgement record id with different digest fails closed as equivocation.
-* Rejected acknowledgement paths are non-mutating.
-* No real audit-ledger acknowledgement is implemented.
-* No real external-publication confirmation is implemented.
-* No real external publication is implemented.
-* No real production attestation/finalization/completion-report/durable-consume/persistent-replay backend is implemented.
-* No real governance execution engine is implemented.
-* No real on-chain governance proof verifier is implemented.
-* No RocksDB/file/schema/migration/storage-format change is implemented.
-* No wire/schema/marker/sequence/trust-bundle change is implemented.
-* No KMS/HSM/RemoteSigner backend is implemented.
-* No MainNet governance enablement.
-* No MainNet peer-driven apply enablement.
-* No validator-set rotation.
-* Full C4 remains OPEN.
-* C5 remains OPEN.
-
-Contradiction handling:
-
-* Crosscheck Run 261 against Runs 050–260.
-* If no contradiction is found, add a “no Run 261 contradiction” entry to `docs/whitepaper/contradiction.md`.
-* If contradiction is found, record it explicitly with exact file/function/doc reference and recommend smallest safe fix.
-
-Security scanning:
-
-* Run secret scan if available.
-* Run CodeQL if available.
-* If Rust CodeQL is skipped because database is too large, or if checker classifies change set as trivial and skips, report that honestly and do not claim CodeQL coverage.
-
-Expected verdict:
-
-Positive release-binary evidence only if:
-
-* release helper builds;
-* release harness exits 0;
-* S1–S6 pass;
-* denylist empty;
-* regression corpus passes;
-* docs/evidence are updated;
-* contradiction entry is present;
-* scans are reported honestly.
-
-Run 261 closes only the Run 260 release-binary evidence gap.
-
-Final response format:
-
-1. Exact verdict.
-2. Files changed.
-3. Release artifacts and hashes.
-4. Helper corpus results.
-5. Real-binary scenarios.
-6. Tests run and results.
-7. Security invariants preserved.
-8. Honest limitations.
-9. C4/C5 status.
-10. Suggested Run 262 next step.
+Run 261 documentation closure continuation only
+
+The Run 261 release helper and harness have already passed.
+
+Do not rewrite the helper.
+Do not rewrite the harness unless a doc path or summary typo requires a tiny fix.
+Do not add new runtime behavior.
+Do not add new evidence scope.
+Do not move to Run 262 yet.
+
+Use the existing generated Run 261 summary and README to create/update only the missing canonical documentation deliverables:
+
+1. Create:
+   docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_261.md
+
+2. Append narrow Run 261 entries to:
+   docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md
+   docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md
+   docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md
+   docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md
+   docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md
+   docs/whitepaper/contradiction.md
+
+3. The canonical evidence doc must record:
+   - verdict: PASS for release-binary evidence only
+   - git commit: 4f322b9b1d9efb2f125d79341fc25c2a5602e53a
+   - qbind-node SHA-256: 2e24112f5b31018bd8851e49d4782331c8b05c59ab1229c21ea58c7a0364903e
+   - qbind-node BuildID: c4b9c201d8b534b9b10b7e48de0e8e974ed264c4
+   - helper SHA-256: e68ffd57e74ec80a10c8e66ee0f8da66c2b233b7f524958565ecd1dc15018e5e
+   - helper BuildID: 93d94cb84e2c6d5d7fc1c89186b426cd7c8fe9c0
+   - S1–S6 results, including S6 expected fail-closed non-zero
+   - helper corpus: 256 pass / 0 fail
+   - table counts:
+     accepted 66
+     rejection 50
+     recovery 32
+     projection 20
+     stage_ordering 6
+     acknowledgement_ledger 18
+     non_mutation 28
+     reachability 36
+   - denylist: 51 forbidden patterns empty
+   - regression corpus: all listed targets rc=0
+   - secret scan clean
+   - CodeQL skipped as trivial: harness + docs only
+   - helper remains dead code from production runtime
+   - production/MainNet/external-publication paths remain reachable but unavailable/fail-closed
+   - no real audit ledger acknowledgement
+   - no real external-publication confirmation
+   - no real external publication
+   - no production backend
+   - no MainNet governance
+   - no MainNet peer-driven apply
+   - no validator-set rotation
+   - no storage/wire/schema change
+   - no Run 070 call
+   - no LivePqcTrustState mutation
+   - Full C4 remains OPEN
+   - C5 remains OPEN
+
+4. contradiction.md:
+   Add a “Run 261 — no contradiction found” entry after crosschecking Runs 050–260.
+   If a contradiction is found, record it explicitly instead.
+
+5. Final response format:
+   1. Exact verdict
+   2. Files changed
+   3. Release artifacts and hashes
+   4. Helper corpus results
+   5. Real-binary scenarios
+   6. Tests run and results
+   7. Security invariants preserved
+   8. Honest limitations
+   9. C4/C5 status
+   10. Suggested Run 262 next step

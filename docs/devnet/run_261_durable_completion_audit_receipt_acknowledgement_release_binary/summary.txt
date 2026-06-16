@@ -1,0 +1,64 @@
+Run 261 — release-binary governance durable-completion audit-receipt acknowledgement interface evidence
+git_commit: 4f322b9b1d9efb2f125d79341fc25c2a5602e53a
+
+build:
+  rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
+  cargo_version:      cargo 1.96.0 (30a34c682 2026-05-25)
+  qbind_node_sha256:  2e24112f5b31018bd8851e49d4782331c8b05c59ab1229c21ea58c7a0364903e
+  qbind_node_buildid: BuildID[sha1]=c4b9c201d8b534b9b10b7e48de0e8e974ed264c4
+  helper_261_sha256:  e68ffd57e74ec80a10c8e66ee0f8da66c2b233b7f524958565ecd1dc15018e5e
+  helper_261_buildid: BuildID[sha1]=93d94cb84e2c6d5d7fc1c89186b426cd7c8fe9c0
+
+release-binary scenario verdicts:
+  S1_helprc=0
+  S2_default_devnetrc=0
+  S3_default_testnetrc=0
+  S4_default_mainnetrc=0
+  S5_selector_parsesrc=1
+  S6_selector_invalidrc=1
+  note: S6 (invalid selector) is expected non-zero (fail-closed before mutation).
+
+release-helper verdicts:
+  helper_run_261rc=0verdict: PASS
+
+helper corpus verdicts (release mode, Run 260 audit-receipt-acknowledgement boundary symbols):
+  table accepted: pass=66 fail=0
+  table rejection: pass=50 fail=0
+  table recovery: pass=32 fail=0
+  table projection: pass=20 fail=0
+  table stage_ordering: pass=6 fail=0
+  table acknowledgement_ledger: pass=18 fail=0
+  table non_mutation: pass=28 fail=0
+  table reachability: pass=36 fail=0
+  total_pass: 256
+  total_fail: 0
+  verdict: PASS
+
+denylist result:
+  verdict: PASS (all 51 forbidden patterns proven empty across captured logs)
+
+regression test verdicts:
+  test:run_260_durable_completion_audit_receipt_acknowledgement_tests	rc=0
+  test:run_258_durable_completion_audit_publication_receipt_tests	rc=0
+  test:run_256_durable_completion_attestation_backend_tests	rc=0
+  test:run_254_modeled_durable_completion_attestation_projection_tests	rc=0
+  test:run_252_modeled_durable_completion_finalization_projection_tests	rc=0
+  test:run_250_modeled_durable_consume_completion_reporter_tests	rc=0
+  test:run_248_modeled_durable_consume_projection_sink_tests	rc=0
+  test:run_246_governance_modeled_end_to_end_pipeline_tests	rc=0
+  test:run_244_modeled_governance_trust_mutation_applier_tests	rc=0
+  test:run_242_governance_execution_mutation_engine_tests	rc=0
+  test:run_240_governance_evaluator_replay_durable_runtime_integration_tests	rc=0
+  test:run_238_governance_evaluator_replay_durable_backend_tests	rc=0
+  test:run_236_governance_evaluator_replay_consume_runtime_integration_tests	rc=0
+  test:run_234_governance_evaluator_replay_consume_boundary_tests	rc=0
+  test:run_232_governance_evaluator_replay_runtime_integration_tests	rc=0
+  test:run_230_governance_evaluator_replay_state_tests	rc=0
+  test:run_228_peer_evaluator_context_representation_tests	rc=0
+  test:run_226_governance_evaluator_runtime_callsite_wiring_tests	rc=0
+  lib:pqc_authority	rc=0
+  lib:lib_all	rc=0
+
+honest_limits: the Run 260 governance durable-completion audit-receipt acknowledgement interface boundary is a pure, typed projection over the already-landed Run 258 audit-publication receipt outcome plus a mockable acknowledgement sink that records ONLY the in-memory DurableCompletionAuditReceiptAcknowledgementLedger, exercised here through release-built library symbols (the same symbols a future production call site would use); a disabled acknowledgement / receipt / attestor / finalizer / reporter / sink / pipeline / evaluator-call-site policy is a legacy no-acknowledgement bypass with no acknowledgement invocation; MainNet peer-driven apply is refused before pipeline progression, before any sink invocation, before any reporter invocation, before any finalizer invocation, before any attestor invocation, before any receipt invocation, and before any acknowledgement invocation; only the Run 258 AuditReceiptRecorded outcome creates an acknowledgement request and AuditReceiptDuplicateIdempotent may only match an already-recorded acknowledgement; only AcknowledgementRecorded authorizes a new modeled acknowledgement-recorded state; a duplicate identical acknowledgement is idempotent (no second submission) and the same acknowledgement record id with a different digest fails closed as equivocation; every non-recording audit-receipt outcome, record failure, rollback, rollback-failed, ambiguous acknowledgement window, unavailable production/MainNet/external-publication-confirmation path, and unsupported action never records, and a rejection before the acknowledgement stage leaves the acknowledgement invocation count at zero; production/MainNet/external-publication paths are reachable but always unavailable/fail-closed; validator-set rotation and policy-change actions remain unsupported; rejections are pure and non-mutating (no marker/sequence write, no live trust swap, no session eviction, no external publication, no durable completion / audit write, no Run 070 call, no LivePqcTrustState mutation); no real audit-receipt acknowledgement, audit ledger acknowledgement, external publication confirmation, audit-publication receipt, finalization receipt, completion-report receipt, durable consume receipt, persistent replay receipt, production mutation engine, governance execution engine, or on-chain governance proof verifier; no KMS/HSM/RemoteSigner acknowledgement; no RocksDB schema change, no file format change, no database migration, no storage-format change, no persistent storage, and no wire/marker/sequence/trust-bundle schema change; existing Run 259, Run 257, Run 255, Run 253, Run 251, Run 249, Run 247, and Run 245 release behaviour remains compatible; full C4 and C5 remain OPEN.
+
+verdict: PASS
