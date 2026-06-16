@@ -1,5 +1,5 @@
 Run 261 — release-binary governance durable-completion audit-receipt acknowledgement interface evidence
-git_commit: 4f322b9b1d9efb2f125d79341fc25c2a5602e53a
+git_commit: c003d6ca8aac819dffc2ea25bf183bd94ebcb98b
 
 build:
   rustc_version:      rustc 1.96.0 (ac68faa20 2026-05-25)
