@@ -1112,6 +1112,32 @@ pub mod pqc_governance_durable_completion_audit_receipt_acknowledgement;
 // remain refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5
 // remains OPEN.
 pub mod pqc_governance_durable_completion_acknowledgement_consumer;
+// Run 264 — modeled durable-completion consumer settlement-projection / post-consumer
+// settlement-projection interface boundary. SOURCE/TEST-ONLY INTERFACE BOUNDARY. Defines the
+// first typed interface a future production settlement-projection or downstream
+// durable-completion subsystem would use to consume a durable-completion acknowledgement
+// consumer record and prepare a post-consumer settlement-projection record after the Run 262
+// modeled acknowledgement-consumer stage produced AcknowledgementConsumed. Interface boundary
+// only: production / MainNet / external settlement-projection consumers are reachable but
+// deliberately unavailable / fail-closed, and the only positive settlement-projection
+// implementation is a DevNet/TestNet fixture that records into an in-memory fixture ledger for
+// source/test evidence only. Only the Run 262 AcknowledgementConsumed outcome creates a
+// settlement-projection request; AcknowledgementConsumerDuplicateIdempotent may only match an
+// already-recorded settlement-projection record and never creates one. Every other consumer
+// outcome, every settlement-projection record failure / rollback / rollback-failed / ambiguous
+// window, every production / MainNet / external settlement-projection unavailable path, and
+// every unsupported action fails closed with no settlement projection. The DevNet/TestNet
+// fixture settlement-projection sink mutates only the in-memory
+// DurableCompletionConsumerSettlementProjectionLedger and exposes an invocation counter so tests
+// prove non-recording consumer paths and pre-settlement-projection rejections never invoke it.
+// Source/test only: no real settlement, no real external publication, no real audit-ledger
+// acknowledgement, no real persistent backend. It does NOT call Run 070, mutate
+// LivePqcTrustState, perform a real trust swap, evict sessions, write sequence files, write
+// authority markers, perform external publication, or touch RocksDB/file/schema/migration/
+// storage-format. MainNet governance, MainNet peer-driven apply, and validator-set rotation
+// remain refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5
+// remains OPEN.
+pub mod pqc_governance_durable_completion_consumer_settlement_projection;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
