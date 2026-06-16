@@ -308,7 +308,7 @@ a faked, unattached consumer path. The matrix covers:
 * `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
   — `48 passed; 0 failed`.
 * `cargo test -p qbind-node --lib pqc_authority` — `164 passed; 0 failed`.
-* `cargo test -p qbind-node --lib` — PASS.
+* `cargo test -p qbind-node --lib` — `1365 passed; 0 failed`.
 
 > Note: as observed in Run 260, the task brief lists the Run 232 regression target
 > as `run_232_governance_evaluator_replay_state_tests`; the actual target in the
