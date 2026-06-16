@@ -1,0 +1,488 @@
+Run 262 — Source/test durable-completion acknowledgement consumer / post-acknowledgement settlement interface boundary
+
+You are continuing QBIND after Run 261.
+
+Current accepted state:
+
+Run 260 closed the source/test durable-completion audit-receipt acknowledgement / external-publication confirmation boundary.
+
+Run 261 closed the release-binary evidence gap for Run 260. Run 261 proved, on real `target/release/qbind-node` plus a release-built helper, that the Run 260 acknowledgement boundary symbols are present and exercised in release mode. The helper remains dead code from the production runtime. The fixture acknowledgement sink mutates only modeled in-memory `DurableCompletionAuditReceiptAcknowledgementLedger` state. Production/MainNet audit-ledger acknowledgement and external-publication confirmation sinks remain reachable but unavailable/fail-closed.
+
+Full C4 remains OPEN. C5 remains OPEN.
+
+Strict workflow:
+
+* Execution-first.
+* Narrow scope only.
+* No broad redesign.
+* No silent regressions.
+* No hype or overclaiming.
+* Source/test only.
+* No release-binary evidence in this run.
+* No production runtime enablement.
+* No real settlement backend.
+* No real audit-ledger acknowledgement backend.
+* No real external-publication confirmation backend.
+* No real external publication.
+* No real production attestation backend.
+* No real finalization backend.
+* No real completion-report backend.
+* No real durable consume backend.
+* No real persistent replay backend.
+* No real governance execution engine.
+* No real production mutation engine.
+* No real on-chain governance proof verifier.
+* No KMS/HSM/RemoteSigner backend.
+* No RocksDB/file/schema/migration/storage-format change.
+* No wire/schema/marker/sequence/trust-bundle change.
+* No Run 070 call.
+* No `LivePqcTrustState` mutation.
+* No real trust swap.
+* No session eviction.
+* No sequence write.
+* No marker write.
+* No network I/O or external settlement.
+* No MainNet governance.
+* No MainNet peer-driven apply.
+* No validator-set rotation.
+* Keep Full C4 OPEN.
+* Keep C5 OPEN.
+
+Exact objective:
+
+Add the next source/test-only boundary above Run 260: a modeled durable-completion acknowledgement consumer / post-acknowledgement settlement interface.
+
+This boundary models the first consumer of a Run 260 `AcknowledgementRecorded` outcome. It represents how a future production subsystem might consume a durable-completion acknowledgement and prepare a post-acknowledgement settlement intent.
+
+This is only a typed, mockable, in-memory source/test boundary. It must not implement real settlement, real external publication, real audit-ledger acknowledgement, real governance execution, or production mutation.
+
+Required new source module:
+
+`crates/qbind-node/src/pqc_governance_durable_completion_acknowledgement_consumer.rs`
+
+Register it in:
+
+`crates/qbind-node/src/lib.rs`
+
+Required new test file:
+
+`crates/qbind-node/tests/run_262_durable_completion_acknowledgement_consumer_tests.rs`
+
+Required evidence doc:
+
+`docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_262.md`
+
+Required narrow doc updates:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Required ordering:
+
+The new Run 262 boundary must preserve the full prior modeled chain:
+
+1. Run 246 pipeline success before any Run 248 sink intent.
+2. Run 248 `ConsumeReceiptRecorded` before any Run 250 completion-report intent.
+3. Run 250 `CompletionReportRecorded` before any Run 252 finalization intent.
+4. Run 252 `DurableCompletionFinalized` before any Run 254 attestation intent.
+5. Run 254 `DurableCompletionAttested` before any Run 256 backend request.
+6. Run 256 `BackendSubmissionRecorded` before any Run 258 audit/publication receipt request.
+7. Run 258 `AuditReceiptRecorded` before any Run 260 acknowledgement / confirmation request.
+8. Run 260 `AcknowledgementRecorded` before any Run 262 acknowledgement-consumer / settlement intent.
+9. Only Run 262 `AcknowledgementConsumed` or equivalent explicitly named success outcome may authorize a new modeled consumer state.
+
+Suggested type names:
+
+* `DurableCompletionAcknowledgementConsumerKind`
+* `DurableCompletionAcknowledgementConsumerPolicy`
+* `DurableCompletionAcknowledgementConsumerIdentity`
+* `DurableCompletionAcknowledgementConsumerEnvironment`
+* `DurableCompletionAcknowledgementConsumerSurface`
+* `DurableCompletionAcknowledgementConsumerBinding`
+* `DurableCompletionAcknowledgementConsumerInput`
+* `DurableCompletionAcknowledgementConsumerExpectations`
+* `DurableCompletionAcknowledgementConsumerRequest`
+* `DurableCompletionAcknowledgementConsumerResponse`
+* `DurableCompletionAcknowledgementConsumerRecord`
+* `DurableCompletionAcknowledgementConsumerDigest`
+* `DurableCompletionAcknowledgementConsumerTranscriptDigest`
+
+Suggested kinds:
+
+* `Disabled`
+* `FixtureInMemory`
+* `ProductionSettlementUnavailable`
+* `MainNetSettlementUnavailable`
+* `ExternalSettlementUnavailable`
+* `Unknown`
+
+Suggested policies:
+
+* `Disabled`
+* `FixtureAllowed`
+* `ProductionSettlementRequired`
+* `MainNetSettlementRequired`
+* `ExternalSettlementRequired`
+
+Required trait:
+
+`GovernanceDurableCompletionAcknowledgementConsumer`
+
+Required trait method:
+
+`consume_durable_completion_acknowledgement(...)`
+
+Required recovery method:
+
+`recover_durable_completion_acknowledgement_consumer_window(...)`
+
+Required implementations:
+
+* `FixtureDurableCompletionAcknowledgementConsumer`
+* `ProductionDurableCompletionSettlementConsumer`
+* `MainNetDurableCompletionSettlementConsumer`
+* `ExternalDurableCompletionSettlementConsumer`
+
+Implementation rules:
+
+* Fixture implementation is DevNet/TestNet only.
+* Fixture implementation mutates only an in-memory `DurableCompletionAcknowledgementConsumerLedger`.
+* Production/MainNet/external settlement consumers are reachable but unavailable/fail-closed.
+* No real settlement, no external call, no network call, no file write, no RocksDB write, no marker write, no sequence write, no Run 070 call, no `LivePqcTrustState` mutation.
+
+Required in-memory ledger:
+
+* `DurableCompletionAcknowledgementConsumerLedger`
+* `DurableCompletionAcknowledgementConsumerLedgerRecord`
+* `DurableCompletionAcknowledgementConsumerLedgerSnapshot`
+* `DurableCompletionAcknowledgementConsumerLedgerStatus`
+
+Ledger semantics:
+
+* One valid acknowledgement-consumer record inserts exactly one in-memory record.
+* Duplicate identical consumer record is idempotent.
+* Same consumer record id with a different digest is equivocation and fails closed.
+* Rollback restores the in-memory snapshot.
+* Rollback failure never claims success.
+* Fixture ledger never writes files, RocksDB, markers, sequences, external publications, confirmations, audit-ledger entries, settlement records, or production durable state.
+
+Required outcome enum:
+
+Use exact names close to these:
+
+* `LegacyBypassNoConsumer`
+* `RejectedBeforeAcknowledgementNoConsumer`
+* `AcknowledgementDidNotRecordNoConsumer`
+* `AcknowledgementConsumed`
+* `AcknowledgementConsumerDuplicateIdempotent`
+* `AcknowledgementConsumerRejectedBeforeRecord`
+* `AcknowledgementConsumerRecordFailedNoConsumer`
+* `AcknowledgementConsumerRolledBackNoConsumer`
+* `AcknowledgementConsumerRollbackFailedFatalNoConsumer`
+* `AcknowledgementConsumerAmbiguousFailClosedNoConsumer`
+* `ProductionSettlementUnavailableNoConsumer`
+* `MainNetSettlementUnavailableNoConsumer`
+* `ExternalSettlementUnavailableNoConsumer`
+* `MainNetPeerDrivenApplyRefusedNoConsumer`
+* `ValidatorSetRotationUnsupportedNoConsumer`
+* `PolicyChangeUnsupportedNoConsumer`
+
+Only `AcknowledgementConsumed` may authorize a new modeled consumer state.
+
+Duplicate idempotent must not create a second record.
+
+Same record id with different digest must fail closed as equivocation.
+
+Every fail/unavailable/rollback/ambiguous/unsupported path must record nothing.
+
+Required projection helpers:
+
+* `project_acknowledgement_outcome_to_consumer_request(...)`
+* `evaluate_durable_completion_acknowledgement_consumer(...)`
+* `recover_durable_completion_acknowledgement_consumer_window(...)`
+* `acknowledgement_consumer_outcome_authorizes_consumer_record(...)`
+* `acknowledgement_consumer_outcome_projects_to_consumed(...)`
+
+Projection semantics:
+
+* Only Run 260 `AcknowledgementRecorded` creates a consumer request.
+* Run 260 `AcknowledgementDuplicateIdempotent` may only match an already-recorded consumer record and must not create a new one by itself.
+* Every other Run 260 outcome maps to a no-consumer fail-closed outcome.
+* Run 258 `AuditReceiptRecorded` alone does not create a consumer request.
+* Run 256 `BackendSubmissionRecorded` alone does not create a consumer request.
+* Run 254 attestation alone does not create a consumer request.
+* Run 252 finalization alone does not create a consumer request.
+* Run 250 completion report alone does not create a consumer request.
+* Run 248 sink receipt alone does not create a consumer request.
+* Run 246 pipeline success alone does not create a consumer request.
+* Validate the full chain of digests before invocation.
+* Binding mismatch leaves invocation count zero.
+* Digest mismatch after invocation does not record.
+* Failure/rollback/ambiguous/unavailable paths fail closed.
+
+Required invariant helpers:
+
+Add grep-verifiable helpers, with names close to:
+
+* `durable_completion_ack_consumer_rejection_is_non_mutating`
+* `durable_completion_ack_consumer_never_calls_run_070`
+* `durable_completion_ack_consumer_never_mutates_live_pqc_trust_state`
+* `durable_completion_ack_consumer_never_writes_sequence_or_marker`
+* `durable_completion_ack_consumer_no_rocksdb_file_schema_migration_change`
+* `durable_completion_ack_consumer_no_external_publication`
+* `durable_completion_ack_consumer_no_real_audit_ledger`
+* `durable_completion_ack_consumer_no_real_settlement`
+* `durable_completion_ack_consumer_pipeline_success_required`
+* `durable_completion_ack_consumer_sink_receipt_required`
+* `durable_completion_ack_consumer_completion_report_required`
+* `durable_completion_ack_consumer_finalization_required`
+* `durable_completion_ack_consumer_attestation_required`
+* `durable_completion_ack_consumer_backend_submission_required`
+* `durable_completion_ack_consumer_receipt_required`
+* `durable_completion_ack_consumer_acknowledgement_required`
+* `durable_completion_ack_consumer_record_required_before_consume`
+* `durable_completion_ack_consumer_failed_record_never_records`
+* `durable_completion_ack_consumer_rollback_never_records`
+* `durable_completion_ack_consumer_ambiguous_window_fails_closed`
+* `durable_completion_ack_consumer_mainnet_peer_driven_apply_refused_first`
+* `durable_completion_ack_consumer_production_mainnet_unavailable`
+* `durable_completion_ack_consumer_external_settlement_unavailable`
+* `durable_completion_ack_consumer_validator_set_rotation_unsupported`
+* `durable_completion_ack_consumer_policy_change_unsupported`
+* `durable_completion_ack_consumer_local_operator_cannot_satisfy_mainnet_authority`
+* `durable_completion_ack_consumer_peer_majority_cannot_satisfy_mainnet_authority`
+
+Required tests:
+
+Accepted / compatible:
+
+* Disabled consumer policy preserves legacy bypass: no consumer record, no settlement, no external publication, no confirmation, no mutation.
+* Disabled acknowledgement policy never invokes consumer.
+* Disabled receipt policy never invokes acknowledgement or consumer.
+* Disabled backend policy never invokes receipt, acknowledgement, or consumer.
+* Disabled attestor/finalizer/reporter/sink/pipeline/evaluator-call-site policy never reaches consumer.
+* DevNet fixture chain records exactly one modeled in-memory consumer record only after:
+  Run 246 pipeline success → Run 248 sink receipt → Run 250 completion report → Run 252 finalization → Run 254 attestation → Run 256 backend submission → Run 258 audit receipt → Run 260 acknowledgement → Run 262 consumer.
+* TestNet fixture chain does the same.
+* Add-root / retire-root / revoke-root / emergency-revoke-root / noop modeled action variants preserve ordering and consume only after acknowledgement recorded.
+* Duplicate identical consumer record is idempotent.
+* Run 260 duplicate-idempotent acknowledgement may only match an already-recorded consumer record and never creates a new consumer record by itself.
+* Existing Run 260 acknowledgement behavior remains compatible.
+* Existing Run 258 receipt behavior remains compatible.
+* Existing Run 256 backend behavior remains compatible.
+* Existing Run 254 attestation behavior remains compatible.
+* Existing Run 252 finalization behavior remains compatible.
+* Existing Run 250 completion-reporter behavior remains compatible.
+* Existing Run 248 sink behavior remains compatible.
+* Existing Run 246 pipeline behavior remains compatible.
+* Existing Run 244 modeled applier behavior remains compatible.
+* Existing Run 242 mutation-engine behavior remains compatible.
+* Existing Run 240 durable completion behavior remains compatible.
+* Production settlement path is reachable but unavailable/fail-closed and records no consumer state.
+* MainNet settlement path is reachable but unavailable/fail-closed and records no consumer state.
+* External settlement path is reachable but unavailable/fail-closed and performs no publication/network I/O.
+* MainNet peer-driven apply refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, backend invocation, receipt invocation, acknowledgement invocation, and consumer invocation.
+* Validator-set rotation unsupported and records no consumer state.
+* Policy-change unsupported and records no consumer state.
+
+Rejected / fail-closed:
+
+* Every rejection before Run 262 produces no consumer request and no consumer record.
+* Acknowledgement did-not-record / rejected-before-record / record failure / rollback / rollback-failed / ambiguous window produces no consumer invocation and no consumer record.
+* Consumer before Run 260 `AcknowledgementRecorded` is rejected.
+* Consumer after modeled apply failure, sink failure, reporter failure, finalizer failure, attestor failure, backend failure, receipt failure, acknowledgement failure, acknowledgement rollback, acknowledgement rollback-failed, or acknowledgement ambiguous window is rejected.
+* Same consumer record id with different digest fails closed as equivocation.
+* Wrong environment / chain / genesis / governance surface / mutation surface fails before consumer invocation.
+* Wrong consumer identity / policy / kind / request digest / response digest / record digest fails closed.
+* Wrong acknowledgement identity / request / response / record / transcript digest fails closed.
+* Wrong receipt identity / request / response / record / transcript digest fails closed.
+* Wrong backend identity / request / response / receipt / transcript digest fails closed.
+* Wrong attestation / finalization / completion-report / sink / reporter / pipeline digest fails closed.
+* Wrong proposal id / decision id / candidate digest / authority-domain sequence fails closed.
+* Malformed request / response fails closed.
+* Local operator key cannot satisfy MainNet authority.
+* Peer majority cannot satisfy MainNet authority.
+* Production/MainNet/external settlement unavailable paths record no consumer state and perform no publication.
+* Rejected paths produce no Run 070 call, no `LivePqcTrustState` mutation, no trust swap, no session eviction, no sequence write, no marker write, no RocksDB/file/schema/migration/storage-format change, no external publication, no confirmation, no real audit-ledger write, no real settlement write.
+
+Recovery / crash-window:
+
+* before-pipeline through after-acknowledgement-success-before-consumer-request windows fail closed unless explicit matching acknowledgement success exists.
+* after-consumer-request-before-consumer-record fails closed.
+* after-consumer-record-before-consumer-success fails closed unless explicit matching consumer record exists.
+* after-consumer-success recovers as consumed.
+* ambiguous, record-failed, rollback-completed, rollback-failed, unknown, production/MainNet/external settlement windows fail closed.
+* MainNet peer-driven apply refusal precedes recovery classification where applicable.
+
+Projection:
+
+* Only Run 260 `AcknowledgementRecorded` creates a consumer request.
+* Run 246 pipeline success alone creates no consumer request.
+* Run 248 sink receipt alone creates no consumer request.
+* Run 250 completion report alone creates no consumer request.
+* Run 252 finalization alone creates no consumer request.
+* Run 254 attestation alone creates no consumer request.
+* Run 256 backend submission alone creates no consumer request.
+* Run 258 audit receipt alone creates no consumer request.
+* Run 260 acknowledgement request alone creates no consumer request.
+* Run 260 duplicate-idempotent acknowledgement creates no new consumer record unless a matching consumer record already exists.
+* Only `AcknowledgementConsumed` authorizes modeled consumer state.
+* Every other outcome does not record.
+
+Stage-ordering:
+
+* MainNet peer-driven apply refusal happens before every later stage.
+* Evaluator/call-site authorization precedes durable replay.
+* Durable replay precedes mutation engine.
+* Mutation engine precedes modeled applier.
+* Modeled applier precedes sink intent.
+* Sink receipt precedes completion report.
+* Completion report precedes finalization.
+* Finalization precedes attestation.
+* Attestation precedes backend request.
+* Backend submission precedes audit receipt request.
+* Audit receipt precedes acknowledgement request.
+* Acknowledgement record precedes consumer request.
+* Consumer record happens only after acknowledgement recorded state.
+* Rejection before consumer stage leaves consumer invocation count zero.
+* Consumer record failure does not invalidate acknowledgement but does not authorize consumer state.
+* Consumer rollback failure is fatal/fail-closed and does not authorize consumer state.
+
+Consumer ledger:
+
+* One valid consumer record inserts one in-memory record.
+* Duplicate identical consumer record is idempotent and does not increase count.
+* Same record id with different digest is equivocation and does not increase count.
+* Wrong consumer / acknowledgement / receipt / backend / attestation / finalization / report / sink / pipeline / proposal / decision / candidate / sequence digest does not record.
+* Malformed request / response does not record.
+* Rollback restores in-memory ledger snapshot.
+* Rollback failure never claims success.
+* Fixture ledger never writes files, RocksDB, markers, sequences, external publications, confirmations, audit-ledger entries, settlement records, or production durable state.
+
+Non-mutation:
+
+* no Run 070 call;
+* no `LivePqcTrustState` mutation;
+* no trust swap;
+* no session eviction;
+* no sequence write;
+* no marker write;
+* no RocksDB/file/schema/migration/storage-format write;
+* no wire/schema/marker/sequence/trust-bundle change;
+* no external network publication;
+* no real external settlement;
+* no real external-publication confirmation;
+* no real audit-ledger write;
+* fixture consumer mutates only `DurableCompletionAcknowledgementConsumerLedger`;
+* production/MainNet/external paths remain unavailable/fail-closed.
+
+Validation commands:
+
+Run at minimum:
+
+* `cargo build -p qbind-node --lib`
+* `cargo test -p qbind-node --test run_262_durable_completion_acknowledgement_consumer_tests`
+* `cargo test -p qbind-node --test run_260_durable_completion_audit_receipt_acknowledgement_tests`
+* `cargo test -p qbind-node --test run_258_durable_completion_audit_publication_receipt_tests`
+* `cargo test -p qbind-node --test run_256_durable_completion_attestation_backend_tests`
+* `cargo test -p qbind-node --test run_254_modeled_durable_completion_attestation_projection_tests`
+* `cargo test -p qbind-node --test run_252_modeled_durable_completion_finalization_projection_tests`
+* `cargo test -p qbind-node --test run_250_modeled_durable_consume_completion_reporter_tests`
+* `cargo test -p qbind-node --test run_248_modeled_durable_consume_projection_sink_tests`
+* `cargo test -p qbind-node --test run_246_governance_modeled_end_to_end_pipeline_tests`
+* `cargo test -p qbind-node --test run_244_modeled_governance_trust_mutation_applier_tests`
+* `cargo test -p qbind-node --test run_242_governance_execution_mutation_engine_tests`
+* `cargo test -p qbind-node --test run_240_governance_evaluator_replay_durable_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_238_governance_evaluator_replay_durable_backend_tests`
+* `cargo test -p qbind-node --test run_236_governance_evaluator_replay_consume_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_234_governance_evaluator_replay_consume_boundary_tests`
+* `cargo test -p qbind-node --test run_232_governance_evaluator_replay_runtime_integration_tests`
+* `cargo test -p qbind-node --test run_230_governance_evaluator_replay_state_tests`
+* `cargo test -p qbind-node --test run_228_peer_evaluator_context_representation_tests`
+* `cargo test -p qbind-node --test run_226_governance_evaluator_runtime_callsite_wiring_tests`
+* `cargo test -p qbind-node --test run_224_governance_evaluator_runtime_integration_tests`
+* `cargo test -p qbind-node --lib pqc_authority`
+* `cargo test -p qbind-node --lib`
+
+Security scanning:
+
+* Run secret scanning and report result.
+* Run CodeQL if available and report result honestly.
+* If Rust CodeQL analysis is skipped because the database is too large, or if the checker classifies the change set as trivial, state that explicitly and do not claim CodeQL coverage.
+
+Documentation:
+
+Create:
+
+* `docs/devnet/QBIND_DEVNET_EVIDENCE_RUN_262.md`
+
+Update narrowly:
+
+* `docs/protocol/QBIND_GOVERNANCE_EXECUTION_RUNTIME_SURFACE_AUDIT.md`
+* `docs/protocol/QBIND_C4_C5_CLOSURE_CRITERIA.md`
+* `docs/ops/QBIND_PQC_TRUST_LIFECYCLE_RUNBOOK.md`
+* `docs/protocol/QBIND_PEER_DRIVEN_TRUST_BUNDLE_APPLY_SAFETY.md`
+* `docs/protocol/QBIND_TRUST_ANCHOR_AUTHORITY_MODEL.md`
+* `docs/whitepaper/contradiction.md`
+
+Documentation must state:
+
+* Run 262 is source/test only.
+* Run 262 adds a durable-completion acknowledgement consumer / post-acknowledgement settlement interface boundary.
+* The boundary models the first post-Run-260 acknowledgement consumer interface a future production settlement or downstream durable completion subsystem might use.
+* The fixture consumer is DevNet/TestNet evidence-only and in-memory only.
+* Production settlement, MainNet settlement, and external settlement consumers are reachable but unavailable/fail-closed.
+* No real settlement is implemented.
+* No real audit-ledger acknowledgement is implemented.
+* No real external-publication confirmation is implemented.
+* No real external publication is implemented.
+* No real production attestation backend is implemented.
+* No real finalization backend is implemented.
+* No real completion-report backend is implemented.
+* No real durable consume backend is implemented.
+* No real persistent replay backend is implemented.
+* No real governance execution engine is implemented.
+* No real production mutation engine is implemented.
+* No real on-chain governance proof verifier is implemented.
+* No KMS/HSM/RemoteSigner backend is implemented.
+* No RocksDB/file/schema/migration/storage-format change is implemented.
+* No wire/schema/marker/sequence/trust-bundle change is implemented.
+* No MainNet governance is enabled.
+* No MainNet peer-driven apply is enabled.
+* No validator-set rotation is implemented.
+* Run 260 `AcknowledgementRecorded` is required before any consumer / settlement request can exist.
+* Only `AcknowledgementConsumed` authorizes modeled consumer state.
+* Every non-recorded acknowledgement outcome produces no consumer request and no consumer record.
+* Failed consumer record, rollback, rollback-failed, ambiguous windows, unavailable production/MainNet/external settlement paths, rejected replay states, and unsupported actions never record.
+* MainNet peer-driven apply remains refused before pipeline progression, sink invocation, reporter invocation, finalizer invocation, attestor invocation, backend invocation, receipt invocation, acknowledgement invocation, and consumer invocation.
+* Rejected consumer paths are non-mutating.
+* Full C4 remains OPEN.
+* C5 remains OPEN.
+
+Contradiction handling:
+
+* Crosscheck Run 262 against Runs 050–261.
+* If no contradiction is found, add a “no Run 262 contradiction” entry to `docs/whitepaper/contradiction.md`.
+* If contradiction is found, record it explicitly with exact file/function/doc reference and recommend the smallest safe fix.
+
+Expected verdict after completion:
+
+Source/test positive only if the Run 262 tests, regression corpus, docs, contradiction entry, and scans pass.
+
+Suggested next step after successful Run 262:
+
+Run 263 — release-binary evidence for the Run 262 durable-completion acknowledgement consumer / post-acknowledgement settlement interface boundary.
+
+Final response format:
+
+1. Exact verdict.
+2. Files changed.
+3. Tests run and results.
+4. Security invariants preserved.
+5. Honest limitations.
+6. C4/C5 status.
+7. Suggested Run 263 next step.
