@@ -381,6 +381,24 @@ settlement-projection path. The matrix covers:
   consumer-settlement-projection state; no RocksDB / file / schema / migration /
   storage-format change; no wire / marker / sequence / trust-bundle change.
 
+## Security scan closure
+
+Scan-closure pass for Run 264 (no production behavior change, no new runtime path,
+no release-binary evidence):
+
+* **Secret scanning** — ran over the Run 264 changed files (`crates/qbind-node/src/lib.rs`,
+  `crates/qbind-node/src/pqc_governance_durable_completion_consumer_settlement_projection.rs`,
+  `crates/qbind-node/tests/run_264_durable_completion_consumer_settlement_projection_tests.rs`,
+  and the Run 264 docs). **Result: no secrets detected.** No API keys, tokens, or
+  credentials are present; the module uses only modeled in-memory fixture state.
+* **CodeQL (Rust)** — invoked over the Run 264 changes. The CodeQL tooling reported
+  **no analyzable code changes in the diff** (the Run 264 source/test changes are
+  already committed on the branch and the working tree is clean), so **no CodeQL
+  analysis was performed**. We therefore do **not** claim CodeQL coverage for this
+  run. No findings were produced, and no findings were available to act on.
+* **Fixes from scans:** none required — neither scan surfaced an actionable issue, so
+  the Run 264 implementation was left unchanged.
+
 ## Honest limitations
 
 * Run 264 is source/test only and introduces a settlement-projection interface
