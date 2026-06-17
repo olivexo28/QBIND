@@ -139,7 +139,11 @@ recovers as recorded; ambiguous/record-failed/rollback/unknown windows fail clos
 
 ## Validation commands and results
 
-* `cargo build -p qbind-node --lib` — OK.
+The full Run 270 validation corpus below was **re-executed from scratch** in the
+Run 270 closure pass (not just the Run 270 test). Every command returned `rc=0`
+with the exact pass counts shown; no command failed.
+
+* `cargo build -p qbind-node --lib` — OK. rc=0.
 * `cargo test -p qbind-node --test run_270_durable_completion_settlement_receipt_acknowledgement_tests` — ok. 63 passed; 0 failed.
 * `cargo test -p qbind-node --test run_268_durable_completion_settlement_finalization_tests` — ok. 63 passed; 0 failed.
 * `cargo test -p qbind-node --test run_266_durable_completion_settlement_commitment_tests` — ok. 63 passed; 0 failed.
