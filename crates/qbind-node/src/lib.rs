@@ -1159,6 +1159,30 @@ pub mod pqc_governance_durable_completion_consumer_settlement_projection;
 // peer-driven apply, and validator-set rotation remain refused/unsupported; rejected paths are
 // non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_durable_completion_settlement_commitment;
+// Run 268 — modeled durable-completion settlement-finalization / settlement-receipt
+// interface boundary. SOURCE/TEST-ONLY INTERFACE BOUNDARY. Defines the first typed
+// interface a future production settlement-finalization or settlement-receipt subsystem
+// would use to consume a Run 266 durable-completion settlement-commitment record and
+// prepare a settlement-finalization receipt after the Run 266 modeled settlement-
+// commitment stage produced SettlementCommitmentRecorded. Interface boundary only:
+// production / MainNet / external settlement-finalization sinks are reachable but
+// deliberately unavailable / fail-closed, and the only positive settlement-finalization
+// implementation is a DevNet/TestNet fixture that records into an in-memory fixture
+// ledger for source/test evidence only. Only the Run 266 SettlementCommitmentRecorded
+// outcome creates a settlement-finalization request; SettlementCommitmentDuplicateIdempotent
+// may only match an already-recorded settlement-finalization record and never creates
+// one. Every other settlement-commitment outcome, every settlement-finalization record
+// failure / rollback / rollback-failed / ambiguous window, every production / MainNet /
+// external settlement-finalization unavailable path, and every unsupported action fails
+// closed with no settlement finalization. Source/test only: no real settlement, no real
+// settlement finality, no real settlement receipt, no real external publication, no real
+// audit-ledger acknowledgement, no real persistent backend. It does NOT call Run 070,
+// mutate LivePqcTrustState, perform a real trust swap, evict sessions, write sequence
+// files, write authority markers, perform external publication, or touch
+// RocksDB/file/schema/migration/storage-format. MainNet governance, MainNet peer-driven
+// apply, and validator-set rotation remain refused/unsupported; rejected paths are
+// non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_settlement_finalization;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
