@@ -1183,6 +1183,35 @@ pub mod pqc_governance_durable_completion_settlement_commitment;
 // apply, and validator-set rotation remain refused/unsupported; rejected paths are
 // non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_durable_completion_settlement_finalization;
+// Run 270 — modeled durable-completion settlement-receipt acknowledgement /
+// settlement-finality projection interface boundary. SOURCE/TEST-ONLY INTERFACE
+// BOUNDARY. Defines the first typed interface a future production settlement-receipt
+// acknowledgement or settlement-finality projection subsystem would use to consume a
+// Run 268 durable-completion settlement-finalization record and prepare a
+// settlement-receipt acknowledgement / settlement-finality projection receipt after
+// the Run 268 modeled settlement-finalization stage produced
+// SettlementFinalizationRecorded. Interface boundary only: production / MainNet /
+// external settlement-receipt acknowledgement sinks are reachable but deliberately
+// unavailable / fail-closed, and the only positive settlement-receipt acknowledgement
+// implementation is a DevNet/TestNet fixture that records into an in-memory fixture
+// ledger for source/test evidence only. Only the Run 268 SettlementFinalizationRecorded
+// outcome creates a settlement-receipt acknowledgement request;
+// SettlementFinalizationDuplicateIdempotent may only match an already-recorded
+// settlement-receipt acknowledgement record and never creates one. Every other
+// settlement-finalization outcome, every settlement-receipt acknowledgement record
+// failure / rollback / rollback-failed / ambiguous window, every production / MainNet /
+// external settlement-receipt acknowledgement unavailable path, and every unsupported
+// action fails closed with no settlement-receipt acknowledgement. Source/test only: no
+// real settlement, no real settlement finality, no real settlement receipt, no real
+// settlement-receipt acknowledgement, no real settlement-finality projection, no real
+// external publication, no real audit-ledger acknowledgement, no real persistent
+// backend. It does NOT call Run 070, mutate LivePqcTrustState, perform a real trust
+// swap, evict sessions, write sequence files, write authority markers, perform external
+// publication, or touch RocksDB/file/schema/migration/storage-format. MainNet
+// governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains
+// OPEN.
+pub mod pqc_governance_durable_completion_settlement_receipt_acknowledgement;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
