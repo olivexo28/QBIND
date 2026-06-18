@@ -1296,6 +1296,25 @@ pub mod pqc_governance_durable_completion_settlement_outcome_publication;
 // apply, and validator-set rotation remain refused/unsupported; rejected paths are
 // non-mutating. Full C4 remains OPEN; C5 remains OPEN.
 pub mod pqc_governance_durable_completion_external_publication_confirmation;
+// Run 278 — source/test durable-completion external-publication-confirmation consumer /
+// external-publication-receipt interface boundary. Sits one rung above the Run 276
+// external-publication-confirmation boundary: consumes only a Run 276
+// ExternalPublicationConfirmationRecorded outcome and projects a typed
+// external-publication-receipt intent plus a modeled in-memory
+// DurableCompletionExternalPublicationReceiptLedger record. Only
+// ExternalPublicationReceiptRecorded authorizes modeled external-publication-receipt
+// state. The fixture receipt sink is DevNet/TestNet evidence-only and mutates only the
+// in-memory ledger; production / MainNet / external receipt sinks remain reachable but
+// unavailable / fail-closed. Source/test only: no real settlement, settlement finality,
+// settlement receipt, settlement-receipt acknowledgement, settlement-finality projection,
+// settlement-outcome report backend, settlement-outcome publication, external publication,
+// external-publication confirmation, external-publication receipt, or audit-ledger
+// acknowledgement backend. It does NOT call Run 070, mutate LivePqcTrustState, perform a
+// real trust swap, evict sessions, write sequence files, write authority markers, perform
+// external publication, or touch RocksDB/file/schema/migration/storage-format. MainNet
+// governance, MainNet peer-driven apply, and validator-set rotation remain
+// refused/unsupported; rejected paths are non-mutating. Full C4 remains OPEN; C5 remains OPEN.
+pub mod pqc_governance_durable_completion_external_publication_receipt;
 // Run 057 — trust-bundle activation epoch/height gating. Enforces
 // optional `activation_height` / `activation_epoch` fields on a
 // freshly validated trust bundle so a structurally valid, signed,
