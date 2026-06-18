@@ -1,15 +1,15 @@
-// Run 282 — durable-completion external-publication-acknowledgement consumer /
-// external-publication-audit-finalization boundary tests.
+// Run 280 — durable-completion external-publication-receipt consumer /
+// external-publication-acknowledgement boundary tests.
 //
-// Source/test-only modeled boundary that sits one rung above the Run 280
-// external-publication-acknowledgement boundary. The chain attaches the real Run 256
+// Source/test-only modeled boundary that sits one rung above the Run 278
+// external-publication-receipt boundary. The chain attaches the real Run 256
 // backend, Run 258 receipt, Run 260 acknowledgement, Run 262 consumer, Run 264
 // settlement projection, Run 266 settlement commitment, Run 268 settlement
 // finalization, Run 270 settlement-receipt acknowledgement, Run 272
 // settlement-outcome report, Run 274 settlement-outcome publication, Run 276
-// external-publication-confirmation, and Run 280 external-publication-acknowledgement
-// records, then evaluates the Run 282 external-publication-audit-finalization
-// boundary. Only a Run 282 ExternalPublicationAuditFinalizationRecorded outcome
+// external-publication-confirmation, and Run 278 external-publication-receipt
+// records, then evaluates the Run 280 external-publication-acknowledgement
+// boundary. Only a Run 280 ExternalPublicationAcknowledgementRecorded outcome
 // authorizes new state; every ambiguous, missing, duplicate, or mismatched
 // window fails closed.
 
@@ -180,52 +180,52 @@ use qbind_node::pqc_governance_durable_completion_external_publication_confirmat
     GovernanceDurableCompletionExternalPublicationConfirmationSink, MainNetExternalPublicationConfirmationSink,
     ProductionExternalPublicationConfirmationSink,
 };
-use qbind_node::pqc_governance_durable_completion_external_publication_acknowledgement::{
-    external_publication_acknowledgement_identity_digest,
-    durable_completion_external_publication_acknowledgement_ambiguous_window_fails_closed,
-    durable_completion_external_publication_acknowledgement_attestation_required,
-    durable_completion_external_publication_acknowledgement_backend_submission_required,
-    durable_completion_external_publication_acknowledgement_completion_report_required,
-    durable_completion_external_publication_acknowledgement_external_unavailable,
-    durable_completion_external_publication_acknowledgement_failed_record_never_records,
-    durable_completion_external_publication_acknowledgement_finalization_projection_required,
-    durable_completion_external_publication_acknowledgement_local_operator_cannot_satisfy_mainnet_authority,
-    durable_completion_external_publication_acknowledgement_mainnet_peer_driven_apply_refused_first,
-    durable_completion_external_publication_acknowledgement_never_calls_run_070,
-    durable_completion_external_publication_acknowledgement_never_mutates_live_pqc_trust_state,
-    durable_completion_external_publication_acknowledgement_never_writes_sequence_or_marker,
-    durable_completion_external_publication_acknowledgement_no_external_publication,
-    durable_completion_external_publication_acknowledgement_no_real_audit_ledger,
-    durable_completion_external_publication_acknowledgement_no_rocksdb_file_schema_migration_change,
-    durable_completion_external_publication_acknowledgement_peer_majority_cannot_satisfy_mainnet_authority,
-    durable_completion_external_publication_acknowledgement_pipeline_success_required,
-    durable_completion_external_publication_acknowledgement_policy_change_unsupported,
-    durable_completion_external_publication_acknowledgement_production_mainnet_unavailable,
-    durable_completion_external_publication_acknowledgement_receipt_required,
-    durable_completion_external_publication_acknowledgement_record_required_before_reported,
-    durable_completion_external_publication_acknowledgement_rejection_is_non_mutating,
-    durable_completion_external_publication_acknowledgement_rollback_never_records,
-    durable_completion_external_publication_acknowledgement_sink_receipt_required,
-    durable_completion_external_publication_acknowledgement_validator_set_rotation_unsupported,
-    evaluate_durable_completion_external_publication_acknowledgement,
-    project_external_publication_confirmation_outcome_to_external_publication_acknowledgement_request,
-    recover_durable_completion_external_publication_acknowledgement_window,
-    external_publication_acknowledgement_outcome_authorizes_record,
-    external_publication_acknowledgement_outcome_projects_to_recorded,
-    DurableCompletionExternalPublicationAcknowledgementExpectations,
-    DurableCompletionExternalPublicationAcknowledgementFault,
-    DurableCompletionExternalPublicationAcknowledgementIdentity,
-    DurableCompletionExternalPublicationAcknowledgementInput,
-    DurableCompletionExternalPublicationAcknowledgementKind,
-    DurableCompletionExternalPublicationAcknowledgementLedger,
-    DurableCompletionExternalPublicationAcknowledgementOutcome,
-    DurableCompletionExternalPublicationAcknowledgementPolicy,
-    DurableCompletionExternalPublicationAcknowledgementRequest,
-    DurableCompletionExternalPublicationAcknowledgementRequestIntent,
-    DurableCompletionExternalPublicationAcknowledgementWindow, ExternalExternalPublicationAcknowledgementSink,
-    FixtureDurableCompletionExternalPublicationAcknowledgementSink,
-    GovernanceDurableCompletionExternalPublicationAcknowledgementSink, MainNetExternalPublicationAcknowledgementSink,
-    ProductionExternalPublicationAcknowledgementSink,
+use qbind_node::pqc_governance_durable_completion_external_publication_receipt::{
+    external_publication_receipt_identity_digest,
+    durable_completion_external_publication_receipt_ambiguous_window_fails_closed,
+    durable_completion_external_publication_receipt_attestation_required,
+    durable_completion_external_publication_receipt_backend_submission_required,
+    durable_completion_external_publication_receipt_completion_report_required,
+    durable_completion_external_publication_receipt_external_unavailable,
+    durable_completion_external_publication_receipt_failed_record_never_records,
+    durable_completion_external_publication_receipt_finalization_projection_required,
+    durable_completion_external_publication_receipt_local_operator_cannot_satisfy_mainnet_authority,
+    durable_completion_external_publication_receipt_mainnet_peer_driven_apply_refused_first,
+    durable_completion_external_publication_receipt_never_calls_run_070,
+    durable_completion_external_publication_receipt_never_mutates_live_pqc_trust_state,
+    durable_completion_external_publication_receipt_never_writes_sequence_or_marker,
+    durable_completion_external_publication_receipt_no_external_publication,
+    durable_completion_external_publication_receipt_no_real_audit_ledger,
+    durable_completion_external_publication_receipt_no_rocksdb_file_schema_migration_change,
+    durable_completion_external_publication_receipt_peer_majority_cannot_satisfy_mainnet_authority,
+    durable_completion_external_publication_receipt_pipeline_success_required,
+    durable_completion_external_publication_receipt_policy_change_unsupported,
+    durable_completion_external_publication_receipt_production_mainnet_unavailable,
+    durable_completion_external_publication_receipt_receipt_required,
+    durable_completion_external_publication_receipt_record_required_before_reported,
+    durable_completion_external_publication_receipt_rejection_is_non_mutating,
+    durable_completion_external_publication_receipt_rollback_never_records,
+    durable_completion_external_publication_receipt_sink_receipt_required,
+    durable_completion_external_publication_receipt_validator_set_rotation_unsupported,
+    evaluate_durable_completion_external_publication_receipt,
+    project_external_publication_confirmation_outcome_to_external_publication_receipt_request,
+    recover_durable_completion_external_publication_receipt_window,
+    external_publication_receipt_outcome_authorizes_record,
+    external_publication_receipt_outcome_projects_to_recorded,
+    DurableCompletionExternalPublicationReceiptExpectations,
+    DurableCompletionExternalPublicationReceiptFault,
+    DurableCompletionExternalPublicationReceiptIdentity,
+    DurableCompletionExternalPublicationReceiptInput,
+    DurableCompletionExternalPublicationReceiptKind,
+    DurableCompletionExternalPublicationReceiptLedger,
+    DurableCompletionExternalPublicationReceiptOutcome,
+    DurableCompletionExternalPublicationReceiptPolicy,
+    DurableCompletionExternalPublicationReceiptRequest,
+    DurableCompletionExternalPublicationReceiptRequestIntent,
+    DurableCompletionExternalPublicationReceiptWindow, ExternalExternalPublicationReceiptSink,
+    FixtureDurableCompletionExternalPublicationReceiptSink,
+    GovernanceDurableCompletionExternalPublicationReceiptSink, MainNetExternalPublicationReceiptSink,
+    ProductionExternalPublicationReceiptSink,
 };
 use qbind_node::pqc_governance_durable_completion_external_publication_audit_finalization::{
     external_publication_audit_finalization_identity_digest,
@@ -273,6 +273,54 @@ use qbind_node::pqc_governance_durable_completion_external_publication_audit_fin
     FixtureDurableCompletionExternalPublicationAuditFinalizationSink,
     GovernanceDurableCompletionExternalPublicationAuditFinalizationSink, MainNetExternalPublicationAuditFinalizationSink,
     ProductionExternalPublicationAuditFinalizationSink,
+};
+
+use qbind_node::pqc_governance_durable_completion_external_publication_acknowledgement::{
+    external_publication_acknowledgement_identity_digest,
+    durable_completion_external_publication_acknowledgement_ambiguous_window_fails_closed,
+    durable_completion_external_publication_acknowledgement_attestation_required,
+    durable_completion_external_publication_acknowledgement_backend_submission_required,
+    durable_completion_external_publication_acknowledgement_completion_report_required,
+    durable_completion_external_publication_acknowledgement_external_unavailable,
+    durable_completion_external_publication_acknowledgement_failed_record_never_records,
+    durable_completion_external_publication_acknowledgement_finalization_projection_required,
+    durable_completion_external_publication_acknowledgement_local_operator_cannot_satisfy_mainnet_authority,
+    durable_completion_external_publication_acknowledgement_mainnet_peer_driven_apply_refused_first,
+    durable_completion_external_publication_acknowledgement_never_calls_run_070,
+    durable_completion_external_publication_acknowledgement_never_mutates_live_pqc_trust_state,
+    durable_completion_external_publication_acknowledgement_never_writes_sequence_or_marker,
+    durable_completion_external_publication_acknowledgement_no_external_publication,
+    durable_completion_external_publication_acknowledgement_no_real_audit_ledger,
+    durable_completion_external_publication_acknowledgement_no_rocksdb_file_schema_migration_change,
+    durable_completion_external_publication_acknowledgement_peer_majority_cannot_satisfy_mainnet_authority,
+    durable_completion_external_publication_acknowledgement_pipeline_success_required,
+    durable_completion_external_publication_acknowledgement_policy_change_unsupported,
+    durable_completion_external_publication_acknowledgement_production_mainnet_unavailable,
+    durable_completion_external_publication_acknowledgement_receipt_required,
+    durable_completion_external_publication_acknowledgement_record_required_before_reported,
+    durable_completion_external_publication_acknowledgement_rejection_is_non_mutating,
+    durable_completion_external_publication_acknowledgement_rollback_never_records,
+    durable_completion_external_publication_acknowledgement_sink_receipt_required,
+    durable_completion_external_publication_acknowledgement_validator_set_rotation_unsupported,
+    evaluate_durable_completion_external_publication_acknowledgement,
+    project_external_publication_receipt_outcome_to_external_publication_acknowledgement_request,
+    recover_durable_completion_external_publication_acknowledgement_window,
+    external_publication_acknowledgement_outcome_authorizes_record,
+    external_publication_acknowledgement_outcome_projects_to_recorded,
+    DurableCompletionExternalPublicationAcknowledgementExpectations,
+    DurableCompletionExternalPublicationAcknowledgementFault,
+    DurableCompletionExternalPublicationAcknowledgementIdentity,
+    DurableCompletionExternalPublicationAcknowledgementInput,
+    DurableCompletionExternalPublicationAcknowledgementKind,
+    DurableCompletionExternalPublicationAcknowledgementLedger,
+    DurableCompletionExternalPublicationAcknowledgementOutcome,
+    DurableCompletionExternalPublicationAcknowledgementPolicy,
+    DurableCompletionExternalPublicationAcknowledgementRequest,
+    DurableCompletionExternalPublicationAcknowledgementRequestIntent,
+    DurableCompletionExternalPublicationAcknowledgementWindow, ExternalExternalPublicationAcknowledgementSink,
+    FixtureDurableCompletionExternalPublicationAcknowledgementSink,
+    GovernanceDurableCompletionExternalPublicationAcknowledgementSink, MainNetExternalPublicationAcknowledgementSink,
+    ProductionExternalPublicationAcknowledgementSink,
 };
 use qbind_node::pqc_governance_execution_runtime_arming::GovernanceExecutionRuntimeSurface;
 use qbind_node::pqc_governance_modeled_durable_completion_attestation_projection::GovernanceModeledDurableCompletionAttestationOutcome;
@@ -338,13 +386,17 @@ const CONFIRMATION_ID: &str = "fixture-external-publication-confirmation-0001";
 const CONFIRMATION_DOMAIN_TAG: &str = "QBIND:run276:domain-separation:v1";
 const CONFIRMATION_RECORD_ID: &str =
     "durable-completion-external-publication-confirmation-0001";
-const RECEIPT_ID: &str = "fixture-external-publication-acknowledgement-0001";
+const RECEIPT_ID: &str = "fixture-external-publication-receipt-0001";
 const RECEIPT_DOMAIN_TAG: &str = "QBIND:run278:domain-separation:v1";
 const RECEIPT_RECORD_ID: &str =
-    "durable-completion-external-publication-acknowledgement-0001";
-const ACKNOWLEDGEMENT_ID: &str = "fixture-external-publication-audit-finalization-0001";
+    "durable-completion-external-publication-receipt-0001";
+const ACKNOWLEDGEMENT_ID: &str = "fixture-external-publication-acknowledgement-0001";
 const ACKNOWLEDGEMENT_DOMAIN_TAG: &str = "QBIND:run280:domain-separation:v1";
 const ACKNOWLEDGEMENT_RECORD_ID: &str =
+    "durable-completion-external-publication-acknowledgement-0001";
+const AUDIT_FINALIZATION_ID: &str = "fixture-external-publication-audit-finalization-0001";
+const AUDIT_FINALIZATION_DOMAIN_TAG: &str = "QBIND:run282:domain-separation:v1";
+const AUDIT_FINALIZATION_RECORD_ID: &str =
     "durable-completion-external-publication-audit-finalization-0001";
 
 /// The real Run 256 backend submission digests, captured from an *actual*
@@ -374,6 +426,7 @@ struct ActionLabel {
     outcome_report_record_id: String,
     outcome_publication_record_id: String,
     confirmation_record_id: String,
+    external_publication_receipt_record_id: String,
     external_publication_acknowledgement_record_id: String,
     external_publication_audit_finalization_record_id: String,
     proposal_id: String,
@@ -402,6 +455,9 @@ fn action_label(label: &str) -> ActionLabel {
         confirmation_record_id: format!(
             "durable-completion-external-publication-confirmation-{label}"
         ),
+        external_publication_receipt_record_id: format!(
+            "durable-completion-external-publication-receipt-{label}"
+        ),
         external_publication_acknowledgement_record_id: format!(
             "durable-completion-external-publication-acknowledgement-{label}"
         ),
@@ -427,8 +483,9 @@ fn default_action() -> ActionLabel {
         outcome_report_record_id: OUTCOME_REPORT_RECORD_ID.to_string(),
         outcome_publication_record_id: OUTCOME_PUBLICATION_RECORD_ID.to_string(),
         confirmation_record_id: CONFIRMATION_RECORD_ID.to_string(),
-        external_publication_acknowledgement_record_id: RECEIPT_RECORD_ID.to_string(),
-        external_publication_audit_finalization_record_id: ACKNOWLEDGEMENT_RECORD_ID.to_string(),
+        external_publication_receipt_record_id: RECEIPT_RECORD_ID.to_string(),
+        external_publication_acknowledgement_record_id: ACKNOWLEDGEMENT_RECORD_ID.to_string(),
+        external_publication_audit_finalization_record_id: AUDIT_FINALIZATION_RECORD_ID.to_string(),
         proposal_id: PROPOSAL.to_string(),
         decision_id: DECISION.to_string(),
         candidate_digest: CAND_DIGEST.to_string(),
@@ -2712,14 +2769,14 @@ fn attach_run276_external_publication_confirmation(
     }
 }
 // ===========================================================================
-// Run 280 external-publication-acknowledgement attachment (prior boundary)
-// Builds a REAL Run 280 recorded outcome from the Run 276 prior. Uses the real
-// Run 280 module field names so the Run 280 cur-layer can consume it.
+// Run 278 external-publication-receipt attachment (prior boundary)
+// Builds a REAL Run 278 recorded outcome from the Run 276 prior. Uses the real
+// Run 278 module field names so the Run 278 cur-layer can consume it.
 // ===========================================================================
 #[allow(dead_code)]
-struct AttachedExternalPublicationAcknowledgement {
-    outcome: DurableCompletionExternalPublicationAcknowledgementOutcome,
-    external_publication_acknowledgement_record_id: String,
+struct AttachedExternalPublicationReceipt {
+    outcome: DurableCompletionExternalPublicationReceiptOutcome,
+    external_publication_receipt_record_id: String,
     identity_digest: String,
     request_digest: String,
     response_digest: String,
@@ -2729,20 +2786,20 @@ struct AttachedExternalPublicationAcknowledgement {
     external_publication_confirmation: AttachedExternalPublicationConfirmation,
 }
 
-fn run278_confirmation_identity() -> DurableCompletionExternalPublicationAcknowledgementIdentity {
-    DurableCompletionExternalPublicationAcknowledgementIdentity {
+fn run278_confirmation_identity() -> DurableCompletionExternalPublicationReceiptIdentity {
+    DurableCompletionExternalPublicationReceiptIdentity {
         confirmation_id: RECEIPT_ID.to_string(),
-        kind: DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
-        policy: DurableCompletionExternalPublicationAcknowledgementPolicy::FixtureAllowed,
+        kind: DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+        policy: DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
         domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
     }
 }
 
-fn attach_run278_external_publication_acknowledgement(
+fn attach_run278_external_publication_receipt(
     environment: TrustBundleEnvironment,
     action: &ActionLabel,
     confirmation_duplicate: bool,
-) -> AttachedExternalPublicationAcknowledgement {
+) -> AttachedExternalPublicationReceipt {
     let external_publication_confirmation =
         attach_run276_external_publication_confirmation(environment, action, false);
     let consumer = external_publication_confirmation.consumer.clone();
@@ -2766,8 +2823,8 @@ fn attach_run278_external_publication_acknowledgement(
         authority_domain_sequence: SEQUENCE,
     };
     let id = run278_confirmation_identity();
-    let request = DurableCompletionExternalPublicationAcknowledgementRequest {
-        external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
+    let request = DurableCompletionExternalPublicationReceiptRequest {
+        external_publication_receipt_record_id: action.external_publication_receipt_record_id.clone(),
         environment: confirmation_env,
         chain_id: CHAIN.to_string(),
         genesis_hash: GENESIS.to_string(),
@@ -2817,8 +2874,8 @@ fn attach_run278_external_publication_acknowledgement(
         identity: id.clone(),
         domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
     };
-    let expectations = DurableCompletionExternalPublicationAcknowledgementExpectations {
-        expected_external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
+    let expectations = DurableCompletionExternalPublicationReceiptExpectations {
+        expected_external_publication_receipt_record_id: action.external_publication_receipt_record_id.clone(),
         expected_environment: confirmation_env,
         expected_chain_id: CHAIN.to_string(),
         expected_genesis_hash: GENESIS.to_string(),
@@ -2870,9 +2927,238 @@ fn attach_run278_external_publication_acknowledgement(
             .clone(),
         expected_external_publication_confirmation_record_id: external_publication_confirmation.confirmation_record_id.clone(),
         expected_identity: id.clone(),
+        expected_external_publication_receipt_kind: DurableCompletionExternalPublicationReceiptKind::FixtureInMemory,
+        expected_external_publication_receipt_policy: DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+        expected_domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
+    };
+    let input = DurableCompletionExternalPublicationReceiptInput {
+        policy: DurableCompletionExternalPublicationReceiptPolicy::FixtureAllowed,
+        environment_binding: env,
+        runtime_binding: runtime,
+        replay_binding: DurableReplayObservation::MutationAuthorized,
+        pipeline_binding:
+            GovernanceModeledEndToEndPipelineOutcome::ModeledApplierAppliedAndDurableConsumeAuthorized,
+        sink_binding: GovernanceModeledDurableConsumeSinkOutcome::ConsumeReceiptRecorded,
+        reporter_binding:
+            GovernanceModeledDurableConsumeCompletionReporterOutcome::CompletionReportRecorded,
+        confirmation_binding:
+            GovernanceModeledDurableCompletionFinalizationOutcome::DurableCompletionFinalized,
+        attestation_binding:
+            GovernanceModeledDurableCompletionAttestationOutcome::DurableCompletionAttested,
+        backend_binding: ack.receipt.backend.outcome.clone(),
+        receipt_binding: ack.receipt.outcome.clone(),
+        acknowledgement_binding: ack.outcome.clone(),
+        consumer_binding: consumer.outcome.clone(),
+        external_publication_confirmation_binding: external_publication_confirmation.outcome.clone(),
+        request,
+    };
+    let mut ledger = DurableCompletionExternalPublicationReceiptLedger::new();
+    let mut sink = FixtureDurableCompletionExternalPublicationReceiptSink::new();
+    let first = evaluate_durable_completion_external_publication_receipt(
+        &input,
+        &expectations,
+        &mut sink,
+        &mut ledger,
+    );
+    assert_eq!(
+        first,
+        DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptRecorded
+    );
+    let outcome = if confirmation_duplicate {
+        let second = evaluate_durable_completion_external_publication_receipt(
+            &input,
+            &expectations,
+            &mut sink,
+            &mut ledger,
+        );
+        assert_eq!(
+            second,
+            DurableCompletionExternalPublicationReceiptOutcome::ExternalPublicationReceiptDuplicateIdempotent
+        );
+        second
+    } else {
+        first
+    };
+    let record = ledger
+        .find(&action.external_publication_receipt_record_id)
+        .expect("recorded Run 278 settlement outcome publication");
+    AttachedExternalPublicationReceipt {
+        outcome,
+        external_publication_receipt_record_id: action.external_publication_receipt_record_id.clone(),
+        identity_digest: external_publication_receipt_identity_digest(&id)
+            .as_hex()
+            .to_string(),
+        request_digest: record.request_digest.as_hex().to_string(),
+        response_digest: record.response_digest.as_hex().to_string(),
+        record_digest: record.record_digest.as_hex().to_string(),
+        transcript_digest: record.transcript_digest.as_hex().to_string(),
+        consumer,
+        external_publication_confirmation,
+    }
+}
+
+// ===========================================================================
+// Run 280 external_publication_acknowledgement attachment (prior boundary)
+// Builds a REAL Run 280 recorded outcome from the Run 278 prior. Uses the real
+// Run 280 module field names so the Run 280 cur-layer can consume it.
+// ===========================================================================
+#[allow(dead_code)]
+struct AttachedExternalPublicationAcknowledgement {
+    outcome: DurableCompletionExternalPublicationAcknowledgementOutcome,
+    external_publication_acknowledgement_record_id: String,
+    identity_digest: String,
+    request_digest: String,
+    response_digest: String,
+    record_digest: String,
+    transcript_digest: String,
+    consumer: AttachedConsumer,
+    external_publication_receipt: AttachedExternalPublicationReceipt,
+}
+
+fn run280_confirmation_identity() -> DurableCompletionExternalPublicationAcknowledgementIdentity {
+    DurableCompletionExternalPublicationAcknowledgementIdentity {
+        confirmation_id: ACKNOWLEDGEMENT_ID.to_string(),
+        kind: DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
+        policy: DurableCompletionExternalPublicationAcknowledgementPolicy::FixtureAllowed,
+        domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
+    }
+}
+
+fn attach_run280_external_publication_acknowledgement(
+    environment: TrustBundleEnvironment,
+    action: &ActionLabel,
+    confirmation_duplicate: bool,
+) -> AttachedExternalPublicationAcknowledgement {
+    let external_publication_receipt =
+        attach_run278_external_publication_receipt(environment, action, false);
+    let consumer = external_publication_receipt.consumer.clone();
+    let ack = &consumer.ack;
+    let confirmation_env = match environment {
+        TrustBundleEnvironment::Devnet | TrustBundleEnvironment::Testnet => environment,
+        TrustBundleEnvironment::Mainnet => TrustBundleEnvironment::Devnet,
+    };
+    let surface = GovernanceExecutionRuntimeSurface::ReloadApply;
+    let env = ModeledGovernanceTrustMutationEnvironmentBinding {
+        environment: confirmation_env,
+        chain_id: CHAIN.to_string(),
+        genesis_hash: GENESIS.to_string(),
+    };
+    let runtime = ModeledGovernanceTrustMutationRuntimeBinding {
+        governance_surface: surface,
+        mutation_surface: ModeledGovernanceTrustMutationSurface {
+            validation_surface: surface,
+            mutation_surface: surface,
+        },
+        authority_domain_sequence: SEQUENCE,
+    };
+    let id = run280_confirmation_identity();
+    let request = DurableCompletionExternalPublicationAcknowledgementRequest {
+        external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
+        environment: confirmation_env,
+        chain_id: CHAIN.to_string(),
+        genesis_hash: GENESIS.to_string(),
+        governance_surface: surface,
+        validation_surface: surface,
+        mutation_surface: surface,
+        proposal_id: action.proposal_id.clone(),
+        decision_id: action.decision_id.clone(),
+        candidate_digest: action.candidate_digest.clone(),
+        authority_domain_sequence: SEQUENCE,
+        pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+        sink_decision_digest: SINK_DIGEST.to_string(),
+        reporter_decision_digest: REPORTER_DIGEST.to_string(),
+        finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+        attestation_digest: ATTESTATION_DIGEST.to_string(),
+        attestation_id: ATTESTATION_ID.to_string(),
+        backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+        backend_request_digest: ack.receipt.backend.request_digest.clone(),
+        backend_response_digest: ack.receipt.backend.response_digest.clone(),
+        backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+        backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+        backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+        receipt_identity_digest: ack.receipt.identity_digest.clone(),
+        receipt_request_digest: ack.receipt.request_digest.clone(),
+        receipt_response_digest: ack.receipt.response_digest.clone(),
+        receipt_record_digest: ack.receipt.record_digest.clone(),
+        receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+        receipt_record_id: ack.receipt.receipt_record_id.clone(),
+        acknowledgement_identity_digest: ack.identity_digest.clone(),
+        acknowledgement_request_digest: ack.request_digest.clone(),
+        acknowledgement_response_digest: ack.response_digest.clone(),
+        acknowledgement_record_digest: ack.record_digest.clone(),
+        acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+        acknowledgement_record_id: ack.ack_record_id.clone(),
+        consumer_identity_digest: consumer.identity_digest.clone(),
+        consumer_request_digest: consumer.request_digest.clone(),
+        consumer_response_digest: consumer.response_digest.clone(),
+        consumer_record_digest: consumer.record_digest.clone(),
+        consumer_transcript_digest: consumer.transcript_digest.clone(),
+        consumer_record_id: consumer.consumer_record_id.clone(),
+        external_publication_receipt_identity_digest: external_publication_receipt.identity_digest.clone(),
+        external_publication_receipt_request_digest: external_publication_receipt.request_digest.clone(),
+        external_publication_receipt_response_digest: external_publication_receipt.response_digest.clone(),
+        external_publication_receipt_record_digest: external_publication_receipt.record_digest.clone(),
+        external_publication_receipt_transcript_digest: external_publication_receipt.transcript_digest.clone(),
+        external_publication_receipt_record_id: external_publication_receipt.external_publication_receipt_record_id.clone(),
+        identity: id.clone(),
+        domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
+    };
+    let expectations = DurableCompletionExternalPublicationAcknowledgementExpectations {
+        expected_external_publication_acknowledgement_record_id: action.external_publication_acknowledgement_record_id.clone(),
+        expected_environment: confirmation_env,
+        expected_chain_id: CHAIN.to_string(),
+        expected_genesis_hash: GENESIS.to_string(),
+        expected_governance_surface: surface,
+        expected_validation_surface: surface,
+        expected_mutation_surface: surface,
+        expected_proposal_id: action.proposal_id.clone(),
+        expected_decision_id: action.decision_id.clone(),
+        expected_candidate_digest: action.candidate_digest.clone(),
+        expected_authority_domain_sequence: SEQUENCE,
+        expected_pipeline_decision_digest: PIPELINE_DIGEST.to_string(),
+        expected_sink_decision_digest: SINK_DIGEST.to_string(),
+        expected_reporter_decision_digest: REPORTER_DIGEST.to_string(),
+        expected_finalization_decision_digest: FINALIZATION_DECISION_DIGEST.to_string(),
+        expected_attestation_digest: ATTESTATION_DIGEST.to_string(),
+        expected_attestation_id: ATTESTATION_ID.to_string(),
+        expected_backend_identity_digest: ack.receipt.backend.identity_digest.clone(),
+        expected_backend_request_digest: ack.receipt.backend.request_digest.clone(),
+        expected_backend_response_digest: ack.receipt.backend.response_digest.clone(),
+        expected_backend_receipt_digest: ack.receipt.backend.receipt_digest.clone(),
+        expected_backend_transcript_digest: ack.receipt.backend.transcript_digest.clone(),
+        expected_backend_record_id: ack.receipt.backend.backend_record_id.clone(),
+        expected_receipt_identity_digest: ack.receipt.identity_digest.clone(),
+        expected_receipt_request_digest: ack.receipt.request_digest.clone(),
+        expected_receipt_response_digest: ack.receipt.response_digest.clone(),
+        expected_receipt_record_digest: ack.receipt.record_digest.clone(),
+        expected_receipt_transcript_digest: ack.receipt.transcript_digest.clone(),
+        expected_receipt_record_id: ack.receipt.receipt_record_id.clone(),
+        expected_acknowledgement_identity_digest: ack.identity_digest.clone(),
+        expected_acknowledgement_request_digest: ack.request_digest.clone(),
+        expected_acknowledgement_response_digest: ack.response_digest.clone(),
+        expected_acknowledgement_record_digest: ack.record_digest.clone(),
+        expected_acknowledgement_transcript_digest: ack.transcript_digest.clone(),
+        expected_acknowledgement_record_id: ack.ack_record_id.clone(),
+        expected_consumer_identity_digest: consumer.identity_digest.clone(),
+        expected_consumer_request_digest: consumer.request_digest.clone(),
+        expected_consumer_response_digest: consumer.response_digest.clone(),
+        expected_consumer_record_digest: consumer.record_digest.clone(),
+        expected_consumer_transcript_digest: consumer.transcript_digest.clone(),
+        expected_consumer_record_id: consumer.consumer_record_id.clone(),
+        expected_external_publication_receipt_identity_digest: external_publication_receipt.identity_digest.clone(),
+        expected_external_publication_receipt_request_digest: external_publication_receipt.request_digest.clone(),
+        expected_external_publication_receipt_response_digest: external_publication_receipt
+            .response_digest
+            .clone(),
+        expected_external_publication_receipt_record_digest: external_publication_receipt.record_digest.clone(),
+        expected_external_publication_receipt_transcript_digest: external_publication_receipt
+            .transcript_digest
+            .clone(),
+        expected_external_publication_receipt_record_id: external_publication_receipt.external_publication_receipt_record_id.clone(),
+        expected_identity: id.clone(),
         expected_external_publication_acknowledgement_kind: DurableCompletionExternalPublicationAcknowledgementKind::FixtureInMemory,
         expected_external_publication_acknowledgement_policy: DurableCompletionExternalPublicationAcknowledgementPolicy::FixtureAllowed,
-        expected_domain_separation_tag: RECEIPT_DOMAIN_TAG.to_string(),
+        expected_domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
     };
     let input = DurableCompletionExternalPublicationAcknowledgementInput {
         policy: DurableCompletionExternalPublicationAcknowledgementPolicy::FixtureAllowed,
@@ -2892,7 +3178,7 @@ fn attach_run278_external_publication_acknowledgement(
         receipt_binding: ack.receipt.outcome.clone(),
         acknowledgement_binding: ack.outcome.clone(),
         consumer_binding: consumer.outcome.clone(),
-        external_publication_confirmation_binding: external_publication_confirmation.outcome.clone(),
+        external_publication_receipt_binding: external_publication_receipt.outcome.clone(),
         request,
     };
     let mut ledger = DurableCompletionExternalPublicationAcknowledgementLedger::new();
@@ -2936,9 +3222,10 @@ fn attach_run278_external_publication_acknowledgement(
         record_digest: record.record_digest.as_hex().to_string(),
         transcript_digest: record.transcript_digest.as_hex().to_string(),
         consumer,
-        external_publication_confirmation,
+        external_publication_receipt,
     }
 }
+
 
 // ===========================================================================
 // Run 282 owned-context builder
@@ -2958,10 +3245,10 @@ fn ack_identity(
     kind: DurableCompletionExternalPublicationAuditFinalizationKind,
 ) -> DurableCompletionExternalPublicationAuditFinalizationIdentity {
     DurableCompletionExternalPublicationAuditFinalizationIdentity {
-        confirmation_id: ACKNOWLEDGEMENT_ID.to_string(),
+        confirmation_id: AUDIT_FINALIZATION_ID.to_string(),
         kind,
         policy,
-        domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
+        domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
     }
 }
 
@@ -2976,7 +3263,7 @@ fn ctx_action(
     consumer_duplicate: bool,
 ) -> Ctx {
     let external_publication_acknowledgement =
-        attach_run278_external_publication_acknowledgement(environment, action, consumer_duplicate);
+        attach_run280_external_publication_acknowledgement(environment, action, consumer_duplicate);
     let consumer = external_publication_acknowledgement.consumer.clone();
     let ack = &consumer.ack;
     let env = ModeledGovernanceTrustMutationEnvironmentBinding {
@@ -3042,7 +3329,7 @@ fn ctx_action(
         external_publication_acknowledgement_transcript_digest: external_publication_acknowledgement.transcript_digest.clone(),
         external_publication_acknowledgement_record_id: external_publication_acknowledgement.external_publication_acknowledgement_record_id.clone(),
         identity: id.clone(),
-        domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
+        domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
     };
     let expectations = DurableCompletionExternalPublicationAuditFinalizationExpectations {
         expected_external_publication_audit_finalization_record_id: action.external_publication_audit_finalization_record_id.clone(),
@@ -3099,7 +3386,7 @@ fn ctx_action(
         expected_identity: id,
         expected_external_publication_audit_finalization_kind: kind,
         expected_external_publication_audit_finalization_policy: policy,
-        expected_domain_separation_tag: ACKNOWLEDGEMENT_DOMAIN_TAG.to_string(),
+        expected_domain_separation_tag: AUDIT_FINALIZATION_DOMAIN_TAG.to_string(),
     };
     Ctx {
         env,
@@ -3314,7 +3601,7 @@ fn devnet_fixture_chain_records_exactly_one_receipt_only_after_backend_submissio
     assert!(external_publication_audit_finalization_outcome_projects_to_recorded(&outcome));
     assert_eq!(sink.invocations(), 1);
     assert_eq!(ledger.len(), 1);
-    assert!(ledger.contains(ACKNOWLEDGEMENT_RECORD_ID));
+    assert!(ledger.contains(AUDIT_FINALIZATION_RECORD_ID));
     assert_eq!(
         external_publication_audit_finalization_identity_digest(&c.request.identity),
         c.request.identity.digest()
@@ -3694,7 +3981,7 @@ fn non_recording_confirmation_outcomes_never_record_external_publication_audit_f
         Receipt::RejectedBeforeExternalPublicationAcknowledgementNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+        Finalization::ExternalPublicationReceiptDidNotRecordNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
@@ -3702,31 +3989,31 @@ fn non_recording_confirmation_outcomes_never_record_external_publication_audit_f
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAcknowledgementRecordFailedNoReceipt,
+        Finalization::ExternalPublicationAcknowledgementRecordFailedNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAcknowledgementRolledBackNoReceipt,
+        Finalization::ExternalPublicationAcknowledgementRolledBackNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAcknowledgementRollbackFailedFatalNoReceipt,
+        Finalization::ExternalPublicationAcknowledgementRollbackFailedFatalNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalPublicationAcknowledgementAmbiguousFailClosedNoReceipt,
+        Finalization::ExternalPublicationAcknowledgementAmbiguousFailClosedNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ProductionExternalPublicationAcknowledgementUnavailableNoReceipt,
+        Finalization::ProductionExternalPublicationAcknowledgementUnavailableNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::MainNetExternalPublicationAcknowledgementUnavailableNoReceipt,
+        Finalization::MainNetExternalPublicationAcknowledgementUnavailableNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
-        Finalization::ExternalExternalPublicationAcknowledgementUnavailableNoReceipt,
+        Finalization::ExternalExternalPublicationAcknowledgementUnavailableNoAcknowledgement,
         Receipt::ExternalPublicationAcknowledgementDidNotRecordNoAuditFinalization,
     );
     assert_non_recording_confirmation(
@@ -4183,10 +4470,10 @@ fn non_recording_confirmation_outcomes_create_no_external_publication_audit_fina
     for confirmation in [
         Finalization::LegacyBypassNoExternalPublicationAcknowledgement,
         Finalization::RejectedBeforeExternalPublicationReceiptNoAcknowledgement,
-        Finalization::ExternalPublicationConfirmationDidNotRecordNoReceipt,
+        Finalization::ExternalPublicationReceiptDidNotRecordNoAcknowledgement,
         Finalization::ExternalPublicationAcknowledgementRejectedBeforeRecord,
-        Finalization::ExternalPublicationAcknowledgementRecordFailedNoReceipt,
-        Finalization::ProductionExternalPublicationAcknowledgementUnavailableNoReceipt,
+        Finalization::ExternalPublicationAcknowledgementRecordFailedNoAcknowledgement,
+        Finalization::ProductionExternalPublicationAcknowledgementUnavailableNoAcknowledgement,
     ] {
         assert!(matches!(
             project_external_publication_acknowledgement_outcome_to_external_publication_audit_finalization_request(&confirmation),
@@ -4221,7 +4508,7 @@ fn assert_window(
     let input = c.recorded();
     let ledger = recovered_ledger();
     let record = if with_record {
-        ledger.find(ACKNOWLEDGEMENT_RECORD_ID)
+        ledger.find(AUDIT_FINALIZATION_RECORD_ID)
     } else {
         None
     };
